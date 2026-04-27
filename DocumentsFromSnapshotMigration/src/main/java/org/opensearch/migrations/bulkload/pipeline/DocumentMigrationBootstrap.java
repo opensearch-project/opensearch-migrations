@@ -98,6 +98,10 @@ public class DocumentMigrationBootstrap {
     @Builder.Default
     private final boolean enableSourcelessMigrations = false;
 
+    // When true, treat _recovery_source as _source if present (ES 7+ / OpenSearch soft-deletes)
+    @Builder.Default
+    private final boolean useRecoverySource = false;
+
     // Index metadata factory for reading mappings (needed for sourceless migration)
     @Builder.Default
     private final IndexMetadata.Factory indexMetadataFactory = null;
@@ -292,7 +296,8 @@ public class DocumentMigrationBootstrap {
             return externalDocumentSource;
         }
         var builder = LuceneSnapshotSource.builder(extractor, snapshotName, workDir)
-            .maxShardSizeBytes(maxShardSizeBytes);
+            .maxShardSizeBytes(maxShardSizeBytes)
+            .useRecoverySource(useRecoverySource);
         if (previousSnapshotName != null && deltaMode != null) {
             log.info("Creating delta document source: previous={}, mode={}", previousSnapshotName, deltaMode);
             builder.delta(previousSnapshotName, deltaMode, deltaContextFactory);

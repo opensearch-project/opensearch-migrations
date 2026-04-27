@@ -55,15 +55,15 @@ class SourceReconstructorTest {
     // ---------- Helpers to construct mocks/records without repeating boilerplate ----------
 
     private static FieldMappingInfo mapping(EsFieldType type, String mappingType) {
-        return new FieldMappingInfo(type, mappingType, null, null, true);
+        return new FieldMappingInfo(type, mappingType, null, null, true, null);
     }
 
     private static FieldMappingInfo mapping(EsFieldType type, String mappingType, String format) {
-        return new FieldMappingInfo(type, mappingType, format, null, true);
+        return new FieldMappingInfo(type, mappingType, format, null, true, null);
     }
 
     private static FieldMappingInfo mappingScaled(double scalingFactor) {
-        return new FieldMappingInfo(EsFieldType.SCALED_FLOAT, "scaled_float", null, scalingFactor, true);
+        return new FieldMappingInfo(EsFieldType.SCALED_FLOAT, "scaled_float", null, scalingFactor, true, null);
     }
 
     private static FieldMappingContext contextOf(String fieldName, FieldMappingInfo info) {
@@ -737,7 +737,7 @@ class SourceReconstructorTest {
             f.setAccessible(true);
             @SuppressWarnings("unchecked")
             var m = (java.util.Map<String, FieldMappingInfo>) f.get(ctx);
-            m.put("count", new FieldMappingInfo(EsFieldType.NUMERIC, "long", null, null, false));
+            m.put("count", new FieldMappingInfo(EsFieldType.NUMERIC, "long", null, null, false, null));
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException(e);
         }
@@ -828,7 +828,7 @@ class SourceReconstructorTest {
     @MethodSource("allTypesMatrix")
     void allTypesMatrix(Row row) throws IOException {
         var info = new FieldMappingInfo(row.type(), row.mappingType(), row.format(),
-                row.scalingFactor(), true);
+                row.scalingFactor(), true, null);
         var ctx = contextOf("field", info);
 
         LuceneLeafReader reader;
@@ -1085,9 +1085,9 @@ class SourceReconstructorTest {
 
     @Test
     void underscorePrefix_stillSkipped_evenIfInMapping() {
-        // Internal fields (_id, _routing, _recovery_source) are ALWAYS skipped,
+        // Internal fields (_id, _routing) are ALWAYS skipped,
         // even if they happen to be registered in the mapping — they're consumed
-        // by the reconstructor itself, not re-emitted into _source.
+        // by the reader itself, not re-emitted into _source.
         var reader = storedOnlyReader();
         var doc = document(
             storedString("_id", "abc"),
@@ -1114,7 +1114,7 @@ class SourceReconstructorTest {
     // ==========================================================================================
     // 10. MERGE PATH CORRECTNESS REGRESSIONS (bugs found by correctness critics — PR #2771)
     // ==========================================================================================
-    // These exercise the `mergeWithDocValues` + `mergeWithRecoverySource` code paths that handle
+    // These exercise the `mergeWithDocValues` code paths that handle
     // partial-_source indices (includes/excludes). Before the fixes, size-based dirty detection
     // dropped nested inserts and `putAll` shallow-merged nested objects — both silently lost data.
 
@@ -1157,45 +1157,6 @@ class SourceReconstructorTest {
         String original = "{\"name\":\"alice\"}";
         String merged = SourceReconstructor.mergeWithDocValues(original, reader, 0, document(), ctx);
         assertEquals(original, merged, "unchanged payload must be returned verbatim");
-    }
-
-    @Test
-    void mergeWithRecoverySource_deepMerge_preservesPartialSourceNestedSiblings() throws IOException {
-        // REGRESSION: mergeWithRecoverySource used `existing.putAll(recovery)` which replaces entire
-        // top-level values. If partial _source carries a nested child that recovery doesn't (e.g. a
-        // field added by an ingest pipeline AFTER _recovery_source was captured), that child was
-        // silently dropped. Deep-merge preserves it while still letting recovery win on scalar conflicts.
-        String existing = "{\"address\":{\"city\":\"NYC\",\"added_by_pipeline\":\"yes\"}}";
-        String recovery = "{\"address\":{\"city\":\"NYC\",\"zip\":\"10001\"}}";
-
-        String merged = SourceReconstructor.mergeWithRecoverySource(existing, recovery);
-        JsonNode tree = MAPPER.readTree(merged);
-        assertEquals("NYC", tree.path("address").path("city").asText(), merged);
-        assertEquals("10001", tree.path("address").path("zip").asText(), merged);
-        assertEquals("yes", tree.path("address").path("added_by_pipeline").asText(),
-            "partial-source sibling preserved across deep merge: " + merged);
-    }
-
-    @Test
-    void mergeWithRecoverySource_recoveryWinsOnScalarConflict() throws IOException {
-        // The documented contract: recovery_source is authoritative, so on leaf-value conflicts
-        // it overwrites. Deep merge must still respect this — only nested-object merge should recurse.
-        String existing = "{\"title\":\"partial\",\"address\":{\"city\":\"stale\"}}";
-        String recovery = "{\"title\":\"authoritative\",\"address\":{\"city\":\"fresh\"}}";
-
-        String merged = SourceReconstructor.mergeWithRecoverySource(existing, recovery);
-        JsonNode tree = MAPPER.readTree(merged);
-        assertEquals("authoritative", tree.path("title").asText(), merged);
-        assertEquals("fresh", tree.path("address").path("city").asText(), merged);
-    }
-
-    @Test
-    void mergeWithRecoverySource_parseFailure_returnsPartial() {
-        // Best-effort fallback: if either JSON is malformed, we return the partial unchanged so the
-        // document still migrates. (Better partial than dropped — see mergeWithRecoverySource javadoc.)
-        String partial = "{\"ok\":true}";
-        String merged = SourceReconstructor.mergeWithRecoverySource(partial, "{ not json }");
-        assertEquals(partial, merged);
     }
 
     @Test

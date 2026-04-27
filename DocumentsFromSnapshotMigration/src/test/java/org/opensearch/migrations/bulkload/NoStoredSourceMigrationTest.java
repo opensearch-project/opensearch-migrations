@@ -114,7 +114,7 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         new FieldTypeConfig("short", "short", "short", (short) 32000, VersionRange.ALL, true, true),
         new FieldTypeConfig("half_float", "half_float", "half_float", 1.5f, VersionRange.ES_5_PLUS, true, true),
         new FieldTypeConfig("token_count", "token_count", "token_count", "one two three four five", VersionRange.ES_5_PLUS, true, true, Map.of("analyzer", "standard")),
-        new FieldTypeConfig("constant_keyword", "constant_keyword", "constant_keyword", "constant_val", VersionRange.ES_7_11_PLUS, false, false, false, Map.of("value", "constant_val")),
+        new FieldTypeConfig("constant_keyword", "constant_keyword", "constant_keyword", "constant_val", VersionRange.ES_7_11_PLUS, false, false, Map.of("value", "constant_val")),
         new FieldTypeConfig("wildcard", "wildcard", "wildcard", "wild*card", VersionRange.ES_7_11_PLUS, true, false)
     );
 
@@ -283,11 +283,6 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         if (perm.array()) {
             if ("constant_keyword".equals(type)) {
                 return Optional.of("constant_keyword is single-valued by definition");
-            }
-            if ("geo_point".equals(type)) {
-                // Older Lucene encodes multi-valued geo_point doc_values in a way that
-                // collapses to a single value on recovery; avoid the flaky rabbit hole.
-                return Optional.of("array variant not meaningful for geo_point (recovery collapses multi-values)");
             }
         }
         return Optional.empty();
@@ -692,28 +687,26 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             return;
         }
 
-        // Reconstruction path (same as the legacy sourceless assertions).
+        // Reconstruction path.
         boolean pointsSupported = !UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion());
-        boolean hasRecoverySource = UnboundVersionMatchers.anyOS.test(sourceVersion.getVersion())
-            || !UnboundVersionMatchers.isBelowES_7_X.test(sourceVersion.getVersion());
 
-        if (!cfg.recoverable() && !hasRecoverySource) {
+        if (!cfg.recoverable()) {
             assertNull(fieldValue, fieldName + " should NOT be recovered (unsupported type)");
             return;
         }
 
         boolean canRecoverFromPoints = pointsSupported && cfg.supportsPoints() && perm.indexed();
-        boolean canRecoverFromTerms = cfg.targetType().equals("boolean") && !hasRecoverySource && perm.indexed();
+        boolean canRecoverFromTerms = cfg.targetType().equals("boolean") && perm.indexed();
         boolean canRecoverFromKeywordTerms = (cfg.sourceType().equals("keyword") || cfg.sourceType().equals("string"))
             && perm.indexed();
         boolean preBkdNumerics = UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion());
         boolean canRecoverFromNumericTerms = preBkdNumerics && cfg.supportsPoints() && perm.indexed();
         boolean alwaysHasDocValues = cfg.sourceType().equals("wildcard");
-        boolean canRecoverFromRecoverySource = hasRecoverySource;
+        boolean hasConstantValue = cfg.sourceType().equals("constant_keyword");
 
         boolean shouldRecover = p.hasStore || p.hasDv
             || canRecoverFromPoints || canRecoverFromTerms || canRecoverFromKeywordTerms
-            || canRecoverFromNumericTerms || alwaysHasDocValues || canRecoverFromRecoverySource;
+            || canRecoverFromNumericTerms || alwaysHasDocValues || hasConstantValue;
 
         if (shouldRecover) {
             assertNotNull(fieldValue, fieldName + " [mode=" + perm.sm() + "] should be recovered but was null");
@@ -752,22 +745,11 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         }
         if (cfg.sourceType().equals("token_count")) {
             // token_count acceptable forms across versions:
-            //   - numeric (e.g. 5)         → count from doc_values / Points reconstruction (ES 7+ usual path)
-            //   - textual integer ("5")    → ES 5.x/6.x stored field (numeric count rendered as string;
-            //                                those versions have no _recovery_source to round-trip the
-            //                                original text)
-            //   - textual original string  → ES 7+ _recovery_source round-tripped the original text
+            //   - numeric (e.g. 5)         → count from doc_values / Points reconstruction
+            //   - textual integer ("5")    → stored field (numeric count rendered as string)
             if (target.isTextual()) {
-                String s = target.asText();
-                try {
-                    int n = Integer.parseInt(s);
-                    assertEquals(5, n, perm.fieldName() + " value mismatch");
-                    return;
-                } catch (NumberFormatException nfe) {
-                    // Not a numeric string — must be the original text from _recovery_source.
-                }
-                assertEquals(cfg.testValue().toString(), s,
-                    perm.fieldName() + " should preserve original string via _recovery_source");
+                int n = Integer.parseInt(target.asText());
+                assertEquals(5, n, perm.fieldName() + " value mismatch");
             } else {
                 assertEquals(5, target.asInt(), perm.fieldName() + " value mismatch");
             }
@@ -840,9 +822,34 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         var cfg = perm.cfg();
 
         // geo_point & token_count have bespoke scalar/shape contracts that carry over
-        // to array mode — keep the original "not-null" / "count" semantics.
+        // to array mode.
         if (cfg.sourceType().equals("geo_point")) {
             assertNotNull(fieldValue, perm.fieldName() + " should not be null");
+            // Multi-valued geo_point recovery produces a list of {lat,lon} maps from
+            // Morton-encoded SortedNumericDocValues. Verify we got an array with 2 elements
+            // and that each decoded lat/lon is within 0.01 of one of the original values.
+            if (fieldValue.isArray()) {
+                assertEquals(2, fieldValue.size(), perm.fieldName() + " should have 2 geo_point values");
+                // Both original points should be present (order may differ due to Morton sort)
+                @SuppressWarnings("unchecked")
+                var expected1 = (Map<String, Object>) cfg.testValue();
+                @SuppressWarnings("unchecked")
+                var expected2 = (Map<String, Object>) secondValueFor(cfg);
+                double lat1 = ((Number) expected1.get("lat")).doubleValue();
+                double lon1 = ((Number) expected1.get("lon")).doubleValue();
+                double lat2 = ((Number) expected2.get("lat")).doubleValue();
+                double lon2 = ((Number) expected2.get("lon")).doubleValue();
+                boolean foundFirst = false, foundSecond = false;
+                for (int i = 0; i < fieldValue.size(); i++) {
+                    JsonNode pt = fieldValue.get(i);
+                    double aLat = pt.path("lat").asDouble();
+                    double aLon = pt.path("lon").asDouble();
+                    if (Math.abs(aLat - lat1) < 0.01 && Math.abs(aLon - lon1) < 0.01) foundFirst = true;
+                    if (Math.abs(aLat - lat2) < 0.01 && Math.abs(aLon - lon2) < 0.01) foundSecond = true;
+                }
+                assertTrue(foundFirst && foundSecond,
+                    perm.fieldName() + " should contain both geo_point values but was " + fieldValue);
+            }
             return;
         }
         if (cfg.sourceType().equals("token_count")) {
@@ -851,17 +858,12 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             //   "alpha beta gamma"        -> 3 tokens
             // Doc-values / Points recovery paths numerically sort the count array, so
             // the recovered order is [3,5] (not [5,3]). Never read by index — iterate
-            // every node and accept membership in {5, 3}. Text nodes (from
-            // _recovery_source on ES 7+) are always acceptable; we just confirm they
-            // parse to the expected count or are one of the original input strings.
+            // every node and accept membership in {5, 3}. Text nodes are acceptable
+            // if they parse to the expected count.
             assertNotNull(fieldValue, perm.fieldName() + " should not be null");
             Set<Integer> acceptableCounts = Set.of(
                 5,  // count of cfg.testValue() "one two three four five"
                 3   // count of secondValueFor(cfg) "alpha beta gamma"
-            );
-            Set<String> acceptableStrings = Set.of(
-                String.valueOf(cfg.testValue()),
-                String.valueOf(secondValueFor(cfg))
             );
             List<JsonNode> nodes = new ArrayList<>();
             if (fieldValue.isArray()) {
@@ -872,23 +874,10 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                 nodes.add(fieldValue);
             }
             for (JsonNode n : nodes) {
-                if (n.isTextual()) {
-                    String s = n.asText();
-                    try {
-                        int cnt = Integer.parseInt(s);
-                        assertTrue(acceptableCounts.contains(cnt),
-                            perm.fieldName() + " token count " + cnt
-                                + " not in acceptable set " + acceptableCounts);
-                    } catch (NumberFormatException nfe) {
-                        assertTrue(acceptableStrings.contains(s),
-                            perm.fieldName() + " text " + s
-                                + " not in acceptable original strings " + acceptableStrings);
-                    }
-                } else {
-                    assertTrue(acceptableCounts.contains(n.asInt()),
-                        perm.fieldName() + " token count " + n.asInt()
-                            + " not in acceptable set " + acceptableCounts);
-                }
+                int cnt = n.isTextual() ? Integer.parseInt(n.asText()) : n.asInt();
+                assertTrue(acceptableCounts.contains(cnt),
+                    perm.fieldName() + " token count " + cnt
+                        + " not in acceptable set " + acceptableCounts);
             }
             return;
         }
@@ -938,13 +927,6 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
     @MethodSource("versionPairs")
     public void testUnrecoverableDocumentSkipped(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
         if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion())) {
-            return;
-        }
-        // ES 7.0+ and OpenSearch ship with soft-deletes enabled by default, which causes
-        // the engine to write a stored "_recovery_source" field whenever `_source.enabled:false`.
-        // Every field is then recoverable, so there's no "unrecoverable" scenario to exercise here.
-        if (UnboundVersionMatchers.anyOS.test(sourceVersion.getVersion())
-            || !UnboundVersionMatchers.isBelowES_7_X.test(sourceVersion.getVersion())) {
             return;
         }
 

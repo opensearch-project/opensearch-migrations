@@ -324,6 +324,16 @@ public class RfsMigrateDocuments {
             arity = 0
         )
         public boolean enableSourcelessMigrations = false;
+
+        @Parameter(required = false,
+            names = { "--use-recovery-source" },
+            description = "When enabled, treat the _recovery_source stored field (present in ES 7+ / OpenSearch " +
+                "snapshots with soft-deletes) as _source. This field is transient and may not be present for " +
+                "all documents, so results can be inconsistent. Use only when reconstruction from doc_values " +
+                "and stored fields is insufficient.",
+            arity = 0
+        )
+        public boolean useRecoverySource = false;
     }
 
 
@@ -608,7 +618,8 @@ public class RfsMigrateDocuments {
                 cancellationRunnableRef,
                 arguments.experimental.previousSnapshotName,
                 arguments.experimental.experimentalDeltaMode,
-                arguments.experimental.enableSourcelessMigrations);
+                arguments.experimental.enableSourcelessMigrations,
+                arguments.experimental.useRecoverySource);
             cleanShutdownCompleted.set(true);
             if (status == CompletionStatus.NOTHING_DONE) {
                 log.atInfo().setMessage("Work exists but none available to this worker. Exiting with exit code " + NO_WORK_AVAILABLE_EXIT_CODE).log();
@@ -1109,7 +1120,7 @@ public class RfsMigrateDocuments {
             useServerGeneratedIds, allowlist, maxDocsPerBatch, maxBytesPerBatch, batchConcurrency,
             maxShardSizeBytes, progressCursor, workCoordinator, maxInitialLeaseDuration, leaseExpireTrigger,
             workItemTimeProvider, indexMetadataFactory, indexAllowlist, rootDocumentContext, cancellationRunnable,
-            previousSnapshotName, deltaMode, false);
+            previousSnapshotName, deltaMode, false, false);
     }
 
     public static CompletionStatus runWithPipeline(
@@ -1135,7 +1146,8 @@ public class RfsMigrateDocuments {
         AtomicReference<Runnable> cancellationRunnable,
         String previousSnapshotName,
         DeltaMode deltaMode,
-        boolean enableSourcelessMigrations
+        boolean enableSourcelessMigrations,
+        boolean useRecoverySource
     ) throws IOException, InterruptedException, NoWorkLeftException {
         var scopedWorkCoordinator = prepareWorkCoordination(
             workCoordinator, leaseExpireTrigger, indexMetadataFactory,
@@ -1160,6 +1172,7 @@ public class RfsMigrateDocuments {
                 ? () -> new RfsContexts.DeltaStreamContext(rootDocumentContext, null)
                 : null)
             .enableSourcelessMigrations(enableSourcelessMigrations)
+            .useRecoverySource(useRecoverySource)
             .indexMetadataFactory(indexMetadataFactory)
             .workCoordinator(scopedWorkCoordinator)
             .workItemTimeProvider(workItemTimeProvider)

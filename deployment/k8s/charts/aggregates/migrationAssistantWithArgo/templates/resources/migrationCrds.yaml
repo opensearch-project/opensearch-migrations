@@ -272,6 +272,8 @@ spec:
                   type: integer
                 metadataMigrationEnableSourcelessMigrations:
                   type: boolean
+                metadataMigrationUseRecoverySource:
+                  type: boolean
                 metadataMigrationMultiTypeBehavior:
                   type: string
                 metadataMigrationOtelCollectorEndpoint:
@@ -305,6 +307,8 @@ spec:
                 documentBackfillAllowLooseVersionMatching:
                   type: boolean
                 documentBackfillEnableSourcelessMigrations:
+                  type: boolean
+                documentBackfillUseRecoverySource:
                   type: boolean
                 documentBackfillDocTransformerConfigBase64:
                   type: string

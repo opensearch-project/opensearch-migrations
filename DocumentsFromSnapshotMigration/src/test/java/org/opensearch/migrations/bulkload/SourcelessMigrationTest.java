@@ -553,7 +553,8 @@ public class SourcelessMigrationTest extends SourceTestBase {
                     new AtomicReference<>(),
                     null,           // no previous snapshot
                     null,           // no delta mode
-                    true            // ENABLE SOURCELESS MIGRATIONS
+                    true,           // ENABLE SOURCELESS MIGRATIONS
+                    false           // don't use _recovery_source
                 );
             }
         } finally {

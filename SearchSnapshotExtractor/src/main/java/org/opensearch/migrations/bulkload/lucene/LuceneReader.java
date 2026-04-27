@@ -39,6 +39,10 @@ public class LuceneReader {
        to keep the source feeding batches fast enough.
      */
     public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId, FieldMappingContext mappingContext) {
+        return readDocsByLeavesFromStartingPosition(reader, startDocId, mappingContext, false);
+    }
+
+    public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId, FieldMappingContext mappingContext, boolean useRecoverySource) {
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)
             .addArgument(() -> reader.leaves().size())
@@ -49,7 +53,8 @@ public class LuceneReader {
                     startDocId,
                     reader.getIndexDirectoryPath(),
                     DocumentChangeType.INDEX,
-                    mappingContext)
+                    mappingContext,
+                    useRecoverySource)
             )
             .subscribeOn(LUCENE_IO_SCHEDULER);
     }
@@ -109,6 +114,12 @@ public class LuceneReader {
     public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
                                                 Path indexDirectoryPath, DocumentChangeType operation,
                                                 FieldMappingContext mappingContext) {
+        return readDocsFromSegment(readerAndBase, docStartingId, indexDirectoryPath, operation, mappingContext, false);
+    }
+
+    public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
+                                                Path indexDirectoryPath, DocumentChangeType operation,
+                                                FieldMappingContext mappingContext, boolean useRecoverySource) {
         var segmentReader = readerAndBase.getReader();
         var liveDocs = readerAndBase.getLiveDocs();
 
@@ -142,7 +153,7 @@ public class LuceneReader {
         return Flux.fromStream(idxStream.boxed())
             .flatMapSequential(docIdx -> Mono.defer(() -> {
                     try {
-                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex);
+                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex, useRecoverySource);
                         return Mono.justOrEmpty(document);
                     } catch (Exception e) {
                         log.atError().setMessage("Error reading document from reader {} with index: {}")
@@ -166,12 +177,19 @@ public class LuceneReader {
             final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
             FieldMappingContext mappingContext) {
         return getDocument(reader, luceneDocId, isLive, segmentDocBase, getSegmentReaderDebugInfo,
-            indexDirectoryPath, operation, mappingContext, null);
+            indexDirectoryPath, operation, mappingContext, null, false);
     }
 
     public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
             final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
             FieldMappingContext mappingContext, SegmentTermIndex termIndex) {
+        return getDocument(reader, luceneDocId, isLive, segmentDocBase, getSegmentReaderDebugInfo,
+            indexDirectoryPath, operation, mappingContext, termIndex, false);
+    }
+
+    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
+            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
+            FieldMappingContext mappingContext, SegmentTermIndex termIndex, boolean useRecoverySource) {
         LuceneDocument document;
         try {
             document = reader.document(luceneDocId);
@@ -184,7 +202,6 @@ public class LuceneReader {
         String openSearchDocId = null;
         String type = null;
         byte[] sourceBytes = null;
-        byte[] recoverySourceBytes = null;
         String routing = null;
 
         try {
@@ -209,14 +226,11 @@ public class LuceneReader {
                         break;
                     }
                     case "_recovery_source": {
-                        // ES 7.0+ and OpenSearch store the FULL original _source in this field
-                        // as a byproduct of soft-deletes (default on from 7.0, opt-in from 6.5).
-                        // Present whenever _source filtering drops fields (enabled:false,
-                        // includes, or excludes). When both _source and _recovery_source are
-                        // present, _source is the filtered view and _recovery_source is the
-                        // complete original — we merge recovery over the partial source so
-                        // excluded/filtered fields are restored exactly.
-                        recoverySourceBytes = field.utf8Value();
+                        // ES 7+ / OpenSearch soft-deletes field. When opted in, treat as _source
+                        // for documents where _source is absent (disabled or filtered).
+                        if (useRecoverySource && sourceBytes == null) {
+                            sourceBytes = field.utf8Value();
+                        }
                         break;
                     }
                     case "_routing": {
@@ -236,7 +250,7 @@ public class LuceneReader {
                 return null;  // Skip documents with missing id
             }
 
-            sourceBytes = resolveSourceBytes(sourceBytes, recoverySourceBytes, reader, luceneDocId, document, mappingContext,
+            sourceBytes = resolveSourceBytes(sourceBytes, reader, luceneDocId, document, mappingContext,
                 openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath, termIndex);
             if (sourceBytes == null) {
                 return null;
@@ -277,28 +291,15 @@ public class LuceneReader {
      * </ol>
      * @return resolved source bytes, or null if the document should be skipped
      */
-    private static byte[] resolveSourceBytes(byte[] sourceBytes, byte[] recoverySourceBytes,
+    private static byte[] resolveSourceBytes(byte[] sourceBytes,
             LuceneLeafReader reader, int luceneDocId,
             LuceneDocument document, FieldMappingContext mappingContext, String openSearchDocId,
             Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, SegmentTermIndex termIndex) {
         boolean hasSource = sourceBytes != null && sourceBytes.length > 0;
-        boolean hasRecovery = recoverySourceBytes != null && recoverySourceBytes.length > 0;
 
-        if (!hasSource && hasRecovery) {
-            // _source.enabled:false path — recovery source is the only copy of the original JSON.
-            return recoverySourceBytes;
-        }
         if (!hasSource) {
             return reconstructSourceBytes(reader, luceneDocId, document, mappingContext,
                 openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath, termIndex);
-        }
-        if (hasRecovery) {
-            // includes/excludes path — _source is filtered, _recovery_source holds the full original.
-            // Merge recovery onto the partial source so filtered fields are restored exactly.
-            String merged = SourceReconstructor.mergeWithRecoverySource(
-                new String(sourceBytes, java.nio.charset.StandardCharsets.UTF_8),
-                new String(recoverySourceBytes, java.nio.charset.StandardCharsets.UTF_8));
-            return merged.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         }
         if (mappingContext != null) {
             String merged = SourceReconstructor.mergeWithDocValues(

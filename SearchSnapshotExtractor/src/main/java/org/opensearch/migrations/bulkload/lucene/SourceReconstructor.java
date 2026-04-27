@@ -163,52 +163,6 @@ public class SourceReconstructor {
     }
 
     /**
-     * Merges recovery-source JSON onto a partial _source JSON. Used when an ES 7+ segment
-     * has both _source (filtered by includes/excludes) and _recovery_source (full original
-     * JSON captured as a byproduct of soft-deletes). Recovery wins on field conflicts since
-     * it is the authoritative copy of the original document.
-     * <p>
-     * Performs a recursive map-merge so nested siblings that happen to only exist in the
-     * partial {@code _source} (e.g. fields injected by an ingest pipeline after
-     * {@code _recovery_source} was captured) are preserved rather than silently dropped.
-     * <p>
-     * On parse failure, returns the existing partial source unchanged so the document still
-     * migrates (best-effort — better partial than dropped).
-     */
-    @SuppressWarnings("unchecked")
-    public static String mergeWithRecoverySource(String existingSource, String recoverySource) {
-        try {
-            Map<String, Object> existing = OBJECT_MAPPER.readValue(existingSource, Map.class);
-            Map<String, Object> recovery = OBJECT_MAPPER.readValue(recoverySource, Map.class);
-            // Recovery is the authoritative copy — overwrites on scalar conflicts, recurses on object conflicts.
-            deepMerge(existing, recovery);
-            return OBJECT_MAPPER.writeValueAsString(existing);
-        } catch (IOException e) {
-            log.atWarn().setCause(e).setMessage("Failed to merge recovery source; keeping partial _source").log();
-            return existingSource;
-        }
-    }
-
-    /**
-     * Recursive in-place merge: every key in {@code source} is copied into {@code target};
-     * when both sides hold a {@code Map} at the same key, recurse; otherwise source wins.
-     * Preserves nested siblings that appear only on the target side (e.g. pipeline-added
-     * fields that were never captured in {@code _recovery_source}).
-     */
-    @SuppressWarnings("unchecked")
-    private static void deepMerge(Map<String, Object> target, Map<String, Object> source) {
-        for (Map.Entry<String, Object> entry : source.entrySet()) {
-            Object sourceValue = entry.getValue();
-            Object targetValue = target.get(entry.getKey());
-            if (targetValue instanceof Map<?, ?> targetMap && sourceValue instanceof Map<?, ?> sourceMap) {
-                deepMerge((Map<String, Object>) targetMap, (Map<String, Object>) sourceMap);
-            } else {
-                target.put(entry.getKey(), sourceValue);
-            }
-        }
-    }
-
-    /**
      * Merges reconstructed fields into existing source JSON. Used when the snapshot still
      * holds a (possibly partial) _source — e.g. _source.includes/_source.excludes indices.
      * Applies the same stored → doc_values → points/terms recovery chain as
@@ -293,6 +247,19 @@ public class SourceReconstructor {
                             modified |= putNested(target, fieldName, converted);
                         }
                     }
+                }
+            }
+        }
+
+        // 4. Mapping-level constant values (constant_keyword stores its value in the mapping, not the segment)
+        if (mappingContext != null) {
+            for (String fieldName : mappingContext.getFieldNames()) {
+                if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+                    continue;
+                }
+                FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
+                if (mappingInfo != null && mappingInfo.constantValue() != null) {
+                    modified |= putNested(target, fieldName, mappingInfo.constantValue());
                 }
             }
         }

@@ -597,6 +597,10 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
         .describe("Enable migration of indices that have _source disabled or partially filtered (includes/excludes). " +
             "When enabled, document backfill will reconstruct documents from stored fields and doc_values. " +
             "Without this flag, metadata migration will fail if any selected index has _source disabled or partially filtered."),
+    useRecoverySource: z.boolean().default(false).optional()
+        .describe("When enabled, treat the _recovery_source stored field (present in ES 7+ / OpenSearch snapshots " +
+            "with soft-deletes) as _source. This field is transient and may not be present for all documents, " +
+            "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient."),
 }).describe("Process-level options for the metadata migration command, controlling which metadata is migrated and how it is transformed.");
 
 export const USER_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(USER_METADATA_WORKFLOW_OPTIONS);
@@ -702,6 +706,12 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .describe("Enable migration of indices that have _source disabled or partially filtered (includes/excludes). " +
             "When enabled, documents are reconstructed from stored fields and doc_values instead of _source. " +
             "Without this flag, migration of sourceless indices will fail with an error.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
+    useRecoverySource: z.boolean().default(false).optional()
+        .describe("When enabled, treat the _recovery_source stored field (present in ES 7+ / OpenSearch snapshots " +
+            "with soft-deletes) as _source. This field is transient and may not be present for all documents, " +
+            "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
 }).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");

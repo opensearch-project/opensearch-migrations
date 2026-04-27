@@ -68,9 +68,13 @@ public interface LuceneIndexReader {
     }
 
     default Flux<LuceneDocumentChange> streamDocumentChanges(String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext) {
+        return streamDocumentChanges(segmentsFileName, startDocIdx, mappingContext, false);
+    }
+
+    default Flux<LuceneDocumentChange> streamDocumentChanges(String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource) {
         return Flux.using(
             () -> this.getReader(segmentsFileName),
-            reader -> LuceneReader.readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext),
+            reader -> LuceneReader.readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext, useRecoverySource),
             reader -> {
                 try {
                     reader.close();

@@ -157,6 +157,11 @@ public class SnapshotExtractor {
      */
     public Flux<LuceneDocumentChange> readDocuments(ShardEntry shard, Path workDir, int startDocIdx,
                                                      FieldMappingContext mappingContext) {
+        return readDocuments(shard, workDir, startDocIdx, mappingContext, false);
+    }
+
+    public Flux<LuceneDocumentChange> readDocuments(ShardEntry shard, Path workDir, int startDocIdx,
+                                                     FieldMappingContext mappingContext, boolean useRecoverySource) {
         var repoAccessor = new SourceRepoAccessor(sourceRepo);
         var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, workDir);
         var readerFactory = new LuceneIndexReader.Factory(snapshotReader);
@@ -173,7 +178,7 @@ public class SnapshotExtractor {
         // Read documents from startDocIdx (binary search to segment)
         Path shardPath = workDir.resolve(shard.indexName()).resolve(String.valueOf(shard.shardId()));
         LuceneIndexReader indexReader = readerFactory.getReader(shardPath);
-        return indexReader.streamDocumentChanges(shard.metadata().getSegmentFileName(), startDocIdx, mappingContext);
+        return indexReader.streamDocumentChanges(shard.metadata().getSegmentFileName(), startDocIdx, mappingContext, useRecoverySource);
     }
 
     /**

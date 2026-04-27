@@ -53,6 +53,9 @@ public class LuceneSnapshotSource implements DocumentSource {
     // When non-null, provides FieldMappingContext for indices with _source disabled
     private final Function<String, FieldMappingContext> sourcelessMappingContextProvider;
 
+    // When true, treat _recovery_source as _source if present
+    private final boolean useRecoverySource;
+
     private LuceneSnapshotSource(Builder builder) {
         this.extractor = builder.extractor;
         this.snapshotName = builder.snapshotName;
@@ -62,6 +65,7 @@ public class LuceneSnapshotSource implements DocumentSource {
         this.deltaMode = builder.deltaMode;
         this.deltaContextFactory = builder.deltaContextFactory;
         this.sourcelessMappingContextProvider = builder.sourcelessMappingContextProvider;
+        this.useRecoverySource = builder.useRecoverySource;
     }
 
     public static Builder builder(SnapshotExtractor extractor, String snapshotName, Path workDir) {
@@ -77,6 +81,7 @@ public class LuceneSnapshotSource implements DocumentSource {
         private DeltaMode deltaMode;
         private Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory;
         private Function<String, FieldMappingContext> sourcelessMappingContextProvider;
+        private boolean useRecoverySource;
 
         private Builder(SnapshotExtractor extractor, String snapshotName, Path workDir) {
             this.extractor = extractor;
@@ -104,6 +109,11 @@ public class LuceneSnapshotSource implements DocumentSource {
          */
         public Builder sourcelessMappingContextProvider(Function<String, FieldMappingContext> provider) {
             this.sourcelessMappingContextProvider = provider;
+            return this;
+        }
+
+        public Builder useRecoverySource(boolean useRecoverySource) {
+            this.useRecoverySource = useRecoverySource;
             return this;
         }
 
@@ -203,7 +213,7 @@ public class LuceneSnapshotSource implements DocumentSource {
         FieldMappingContext mappingContext = sourcelessMappingContextProvider != null
             ? sourcelessMappingContextProvider.apply(esPartition.indexName())
             : null;
-        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingDocOffset), mappingContext)
+        return extractor.readDocuments(entry, workDir, Math.toIntExact(startingDocOffset), mappingContext, useRecoverySource)
             .map(LuceneAdapter::fromLucene);
     }
 
