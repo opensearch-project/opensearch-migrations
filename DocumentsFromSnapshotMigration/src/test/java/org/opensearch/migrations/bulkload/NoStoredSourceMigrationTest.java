@@ -747,9 +747,16 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             // token_count acceptable forms across versions:
             //   - numeric (e.g. 5)         → count from doc_values / Points reconstruction
             //   - textual integer ("5")    → stored field (numeric count rendered as string)
+            //   - textual original string  → stored field on ES 7+ preserves original text
             if (target.isTextual()) {
-                int n = Integer.parseInt(target.asText());
-                assertEquals(5, n, perm.fieldName() + " value mismatch");
+                String s = target.asText();
+                try {
+                    int n = Integer.parseInt(s);
+                    assertEquals(5, n, perm.fieldName() + " value mismatch");
+                } catch (NumberFormatException nfe) {
+                    assertEquals(cfg.testValue().toString(), s,
+                        perm.fieldName() + " should be original string from stored field");
+                }
             } else {
                 assertEquals(5, target.asInt(), perm.fieldName() + " value mismatch");
             }
@@ -859,11 +866,15 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             // Doc-values / Points recovery paths numerically sort the count array, so
             // the recovered order is [3,5] (not [5,3]). Never read by index — iterate
             // every node and accept membership in {5, 3}. Text nodes are acceptable
-            // if they parse to the expected count.
+            // if they parse to the expected count or are one of the original input strings.
             assertNotNull(fieldValue, perm.fieldName() + " should not be null");
             Set<Integer> acceptableCounts = Set.of(
                 5,  // count of cfg.testValue() "one two three four five"
                 3   // count of secondValueFor(cfg) "alpha beta gamma"
+            );
+            Set<String> acceptableStrings = Set.of(
+                String.valueOf(cfg.testValue()),
+                String.valueOf(secondValueFor(cfg))
             );
             List<JsonNode> nodes = new ArrayList<>();
             if (fieldValue.isArray()) {
@@ -874,10 +885,23 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                 nodes.add(fieldValue);
             }
             for (JsonNode n : nodes) {
-                int cnt = n.isTextual() ? Integer.parseInt(n.asText()) : n.asInt();
-                assertTrue(acceptableCounts.contains(cnt),
-                    perm.fieldName() + " token count " + cnt
-                        + " not in acceptable set " + acceptableCounts);
+                if (n.isTextual()) {
+                    String s = n.asText();
+                    try {
+                        int cnt = Integer.parseInt(s);
+                        assertTrue(acceptableCounts.contains(cnt),
+                            perm.fieldName() + " token count " + cnt
+                                + " not in acceptable set " + acceptableCounts);
+                    } catch (NumberFormatException nfe) {
+                        assertTrue(acceptableStrings.contains(s),
+                            perm.fieldName() + " text " + s
+                                + " not in acceptable original strings " + acceptableStrings);
+                    }
+                } else {
+                    assertTrue(acceptableCounts.contains(n.asInt()),
+                        perm.fieldName() + " token count " + n.asInt()
+                            + " not in acceptable set " + acceptableCounts);
+                }
             }
             return;
         }
