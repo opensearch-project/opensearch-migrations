@@ -56,6 +56,7 @@ def call(Map config = [:]) {
                     regexpFilterExpression: "^$jobName\$",
                     regexpFilterText: "\$job_name",
             )
+            cron(periodicCron(jobName))
         }
 
         stages {
@@ -120,7 +121,7 @@ def call(Map config = [:]) {
                             if (config.buildStep) {
                                 config.buildStep()
                             } else {
-                                sh './gradlew clean build --no-daemon --stacktrace'
+                                sh './gradlew clean build -x test --no-daemon --stacktrace'
                             }
                         }
                     }

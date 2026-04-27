@@ -9,6 +9,7 @@ import org.opensearch.migrations.MetadataTransformationRegistry;
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.FilterScheme;
 import org.opensearch.migrations.bulkload.transformers.FanOutCompositeTransformer;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.bulkload.transformers.TransformerMapper;
@@ -114,6 +115,9 @@ public abstract class MigratorEvaluatorBase {
         items.componentTemplates(metadataResults.getComponentTemplates());
 
         if (metadataResults.fatalIssueCount() == 0) {
+            // Validate sourceless indices before proceeding with migration
+            validateSourcelessIndices(clusters);
+
             var indexResults = migrateIndices(migrationMode, clusters, transformer, context);
             items.indexes(indexResults.getIndexes());
             items.aliases(indexResults.getAliases());
@@ -156,5 +160,43 @@ public abstract class MigratorEvaluatorBase {
     protected String createUnexpectedErrorMessage(Throwable e) {
         var causeMessage = Optional.of(e).map(Throwable::getCause).map(Throwable::getMessage).orElse(null);
         return "Unexpected failure: " + e.getMessage() + (causeMessage == null ? "" : ", inner cause: " + causeMessage);
+    }
+
+    /**
+     * Validates that no selected indices have _source disabled unless --enable-sourceless-migrations is set.
+     * Throws ParameterException if sourceless indices are found without the flag.
+     */
+    protected void validateSourcelessIndices(Clusters clusters) {
+        var metadataFactory = clusters.getSource().getIndexMetadata();
+        var repoDataProvider = metadataFactory.getRepoDataProvider();
+        var skipFilter = FilterScheme.filterByAllowList(arguments.dataFilterArgs.indexAllowlist).negate();
+        var sourcelessIndices = new ArrayList<String>();
+
+        for (var index : repoDataProvider.getIndicesInSnapshot(arguments.snapshotName)) {
+            if (skipFilter.test(index.getName())) {
+                continue;
+            }
+            try {
+                var indexMetadata = metadataFactory.fromRepo(arguments.snapshotName, index.getName());
+                if (indexMetadata.needsSourceReconstruction()) {
+                    sourcelessIndices.add(index.getName());
+                }
+            } catch (Exception e) {
+                log.warn("Could not check _source status for index {}: {}", index.getName(), e.getMessage());
+            }
+        }
+
+        if (!sourcelessIndices.isEmpty() && !arguments.enableSourcelessMigrations) {
+            throw new com.beust.jcommander.ParameterException(
+                "The following indices have _source disabled or partial (includes/excludes): " + sourcelessIndices + ". "
+                + "Document backfill will not be able to migrate these indices without the "
+                + "--enable-sourceless-migrations flag on both metadata migration and backfill commands. "
+                + "With this flag, documents will be reconstructed from stored fields and doc_values."
+            );
+        }
+
+        if (!sourcelessIndices.isEmpty()) {
+            log.info("Sourceless indices detected (--enable-sourceless-migrations is set): {}", sourcelessIndices);
+        }
     }
 }

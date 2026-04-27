@@ -1,6 +1,9 @@
+import glob
+import gzip
 import json
 import logging
 import os
+import time
 import pytest
 import unittest
 from http import HTTPStatus
@@ -65,6 +68,9 @@ def initialize(request):
 
     # Delete existing Kafka topic to clear records
     delete_topic(kafka=kafka, topic_name="logging-traffic-topic")
+
+    # Record test start time for filtering rotated tuple files by mtime at test end.
+    pytest.test_start_time = time.time()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -163,3 +169,55 @@ class E2ETests(unittest.TestCase):
                                    index_prefix_ignore_list=ignore_list, test_case=self)
         ops.check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_target_docs,
                                    index_prefix_ignore_list=ignore_list, max_attempts=30, delay=10.0, test_case=self)
+
+        # Regression guard for commit 5b5c23f10 (NPE wiping every tuple): assert that the Log4J
+        # tuple consumer actually wrote tuples to the shared EFS volume during this test.
+        #
+        # Log4J2's RollingRandomAccessFile writes the live file to ${tempDir}/progress/tuples.log
+        # (container-local), and only rotated files land on EFS as
+        # ${rootLogsDir}/${hostName}/tuples/tuples-%d{yyyy-MM-dd-HH-mm}-%i.log.gz. Rotation fires
+        # on the first log event past a minute boundary, so we:
+        #   1) sleep past the boundary
+        #   2) trigger one more captured request so the replayer emits a tuple
+        #   3) give the pipeline a few seconds to rotate + gzip
+        # then read all rotated files whose mtime is after the test start.
+        # TODO: strengthen to an exact count once ALB health-check capture suppression is wired
+        # in CDK (today the capture-proxy records ELB-HealthChecker requests, making the count
+        # non-deterministic).
+        logger.info("Waiting 65s to cross Log4J2 TimeBasedTriggeringPolicy minute boundary")
+        time.sleep(65)
+        # Trigger one captured source request so log4j2's rolling policy sees a post-boundary event.
+        ops.get_document(cluster=source_cluster, index_name=index_name,
+                         doc_id=doc_id_base + "_1", test_case=self)
+        logger.info("Waiting 15s for capture -> Kafka -> replayer -> tuple -> rotation + gzip")
+        time.sleep(15)
+
+        tuple_glob = "/shared-logs-output/traffic-replayer-*/*/tuples/tuples-*.log.gz"
+        all_files = glob.glob(tuple_glob)
+        recent_files = [f for f in all_files if os.path.getmtime(f) >= pytest.test_start_time]
+        logger.info(f"Found {len(all_files)} total rotated tuple files on EFS, "
+                    f"{len(recent_files)} created since test start")
+        assert len(recent_files) > 0, (
+            f"No rotated tuple files matching {tuple_glob} were written during this test. "
+            f"This regresses the Log4J tuple path (see commit 5b5c23f10 for the NPE that "
+            f"swallowed every tuple silently)."
+        )
+
+        tuple_count = 0
+        for path in recent_files:
+            with gzip.open(path, "rt") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        json.loads(line)
+                        tuple_count += 1
+                    except json.JSONDecodeError:
+                        logger.warning(f"Skipping malformed tuple line in {path}")
+        logger.info(f"Total tuples written across {len(recent_files)} rotated file(s): "
+                    f"{tuple_count}")
+        assert 20 < tuple_count < 40, (
+            f"Expected between 20 and 40 tuples but found {tuple_count} across "
+            f"{len(recent_files)} rotated tuple file(s)."
+        )

@@ -82,6 +82,25 @@ public class MigrateOrEvaluateArgs {
         + " which can help catch configuration problems early (such as an incorrect snapshot or wrong allowlist).")
     public boolean succeedOnEmpty = true;
 
+    @Parameter(required = false,
+        names = { "--enable-sourceless-migrations" },
+        description = "Enable migration of indices that have _source disabled. When enabled, document backfill " +
+            "will reconstruct documents from stored fields and doc_values. Without this flag, metadata migration " +
+            "will fail if any selected index has _source disabled.",
+        arity = 0
+    )
+    public boolean enableSourcelessMigrations = false;
+
+    // Accepted for parity with RfsMigrateDocuments but not used by MetadataMigration.
+    // The orchestration layer forwards a shared config bag to both CLIs.
+    @Parameter(required = false,
+        names = { "--use-recovery-source" },
+        description = "Accepted for compatibility with the document backfill CLI. "
+            + "Has no effect on metadata migration.",
+        arity = 0
+    )
+    public boolean useRecoverySource = false;
+
     @ParametersDelegate
     public VersionStrictness versionStrictness = new VersionStrictness();
 
