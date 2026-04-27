@@ -12,6 +12,19 @@ An **OpenSearch Agent Skill** that helps migrate from [Apache Solr](https://solr
 > [!TIP]
 > In Kiro, use **I want to use the Solr to OpenSearch skill.** to ensure Kiro activates this skill.
 
+## Usage
+
+There are two ways to run the Agent Skill:
+
+### 1. AI CLI
+
+Run your favorite AI CLI directly on your machine. The skill is compatible with any CLI that supports agent skills, such as [Kiro CLI](https://kiro.dev/) or [Claude Code CLI](https://claude.ai/code).
+
+### 2. Docker Container
+
+Run a pre-configured Docker container that includes all dependencies and automatically starts an agent session with the skill loaded.
+
+See the [Docker setup README](setup/docker/claude/README.md) for build and startup instructions.
 
 # Developer Guide
 
