@@ -298,11 +298,22 @@ Prompt the user:
 
 *"Would you like a pricing estimate for your OpenSearch deployment? I can calculate costs for managed clusters (search, time-series, or vector workloads) or OpenSearch Serverless collections."*
 
-The service exposes an HTTP API on **port 5050**. Call `estimate_pricing` with the appropriate workload type and parameters collected from the user.
+**Always use the `PricingCalculatorClient` from `scripts/pricing_calculator.py`** to obtain estimates. Never construct raw HTTP requests or call the calculator API directly — all communication must go through the Python client. The client handles the base URL (`http://opensearch-pricing-calculator:5050`), error handling, and response parsing.
 
-**If the calculator is unreachable**, the client code will raise a `PricingCalculatorError`. When this happens, notify the user with a message such as:
+Call the appropriate method based on the workload type:
 
-*"I wasn't able to connect to the OpenSearch Pricing Calculator at http://localhost:5050. Pricing estimates will be skipped for now — you can add them later by starting the calculator and re-running this step."*
+| Workload type | Key inputs | `PricingCalculatorClient` method |
+|---|---|---|
+| `search` | data size (GB), AZs, replicas, shard size, region | `estimate_provisioned_search` |
+| `timeSeries` | data size (GB), hot/warm retention days, region | `estimate_provisioned_time_series` |
+| `vector` | vector count, dimensions, engine type, region | `estimate_provisioned_vector` |
+| `serverless` | collection type, daily index size (GB), region | `estimate_serverless` |
+
+Collect only the parameters the user can readily provide; use documented defaults for the rest. Pass the result to `PricingCalculatorClient.format_estimate` to produce a human-readable Markdown summary.
+
+**If the calculator is unreachable**, `PricingCalculatorClient.health_check()` will return `False` and the estimate methods will raise `PricingCalculatorError`. When this happens, notify the user with a message such as:
+
+*"I wasn't able to connect to the OpenSearch Pricing Calculator at http://opensearch-pricing-calculator:5050. Pricing estimates will be skipped for now — you can add them later by starting the calculator and re-running this step."*
 
 Then continue to Step 9 without blocking the migration report. Do not treat an unreachable calculator as a blocker. The report will note that pricing estimates are unavailable.
 
@@ -323,14 +334,7 @@ docker build -t opensearch-pricing-calculator .
 docker run -p 5050:5050 opensearch-pricing-calculator
 ```
 
-| Workload type | Key inputs | Method |
-|---|---|---|
-| `search` | data size (GB), AZs, replicas, shard size, region | `estimate_provisioned_search` |
-| `timeSeries` | data size (GB), hot/warm retention days, region | `estimate_provisioned_time_series` |
-| `vector` | vector count, dimensions, engine type, region | `estimate_provisioned_vector` |
-| `serverless` | collection type, daily index size (GB), region | `estimate_serverless` |
-
-Collect only the parameters the user can readily provide; use documented defaults for the rest. Present the formatted estimate and store it in the session under `facts.pricing_estimate` so it is included in the migration report.
+Present the formatted estimate and store it in the session under `facts.pricing_estimate` so it is included in the migration report.
 
 **Stakeholder guidance:**
 - **Search Relevance Engineer** — note how engine type and shard sizing choices affect cost.

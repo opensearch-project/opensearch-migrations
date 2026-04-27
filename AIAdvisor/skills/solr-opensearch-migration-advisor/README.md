@@ -27,7 +27,7 @@ cd opensearch-migrations/AIAdvisor/opensearch-pricing-calculator
 docker build -t opensearch-pricing-calculator .
 ```
 
-The agent connects to it at `http://localhost:5050` by default. Override this with the `PRICING_CALCULATOR_URL` environment variable if needed.
+The agent connects to it at `http://opensearch-pricing-calculator:5050` by default. Override this with the `PRICING_CALCULATOR_URL` environment variable if needed.
 
 ## Running the Tests
 

@@ -60,7 +60,7 @@ class SolrToOpenSearchMigrationSkill:
     def __init__(
         self,
         storage: Optional[StorageBackend] = None,
-        pricing_calculator_url: str = "http://localhost:5050",
+        pricing_calculator_url: str = "http://opensearch-pricing-calculator:5050",
     ) -> None:
         self._schema_converter = SchemaConverter()
         self._query_converter = QueryConverter()

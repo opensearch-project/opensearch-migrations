@@ -17,7 +17,6 @@ docker run -d --rm  \
   --name claude-container \
   -v "$AGENT_VOLUME_DIR":/home/user/claude/processing \
   -e CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
-  -e PRICING_CALCULATOR_URL="http://opensearch-pricing-calculator:5050" \
   --network opensearch-migration \
   claude_image:0.0.1
 

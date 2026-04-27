@@ -187,7 +187,7 @@ class TestPricingCalculatorIntegration(unittest.TestCase):
         python tests/test_pricing_calculator.py TestPricingCalculatorIntegration -v
     """
 
-    BASE_URL = "http://localhost:5050"
+    BASE_URL = "http://opensearch-pricing-calculator:5050"
 
     @classmethod
     def setUpClass(cls):
