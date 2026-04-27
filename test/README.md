@@ -2,7 +2,7 @@
 
 ### AWS E2E Testing
 Featured in this directory is a `./awsE2ESolutionSetup` script whose goal is to encapsulate deploying an E2E environment in AWS. This script will perform the following key actions:
-1. Deploy an Elasticsearch source cluster to EC2 using the following [CDK](https://github.com/opensearch-project/opensearch-cluster-cdk)
+1. Deploy an Elasticsearch source cluster to EC2 using the following [CDK](https://github.com/lewijacn/opensearch-cluster-cdk/tree/migration-es)
    * The CDK context options for this CDK can be used to customize this deployment and can be provided with a custom context file using the `--context-file` option
    * A sample CDK context file can be seen [here](defaultSourceContext.json)
 2. Build the Docker Images
