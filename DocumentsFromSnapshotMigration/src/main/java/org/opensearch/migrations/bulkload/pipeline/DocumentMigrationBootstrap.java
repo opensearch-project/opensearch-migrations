@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -304,24 +305,29 @@ public class DocumentMigrationBootstrap {
         }
         if (enableSourcelessMigrations && indexMetadataFactory != null) {
             log.info("Sourceless migrations enabled — will reconstruct _source from stored fields/doc_values");
-            Map<String, FieldMappingContext> cache = new ConcurrentHashMap<>();
+            // Optional wraps nullable FieldMappingContext so computeIfAbsent caches the
+            // "no reconstruction needed" result too. Returning null from the remapping
+            // function is a no-op for ConcurrentHashMap storage, so a plain
+            // Map<String, FieldMappingContext> would re-read snapshot metadata on every
+            // provider invocation for _source-enabled indices.
+            Map<String, Optional<FieldMappingContext>> cache = new ConcurrentHashMap<>();
             builder.sourcelessMappingContextProvider(indexName -> {
                 return cache.computeIfAbsent(indexName, name -> {
                     try {
                         var meta = indexMetadataFactory.fromRepo(snapshotName, name);
                         if (!meta.needsSourceReconstruction()) {
                             log.debug("Index {} has full _source enabled, no reconstruction needed", name);
-                            return null;
+                            return Optional.empty();
                         }
                         log.info("Index {} needs source reconstruction (disabled={}, partial={}), building FieldMappingContext",
                             name, !meta.isSourceEnabled(), meta.isSourcePartial());
-                        return new FieldMappingContext(meta.getMappings());
+                        return Optional.of(new FieldMappingContext(meta.getMappings()));
                     } catch (Exception e) {
                         throw new RuntimeException(
                             "Failed to read metadata for index " + name +
                             " — cannot determine if source reconstruction is needed", e);
                     }
-                });
+                }).orElse(null);
             });
         }
         return builder.build();
