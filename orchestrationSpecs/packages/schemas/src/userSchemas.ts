@@ -399,10 +399,8 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
         .changeRestriction('gated'),
     numThreads: z.number().default(1).optional()
         .describe("Number of Netty worker threads for the proxy to handle concurrent connections."),
-    sslConfigFile: z.string().optional()
-        .describe("[Expert] Path to a YAML file with OpenSearch security SSL configuration (plugins.security.ssl.http.* keys). The file must be mounted into the container by the user. For Kubernetes deployments, prefer the 'tls' option instead."),
     tls: PROXY_TLS_CONFIG.optional()
-        .describe("TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile.")
+        .describe("TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.")
         .changeRestriction('gated'),
     enableMSKAuth: z.boolean().default(false).optional()
         .describe("Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
@@ -431,15 +429,7 @@ export const USER_PROXY_PROCESS_OPTION_KEYS = getZodKeys(USER_PROXY_PROCESS_OPTI
 export const USER_PROXY_OPTIONS = z.object({
     ...USER_PROXY_WORKFLOW_OPTIONS.shape,
     ...USER_PROXY_PROCESS_OPTIONS.shape,
-}).superRefine((data, ctx) => {
-    if (data.sslConfigFile && data.tls) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "sslConfigFile and tls are mutually exclusive. Use tls for Kubernetes deployments or sslConfigFile for legacy non-Kubernetes deployments.",
-            path: ['tls']
-        });
-    }
-});
+}).describe("Process-level and deployment-level configuration options for the capture proxy.");
 
 export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
     jvmArgs: z.string().default("").optional()

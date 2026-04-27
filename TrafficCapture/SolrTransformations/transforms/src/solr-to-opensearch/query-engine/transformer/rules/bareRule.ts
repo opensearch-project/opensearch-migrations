@@ -51,17 +51,17 @@ export const bareRule: TransformRuleFn = (
   // Bare is a leaf node — transformChild not used
   _transformChild,
 ): Map<string, any> => {
-  const { value, isPhrase, defaultField, queryFields } = node;
+  const { value, isPhrase, defaultField, queryFields, tieBreaker } = node;
 
   // multi_match path: qf fields provided (edismax/dismax)
   if (queryFields && queryFields.length > 0) {
-    return new Map([
-      ['multi_match', new Map<string, any>([
-        ['query', value],
-        ['fields', queryFields],
-        ['type', isPhrase ? 'phrase' : 'best_fields'],
-      ])],
-    ]);
+    const entries: [string, any][] = [
+      ['query', value],
+      ['fields', queryFields],
+      ['type', isPhrase ? 'phrase' : 'best_fields'],
+    ];
+    if (tieBreaker !== undefined) entries.push(['tie_breaker', tieBreaker]);
+    return new Map([['multi_match', new Map<string, any>(entries)]]);
   }
 
   // query_string fallback (standard parser / df only)

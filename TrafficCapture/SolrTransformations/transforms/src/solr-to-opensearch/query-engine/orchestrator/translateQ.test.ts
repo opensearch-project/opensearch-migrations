@@ -84,6 +84,29 @@ describe('translateQ', () => {
     });
   });
 
+  describe('pf phrase boost', () => {
+    it('wraps dsl in bool when pf is set', () => {
+      const fakeDsl = new Map([['multi_match', new Map()]]);
+      mockParse.mockReturnValue({ ast: { type: 'matchAll' }, errors: [] });
+      mockTransform.mockReturnValue(fakeDsl);
+
+      const result = translateQ(params(['q', 'foo bar'], ['pf', 'title^50']));
+
+      expect(result.dsl.has('bool')).toBe(true);
+      expect((result.dsl.get('bool') as Map<string, any>).get('must')).toBe(fakeDsl);
+    });
+
+    it('returns plain dsl when pf is not set', () => {
+      const fakeDsl = new Map([['match_all', new Map()]]);
+      mockParse.mockReturnValue({ ast: { type: 'matchAll' }, errors: [] });
+      mockTransform.mockReturnValue(fakeDsl);
+
+      const result = translateQ(params(['q', 'foo bar']));
+
+      expect(result.dsl).toBe(fakeDsl);
+    });
+  });
+
   describe('fail-fast mode', () => {
     it('throws on parse failure', () => {
       mockParse.mockReturnValue({

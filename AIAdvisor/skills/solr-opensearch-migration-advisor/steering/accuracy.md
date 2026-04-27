@@ -6,6 +6,7 @@ When translating Solr constructs to OpenSearch equivalents, never guess or appro
 
 ## Rules
 
+- Never recommend deprecated OpenSearch components, features, APIs, or field types. If a user's Solr construct maps to a deprecated OpenSearch equivalent, explicitly state that it is deprecated and recommend the current supported alternative instead.
 - Verify every query translation produces semantically equivalent results before presenting it. Behavior must match, not just syntax.
 - Flag any Solr feature that has no direct OpenSearch equivalent rather than silently substituting a close-but-different alternative.
 - Do not omit edge cases. If a translation works in most cases but breaks under specific conditions (e.g., null values, multi-valued fields, nested docs), document those conditions.

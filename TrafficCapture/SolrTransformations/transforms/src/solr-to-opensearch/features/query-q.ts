@@ -14,7 +14,7 @@ import type { ParamRule } from './validation';
 import { translateQ } from '../query-engine/orchestrator/translateQ';
 
 /** Solr query params this feature handles. */
-export const params = ['q', 'rows', 'start', 'q.op', 'defType', 'qf'];
+export const params = ['q', 'rows', 'start', 'q.op', 'defType', 'qf', 'pf', 'ps', 'tie'];
 export const paramRules: ParamRule[] = [
   { name: 'rows', type: 'integer' },
   { name: 'start', type: 'integer' },
