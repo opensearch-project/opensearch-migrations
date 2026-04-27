@@ -217,8 +217,7 @@ class E2ETests(unittest.TestCase):
                         logger.warning(f"Skipping malformed tuple line in {path}")
         logger.info(f"Total tuples written across {len(recent_files)} rotated file(s): "
                     f"{tuple_count}")
-        assert tuple_count > 0, (
-            f"Found {len(recent_files)} rotated tuple file(s) but ZERO parseable tuples inside. "
-            f"This is the exact regression shape from commit 5b5c23f10 — the NPE was caught and "
-            f"logged per-tuple, so files were created but never received a single tuple."
+        assert 20 < tuple_count < 40, (
+            f"Expected between 20 and 40 tuples but found {tuple_count} across "
+            f"{len(recent_files)} rotated tuple file(s)."
         )

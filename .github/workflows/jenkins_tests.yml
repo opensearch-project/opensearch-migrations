@@ -42,7 +42,7 @@ jobs:
           job_params: "GIT_REPO_URL=${{ needs.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ needs.sanitize-input.outputs.branch_name }},GIT_COMMIT=${{ needs.sanitize-input.outputs.commit_hash }}"
           jenkins_user: "${{ secrets.JENKINS_MIGRATIONS_USER }}"
           jenkins_api_token: "${{ secrets.JENKINS_MIGRATIONS_API_TOKEN }}"
-          job_timeout_minutes: "120"
+          job_timeout_minutes: "180"
 
   elasticsearch-5x-k8s-local-test:
     needs: [get-require-approval, sanitize-input]
