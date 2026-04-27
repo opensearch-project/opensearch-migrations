@@ -27,12 +27,6 @@ cd opensearch-migrations/AIAdvisor/opensearch-pricing-calculator
 docker build -t opensearch-pricing-calculator .
 ```
 
-Once built, start the calculator container before launching the agent:
-
-```bash
-docker run -p 5050:5050 opensearch-pricing-calculator
-```
-
 The agent connects to it at `http://localhost:5050` by default. Override this with the `PRICING_CALCULATOR_URL` environment variable if needed.
 
 ## Running the Tests
