@@ -94,7 +94,14 @@ clean_up_source () {
   fi
 
   cd "$EC2_SOURCE_CDK_PATH" || exit
-  npm ci
+  # Do NOT `npm ci` here: the main flow above (line ~294) already ran `npm ci`
+  # in this directory AND overlaid a compatible aws-cdk CLI via
+  # `npm install --no-save aws-cdk@<ver>`. A second `npm ci` would wipe the
+  # overlaid CLI and reinstall the broken 2.139.0 from upstream's
+  # package-lock.json, re-triggering the cloud-assembly schema mismatch on
+  # destroy. `clean_up_source` is only reachable after the main-flow install
+  # (via --clean-up-source-only short-circuit at line ~304 or clean_up_all
+  # at line ~327), so the install state is guaranteed.
   echo "Destroying source CDK app stacks..."
   # The upstream opensearch-cluster-cdk reads context from cdk.context.json via --context contextKey=<id>
   cp "$SOURCE_GEN_CONTEXT_FILE" cdk.context.json
@@ -292,6 +299,17 @@ else
 fi
 cd opensearch-cluster-cdk && git pull
 npm ci
+# Upstream opensearch-cluster-cdk pins `aws-cdk` (CLI) 2.139.0 against
+# `aws-cdk-lib` 2.248.0, which emits a cloud-assembly schema (53.0.0) that
+# the pinned CLI (max 36.0.0) cannot read -- `npx cdk deploy|destroy|bootstrap`
+# then fails with "Cloud assembly schema version mismatch". Overlay a newer
+# CLI into ./node_modules/.bin/cdk so every subsequent `npx cdk` in this
+# directory (bootstrap_region, source deploy, and clean_up_source destroy)
+# resolves to a CLI that can read the library's output. `--no-save` keeps
+# upstream's package.json and package-lock.json untouched; newer CDK CLIs
+# are backwards-compatible with older assemblies. Pinned to the same version
+# as the in-tree migration CDK (deployment/cdk/opensearch-service-migration/package.json).
+npm install --no-save --no-audit --no-fund aws-cdk@2.1118.4
 # The upstream opensearch-cluster-cdk reads context from cdk.context.json via --context contextKey=<id>
 cp "$SOURCE_GEN_CONTEXT_FILE" cdk.context.json
 if [ "$BOOTSTRAP_REGION" = true ] ; then
