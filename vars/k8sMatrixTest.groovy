@@ -7,10 +7,6 @@ def call(Map config = [:]) {
         defaultChildJobName = "pr-checks/pr-k8s-local-integ-test"
     }
     def childJobName = config.childJobName ?: defaultChildJobName
-    // Default behavior: keep periodic cadence for non-PR jobs, disable for pr-* jobs.
-    def enablePeriodicSchedule = config.containsKey('enablePeriodicSchedule') ?
-            config.enablePeriodicSchedule :
-            !jobName.startsWith("pr-")
 
     def allSourceVersions = ['ES_1.5', 'ES_2.4', 'ES_5.6', 'ES_6.8', 'ES_7.10', 'SOLR_8.11']
     def allTargetVersions = ['OS_1.3', 'OS_2.19', 'OS_3.1']
@@ -31,7 +27,7 @@ def call(Map config = [:]) {
                 regexpFilterExpression: "^${jobName}\$",
                 regexpFilterText: '$job_name'
             )
-            cron(enablePeriodicSchedule ? 'H 22 * * *' : '')
+            cron(periodicCron(jobName))
         }
         
         parameters {

@@ -74,14 +74,24 @@ functionName(jobName: jobNameOverride ?: null)
 - Default child job path follows parent job name:
   - `main-*` parent defaults to `main/main-k8s-local-integ-test`
   - `pr-*` parent defaults to `pr-checks/pr-k8s-local-integ-test`
-- Periodic schedule is enabled by default for non-`pr-*` job names and disabled for `pr-*` job names
+- Periodic schedules are defined in `vars/periodicCron.groovy` (dispatch table keyed on job name). `pr-*` jobs never have a cadence; `main-*` and `release-*` jobs pick their cadence from the table
 
 ### Supported Cover Files
 
 | Cover File | Vars Function | Override Parameter |
 |------------|---------------|-------------------|
-| eksCreateVPCSolutionsCFNTestCover.groovy | eksSolutionsCFNTest | JOB_NAME_OVERRIDE |
+| cleanupDeploymentCover.groovy | cleanupDeployment | JOB_NAME_OVERRIDE |
+| eksAOSSSearchIntegTestCover.groovy | eksAOSSIntegPipeline | JOB_NAME_OVERRIDE |
+| eksAOSSTimeSeriesIntegTestCover.groovy | eksAOSSIntegPipeline | JOB_NAME_OVERRIDE |
+| eksAOSSVectorIntegTestCover.groovy | eksAOSSIntegPipeline | JOB_NAME_OVERRIDE |
 | eksBYOSIntegTestCover.groovy | eksBYOSIntegPipeline | JOB_NAME_OVERRIDE |
+| eksCdcAossCdcOnlyIntegTestCover.groovy | eksCdcAossIntegPipeline | JOB_NAME_OVERRIDE |
+| eksCdcAossFullE2eIntegTestCover.groovy | eksCdcAossIntegPipeline | JOB_NAME_OVERRIDE |
+| eksCdcBulkGenerateDataIntegTestCover.groovy | eksCdcIntegPipeline | JOB_NAME_OVERRIDE |
+| eksCdcIntegTestCover.groovy | eksCdcIntegPipeline | JOB_NAME_OVERRIDE |
+| eksCdcMixedOpsIntegTestCover.groovy | eksCdcIntegPipeline | JOB_NAME_OVERRIDE |
+| eksCdcSimpleBulkE2eIntegTestCover.groovy | eksCdcIntegPipeline | JOB_NAME_OVERRIDE |
+| eksCreateVPCSolutionsCFNTestCover.groovy | eksSolutionsCFNTest | JOB_NAME_OVERRIDE |
 | eksImportVPCSolutionsCFNTestCover.groovy | eksSolutionsCFNTest | JOB_NAME_OVERRIDE |
 | eksIntegTestCover.groovy | eksIntegPipeline | JOB_NAME_OVERRIDE |
 | elasticsearch5xK8sLocalTestCover.groovy | elasticsearch5xK8sLocalTest | JOB_NAME_OVERRIDE |
@@ -90,25 +100,45 @@ functionName(jobName: jobNameOverride ?: null)
 | k8sLocalIntegTestCover.groovy | k8sLocalDeployment | JOB_NAME_OVERRIDE |
 | k8sMatrixTestCover.groovy | k8sMatrixTest | JOB_NAME_OVERRIDE + CHILD_JOB_NAME_OVERRIDE |
 | rfsDefaultE2ETestCover.groovy | rfsDefaultE2ETest | JOB_NAME_OVERRIDE |
+| solr8xK8sLocalTestCover.groovy | solr8xK8sLocalTest | JOB_NAME_OVERRIDE |
 | solutionsCFNTestCover.groovy | solutionsCFNTest | JOB_NAME_OVERRIDE |
 | trafficReplayDefaultE2ETestCover.groovy | trafficReplayDefaultE2ETest | JOB_NAME_OVERRIDE |
 
 ### GitHub Actions Integration
 
-The `.github/workflows/jenkins_tests.yml` workflow handles both PR and post-merge triggers using a single file. It uses `github.event_name == 'push'` to select `main-*` prefixed job names for pushes to `main`, and `pr-*` prefixed job names for pull requests. Note that `main-*` jobs may also run on a periodic cadence configured directly in Jenkins, independent of GHA webhooks.
+The `.github/workflows/jenkins_tests.yml` workflow handles both PR and post-merge triggers using a single file. It uses `github.event_name == 'push'` to select `main-*` prefixed job names for pushes to `main`, and `pr-*` prefixed job names for pull requests. Periodic cadences are separate and defined in code (see [Periodic Cron Schedules](#periodic-cron-schedules)).
 
 Jobs triggered:
 
 - `full-es68source-e2e-test` (PR and main)
 - `elasticsearch-5x-k8s-local-test` (PR and main)
+- `solr-8x-k8s-local-test` (PR and main)
 - `eks-integ-test` (PR with `run-eks-tests` label, and main)
+- `eks-cdc-*` (PR with `run-eks-tests` label, and main)
+- `eks-aoss-*` (PR with `run-aoss-tests` label, and main)
+- `eks-byos-integ-test` (PR with `run-eks-byos-tests` label, and main)
+- `eks-cfn-*` (PR with `run-cfn-tests` label, and main)
 
 This ensures PR-triggered jobs don't conflict with post-merge jobs using the same pipeline code.
 
 ### Jenkins Folder Structure
 
-Jenkins jobs are organized into two folders:
+Jenkins jobs are organized into three folders:
 
 - `main/` - pipelines that run on a periodic cadence, via GenericTrigger on push to `main`, or both (e.g., `main/main-k8s-local-integ-test`)
 - `pr-checks/` - pipelines that run only via GenericTrigger from PRs. No periodic cadence, no action on PR push (e.g., `pr-checks/pr-k8s-local-integ-test`)
+- `release-canaries/` - pipelines that exercise release-candidate artifacts on a canary cadence, independent of PR and post-merge triggers
 
+
+### Periodic Cron Schedules
+
+Periodic cadences are defined in code via `vars/periodicCron.groovy`, a dispatch table keyed on job name. Each shared pipeline calls `cron(periodicCron(jobName))` in its `triggers {}` block.
+
+Rules:
+- `pr-*` jobs never fire on a cadence (the helper returns `''` for any name not in the table)
+- `release-*` jobs all run every 6 hours (`H H(0-5)/6 * * *`), spread across all 24 hours
+- `main-*` jobs have per-job cadences defined in the switch statement
+
+Jenkins' `H` token deterministically hashes the job name into a slot within the allowed range, so jobs sharing the same cron expression still fire at unique minutes. The explicit `H(0-5)/6` hour range forces Jenkins to also spread jobs across different starting hours — without the range, all `H/6` jobs collapse into hour slot 0.
+
+To change a cadence or add one for a new `main-*` / `release-*` job, edit the switch in `vars/periodicCron.groovy` and rebuild the shared library.

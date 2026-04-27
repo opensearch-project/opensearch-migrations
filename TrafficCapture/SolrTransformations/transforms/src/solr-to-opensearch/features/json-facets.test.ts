@@ -838,6 +838,99 @@ describe('query facet conversion (filter)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Stat (metric) facets — string shorthand like "avg(price)"
+// ---------------------------------------------------------------------------
+
+/** Helper: build a context with a string stat facet and return the agg result. */
+function applyStatFacet(expr: string): JavaMap {
+  const jsonFacet = new Map([[FACET_NAME, expr]]) as unknown as JavaMap;
+  const body = new Map([['json.facet', jsonFacet]]) as unknown as JavaMap;
+  const ctx: RequestContext = {
+    msg: new Map() as unknown as JavaMap,
+    endpoint: 'select',
+    collection: 'testcollection',
+    params: new URLSearchParams(),
+    body,
+    emitMetric: () => {},
+    _metrics: new Map(),
+  };
+  request.apply(ctx);
+  return ctx.body.get('aggs').get(FACET_NAME);
+}
+
+describe('stat facet conversion', () => {
+  it('should convert avg(price) to avg aggregation', () => {
+    const agg = applyStatFacet('avg(price)');
+    expect(agg.get('avg')).toEqual(new Map([['field', 'price']]));
+  });
+
+  it('should convert sum(revenue) to sum aggregation', () => {
+    const agg = applyStatFacet('sum(revenue)');
+    expect(agg.get('sum')).toEqual(new Map([['field', 'revenue']]));
+  });
+
+  it('should convert min(price) to min aggregation', () => {
+    const agg = applyStatFacet('min(price)');
+    expect(agg.get('min')).toEqual(new Map([['field', 'price']]));
+  });
+
+  it('should convert max(price) to max aggregation', () => {
+    const agg = applyStatFacet('max(price)');
+    expect(agg.get('max')).toEqual(new Map([['field', 'price']]));
+  });
+
+  it('should convert unique(author) to cardinality aggregation', () => {
+    const agg = applyStatFacet('unique(author)');
+    expect(agg.get('cardinality')).toEqual(new Map([['field', 'author']]));
+  });
+
+  it('should convert hll(author) to cardinality aggregation', () => {
+    const agg = applyStatFacet('hll(author)');
+    expect(agg.get('cardinality')).toEqual(new Map([['field', 'author']]));
+  });
+
+  it('should convert countvals(status) to value_count aggregation', () => {
+    const agg = applyStatFacet('countvals(status)');
+    expect(agg.get('value_count')).toEqual(new Map([['field', 'status']]));
+  });
+
+  it('should throw for unsupported stat function', () => {
+    expect(() => applyStatFacet('sumsq(price)')).toThrow("Unsupported stat function 'sumsq'");
+  });
+
+  it('should throw for stat function with wrong number of args', () => {
+    expect(() => applyStatFacet('avg(price, weight)')).toThrow('expects exactly 1 argument, got 2');
+  });
+
+  it('should throw for invalid stat expression', () => {
+    expect(() => applyStatFacet('not-a-function')).toThrow();
+  });
+
+  it('should work as nested sub-facet inside terms facet', () => {
+    const def = new Map([
+      ['type', 'terms'],
+      ['field', 'category'],
+      ['facet', new Map([['avg_price', 'avg(price)']])],
+    ]) as unknown as JavaMap;
+    const jsonFacet = new Map([[FACET_NAME, def]]) as unknown as JavaMap;
+    const body = new Map([['json.facet', jsonFacet]]) as unknown as JavaMap;
+    const ctx: RequestContext = {
+      msg: new Map() as unknown as JavaMap,
+      endpoint: 'select',
+      collection: 'testcollection',
+      params: new URLSearchParams(),
+      body,
+      emitMetric: () => {},
+      _metrics: new Map(),
+    };
+    request.apply(ctx);
+    const facetAgg = ctx.body.get('aggs').get(FACET_NAME);
+    const nestedAggs = facetAgg.get('aggs');
+    expect(nestedAggs.get('avg_price').get('avg')).toEqual(new Map([['field', 'price']]));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Edge cases and warning paths (json-facets.ts coverage gaps)
 // ---------------------------------------------------------------------------
 
@@ -922,8 +1015,8 @@ describe('edge cases and warning paths', () => {
   });
 
   it('should return empty map for non-map facet definition', () => {
-    // Build a context where the facet value is a string instead of a Map
-    const jsonFacet = new Map([[FACET_NAME, 'not-a-map']]) as unknown as JavaMap;
+    // Build a context where the facet value is neither a Map nor a string
+    const jsonFacet = new Map([[FACET_NAME, 42]]) as unknown as JavaMap;
     const body = new Map([['json.facet', jsonFacet]]) as unknown as JavaMap;
     const ctx: RequestContext = {
       msg: new Map() as unknown as JavaMap,
