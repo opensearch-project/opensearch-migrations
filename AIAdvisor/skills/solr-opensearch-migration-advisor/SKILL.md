@@ -300,16 +300,66 @@ Prompt the user:
 
 **Always use the `PricingCalculatorClient` from `scripts/pricing_calculator.py`** to obtain estimates. Never construct raw HTTP requests or call the calculator API directly — all communication must go through the Python client. The client handles the base URL (`http://opensearch-pricing-calculator:5050`), error handling, and response parsing.
 
-Call the appropriate method based on the workload type:
+Call the appropriate method based on the workload type, using the exact parameter names shown below:
 
-| Workload type | Key inputs | `PricingCalculatorClient` method |
-|---|---|---|
-| `search` | data size (GB), AZs, replicas, shard size, region | `estimate_provisioned_search` |
-| `timeSeries` | data size (GB), hot/warm retention days, region | `estimate_provisioned_time_series` |
-| `vector` | vector count, dimensions, engine type, region | `estimate_provisioned_vector` |
-| `serverless` | collection type, daily index size (GB), region | `estimate_serverless` |
+**Managed search workload:**
+```python
+client.estimate_provisioned_search(
+    size_gb=200,                  # total data size in GB
+    azs=3,                        # availability zones
+    replicas=1,                   # replicas per primary shard
+    target_shard_size_gb=25.0,    # target shard size in GB
+    cpus_per_shard=1.5,           # CPU cores per shard
+    pricing_type="OnDemand",      # "OnDemand" or "Reserved"
+    region="US East (N. Virginia)",
+)
+```
 
-Collect only the parameters the user can readily provide; use documented defaults for the rest. Pass the result to `PricingCalculatorClient.format_estimate` to produce a human-readable Markdown summary.
+**Managed time-series workload:**
+```python
+client.estimate_provisioned_time_series(
+    size_gb=500,
+    azs=3,
+    replicas=1,
+    hot_retention_days=14,
+    warm_retention_days=76,
+    target_shard_size_gb=45.0,
+    cpus_per_shard=1.25,
+    pricing_type="OnDemand",
+    region="US East (N. Virginia)",
+)
+```
+
+**Managed vector workload:**
+```python
+client.estimate_provisioned_vector(
+    vector_count=10_000_000,
+    dimensions=768,
+    engine_type="hnswfp16",       # hnswfp32/hnswfp16/hnswbq/ivffp32/ivffp16/ivfbq
+    max_edges=16,
+    azs=3,
+    replicas=1,
+    pricing_type="OnDemand",
+    region="US East (N. Virginia)",
+)
+```
+
+**Serverless collection:**
+```python
+client.estimate_serverless(
+    collection_type="search",     # "search", "timeSeries", or "vector"
+    daily_index_size_gb=10,
+    days_in_hot=1,
+    days_in_warm=6,
+    min_query_rate=1.0,
+    max_query_rate=1.0,
+    hours_at_max_rate=0.0,
+    region="us-east-1",           # AWS region code, not display name
+    redundancy=True,
+)
+```
+
+Collect only the parameters the user can readily provide; use the defaults shown above for the rest. Pass the result to `PricingCalculatorClient.format_estimate` to produce a human-readable Markdown summary.
 
 **If the calculator is unreachable**, `PricingCalculatorClient.health_check()` will return `False` and the estimate methods will raise `PricingCalculatorError`. When this happens, notify the user with a message such as:
 

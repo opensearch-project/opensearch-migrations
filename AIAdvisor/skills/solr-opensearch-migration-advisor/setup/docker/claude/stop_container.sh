@@ -1,4 +1,4 @@
 #!/bin/bash -e
 
-docker stop openseasrch-pricing-calculator
+docker compose down
 docker stop claude-container
