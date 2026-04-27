@@ -94,11 +94,8 @@ clean_up_source () {
   fi
 
   cd "$EC2_SOURCE_CDK_PATH" || exit
-  npm ci
   echo "Destroying source CDK app stacks..."
-  # The upstream opensearch-cluster-cdk reads context from cdk.context.json via --context contextKey=<id>
-  cp "$SOURCE_GEN_CONTEXT_FILE" cdk.context.json
-  npx cdk destroy "*" --force --c contextKey="$SOURCE_CONTEXT_ID"
+  npx cdk destroy "*" --force --c contextFile="$SOURCE_GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID"
   local cdk_rc=$?
   if [ $cdk_rc -ne 0 ]; then
     echo "Error: cdk destroy for source stacks exited with code $cdk_rc."
@@ -116,9 +113,7 @@ clean_up_all () {
 # One-time required CDK bootstrap setup for a given region. Only required if the 'CDKToolkit' CFN stack does not exist
 bootstrap_region () {
   # Picking arbitrary context values to satisfy required values for CDK synthesis. These should not need to be kept in sync with the actual deployment context values
-  # The upstream opensearch-cluster-cdk reads context from cdk.context.json via --context contextKey=<id>
-  cp "$SOURCE_GEN_CONTEXT_FILE" cdk.context.json
-  npx cdk bootstrap --require-approval never --c contextKey="$SOURCE_CONTEXT_ID"
+  npx cdk bootstrap --require-approval never --c contextFile="$SOURCE_GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID"
 }
 
 usage() {
@@ -286,14 +281,12 @@ if [ "$CLEAN_UP_MIGRATION_ONLY" = true ] ; then
 fi
 
 if [ ! -d "opensearch-cluster-cdk" ]; then
-  git clone https://github.com/opensearch-project/opensearch-cluster-cdk.git
+  git clone https://github.com/lewijacn/opensearch-cluster-cdk.git
 else
   echo "Repo already exists, skipping clone."
 fi
-cd opensearch-cluster-cdk && git pull
+cd opensearch-cluster-cdk && git pull && git checkout migration-es && git pull
 npm ci
-# The upstream opensearch-cluster-cdk reads context from cdk.context.json via --context contextKey=<id>
-cp "$SOURCE_GEN_CONTEXT_FILE" cdk.context.json
 if [ "$BOOTSTRAP_REGION" = true ] ; then
   bootstrap_region
 fi
@@ -309,7 +302,7 @@ fi
 
 if [ "$SKIP_SOURCE_DEPLOY" = false ] && [ "$CLEAN_UP_ALL" = false ] ; then
   # Deploy source cluster on EC2 instances
-  npx cdk deploy "*" --c contextKey="$SOURCE_CONTEXT_ID" --require-approval never
+  npx cdk deploy "*" --c contextFile="$SOURCE_GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID" --require-approval never
   if [ $? -ne 0 ]; then
     echo "Error: deploy source cluster failed, exiting."
     exit 1

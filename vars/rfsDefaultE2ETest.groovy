@@ -10,6 +10,7 @@ def call(Map config = [:]) {
             "networkStackSuffix": "ec2-source-<STAGE>",
             "distVersion": "7.10.2",
             "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz",
+            "captureProxyEnabled": false,
             "securityDisabled": true,
             "minDistribution": false,
             "cpuArch": "x64",

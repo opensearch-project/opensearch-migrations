@@ -39,6 +39,7 @@ def call(Map config = [:]) {
             "networkStackSuffix": "ec2-source-<STAGE>",
             "distVersion": "6.8.23",
             "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-6.8.23.tar.gz",
+            "captureProxyEnabled": false,
             "securityDisabled": true,
             "minDistribution": false,
             "cpuArch": "x64",
