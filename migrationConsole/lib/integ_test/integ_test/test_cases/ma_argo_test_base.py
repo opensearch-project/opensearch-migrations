@@ -18,6 +18,7 @@ _WILDCARD_TEMPLATE_MAP = {
     ("elasticsearch", 5): 6,
     ("elasticsearch", 6): 8,
     ("elasticsearch", 7): 10,
+    ("elasticsearch", 8): 19,
     ("opensearch", 1): 3,
     ("opensearch", 2): 19,
     ("opensearch", 3): 1,
