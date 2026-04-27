@@ -116,8 +116,6 @@ spec:
                   type: boolean
                 numThreads:
                   type: integer
-                sslConfigFile:
-                  type: string
                 tls:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true

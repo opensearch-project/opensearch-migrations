@@ -276,7 +276,6 @@ Present all findings as a prioritized list: Breaking first, then Behavioral, the
 - **DevOps / Platform Engineer** — prioritise Breaking issues that could cause index creation or reindex failures; note any that require cluster-level configuration changes.
 - **Business Stakeholder** — translate every finding into business impact ("this field won't sort correctly", "this feature has no equivalent and requires redesign"). Summarise total blocker count by severity and provide a rough effort estimate (days/weeks) for resolution. Skip technical root causes.
 
-
 ### Step 4 — Query Translation
 
 Audience: SRE, DOP, BSH
@@ -323,8 +322,6 @@ Known query incompatibilities to check for:
 - **Search Relevance Engineer** — show the full before/after Query DSL for every translated query; explain scoring differences (TF-IDF vs BM25) and how to tune `similarity` settings if needed.
 - **DevOps / Platform Engineer** — flag queries that imply resource-intensive patterns (deep pagination, large facet pivots, graph traversal) and note their infrastructure implications.
 - **Business Stakeholder** — skip Query DSL syntax entirely. Describe each query in terms of the search feature it powers ("the autocomplete query", "the category filter") and flag any that require significant engineering effort to replicate, with a time estimate.
-
-
 ### Step 5 — Solr Customizations
 
 Audience: SRE, DOP, BSH
@@ -380,7 +377,6 @@ From here, proceed for all audiences SRE, DOP, BSH:
 - **Search Relevance Engineer** — go deep on plugin internals; show the OpenSearch plugin SDK or analysis chain equivalent for each custom component.
 - **DevOps / Platform Engineer** — prioritise authentication, authorization, and operational constraints (air-gapped, FIPS, multi-tenancy); these drive infrastructure and deployment decisions. This is a high-priority step for this role.
 - **Business Stakeholder** — summarise customizations as capabilities ("custom ranking logic", "data enrichment on ingest") and flag any that require significant engineering effort to replicate, with a rough effort estimate. Highlight any that involve third-party vendor work or procurement.
-
 
 ### Step 6 — Cluster & Infrastructure Assessment
 
@@ -490,7 +486,7 @@ Present the report to the user and offer to drill into any section.
 - **Business Stakeholder** — lead with an executive summary: total estimated cost (infrastructure + engineering hours), proposed timeline with milestones, blocker count by severity expressed as schedule risk, 
   and a go/no-go recommendation. Make this first section a concise 1-pager. Place all technical detail in an appendix clearly labelled as optional reading.
   Add another document with a cost breakdown table (infrastructure monthly spend, one-time migration effort in hours/weeks, tooling costs) and additional relevant information for this role.
-  After details are clarified with the user, offer to persist and suggest MIGRATION_REPORT_BUSINESS.md as file name for the first section 1-pager, MIGRATION_REPORT_DETAILS.md for the additional information.  
+  After details are clarified with the user, offer to persist and suggest MIGRATION_REPORT_BUSINESS.md as file name for the first section 1-pager, MIGRATION_REPORT_DETAILS.md for the additional information.
   
 ## Resuming a Conversation
 
@@ -660,6 +656,7 @@ You have access to a verified knowledge base of technical information about Apac
 | `references/07-solrconfig-migration.md` | `solrconfig.xml` constructs (request handlers, caches, update settings, merge policy, similarity) mapped to OpenSearch equivalents | Migrating `solrconfig.xml`; configuring OpenSearch index and node settings |
 | `references/08-query-behavior-edge-cases.md` | Known behavioral differences between Solr query parsers and OpenSearch Query DSL: default operator, fuzzy scale, date math, scoring, highlighting, sorting, deep pagination, Solr-only query parsers (`{!complexphrase}`, `{!surround}`, `{!graph}`, `{!switch}`, `{!rerank}`) with no OpenSearch equivalent | Debugging query result differences; validating query parity after migration; identifying unsupported query parsers |
 | `references/09-sizing-and-performance.md` | Node roles, shard sizing formulas, JVM/heap tuning, bulk indexing settings, cache configuration, hardware recommendations, and monitoring metrics | Sizing a new OpenSearch cluster; performance tuning; capacity planning (Step 3 / DevOps stakeholder) |
+| `references/10-opensearch.md` | OpenSearch best practices covering index design, sharding strategy, performance tuning, cluster stability, ISM lifecycle management, security, and cost optimization | Recommending OpenSearch configuration and operational practices at any step; answering "how should I configure this?" questions about OpenSearch |
 
 ### Usage Guidelines
 
@@ -679,7 +676,7 @@ You have access to a verified knowledge base of technical information about Apac
 #[[file:references/07-solrconfig-migration.md]]
 #[[file:references/08-query-behavior-edge-cases.md]]
 #[[file:references/09-sizing-and-performance.md]]
-
+#[[file:references/10-opensearch.md]]
 
 ## Instructions
 
