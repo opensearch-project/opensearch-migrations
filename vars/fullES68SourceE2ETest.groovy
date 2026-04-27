@@ -101,6 +101,7 @@ def call(Map config = [:]) {
             skipCaptureProxyOnNodeSetup: true,
             jobName: config.jobName ?: 'full-es68source-e2e-test',
             testUniqueId: testUniqueId,
+            defaultGitBranch: config.defaultGitBranch ?: 'main',
             integTestCommand: '/root/lib/integ_test/integ_test/full_tests.py --source_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9201 --target_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9202',
             preDeployStep: { Map args ->
                 // Destroy any prior stacks in strict order before redeploying: migration CDK
