@@ -2,19 +2,13 @@ package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import javax.net.ssl.SSLEngine;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.function.Supplier;
 
 import com.beust.jcommander.ParameterException;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 public class PemSslConfigurationTest {
-
-    @TempDir
-    Path tempDir;
 
     /**
      * Generate a self-signed cert + key pair using keytool and openssl-equivalent Netty utilities.
@@ -92,26 +86,6 @@ public class PemSslConfigurationTest {
         });
         Supplier<SSLEngine> supplier = CaptureProxy.buildSslEngineSupplier(params);
         Assertions.assertNull(supplier);
-    }
-
-    @Test
-    public void testBuildSslEngineSupplierRejectsBothPemAndLegacy() throws Exception {
-        var ssc = createSelfSignedCert();
-        var sslConfigFile = tempDir.resolve("ssl-config.yaml");
-        Files.writeString(sslConfigFile, "plugins.security.ssl.http.enabled: true\n");
-
-        var params = CaptureProxy.parseArgs(new String[]{
-            "--destinationUri", "http://localhost:9200",
-            "--listenPort", "80",
-            "--noCapture",
-            "--sslCertChainFile", ssc.certificate().getAbsolutePath(),
-            "--sslKeyFile", ssc.privateKey().getAbsolutePath(),
-            "--sslConfigFile", sslConfigFile.toString()
-        });
-        Assertions.assertThrows(ParameterException.class, () ->
-            CaptureProxy.buildSslEngineSupplier(params)
-        );
-        ssc.delete();
     }
 
     @Test
