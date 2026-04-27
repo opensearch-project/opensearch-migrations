@@ -2,14 +2,19 @@
 
 import json
 import unittest
-from unittest.mock import MagicMock, patch
-from urllib.error import URLError
-
 import sys
 import os
+import io
+from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError, URLError
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from pricing_calculator import PricingCalculatorClient, PricingCalculatorError
+from pricing_calculator import (
+    PricingCalculatorClient,
+    PricingCalculatorError,
+    PRICING_CALCULATOR_URL,
+)
 
 
 MOCK_PROVISIONED = {
@@ -40,6 +45,28 @@ class TestPricingCalculatorClient(unittest.TestCase):
 
     def setUp(self):
         self.client = PricingCalculatorClient()
+
+    # ------------------------------------------------------------------
+    # Constructor / env-var
+    # ------------------------------------------------------------------
+
+    def test_default_base_url_from_module_constant(self):
+        client = PricingCalculatorClient()
+        self.assertEqual(client.base_url, PRICING_CALCULATOR_URL.rstrip("/"))
+
+    def test_explicit_base_url_overrides_env(self):
+        client = PricingCalculatorClient(base_url="http://custom:9999/")
+        self.assertEqual(client.base_url, "http://custom:9999")
+
+    def test_none_base_url_falls_back_to_env(self):
+        client = PricingCalculatorClient(base_url=None)
+        self.assertEqual(client.base_url, PRICING_CALCULATOR_URL.rstrip("/"))
+
+    def test_env_var_override(self):
+        """PRICING_CALCULATOR_URL env var is read at module import time."""
+        original = PRICING_CALCULATOR_URL
+        client = PricingCalculatorClient()
+        self.assertEqual(client.base_url, original.rstrip("/"))
 
     # ------------------------------------------------------------------
     # Provisioned estimates
@@ -106,6 +133,37 @@ class TestPricingCalculatorClient(unittest.TestCase):
         self.assertTrue(body["redundancy"])
 
     # ------------------------------------------------------------------
+    # Reference data
+    # ------------------------------------------------------------------
+
+    @patch("urllib.request.urlopen")
+    def test_get_regions_provisioned(self, mock_urlopen):
+        mock_urlopen.return_value = _mock_urlopen(["US East (N. Virginia)", "EU West (Ireland)"])
+        result = self.client.get_regions("provisioned")
+        self.assertIn("US East (N. Virginia)", result)
+
+    @patch("urllib.request.urlopen")
+    def test_get_regions_serverless(self, mock_urlopen):
+        mock_urlopen.return_value = _mock_urlopen(["us-east-1", "eu-west-1"])
+        result = self.client.get_regions("serverless")
+        self.assertIn("us-east-1", result)
+
+    @patch("urllib.request.urlopen")
+    def test_get_pricing_options(self, mock_urlopen):
+        mock_urlopen.return_value = _mock_urlopen(["OnDemand", "Reserved"])
+        result = self.client.get_pricing_options()
+        self.assertIn("OnDemand", result)
+
+    @patch("urllib.request.urlopen")
+    def test_get_instance_families(self, mock_urlopen):
+        mock_urlopen.return_value = _mock_urlopen({"families": ["r6g", "m6g"]})
+        result = self.client.get_instance_families("US East (N. Virginia)")
+        self.assertEqual(result["families"], ["r6g", "m6g"])
+        # Verify the region was URL-encoded in the request path
+        req = mock_urlopen.call_args[0][0]
+        self.assertIn("US%20East", req.full_url)
+
+    # ------------------------------------------------------------------
     # Error handling
     # ------------------------------------------------------------------
 
@@ -114,6 +172,43 @@ class TestPricingCalculatorClient(unittest.TestCase):
         with self.assertRaises(PricingCalculatorError) as ctx:
             self.client.estimate_provisioned_search(size_gb=100)
         self.assertIn("port 5050", str(ctx.exception))
+
+    @patch("urllib.request.urlopen")
+    def test_post_http_error_raises(self, mock_urlopen):
+        exc = HTTPError(
+            url="http://localhost:5050/provisioned/estimate",
+            code=400,
+            msg="Bad Request",
+            hdrs={},
+            fp=io.BytesIO(b"invalid payload"),
+        )
+        mock_urlopen.side_effect = exc
+        client = PricingCalculatorClient(base_url="http://localhost:5050")
+        with self.assertRaises(PricingCalculatorError) as ctx:
+            client.estimate_provisioned_search(size_gb=100)
+        self.assertIn("HTTP 400", str(ctx.exception))
+
+    @patch("urllib.request.urlopen")
+    def test_get_http_error_raises(self, mock_urlopen):
+        exc = HTTPError(
+            url="http://localhost:5050/provisioned/regions",
+            code=500,
+            msg="Internal Server Error",
+            hdrs={},
+            fp=io.BytesIO(b"server error"),
+        )
+        mock_urlopen.side_effect = exc
+        client = PricingCalculatorClient(base_url="http://localhost:5050")
+        with self.assertRaises(PricingCalculatorError) as ctx:
+            client.get_regions()
+        self.assertIn("HTTP 500", str(ctx.exception))
+
+    @patch("urllib.request.urlopen", side_effect=URLError("Connection refused"))
+    def test_get_url_error_raises(self, _):
+        client = PricingCalculatorClient(base_url="http://localhost:5050")
+        with self.assertRaises(PricingCalculatorError) as ctx:
+            client.get_pricing_options()
+        self.assertIn("Could not reach", str(ctx.exception))
 
     @patch("urllib.request.urlopen", side_effect=URLError("Connection refused"))
     def test_health_check_returns_false_when_unreachable(self, _):
@@ -134,6 +229,111 @@ class TestPricingCalculatorClient(unittest.TestCase):
         self.assertIn("r6g.2xlarge.search", summary)
         self.assertIn("600", summary)
 
+    def test_format_estimate_cluster_configs_single(self):
+        result = {
+            "clusterConfigs": [
+                {
+                    "totalCost": 500.00,
+                    "hotNodes": {"type": "r6g.large.search", "count": 3},
+                    "leaderNodes": {"type": "m6g.large.search", "count": 3},
+                }
+            ]
+        }
+        summary = PricingCalculatorClient.format_estimate(result)
+        self.assertIn("$500.00", summary)
+        self.assertIn("r6g.large.search", summary)
+        self.assertIn("m6g.large.search", summary)
+
+    def test_format_estimate_cluster_configs_multiple(self):
+        result = {
+            "clusterConfigs": [
+                {"totalCost": 400.00, "hotNodes": {"type": "r6g.large.search", "count": 3}, "leaderNodes": {}},
+                {"totalCost": 800.00, "hotNodes": {"type": "r6g.2xlarge.search", "count": 3}, "leaderNodes": {}},
+            ]
+        }
+        summary = PricingCalculatorClient.format_estimate(result)
+        self.assertIn("$400.00", summary)
+        self.assertIn("Configurations evaluated", summary)
+        self.assertIn("$800.00", summary)
+
+    def test_format_estimate_cluster_configs_no_leader(self):
+        result = {
+            "clusterConfigs": [
+                {"totalCost": 300.00, "hotNodes": {"type": "r6g.large.search", "count": 2}},
+            ]
+        }
+        summary = PricingCalculatorClient.format_estimate(result)
+        self.assertIn("$300.00", summary)
+        self.assertNotIn("Manager", summary)
+
+    def test_format_estimate_cluster_configs_no_hot_type(self):
+        result = {
+            "clusterConfigs": [
+                {"totalCost": 300.00, "hotNodes": {}, "leaderNodes": {}},
+            ]
+        }
+        summary = PricingCalculatorClient.format_estimate(result)
+        self.assertIn("$300.00", summary)
+
+    def test_format_estimate_serverless_price(self):
+        result = {
+            "price": {
+                "month": {"total": 123.45, "indexOcu": 50.0, "searchOcu": 40.0, "s3Storage": 33.45},
+                "year": {"total": 1481.40},
+            }
+        }
+        summary = PricingCalculatorClient.format_estimate(result)
+        self.assertIn("$123.45", summary)
+        self.assertIn("Index OCU", summary)
+        self.assertIn("Search OCU", summary)
+        self.assertIn("S3 storage", summary)
+        self.assertIn("$1,481.40", summary)
+
+    def test_format_estimate_serverless_price_minimal(self):
+        result = {"price": {"month": {"total": 99.99}}}
+        summary = PricingCalculatorClient.format_estimate(result)
+        self.assertIn("$99.99", summary)
+
+    def test_format_estimate_serverless_price_empty_month(self):
+        result = {"price": {"day": {"total": 3.0}}}
+        summary = PricingCalculatorClient.format_estimate(result)
+        # Falls through to JSON fallback since month has no total
+        self.assertIn("```json", summary)
+
+    def test_format_estimate_legacy_all_fields(self):
+        result = {
+            "monthlyCost": 1234.56,
+            "annualCost": 14814.72,
+            "instanceType": "r6g.2xlarge.search",
+            "instanceCount": 6,
+            "storageGB": 600,
+            "shardCount": 8,
+        }
+        summary = PricingCalculatorClient.format_estimate(result)
+        self.assertIn("$1,234.56", summary)
+        self.assertIn("$14,814.72", summary)
+        self.assertIn("r6g.2xlarge.search", summary)
+        self.assertIn("6", summary)
+        self.assertIn("600", summary)
+        self.assertIn("8", summary)
+
+    def test_format_estimate_unknown_shape_returns_json(self):
+        summary = PricingCalculatorClient.format_estimate({"foo": "bar"})
+        self.assertIn("```json", summary)
+        self.assertIn('"foo"', summary)
+
+    def test_format_estimate_type_error_returns_json(self):
+        # Trigger TypeError by making configs[0] a non-subscriptable type
+        result = {"clusterConfigs": [None]}
+        summary = PricingCalculatorClient.format_estimate(result)
+        self.assertIn("```json", summary)
+
+    def test_format_estimate_key_error_returns_json(self):
+        # Trigger KeyError by omitting totalCost
+        result = {"clusterConfigs": [{"noSuchKey": 1}]}
+        summary = PricingCalculatorClient.format_estimate(result)
+        self.assertIn("```json", summary)
+
     def test_format_estimate_fallback_to_json(self):
         summary = PricingCalculatorClient.format_estimate({"unexpected": "shape"})
         self.assertIn("```json", summary)
@@ -149,6 +349,7 @@ if __name__ == "__main__":
 # To run: python tests/test_pricing_calculator.py TestPricingCalculatorIntegration -v
 
 import sys as _sys
+
 
 def _is_pytest() -> bool:
     """Return True when the current process was launched by pytest."""

@@ -59,7 +59,7 @@ import json
 import os
 import urllib.error
 import urllib.request
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal
 
 PRICING_CALCULATOR_URL = os.environ.get(
     "PRICING_CALCULATOR_URL", "http://opensearch-pricing-calculator:5050"
