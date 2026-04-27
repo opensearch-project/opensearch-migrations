@@ -57,6 +57,7 @@ def call(Map config = [:]) {
                     regexpFilterExpression: "^$jobName\$",
                     regexpFilterText: "\$job_name",
             )
+            cron(periodicCron(jobName))
         }
 
         stages {
