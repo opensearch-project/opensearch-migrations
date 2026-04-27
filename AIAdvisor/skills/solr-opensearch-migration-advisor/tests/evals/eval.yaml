@@ -35,8 +35,8 @@ tests:
     assert:
       - type: llm-rubric
         value: >-
-          Response clarifies the actual role of the user. Provides 2 explicit role examples to choose from:
-          search relevance engineer and devops / platform engineer.
+          Response clarifies the actual role of the user. Provides 3 explicit role examples to choose from:
+          search relevance engineer, devops / platform engineer, and business stakeholder.
         metric: clarify-role
 
   - description: "Ask for Solr version"
