@@ -138,7 +138,6 @@ export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
 export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_METADATA_OPTIONS.pick({
     jvmArgs: true,
     loggingConfigurationOverrideConfigMap: true,
-    useRecoverySource: true,
 }));
 
 export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
