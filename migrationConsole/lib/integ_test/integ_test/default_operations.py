@@ -22,6 +22,29 @@ class DefaultOperationsLibrary:
     exist.
     """
 
+    # Document-type resolution (mirrors Java ClusterOperations.defaultDocType /
+    # docTypePathOrDefault). Default is `_doc`, which is correct for OS 1+, ES 6.2+,
+    # ES 7, and ES 8. Subclasses for older ES versions override these methods.
+    def default_doc_type(self) -> str:
+        """Default document type for typed URL APIs (`/{index}/{type}/{id}`)."""
+        return "_doc"
+
+    def resolve_doc_type(self, type_override: Optional[str]) -> str:
+        """Resolve the doc_type path segment given a caller-supplied override.
+        Default (OS, ES 6.2+, ES 7, ES 8): always uses `default_doc_type()` and ignores
+        the override. Pre-ES 6 subclasses override this to honor the caller's type.
+        """
+        return self.default_doc_type()
+
+    def uses_typed_mappings(self) -> bool:
+        """Whether `GET /{index}` returns mappings nested under a type name
+        (`mappings.{type}.properties`) instead of a flat `mappings.properties`.
+        Default is False (OS 1+, ES 6.2+, 7, 8). Pre-ES 6 subclasses override this.
+        Mirrors Java `UnboundVersionMatchers.isBelowES_6_X` checks used by
+        `ClusterOperations.createLegacyTemplate` (`useTypedMappings`).
+        """
+        return False
+
     def create_index(self, index_name: str, cluster: Cluster, **kwargs):
         headers = {'Content-Type': 'application/json'}
         return execute_api_call(cluster=cluster, method=HttpMethod.PUT, path=f"/{index_name}",
@@ -35,31 +58,37 @@ class DefaultOperationsLibrary:
         return execute_api_call(cluster=cluster, method=HttpMethod.DELETE, path=f"/{index_name}",
                                 **kwargs)
 
-    def create_document(self, index_name: str, doc_id: str, cluster: Cluster, data: dict = None, doc_type="_doc",
-                        **kwargs):
+    def create_document(self, index_name: str, doc_id: str, cluster: Cluster, data: dict = None,
+                        doc_type: Optional[str] = None, **kwargs):
         if data is None:
             data = {
                 'title': 'Test Document',
                 'content': 'This is a sample document for testing OpenSearch.'
             }
+        resolved_type = self.resolve_doc_type(doc_type)
         headers = {'Content-Type': 'application/json'}
-        return execute_api_call(cluster=cluster, method=HttpMethod.PUT, path=f"/{index_name}/{doc_type}/{doc_id}",
+        return execute_api_call(cluster=cluster, method=HttpMethod.PUT, path=f"/{index_name}/{resolved_type}/{doc_id}",
                                 data=json.dumps(data), headers=headers, **kwargs)
 
     def create_and_retrieve_document(self, index_name: str, doc_id: str, cluster: Cluster, data: dict = None,
-                                     doc_type="_doc", **kwargs):
+                                     doc_type: Optional[str] = None, **kwargs):
         self.create_document(index_name=index_name, doc_id=doc_id, cluster=cluster, data=data, doc_type=doc_type,
                              **kwargs)
         headers = {'Content-Type': 'application/json'}
         self.get_document(index_name=index_name, doc_id=doc_id, cluster=cluster, data=data, doc_type=doc_type,
                           headers=headers, **kwargs)
 
-    def get_document(self, index_name: str, doc_id: str, cluster: Cluster, doc_type="_doc", **kwargs):
-        return execute_api_call(cluster=cluster, method=HttpMethod.GET, path=f"/{index_name}/{doc_type}/{doc_id}",
+    def get_document(self, index_name: str, doc_id: str, cluster: Cluster,
+                     doc_type: Optional[str] = None, **kwargs):
+        resolved_type = self.resolve_doc_type(doc_type)
+        return execute_api_call(cluster=cluster, method=HttpMethod.GET, path=f"/{index_name}/{resolved_type}/{doc_id}",
                                 **kwargs)
 
-    def delete_document(self, index_name: str, doc_id: str, cluster: Cluster, doc_type="_doc", **kwargs):
-        return execute_api_call(cluster=cluster, method=HttpMethod.DELETE, path=f"/{index_name}/{doc_type}/{doc_id}",
+    def delete_document(self, index_name: str, doc_id: str, cluster: Cluster,
+                        doc_type: Optional[str] = None, **kwargs):
+        resolved_type = self.resolve_doc_type(doc_type)
+        return execute_api_call(cluster=cluster, method=HttpMethod.DELETE,
+                                path=f"/{index_name}/{resolved_type}/{doc_id}",
                                 **kwargs)
 
     def update_document(self, index_name: str, doc_id: str, cluster: Cluster, doc: dict, **kwargs):
@@ -121,10 +150,20 @@ class DefaultOperationsLibrary:
     def verify_index_mapping_properties(self, index_name: str, cluster: Cluster, expected_props: set, **kwargs):
         response = execute_api_call(cluster=cluster, method=HttpMethod.GET, path=f"/{index_name}", **kwargs)
         data = response.json()
-        mappings = data[index_name]["mappings"]["properties"]
-        if not all(prop in mappings for prop in expected_props):
+        mappings = data[index_name]["mappings"]
+        # Pre-ES 6 responses nest properties under a type name: mappings.{type}.properties.
+        # ES 6.2+ / 7 / 8 / OS flatten this to mappings.properties.
+        if self.uses_typed_mappings():
+            # Walk into whichever type the index actually has (tests usually have a single one)
+            type_name = next(iter(t for t in mappings.keys() if isinstance(mappings[t], dict)), None)
+            if type_name is None:
+                raise AssertionError(f"No typed mapping found in /{index_name} response: {mappings}")
+            properties = mappings[type_name].get("properties", {})
+        else:
+            properties = mappings.get("properties", {})
+        if not all(prop in properties for prop in expected_props):
             raise AssertionError(f"Expected properties: {expected_props} not found in index "
-                                 f"mappings {list(mappings.keys())}")
+                                 f"mappings {list(properties.keys())}")
 
     def index_matches_ignored_index(self, index_name: str, index_prefix_ignore_list: List[str]):
         for prefix in index_prefix_ignore_list:

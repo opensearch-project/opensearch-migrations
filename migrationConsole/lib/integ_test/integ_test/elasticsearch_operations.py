@@ -45,15 +45,34 @@ def get_type_mapping_union_transformation(multi_type_index_name: str, doc_type_1
     }
 
 
-class ElasticsearchV1_XOperationsLibrary(DefaultOperationsLibrary):
+class _LegacyTypedOperationsLibrary(DefaultOperationsLibrary):
+    """Shared base for pre-ES 6 libraries where a document can be typed.
+
+    Mirrors Java `ClusterOperations.docTypePathOrDefault` + `defaultDocType`:
+    caller-supplied type is honored for document paths; falls back to the
+    library's default doc type (`doc`). Mappings come back nested under a
+    type name in these versions.
+    """
+
+    def default_doc_type(self) -> str:
+        return "doc"
+
+    def resolve_doc_type(self, type_override):
+        return type_override if type_override else self.default_doc_type()
+
+    def uses_typed_mappings(self) -> bool:
+        return True
+
+
+class ElasticsearchV1_XOperationsLibrary(_LegacyTypedOperationsLibrary):
     pass
 
 
-class ElasticsearchV2_XOperationsLibrary(DefaultOperationsLibrary):
+class ElasticsearchV2_XOperationsLibrary(_LegacyTypedOperationsLibrary):
     pass
 
 
-class ElasticsearchV5_XOperationsLibrary(DefaultOperationsLibrary):
+class ElasticsearchV5_XOperationsLibrary(_LegacyTypedOperationsLibrary):
 
     def get_type_mapping_union_transformation(self, multi_type_index_name: str, doc_type_1: str, doc_type_2: str,
                                               cluster_version: ClusterVersion):
@@ -91,6 +110,8 @@ class ElasticsearchV5_XOperationsLibrary(DefaultOperationsLibrary):
 
 
 class ElasticsearchV6_XOperationsLibrary(DefaultOperationsLibrary):
+    # ES 6.2+ uses `_doc`. We don't distinguish 6.0/6.1 here because the test
+    # framework only exercises 6.8 (via k8sLocalDeployment's ES_6.8 choice).
     pass
 
 
@@ -99,4 +120,6 @@ class ElasticsearchV7_XOperationsLibrary(DefaultOperationsLibrary):
 
 
 class ElasticsearchV8_XOperationsLibrary(DefaultOperationsLibrary):
+    # ES 8 removed per-document types; `default_doc_type()` (`_doc`) is the only
+    # valid value. Inherits the correct behavior from DefaultOperationsLibrary.
     pass

@@ -34,6 +34,7 @@ def get_template_name(version: ClusterVersion) -> str:
                              f"Add an entry to _WILDCARD_TEMPLATE_MAP.")
     return f"{version.full_cluster_type}-{version.major_version}-{minor}-single-node"
 
+
 MigrationType = Enum("MigrationType", ["METADATA", "BACKFILL", "CAPTURE_AND_REPLAY"])
 
 

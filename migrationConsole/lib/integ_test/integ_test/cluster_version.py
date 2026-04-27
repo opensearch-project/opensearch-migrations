@@ -52,10 +52,10 @@ RFS_MIGRATION_COMBINATIONS = (
     build_combinations(
         [ElasticsearchV1_X, ElasticsearchV2_X, ElasticsearchV5_X,
          ElasticsearchV6_X, ElasticsearchV7_X],
-        [OpensearchV1_X, OpensearchV2_X, OpensearchV3_X])
-    + build_combinations([ElasticsearchV8_X], [OpensearchV2_X, OpensearchV3_X])
-    + build_combinations([OpensearchV1_X], [OpensearchV2_X, OpensearchV3_X])
-    + build_combinations([OpensearchV2_X], [OpensearchV3_X])
+        [OpensearchV1_X, OpensearchV2_X, OpensearchV3_X]) +
+    build_combinations([ElasticsearchV8_X], [OpensearchV2_X, OpensearchV3_X]) +
+    build_combinations([OpensearchV1_X], [OpensearchV2_X, OpensearchV3_X]) +
+    build_combinations([OpensearchV2_X], [OpensearchV3_X])
 )
 
 # CDC migration matrix: Capture and Replay is supported from ES 5.x onwards
@@ -63,10 +63,10 @@ RFS_MIGRATION_COMBINATIONS = (
 CDC_MIGRATION_COMBINATIONS = (
     build_combinations(
         [ElasticsearchV5_X, ElasticsearchV6_X, ElasticsearchV7_X],
-        [OpensearchV1_X, OpensearchV2_X, OpensearchV3_X])
-    + build_combinations([ElasticsearchV8_X], [OpensearchV2_X, OpensearchV3_X])
-    + build_combinations([OpensearchV1_X], [OpensearchV2_X, OpensearchV3_X])
-    + build_combinations([OpensearchV2_X], [OpensearchV3_X])
+        [OpensearchV1_X, OpensearchV2_X, OpensearchV3_X]) +
+    build_combinations([ElasticsearchV8_X], [OpensearchV2_X, OpensearchV3_X]) +
+    build_combinations([OpensearchV1_X], [OpensearchV2_X, OpensearchV3_X]) +
+    build_combinations([OpensearchV2_X], [OpensearchV3_X])
 )
 
 
