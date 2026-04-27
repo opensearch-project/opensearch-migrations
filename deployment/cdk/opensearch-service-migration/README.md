@@ -22,7 +22,7 @@ Java is used by the opensearch-migrations repo and Gradle, its associated build 
 
 1- It is necessary to run `npm install` within this current directory to install required packages that this app and CDK need for operation.
 
-2- Creating Docker Images: This project needs to build the required Docker images that the CDK will use in its services. These images can be built by running the below script which is located in the same directory as this README
+2- Creating Docker Images: This project needs to build the required Docker images that the CDK will use in its services. These images can be built by running the below script which is located in the same directory as this README:
 ```shell
 ./buildDockerImages.sh
 ```

@@ -1,6 +1,0 @@
-extensions:
-  pprof:
-    endpoint: :1888
-
-service:
-  extensions: [ pprof ]

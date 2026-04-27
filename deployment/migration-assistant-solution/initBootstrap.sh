@@ -61,4 +61,6 @@ fi
 
 npm install -g aws-cdk 2>&1
 npm install 2>&1
+
+# Build Docker images for CDK's DockerImageAsset
 ./buildDockerImages.sh

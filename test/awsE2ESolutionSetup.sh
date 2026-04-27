@@ -393,12 +393,10 @@ if [ "$CLEAN_UP_ALL" = true ] ; then
 fi
 
 if [ "$SKIP_MIGRATION_DEPLOY" = false ] ; then
+  # Build Docker images into local daemon for CDK's DockerImageAsset
+  "$MIGRATION_CDK_PATH/buildDockerImages.sh"
+
   cd "$MIGRATION_CDK_PATH" || exit
-  ./buildDockerImages.sh
-  if [ $? -ne 0 ]; then
-    echo "Error: building docker images failed, exiting."
-    exit 1
-  fi
   npm ci
   cdk deploy "*" --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID" --require-approval never --concurrency 3
   if [ $? -ne 0 ]; then

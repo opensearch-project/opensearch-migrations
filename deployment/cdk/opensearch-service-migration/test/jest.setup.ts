@@ -5,7 +5,6 @@ jest.mock('node:child_process', () => {
   // Define the list of expected Docker images as per CI.yml
   const expectedDockerImages = [
     'mirror.gcr.io/apache/kafka:3.9.1',
-    'migrations/capture_proxy_es:latest',
     'migrations/capture_proxy:latest',
     'migrations/elasticsearch_searchguard:latest',
     'migrations/migration_console:latest',
@@ -49,7 +48,7 @@ jest.mock('node:child_process', () => {
       }
       throw new Error(`Command not supported: ${command}`);
     }),
-    // Uncomment and replace above to use the actual implementations, requires ./buildDockerImages.sh to be run locally
+    // Uncomment and replace above to use the actual implementations, requires buildImages to be run locally
     // execFileSync: child_process.execFileSync,
     // execSync: child_process.execSync,
     spawnSync: child_process.spawnSync,

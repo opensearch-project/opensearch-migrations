@@ -151,23 +151,3 @@ updates:
       pip-es-test-console:
         patterns:
           - "*"
-
-  - package-ecosystem: "pip"
-    directory: "/TrafficCapture/dockerSolution/src/main/docker/k8sConfigMapUtilScripts"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 1
-    groups:
-      pip-k8s-configmap-utils:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "pip"
-    directory: "/TrafficCapture/dockerSolution/otelConfigs"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 1
-    groups:
-      pip-otel-configs:
-        patterns:
-          - "*"

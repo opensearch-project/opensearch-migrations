@@ -1,6 +1,0 @@
-service:
-  pipelines:
-    logs:
-      receivers: [ otlp ]
-      processors:
-      exporters:

@@ -76,12 +76,10 @@ As a developer, you'll need to install
 * [kubectl](https://kubernetes.io/docs/tasks/tools/)
 * [helm](https://helm.sh/docs/intro/install/)
 
-### Install docker
-Follow instructions [here](https://docs.docker.com/engine/install/) to set up Docker. Docker can be used to build Docker images as well as run a local Kubernetes cluster. 
+### Install docker (for minikube or kind)
+Follow instructions [here](https://docs.docker.com/engine/install/) to set up Docker.
 
-Notice that there are two different gradle tasks to build images:
-* [:TrafficCapture:dockerSolution:buildDockerImages](../../TrafficCapture/dockerSolution/README.md) builds all the images for the ECS solution and can also bring up a docker compose environment to demonstrate capture and replay.
-* [:buildImagesToRegistry](../../buildImages/README.md) builds the same set of images using jib and buildkit. These do not require docker and can be run from a container. In a fully-containerized K8s environment, these are necessary to complete builds.
+Docker images are built via the [:buildImages:buildImagesToRegistry](../../buildImages/README.md) project using Jib and BuildKit (which requires docker's builders).
 
 ### Setup a Kubernetes cluster
 
