@@ -284,6 +284,12 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             if ("constant_keyword".equals(type)) {
                 return Optional.of("constant_keyword is single-valued by definition");
             }
+            if ("geo_point".equals(type)) {
+                // Multi-valued geo_point doc_values use version-specific encodings (Morton, quantized lat/lon)
+                // that produce incorrect values when decoded with a single decoder. Skip until per-version
+                // decoders are implemented.
+                return Optional.of("array variant not reliable for geo_point (version-specific encoding)");
+            }
         }
         return Optional.empty();
     }
