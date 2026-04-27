@@ -91,6 +91,16 @@ public class MigrateOrEvaluateArgs {
     )
     public boolean enableSourcelessMigrations = false;
 
+    // Accepted for parity with RfsMigrateDocuments but not used by MetadataMigration.
+    // The orchestration layer forwards a shared config bag to both CLIs.
+    @Parameter(required = false,
+        names = { "--use-recovery-source" },
+        description = "Accepted for compatibility with the document backfill CLI. "
+            + "Has no effect on metadata migration.",
+        arity = 0
+    )
+    public boolean useRecoverySource = false;
+
     @ParametersDelegate
     public VersionStrictness versionStrictness = new VersionStrictness();
 
