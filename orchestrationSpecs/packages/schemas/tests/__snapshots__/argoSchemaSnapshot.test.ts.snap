@@ -347,10 +347,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 1
                     },
-                    "sslConfigFile": {
-                      "type": "string",
-                      "description": "[Expert] Path to a YAML file with OpenSearch security SSL configuration (plugins.security.ssl.http.* keys). The file must be mounted into the container by the user. For Kubernetes deployments, prefer the 'tls' option instead."
-                    },
                     "tls": {
                       "oneOf": [
                         {
@@ -458,7 +454,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           "description": "Explicitly disable TLS termination on the capture proxy."
                         }
                       ],
-                      "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile.",
+                      "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.",
                       "changeRestriction": "gated"
                     },
                     "enableMSKAuth": {
@@ -1465,10 +1461,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "requests"
                       ],
                       "description": "Kubernetes resource limits and requests for the replayer container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
-                    },
-                    "authHeaderValue": {
-                      "type": "string",
-                      "default": ""
                     },
                     "kafkaTrafficEnableMSKAuth": {
                       "type": "boolean",
@@ -2728,10 +2720,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "default": 1,
                     "description": "Number of Netty worker threads for the proxy to handle concurrent connections."
                   },
-                  "sslConfigFile": {
-                    "type": "string",
-                    "description": "[Expert] Path to a YAML file with OpenSearch security SSL configuration (plugins.security.ssl.http.* keys). The file must be mounted into the container by the user. For Kubernetes deployments, prefer the 'tls' option instead."
-                  },
                   "tls": {
                     "oneOf": [
                       {
@@ -2839,7 +2827,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "description": "Explicitly disable TLS termination on the capture proxy."
                       }
                     ],
-                    "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/. Mutually exclusive with sslConfigFile.",
+                    "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.",
                     "changeRestriction": "gated"
                   },
                   "enableMSKAuth": {
@@ -3020,12 +3008,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "requests"
                     ],
                     "description": "Kubernetes resource limits and requests for the replayer container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
-                  },
-                  "authHeaderValue": {
-                    "type": "string",
-                    "default": "",
-                    "description": "Static value to use for the \\"authorization\\" header of each request (cannot be used with other auth arguments)",
-                    "changeRestriction": "gated"
                   },
                   "kafkaTrafficEnableMSKAuth": {
                     "type": "boolean",

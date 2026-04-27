@@ -109,6 +109,16 @@ def call(Map config = [:]) {
                 // returned. `npx cdk destroy` already polls CFN synchronously, and
                 // --clean-up-migration-only additionally waits on `aws cloudformation wait
                 // stack-delete-complete` for any leftover "OSMigrations-<stage>" stacks.
+                //
+                // Note on why a context file is passed here even though we may be cleaning
+                // up an old deploy whose context differed: CloudFormation stacks are named
+                // purely by `--stage` (e.g. OSMigrations-<stage>, opensearch-infra-stack-
+                // ec2-source-<stage>), so cleanup is already stage-scoped regardless of
+                // context content. The context file is only required for `cdk destroy` to
+                // synth successfully so it can enumerate its own stack list; the
+                // awsE2ESolutionSetup.sh short-circuits also substitute placeholder
+                // <VPC_ID>/<SOURCE_CLUSTER_ENDPOINT> values when the real source side is
+                // already gone, so a stale or default context is still safe.
                 def commonArgs = "--source-context-file './${args.sourceContextFileName}' " +
                         "--migration-context-file './${args.migrationContextFileName}' " +
                         "--source-context-id ${args.sourceContextId} " +

@@ -475,6 +475,7 @@ You have access to a verified knowledge base of technical information about Apac
 | `references/07-solrconfig-migration.md` | `solrconfig.xml` constructs (request handlers, caches, update settings, merge policy, similarity) mapped to OpenSearch equivalents | Migrating `solrconfig.xml`; configuring OpenSearch index and node settings |
 | `references/08-query-behavior-edge-cases.md` | Known behavioral differences between Solr query parsers and OpenSearch Query DSL: default operator, fuzzy scale, date math, scoring, highlighting, sorting, deep pagination, Solr-only query parsers (`{!complexphrase}`, `{!surround}`, `{!graph}`, `{!switch}`, `{!rerank}`) with no OpenSearch equivalent | Debugging query result differences; validating query parity after migration; identifying unsupported query parsers |
 | `references/09-sizing-and-performance.md` | Node roles, shard sizing formulas, JVM/heap tuning, bulk indexing settings, cache configuration, hardware recommendations, and monitoring metrics | Sizing a new OpenSearch cluster; performance tuning; capacity planning (Step 3 / DevOps stakeholder) |
+| `references/10-opensearch.md` | OpenSearch best practices covering index design, sharding strategy, performance tuning, cluster stability, ISM lifecycle management, security, and cost optimization | Recommending OpenSearch configuration and operational practices at any step; answering "how should I configure this?" questions about OpenSearch |
 
 ### Usage Guidelines
 
@@ -494,7 +495,7 @@ You have access to a verified knowledge base of technical information about Apac
 #[[file:references/07-solrconfig-migration.md]]
 #[[file:references/08-query-behavior-edge-cases.md]]
 #[[file:references/09-sizing-and-performance.md]]
-
+#[[file:references/10-opensearch.md]]
 
 ## Instructions
 

@@ -8,21 +8,17 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.opensearch.common.settings.Settings;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.jcommander.NoSplitter;
@@ -47,15 +43,10 @@ import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningH
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.ProxyChannelInitializer;
 import org.opensearch.migrations.utils.ProcessHelpers;
 import org.opensearch.migrations.utils.URIHelper;
-import org.opensearch.security.ssl.DefaultSecurityKeyStore;
-import org.opensearch.security.ssl.util.SSLConfigConstants;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
@@ -64,17 +55,12 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
-import lombok.Lombok;
 import lombok.NonNull;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.KafkaProducer;
 
 @Slf4j
 public class CaptureProxy {
-
-    private static final String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
-    public static final String SUPPORTED_TLS_PROTOCOLS_LIST_KEY = "plugins.security.ssl.http.enabled_protocols";
 
     public static class Parameters {
         @Parameter(required = false,
@@ -88,14 +74,9 @@ public class CaptureProxy {
             description = "If enabled, Does NOT capture traffic to ANY sink.")
         public boolean noCapture;
         @Parameter(required = false,
-            names = { "--sslConfigFile" },
-            arity = 1,
-            description = "YAML configuration of the HTTPS settings.  When this is not set, the proxy will not use TLS.")
-        public String sslConfigFilePath;
-        @Parameter(required = false,
             names = { "--sslCertChainFile" },
             arity = 1,
-            description = "Path to PEM certificate chain file for TLS. Use with --sslKeyFile as an alternative to --sslConfigFile.")
+            description = "Path to PEM certificate chain file for TLS. Use with --sslKeyFile.")
         public String sslCertChainFilePath;
         @Parameter(required = false,
             names = { "--sslKeyFile" },
@@ -224,28 +205,6 @@ public class CaptureProxy {
         }
     }
 
-    @SneakyThrows
-    protected static Settings getSettings(@NonNull String configFile) {
-        var objectMapper = new ObjectMapper(new YAMLFactory());
-        var configMap = objectMapper.readValue(new File(configFile), Map.class);
-
-        var configParentDirStr = Paths.get(configFile).toAbsolutePath().getParent();
-        var httpsSettings =
-            objectMapper.convertValue(configMap, new TypeReference<Map<String, Object>>(){})
-                .entrySet().stream()
-                .filter(kvp -> kvp.getKey().startsWith(HTTPS_CONFIG_PREFIX))
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-        httpsSettings.putIfAbsent(SUPPORTED_TLS_PROTOCOLS_LIST_KEY, List.of("TLSv1.2", "TLSv1.3"));
-
-        return Settings.builder().loadFromMap(httpsSettings)
-            // Don't bother with configurations the 'transport' (port 9300), which the plugin that we're using
-            // will also configure (& fail) otherwise.  We only use the plugin to setup security for the 'http'
-            // port and then move the SSLEngine into our implementation.
-            .put(SSLConfigConstants.SECURITY_SSL_TRANSPORT_ENABLED, false)
-            .put("path.home", configParentDirStr)
-            .build();
-    }
-
     protected static IConnectionCaptureFactory<Object> getNullConnectionCaptureFactory() {
         System.err.println("No trace log directory specified.  Logging to /dev/null");
         return ctx -> new StreamChannelConnectionCaptureSerializer<>(
@@ -361,20 +320,11 @@ public class CaptureProxy {
 
     /**
      * Build the SSL engine supplier based on the provided parameters.
-     * Supports two mutually exclusive paths:
-     * <ul>
-     *   <li>PEM files (--sslCertChainFile + --sslKeyFile): loads certs directly via Netty, no OpenSearch dependency</li>
-     *   <li>Legacy config (--sslConfigFile): uses OpenSearch's DefaultSecurityKeyStore</li>
-     * </ul>
+     * Uses PEM files (--sslCertChainFile + --sslKeyFile) to load certs directly via Netty.
+     * Returns null when no TLS is configured.
      */
     protected static Supplier<SSLEngine> buildSslEngineSupplier(Parameters params) throws SSLException {
         boolean hasPemConfig = params.sslCertChainFilePath != null && !params.sslCertChainFilePath.isEmpty();
-        boolean hasLegacyConfig = params.sslConfigFilePath != null && !params.sslConfigFilePath.isEmpty();
-
-        if (hasPemConfig && hasLegacyConfig) {
-            throw new ParameterException(
-                "Cannot specify both --sslCertChainFile and --sslConfigFile. Use one or the other.");
-        }
 
         if (hasPemConfig) {
             if (params.sslKeyFilePath == null || params.sslKeyFilePath.isEmpty()) {
@@ -382,23 +332,6 @@ public class CaptureProxy {
             }
             log.info("Loading TLS from PEM files: cert={}, key={}", params.sslCertChainFilePath, params.sslKeyFilePath);
             return loadSslEngineFromPem(params.sslCertChainFilePath, params.sslKeyFilePath, params.sslTrustCertFilePath);
-        }
-
-        if (hasLegacyConfig) {
-            log.info("Loading TLS from OpenSearch security config: {}", params.sslConfigFilePath);
-            var sksOp = Optional.of(params.sslConfigFilePath)
-                .map(sslConfigFile -> new DefaultSecurityKeyStore(
-                    getSettings(sslConfigFile),
-                    Paths.get(sslConfigFile).toAbsolutePath().getParent()))
-                .filter(sks -> sks.sslHTTPProvider != null);
-            sksOp.ifPresent(DefaultSecurityKeyStore::initHttpSSLConfig);
-            return sksOp.map(sks -> (Supplier<SSLEngine>) () -> {
-                try {
-                    return sks.createHTTPSSLEngine();
-                } catch (Exception e) {
-                    throw Lombok.sneakyThrow(e);
-                }
-            }).orElse(null);
         }
 
         return null;

@@ -51,7 +51,7 @@ clean_up_migration () {
   CDK_SKIP_LOCAL_IMAGE_HASH=true npx cdk destroy "*" --force --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID"
   local cdk_rc=$?
   if [ $cdk_rc -ne 0 ]; then
-    echo "Error: cdk destroy for migration stacks exited with code $cdk_rc, aborting cleanup before source destroy."
+    echo "Error: cdk destroy for migration stacks exited with code $cdk_rc. Aborting before the subsequent source-CDK destroy (i.e. the EC2 source cluster teardown) so that failure is visible rather than masked by a best-effort source destroy."
     exit $cdk_rc
   fi
 
@@ -65,6 +65,11 @@ clean_up_migration () {
       --output text)
   if [ -n "$leftover" ]; then
     echo "Waiting for lingering migration stacks to reach DELETE_COMPLETE: $leftover"
+    # `aws cloudformation wait stack-delete-complete` is bounded, not indefinite:
+    # it polls every 30s for at most 120 attempts (~1 hour) and then exits
+    # non-zero, which we propagate below. Jenkins also wraps this stage in its
+    # own 1-hour timeout, so worst case we surface a bounded failure rather
+    # than hanging the pipeline.
     for s in $leftover; do
       aws cloudformation wait stack-delete-complete --stack-name "$s" || {
         echo "Error: stack $s did not reach DELETE_COMPLETE."
@@ -89,9 +94,9 @@ clean_up_source () {
   fi
 
   cd "$EC2_SOURCE_CDK_PATH" || exit
+  npm ci
   echo "Destroying source CDK app stacks..."
-  # The upstream opensearch-cluster-cdk reads context from cdk.context.json
-  # via --context contextKey=<id>, not the repo-fork's contextFile/contextId.
+  # The upstream opensearch-cluster-cdk reads context from cdk.context.json via --context contextKey=<id>
   cp "$SOURCE_GEN_CONTEXT_FILE" cdk.context.json
   npx cdk destroy "*" --force --c contextKey="$SOURCE_CONTEXT_ID"
   local cdk_rc=$?
@@ -113,7 +118,7 @@ bootstrap_region () {
   # Picking arbitrary context values to satisfy required values for CDK synthesis. These should not need to be kept in sync with the actual deployment context values
   # The upstream opensearch-cluster-cdk reads context from cdk.context.json via --context contextKey=<id>
   cp "$SOURCE_GEN_CONTEXT_FILE" cdk.context.json
-  cdk bootstrap --require-approval never --c contextKey="$SOURCE_CONTEXT_ID"
+  npx cdk bootstrap --require-approval never --c contextKey="$SOURCE_CONTEXT_ID"
 }
 
 usage() {
@@ -226,6 +231,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Mutually exclusive cleanup flags: --clean-up-all is a superset of the other
+# two, so combining them is almost certainly a caller mistake. Reject early
+# rather than silently letting --clean-up-all win further down.
+if [ "$CLEAN_UP_ALL" = true ] && { [ "$CLEAN_UP_MIGRATION_ONLY" = true ] || [ "$CLEAN_UP_SOURCE_ONLY" = true ]; }; then
+  echo "Error: --clean-up-all cannot be combined with --clean-up-migration-only or --clean-up-source-only"
+  exit 1
+fi
+if [ "$CLEAN_UP_MIGRATION_ONLY" = true ] && [ "$CLEAN_UP_SOURCE_ONLY" = true ]; then
+  echo "Error: --clean-up-migration-only and --clean-up-source-only cannot be combined; omit both or pass --clean-up-all"
+  exit 1
+fi
+
 SOURCE_NETWORK_STACK_NAME="opensearch-network-stack-ec2-source-$STAGE"
 SOURCE_INFRA_STACK_NAME="opensearch-infra-stack-ec2-source-$STAGE"
 SOURCE_GEN_CONTEXT_FILE="$TMP_DIR_PATH/generatedSourceContext.json"
@@ -292,7 +309,7 @@ fi
 
 if [ "$SKIP_SOURCE_DEPLOY" = false ] && [ "$CLEAN_UP_ALL" = false ] ; then
   # Deploy source cluster on EC2 instances
-  cdk deploy "*" --c contextKey="$SOURCE_CONTEXT_ID" --require-approval never
+  npx cdk deploy "*" --c contextKey="$SOURCE_CONTEXT_ID" --require-approval never
   if [ $? -ne 0 ]; then
     echo "Error: deploy source cluster failed, exiting."
     exit 1
@@ -321,7 +338,7 @@ if [ "$SKIP_MIGRATION_DEPLOY" = false ] ; then
     exit 1
   fi
   npm ci
-  cdk deploy "*" --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID" --require-approval never --concurrency 3
+  npx cdk deploy "*" --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID" --require-approval never --concurrency 3
   if [ $? -ne 0 ]; then
     echo "Error: deploying migration stacks failed, exiting."
     exit 1

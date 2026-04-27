@@ -26,6 +26,7 @@
 
 import { parseSolrQuery } from '../parser/parser';
 import { transformNode } from '../transformer/astToOpenSearch';
+import { applyPhraseBoost } from '../transformer/phraseBoost';
 
 export interface TranslateResult {
   /**
@@ -111,7 +112,11 @@ export function translateQ(
 
   // Stage 2: Transform
   try {
-    const dsl = transformNode(ast);
+    const mainDsl = transformNode(ast);
+
+    // Stage 3: pf phrase boost — wraps the main query in bool.must + bool.should
+    // if pf is set. Delegated to phraseBoost.ts (transformer concern).
+    const dsl = applyPhraseBoost(mainDsl, query, params);
     return { dsl, warnings: [] };
   } catch (err: unknown) {
     // Transform failure — unsupported node type or unexpected error

@@ -141,16 +141,22 @@ fi
 
 contextId="$1"
 
+# Ensure the CDK CLI and the app's dependencies match. The script invokes
+# `npx cdk`, which resolves to the locally-pinned `aws-cdk` in this package's
+# node_modules; running the globally-installed `cdk` can cause cloud-assembly
+# schema mismatches between CLI and library.
+npm ci
+
 output_dir="cdk-synth-output"
 rm -rf "$output_dir"
 mkdir -p "$output_dir"
 
 echo "Synthesizing all stacks..."
-raw_stacks=$(cdk list --ci --context contextId=$contextId)
+raw_stacks=$(npx cdk list --ci --context contextId=$contextId)
 
 echo "$raw_stacks" | sed -E 's/ *\(.*\)//' | while read -r stack; do
     echo "Synthesizing stack: $stack"
-    cdk synth $stack --ci --context contextId=$contextId > "$output_dir/$stack.yaml"
+    npx cdk synth $stack --ci --context contextId=$contextId > "$output_dir/$stack.yaml"
 done
 
 echo "Finding resource usage from synthesized stacks..."

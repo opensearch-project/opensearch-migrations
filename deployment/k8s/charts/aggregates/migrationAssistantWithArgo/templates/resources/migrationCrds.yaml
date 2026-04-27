@@ -116,8 +116,6 @@ spec:
                   type: boolean
                 numThreads:
                   type: integer
-                sslConfigFile:
-                  type: string
                 tls:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
@@ -391,8 +389,6 @@ spec:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
                 # Replayer CLI params
-                authHeaderValue:
-                  type: string
                 kafkaTrafficEnableMSKAuth:
                   type: boolean
                 kafkaTrafficPropertyFile:
