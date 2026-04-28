@@ -1,4 +1,4 @@
-# These are default values for a local environment and should be changed for a cloud deployment
+# Default values for local docker-compose environment
 source_cluster:
   endpoint: "https://capture-proxy:9200"
   allow_insecure: true
@@ -12,9 +12,6 @@ target_cluster:
   basic_auth:
     username: "admin"
     password: "myStrongPassword123!"
-metrics_source:
-  prometheus:
-    endpoint: "http://prometheus:9090"
 backfill:
   reindex_from_snapshot:
     docker:
@@ -25,11 +22,9 @@ snapshot:
   snapshot_repo_name: "migration_assistant_repo"
   fs:
     repo_path: "/snapshot/test-console"
-  otel_endpoint: "http://otel-collector:4317"
 metadata_migration:
   from_snapshot:
   cluster_awareness_attributes: 0
-  otel_endpoint: "http://otel-collector:4317"
 kafka:
   broker_endpoints: "kafka:9092"
   standard: ""

@@ -36,10 +36,8 @@
 # 2. Install Node.js dependencies:
 #    $ npm install
 #
-# 3. Build Docker images (one-time setup):
-#    $ cd ../../..  # Return to repo root
-#    $ ./deployment/cdk/opensearch-service-migration/buildDockerImages.sh
-#    $ cd deployment/cdk/opensearch-service-migration
+# 3. Build Docker images:
+#    $ ./buildDockerImages.sh
 #
 # 4. (Optional) Configure AWS credentials:
 #    $ aws configure

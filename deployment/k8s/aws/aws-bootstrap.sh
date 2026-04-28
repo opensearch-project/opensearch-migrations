@@ -996,7 +996,10 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
     # Remove stale builder if it exists but failed health check above (e.g. orphaned
     # from a previous interrupted run). This is safe — the builder is recreated below.
     docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
-    "${base_dir}/buildImages/setUpK8sImageBuildServices.sh"
+    # EKS/bootstrap builds are always Kubernetes-hosted; they cannot assume
+    # direct access to a local Docker daemon from the target environment.
+    source "${base_dir}/buildImages/backends/k8sHostedBuildkit.sh"
+    setup_build_backend
   fi
 
   echo "Building images to MIGRATIONS_ECR_REGISTRY=$MIGRATIONS_ECR_REGISTRY"

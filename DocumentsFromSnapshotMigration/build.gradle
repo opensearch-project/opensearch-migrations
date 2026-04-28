@@ -1,26 +1,9 @@
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
     id 'io.freefair.lombok'
-    id 'com.avast.gradle.docker-compose'
-    id 'com.bmuschko.docker-remote-api'
 }
 
-import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
-import groovy.transform.Canonical
 import org.opensearch.migrations.common.CommonUtils
-import org.opensearch.migrations.image.PullThroughCacheHelper
-
-def ptcEndpoint = rootProject.findProperty('pullThroughCacheEndpoint')?.toString() ?: ''
-def ptc = new PullThroughCacheHelper(ptcEndpoint)
-
-@Canonical
-class DockerServiceProps {
-    String projectName = ""
-    String dockerImageName = ""
-    String inputDir = ""
-    Map<String, String> buildArgs = [:]
-    List<String> taskDependencies = []
-}
 
 dependencies {
     implementation project(":coreUtilities")
@@ -93,39 +76,6 @@ tasks.register('copyDockerRuntimeJars', Sync) {
     from configurations.runtimeClasspath
     from tasks.named('jar')
     include '*.jar'
-}
-
-DockerServiceProps[] dockerServices = [
-        new DockerServiceProps([projectName:"reindexFromSnapshot",
-                                dockerImageName:"reindex_from_snapshot",
-                                inputDir:"./docker",
-                                buildArgs:[BASE_IMAGE: ptc.rewrite("docker.io/library/amazoncorretto:17-al2023-headless")],
-                                taskDependencies:["copyDockerRuntimeJars", "syncVersionFile_reindexFromSnapshot"]])
-] as DockerServiceProps[]
-
-for (dockerService in dockerServices) {
-    tasks.register("buildDockerImage_${dockerService.projectName}", DockerBuildImage) {
-        def hash = CommonUtils.calculateDockerHash(project.fileTree("docker/${dockerService.projectName}"))
-        for (dep in dockerService.taskDependencies) {
-            dependsOn dep
-        }
-        inputDir = project.file(dockerService.inputDir)
-        // platform.set("linux/amd64")
-        buildArgs = dockerService.buildArgs
-        images.add("migrations/${dockerService.dockerImageName}:${hash}".toString())
-        images.add("migrations/${dockerService.dockerImageName}:${version}".toString())
-        images.add("migrations/${dockerService.dockerImageName}:latest".toString())
-    }
-}
-
-tasks.register('buildDockerImages') {
-    for (dockerService in dockerServices) {
-        dependsOn "buildDockerImage_${dockerService.projectName}"
-    }
-}
-
-tasks.named('composeUp') {
-    dependsOn(tasks.named('buildDockerImages'))
 }
 
 tasks.named('slowTest') {

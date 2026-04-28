@@ -1,6 +1,0 @@
-[run]
-source = configmap2yaml
-
-[report]
-omit =
-   */tests/*

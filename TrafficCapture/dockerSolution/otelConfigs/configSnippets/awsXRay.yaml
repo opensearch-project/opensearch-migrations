@@ -1,8 +1,0 @@
-exporters:
-  awsxray:
-    index_all_attributes: true
-
-service:
-  pipelines:
-    traces:
-      exporters: [ awsxray ]
