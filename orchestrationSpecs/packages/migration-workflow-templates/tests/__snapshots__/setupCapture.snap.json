@@ -254,7 +254,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: cert-manager.io/v1\nkind: Certificate\nmetadata:\n  name: \"{{inputs.parameters.certName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: CaptureProxy\n      name: {{inputs.parameters.ownerName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\nspec:\n  secretName: \"{{inputs.parameters.secretName}}\"\n  issuerRef:\n    name: \"{{inputs.parameters.issuerName}}\"\n    kind: \"{{inputs.parameters.issuerKind}}\"\n    group: \"{{inputs.parameters.issuerGroup}}\"\n  dnsNames: {{inputs.parameters.dnsNames}}\n  duration: \"{{inputs.parameters.duration}}\"\n  renewBefore: \"{{inputs.parameters.renewBefore}}\"\n",
+          "manifest": "apiVersion: cert-manager.io/v1\nkind: Certificate\nmetadata:\n  name: \"{{inputs.parameters.certName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: CaptureProxy\n      name: {{inputs.parameters.ownerName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\nspec:\n  secretName: \"{{inputs.parameters.secretName}}\"\n  issuerRef:\n    name: \"{{inputs.parameters.issuerName}}\"\n    kind: \"{{inputs.parameters.issuerKind}}\"\n    group: \"{{inputs.parameters.issuerGroup}}\"\n  dnsNames: {{inputs.parameters.dnsNames}}\n  duration: \"{{inputs.parameters.duration}}\"\n  renewBefore: \"{{inputs.parameters.renewBefore}}\"\n  privateKey:\n    algorithm: RSA\n    encoding: PKCS8\n    size: 2048\n",
           "action": "apply",
           "setOwnerReference": false
         },
