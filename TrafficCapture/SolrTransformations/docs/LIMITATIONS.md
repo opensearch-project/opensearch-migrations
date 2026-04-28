@@ -22,6 +22,8 @@ the root cause, and provides a workaround where one exists.
 | [JSON-QUERIES](#json-queries)                   | JSON Request API `queries` key not supported |
 | [JSON-PARAM-PREFIX](#json-param-prefix)         | JSON Request API `json.<param>` prefix passthrough not supported |
 | [UPDATE-COMMANDS](#update-commands)             | Only `add` and `delete-by-id` commands supported; JSON only |
+| [BULK-PARTIAL-FAILURE](#bulk-partial-failure)   | `_bulk` partial failures surface as `errors[]`; Solr's default strict mode has no OpenSearch equivalent |
+| [NDJSON-INGEST-PARITY](#ndjson-ingest-parity)   | Shim does not parse NDJSON request bodies on ingress (not exercised by Solr clients, but diverges from replayer) |
 | [MM-AUTORELAX](#mm-autorelax)                   | eDisMax `mm.autoRelax` parameter not supported |
 | [MM-EDISMAX-OPERATOR-DEFAULT](#mm-edismax-operator-default) | eDisMax `mm` default with explicit operators not fully replicated |
 | [MM-EDISMAX-MIXED-OPERATORS](#mm-edismax-mixed-operators) | eDisMax `mm` with mixed explicit and implicit operators applies to wrong scope |
@@ -498,6 +500,111 @@ Both JSON and XML content types are supported.
 Only `application/json` request bodies are supported. XML bodies
 (`text/xml`, `application/xml`) cannot be parsed by the shim and will
 fail with an error. Clients using XML format must switch to JSON.
+
+---
+
+## BULK-PARTIAL-FAILURE
+
+**Feature:** Batch `add` / `delete` request where some documents succeed and
+others fail.
+
+**Solr behaviour:**
+Solr's default `/update` semantics are strict: if any document in a batch
+fails validation or indexing, Solr aborts the whole request with an HTTP 4xx
+error and none of the batch's documents become visible. Successfully-indexed
+docs from earlier in the batch are rolled back.
+
+An opt-in `TolerantUpdateProcessorFactory` (configured per-core in
+`solrconfig.xml`) changes this: Solr continues past individual failures and
+returns HTTP 200 with an `errors[]` array describing the per-document
+failures. This opt-in mode is the closest match to OpenSearch's default
+behaviour.
+
+**OpenSearch behaviour:**
+The `_bulk` API processes actions independently. A single failing item does
+**not** abort the rest. The response is always HTTP 200 and each entry in
+`items[]` carries its own `status` and optional `error` block. There is no
+transactional rollback: successfully-indexed documents from earlier items
+remain in the index even if later items fail.
+
+**Cause:**
+OpenSearch does not support ACID transactions across multiple documents.
+Per-document writes are atomic, but the underlying Lucene segment model has
+no concept of a multi-document rollback. There is no header, setting, or
+API flag that enables all-or-nothing batch semantics — not in OpenSearch,
+not in Elasticsearch, not in any fork of either.
+
+**Current workaround (applied automatically by the transformer):**
+The shim's `_bulk` response aggregator (`features/bulk/bulk-response.ts`)
+walks `items[]` and produces a response shape that matches Solr's
+**tolerant** update-processor output:
+
+* All items succeeded → `{responseHeader:{status:0, QTime:<took>}}`, HTTP 200.
+* Any item failed → `{responseHeader:{status:1, QTime:<took>}, errors:[{index,id,status,type,reason},…]}`,
+  HTTP 200.
+
+HTTP 200 is preserved even on partial failure because returning a 4xx would
+imply *no* documents were indexed, causing well-behaved clients to retry the
+entire batch and create duplicates of the already-indexed subset. The
+tolerant-mode emulation lets clients inspect `errors[]` to retry only the
+failed subset.
+
+**Residual impact:**
+
+* **SolrJ clients expecting strict semantics** — Applications that treat any
+  response with `responseHeader.status != 0` as fatal, without inspecting
+  `errors[]`, will behave differently against the shim than against a
+  strict-mode Solr. Migration checklist for these clients: either inspect
+  the `errors[]` array, or deploy Solr's `TolerantUpdateProcessorFactory`
+  in the source Solr for an apples-to-apples comparison.
+* **No rollback of partial successes** — Documents indexed before a
+  failure remain in OpenSearch. This is inherent to OpenSearch's
+  architecture and cannot be fixed by the translation layer. Applications
+  that previously relied on Solr's "entire batch aborted, nothing visible"
+  guarantee should treat batch requests as idempotent (e.g. by using the
+  `_id` of each doc, which is how Solr batches behave anyway when IDs
+  collide).
+
+---
+
+## NDJSON-INGEST-PARITY
+
+**Feature:** Ingesting a request body that is already NDJSON (multiple
+newline-delimited JSON objects).
+
+**Solr behaviour:**
+Not applicable — Solr clients do not send NDJSON to `/update`. Every Solr
+update format (single-doc `add`, command-object with arrays, mixed commands,
+delete-by-id, delete-by-query, commit) uses a single top-level JSON object
+or a top-level JSON array. There is no Solr client that sends a body like
+`{"a":1}\n{"b":2}\n{"c":3}\n`.
+
+**OpenSearch behaviour:**
+OpenSearch's `_bulk`, `_msearch`, and a few other endpoints accept NDJSON.
+The traffic replayer supports this on both ingress (via
+`NettyJsonBodyAccumulateHandler`, which stores the parsed list under
+`payload.inlinedJsonSequenceBodies`) and egress (via
+`NettyJsonBodySerializeHandler`).
+
+**Cause:**
+The shim's `HttpMessageUtil.parseJsonOrText` currently only parses the first
+top-level JSON value it sees. An NDJSON body beginning with `{...}\n{...}`
+would be partially parsed: the first object becomes `inlinedJsonBody` and
+the remaining lines are silently discarded.
+
+**Current workaround:**
+Egress (emitting NDJSON from the shim to OpenSearch) **is** supported as of
+PR 1 — transforms that produce `payload.inlinedJsonSequenceBodies` are
+materialized as NDJSON on the wire with correct trailing-newline semantics.
+Ingress (parsing NDJSON from a client) is not needed for the Solr→OpenSearch
+translation use case.
+
+**Residual impact:**
+Only relevant if the shim is repurposed as a generic proxy that must accept
+arbitrary OpenSearch `_bulk` traffic from clients. No Solr client exercises
+this path, so the gap is invisible to the intended customer. A follow-up
+change to the ingest side (mirroring `JsonAccumulator` semantics from the
+replayer) would close this gap if needed.
 
 ---
 

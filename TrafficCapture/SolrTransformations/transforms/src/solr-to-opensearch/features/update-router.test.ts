@@ -388,3 +388,103 @@ describe('update-router response', () => {
     expect(ctx.responseBody.has('responseHeader')).toBe(true);
   });
 });
+
+// --- Response dispatch: _bulk branch (added in PR 1 for framework readiness) ---
+
+function bulkItem(
+  op: 'index' | 'create' | 'update' | 'delete',
+  details: Record<string, any>,
+): Map<string, any> {
+  return new Map([[op, new Map<string, any>(Object.entries(details))]]);
+}
+
+describe('update-router response — match-and-dispatch', () => {
+  it('matches _bulk response shape (items present)', () => {
+    const body = new Map<string, any>([['took', 3], ['errors', false], ['items', []]]);
+    expect(response.match!(buildResponseCtx(body))).toBe(true);
+  });
+
+  it('still matches single-doc _doc response shape', () => {
+    const body = new Map<string, any>([['_id', '1'], ['result', 'created']]);
+    expect(response.match!(buildResponseCtx(body))).toBe(true);
+  });
+
+  it('does not match unrelated shape (select response)', () => {
+    const body = new Map<string, any>([['hits', new Map()], ['took', 3]]);
+    expect(response.match!(buildResponseCtx(body))).toBe(false);
+  });
+
+  it('dispatches _bulk all-success response to bulk aggregator', () => {
+    const body = new Map<string, any>([
+      ['took', 5],
+      ['errors', false],
+      ['items', [
+        bulkItem('index', { _index: 'mycore', _id: '1', status: 201 }),
+        bulkItem('index', { _index: 'mycore', _id: '2', status: 200 }),
+      ]],
+    ]);
+    const ctx = buildResponseCtx(body);
+    response.apply(ctx);
+    const header = ctx.responseBody.get('responseHeader');
+    expect(header.get('status')).toBe(0);
+    // Bulk path preserves took as QTime (unlike _doc path which always uses 0)
+    expect(header.get('QTime')).toBe(5);
+    expect(ctx.responseBody.has('errors')).toBe(false);
+  });
+
+  it('dispatches _bulk partial-failure response to bulk aggregator', () => {
+    const body = new Map<string, any>([
+      ['took', 7],
+      ['errors', true],
+      ['items', [
+        bulkItem('index', { _index: 'mycore', _id: '1', status: 201 }),
+        bulkItem('index', {
+          _index: 'mycore',
+          _id: '2',
+          status: 400,
+          error: new Map<string, any>([
+            ['type', 'mapper_parsing_exception'],
+            ['reason', 'failed to parse'],
+          ]),
+        }),
+      ]],
+    ]);
+    const ctx = buildResponseCtx(body);
+    response.apply(ctx);
+    expect(ctx.responseBody.get('responseHeader').get('status')).toBe(1);
+    expect(ctx.responseBody.get('responseHeader').get('QTime')).toBe(7);
+    const errors = ctx.responseBody.get('errors');
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as Map<string, any>).get('id')).toBe('2');
+  });
+
+  it('dispatches _bulk response with mixed ops (index + delete + update)', () => {
+    const body = new Map<string, any>([
+      ['took', 10],
+      ['errors', true],
+      ['items', [
+        bulkItem('index', { _index: 'mycore', _id: '1', status: 201 }),
+        bulkItem('delete', {
+          _index: 'mycore',
+          _id: '2',
+          status: 404,
+          error: new Map<string, any>([['type', 'not_found'], ['reason', 'missing']]),
+        }),
+        bulkItem('update', { _index: 'mycore', _id: '3', status: 200 }),
+      ]],
+    ]);
+    const ctx = buildResponseCtx(body);
+    response.apply(ctx);
+    expect(ctx.responseBody.get('responseHeader').get('status')).toBe(1);
+    const errors = ctx.responseBody.get('errors');
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as Map<string, any>).get('id')).toBe('2');
+  });
+
+  it('single-doc dispatch keeps QTime: 0 (distinct from bulk)', () => {
+    const body = new Map<string, any>([['_id', '1'], ['result', 'created']]);
+    const ctx = buildResponseCtx(body);
+    response.apply(ctx);
+    expect(ctx.responseBody.get('responseHeader').get('QTime')).toBe(0);
+  });
+});

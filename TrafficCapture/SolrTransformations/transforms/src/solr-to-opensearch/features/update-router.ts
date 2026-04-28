@@ -30,6 +30,7 @@ import type { MicroTransform } from '../pipeline';
 import type { RequestContext, ResponseContext } from '../context';
 import { request as deleteDocRequest } from './delete-doc';
 import { request as updateDocRequest } from './update-doc';
+import { response as bulkResponse, isBulkResponse } from './bulk/bulk-response';
 
 /** Known Solr update command keys. */
 const KNOWN_COMMANDS = ['delete', 'add', 'commit', 'optimize', 'rollback'];
@@ -178,40 +179,62 @@ function handleAdd(ctx: RequestContext, data: any): void {
 }
 
 /**
- * Response transform — convert OpenSearch _doc response to Solr update response.
+ * Response transform — single entry point for all /update/* responses.
  *
- * Generic for all _doc API operations (create, update, delete).
- * OpenSearch returns: {"_index":"mycore","_id":"1","result":"created|updated|deleted",...}
- * Solr returns:       {"responseHeader":{"status":0,"QTime":N}}
+ * Match-and-dispatch between two OpenSearch response shapes:
+ *   - Single-doc: {_id, result, ...}   — from PUT /_doc/{id}, DELETE /_doc/{id}
+ *   - Bulk:       {took, errors, items}— from POST /_bulk (used by PR 2+)
  *
- * Result mapping:
- *   created/updated/deleted → status 0 (success)
- *   not_found → status 0 (Solr treats delete of missing doc as success — verified against Solr 8/9)
- *   anything else → status 1 (error)
+ * Single-doc mapping:
+ *   OpenSearch: {"_index":"mycore","_id":"1","result":"created|updated|deleted",...}
+ *   Solr:       {"responseHeader":{"status":0,"QTime":N}}
  *
- * QTime is set to 0 because OpenSearch's _doc response does not include processing time.
- * This is a known approximation — monitoring tools should not rely on this value for
- * update operations through the shim.
+ *   Result mapping:
+ *     created/updated/deleted → status 0 (success)
+ *     not_found → status 0 (Solr treats delete of missing doc as success —
+ *                           verified against Solr 8/9)
+ *     anything else → status 1 (error)
+ *
+ *   QTime is 0 because OpenSearch's _doc response does not include processing
+ *   time. This is a known approximation — monitoring tools should not rely on
+ *   this value for update operations through the shim.
+ *
+ * Bulk mapping: delegated to bulk-response.apply (preserves `took` as QTime,
+ * aggregates per-item failures into a Solr-shaped errors array). See
+ * LIMITATIONS shortcode BULK-PARTIAL-FAILURE.
  */
+function isSingleDocResponse(ctx: ResponseContext): boolean {
+  return ctx.responseBody.has('result') && ctx.responseBody.has('_id');
+}
+
+function applySingleDocResponse(ctx: ResponseContext): void {
+  const result = ctx.responseBody.get('result');
+  const status = (result === 'created' || result === 'updated' || result === 'deleted' || result === 'not_found') ? 0 : 1;
+
+  const keys = Array.from(ctx.responseBody.keys());
+  for (const key of keys) {
+    ctx.responseBody.delete(key);
+  }
+
+  ctx.responseBody.set(
+    'responseHeader',
+    new Map<string, unknown>([
+      ['status', status],
+      ['QTime', 0],
+    ]),
+  );
+}
+
 export const response: MicroTransform<ResponseContext> = {
   name: 'update-response',
-  match: (ctx) => ctx.responseBody.has('result') && ctx.responseBody.has('_id'),
+  match: (ctx) => isSingleDocResponse(ctx) || isBulkResponse(ctx.responseBody),
   apply: (ctx) => {
-    const result = ctx.responseBody.get('result');
-    const status = (result === 'created' || result === 'updated' || result === 'deleted' || result === 'not_found') ? 0 : 1;
-
-    const keys = Array.from(ctx.responseBody.keys());
-    for (const key of keys) {
-      ctx.responseBody.delete(key);
+    if (isBulkResponse(ctx.responseBody)) {
+      bulkResponse.apply(ctx);
+      return;
     }
-
-    // QTime is 0 because OpenSearch's _doc response doesn't include processing time.
-    ctx.responseBody.set(
-      'responseHeader',
-      new Map<string, unknown>([
-        ['status', status],
-        ['QTime', 0],
-      ]),
-    );
+    if (isSingleDocResponse(ctx)) {
+      applySingleDocResponse(ctx);
+    }
   },
 };
