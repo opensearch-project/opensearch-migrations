@@ -9,6 +9,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotMetadataLoader;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.transformation.entity.Index;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -34,6 +35,110 @@ public interface IndexMetadata extends Index {
     JsonNode getSettings();
 
     IndexMetadata deepCopy();
+
+    /**
+     * Returns the {@code _source} configuration node from this index's mappings, or null if absent.
+     * Version-specific subclasses should override this if their mappings format wraps
+     * {@code _source} under a type name (ES 1.x–6.x).
+     *
+     * <p>The default implementation handles both typed and typeless layouts as a fallback.
+     */
+    @JsonIgnore
+    default JsonNode getSourceNode() {
+        JsonNode mappings = unwrapMappingsArrayIfNeeded(getMappings());
+        if (mappings == null) {
+            return null;
+        }
+        // Direct _source (ES 7+, OS, or already unwrapped)
+        JsonNode sourceNode = mappings.path("_source");
+        if (!sourceNode.isMissingNode()) {
+            return sourceNode;
+        }
+        // Typed mappings (ES 1.x-6.x): {"type_name": {"_source": ...}}
+        return findTypedSourceNode(mappings);
+    }
+
+    /**
+     * Unwraps the ES 5.x/6.x snapshot format where typed mappings are wrapped in an array:
+     * {@code mappings: [{"doc": {"_source": {...}, "properties": {...}}}]}.
+     * Returns the first element if array-wrapped, the input if already an object, or null otherwise.
+     */
+    private static JsonNode unwrapMappingsArrayIfNeeded(JsonNode mappings) {
+        if (mappings == null || mappings.isMissingNode()) {
+            return null;
+        }
+        if (!mappings.isArray()) {
+            return mappings;
+        }
+        if (mappings.isEmpty()) {
+            return null;
+        }
+        JsonNode first = mappings.get(0);
+        return (first != null && first.isObject()) ? first : null;
+    }
+
+    /**
+     * Searches an object node's direct children for a {@code _source} sub-node
+     * (typed mappings layout from ES 1.x-6.x). Returns null if not found.
+     */
+    private static JsonNode findTypedSourceNode(JsonNode mappings) {
+        if (!mappings.isObject()) {
+            return null;
+        }
+        var fields = mappings.fields();
+        while (fields.hasNext()) {
+            JsonNode typeMapping = fields.next().getValue();
+            JsonNode typedSource = (typeMapping != null && typeMapping.isObject())
+                ? typeMapping.path("_source")
+                : null;
+            if (typedSource != null && !typedSource.isMissingNode()) {
+                return typedSource;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Returns whether _source is enabled for this index.
+     * Returns true if _source is enabled or not explicitly set (ES default is enabled).
+     */
+    @JsonIgnore
+    default boolean isSourceEnabled() {
+        JsonNode sourceNode = getSourceNode();
+        if (sourceNode == null || !sourceNode.has("enabled")) {
+            return true;
+        }
+        return sourceNode.get("enabled").asBoolean(true);
+    }
+
+    /**
+     * Returns whether _source has includes or excludes filtering (partial source).
+     * When partial, some fields are missing from the stored _source and must be
+     * reconstructed from doc_values or stored fields.
+     */
+    @JsonIgnore
+    default boolean isSourcePartial() {
+        JsonNode sourceNode = getSourceNode();
+        if (sourceNode == null) {
+            return false;
+        }
+        return hasNonEmptyArray(sourceNode, "includes") || hasNonEmptyArray(sourceNode, "excludes");
+    }
+
+    /**
+     * Returns true if the index needs source reconstruction during migration.
+     * This is the case when _source is disabled or when _source is partial
+     * (has includes/excludes filtering).
+     */
+    @JsonIgnore
+    default boolean needsSourceReconstruction() {
+        return !isSourceEnabled() || isSourcePartial();
+    }
+
+    private static boolean hasNonEmptyArray(JsonNode node, String fieldName) {
+        JsonNode arr = node.get(fieldName);
+        return arr != null && arr.isArray() && arr.size() > 0;
+    }
 
     default void validateRawJson(ObjectNode rawJson) {
         if (rawJson == null) {

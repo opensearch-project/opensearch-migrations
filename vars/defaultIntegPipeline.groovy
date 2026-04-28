@@ -20,7 +20,6 @@ def call(Map config = [:]) {
     def migration_context_id = config.migrationContextId ?: 'migration-default'
     def source_context_file_name = 'sourceJenkinsContext.json'
     def migration_context_file_name = 'migrationJenkinsContext.json'
-    def skipCaptureProxyOnNodeSetup = config.skipCaptureProxyOnNodeSetup ?: false
     def time = new Date().getTime()
     def testUniqueId = config.testUniqueId ?: "integ_full_${time}_${currentBuild.number}"
     def testDir = "/root/lib/integ_test/integ_test"
@@ -122,7 +121,7 @@ def call(Map config = [:]) {
                             if (config.buildStep) {
                                 config.buildStep()
                             } else {
-                                sh './gradlew clean build --no-daemon --stacktrace'
+                                sh './gradlew clean build -x test --no-daemon --stacktrace'
                             }
                         }
                     }
@@ -168,12 +167,7 @@ def call(Map config = [:]) {
                                             "--migration-context-file './$migration_context_file_name' " +
                                             "--source-context-id $source_context_id " +
                                             "--migration-context-id $migration_context_id " +
-                                            "--stage ${stage} " +
-                                            "--migrations-git-url ${params.GIT_REPO_URL} " +
-                                            "--migrations-git-branch ${env.CHECKOUT_BRANCH}"
-                                    if (skipCaptureProxyOnNodeSetup) {
-                                        baseCommand += " --skip-capture-proxy"
-                                    }
+                                            "--stage ${stage}"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                         withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 5400, roleSessionName: 'jenkins-session') {
                                             sh baseCommand

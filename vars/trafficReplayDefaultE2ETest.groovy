@@ -82,6 +82,7 @@ def call(Map config = [:]) {
             migrationContextId: migrationContextId,
             defaultStageId: 'aws-integ',
             jobName: config.jobName ?: 'traffic-replay-default-e2e-test',
+            defaultGitBranch: config.defaultGitBranch ?: 'main',
             //deployStep: {
             //    echo 'Custom Test Step'
             //}

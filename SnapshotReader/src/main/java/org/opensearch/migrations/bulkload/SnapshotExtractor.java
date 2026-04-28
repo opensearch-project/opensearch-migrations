@@ -20,6 +20,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.SourceRepoAccessor;
 import org.opensearch.migrations.bulkload.delta.DeltaLuceneReader;
+import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
@@ -141,6 +142,26 @@ public class SnapshotExtractor {
      * @return a Flux of document changes starting from startDocIdx
      */
     public Flux<LuceneDocumentChange> readDocuments(ShardEntry shard, Path workDir, int startDocIdx) {
+        return readDocuments(shard, workDir, startDocIdx, null);
+    }
+
+    /**
+     * Reads documents from a shard entry starting at the given Lucene doc index,
+     * optionally using a FieldMappingContext for sourceless document reconstruction.
+     *
+     * @param shard          the shard to read (from {@link #listShards})
+     * @param workDir        temporary directory for unpacked Lucene files
+     * @param startDocIdx    the Lucene doc index to resume from (0 for start)
+     * @param mappingContext mapping context for _source reconstruction (null to skip sourceless docs)
+     * @return a Flux of document changes starting from startDocIdx
+     */
+    public Flux<LuceneDocumentChange> readDocuments(ShardEntry shard, Path workDir, int startDocIdx,
+                                                     FieldMappingContext mappingContext) {
+        return readDocuments(shard, workDir, startDocIdx, mappingContext, false);
+    }
+
+    public Flux<LuceneDocumentChange> readDocuments(ShardEntry shard, Path workDir, int startDocIdx,
+                                                     FieldMappingContext mappingContext, boolean useRecoverySource) {
         var repoAccessor = new SourceRepoAccessor(sourceRepo);
         var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, workDir);
         var readerFactory = new LuceneIndexReader.Factory(snapshotReader);
@@ -157,7 +178,7 @@ public class SnapshotExtractor {
         // Read documents from startDocIdx (binary search to segment)
         Path shardPath = workDir.resolve(shard.indexName()).resolve(String.valueOf(shard.shardId()));
         LuceneIndexReader indexReader = readerFactory.getReader(shardPath);
-        return indexReader.streamDocumentChanges(shard.metadata().getSegmentFileName(), startDocIdx);
+        return indexReader.streamDocumentChanges(shard.metadata().getSegmentFileName(), startDocIdx, mappingContext, useRecoverySource);
     }
 
     /**
