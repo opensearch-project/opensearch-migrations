@@ -894,6 +894,11 @@ describe('stat facet conversion', () => {
     expect(agg.get('value_count')).toEqual(new Map([['field', 'status']]));
   });
 
+  it('should convert count(*) to value_count on _id', () => {
+    const agg = applyStatFacet('count(*)');
+    expect(agg.get('value_count')).toEqual(new Map([['field', '_id']]));
+  });
+
   it('should throw for unsupported stat function', () => {
     expect(() => applyStatFacet('sumsq(price)')).toThrow("Unsupported stat function 'sumsq'");
   });

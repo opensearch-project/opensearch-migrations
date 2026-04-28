@@ -336,7 +336,11 @@ funcArg
   = funcNumericLiteral
   / funcStringConstant
   / funcCall
+  / funcWildcard
   / funcFieldRef
+
+funcWildcard
+  = "*" { return { kind: 'field', name: '*' }; }
 
 funcNumericLiteral
   = val:$("-"? [0-9]+ ("." [0-9]+)? ([eE] [+\-]? [0-9]+)?) {
