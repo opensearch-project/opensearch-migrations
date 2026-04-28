@@ -15,6 +15,20 @@ An **OpenSearch Agent Skill** that helps migrate from [Apache Solr](https://solr
 
 # Developer Guide
 
+## Prerequisites
+
+### opensearch-pricing-calculator Docker Image
+
+Before running the agent as a Docker container, you must build the `opensearch-pricing-calculator` image. The agent uses it to generate cluster cost estimates during migration planning.
+
+```bash
+git clone https://github.com/opensearch-project/opensearch-migrations.git
+cd opensearch-migrations/AIAdvisor/opensearch-pricing-calculator
+docker build -t opensearch-pricing-calculator .
+```
+
+The agent connects to it at `http://opensearch-pricing-calculator:5050` by default. Override this with the `PRICING_CALCULATOR_URL` environment variable if needed.
+
 ## Running the Tests
 
 ```bash

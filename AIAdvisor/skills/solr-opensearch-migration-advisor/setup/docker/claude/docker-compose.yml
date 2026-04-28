@@ -1,0 +1,28 @@
+services:
+
+  opensearch-pricing-calculator:
+    image: opensearch-pricing-calculator:2.0.0
+    container_name: opensearch-pricing-calculator
+    ports:
+      - "5050:5050"
+    networks:
+      - opensearch-migration
+
+  claude:
+    build:
+      context: ../../..
+      dockerfile: setup/docker/claude/Dockerfile
+    container_name: claude-container
+    depends_on:
+      - opensearch-pricing-calculator
+    volumes:
+      - ./CLAUDE_ADVISOR_VOLUME:/home/user/claude/processing
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+    networks:
+      - opensearch-migration
+    command: tail -f /dev/null
+
+networks:
+  opensearch-migration:
+    name: opensearch-migration

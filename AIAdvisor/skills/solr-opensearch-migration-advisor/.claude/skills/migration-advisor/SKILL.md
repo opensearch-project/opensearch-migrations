@@ -1,0 +1,1 @@
+./tests/scripts/../../SKILL.md

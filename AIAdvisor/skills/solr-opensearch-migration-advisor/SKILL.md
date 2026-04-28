@@ -464,7 +464,107 @@ Identify any authentication changes required (e.g. moving from Solr Basic Auth t
 - **DevOps / Platform Engineer** — focus on authentication changes and any integrations that make direct admin API calls; flag anything that requires network or firewall rule changes.
 - **Business Stakeholder** — summarise integrations as a list of systems that need updating ("the product catalog service", "the search UI") and flag any that require third-party vendor involvement. Estimate the number of engineering teams affected and the approximate effort per integration.
 
-### Step 8 — Migration Report
+### Step 8 — Pricing Estimate
+
+Before generating the final report, offer to calculate infrastructure cost estimates using the **opensearch-pricing-calculator**.
+
+Prompt the user:
+
+*"Would you like a pricing estimate for your OpenSearch deployment? I can calculate costs for managed clusters (search, time-series, or vector workloads) or OpenSearch Serverless collections."*
+
+**Always use the `PricingCalculatorClient` from `scripts/pricing_calculator.py`** to obtain estimates. Never construct raw HTTP requests or call the calculator API directly — all communication must go through the Python client. The client handles the base URL (`http://opensearch-pricing-calculator:5050`), error handling, and response parsing.
+
+Call the appropriate method based on the workload type, using the exact parameter names shown below:
+
+**Managed search workload:**
+```python
+client.estimate_provisioned_search(
+    size_gb=200,                  # total data size in GB
+    azs=3,                        # availability zones
+    replicas=1,                   # replicas per primary shard
+    target_shard_size_gb=25.0,    # target shard size in GB
+    cpus_per_shard=1.5,           # CPU cores per shard
+    pricing_type="OnDemand",      # "OnDemand" or "Reserved"
+    region="US East (N. Virginia)",
+)
+```
+
+**Managed time-series workload:**
+```python
+client.estimate_provisioned_time_series(
+    size_gb=500,
+    azs=3,
+    replicas=1,
+    hot_retention_days=14,
+    warm_retention_days=76,
+    target_shard_size_gb=45.0,
+    cpus_per_shard=1.25,
+    pricing_type="OnDemand",
+    region="US East (N. Virginia)",
+)
+```
+
+**Managed vector workload:**
+```python
+client.estimate_provisioned_vector(
+    vector_count=10_000_000,
+    dimensions=768,
+    engine_type="hnswfp16",       # hnswfp32/hnswfp16/hnswbq/ivffp32/ivffp16/ivfbq
+    max_edges=16,
+    azs=3,
+    replicas=1,
+    pricing_type="OnDemand",
+    region="US East (N. Virginia)",
+)
+```
+
+**Serverless collection:**
+```python
+client.estimate_serverless(
+    collection_type="search",     # "search", "timeSeries", or "vector"
+    daily_index_size_gb=10,
+    days_in_hot=1,
+    days_in_warm=6,
+    min_query_rate=1.0,
+    max_query_rate=1.0,
+    hours_at_max_rate=0.0,
+    region="us-east-1",           # AWS region code, not display name
+    redundancy=True,
+)
+```
+
+Collect only the parameters the user can readily provide; use the defaults shown above for the rest. Pass the result to `PricingCalculatorClient.format_estimate` to produce a human-readable Markdown summary.
+
+**If the calculator is unreachable**, `PricingCalculatorClient.health_check()` will return `False` and the estimate methods will raise `PricingCalculatorError`. When this happens, notify the user with a message such as:
+
+*"I wasn't able to connect to the OpenSearch Pricing Calculator at http://opensearch-pricing-calculator:5050. Pricing estimates will be skipped for now — you can add them later by starting the calculator and re-running this step."*
+
+Then continue to Step 9 without blocking the migration report. Do not treat an unreachable calculator as a blocker. The report will note that pricing estimates are unavailable.
+
+To start the calculator later:
+
+```bash
+git clone https://github.com/opensearch-project/opensearch-migrations.git
+cd opensearch-migrations/AIAdvisor/opensearch-pricing-calculator
+go mod download
+go build -o opensearch-pricing-calculator .
+./opensearch-pricing-calculator
+```
+
+Or with Docker:
+
+```bash
+docker build -t opensearch-pricing-calculator .
+docker run -p 5050:5050 opensearch-pricing-calculator
+```
+
+Present the formatted estimate and store it in the session under `facts.pricing_estimate` so it is included in the migration report.
+
+**Stakeholder guidance:**
+- **Search Relevance Engineer** — note how engine type and shard sizing choices affect cost.
+- **DevOps / Platform Engineer** — compare OnDemand vs. Reserved pricing; discuss instance family options for the target region.
+
+### Step 9 — Migration Report
 
 Call `generate_report` to produce the final report. The report must cover:
 
