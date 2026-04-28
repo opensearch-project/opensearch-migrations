@@ -32,6 +32,7 @@ public final class HttpMessageUtil {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final TypeReference<LinkedHashMap<String, Object>> MAP_TYPE_REF = new TypeReference<>() {};
+    private static final TypeReference<List<Object>> LIST_TYPE_REF = new TypeReference<>() {};
 
     private static final Set<String> RESTRICTED_REQUEST_HEADERS = Set.of(
         "host", "content-length", "transfer-encoding", "connection",
@@ -154,7 +155,15 @@ public final class HttpMessageUtil {
     static String extractBodyString(Map<String, Object> map) {
         var payload = (Map<String, Object>) map.get(JsonKeysForHttpMessage.PAYLOAD_KEY);
         if (payload == null) return null;
-        // Prefer inlinedJsonBody — may be a Map (serialize with Jackson) or a String (passthrough)
+        // Prefer inlinedJsonSequenceBodies (NDJSON) when present — used by _bulk-style requests.
+        // Matches the replayer's NettyJsonBodySerializeHandler semantics: one JSON doc per line
+        // with a trailing newline. See OpenSearch _bulk API which requires the trailing newline.
+        var ndjsonBodies = payload.get(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY);
+        if (ndjsonBodies instanceof List) {
+            return serializeNdjson((List<?>) ndjsonBodies);
+        }
+        // inlinedJsonBody may be a Map, a List (top-level JSON array), or a String (passthrough).
+        // Jackson's ObjectMapper handles both Map and List without additional branching.
         var jsonBody = payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY);
         if (jsonBody != null) {
             if (jsonBody instanceof String) return (String) jsonBody;
@@ -169,17 +178,53 @@ public final class HttpMessageUtil {
     }
 
     /**
-     * Parse a JSON string into a LinkedHashMap if valid JSON object, otherwise return the raw string.
-     * This allows transforms to work with Maps (fast .get()/.set()) instead of parsing JSON in JS.
-     * Only parses JSON objects (starting with '{') — arrays and other types stay as strings.
+     * Serialize a list of JSON values as NDJSON: one JSON document per line, each followed by '\n'
+     * (including the last one). Matches the OpenSearch _bulk API requirement and is semantically
+     * equivalent to the replayer's NettyJsonBodySerializeHandler.serializePayloadList with
+     * addLastNewline=true (i.e. no sibling binary/text body present).
+     */
+    private static String serializeNdjson(List<?> items) {
+        var sb = new StringBuilder();
+        for (var item : items) {
+            try {
+                sb.append(MAPPER.writeValueAsString(item)).append('\n');
+            } catch (JsonProcessingException e) {
+                throw new IllegalStateException("Failed to serialize inlinedJsonSequenceBodies item", e);
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Parse a JSON string into a structured value for efficient Map/List access by transforms.
+     * - Objects (starting with '{') → LinkedHashMap
+     * - Arrays (starting with '[')  → List<Object>  (matches replayer JsonAccumulator semantics)
+     * - Anything else or parse failure → raw String (passthrough)
+     *
+     * Storing a top-level array under INLINED_JSON_BODY_DOCUMENT_KEY is aligned with the replayer's
+     * NettyJsonBodyAccumulateHandler, which stores a single top-level JSON value (Map or Object[])
+     * under the same key. Only a stream of multiple top-level JSON values (true NDJSON) maps to
+     * INLINED_NDJSON_BODIES_DOCUMENT_KEY — that ingress path is not handled here (see LIMITATIONS
+     * shortcode NDJSON-INGEST-PARITY).
      */
     private static Object parseJsonOrText(String body) {
-        if (body.isEmpty() || body.charAt(0) != '{') return body;
-        try {
-            return MAPPER.readValue(body, MAP_TYPE_REF);
-        } catch (JsonProcessingException ignored) {
-            return body;
+        if (body.isEmpty()) return body;
+        var first = body.charAt(0);
+        if (first == '{') {
+            try {
+                return MAPPER.readValue(body, MAP_TYPE_REF);
+            } catch (JsonProcessingException ignored) {
+                return body;
+            }
         }
+        if (first == '[') {
+            try {
+                return MAPPER.readValue(body, LIST_TYPE_REF);
+            } catch (JsonProcessingException ignored) {
+                return body;
+            }
+        }
+        return body;
     }
 
     /** Write a response, handling keep-alive semantics. */
