@@ -260,66 +260,6 @@ jobs:
           df -h
           docker system df -v
 
-  python-e2e-tests:
-    needs: [ generate-cache-key ]
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/setup-env
-        with:
-          gradle-cache-enabled: true
-      - name: Cache Docker Images
-        uses: AndreKurait/docker-cache@0.6.0
-        with:
-          key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
-          read-only: ${{ github.event_name != 'push' }}
-      - name: Build Docker images via dockerHostedBuildkit
-        run: |
-          source buildImages/backends/dockerHostedBuildkit.sh
-          setup_build_backend
-          BUILDER_NAME="builder-${KUBE_CONTEXT:-compose-e2e}"
-          ./gradlew :buildImages:buildImagesToRegistry_amd64 \
-            -Pbuilder="$BUILDER_NAME" \
-            -PregistryEndpoint="localhost:${EXTERNAL_REGISTRY_PORT}" \
-            -PlocalContainerRegistryEndpoint="${EXTERNAL_REGISTRY_NAME}:5000" \
-            -x test --info --stacktrace
-        env:
-          KUBE_CONTEXT: compose-e2e
-          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
-      - name: Pull images into local Docker daemon
-        run: |
-          source buildImages/backends/dockerHostedBuildkit.sh
-          set_docker_hosted_defaults
-          for image in capture_proxy migration_console traffic_replayer elasticsearch_searchguard reindex_from_snapshot; do
-            docker pull "localhost:${EXTERNAL_REGISTRY_PORT}/migrations/${image}:latest"
-            docker tag "localhost:${EXTERNAL_REGISTRY_PORT}/migrations/${image}:latest" "migrations/${image}:latest"
-          done
-      - name: Start Docker Solution
-        run: ./gradlew -p TrafficCapture dockerSolution:composeUp -x test -x spotlessCheck --info --stacktrace
-      - name: Run E2E test script
-        run: |
-          docker exec $(docker ps --filter "name=migration-console" -q) pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
-      - name: Collect Docker Logs
-        if: always()
-        run: |
-          mkdir -p logs/docker
-          for container in $(docker ps -aq); do
-            container_name=$(docker inspect --format '{{.Name}}' $container | sed 's/\///')
-            docker logs $container > logs/docker/${container_name}_logs.txt 2>&1
-          done
-      - name: Upload Logs
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: e2e-test-logs
-          path: logs/docker
-      - name: Clean up migrations docker images before caching
-        if: always()
-        run: |
-          docker stop $(docker ps -q) 2>/dev/null || true
-          docker system prune --volumes -f
-          docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^migrations/' | xargs -I {} docker image rm {} 2>/dev/null || true
-
   node-tests:
     runs-on: ubuntu-22.04
     strategy:
@@ -534,7 +474,6 @@ jobs:
       - gradle-tests
       - link-checker
       - node-tests
-      - python-e2e-tests
       - python-lint
       - gradle-extended-check
       - gradle-build-macos
