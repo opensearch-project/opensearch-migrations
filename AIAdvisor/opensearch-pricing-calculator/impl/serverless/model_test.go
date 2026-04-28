@@ -11,19 +11,19 @@ import (
 
 // --- Ingest.Normalize tests ---
 
-func TestIngestNormalizeMaxLessThanMin(t *testing.T) {
+func TestIngest_Normalize_MaxLessThanMin(t *testing.T) {
 	i := Ingest{MinIndexingRate: 10, MaxIndexingRate: 5}
 	i.Normalize()
 	assert.Equal(t, 10.0, i.MaxIndexingRate, "MaxIndexingRate should be raised to MinIndexingRate")
 }
 
-func TestIngestNormalizeMaxGreaterThanMin(t *testing.T) {
+func TestIngest_Normalize_MaxGreaterThanMin(t *testing.T) {
 	i := Ingest{MinIndexingRate: 5, MaxIndexingRate: 10}
 	i.Normalize()
 	assert.Equal(t, 10.0, i.MaxIndexingRate, "MaxIndexingRate should remain unchanged")
 }
 
-func TestIngestNormalizeBothZero(t *testing.T) {
+func TestIngest_Normalize_BothZero(t *testing.T) {
 	i := Ingest{}
 	i.Normalize()
 	assert.Equal(t, 0.0, i.MaxIndexingRate)
@@ -32,13 +32,13 @@ func TestIngestNormalizeBothZero(t *testing.T) {
 
 // --- Search.Normalize tests ---
 
-func TestSearchNormalizeMaxLessThanMin(t *testing.T) {
+func TestSearch_Normalize_MaxLessThanMin(t *testing.T) {
 	s := Search{MinQueryRate: 100, MaxQueryRate: 50}
 	s.Normalize()
 	assert.Equal(t, int64(100), s.MaxQueryRate, "MaxQueryRate should be raised to MinQueryRate")
 }
 
-func TestSearchNormalizeMaxGreaterThanMin(t *testing.T) {
+func TestSearch_Normalize_MaxGreaterThanMin(t *testing.T) {
 	s := Search{MinQueryRate: 50, MaxQueryRate: 100}
 	s.Normalize()
 	assert.Equal(t, int64(100), s.MaxQueryRate, "MaxQueryRate should remain unchanged")
@@ -46,7 +46,7 @@ func TestSearchNormalizeMaxGreaterThanMin(t *testing.T) {
 
 // --- TimeSeries.Normalize tests ---
 
-func TestTimeSeriesNormalizeDefaults(t *testing.T) {
+func TestTimeSeries_Normalize_Defaults(t *testing.T) {
 	ts := TimeSeries{DaysInHot: 0, DaysInWarm: -1, MinQueryRate: 100, MaxQueryRate: 50}
 	ts.Normalize()
 
@@ -55,7 +55,7 @@ func TestTimeSeriesNormalizeDefaults(t *testing.T) {
 	assert.Equal(t, int64(100), ts.MaxQueryRate, "MaxQueryRate should be raised to MinQueryRate")
 }
 
-func TestTimeSeriesNormalizeValidValues(t *testing.T) {
+func TestTimeSeries_Normalize_ValidValues(t *testing.T) {
 	ts := TimeSeries{DaysInHot: 7, DaysInWarm: 30, MinQueryRate: 50, MaxQueryRate: 200}
 	ts.Normalize()
 
@@ -66,7 +66,7 @@ func TestTimeSeriesNormalizeValidValues(t *testing.T) {
 
 // --- Vector.Normalize tests ---
 
-func TestVectorNormalizeAllDefaults(t *testing.T) {
+func TestVector_Normalize_AllDefaults(t *testing.T) {
 	v := Vector{}
 	v.Normalize()
 
@@ -78,31 +78,31 @@ func TestVectorNormalizeAllDefaults(t *testing.T) {
 	assert.Equal(t, 8, v.CodeSize, "CodeSize should default to 8")
 }
 
-func TestVectorNormalizeIncrementHintBelowMinimum(t *testing.T) {
+func TestVector_Normalize_IncrementHintBelowMinimum(t *testing.T) {
 	v := Vector{IncrementHint: 500, VectorEngineType: "hnsw", MaxEdges: 16, SubVectors: 8, NList: 4, CodeSize: 8}
 	v.Normalize()
 	assert.Equal(t, int64(1000), v.IncrementHint)
 }
 
-func TestVectorNormalizeIncrementHintAboveMinimum(t *testing.T) {
+func TestVector_Normalize_IncrementHintAboveMinimum(t *testing.T) {
 	v := Vector{IncrementHint: 5000, VectorEngineType: "hnsw", MaxEdges: 16, SubVectors: 8, NList: 4, CodeSize: 8}
 	v.Normalize()
 	assert.Equal(t, int64(5000), v.IncrementHint, "should keep values above 1000")
 }
 
-func TestVectorNormalizeReplicasProd(t *testing.T) {
+func TestVector_Normalize_ReplicasProd(t *testing.T) {
 	v := Vector{Config: "prod", VectorEngineType: "hnsw", MaxEdges: 16, IncrementHint: 1000, SubVectors: 8, NList: 4, CodeSize: 8}
 	v.Normalize()
 	assert.Equal(t, int64(1), v.Replicas, "prod config should set replicas to 1")
 }
 
-func TestVectorNormalizeReplicasDev(t *testing.T) {
+func TestVector_Normalize_ReplicasDev(t *testing.T) {
 	v := Vector{Config: "dev", VectorEngineType: "hnsw", MaxEdges: 16, IncrementHint: 1000, SubVectors: 8, NList: 4, CodeSize: 8}
 	v.Normalize()
 	assert.Equal(t, int64(0), v.Replicas, "dev config should set replicas to 0")
 }
 
-func TestVectorNormalizeNegativeReplicas(t *testing.T) {
+func TestVector_Normalize_NegativeReplicas(t *testing.T) {
 	v := Vector{Replicas: -5, VectorEngineType: "hnsw", MaxEdges: 16, IncrementHint: 1000, SubVectors: 8, NList: 4, CodeSize: 8}
 	v.Normalize()
 	assert.Equal(t, int64(1), v.Replicas, "negative replicas should normalize to 1")
@@ -110,55 +110,55 @@ func TestVectorNormalizeNegativeReplicas(t *testing.T) {
 
 // --- Vector.validateOnDiskMode tests ---
 
-func TestVectorValidateOnDiskModeDisabled(t *testing.T) {
+func TestVector_ValidateOnDiskMode_Disabled(t *testing.T) {
 	v := Vector{OnDisk: false, CompressionLevel: 0, VectorEngineType: "hnsw"}
 	v.validateOnDiskMode()
 	assert.False(t, v.OnDisk)
 	assert.Equal(t, 32, v.CompressionLevel, "should default to 32 when OnDisk is false")
 }
 
-func TestVectorValidateOnDiskModeDisabledWithExistingLevel(t *testing.T) {
+func TestVector_ValidateOnDiskMode_DisabledWithExistingLevel(t *testing.T) {
 	v := Vector{OnDisk: false, CompressionLevel: 8, VectorEngineType: "hnsw"}
 	v.validateOnDiskMode()
 	assert.Equal(t, 8, v.CompressionLevel, "should keep existing compression level")
 }
 
-func TestVectorValidateOnDiskModeEnabledHNSW(t *testing.T) {
+func TestVector_ValidateOnDiskMode_EnabledHNSW(t *testing.T) {
 	v := Vector{OnDisk: true, CompressionLevel: 16, VectorEngineType: "hnsw"}
 	v.validateOnDiskMode()
 	assert.True(t, v.OnDisk, "HNSW should support on-disk mode")
 	assert.Equal(t, 16, v.CompressionLevel)
 }
 
-func TestVectorValidateOnDiskModeEnabledIVF(t *testing.T) {
+func TestVector_ValidateOnDiskMode_EnabledIVF(t *testing.T) {
 	v := Vector{OnDisk: true, CompressionLevel: 4, VectorEngineType: "ivf"}
 	v.validateOnDiskMode()
 	assert.True(t, v.OnDisk, "IVF should support on-disk mode")
 	assert.Equal(t, 4, v.CompressionLevel)
 }
 
-func TestVectorValidateOnDiskModeEnabledNMSLIB(t *testing.T) {
+func TestVector_ValidateOnDiskMode_EnabledNMSLIB(t *testing.T) {
 	v := Vector{OnDisk: true, CompressionLevel: 8, VectorEngineType: "nmslib"}
 	v.validateOnDiskMode()
 	assert.True(t, v.OnDisk, "NMSLIB should support on-disk mode")
 	assert.Equal(t, 8, v.CompressionLevel)
 }
 
-func TestVectorValidateOnDiskModeUnsupportedEngine(t *testing.T) {
+func TestVector_ValidateOnDiskMode_UnsupportedEngine(t *testing.T) {
 	v := Vector{OnDisk: true, CompressionLevel: 8, VectorEngineType: "hnswfp16"}
 	v.validateOnDiskMode()
 	assert.False(t, v.OnDisk, "hnswfp16 should not support on-disk mode")
 	assert.Equal(t, 32, v.CompressionLevel, "should reset to default")
 }
 
-func TestVectorValidateOnDiskModeInvalidCompressionLevel(t *testing.T) {
+func TestVector_ValidateOnDiskMode_InvalidCompressionLevel(t *testing.T) {
 	v := Vector{OnDisk: true, CompressionLevel: 7, VectorEngineType: "hnsw"}
 	v.validateOnDiskMode()
 	assert.True(t, v.OnDisk)
 	assert.Equal(t, 32, v.CompressionLevel, "invalid level should reset to 32")
 }
 
-func TestVectorValidateOnDiskModeDefaultCompressionLevel(t *testing.T) {
+func TestVector_ValidateOnDiskMode_DefaultCompressionLevel(t *testing.T) {
 	v := Vector{OnDisk: true, CompressionLevel: 0, VectorEngineType: "hnsw"}
 	v.validateOnDiskMode()
 	assert.True(t, v.OnDisk)
@@ -200,7 +200,7 @@ func TestIsUncompressedEngine(t *testing.T) {
 
 // --- EstimateRequest.Normalize tests ---
 
-func TestEstimateRequestNormalizeDefaultRedundancy(t *testing.T) {
+func TestEstimateRequest_Normalize_DefaultRedundancy(t *testing.T) {
 	er := EstimateRequest{Region: "us-east-1"}
 	er.Normalize()
 
@@ -208,7 +208,7 @@ func TestEstimateRequestNormalizeDefaultRedundancy(t *testing.T) {
 	assert.True(t, *er.Redundancy, "Default redundancy should be true")
 }
 
-func TestEstimateRequestNormalizeExplicitRedundancy(t *testing.T) {
+func TestEstimateRequest_Normalize_ExplicitRedundancy(t *testing.T) {
 	redundancyOff := false
 	er := EstimateRequest{Region: "us-east-1", Redundancy: &redundancyOff}
 	er.Normalize()
@@ -216,7 +216,7 @@ func TestEstimateRequestNormalizeExplicitRedundancy(t *testing.T) {
 	assert.False(t, *er.Redundancy, "Explicit false should be preserved")
 }
 
-func TestEstimateRequestNormalizeWithSearch(t *testing.T) {
+func TestEstimateRequest_Normalize_WithSearch(t *testing.T) {
 	er := EstimateRequest{
 		Region: "us-east-1",
 		Search: &Search{MinQueryRate: 100, MaxQueryRate: 50},
@@ -226,7 +226,7 @@ func TestEstimateRequestNormalizeWithSearch(t *testing.T) {
 	assert.Equal(t, int64(100), er.Search.MaxQueryRate, "Search should be normalized")
 }
 
-func TestEstimateRequestNormalizeWithTimeSeries(t *testing.T) {
+func TestEstimateRequest_Normalize_WithTimeSeries(t *testing.T) {
 	er := EstimateRequest{
 		Region:     "us-east-1",
 		TimeSeries: &TimeSeries{DaysInHot: 0, MinQueryRate: 10, MaxQueryRate: 5},
@@ -237,7 +237,7 @@ func TestEstimateRequestNormalizeWithTimeSeries(t *testing.T) {
 	assert.Equal(t, int64(10), er.TimeSeries.MaxQueryRate)
 }
 
-func TestEstimateRequestNormalizeWithVector(t *testing.T) {
+func TestEstimateRequest_Normalize_WithVector(t *testing.T) {
 	er := EstimateRequest{
 		Region: "us-east-1",
 		Vector: &Vector{IncrementHint: 100},
@@ -267,7 +267,7 @@ func TestVectorMemoryForDimensionsBytes(t *testing.T) {
 	assert.Equal(t, int64(141), result)
 }
 
-func TestVectorGetRequiredMemoryInBytesHNSW(t *testing.T) {
+func TestVector_GetRequiredMemoryInBytes_HNSW(t *testing.T) {
 	v := Vector{
 		VectorEngineType: "hnsw",
 		DimensionsCount:  768,
@@ -281,7 +281,7 @@ func TestVectorGetRequiredMemoryInBytesHNSW(t *testing.T) {
 	assert.NotEmpty(t, calcString)
 }
 
-func TestVectorGetRequiredMemoryInBytesHNSWWithOnDisk(t *testing.T) {
+func TestVector_GetRequiredMemoryInBytes_HNSWWithOnDisk(t *testing.T) {
 	v := Vector{
 		VectorEngineType: "hnsw",
 		DimensionsCount:  768,
@@ -301,14 +301,14 @@ func TestVectorGetRequiredMemoryInBytesHNSWWithOnDisk(t *testing.T) {
 	assert.Less(t, memCompressed, memFull, "on-disk compressed should use less memory")
 }
 
-func TestVectorGetRequiredMemoryInBytesUnsupportedEngine(t *testing.T) {
+func TestVector_GetRequiredMemoryInBytes_UnsupportedEngine(t *testing.T) {
 	v := Vector{VectorEngineType: "unknown"}
 	_, _, err := v.GetRequiredMemoryInBytes()
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "engine type is not supported")
 }
 
-func TestVectorGetRequiredMemoryInBytesAllEngines(t *testing.T) {
+func TestVector_GetRequiredMemoryInBytes_AllEngines(t *testing.T) {
 	tests := []struct {
 		engine string
 	}{
@@ -335,7 +335,7 @@ func TestVectorGetRequiredMemoryInBytesAllEngines(t *testing.T) {
 	}
 }
 
-func TestVectorGetRequiredMemoryInGB(t *testing.T) {
+func TestVector_GetRequiredMemoryInGB(t *testing.T) {
 	v := Vector{
 		VectorEngineType: "hnsw",
 		DimensionsCount:  768,
@@ -348,7 +348,7 @@ func TestVectorGetRequiredMemoryInGB(t *testing.T) {
 	assert.Greater(t, gb, 0.0)
 }
 
-func TestVectorCalculateRequiredMemory(t *testing.T) {
+func TestVector_CalculateRequiredMemory(t *testing.T) {
 	v := Vector{
 		VectorEngineType: "hnsw",
 		DimensionsCount:  768,

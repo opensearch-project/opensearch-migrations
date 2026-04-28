@@ -70,6 +70,7 @@ type VectorEstimateRequest struct {
 	ColdPercentage         int    `json:"coldPercentage,omitempty"`         // Percentage of vectors to store in cold tier (0-100)
 	WarmInstanceType       string `json:"warmInstanceType,omitempty"`       // Override UltraWarm instance type: "ultrawarm1.medium.search" or "ultrawarm1.large.search"
 	AutoSelectWarmInstance *bool  `json:"autoSelectWarmInstance,omitempty"` // Enable automatic warm instance selection based on storage (default: true)
+	DynamicSizing          bool   `json:"dynamicSizing,omitempty"`          // Enable workload-aware configuration scoring instead of cheapest-first ranking
 
 	logger *zap.Logger
 }
@@ -123,6 +124,20 @@ func GetDefaultVectorRequest() *VectorEstimateRequest {
 		WarmPercentage:             0,     // All vectors in hot tier by default
 		ColdPercentage:             0,     // No cold tier by default
 		// AutoSelectWarmInstance is nil, which means auto-select is enabled by default
+	}
+}
+
+// getDataScale returns the data scale tier based on vector count.
+func (r *VectorEstimateRequest) getDataScale() string {
+	switch {
+	case r.VectorCount < 1_000_000:
+		return "small"
+	case r.VectorCount < 10_000_000:
+		return "medium"
+	case r.VectorCount < 100_000_000:
+		return "large"
+	default:
+		return "xlarge"
 	}
 }
 
@@ -183,7 +198,11 @@ func (r *VectorEstimateRequest) Calculate() (response EstimateResponse, err erro
 	}
 
 	// Calculate hot storage for HOT tier vectors only
-	hotVectorSizeInGB := float64(r.DimensionsCount*4.0*hotVectorCount*(1+r.Replicas)) / (1024 * 1024 * 1024)
+	// S3 engine: vectors are fully offloaded to S3 (no _source, no graph, no vector memory on data nodes)
+	var hotVectorSizeInGB float64
+	if strings.ToLower(r.VectorEngineType) != "s3" {
+		hotVectorSizeInGB = float64(r.DimensionsCount*4.0*hotVectorCount*(1+r.Replicas)) / (1024 * 1024 * 1024)
+	}
 	vectorStorage := response.TotalMemoryRequiredForVectors
 	if !r.ExcludeVectorSource {
 		vectorStorage += hotVectorSizeInGB
@@ -306,7 +325,7 @@ func (r *VectorEstimateRequest) GetClusterConfigs(totalActiveShards int, totalSt
 				warmInstanceTypesToEvaluate = []string{r.WarmInstanceType}
 			} else {
 				// Auto-select: evaluate both warm instance types to find best price
-				warmInstanceTypesToEvaluate = []string{"ultrawarm1.medium.search", "ultrawarm1.large.search"}
+				warmInstanceTypesToEvaluate = AllWarmInstanceTypes
 			}
 		}
 
@@ -406,9 +425,22 @@ func (r *VectorEstimateRequest) GetClusterConfigs(totalActiveShards int, totalSt
 		return cc[i].TotalCost < cc[j].TotalCost
 	})
 
-	//return only the top 10 configs if there are more than 10 else return all
-	if len(cc) > 10 {
-		cc = cc[:10]
+	maxConfigs := 10
+	if r.DynamicSizing {
+		// Keep 3x candidates for scoring, then rank and return top N
+		oversampleLimit := maxConfigs * 3
+		if len(cc) > oversampleLimit {
+			cc = cc[:oversampleLimit]
+		}
+		scoringProfile := "vector"
+		if strings.ToLower(r.VectorEngineType) == "s3" {
+			scoringProfile = "s3"
+		}
+		cc = ScoreAndRank(cc, scoringProfile, r.getDataScale(), maxConfigs, totalVectorMemoryRequired)
+	} else {
+		if len(cc) > maxConfigs {
+			cc = cc[:maxConfigs]
+		}
 	}
 	return cc
 }
@@ -451,6 +483,29 @@ func (r *VectorEstimateRequest) Normalize() {
 
 	// Validate and normalize on-disk mode parameters
 	r.validateOnDiskMode()
+
+	// S3 vector engine constraints
+	if strings.ToLower(r.VectorEngineType) == "s3" {
+		// S3 requires all-hot: no warm/cold tiers
+		r.WarmPercentage = 0
+		r.ColdPercentage = 0
+		// S3 has no in-memory graph: on-disk mode not applicable
+		r.OnDisk = false
+		// Filter instance types to OpenSearch Optimized only (OR1, OR2, OM2, OI2)
+		if len(r.InstanceTypes) > 0 {
+			var filtered []string
+			for _, it := range r.InstanceTypes {
+				if isOpenSearchOptimizedPrefix(it) {
+					filtered = append(filtered, it)
+				}
+			}
+			r.InstanceTypes = filtered
+		}
+		// Default to all OS-optimized prefixes if none specified or none survived filtering
+		if len(r.InstanceTypes) == 0 {
+			r.InstanceTypes = []string{"or1.", "or2.", "om2.", "oi2."}
+		}
+	}
 
 	// Validate and normalize warm/cold tier percentages
 	r.validateTierPercentages()
@@ -545,6 +600,9 @@ func (r *VectorEstimateRequest) GetRequiredMemory() (reqMemory float64, calcStri
 	case "exactknn":
 		calcString += "ExactKNN needs no memory"
 		return 0.0, calcString, nil
+	case "s3":
+		calcString += ",s3:true,vectorMemory:0"
+		return 0.0, calcString, nil
 	default:
 		calcString += ",error:unsupported_engine_type"
 		return 0.0, calcString, errors.New("engine type is not supported")
@@ -617,6 +675,20 @@ func isValidCompressionLevel(level int) bool {
 	validLevels := []int{2, 4, 8, 16, 32}
 	for _, valid := range validLevels {
 		if level == valid {
+			return true
+		}
+	}
+	return false
+}
+
+// isOpenSearchOptimizedPrefix checks if the given prefix matches an OpenSearch Optimized instance family.
+// It handles both full instance names (e.g., "or2.xlarge.search") and short prefixes (e.g., "or2", "oi2")
+// by checking bidirectional prefix matching against the OS-optimized families (or1, or2, om2, oi2).
+func isOpenSearchOptimizedPrefix(prefix string) bool {
+	prefixLower := strings.ToLower(prefix)
+	osPrefixes := []string{"or1", "or2", "om2", "oi2"}
+	for _, osPrefix := range osPrefixes {
+		if strings.HasPrefix(prefixLower, osPrefix) || strings.HasPrefix(osPrefix, prefixLower) {
 			return true
 		}
 	}

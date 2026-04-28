@@ -4,13 +4,14 @@
 package provisioned
 
 import (
-	"go.uber.org/zap"
-	"math"
+	"fmt"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/cache"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/commons"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/instances"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/price"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/regions"
+	"go.uber.org/zap"
+	"math"
 	"sort"
 	"strings"
 )
@@ -37,21 +38,22 @@ type TimeSeriesEstimateRequest struct {
 	ExpansionRate         int     `json:"indexExpansionRate,omitempty"`
 	ActivePrimaryShards   int     `json:"activePrimaryShards,omitempty"`
 	// Storage compression options
-	DerivedSource   bool `json:"derivedSource,omitempty"`   // Enable derived source (~30% storage reduction)
-	ZstdCompression bool `json:"zstdCompression,omitempty"` // Enable ZSTD compression (~20% storage reduction)
-	PricingType   string               `json:"pricingType"`
-	Edp           float64              `json:"edp"`
-	Region        string               `json:"region"`
-	MinimumJVM    float64              `json:"minimumJVM,omitempty"`
-	RemoteStorage RemoteStorageOptions `json:"remoteStorage,omitempty"`
-	Config        string               `json:"config"`
-	InstanceTypes []string             `json:"instanceTypes"`
+	DerivedSource   bool                 `json:"derivedSource,omitempty"`   // Enable derived source (~30% storage reduction)
+	ZstdCompression bool                 `json:"zstdCompression,omitempty"` // Enable ZSTD compression (~20% storage reduction)
+	PricingType     string               `json:"pricingType"`
+	Edp             float64              `json:"edp"`
+	Region          string               `json:"region"`
+	MinimumJVM      float64              `json:"minimumJVM,omitempty"`
+	RemoteStorage   RemoteStorageOptions `json:"remoteStorage,omitempty"`
+	Config          string               `json:"config"`
+	InstanceTypes   []string             `json:"instanceTypes"`
 	// Multi-AZ with Standby option - when enabled, 1/3 of instances are standby and don't take traffic
 	// Thread calculations use only 2/3 of instance count, and minimum 2 replicas are enforced
 	MultiAzWithStandby bool `json:"multiAzWithStandby,omitempty"`
 	// Warm instance type selection (optional - if not specified, auto-select based on storage size)
 	WarmInstanceType       string `json:"warmInstanceType,omitempty"`       // "ultrawarm1.medium.search" or "ultrawarm1.large.search"
 	AutoSelectWarmInstance *bool  `json:"autoSelectWarmInstance,omitempty"` // Default true - auto-select warm instance type
+	DynamicSizing          bool   `json:"dynamicSizing,omitempty"`          // Enable workload-aware configuration scoring instead of cheapest-first ranking
 	logger                 *zap.Logger
 }
 
@@ -90,6 +92,21 @@ func GetDefaultTimeSeriesRequest() *TimeSeriesEstimateRequest {
 		Edp:                 0.0,
 		Region:              "US East (N. Virginia)",
 		StorageClass:        "gp3",
+	}
+}
+
+// getDataScale returns the data scale tier based on total hot storage volume.
+func (r *TimeSeriesEstimateRequest) getDataScale() string {
+	totalHot := r.IngestionSize * float64(r.HotRetentionPeriod)
+	switch {
+	case totalHot < 500:
+		return "small"
+	case totalHot < 5000:
+		return "medium"
+	case totalHot < 50000:
+		return "large"
+	default:
+		return "xlarge"
 	}
 }
 
@@ -258,6 +275,16 @@ func (r *TimeSeriesEstimateRequest) GetClusterConfigs(response EstimateResponse)
 	if err == nil {
 		nodes := provisionedRegion.HotInstances
 
+		// Determine which warm instance types to evaluate
+		var warmInstanceTypesToEvaluate []string
+		if r.WarmRetentionPeriod > 0 {
+			if r.WarmInstanceType != "" && !r.isAutoSelectWarmInstance() {
+				warmInstanceTypesToEvaluate = []string{r.WarmInstanceType}
+			} else {
+				warmInstanceTypesToEvaluate = AllWarmInstanceTypes
+			}
+		}
+
 		for instanceType, instanceUnit := range nodes {
 			//only process instances that have one of the instanceFamilies in the request
 			if !r.IsInstanceTypesAllowed(instanceType) ||
@@ -302,125 +329,90 @@ func (r *TimeSeriesEstimateRequest) GetClusterConfigs(response EstimateResponse)
 					hotNodes.RemoteStorageRequired = float64(storagePerNode / (1 + r.FreeStorageRequired/100.0))
 				}
 				hotNodes.CalculateMetricsWithStandby(r.MultiAzWithStandby)
-				var warmNodes *WarmNodes
 				hotNodes.CalculatePrice(instanceUnit, provisionedRegion.GetStorageUnitPrice(r.StorageClass), provisionedRegion.GetStorageUnitPrice("managedStorage"))
+
 				if r.WarmRetentionPeriod > 0 {
-					warmNodes = &WarmNodes{}
-					// Determine warm instance type: use user-specified type or auto-select based on storage size
-					var warmInstanceType string
-					if !r.isAutoSelectWarmInstance() && r.WarmInstanceType != "" {
-						// User specified a warm instance type
-						warmInstanceType = r.WarmInstanceType
-					} else {
-						// Auto-select based on storage size (UltraWarm only for auto-select)
-						// If total warm storage is less than 33 TB, use medium, otherwise use large
-						if response.TotalWarmStorage < 33*1024 {
-							warmInstanceType = "ultrawarm1.medium.search"
-						} else {
-							warmInstanceType = "ultrawarm1.large.search"
-						}
-					}
-
-					// OI2 warm instances can only be used with OpenSearch Optimized hot nodes
-					if isOI2WarmInstance(warmInstanceType) && !isOpenSearchOptimizedInstance(instanceType) {
-						if r.logger != nil {
-							r.logger.Debug("Skipping non-OpenSearch Optimized hot instance for OI2 warm",
-								zap.String("hotInstanceType", instanceType),
-								zap.String("warmInstanceType", warmInstanceType))
-						}
-						continue
-					}
-
-					// Calculate node count based on instance type (supports both UltraWarm and OI2)
-					cacheSize := getWarmInstanceCacheSize(warmInstanceType, nodes)
-					if cacheSize == 0 {
-						// Unknown warm instance type, skip
-						continue
-					}
-					warmNodes.Count = int(math.Max(math.Ceil(response.TotalWarmStorage/cacheSize), 2.0))
-					warmNodes.Type = warmInstanceType
-
-					// Apply maximum node count limit based on instance type and AZs
-					// UltraWarm: 250 per AZ, OI2: 1002 per AZ
-					var maxWarmNodes int
-					if isOI2WarmInstance(warmInstanceType) {
-						maxWarmNodes = 1002 * r.Azs
-					} else {
-						maxWarmNodes = 250 * r.Azs
-					}
-					// Check if the calculated warm node count exceeds the AZ-based limit
-					if warmNodes.Count > maxWarmNodes {
-						if r.logger != nil {
-							r.logger.Debug("Warm node count exceeds AZ-based limit, skipping this instance type",
-								zap.Int("calculatedCount", warmNodes.Count),
-								zap.Int("maxAllowedCount", maxWarmNodes),
-								zap.Int("azs", r.Azs),
-								zap.String("hotInstanceType", instanceType),
-								zap.String("warmInstanceType", warmInstanceType))
-						}
-						continue
-					}
-					//if the total node count(hot+warm) is greater than the instance-specific limit, continue with the next instance type
-					// Get instance-specific max node count limit from InstanceLimitsMap
-					ebsStorage, found := instances.InstanceLimitsMap[instanceType]
-					if found && ebsStorage.MaxNodesCount > 0 {
-						// Ensure the total node count (hot + warm) doesn't exceed the instance-specific limit
-						if hotNodes.Count+warmNodes.Count > ebsStorage.MaxNodesCount {
+					// Generate configs for each warm instance type to compare prices
+					for _, warmInstanceType := range warmInstanceTypesToEvaluate {
+						// OI2 warm instances can only be used with OpenSearch Optimized hot nodes
+						if isOI2WarmInstance(warmInstanceType) && !isOpenSearchOptimizedInstance(instanceType) {
 							continue
 						}
-					}
-					warmNodes.StorageRequired = int(response.TotalWarmStorage)
 
-					// Get warm instance pricing - OI2 uses hot instance pricing, UltraWarm uses warm instance pricing
-					if isOI2WarmInstance(warmNodes.Type) {
-						// OI2 warm nodes use hot instance pricing
-						if warmInstanceUnit, found := nodes[warmNodes.Type]; found {
+						warmNodes, warmNodeErr := r.selectWarmInstanceForTimeSeriesWithType(
+							response.TotalWarmStorage, warmInstanceType, instanceType, hotNodes.Count, nodes)
+						if warmNodeErr != nil {
+							continue
+						}
+						if warmNodes != nil {
+							// Get warm instance pricing
+							// OI2 instances use hot instance pricing, UltraWarm uses warm instance pricing
+							var warmInstanceUnit price.InstanceUnit
+							if isOI2WarmInstance(warmNodes.Type) {
+								if iu, found := nodes[warmNodes.Type]; found {
+									warmInstanceUnit = iu
+								} else {
+									continue
+								}
+							} else {
+								warmInstanceUnitPtr, pricingErr := provisionedRegion.GetWarmNode(warmNodes.Type)
+								if pricingErr != nil {
+									continue
+								}
+								warmInstanceUnit = *warmInstanceUnitPtr
+							}
 							warmNodes.AvailableCPUs = warmInstanceUnit.CPU * warmNodes.Count
 							warmNodes.CalculateMetrics()
-							warmNodes.CalculatePrice(warmInstanceUnit, provisionedRegion.GetStorageUnitPrice("managedStorage"), true)
-						} else {
-							// OI2 instance not found in region, skip
-							if r.logger != nil {
-								r.logger.Debug("OI2 warm instance not found in region pricing data",
-									zap.String("warmInstanceType", warmNodes.Type),
-									zap.String("hotInstanceType", instanceType),
-									zap.String("region", r.Region))
-							}
-							continue
+							warmNodes.CalculatePrice(warmInstanceUnit, provisionedRegion.GetStorageUnitPrice("managedStorage"), isOI2WarmInstance(warmNodes.Type))
 						}
-					} else {
-						// UltraWarm nodes use warm instance pricing
-						warmInstanceNode, err := provisionedRegion.GetWarmNode(warmNodes.Type)
+
+						// Cold storage (same logic, inside the warm loop)
+						var coldSettings *ColdStorage
+						if r.ColdRetentionPeriod > 0 {
+							coldSettings = &ColdStorage{}
+							coldSettings.StorageRequired = response.TotalColdStorage
+							coldSettings.ManagedStorageCost = response.TotalColdStorage * provisionedRegion.GetStorageUnitPrice("managedStorage")
+						}
+
+						newClusterConfig, err := r.GetClusterConfigFor(hotNodes, warmNodes, coldSettings)
 						if err != nil {
 							continue
 						}
-						warmNodes.AvailableCPUs = warmInstanceNode.CPU * warmNodes.Count
-						warmNodes.CalculateMetrics()
-						warmNodes.CalculatePrice(*warmInstanceNode, provisionedRegion.GetStorageUnitPrice("managedStorage"), false)
+						if newClusterConfig.ColdStorage != nil {
+							newClusterConfig.InfrastructureCost = newClusterConfig.TotalCost - newClusterConfig.ColdStorage.ManagedStorageCost
+							compressionMult := commons.GetCompressionMultiplier(r.DerivedSource, r.ZstdCompression, commons.TimeSeriesCompressionRatios)
+							newClusterConfig.ColdStorageRampUp = calculateColdStorageRampUp(
+								r.HotRetentionPeriod, r.WarmRetentionPeriod, r.ColdRetentionPeriod,
+								r.IngestionSize, r.ExpansionRate, compressionMult,
+								provisionedRegion.GetStorageUnitPrice("managedStorage"),
+							)
+						}
+						cc = append(cc, newClusterConfig)
 					}
-				}
-				var coldSettings *ColdStorage
-				if r.ColdRetentionPeriod > 0 {
-					coldSettings = &ColdStorage{}
-					coldSettings.StorageRequired = response.TotalColdStorage
-					coldSettings.ManagedStorageCost = response.TotalColdStorage * provisionedRegion.GetStorageUnitPrice("managedStorage")
-				}
+				} else {
+					// No warm storage: config without warm, but possibly with cold
+					var coldSettings *ColdStorage
+					if r.ColdRetentionPeriod > 0 {
+						coldSettings = &ColdStorage{}
+						coldSettings.StorageRequired = response.TotalColdStorage
+						coldSettings.ManagedStorageCost = response.TotalColdStorage * provisionedRegion.GetStorageUnitPrice("managedStorage")
+					}
 
-				newClusterConfig, err := r.GetClusterConfigFor(hotNodes, warmNodes, coldSettings)
-				// if there is an error, skip this node
-				if err != nil {
-					continue
+					newClusterConfig, err := r.GetClusterConfigFor(hotNodes, nil, coldSettings)
+					if err != nil {
+						continue
+					}
+					if newClusterConfig.ColdStorage != nil {
+						newClusterConfig.InfrastructureCost = newClusterConfig.TotalCost - newClusterConfig.ColdStorage.ManagedStorageCost
+						compressionMult := commons.GetCompressionMultiplier(r.DerivedSource, r.ZstdCompression, commons.TimeSeriesCompressionRatios)
+						newClusterConfig.ColdStorageRampUp = calculateColdStorageRampUp(
+							r.HotRetentionPeriod, r.WarmRetentionPeriod, r.ColdRetentionPeriod,
+							r.IngestionSize, r.ExpansionRate, compressionMult,
+							provisionedRegion.GetStorageUnitPrice("managedStorage"),
+						)
+					}
+					cc = append(cc, newClusterConfig)
 				}
-				if newClusterConfig.ColdStorage != nil {
-					newClusterConfig.InfrastructureCost = newClusterConfig.TotalCost - newClusterConfig.ColdStorage.ManagedStorageCost
-					compressionMult := commons.GetCompressionMultiplier(r.DerivedSource, r.ZstdCompression, commons.TimeSeriesCompressionRatios)
-					newClusterConfig.ColdStorageRampUp = calculateColdStorageRampUp(
-						r.HotRetentionPeriod, r.WarmRetentionPeriod, r.ColdRetentionPeriod,
-						r.IngestionSize, r.ExpansionRate, compressionMult,
-						provisionedRegion.GetStorageUnitPrice("managedStorage"),
-					)
-				}
-				cc = append(cc, newClusterConfig)
 			}
 		}
 	}
@@ -429,9 +421,17 @@ func (r *TimeSeriesEstimateRequest) GetClusterConfigs(response EstimateResponse)
 		return cc[i].TotalCost < cc[j].TotalCost
 	})
 
-	//return only the top 10 configs if there are more than 10 else return all
-	if len(cc) > 10 {
-		cc = cc[:10]
+	maxConfigs := 10
+	if r.DynamicSizing {
+		oversampleLimit := maxConfigs * 3
+		if len(cc) > oversampleLimit {
+			cc = cc[:oversampleLimit]
+		}
+		cc = ScoreAndRank(cc, "timeSeries", r.getDataScale(), maxConfigs, 0)
+	} else {
+		if len(cc) > maxConfigs {
+			cc = cc[:maxConfigs]
+		}
 	}
 	return cc
 }
@@ -464,6 +464,54 @@ func calculateColdStorageRampUp(hotRetention, warmRetention, coldRetention int, 
 		SteadyStateMonth:  steadyStateMonth,
 		MonthlyCosts:      monthlyCosts,
 	}
+}
+
+// selectWarmInstanceForTimeSeriesWithType creates a WarmNodes object for a specific warm instance type.
+// It calculates the required node count, validates against AZ-based and instance-specific limits,
+// and returns the WarmNodes or an error if constraints are violated.
+func (r *TimeSeriesEstimateRequest) selectWarmInstanceForTimeSeriesWithType(
+	totalWarmStorage float64,
+	warmInstanceType string,
+	hotInstanceType string,
+	hotNodeCount int,
+	nodes map[string]price.InstanceUnit,
+) (*WarmNodes, error) {
+	if totalWarmStorage == 0 {
+		return nil, nil
+	}
+
+	cacheSize := getWarmInstanceCacheSize(warmInstanceType, nodes)
+	if cacheSize == 0 {
+		return nil, fmt.Errorf("unknown warm instance type: %s", warmInstanceType)
+	}
+
+	warmNodes := &WarmNodes{
+		Type: warmInstanceType,
+	}
+	warmNodes.Count = int(math.Max(math.Ceil(totalWarmStorage/cacheSize), 2.0))
+
+	var maxWarmNodes int
+	if isOI2WarmInstance(warmInstanceType) {
+		maxWarmNodes = 1002 * r.Azs
+	} else {
+		maxWarmNodes = 250 * r.Azs
+	}
+
+	if warmNodes.Count > maxWarmNodes {
+		return nil, fmt.Errorf("warm storage %.2f GB requires %d %s nodes, exceeding maximum %d for %d AZ(s)",
+			totalWarmStorage, warmNodes.Count, warmInstanceType, maxWarmNodes, r.Azs)
+	}
+
+	ebsStorage, found := instances.InstanceLimitsMap[hotInstanceType]
+	if found && ebsStorage.MaxNodesCount > 0 {
+		if hotNodeCount+warmNodes.Count > ebsStorage.MaxNodesCount {
+			return nil, fmt.Errorf("total node count %d exceeds instance limit %d",
+				hotNodeCount+warmNodes.Count, ebsStorage.MaxNodesCount)
+		}
+	}
+
+	warmNodes.StorageRequired = int(totalWarmStorage)
+	return warmNodes, nil
 }
 
 // getOptimizedHotStorage calculates the optimized hot storage required for the given TimeSeriesEstimateRequest.

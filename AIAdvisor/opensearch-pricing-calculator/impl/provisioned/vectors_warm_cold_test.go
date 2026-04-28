@@ -93,7 +93,7 @@ func TestIsOpenSearchOptimizedInstance(t *testing.T) {
 	}
 }
 
-func TestVectorEstimateRequestTierPercentageValidation(t *testing.T) {
+func TestVectorEstimateRequest_TierPercentageValidation(t *testing.T) {
 	tests := []struct {
 		name                   string
 		warmPercentage         int
@@ -186,7 +186,7 @@ func TestVectorEstimateRequestTierPercentageValidation(t *testing.T) {
 	}
 }
 
-func TestVectorEstimateRequestWarmInstanceTypeValidation(t *testing.T) {
+func TestVectorEstimateRequest_WarmInstanceTypeValidation(t *testing.T) {
 	tests := []struct {
 		name                     string
 		warmInstanceType         string
@@ -391,7 +391,7 @@ func TestGetWarmInstanceCacheSize(t *testing.T) {
 	}
 }
 
-func TestVectorEstimateRequestVectorCountForTier(t *testing.T) {
+func TestVectorEstimateRequest_VectorCountForTier(t *testing.T) {
 	tests := []struct {
 		name           string
 		totalVectors   int
@@ -468,7 +468,7 @@ func TestVectorEstimateRequestVectorCountForTier(t *testing.T) {
 	}
 }
 
-func TestVectorEstimateRequestWarmStorage(t *testing.T) {
+func TestVectorEstimateRequest_WarmStorage(t *testing.T) {
 	// Note: Warm storage does NOT include replicas - UltraWarm handles replication internally
 	// Formula: dimensions * 4 bytes * warmVectorCount * (1 + expansionRate/200)
 	tests := []struct {
@@ -527,7 +527,7 @@ func TestVectorEstimateRequestWarmStorage(t *testing.T) {
 	}
 }
 
-func TestVectorEstimateRequestColdStorage(t *testing.T) {
+func TestVectorEstimateRequest_ColdStorage(t *testing.T) {
 	// Note: Cold storage does NOT include replicas - S3 handles durability internally
 	// Formula: dimensions * 4 bytes * coldVectorCount
 	tests := []struct {
@@ -573,7 +573,7 @@ func TestVectorEstimateRequestColdStorage(t *testing.T) {
 	}
 }
 
-func TestVectorEstimateRequestWarmInstanceSelection(t *testing.T) {
+func TestVectorEstimateRequest_WarmInstanceSelection(t *testing.T) {
 	tests := []struct {
 		name                 string
 		totalWarmStorage     float64 // in GB
@@ -643,7 +643,7 @@ func TestVectorEstimateRequestWarmInstanceSelection(t *testing.T) {
 	}
 }
 
-func TestVectorEstimateRequestSelectWarmInstanceForVectorsWithType(t *testing.T) {
+func TestVectorEstimateRequest_SelectWarmInstanceForVectorsWithType(t *testing.T) {
 	tests := []struct {
 		name                 string
 		totalWarmStorage     float64
@@ -733,7 +733,7 @@ func TestVectorEstimateRequestSelectWarmInstanceForVectorsWithType(t *testing.T)
 	}
 }
 
-func TestVectorEstimateRequestAutoSelectWarmInstance(t *testing.T) {
+func TestVectorEstimateRequest_AutoSelectWarmInstance(t *testing.T) {
 	tests := []struct {
 		name           string
 		autoSelect     *bool
@@ -771,7 +771,7 @@ func TestVectorEstimateRequestAutoSelectWarmInstance(t *testing.T) {
 	}
 }
 
-func TestVectorEstimateRequestMemoryOnlyForHotTier(t *testing.T) {
+func TestVectorEstimateRequest_MemoryOnlyForHotTier(t *testing.T) {
 	// Test that memory is only calculated for hot tier vectors
 	// When 50% vectors are in warm tier, memory should be roughly half
 

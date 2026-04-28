@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestMapToStructValidData(t *testing.T) {
+func TestMapToStruct_ValidData(t *testing.T) {
 	m := map[string]interface{}{
 		"region": "US East (N. Virginia)",
 		"edp":    0.0,
@@ -30,7 +30,7 @@ func TestMapToStructValidData(t *testing.T) {
 	assert.Equal(t, 5.0, req.Ingest.MaxIndexingRate)
 }
 
-func TestMapToStructEmptyMap(t *testing.T) {
+func TestMapToStruct_EmptyMap(t *testing.T) {
 	m := map[string]interface{}{}
 	var req EstimateRequest
 	err := mapToStruct(m, &req)
@@ -38,7 +38,7 @@ func TestMapToStructEmptyMap(t *testing.T) {
 	assert.Equal(t, "", req.Region)
 }
 
-func TestMapToStructWithSearchFields(t *testing.T) {
+func TestMapToStruct_WithSearchFields(t *testing.T) {
 	m := map[string]interface{}{
 		"region": "US East (N. Virginia)",
 		"search": map[string]interface{}{
@@ -55,7 +55,7 @@ func TestMapToStructWithSearchFields(t *testing.T) {
 	assert.Equal(t, 50.0, req.Search.CollectionSize)
 }
 
-func TestMapToStructWithVectorFields(t *testing.T) {
+func TestMapToStruct_WithVectorFields(t *testing.T) {
 	m := map[string]interface{}{
 		"region": "US East (N. Virginia)",
 		"vector": map[string]interface{}{
@@ -80,7 +80,7 @@ func TestNewHandler(t *testing.T) {
 	assert.Equal(t, logger, h.logger)
 }
 
-func TestHandlerHandleWithSearchRequest(t *testing.T) {
+func TestHandler_Handle_WithSearchRequest(t *testing.T) {
 	logger := zap.NewNop()
 	h := NewHandler(logger)
 
@@ -109,7 +109,7 @@ func TestHandlerHandleWithSearchRequest(t *testing.T) {
 	assert.NotNil(t, response.Search)
 }
 
-func TestHandlerHandleWithTimeSeriesRequest(t *testing.T) {
+func TestHandler_Handle_WithTimeSeriesRequest(t *testing.T) {
 	logger := zap.NewNop()
 	h := NewHandler(logger)
 
@@ -139,7 +139,7 @@ func TestHandlerHandleWithTimeSeriesRequest(t *testing.T) {
 	assert.NotNil(t, response.TimeSeries)
 }
 
-func TestHandlerHandleWithVectorRequest(t *testing.T) {
+func TestHandler_Handle_WithVectorRequest(t *testing.T) {
 	logger := zap.NewNop()
 	h := NewHandler(logger)
 
@@ -166,7 +166,7 @@ func TestHandlerHandleWithVectorRequest(t *testing.T) {
 	assert.NotNil(t, response.Vector)
 }
 
-func TestHandlerHandleNilArgs(t *testing.T) {
+func TestHandler_Handle_NilArgs(t *testing.T) {
 	logger := zap.NewNop()
 	h := NewHandler(logger)
 

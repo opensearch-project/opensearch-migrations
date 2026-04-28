@@ -5,8 +5,8 @@ package price
 
 import (
 	"errors"
-	"math"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/instances"
+	"math"
 )
 
 const UWUrl = "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/es/USD/current/es-ultrawarm.json"
@@ -18,6 +18,25 @@ const LocationsUrl = "https://b0.p.awsstatic.com/locations/1.0/aws/current/locat
 const EsOnDemandUrl = "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/es/USD/current/es-ondemand.json"
 
 const EsRiBaseUrl = "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/es/USD/current/es-reservedinstance/%s/%s/%s/%s/index.json"
+
+// ChinaPricingUrl is the AWS China Bulk Pricing API endpoint for OpenSearch.
+// China regions use a separate pricing partition (amazonaws.com.cn) with CNY currency.
+// This API uses a different format (SKU-based products + terms) compared to the
+// metered unit maps used for global regions.
+const ChinaPricingUrl = "https://pricing.cn-north-1.amazonaws.com.cn/offers/v1.0/cn/AmazonES/current/index.json"
+
+// Isolated partition pricing URLs.
+// The es-ultrawarm.json endpoints in isolated partitions contain ALL instance types
+// (hot + warm) with all pricing tiers (OnDemand + RI). The es.json endpoints have the same
+// data but without Instance Type names, so we use es-ultrawarm.json as the primary source.
+
+// Secret Region (aws-iso-b) pricing URLs.
+const SecretInstanceUrl = "https://calculator.aws/pricing/2.0/meteredUnitMaps/aws-iso-b/es/USD/current/es-ultrawarm.json"
+const SecretStorageUrl = "https://calculator.aws/pricing/2.0/meteredUnitMaps/aws-iso-b/es/USD/current/es-storage.json"
+
+// Top Secret Region (aws-iso) pricing URLs.
+const TopSecretInstanceUrl = "https://calculator.aws/pricing/2.0/meteredUnitMaps/aws-iso/es/USD/current/es-ultrawarm.json"
+const TopSecretStorageUrl = "https://calculator.aws/pricing/2.0/meteredUnitMaps/aws-iso/es/USD/current/es-storage.json"
 
 var PricingOptions = []string{"No Upfront", "Partial Upfront", "All Upfront"}
 var PricingTerms = []string{"1 year", "3 year"}
@@ -71,17 +90,19 @@ type ProvisionedRegion struct {
 	HotInstances  map[string]InstanceUnit `json:"hotInstances"`
 	WarmInstances map[string]InstanceUnit `json:"warmInstances"`
 	Storage       Storage                 `json:"storage"`
+	Currency      string                  `json:"currency,omitempty"`
 }
 
 // GetStorageUnitPrice returns the price per unit of the given storage class.
 //
 // Returns -1 if the storage class is not recognized.
 func (pr ProvisionedRegion) GetStorageUnitPrice(storageClass string) float64 {
-	if storageClass == "gp3" {
+	switch storageClass {
+	case "gp3":
 		return pr.Storage.Gp3.Price
-	} else if storageClass == "gp2" {
+	case "gp2":
 		return pr.Storage.Gp2.Price
-	} else if storageClass == "managedStorage" {
+	case "managedStorage":
 		return pr.Storage.ManagedStorage.Price
 	}
 	return -1

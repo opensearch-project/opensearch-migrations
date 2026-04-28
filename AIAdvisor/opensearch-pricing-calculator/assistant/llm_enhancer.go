@@ -16,11 +16,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	contentTypeJSON          = "application/json"
-	profileProductionBalanced = "production-balanced"
-)
-
 // LLMEnhancer uses AWS Bedrock to generate complete MCP request payloads
 type LLMEnhancer struct {
 	client    *bedrockruntime.Client
@@ -146,62 +141,49 @@ func (e *LLMEnhancer) Enhance(ctx context.Context, query string, initialParse *P
 }
 
 func (e *LLMEnhancer) extractParametersFromManagedRequest(managedReq map[string]interface{}, parsed *ParsedQuery) {
-	workloadConfig := findWorkloadConfig(managedReq)
+	// Try to find the workload config (search, vector, or timeSeries)
+	var workloadConfig map[string]interface{}
+
+	for _, key := range []string{"search", "vector", "timeSeries"} {
+		if config, ok := managedReq[key].(map[string]interface{}); ok {
+			workloadConfig = config
+			break
+		}
+	}
+
 	if workloadConfig == nil {
 		return
 	}
 
-	extractCommonFields(workloadConfig, parsed)
-	extractVectorFields(workloadConfig, parsed)
-	extractTimeSeriesFields(workloadConfig, parsed)
-}
-
-// findWorkloadConfig locates the workload configuration map within a managed request.
-func findWorkloadConfig(managedReq map[string]interface{}) map[string]interface{} {
-	for _, key := range []string{"search", "vector", "timeSeries"} {
-		if config, ok := managedReq[key].(map[string]interface{}); ok {
-			return config
-		}
-	}
-	return nil
-}
-
-// extractCommonFields extracts size and region from a workload config into ParsedQuery.
-func extractCommonFields(workloadConfig map[string]interface{}, parsed *ParsedQuery) {
+	// Extract common fields
 	if size, ok := workloadConfig["size"].(float64); ok {
 		parsed.Size = int(size)
 	}
 	if region, ok := workloadConfig["region"].(string); ok {
 		parsed.Region = region
 	}
-}
 
-// extractVectorFields extracts vector-specific fields from a workload config into ParsedQuery.
-func extractVectorFields(workloadConfig map[string]interface{}, parsed *ParsedQuery) {
-	if parsed.WorkloadType != "vector" {
-		return
+	// Extract vector-specific fields
+	if parsed.WorkloadType == "vector" {
+		if vc, ok := workloadConfig["vectorCount"].(float64); ok {
+			parsed.VectorCount = int(vc)
+		}
+		if dims, ok := workloadConfig["dimensionsCount"].(float64); ok {
+			parsed.Dimensions = int(dims)
+		}
+		if engine, ok := workloadConfig["vectorEngineType"].(string); ok {
+			parsed.VectorEngine = engine
+		}
 	}
-	if vc, ok := workloadConfig["vectorCount"].(float64); ok {
-		parsed.VectorCount = int(vc)
-	}
-	if dims, ok := workloadConfig["dimensionsCount"].(float64); ok {
-		parsed.Dimensions = int(dims)
-	}
-	if engine, ok := workloadConfig["vectorEngineType"].(string); ok {
-		parsed.VectorEngine = engine
-	}
-}
 
-// extractTimeSeriesFields extracts timeseries-specific fields from a workload config into ParsedQuery.
-func extractTimeSeriesFields(workloadConfig map[string]interface{}, parsed *ParsedQuery) {
-	if parsed.WorkloadType != "timeseries" && parsed.WorkloadType != "timeSeries" {
-		return
-	}
-	if hot, ok := workloadConfig["hotRetentionPeriod"].(float64); ok {
-		parsed.HotPeriod = int(hot)
-	}
-	if warm, ok := workloadConfig["warmRetentionPeriod"].(float64); ok {
-		parsed.WarmPeriod = int(warm)
+	// Extract timeseries-specific fields
+	if parsed.WorkloadType == "timeseries" || parsed.WorkloadType == "timeSeries" {
+		if hot, ok := workloadConfig["hotRetentionPeriod"].(float64); ok {
+			parsed.HotPeriod = int(hot)
+		}
+		if warm, ok := workloadConfig["warmRetentionPeriod"].(float64); ok {
+			parsed.WarmPeriod = int(warm)
+		}
 	}
 }
 
@@ -252,8 +234,13 @@ ANALYSIS STEPS:
 
 4. PARAMETER EXTRACTION
    Extract from query:
-   - Size: Data volume in GB (convert TB/PB to GB: 1TB=1024GB, 1PB=1048576GB)
-   - Region: AWS region code (default: "us-east-1")
+   - Size: NON-VECTOR document data volume in GB (convert TB/PB to GB: 1TB=1024GB, 1PB=1048576GB)
+     IMPORTANT for vector workloads: "size" is ONLY the document/metadata storage, NOT vector memory.
+     The calculator computes vector memory automatically from vectorCount × dimensionsCount.
+     Do NOT add vector memory to the size field. If the user only specifies vectors without
+     mentioning document data size, estimate metadata at 1 KB per vector
+     (e.g., 10M vectors → size=10 GB, 300M vectors → size=300 GB).
+   - Region: AWS region code (default: "us-east-1"). All commercial regions, China (cn-north-1, cn-northwest-1), Secret (us-isob-east-1, us-isob-west-1), and Top Secret (us-iso-east-1, us-iso-west-1) are supported.
    - Vector-specific: vectorCount, dimensionsCount (default: 384), vectorEngineType
    - TimeSeries-specific: hotRetentionPeriod, warmRetentionPeriod
      * RETENTION RULES:
@@ -327,7 +314,7 @@ Query: "Vector search with 10 million vectors, 768 dimensions, need high perform
   "environmentIntent": "production-performant",
   "managedRequest": {
     "vector": {
-      "size": 500,
+      "size": 50,
       "vectorCount": 10000000,
       "dimensionsCount": 768,
       "vectorEngineType": "hnswfp16",
@@ -492,6 +479,8 @@ CONTEXT ANALYSIS:
    - What the user is trying to refine or modify
 
 2. For the CURRENT QUERY, determine if it is:
+   - A CLARIFICATION question about previous results (e.g., "how did you get that number?", "why is the cost so high?", "explain the storage calculation")
+     → Do NOT generate new MCP requests. Instead return: {"clarification": true, "response": "<brief explanation based on conversation history>"}
    - A follow-up question modifying previous parameters (e.g., "what about 20M vectors instead?", "try with 3 AZs")
    - A related new question building on previous context (e.g., "what if I use serverless?", "how much for production?")
    - A completely new question (start fresh with new configuration)
@@ -579,8 +568,8 @@ func (e *LLMEnhancer) invokeModel(ctx context.Context, prompt string) (string, e
 
 	input := &bedrockruntime.InvokeModelInput{
 		ModelId:     aws.String(e.modelID),
-		ContentType: aws.String(contentTypeJSON),
-		Accept:      aws.String(contentTypeJSON),
+		ContentType: aws.String("application/json"),
+		Accept:      aws.String("application/json"),
 		Body:        requestJSON,
 	}
 
@@ -718,8 +707,8 @@ func (e *LLMEnhancer) invokeModelWithTools(ctx context.Context, systemPrompt str
 
 	input := &bedrockruntime.InvokeModelInput{
 		ModelId:     aws.String(e.modelID),
-		ContentType: aws.String(contentTypeJSON),
-		Accept:      aws.String(contentTypeJSON),
+		ContentType: aws.String("application/json"),
+		Accept:      aws.String("application/json"),
 		Body:        requestJSON,
 	}
 
@@ -739,6 +728,7 @@ func (e *LLMEnhancer) invokeModelWithTools(ctx context.Context, systemPrompt str
 
 // parseToolUseResponse extracts tool calls from Bedrock response
 func (e *LLMEnhancer) parseToolUseResponse(response map[string]interface{}, originalQuery string) (*EnhancedLLMResponse, error) {
+	// Extract content blocks
 	content, ok := response["content"].([]interface{})
 	if !ok || len(content) == 0 {
 		return nil, fmt.Errorf("no content in Bedrock response")
@@ -746,23 +736,11 @@ func (e *LLMEnhancer) parseToolUseResponse(response map[string]interface{}, orig
 
 	enhanced := &EnhancedLLMResponse{
 		RawQuery:             originalQuery,
-		Confidence:           0.95,
-		DeploymentPreference: "both",
+		Confidence:           0.95,   // High confidence for tool use
+		DeploymentPreference: "both", // Default
 	}
 
-	e.processToolUseBlocks(content, enhanced)
-
-	if enhanced.ManagedRequest == nil && enhanced.ServerlessRequest == nil {
-		return nil, fmt.Errorf("no valid tool calls in response")
-	}
-
-	e.finalizeEnhancedResponse(enhanced)
-
-	return enhanced, nil
-}
-
-// processToolUseBlocks iterates over Bedrock content blocks and routes tool_use calls.
-func (e *LLMEnhancer) processToolUseBlocks(content []interface{}, enhanced *EnhancedLLMResponse) {
+	// Process each content block
 	for _, block := range content {
 		blockMap, ok := block.(map[string]interface{})
 		if !ok {
@@ -774,35 +752,40 @@ func (e *LLMEnhancer) processToolUseBlocks(content []interface{}, enhanced *Enha
 			continue
 		}
 
+		// Extract tool name and input
 		toolName, _ := blockMap["name"].(string)
 		toolInput, ok := blockMap["input"].(map[string]interface{})
 		if !ok {
 			continue
 		}
 
+		// Add structuredResponse flag
 		toolInput["structuredResponse"] = true
-		e.routeToolCall(toolName, toolInput, enhanced)
-	}
-}
 
-// routeToolCall assigns the tool input to the appropriate field on EnhancedLLMResponse.
-func (e *LLMEnhancer) routeToolCall(toolName string, toolInput map[string]interface{}, enhanced *EnhancedLLMResponse) {
-	switch toolName {
-	case "provisioned_estimate":
-		enhanced.ManagedRequest = toolInput
-		if enhanced.WorkloadType == "" {
-			enhanced.WorkloadType = e.extractWorkloadType(toolInput)
-		}
-	case "serverless_v2_estimate":
-		enhanced.ServerlessRequest = toolInput
-		if enhanced.WorkloadType == "" {
-			enhanced.WorkloadType = e.extractWorkloadTypeFromServerless(toolInput)
+		// Route to appropriate request
+		switch toolName {
+		case "provisioned_estimate":
+			enhanced.ManagedRequest = toolInput
+			// Extract workload type from managed request
+			if enhanced.WorkloadType == "" {
+				enhanced.WorkloadType = e.extractWorkloadType(toolInput)
+			}
+
+		case "serverless_v2_estimate":
+			enhanced.ServerlessRequest = toolInput
+			// Extract workload type from serverless request if not set
+			if enhanced.WorkloadType == "" {
+				enhanced.WorkloadType = e.extractWorkloadTypeFromServerless(toolInput)
+			}
 		}
 	}
-}
 
-// finalizeEnhancedResponse sets deployment preference and environment intent based on populated fields.
-func (e *LLMEnhancer) finalizeEnhancedResponse(enhanced *EnhancedLLMResponse) {
+	// Validate that we got at least one tool call
+	if enhanced.ManagedRequest == nil && enhanced.ServerlessRequest == nil {
+		return nil, fmt.Errorf("no valid tool calls in response")
+	}
+
+	// Set deployment preference based on which tools were called
 	if enhanced.ManagedRequest != nil && enhanced.ServerlessRequest != nil {
 		enhanced.DeploymentPreference = "both"
 	} else if enhanced.ManagedRequest != nil {
@@ -811,9 +794,12 @@ func (e *LLMEnhancer) finalizeEnhancedResponse(enhanced *EnhancedLLMResponse) {
 		enhanced.DeploymentPreference = "serverless"
 	}
 
+	// Extract environment intent from managed request if available
 	if enhanced.ManagedRequest != nil {
 		enhanced.EnvironmentIntent = e.extractEnvironmentIntent(enhanced.ManagedRequest)
 	}
+
+	return enhanced, nil
 }
 
 // extractWorkloadType determines workload type from provisioned request
@@ -856,7 +842,7 @@ func (e *LLMEnhancer) extractEnvironmentIntent(request map[string]interface{}) s
 	}
 
 	if workloadConfig == nil {
-		return profileProductionBalanced
+		return "production-balanced"
 	}
 
 	// Infer from configuration parameters
@@ -880,7 +866,7 @@ func (e *LLMEnhancer) extractEnvironmentIntent(request map[string]interface{}) s
 	}
 
 	// Default: production-balanced
-	return profileProductionBalanced
+	return "production-balanced"
 }
 
 func (e *LLMEnhancer) parseEnhancedResponse(response string, originalQuery string) (*EnhancedLLMResponse, error) {
@@ -901,7 +887,25 @@ func (e *LLMEnhancer) parseEnhancedResponse(response string, originalQuery strin
 		cleanedResponse = strings.TrimSpace(cleanedResponse)
 	}
 
-	// Parse JSON response
+	// Parse JSON response — first check if it's a clarification response
+	var rawResponse map[string]interface{}
+	if err := json.Unmarshal([]byte(cleanedResponse), &rawResponse); err != nil {
+		return nil, fmt.Errorf("failed to parse LLM JSON response: %w (response: %s)", err, cleanedResponse)
+	}
+
+	// Handle clarification responses (non-estimation follow-ups)
+	if isClarification, _ := rawResponse["clarification"].(bool); isClarification {
+		clarificationText, _ := rawResponse["response"].(string)
+		if clarificationText == "" {
+			clarificationText = "I can help clarify. Could you rephrase your question?"
+		}
+		return &EnhancedLLMResponse{
+			RawQuery:      originalQuery,
+			Confidence:    0.95,
+			Clarification: clarificationText,
+		}, nil
+	}
+
 	var enhanced EnhancedLLMResponse
 	if err := json.Unmarshal([]byte(cleanedResponse), &enhanced); err != nil {
 		return nil, fmt.Errorf("failed to parse LLM JSON response: %w (response: %s)", err, cleanedResponse)
@@ -915,7 +919,7 @@ func (e *LLMEnhancer) parseEnhancedResponse(response string, originalQuery strin
 		enhanced.DeploymentPreference = "both" // Default
 	}
 	if enhanced.EnvironmentIntent == "" {
-		enhanced.EnvironmentIntent = profileProductionBalanced // Default
+		enhanced.EnvironmentIntent = "production-balanced" // Default
 	}
 
 	// Set confidence based on completeness

@@ -10,18 +10,13 @@ import (
 	"testing"
 )
 
-const (
-	testClusterName = "test-cluster"
-	testVersion     = "2.11.0"
-)
-
 func TestAnalyze(t *testing.T) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
-			"cluster_name": testClusterName,
-			"version":      map[string]string{"number": testVersion, "distribution": "opensearch"},
+			"cluster_name": "test-cluster",
+			"version":      map[string]string{"number": "2.11.0", "distribution": "opensearch"},
 		})
 	})
 
@@ -66,11 +61,11 @@ func TestAnalyze(t *testing.T) {
 		t.Fatalf("Analyze() failed: %v", err)
 	}
 
-	if metrics.ClusterName != testClusterName {
-		t.Errorf("ClusterName = %q, want %q", metrics.ClusterName, testClusterName)
+	if metrics.ClusterName != "test-cluster" {
+		t.Errorf("ClusterName = %q, want %q", metrics.ClusterName, "test-cluster")
 	}
-	if metrics.Version != testVersion {
-		t.Errorf("Version = %q, want %q", metrics.Version, testVersion)
+	if metrics.Version != "2.11.0" {
+		t.Errorf("Version = %q, want %q", metrics.Version, "2.11.0")
 	}
 	if metrics.NodeCount != 6 {
 		t.Errorf("NodeCount = %d, want 6", metrics.NodeCount)
@@ -95,7 +90,7 @@ func TestAnalyze(t *testing.T) {
 	}
 }
 
-func TestAnalyzeTimeSeries(t *testing.T) {
+func TestAnalyze_TimeSeries(t *testing.T) {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

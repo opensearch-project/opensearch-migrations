@@ -73,10 +73,10 @@ func generateFollowUpQuestion(workloadType string, missingParams []string, requi
 	workloadTypeName := getWorkloadDisplayName(workloadType)
 
 	var question strings.Builder
-	question.WriteString(fmt.Sprintf("I need some additional information to estimate costs for your **%s** workload:\n\n", workloadTypeName))
+	fmt.Fprintf(&question, "I need some additional information to estimate costs for your **%s** workload:\n\n", workloadTypeName)
 
 	for i, part := range parts {
-		question.WriteString(fmt.Sprintf("%d. %s\n", i+1, part))
+		fmt.Fprintf(&question, "%d. %s\n", i+1, part)
 	}
 
 	question.WriteString("\nPlease provide the missing information and I'll calculate the cost estimate for you.")

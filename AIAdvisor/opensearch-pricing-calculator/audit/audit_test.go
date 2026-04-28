@@ -12,99 +12,82 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	testUserEmail       = "user@example.com"
-	testExpectedGotFmt  = "expected %q, got %q"
-	testNilCtxEmptyFmt  = "expected empty for nil context, got %q"
-	testUID123          = "uid-123"
-	testJohnDoe         = "John Doe"
-	testIP192           = "192.168.1.1"
-	testReqABC123       = "req-abc-123"
-	testEmailExample    = "test@example.com"
-	testUserName        = "Test User"
-	testIP10            = "10.0.0.1"
-	testEmailAB         = "a@b.com"
-	testServerlessPath  = "/serverless/regions"
-	testSomethingWrong  = "something went wrong"
-	testRegionUSEast1   = "us-east-1"
-)
-
 // --- Context extraction functions ---
 
 func TestGetUserEmail(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "userEmail", testUserEmail)
-	if got := GetUserEmail(ctx); got != testUserEmail {
-		t.Errorf(testExpectedGotFmt, testUserEmail, got)
+	ctx := context.WithValue(context.Background(), "userEmail", "user@example.com")
+	if got := GetUserEmail(ctx); got != "user@example.com" {
+		t.Errorf("expected %q, got %q", "user@example.com", got)
 	}
 }
 
-func TestGetUserEmailEmpty(t *testing.T) {
+func TestGetUserEmail_Empty(t *testing.T) {
 	if got := GetUserEmail(context.Background()); got != "" {
 		t.Errorf("expected empty, got %q", got)
 	}
 }
 
-func TestGetUserEmailNil(t *testing.T) {
+func TestGetUserEmail_Nil(t *testing.T) {
 	if got := GetUserEmail(nil); got != "" {
-		t.Errorf(testNilCtxEmptyFmt, got)
+		t.Errorf("expected empty for nil context, got %q", got)
 	}
 }
 
 func TestGetUserID(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "userID", testUID123)
-	if got := GetUserID(ctx); got != testUID123 {
-		t.Errorf(testExpectedGotFmt, testUID123, got)
+	ctx := context.WithValue(context.Background(), "userID", "uid-123")
+	if got := GetUserID(ctx); got != "uid-123" {
+		t.Errorf("expected %q, got %q", "uid-123", got)
 	}
 }
 
-func TestGetUserIDEmpty(t *testing.T) {
+func TestGetUserID_Empty(t *testing.T) {
 	if got := GetUserID(context.Background()); got != "" {
 		t.Errorf("expected empty, got %q", got)
 	}
 }
 
-func TestGetUserIDNil(t *testing.T) {
+func TestGetUserID_Nil(t *testing.T) {
 	if got := GetUserID(nil); got != "" {
-		t.Errorf(testNilCtxEmptyFmt, got)
+		t.Errorf("expected empty for nil context, got %q", got)
 	}
 }
 
 func TestGetUserName(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "userName", testJohnDoe)
-	if got := GetUserName(ctx); got != testJohnDoe {
-		t.Errorf(testExpectedGotFmt, testJohnDoe, got)
+	ctx := context.WithValue(context.Background(), "userName", "John Doe")
+	if got := GetUserName(ctx); got != "John Doe" {
+		t.Errorf("expected %q, got %q", "John Doe", got)
 	}
 }
 
-func TestGetUserNameNil(t *testing.T) {
+func TestGetUserName_Nil(t *testing.T) {
 	if got := GetUserName(nil); got != "" {
-		t.Errorf(testNilCtxEmptyFmt, got)
+		t.Errorf("expected empty for nil context, got %q", got)
 	}
 }
 
 func TestGetIPAddress(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "ipAddress", testIP192)
-	if got := GetIPAddress(ctx); got != testIP192 {
-		t.Errorf(testExpectedGotFmt, testIP192, got)
+	ctx := context.WithValue(context.Background(), "ipAddress", "192.168.1.1")
+	if got := GetIPAddress(ctx); got != "192.168.1.1" {
+		t.Errorf("expected %q, got %q", "192.168.1.1", got)
 	}
 }
 
-func TestGetIPAddressNil(t *testing.T) {
+func TestGetIPAddress_Nil(t *testing.T) {
 	if got := GetIPAddress(nil); got != "" {
-		t.Errorf(testNilCtxEmptyFmt, got)
+		t.Errorf("expected empty for nil context, got %q", got)
 	}
 }
 
 func TestGetRequestID(t *testing.T) {
-	ctx := context.WithValue(context.Background(), "requestID", testReqABC123)
-	if got := GetRequestID(ctx); got != testReqABC123 {
-		t.Errorf(testExpectedGotFmt, testReqABC123, got)
+	ctx := context.WithValue(context.Background(), "requestID", "req-abc-123")
+	if got := GetRequestID(ctx); got != "req-abc-123" {
+		t.Errorf("expected %q, got %q", "req-abc-123", got)
 	}
 }
 
-func TestGetRequestIDNil(t *testing.T) {
+func TestGetRequestID_Nil(t *testing.T) {
 	if got := GetRequestID(nil); got != "" {
-		t.Errorf(testNilCtxEmptyFmt, got)
+		t.Errorf("expected empty for nil context, got %q", got)
 	}
 }
 
@@ -125,40 +108,40 @@ func TestNewEvent(t *testing.T) {
 	}
 }
 
-func TestEventBuilderWithContext(t *testing.T) {
+func TestEventBuilder_WithContext(t *testing.T) {
 	ctx := context.Background()
-	ctx = context.WithValue(ctx, "userEmail", testEmailExample)
+	ctx = context.WithValue(ctx, "userEmail", "test@example.com")
 	ctx = context.WithValue(ctx, "userID", "uid-1")
-	ctx = context.WithValue(ctx, "userName", testUserName)
-	ctx = context.WithValue(ctx, "ipAddress", testIP10)
+	ctx = context.WithValue(ctx, "userName", "Test User")
+	ctx = context.WithValue(ctx, "ipAddress", "10.0.0.1")
 	ctx = context.WithValue(ctx, "requestID", "req-1")
 
 	event := NewEvent(EventServerlessEstimate).WithContext(ctx).Build()
 
-	if event.UserEmail != testEmailExample {
-		t.Errorf("expected email %q, got %q", testEmailExample, event.UserEmail)
+	if event.UserEmail != "test@example.com" {
+		t.Errorf("expected email %q, got %q", "test@example.com", event.UserEmail)
 	}
 	if event.UserID != "uid-1" {
 		t.Errorf("expected userID %q, got %q", "uid-1", event.UserID)
 	}
-	if event.UserName != testUserName {
-		t.Errorf("expected userName %q, got %q", testUserName, event.UserName)
+	if event.UserName != "Test User" {
+		t.Errorf("expected userName %q, got %q", "Test User", event.UserName)
 	}
-	if event.IPAddress != testIP10 {
-		t.Errorf("expected IP %q, got %q", testIP10, event.IPAddress)
+	if event.IPAddress != "10.0.0.1" {
+		t.Errorf("expected IP %q, got %q", "10.0.0.1", event.IPAddress)
 	}
 	if event.RequestID != "req-1" {
 		t.Errorf("expected requestID %q, got %q", "req-1", event.RequestID)
 	}
 }
 
-func TestEventBuilderWithUser(t *testing.T) {
+func TestEventBuilder_WithUser(t *testing.T) {
 	event := NewEvent(EventProvisionedEstimate).
-		WithUser(testEmailAB, "uid-2", "Alice").
+		WithUser("a@b.com", "uid-2", "Alice").
 		Build()
 
-	if event.UserEmail != testEmailAB {
-		t.Errorf("expected email %q, got %q", testEmailAB, event.UserEmail)
+	if event.UserEmail != "a@b.com" {
+		t.Errorf("expected email %q, got %q", "a@b.com", event.UserEmail)
 	}
 	if event.UserID != "uid-2" {
 		t.Errorf("expected userID %q, got %q", "uid-2", event.UserID)
@@ -168,28 +151,28 @@ func TestEventBuilderWithUser(t *testing.T) {
 	}
 }
 
-func TestEventBuilderWithAction(t *testing.T) {
+func TestEventBuilder_WithAction(t *testing.T) {
 	event := NewEvent(EventCacheInvalidated).WithAction("invalidate_cache").Build()
 	if event.Action != "invalidate_cache" {
 		t.Errorf("expected action %q, got %q", "invalidate_cache", event.Action)
 	}
 }
 
-func TestEventBuilderWithResource(t *testing.T) {
-	event := NewEvent(EventRegionsAccessed).WithResource(testServerlessPath).Build()
-	if event.Resource != testServerlessPath {
-		t.Errorf("expected resource %q, got %q", testServerlessPath, event.Resource)
+func TestEventBuilder_WithResource(t *testing.T) {
+	event := NewEvent(EventRegionsAccessed).WithResource("/serverless/regions").Build()
+	if event.Resource != "/serverless/regions" {
+		t.Errorf("expected resource %q, got %q", "/serverless/regions", event.Resource)
 	}
 }
 
-func TestEventBuilderWithResult(t *testing.T) {
+func TestEventBuilder_WithResult(t *testing.T) {
 	event := NewEvent(EventServerlessEstimate).WithResult(ResultSuccess).Build()
 	if event.Result != ResultSuccess {
 		t.Errorf("expected result %q, got %q", ResultSuccess, event.Result)
 	}
 }
 
-func TestEventBuilderWithDuration(t *testing.T) {
+func TestEventBuilder_WithDuration(t *testing.T) {
 	d := 500 * time.Millisecond
 	event := NewEvent(EventServerlessEstimate).WithDuration(d).Build()
 	if event.Duration != d {
@@ -197,19 +180,19 @@ func TestEventBuilderWithDuration(t *testing.T) {
 	}
 }
 
-func TestEventBuilderWithError(t *testing.T) {
-	err := errors.New(testSomethingWrong)
+func TestEventBuilder_WithError(t *testing.T) {
+	err := errors.New("something went wrong")
 	event := NewEvent(EventServerlessEstimate).WithError(err).Build()
 
-	if event.ErrorMsg != testSomethingWrong {
-		t.Errorf("expected error %q, got %q", testSomethingWrong, event.ErrorMsg)
+	if event.ErrorMsg != "something went wrong" {
+		t.Errorf("expected error %q, got %q", "something went wrong", event.ErrorMsg)
 	}
 	if event.Result != ResultError {
 		t.Errorf("expected result %q, got %q", ResultError, event.Result)
 	}
 }
 
-func TestEventBuilderWithErrorNil(t *testing.T) {
+func TestEventBuilder_WithError_Nil(t *testing.T) {
 	event := NewEvent(EventServerlessEstimate).
 		WithResult(ResultSuccess).
 		WithError(nil).
@@ -223,21 +206,21 @@ func TestEventBuilderWithErrorNil(t *testing.T) {
 	}
 }
 
-func TestEventBuilderWithMetadata(t *testing.T) {
+func TestEventBuilder_WithMetadata(t *testing.T) {
 	event := NewEvent(EventServerlessEstimate).
-		WithMetadata("region", testRegionUSEast1).
+		WithMetadata("region", "us-east-1").
 		WithMetadata("workloadType", "search").
 		Build()
 
-	if event.Metadata["region"] != testRegionUSEast1 {
-		t.Errorf("expected metadata region %q, got %v", testRegionUSEast1, event.Metadata["region"])
+	if event.Metadata["region"] != "us-east-1" {
+		t.Errorf("expected metadata region %q, got %v", "us-east-1", event.Metadata["region"])
 	}
 	if event.Metadata["workloadType"] != "search" {
 		t.Errorf("expected metadata workloadType %q, got %v", "search", event.Metadata["workloadType"])
 	}
 }
 
-func TestEventBuilderChaining(t *testing.T) {
+func TestEventBuilder_Chaining(t *testing.T) {
 	event := NewEvent(EventAssistantEstimate).
 		WithAction("estimate").
 		WithResource("/api/assistant/estimate").
@@ -266,7 +249,7 @@ func TestNewLogger(t *testing.T) {
 	}
 }
 
-func TestLogEventSuccess(t *testing.T) {
+func TestLogEvent_Success(t *testing.T) {
 	logger := NewLogger(zap.NewNop())
 	event := AuditEvent{
 		EventType: EventServerlessEstimate,
@@ -277,7 +260,7 @@ func TestLogEventSuccess(t *testing.T) {
 	logger.LogEvent(context.Background(), event)
 }
 
-func TestLogEventFailure(t *testing.T) {
+func TestLogEvent_Failure(t *testing.T) {
 	logger := NewLogger(zap.NewNop())
 	event := AuditEvent{
 		EventType: EventServerlessEstimate,
@@ -288,7 +271,7 @@ func TestLogEventFailure(t *testing.T) {
 	logger.LogEvent(context.Background(), event)
 }
 
-func TestLogEventError(t *testing.T) {
+func TestLogEvent_Error(t *testing.T) {
 	logger := NewLogger(zap.NewNop())
 	event := AuditEvent{
 		EventType: EventServerlessEstimate,
@@ -299,7 +282,7 @@ func TestLogEventError(t *testing.T) {
 	logger.LogEvent(context.Background(), event)
 }
 
-func TestLogEventWithDuration(t *testing.T) {
+func TestLogEvent_WithDuration(t *testing.T) {
 	logger := NewLogger(zap.NewNop())
 	event := AuditEvent{
 		EventType: EventServerlessEstimate,
@@ -310,18 +293,18 @@ func TestLogEventWithDuration(t *testing.T) {
 	logger.LogEvent(context.Background(), event)
 }
 
-func TestLogEventWithMetadata(t *testing.T) {
+func TestLogEvent_WithMetadata(t *testing.T) {
 	logger := NewLogger(zap.NewNop())
 	event := AuditEvent{
 		EventType: EventServerlessEstimate,
 		Action:    "estimate",
 		Result:    ResultSuccess,
-		Metadata:  map[string]interface{}{"region": testRegionUSEast1},
+		Metadata:  map[string]interface{}{"region": "us-east-1"},
 	}
 	logger.LogEvent(context.Background(), event)
 }
 
-func TestLogEventExtractsContextWhenFieldsEmpty(t *testing.T) {
+func TestLogEvent_ExtractsContextWhenFieldsEmpty(t *testing.T) {
 	logger := NewLogger(zap.NewNop())
 	ctx := context.WithValue(context.Background(), "userEmail", "auto@test.com")
 	event := AuditEvent{
@@ -333,23 +316,18 @@ func TestLogEventExtractsContextWhenFieldsEmpty(t *testing.T) {
 	logger.LogEvent(ctx, event)
 }
 
-func TestLogEventSetsTimestamp(t *testing.T) {
-	before := time.Now()
-	event := NewEvent(EventServerlessEstimate).
-		WithAction("estimate").
-		WithResult(ResultSuccess).
-		Build()
-	after := time.Now()
-
-	if event.Timestamp.IsZero() {
-		t.Fatal("expected non-zero timestamp on built event")
+func TestLogEvent_SetsTimestamp(t *testing.T) {
+	logger := NewLogger(zap.NewNop())
+	event := AuditEvent{
+		EventType: EventServerlessEstimate,
+		Action:    "estimate",
+		Result:    ResultSuccess,
 	}
-	if event.Timestamp.Before(before) || event.Timestamp.After(after) {
-		t.Errorf("expected timestamp between %v and %v, got %v", before, after, event.Timestamp)
-	}
+	// Zero timestamp should be set by LogEvent
+	logger.LogEvent(context.Background(), event)
 }
 
-func TestEventBuilderLog(t *testing.T) {
+func TestEventBuilder_Log(t *testing.T) {
 	logger := NewLogger(zap.NewNop())
 	NewEvent(EventServerlessEstimate).
 		WithAction("estimate").

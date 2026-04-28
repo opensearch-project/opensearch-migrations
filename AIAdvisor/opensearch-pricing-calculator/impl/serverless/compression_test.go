@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestGetCompressionMultiplierNoCompression(t *testing.T) {
+func TestGetCompressionMultiplier_NoCompression(t *testing.T) {
 	// When no compression is enabled, multiplier should be 1.0
 	multiplier := commons.GetCompressionMultiplier(false, false, commons.TimeSeriesCompressionRatios)
 	if multiplier != 1.0 {
@@ -17,7 +17,7 @@ func TestGetCompressionMultiplierNoCompression(t *testing.T) {
 	}
 }
 
-func TestGetCompressionMultiplierDerivedSourceOnlyTimeSeries(t *testing.T) {
+func TestGetCompressionMultiplier_DerivedSourceOnly_TimeSeries(t *testing.T) {
 	// Derived source only should reduce storage by 30% for timeseries
 	multiplier := commons.GetCompressionMultiplier(true, false, commons.TimeSeriesCompressionRatios)
 	expected := 0.70 // 1 - 0.30
@@ -26,7 +26,7 @@ func TestGetCompressionMultiplierDerivedSourceOnlyTimeSeries(t *testing.T) {
 	}
 }
 
-func TestGetCompressionMultiplierZstdOnlyTimeSeries(t *testing.T) {
+func TestGetCompressionMultiplier_ZstdOnly_TimeSeries(t *testing.T) {
 	// ZSTD only should reduce storage by 20% for timeseries
 	multiplier := commons.GetCompressionMultiplier(false, true, commons.TimeSeriesCompressionRatios)
 	expected := 0.80 // 1 - 0.20
@@ -35,7 +35,7 @@ func TestGetCompressionMultiplierZstdOnlyTimeSeries(t *testing.T) {
 	}
 }
 
-func TestGetCompressionMultiplierBothCompressionsTimeSeries(t *testing.T) {
+func TestGetCompressionMultiplier_BothCompressions_TimeSeries(t *testing.T) {
 	// Both compressions should be multiplicative: (1-0.30) * (1-0.20) = 0.56
 	multiplier := commons.GetCompressionMultiplier(true, true, commons.TimeSeriesCompressionRatios)
 	expected := 0.56 // 0.70 * 0.80
@@ -44,7 +44,7 @@ func TestGetCompressionMultiplierBothCompressionsTimeSeries(t *testing.T) {
 	}
 }
 
-func TestGetCompressionMultiplierDerivedSourceOnlySearch(t *testing.T) {
+func TestGetCompressionMultiplier_DerivedSourceOnly_Search(t *testing.T) {
 	// Derived source only should reduce storage by 25% for search
 	multiplier := commons.GetCompressionMultiplier(true, false, commons.SearchCompressionRatios)
 	expected := 0.75 // 1 - 0.25
@@ -53,7 +53,7 @@ func TestGetCompressionMultiplierDerivedSourceOnlySearch(t *testing.T) {
 	}
 }
 
-func TestGetCompressionMultiplierZstdOnlySearch(t *testing.T) {
+func TestGetCompressionMultiplier_ZstdOnly_Search(t *testing.T) {
 	// ZSTD only should reduce storage by 15% for search
 	multiplier := commons.GetCompressionMultiplier(false, true, commons.SearchCompressionRatios)
 	expected := 0.85 // 1 - 0.15
@@ -62,7 +62,7 @@ func TestGetCompressionMultiplierZstdOnlySearch(t *testing.T) {
 	}
 }
 
-func TestGetCompressionMultiplierBothCompressionsSearch(t *testing.T) {
+func TestGetCompressionMultiplier_BothCompressions_Search(t *testing.T) {
 	// Both compressions should be multiplicative: (1-0.25) * (1-0.15) = 0.6375
 	multiplier := commons.GetCompressionMultiplier(true, true, commons.SearchCompressionRatios)
 	expected := 0.6375 // 0.75 * 0.85
@@ -71,7 +71,7 @@ func TestGetCompressionMultiplierBothCompressionsSearch(t *testing.T) {
 	}
 }
 
-func TestGetCompressionMultiplierVectorRatios(t *testing.T) {
+func TestGetCompressionMultiplier_VectorRatios(t *testing.T) {
 	// Vector uses TimeSeries ratios for non-vector data storage
 	// This applies compression to document/metadata, not the vector graph
 	tests := []struct {
@@ -97,7 +97,7 @@ func TestGetCompressionMultiplierVectorRatios(t *testing.T) {
 	}
 }
 
-func TestTimeSeriesCompressionApplied(t *testing.T) {
+func TestTimeSeries_CompressionApplied(t *testing.T) {
 	// Test that compression is applied to TimeSeries storage calculations
 	baseTimeSeries := TimeSeries{
 		DailyIndexSize:  100, // 100 GB per day
@@ -135,7 +135,7 @@ func TestTimeSeriesCompressionApplied(t *testing.T) {
 	}
 }
 
-func TestTimeSeriesBothCompressionsApplied(t *testing.T) {
+func TestTimeSeries_BothCompressionsApplied(t *testing.T) {
 	// Test that both compressions are applied multiplicatively
 	baseTimeSeries := TimeSeries{
 		DailyIndexSize:  100,
@@ -164,7 +164,7 @@ func TestTimeSeriesBothCompressionsApplied(t *testing.T) {
 	}
 }
 
-func TestSearchCompressionApplied(t *testing.T) {
+func TestSearch_CompressionApplied(t *testing.T) {
 	// Test that compression is applied to Search storage calculations
 	baseSearch := Search{
 		CollectionSize:  500, // 500 GB
