@@ -145,3 +145,18 @@ parameters:
             assert "parameters" in sample
             assert "message" in sample
             assert "requiresApproval" in sample
+
+    def test_get_sample_config_uses_override_path(self, monkeypatch):
+        """Test get_sample_config prefers MIGRATION_SAMPLE_CONFIG_PATH when set."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            sample_file = temp_path / "generated-sample.yaml"
+            custom_content = "parameters:\n  message: \"from override\"\n"
+            sample_file.write_text(custom_content)
+
+            monkeypatch.setenv("MIGRATION_SAMPLE_CONFIG_PATH", str(sample_file))
+            runner = ScriptRunner(script_dir=temp_path)
+
+            sample = runner.get_sample_config()
+
+            assert sample == custom_content

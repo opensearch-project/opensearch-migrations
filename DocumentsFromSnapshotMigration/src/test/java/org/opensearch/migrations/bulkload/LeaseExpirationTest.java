@@ -4,16 +4,20 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.CreateSnapshot;
+import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
+import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.data.IndexOptions;
 import org.opensearch.migrations.data.WorkloadGenerator;
 import org.opensearch.migrations.data.WorkloadOptions;
@@ -28,6 +32,8 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -36,22 +42,24 @@ import org.testcontainers.containers.Network;
 import static org.opensearch.migrations.bulkload.CustomRfsTransformationTest.SNAPSHOT_NAME;
 
 @Tag("isolatedTest")
+@Timeout(value = 10, unit = TimeUnit.MINUTES)
 @Slf4j
 public class LeaseExpirationTest extends SourceTestBase {
 
+    public static final String COORDINATOR_DOCKER_HOSTNAME = "coordinator";
     public static final String TARGET_DOCKER_HOSTNAME = "target";
+    private static final String DEFAULT_COORDINATOR_INDEX_SUFFIX = "";
 
     private static Stream<Arguments> testParameters() {
+        // Lease expiration tests target-side work coordination behavior.
+        // Source version is fixed (ES 7.10 is the most common migration path).
+        // Parameterize on target versions for O(N) coverage.
+        var source = SearchClusterContainer.ES_V7_10_2;
         return Stream.concat(
-                // Test with all pairs with forceMoreSegments=false
-                SupportedClusters.supportedPairs(true).stream()
-                        // Skiping ES 2 as it requires the javascript transformer to convert "string"
-                        .filter(migrationPair -> !VersionMatchers.isES_2_X.test(migrationPair.source().getVersion()))
-                        .filter(migrationPair -> !VersionMatchers.isES_1_X.test(migrationPair.source().getVersion()))
-                        .map(migrationPair ->
-                                Arguments.of(false, migrationPair.source(), migrationPair.target())),
-                // Add test for ES 7 -> OS 2 with forceMoreSegments=true
-                Stream.of(Arguments.of(true, SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V2_19_4))
+                SupportedClusters.targets().stream()
+                        .map(target -> Arguments.of(false, source, target)),
+                // Add test with forceMoreSegments=true to exercise segment ordering logic
+                Stream.of(Arguments.of(true, source, SearchClusterContainer.OS_V2_19_4))
         );
     }
 
@@ -60,8 +68,9 @@ public class LeaseExpirationTest extends SourceTestBase {
     public void testProcessExitsAsExpected(boolean forceMoreSegments,
                                            SearchClusterContainer.ContainerVersion sourceClusterVersion,
                                            SearchClusterContainer.ContainerVersion targetClusterVersion) {
-        // Sending 10 docs per request with 2 requests concurrently with each taking 1 second is 40 docs/sec
-        // will process 1640 docs in 21 seconds. With 10s lease duration, expect to be finished in 3 leases.
+        // With 10 docs/bulk, 2 connections, 500ms latency, results in ~40 docs/sec throughput.
+        // Lease is PT27s with early trigger at 75% = ~20s effective work time.
+        // ~20s × 40 docs/sec = ~800 docs/lease. 1640 docs/shard needs ~3 leases (2 handoffs + 1 completion).
         // This is ensured with the toxiproxy settings, the migration should not be able to be completed
         // faster, but with a heavily loaded test environment, may be slower which is why this is marked as
         // isolated.
@@ -150,6 +159,7 @@ public class LeaseExpirationTest extends SourceTestBase {
             // Create the snapshot from the source cluster
             var args = new CreateSnapshot.Args();
             args.snapshotName = SNAPSHOT_NAME;
+            args.snapshotRepoName = SNAPSHOT_NAME + "_repo";
             args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
             args.sourceArgs.host = esSourceContainer.getUrl();
 
@@ -172,10 +182,6 @@ public class LeaseExpirationTest extends SourceTestBase {
                 FileSystemUtils.deleteDirectories(tempDirLucene.toString());
             } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < expectedInitialExitCodeCount + expectedEventualExitCodeCount);
 
-            // Assert doc count on the target cluster matches source
-            checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer,
-                    DocumentMigrationTestContext.factory().noOtelTracking());
-
             // Check if the final exit code is as expected
             Assertions.assertEquals(
                     expectedEventualExitCodeCount,
@@ -194,6 +200,10 @@ public class LeaseExpirationTest extends SourceTestBase {
                     initialExitCodeCount,
                     "The program did not exit with the expected number of " + expectedInitialExitCode +" exit codes"
             );
+
+            // Assert doc count on the target cluster matches source
+            checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer,
+                    DocumentMigrationTestContext.factory().noOtelTracking());
         } finally {
             FileSystemUtils.deleteDirectories(tempDirSnapshot.toString());
         }
@@ -211,13 +221,23 @@ public class LeaseExpirationTest extends SourceTestBase {
         var tp = proxyContainer.getProxy();
         var latency = tp.toxics().latency("latency-toxic", ToxicDirection.UPSTREAM, 500);
 
-        // Set to less than 2x lease time to ensure leases aren't doubling
-        int timeoutSeconds = 35;
+        // With 10 docs/bulk, 2 connections, 500ms latency, effective throughput is ~40 docs/sec.
+        // The anticipated effective work time per lease is the time the worker actually processes
+        // documents before the early checkpoint trigger fires.
+        int anticipatedEffectiveWorkSeconds = 20;
+        double earlyTriggerFraction = 0.75;
+        // Lease duration is set so that the 75% early trigger mark equals the anticipated work time:
+        //   anticipatedEffectiveWorkSeconds / earlyTriggerFraction = 20 / 0.75 ≈ 26.67 → round to 27s
+        // Early trigger fires at: 27 * 0.75 = 20.25s ≈ anticipated effective work time
+        long leaseDurationSeconds = Math.round(anticipatedEffectiveWorkSeconds / earlyTriggerFraction);
+
+        // Less than 2x lease duration to ensure leases aren't doubling
+        int timeoutSeconds = (int) (leaseDurationSeconds * 2 - 1);
 
         String[] additionalArgs = {
             "--documents-per-bulk-request", "10",
             "--max-connections", "2",
-            "--initial-lease-duration", "PT20s",
+            "--initial-lease-duration", "PT" + leaseDurationSeconds + "s",
             "--source-version", sourceClusterVersion.getVersion().toString()
         };
 
@@ -229,20 +249,161 @@ public class LeaseExpirationTest extends SourceTestBase {
         );
 
         var process = runAndMonitorProcess(processBuilder);
-        boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
-        if (!finished) {
-            log.atError().setMessage("Process timed out, attempting to kill it...").log();
-            process.destroy(); // Try to be nice about things first...
-            if (!process.waitFor(10, TimeUnit.SECONDS)) {
-                log.atError().setMessage("Process still running, attempting to force kill it...").log();
-                process.destroyForcibly();
-            }
-            Assertions.fail("The process did not finish within the timeout period (" + timeoutSeconds + " seconds).");
-        }
+        int exitCode = waitForProcessExit(process, timeoutSeconds);
 
         latency.remove();
 
-        return process.exitValue();
+        return exitCode;
     }
 
+    /**
+     * Verifies early lease-timeout handoff during a transient coordinator outage.
+     *
+     * Setup: 80 docs at ~1 doc/sec with PT60s lease. Coordinator is disabled at t=40s and
+     * re-enabled at t=48s. Expected behavior is early trigger at t=45s, worker exit with
+     * PROCESS_TIMED_OUT (2), and persisted successor checkpoint in the early-trigger range
+     * (distinct from lease-expiry behavior).
+     */
+    @Test
+    @SneakyThrows
+    public void testEarlyCheckpointPersistedBeforeLeaseExpiry() {
+        final int TOTAL_DOCS = 80;
+        final int SHARDS = 1;
+        final int COORDINATOR_DISABLE_AFTER_SECONDS = 40;
+        final int COORDINATOR_REENABLE_AFTER_SECONDS = 8; // re-enabled at t=48s, within lease window
+
+        final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        var tempDirSnapshot = Files.createTempDirectory("earlyCheckpoint_snapshot");
+        var tempDirLucene = Files.createTempDirectory("earlyCheckpoint_lucene");
+
+        try (
+            var network = Network.newNetwork();
+            var esSourceContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2)
+                .withAccessToHost(true);
+            var osTargetContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
+                .withAccessToHost(true).withNetwork(network).withNetworkAliases(TARGET_DOCKER_HOSTNAME);
+            var osCoordinatorContainer = new SearchClusterContainer(SearchClusterContainer.OS_LATEST)
+                .withAccessToHost(true).withNetwork(network).withNetworkAliases(COORDINATOR_DOCKER_HOSTNAME);
+            var targetProxy = new ToxiProxyWrapper(network);
+            var coordinatorProxy = new ToxiProxyWrapper(network)
+        ) {
+            CompletableFuture.allOf(
+                CompletableFuture.runAsync(esSourceContainer::start),
+                CompletableFuture.runAsync(osTargetContainer::start),
+                CompletableFuture.runAsync(osCoordinatorContainer::start)
+            ).join();
+
+            targetProxy.start(TARGET_DOCKER_HOSTNAME, 9200);
+            coordinatorProxy.start(COORDINATOR_DOCKER_HOSTNAME, 9200);
+
+            // Populate source cluster
+            var sourceClusterOperations = new ClusterOperations(esSourceContainer);
+            sourceClusterOperations.createIndex("geonames",
+                "{\"settings\":{\"index\":{\"number_of_shards\":" + SHARDS + ",\"number_of_replicas\":0}}}");
+            for (int i = 1; i <= TOTAL_DOCS; i++) {
+                sourceClusterOperations.createDocument("geonames", String.valueOf(i),
+                    "{\"name\":\"doc-" + i + "\",\"score\":" + i + "}");
+            }
+            sourceClusterOperations.refresh();
+
+            // Create snapshot
+            createSnapshot(esSourceContainer, SNAPSHOT_NAME, testSnapshotContext);
+            esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
+
+            var targetOps = new ClusterOperations(osTargetContainer);
+            var coordinatorOps = new ClusterOperations(osCoordinatorContainer);
+            var coordinatorIndexName = OpenSearchWorkCoordinator.getFinalIndexName(DEFAULT_COORDINATOR_INDEX_SUFFIX);
+
+            // Two scheduled events: disable at t=40s, re-enable at t=48s
+            var scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+                var t = new Thread(r, "coordinator-outage-scheduler");
+                t.setDaemon(true);
+                return t;
+            });
+            scheduler.schedule(() -> {
+                coordinatorProxy.disable();
+                log.atInfo().setMessage("Coordinator disabled at ~{}s")
+                    .addArgument(COORDINATOR_DISABLE_AFTER_SECONDS).log();
+            }, COORDINATOR_DISABLE_AFTER_SECONDS, TimeUnit.SECONDS);
+            scheduler.schedule(() -> {
+                coordinatorProxy.enable();
+                log.atInfo().setMessage("Coordinator re-enabled at t=~{}s")
+                    .addArgument(COORDINATOR_DISABLE_AFTER_SECONDS + COORDINATOR_REENABLE_AFTER_SECONDS).log();
+            }, COORDINATOR_DISABLE_AFTER_SECONDS + COORDINATOR_REENABLE_AFTER_SECONDS, TimeUnit.SECONDS);
+
+            try {
+                int exitCode = runSingleWorkerWithDedicatedCoordinator(
+                    tempDirSnapshot, tempDirLucene, targetProxy, coordinatorProxy);
+                long finalDocCount = targetOps.getDocCount("geonames");
+                log.atInfo().setMessage("Run: exit code {}, target doc count: {}")
+                    .addArgument(exitCode).addArgument(finalDocCount).log();
+
+                // ASSERT: worker exits the lease-timeout handoff path
+                Assertions.assertEquals(RfsMigrateDocuments.PROCESS_TIMED_OUT_EXIT_CODE, exitCode,
+                    "Worker should exit with PROCESS_TIMED_OUT (2); lease expired before all docs migrated");
+
+                // ASSERT: target doc count falls in early-trigger band, not lease-expiry band
+                Assertions.assertTrue(finalDocCount >= 42 && finalDocCount <= 46,
+                    "Target should have 42-46 docs (early checkpoint at ~t=45s); got " + finalDocCount);
+
+                // ASSERT: parent work item contains successor handoff metadata
+                var parentWorkItemId = new IWorkCoordinator.WorkItemAndDuration
+                    .WorkItem("geonames", 0, 0L).toString();
+                coordinatorOps.refresh(coordinatorIndexName);
+                var parentQuery = "{\"query\":{\"ids\":{\"values\":[\"" + parentWorkItemId + "\"]}}}";
+                var searchResponse = coordinatorOps.post("/" + coordinatorIndexName + "/_search", parentQuery);
+                Assertions.assertEquals(200, searchResponse.getKey(), "Failed to query coordinator index");
+                var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                var parentHits = mapper.readTree(searchResponse.getValue()).path("hits").path("hits");
+                Assertions.assertEquals(1, parentHits.size(),
+                    "Expected exactly one hit for parent work item " + parentWorkItemId);
+                var successorItems = parentHits.get(0).path("_source")
+                    .path(OpenSearchWorkCoordinator.SUCCESSOR_ITEMS_FIELD_NAME).asText();
+
+                // ASSERT: successor checkpoint doc is in early-trigger range
+                Assertions.assertTrue(successorItems.startsWith("geonames__0__"),
+                    "Successor should be for shard 0, got: " + successorItems);
+                var checkpointDoc = Integer.parseInt(successorItems.substring("geonames__0__".length()));
+                Assertions.assertTrue(checkpointDoc >= 40 && checkpointDoc <= 44,
+                    "Checkpoint doc should be 40-44 (early trigger at ~t=45s); got " + checkpointDoc);
+            } finally {
+                scheduler.shutdownNow();
+            }
+        } finally {
+            FileSystemUtils.deleteDirectories(tempDirSnapshot.toString(), tempDirLucene.toString());
+        }
+    }
+
+    @SneakyThrows
+    private static int runSingleWorkerWithDedicatedCoordinator(
+        Path tempDirSnapshot,
+        Path tempDirLucene,
+        ToxiProxyWrapper targetProxy,
+        ToxiProxyWrapper coordinatorProxy
+    ) {
+        String targetAddress = targetProxy.getProxyUriAsString();
+        String coordinatorAddress = coordinatorProxy.getProxyUriAsString();
+
+        var tp = targetProxy.getProxy();
+        var latency = tp.toxics().latency("target-latency", ToxicDirection.UPSTREAM, 1_000);
+
+        // 1 doc/bulk, 1 connection, 1000ms latency = deterministic 1 doc/sec
+        int timeoutSeconds = 180;
+
+        String[] additionalArgs = {
+            "--documents-per-bulk-request", "1",
+            "--max-connections", "1",
+            "--initial-lease-duration", "PT60s",
+            "--source-version", SearchClusterContainer.ES_V7_10_2.getVersion().toString(),
+            "--coordinator-host", coordinatorAddress
+        };
+
+        ProcessBuilder processBuilder = setupProcess(
+            tempDirSnapshot, tempDirLucene, targetAddress, additionalArgs);
+
+        var process = runAndMonitorProcess(processBuilder);
+        int exitCode = waitForProcessExit(process, timeoutSeconds);
+        latency.remove();
+        return exitCode;
+    }
 }

@@ -4,24 +4,56 @@ updates:
     directory: "/deployment/migration-assistant-solution"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       migration-assistant-npm:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "eslint"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@eslint/*"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@types/eslint__js"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "typescript-eslint"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "npm"
     directory: "/deployment/cdk/opensearch-service-migration"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       opensearch-cdk-npm:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "eslint"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@eslint/*"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "typescript-eslint"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: "gradle"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       gradle-all:
         patterns:
@@ -37,23 +69,102 @@ updates:
       - dependency-name: "org.gradle.toolchains.foojay-resolver-convention"
       - dependency-name: "org.jcommander:jcommander"
       - dependency-name: "org.opensearch:*"
+      - dependency-name: "org.opensearch.plugin:opensearch-security" # Version is derived from openSearch base version in build.gradle
       - dependency-name: "org.opensearch.plugin:*"
         update-types:
           - "version-update:semver-major"
           - "version-update:semver-minor"
       - dependency-name: "errorprone"
-      - dependency-name: "software.amazon.msk:aws-msk-iam-auth" # > 2.3.4 requires java 17
       - dependency-name: "org.junit:junit-bom"
       - dependency-name: "org.junit.platform:*"
       - dependency-name: "org.junit.jupiter:*"
-      - dependency-name: "com.diffplug.spotless" # Spotless Plugin >= 8 requres java 17 which requires solutions release to update
-      - dependency-name: "io.freefair.lombok" # Lombok Plugin >= 9 requres java 17 which requires solutions release to update
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 1
     groups:
       github-actions-all:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/migrationConsole/lib/console_link"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 1
+    groups:
+      pip-console-link:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/migrationConsole/cluster_tools"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 1
+    groups:
+      pip-cluster-tools:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/migrationConsole/lib/integ_test"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 1
+    groups:
+      pip-integ-test:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/libraries/testAutomation"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 1
+    groups:
+      pip-test-automation:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/test/cleanupDeployment"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 1
+    groups:
+      pip-cleanup-deployment:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 1
+    groups:
+      pip-es-test-console:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/TrafficCapture/dockerSolution/src/main/docker/k8sConfigMapUtilScripts"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 1
+    groups:
+      pip-k8s-configmap-utils:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "/TrafficCapture/dockerSolution/otelConfigs"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 1
+    groups:
+      pip-otel-configs:
         patterns:
           - "*"

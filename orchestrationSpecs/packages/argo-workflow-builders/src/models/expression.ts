@@ -1,8 +1,10 @@
 import {
     AggregateType,
+    ArgoWithParamHybridBrand,
     DeepWiden,
     MissingField,
     NonSerializedPlainObject,
+    Primitive,
     PlainObject,
     Serialized
 } from "./plainObject";
@@ -25,7 +27,7 @@ export type AllowLiteralOrExpression<T extends PlainObject, C extends Expression
     T | BaseExpression<T, C>;
 
 export type AllowSerializedAggregateOrPrimitiveExpressionOrLiteral<T extends PlainObject, C extends ExpressionType = ExpressionType> =
-    T extends AggregateType
+    [T] extends [AggregateType]
         ? BaseExpression<Serialized<T>, C>
         : T | BaseExpression<T, C>;
 
@@ -84,7 +86,7 @@ export class AsStringExpression<
 }
 
 export class ConcatExpression<
-    ES extends readonly BaseExpression<string, any>[]
+    ES extends readonly BaseExpression<string | number | boolean, any>[]
 > extends BaseExpression<string, "govaluate"> {
     constructor(public readonly expressions: ES, public readonly separator?: string) {
         super("concat");
@@ -142,22 +144,25 @@ export class InfixExpression<
     }
 }
 
-type PlainRecord = Record<string, NonSerializedPlainObject>;
+type PlainRecord = Record<string, PlainObject>;
+export type NonRecordLiteral = Primitive | readonly NonRecordLiteral[];
 type ResultOfExpr<E> = E extends BaseExpression<infer U, any> ? U : never;
 type KeysOfUnion<T> = T extends any ? keyof T : never;
 type MembersWithKey<T, K extends PropertyKey> =
     T extends any ? (K extends keyof T ? T : never) : never;
 
-// Deeply exclude `undefined` from any PlainObject (arrays + records).
+// Deeply exclude `undefined` from expression object results. Optional TS fields model
+// absent JSON keys in these Argo values; downstream expression helpers should not
+// carry `undefined` as a possible serialized value.
 type DeepStripUndefined<T> =
 // keep MissingField as-is
     T extends MissingField ? MissingField :
         // Serialized payload preserved; scrub inside the payload
-        T extends Serialized<infer U> ? Serialized<DeepStripUndefined<U>> :
+        T extends Serialized<infer U> ? Serialized<DeepStripUndefined<Exclude<U, undefined>>> :
             // arrays
-            T extends readonly (infer U)[] ? readonly DeepStripUndefined<U>[] :
+            T extends readonly (infer U)[] ? readonly DeepStripUndefined<Exclude<U, undefined>>[] :
                 // objects (including records)
-                T extends object ? { [K in keyof T]: DeepStripUndefined<T[K]> } :
+                T extends object ? { [K in keyof T]-?: DeepStripUndefined<Exclude<T[K], undefined>> } :
                     // primitives / strings / numbers / booleans
                     Exclude<T, undefined>;
 
@@ -176,7 +181,7 @@ export class RecordGetExpression<
 // Helper types for dict operations
 type NormalizeValue<V> =
     V extends BaseExpression<infer U, infer C> ? BaseExpression<U, C> :
-        V extends PlainObject ? SimpleExpression<DeepWiden<V>> :
+        V extends NonRecordLiteral ? SimpleExpression<DeepWiden<V>> :
             never;
 
 type NormalizeRecord<R extends Record<string, unknown>> = {
@@ -303,7 +308,7 @@ type ValueAtSegsMissing<
 export type SegmentsValueMissing<T, S extends readonly unknown[]> =
     ValueAtSegsMissing<NonMissing<T>, S, HasMissing<T>>;
 type DigValue<
-    T extends Record<string, NonSerializedPlainObject>,
+    T extends Record<string, PlainObject>,
     S extends readonly unknown[]
 > =
     DeepWiden<
@@ -359,6 +364,7 @@ export type TaskOutputSource = { kind: "tasks_output", taskName: string, paramet
 
 export type WORKFLOW_VALUES =
     "name"
+    | "namespace"
     | "mainEntrypoint"
     | "serviceAccountName"
     | "uid"
@@ -417,6 +423,30 @@ type UnwrapSerialized<T> = T extends Serialized<infer U>
         ? T
         : never;
 
+type JsonPathExpressionBrand = {
+    readonly __jsonPathExpressionBrand: true;
+};
+
+// Outbound boundary normalization for expr.serialize/toJSON:
+// unwrap nested Serialized<...> markers so we serialize the logical payload once
+// instead of producing doubly-serialized nested fields.
+type NormalizeSerializedForToBoundary<T extends PlainObject> =
+    T extends Serialized<infer U>
+        ? U
+        : T extends readonly (infer U)[]
+            ? U extends PlainObject ? Array<NormalizeSerializedForToBoundary<U>> : never
+            : T extends (infer U)[]
+                ? U extends PlainObject ? Array<NormalizeSerializedForToBoundary<U>> : never
+                : T extends Record<string, PlainObject>
+                    ? {
+                        [K in keyof T]:
+                        T[K] extends PlainObject ? NormalizeSerializedForToBoundary<T[K]> : never
+                    }
+                    : T;
+
+type RejectWithParamHybridForSerialize<T extends PlainObject> =
+    T extends ArgoWithParamHybridBrand ? never : T;
+
 type ExtractTemplatePlaceholders<T extends string> =
     T extends `${string}{{${infer Placeholder}}}${infer Rest}`
         ? Placeholder | ExtractTemplatePlaceholders<Rest>
@@ -450,7 +480,7 @@ export class FunctionExpression<
 // Helper types for toArray
 type NormalizeOne<E> =
     E extends BaseExpression<infer U, infer C> ? BaseExpression<U, C>
-        : E extends PlainObject ? SimpleExpression<DeepWiden<E>>
+        : E extends NonRecordLiteral ? SimpleExpression<DeepWiden<E>>
             : never;
 type NormalizeTuple<ES extends readonly unknown[]> = {
     [K in keyof ES]: NormalizeOne<ES[K]>;
@@ -479,7 +509,7 @@ function _segmentsToPath(segs: readonly unknown[]): string {
 
 class ExprBuilder {
     // Core functions
-    literal<T extends PlainObject>(v: T): SimpleExpression<DeepWiden<T>> {
+    literal<T extends NonRecordLiteral>(v: T): SimpleExpression<DeepWiden<T>> {
         return new LiteralExpression<DeepWiden<T>>(v as DeepWiden<T>);
     }
 
@@ -538,8 +568,10 @@ class ExprBuilder {
         return new ComparisonExpression<number, L, R>(">", l, r);
     }
 
-    not<C extends ExpressionType>(data: AllowLiteralOrExpression<boolean, C>) {
-        return fn<boolean, C>("!", toExpression(data));
+    not<C extends ExpressionType>(data: BaseExpression<Serialized<boolean>, C>): BaseExpression<boolean, C>;
+    not<C extends ExpressionType>(data: AllowLiteralOrExpression<boolean, C>): BaseExpression<boolean, C>;
+    not<C extends ExpressionType>(data: AllowLiteralOrExpression<boolean, C> | BaseExpression<Serialized<boolean>, C>) {
+        return fn<boolean, C>("!", isExpression(data) ? data : toExpression(data));
     }
 
     isEmpty(data: AllowLiteralOrExpression<any, any>): BaseExpression<boolean, "complicatedExpression"> {
@@ -574,7 +606,7 @@ class ExprBuilder {
         CL extends ExpressionType = ExprC<L>,
         CR extends ExpressionType = ExprC<R>,
     >(l: L, r: R) {
-        return new InfixExpression("&&", l, r);
+        return new InfixExpression<boolean, CL, CR>("&&", l, r, typeToken<boolean>());
     }
 
     or<
@@ -583,20 +615,41 @@ class ExprBuilder {
         CL extends ExpressionType = ExprC<L>,
         CR extends ExpressionType = ExprC<R>,
     >(l: L, r: R) {
-        return new InfixExpression("||", l, r);
+        return new InfixExpression<boolean, CL, CR>("||", l, r, typeToken<boolean>());
     }
 
     // String functions
-    concat<ES extends readonly BaseExpression<string, any>[]>(...es: ES): BaseExpression<string, "govaluate"> {
+    concat<ES extends readonly BaseExpression<string | number | boolean, any>[]>(...es: ES): BaseExpression<string, "govaluate"> {
         return new ConcatExpression(es);
     }
 
-    concatWith<ES extends readonly BaseExpression<string, any>[]>(sep: string, ...es: ES): BaseExpression<string, "govaluate"> {
+    concatWith<ES extends readonly BaseExpression<string | number | boolean, any>[]>(sep: string, ...es: ES): BaseExpression<string, "govaluate"> {
         return new ConcatExpression(es, sep);
     }
 
     split(arr: AllowLiteralOrExpression<string>, delim: AllowLiteralOrExpression<string>) {
         return fn<string[], ExpressionType, "complicatedExpression">("split", toExpression(arr), toExpression(delim));
+    }
+
+    // Regex functions
+    regexMatch(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
+        return fn<boolean, ExpressionType, "complicatedExpression">("regexMatch", toExpression(pattern), toExpression(text));
+    }
+
+    regexFind(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
+        return fn<string, ExpressionType, "complicatedExpression">("regexFind", toExpression(pattern), toExpression(text));
+    }
+
+    regexFindAll(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>, count: AllowLiteralOrExpression<number>) {
+        return fn<string[], ExpressionType, "complicatedExpression">("regexFindAll", toExpression(pattern), toExpression(text), toExpression(count));
+    }
+
+    regexReplaceAll(pattern: AllowLiteralOrExpression<string>, replacement: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
+        return fn<string, ExpressionType, "complicatedExpression">("regexReplaceAll", toExpression(pattern), toExpression(replacement), toExpression(text));
+    }
+
+    regexSplit(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>, count: AllowLiteralOrExpression<number>) {
+        return fn<string[], ExpressionType, "complicatedExpression">("regexSplit", toExpression(pattern), toExpression(text), toExpression(count));
     }
 
     fillTemplate<T extends string>(
@@ -633,7 +686,7 @@ class ExprBuilder {
         ComplexityOfNormalized<ES>
     > {
         const normalized = items.map((it) =>
-            isExpression(it) ? it : this.literal(it as PlainObject)
+            isExpression(it) ? it : new LiteralExpression(it as NonRecordLiteral)
         ) as NormalizeTuple<ES>;
 
         type N = Extract<typeof normalized, readonly BaseExpression<any, any>[]>;
@@ -708,14 +761,15 @@ class ExprBuilder {
      *   expr.dig(userExpr, ["profile", "email"], "N/A")
      */
     dig<
-        T extends Record<string, NonSerializedPlainObject>,
+        T extends Record<string, PlainObject>,
         D extends Record<string, any> = UnwrapSerialize<NonMissing<T>>,
-        const S extends DictKeySegmentsCore<D> = DictKeySegmentsCore<D>
+        const S extends DictKeySegmentsCore<D> = DictKeySegmentsCore<D>,
+        DefaultT extends PlainObject = DigValue<T, S>
     >(
         sourceDict: AllowLiteralOrExpression<T, any>,
         segs: S,
-        defaultValue: AllowLiteralOrExpression<DigValue<T, S>>
-    ): BaseExpression<DigValue<T, S>, "complicatedExpression"> {
+        defaultValue: AllowLiteralOrExpression<DefaultT>
+    ): BaseExpression<DigValue<T, S> | DeepWiden<DefaultT>, "complicatedExpression"> {
         const source = toExpression(sourceDict);
 
         const keyExprs = (segs as readonly string[]).map(seg =>
@@ -729,7 +783,7 @@ class ExprBuilder {
         ];
 
         return new FunctionExpression<
-            DigValue<T, S>, any, "complicatedExpression", "complicatedExpression"
+            DigValue<T, S> | DeepWiden<DefaultT>, any, "complicatedExpression", "complicatedExpression"
         >("sprig.dig", argsComp);
     }
 
@@ -739,27 +793,42 @@ class ExprBuilder {
     >(
         source: BaseExpression<Serialized<T>, any>,
         key: K
-    ): BaseExpression<SegmentsValueStrict<T, readonly [K]>, "complicatedExpression">;
+    ): BaseExpression<SegmentsValueStrict<T, readonly [K]>, "complicatedExpression"> & JsonPathExpressionBrand;
     jsonPathStrict<
         T extends Record<string, any>,
         S extends KeySegments<T>
     >(
         source: BaseExpression<Serialized<T>, any>,
         ...segs: S
-    ): BaseExpression<SegmentsValueStrict<T, S>, "complicatedExpression">;
+    ): BaseExpression<SegmentsValueStrict<T, S>, "complicatedExpression"> & JsonPathExpressionBrand;
     jsonPathStrict<
         T extends Serialized<Record<string, any>>,
         K extends Extract<KeysOfUnion<UnwrapSerialized<T>>, string>
     >(
         source: BaseExpression<T, any>,
         key: K
-    ): BaseExpression<SegmentsValueStrict<UnwrapSerialized<T>, readonly [K]>, "complicatedExpression">;
+    ): BaseExpression<SegmentsValueStrict<UnwrapSerialized<T>, readonly [K]>, "complicatedExpression"> & JsonPathExpressionBrand;
     jsonPathStrict(
         source: BaseExpression<Serialized<any>, any>,
         ...segs: readonly unknown[]
-    ): BaseExpression<any, "complicatedExpression"> {
+    ): BaseExpression<any, "complicatedExpression"> & JsonPathExpressionBrand {
         const path = _segmentsToPath(segs);
         return new RecordFieldSelectExpression(source, path) as any;
+    }
+
+    /**
+     * Like jsonPathStrict, but returns a Serialized result. Use this when extracting
+     * nested object fields from a serialized record, where the field value is itself
+     * a serialized string at runtime.
+     */
+    jsonPathStrictSerialized<
+        T extends Record<string, any>,
+        K extends Extract<keyof NonMissing<T>, string>
+    >(
+        source: BaseExpression<Serialized<T>, any>,
+        key: K
+    ): BaseExpression<Serialized<SegmentsValueStrict<T, readonly [K]>>, "complicatedExpression"> & JsonPathExpressionBrand {
+        return this.jsonPathStrict(source, key) as any;
     }
 
     omit<
@@ -769,7 +838,7 @@ class ExprBuilder {
     >(
         recordExpr: NoAny<E>,
         ...keys: Keys
-    ): BaseExpression<Omit<NonMissing<T>, Keys[number]>, "complicatedExpression"> {
+    ): BaseExpression<Extract<DeepStripUndefined<Omit<NonMissing<T>, Keys[number]>>, PlainObject>, "complicatedExpression"> {
         const keyExprs = keys.map(k =>
             widenComplexity(this.literal(k))
         ) as readonly BaseExpression<string, "complicatedExpression">[];
@@ -780,7 +849,7 @@ class ExprBuilder {
         ];
 
         return new FunctionExpression<
-            Omit<NonMissing<T>, Keys[number]>,
+            Extract<DeepStripUndefined<Omit<NonMissing<T>, Keys[number]>>, PlainObject>,
             any,
             "complicatedExpression",
             "complicatedExpression"
@@ -788,10 +857,10 @@ class ExprBuilder {
     }
 
     deserializeRecord<R extends PlainObject, CIn extends ExpressionType>(
-        data: BaseExpression<Serialized<R>, CIn>
+        data: BaseExpression<Serialized<R>, CIn> & { readonly __jsonPathExpressionBrand?: never }
     ): BaseExpression<R, "complicatedExpression">;
     deserializeRecord<T extends Serialized<PlainObject>, CIn extends ExpressionType>(
-        data: BaseExpression<T, CIn>
+        data: BaseExpression<T, CIn> & { readonly __jsonPathExpressionBrand?: never }
     ): BaseExpression<UnwrapSerialized<T>, "complicatedExpression">;
     deserializeRecord<R extends PlainObject, CIn extends ExpressionType>(
         data: BaseExpression<Serialized<R>, CIn>
@@ -800,8 +869,8 @@ class ExprBuilder {
     }
 
 
-    serialize<R extends PlainObject, CIn extends ExpressionType>(data: BaseExpression<R,CIn>) {
-        return fn<Serialized<R>,CIn,"complicatedExpression">("toJSON", data);
+    serialize<R extends PlainObject, CIn extends ExpressionType>(data: BaseExpression<RejectWithParamHybridForSerialize<R>,CIn>) {
+        return fn<Serialized<DeepWiden<NormalizeSerializedForToBoundary<R>>>,CIn,"complicatedExpression">("toJSON", data);
     }
 
     toString<
@@ -824,7 +893,7 @@ class ExprBuilder {
         return fn<Serialized<T>,CIn,"complicatedExpression">("toJSON", toExpression(data)) as any;
     }
 
-    makeDict<R extends Record<string, AllowLiteralOrExpression<PlainObject>>>(
+    makeDict<R extends Record<string, BaseExpression<PlainObject, any> | NonRecordLiteral>>(
         entries: R
     ): BaseExpression<
         { [K in keyof R]: ResultOf<NormalizeValue<R[K]>> },
@@ -832,7 +901,7 @@ class ExprBuilder {
     > {
         const normalized = Object.fromEntries(
             Object.entries(entries).map(([k, v]) => {
-                const e = isExpression(v) ? v : this.literal(v);
+                const e = isExpression(v) ? v : new LiteralExpression(v as NonRecordLiteral);
                 return [k, e];
             })
         ) as NormalizeRecord<R>;
@@ -907,7 +976,10 @@ export default expr;
 
 
 // This function and the next tie into the renderer
-export function makeDirectTypeProxy<T extends (boolean|number|NonSerializedPlainObject)>(value: BaseExpression<T>): T {
+export function makeDirectTypeProxy(value: BaseExpression<Serialized<number>>): number;
+export function makeDirectTypeProxy(value: BaseExpression<Serialized<boolean>>): boolean;
+export function makeDirectTypeProxy<T extends (boolean|number|NonSerializedPlainObject)>(value: BaseExpression<T>): T;
+export function makeDirectTypeProxy<T extends (boolean|number|NonSerializedPlainObject|Serialized<number>|Serialized<boolean>)>(value: BaseExpression<T>) {
     return new UnquotedTypeWrapper(value) as any as T;
 }
 

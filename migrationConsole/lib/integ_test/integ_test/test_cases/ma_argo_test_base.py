@@ -1,5 +1,6 @@
 from enum import Enum
 import logging
+import subprocess
 
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
@@ -21,14 +22,24 @@ class ClusterVersionCombinationUnsupported(Exception):
 
 
 class MATestUserArguments:
-    def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool):
+    def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool,
+                 target_type: str = "OS", image_registry_prefix: str = "",
+                 speedup_factor: int = 20, observed_packet_timeout: int = 30):
         self.source_version = source_version
         self.target_version = target_version
+        self.target_type = target_type
         self.unique_id = unique_id
         self.reuse_clusters = reuse_clusters
+        self.image_registry_prefix = image_registry_prefix
+        self.speedup_factor = speedup_factor
+        self.observed_packet_timeout = observed_packet_timeout
 
 
 class MATestBase:
+    # Tests with requires_explicit_selection=True are excluded from default runs.
+    # They only run when explicitly specified via --test_ids.
+    requires_explicit_selection = False
+
     def __init__(self, user_args: MATestUserArguments, description: str, migrations_required=None,
                  allow_source_target_combinations=None):
         self.allow_source_target_combinations = allow_source_target_combinations or []
@@ -37,38 +48,56 @@ class MATestBase:
         self.migrations_required = migrations_required if migrations_required else [MigrationType.METADATA,
                                                                                     MigrationType.BACKFILL]
         self.source_version = ClusterVersion(version_str=user_args.source_version)
-        self.target_version = ClusterVersion(version_str=user_args.target_version)
+        self.target_type = user_args.target_type
+        self.target_version = (
+            None if self.is_aoss
+            else ClusterVersion(version_str=user_args.target_version)
+        )
         self.argo_service = ArgoService()
         self.workflow_name = None
         self.source_cluster = None
         self.target_cluster = None
         self.imported_clusters = False
 
-        supported_combo = False
-        for (allowed_source, allowed_target) in allow_source_target_combinations:
-            if (is_incoming_version_supported(allowed_source, self.source_version) and
-                    is_incoming_version_supported(allowed_target, self.target_version)):
-                supported_combo = True
-                break
-        if not supported_combo:
-            raise ClusterVersionCombinationUnsupported(self.source_version, self.target_version)
+        if not self.is_aoss:
+            supported_combo = False
+            for (allowed_source, allowed_target) in allow_source_target_combinations:
+                if (is_incoming_version_supported(allowed_source, self.source_version) and
+                        is_incoming_version_supported(allowed_target, self.target_version)):
+                    supported_combo = True
+                    break
+            if not supported_combo:
+                raise ClusterVersionCombinationUnsupported(self.source_version, self.target_version)
 
         self.source_argo_cluster_template = (f"{self.source_version.full_cluster_type}-"
                                              f"{self.source_version.major_version}-"
                                              f"{self.source_version.minor_version}-single-node")
-        self.target_argo_cluster_template = (f"{self.target_version.full_cluster_type}-"
-                                             f"{self.target_version.major_version}-"
-                                             f"{self.target_version.minor_version}-single-node")
+        self.target_argo_cluster_template = None if self.is_aoss else (
+            f"{self.target_version.full_cluster_type}-"
+            f"{self.target_version.major_version}-"
+            f"{self.target_version.minor_version}-single-node"
+        )
 
         self.parameters = {}
+        self.image_registry_prefix = user_args.image_registry_prefix
+        self.speedup_factor = user_args.speedup_factor
+        self.observed_packet_timeout = user_args.observed_packet_timeout
         self.workflow_template = "full-migration-with-clusters"
         self.workflow_snapshot_and_migration_config = None
         self.source_operations = get_operations_library_by_version(self.source_version)
-        self.target_operations = get_operations_library_by_version(self.target_version)
+        self.target_operations = (
+            None if self.is_aoss
+            else get_operations_library_by_version(self.target_version)
+        )
         self.unique_id = user_args.unique_id
 
+    @property
+    def is_aoss(self):
+        return self.target_type == "AOSS"
+
     def __repr__(self):
-        return f"<{self.__class__.__name__}(source={self.source_version},target={self.target_version})>"
+        target_str = self.target_type if self.is_aoss else str(self.target_version)
+        return f"<{self.__class__.__name__}(source={self.source_version},target={target_str})>"
 
     def test_before(self):
         #check_ma_system_health()
@@ -119,12 +148,18 @@ class MATestBase:
         snapshot_and_migration_configs = [{
             "migrations": [{
                 "metadataMigrationConfig": {},
-                "documentBackfillConfig": {}
+                "documentBackfillConfig": {
+                    "maxShardSizeBytes": 16000000,
+                    "resources": {
+                        "requests": {"cpu": "25m", "memory": "1Gi", "ephemeral-storage": "5Gi"},
+                        "limits": {"cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi"}
+                    }
+                }
             }]
         }]
         self.workflow_snapshot_and_migration_config = snapshot_and_migration_configs
 
-    def prepare_workflow_parameters(self):
+    def prepare_workflow_parameters(self, keep_workflows: bool = False):
         # For existing clusters
         if self.imported_clusters:
             self.workflow_template = "full-migration-imported-clusters"
@@ -136,13 +171,37 @@ class MATestBase:
             ]
             self.parameters["source-configs"] = source_configs
             self.parameters["target-config"] = self.target_cluster.config
+            self.parameters["keepMigrationWorkflow"] = "true" if keep_workflows else "false"
+            self.parameters["speedup-factor"] = str(self.speedup_factor)
+            self.parameters["observed-packet-timeout"] = str(self.observed_packet_timeout)
         else:
             self.parameters["snapshot-and-migration-configs"] = self.workflow_snapshot_and_migration_config
             self.parameters["source-cluster-template"] = self.source_argo_cluster_template
             self.parameters["target-cluster-template"] = self.target_argo_cluster_template
             self.parameters["skip-cleanup"] = "true" if self.reuse_clusters else "false"
+            if self.image_registry_prefix:
+                self.parameters["image-registry-prefix"] = self.image_registry_prefix
+
+    def _ensure_approval_configmap(self):
+        """Ensure the approval configmap exists for Argo v4.0+ (requires configmap-type label).
+        In production, the config-processor creates this. In tests, we create a default."""
+        kubectl_cmd = [
+            "kubectl", "apply", "-n", self.argo_service.namespace, "-f", "-"
+        ]
+        configmap_yaml = (
+            'apiVersion: v1\n'
+            'kind: ConfigMap\n'
+            'metadata:\n'
+            '  name: approval-config\n'
+            '  labels:\n'
+            '    workflows.argoproj.io/configmap-type: Parameter\n'
+            'data:\n'
+            '  autoApprove: "{}"\n'
+        )
+        subprocess.run(kubectl_cmd, input=configmap_yaml, text=True, check=True)
 
     def workflow_start(self):
+        self._ensure_approval_configmap()
         start_result = self.argo_service.start_workflow(workflow_template_name=self.workflow_template,
                                                         parameters=self.parameters)
         assert start_result.success is True
@@ -167,6 +226,16 @@ class MATestBase:
         else:
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
             self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=timeout_seconds)
+
+    def post_migration_actions(self):
+        """Hook for actions after migration completes but before verification.
+        CDC tests override this to send traffic through the capture proxy."""
+        pass
+
+    def cleanup(self):
+        """Hook for test-specific resource cleanup after teardown.
+        CDC tests override this to delete Kafka, proxy, and replayer resources."""
+        pass
 
     def display_final_cluster_state(self):
         source_response = cat_indices(cluster=self.source_cluster, refresh=True).decode("utf-8")

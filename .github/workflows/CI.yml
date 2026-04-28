@@ -5,10 +5,11 @@ on:
     branches:
       - main
   pull_request:
+  merge_group:
 
 env:
   python-version: '3.11'
-  java-version: '17'
+  java-version: '21'
   gradle-version: '8.12.1'
   node-version: '22.x'
   gradle-test-parallelization: '30'
@@ -51,6 +52,18 @@ jobs:
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
+  gradle-build-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-env
+        with:
+          gradle-cache-enabled: false
+      - name: Run Gradle build on macOS
+        run: ./gradlew build
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+
   python-lint:
     runs-on: ubuntu-22.04
     steps:
@@ -73,8 +86,12 @@ jobs:
           - migrationConsole/lib/console_link
           - migrationConsole/cluster_tools
           - k8sConfigMapUtilScripts
+          - AIAdvisor/skills/solr-opensearch-migration-advisor
+          - solrMigrationDevSandbox
+          - libraries/testAutomation
     env:
-      WORKING_DIR: ${{ startsWith(matrix.py-project, 'migrationConsole/') && format('./{0}', matrix.py-project) || format('./TrafficCapture/dockerSolution/src/main/docker/{0}', matrix.py-project) }}
+      WORKING_DIR: ${{ startsWith(matrix.py-project, 'migrationConsole/') && format('./{0}', matrix.py-project) || startsWith(matrix.py-project, 'AIAdvisor/') && format('./{0}', matrix.py-project) || startsWith(matrix.py-project, 'libraries/') && format('./{0}', matrix.py-project) || matrix.py-project == 'solrMigrationDevSandbox' && format('./{0}', matrix.py-project) || format('./TrafficCapture/dockerSolution/src/main/docker/{0}', matrix.py-project) }}
+      WORKFLOW_TEST_KUBE_CONTEXT: kind-console-link-test
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}
@@ -85,9 +102,9 @@ jobs:
       # Set up Kind cluster for workflow integration tests (only for console_link project)
       - name: Set up Kind cluster
         if: matrix.py-project == 'migrationConsole/lib/console_link'
-        uses: helm/kind-action@v1.13.0
+        uses: helm/kind-action@v1.14.0
         with:
-          cluster_name: kind-test-cluster
+          cluster_name: console-link-test
 
       # Verify Kind cluster is ready (only for console_link project)
       - name: Verify Kind cluster
@@ -97,27 +114,56 @@ jobs:
           kubectl get nodes
           kubectl get namespaces
 
-      - run: |
-          python3 -m pip install --upgrade pipenv
+      - name: Install workflow test cluster dependencies
+        if: matrix.py-project == 'migrationConsole/lib/console_link'
+        run: ./scripts/setupWorkflowTestCluster.sh
+
+      - name: Install dependencies (Pipfile)
+        if: matrix.py-project != 'AIAdvisor/skills/solr-opensearch-migration-advisor'
+        run: |
+          python3 -m pip install pipenv==2026.5.0
           pipenv install --deploy --dev
           pipenv graph
 
-      - run: |
+      # Install dependencies for pyproject.toml-based projects
+      - name: Install dependencies (pyproject.toml)
+        if: matrix.py-project == 'AIAdvisor/skills/solr-opensearch-migration-advisor'
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -e ".[dev]"
+          python3 -m pip list
+
+      # Run tests for Pipfile-based projects
+      - name: Run tests (Pipfile)
+        if: matrix.py-project != 'AIAdvisor/skills/solr-opensearch-migration-advisor'
+        run: |
           pipenv run test
           pipenv run coverage xml
+
+      # Run tests for pyproject.toml-based projects
+      - name: Run tests (pyproject.toml)
+        if: matrix.py-project == 'AIAdvisor/skills/solr-opensearch-migration-advisor'
+        run: |
+          python3 -m pytest --cov=scripts --cov-report=xml
+
       - name: Get Sanitized Name
         env:
           PY_PROJECT: ${{ matrix.py-project }}
         run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT//\//-}" >> $GITHUB_ENV
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2
         with:
           fail_ci_if_error: true
           flags: python
           skip_validation: true
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
+      - name: List Docker images
+        if: always()
+        run: |
+          echo "Recording Docker images. These include standard images pre-cached by GitHub Actions when Docker is run as root."
+          docker image list --format '{{ if ne .Repository "<none>" }}{{ .Repository }}{{ if ne .Tag "<none>" }}:{{ .Tag }}{{ end }}{{ else }}{{ .ID }}{{ end }}'
 
   generate-test-matrix:
     runs-on: ubuntu-22.04
@@ -146,6 +192,11 @@ jobs:
         with:
           gradle-cache-enabled: true
           gradle-cache-read-only: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/share/swift
+          sudo docker system prune -af
+          df -h
       - name: Restore Docker Cache
         uses: AndreKurait/docker-cache@0.6.0
         with:
@@ -174,7 +225,7 @@ jobs:
           fi
       - name: Upload memory dump
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           if-no-files-found: warn
           name: memory-dumps-gradle-tests-stripe-${{ matrix.index }}
@@ -182,7 +233,7 @@ jobs:
 
       - name: Upload test reports for stripe ${{ matrix.index }}
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           if-no-files-found: error
           name: test-reports-gradle-tests-stripe-${{ matrix.index }}
@@ -191,7 +242,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2
         with:
           fail_ci_if_error: true
           flags: gradle
@@ -199,6 +250,11 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
+      - name: List Docker images
+        if: always()
+        run: |
+          echo "Recording Docker images. These include standard images pre-cached by GitHub Actions when Docker is run as root."
+          docker image list --format '{{ if ne .Repository "<none>" }}{{ .Repository }}{{ if ne .Tag "<none>" }}:{{ .Tag }}{{ end }}{{ else }}{{ .ID }}{{ end }}'
       - name: Show disk usage
         if: always()
         run: |
@@ -219,6 +275,8 @@ jobs:
           key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
           # Only save cache on push events
           read-only: ${{ github.event_name != 'push' }}
+      - name: Build custom ES images
+        run: ./gradlew :custom-es-images:buildImage_es_7_10 --info
       - name: Start Docker Solution
         run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
         env:
@@ -226,6 +284,11 @@ jobs:
       - name: Run E2E test script
         run: |
           docker exec $(docker ps --filter "name=migration-console" -q) pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
+      - name: List Docker images
+        if: always()
+        run: |
+          echo "Recording Docker images. These include standard images pre-cached by GitHub Actions when Docker is run as root."
+          docker image list --format '{{ if ne .Repository "<none>" }}{{ .Repository }}{{ if ne .Tag "<none>" }}:{{ .Tag }}{{ end }}{{ else }}{{ .ID }}{{ end }}'
       - name: Show disk usage
         if: always()
         run: |
@@ -243,7 +306,7 @@ jobs:
           docker cp $(docker ps --filter "name=migration-console" -q):/shared-logs-output logs/shared_logs_output
       - name: Upload Logs
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           if-no-files-found: error
           name: e2e-test-logs
@@ -264,12 +327,8 @@ jobs:
         npm-project:
           - ./deployment/cdk/opensearch-service-migration
           - ./deployment/migration-assistant-solution
-          - ./frontend
-          # TODO - get these enabled
-#          - ./orchestrationSpecs/packages/argo-workflow-builders
-#          - ./orchestrationSpecs/packages/config-processor
-#          - ./orchestrationSpecs/packages/migration-workflow-templates
-#          - ./orchestrationSpecs/packages/schemas
+          - ./TrafficCapture/SolrTransformations/transforms
+          - ./orchestrationSpecs
     defaults:
       run:
         working-directory: ${{ matrix.npm-project }}
@@ -282,7 +341,7 @@ jobs:
         run: npm run test
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2
         with:
           fail_ci_if_error: true
           flags: node
@@ -308,10 +367,166 @@ jobs:
             --exclude "http://capture-proxy*"
             --exclude "https://capture-proxy*"
             --exclude-path "TrafficCapture/dockerSolution/src/main/docker/k8sConfigMapUtilScripts/tests/data"
+            --exclude-path "orchestrationSpecs/packages/argo-workflow-builders/tests/integ/artifacts"
+            --exclude "file://.*artifacts/parity-catalog.md"
           fail: true
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
 
+
+  agent-skills-spec:
+    # Validate every SKILL.md under AIAdvisor/skills/ against the Agent
+    # Skills Spec (https://agentskills.io). Catches things like frontmatter
+    # fields outside the allowed set, or a skill whose `name:` disagrees
+    # with its directory — both of which are silent bugs for downstream
+    # skill-loaders that key on either the filesystem or the YAML.
+    #
+    # Fast job (~20s): pip-installs the reference validator from PyPI and
+    # runs `skills-ref validate` on every SKILL.md found. No Gradle, no
+    # Docker. Kept out of python-lint/python-tests because it's a narrow
+    # spec gate, not a Python-code gate — if it fails, the diagnostic
+    # ("Directory name X must match skill name Y" etc.) should not be
+    # hidden behind an unrelated flake8 / pytest failure.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install skills-ref validator
+        run: python -m pip install --upgrade 'skills-ref>=0.1.1'
+      - name: Validate every SKILL.md under AIAdvisor/skills/
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          failures=0
+          total=0
+          # Find every directory that contains a SKILL.md and validate it.
+          # `python -m skills_ref.cli` over the console-script entrypoint so
+          # this stays robust if the published entry-point name changes.
+          while IFS= read -r -d '' skill_md; do
+            skill_dir="$(dirname "$skill_md")"
+            total=$((total + 1))
+            if ! python -m skills_ref.cli validate "$skill_dir"; then
+              failures=$((failures + 1))
+            fi
+          done < <(find AIAdvisor/skills -name SKILL.md -print0 | sort -z)
+          echo
+          if [ "$total" -eq 0 ]; then
+            echo "No SKILL.md files found under AIAdvisor/skills/ — nothing to validate."
+          else
+            echo "Validated $total skill(s); $failures failure(s)."
+          fi
+          if [ "$failures" -gt 0 ]; then
+            exit 1
+          fi
+
+  codeql-analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-22.04
+    permissions:
+      security-events: write
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - language: java-kotlin
+        - language: javascript-typescript
+        - language: python
+    steps:
+    - uses: actions/checkout@v6
+    - uses: github/codeql-action/init@v4
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: none
+    - uses: github/codeql-action/analyze@v4
+      with:
+        category: "/language:${{matrix.language}}"
+
+  sonarqube-analysis:
+    name: SonarQube Analysis
+    runs-on: ubuntu-22.04
+    services:
+      sonarqube:
+        image: sonarqube:25.10.0.114319-community
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd="curl -s -u admin:admin http://localhost:9000/api/system/health | grep -o GREEN"
+          --health-interval=10s
+          --health-timeout=10s
+          --health-retries=60
+        env:
+          SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+    steps:
+    - uses: actions/checkout@v6
+    - uses: ./.github/actions/setup-env
+      with:
+        gradle-cache-enabled: true
+    - name: Cache SonarQube Scanner
+      uses: actions/cache@v5
+      with:
+        path: ~/.sonar/cache
+        key: sonar-cache
+        restore-keys: sonar-cache
+    - name: Generate SonarQube Token
+      run: |
+        echo "Generating a SonarQube token..."
+        RESPONSE=$(curl -s -X POST -u "admin:admin" "http://localhost:9000/api/user_tokens/generate" \
+          -d "name=github-action-token" -d "type=GLOBAL_ANALYSIS_TOKEN")
+
+        SONAR_TOKEN=$(echo "$RESPONSE" | jq -r '.token')
+
+        if [ "$SONAR_TOKEN" == "null" ]; then
+          echo "❌ Failed to generate SonarQube token!"
+          exit 1
+        fi
+
+        echo "::add-mask::$SONAR_TOKEN"
+        echo "SONAR_TOKEN=$SONAR_TOKEN" >> $GITHUB_ENV
+    - name: Run SonarQube Scanner
+      run: |
+        curl -sLo sonar-scanner-cli.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-6.2.1.4610-linux-x64.zip
+        unzip -q sonar-scanner-cli.zip -d $HOME
+        export PATH="$HOME/sonar-scanner-6.2.1.4610-linux-x64/bin:$PATH"
+        sonar-scanner \
+          -Dsonar.projectKey=local_project \
+          -Dsonar.host.url=http://localhost:9000 \
+          -Dsonar.login=$SONAR_TOKEN
+    - name: Wait for issues to be processed
+      run: sleep 60
+    - name: Collect issues from the server
+      run: |
+        curl -s -u "$SONAR_TOKEN:" "http://localhost:9000/api/issues/search?componentKeys=local_project" -o issues.json
+
+        echo "::group::SonarQube Issues"
+        jq -r '.issues[] | "File: \(.component):\(.line), Rule: \(.rule), Message: \(.message)"' issues.json | sort
+        echo "::endgroup::"
+
+        jq -c '.issues | sort_by(.creationDate) | reverse | .[]' issues.json | while read -r issue; do
+          FILE=$(echo "$issue" | jq -r '.component | split(":")[1]')
+          LINE=$(echo "$issue" | jq -r '.line')
+          MESSAGE=$(echo "$issue" | jq -r '.message')
+          RULE=$(echo "$issue" | jq -r '.rule')
+
+          echo "::error file=$FILE,line=$LINE,title=$RULE::$MESSAGE"
+        done
+
+        ISSUE_COUNT=$(jq '.issues | length' issues.json)
+        BASELINE_ISSUE_COUNT=0
+        if [ "$ISSUE_COUNT" -gt "$BASELINE_ISSUE_COUNT" ]; then
+          echo "❌ Build failed: Found $ISSUE_COUNT issues, which is more than the baseline of $BASELINE_ISSUE_COUNT."
+          exit 1
+        else
+          echo "✅ Build passed: Found $ISSUE_COUNT issues, which is within the baseline of $BASELINE_ISSUE_COUNT."
+        fi
+    - name: Upload SonarQube Artifacts
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: sonar-reports
+        path: issues.json
 
   all-ci-checks-pass:
     needs:
@@ -322,11 +537,15 @@ jobs:
       - python-e2e-tests
       - python-lint
       - gradle-extended-check
+      - gradle-build-macos
+      - agent-skills-spec
+      - codeql-analyze
+      - sonarqube-analysis
     if: always()
     runs-on: ubuntu-22.04
     steps:
-      - if: ${{ contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'failure') || contains(needs.*.result, 'skipped') }}
+      - if: ${{ contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'failure') }}
         run: |
-          echo "One or more job cancelled, failed, or skipped" && exit 1
+          echo "One or more job cancelled or failed" && exit 1
       - run: |
           echo '## :heavy_check_mark: All continuous integration checks pass' >> $GITHUB_STEP_SUMMARY

@@ -59,11 +59,6 @@ async function bundle() {
         platform: 'node',
         target: 'node22',
         outfile: outputFile,
-        external: [
-            '@grpc/grpc-js',
-            '@grpc/proto-loader',
-            'etcd3'
-        ],
         banner: {
             js: '#!/usr/bin/env node\nprocess.env.SUPPRESS_AUTO_LOAD = "true";'
         }
@@ -76,13 +71,7 @@ async function bundle() {
     const bundledNodeModules = path.join(outputDir, 'node_modules');
     fs.mkdirSync(bundledNodeModules, { recursive: true });
 
-    const topLevelExternals = ['etcd3', '@grpc/grpc-js', '@grpc/proto-loader'];
     const allDeps = new Set();
-
-    for (const dep of topLevelExternals) {
-        const deps = getDependencies(dep, workspaceNodeModules);
-        deps.forEach(d => allDeps.add(d));
-    }
 
     console.log(`Found ${allDeps.size} dependencies to copy (including transitive deps)`);
 
@@ -112,6 +101,21 @@ async function bundle() {
             fs.chmodSync(dest, 0o755);  // Make executable
             console.log(`Copied ${script}`);
         }
+    }
+
+    // Optionally copy a generated local fallback unified schema artifact into the bundle.
+    // This is only for explicitly enabled fallback flows, not the default live-cluster path.
+    const fallbackSchemaSrc = path.join(__dirname, '..', 'schemas', 'generated', 'workflowMigration.schema.json');
+    const fallbackSchemaDest = path.join(outputDir, 'generated', 'workflowMigration.schema.json');
+    if (process.env.ALLOW_FALLBACK_UNIFIED_SCHEMA === 'true' && fs.existsSync(fallbackSchemaSrc)) {
+        fs.mkdirSync(path.dirname(fallbackSchemaDest), { recursive: true });
+        fs.copyFileSync(fallbackSchemaSrc, fallbackSchemaDest);
+        console.log(`Copied fallback unified schema to ${fallbackSchemaDest}`);
+    } else if (process.env.REQUIRE_BASELINE_UNIFIED_SCHEMA === 'true') {
+        throw new Error(
+            `Baseline unified schema artifact not found at ${fallbackSchemaSrc}. ` +
+            `Generate it first with 'npm run build:unified-schema -- --strimzi-openapi <path>'.`
+        );
     }
 
     // Make the bundle executable

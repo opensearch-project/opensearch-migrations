@@ -1,6 +1,6 @@
 # RFS High Level Design
 
-**LAST UPDATED: June 2024**
+**LAST UPDATED: March 2026**
 
 ## Table of Contents
 - [RFS High Level Design](#rfs-high-level-design)
@@ -10,6 +10,7 @@
     - [Ultra-High Level Design](#ultra-high-level-design)
     - [Key RFS Worker concepts](#key-rfs-worker-concepts)
     - [How the RFS Worker works](#how-the-rfs-worker-works)
+    - [Pipeline Integration](#pipeline-integration--how-work-coordination-drives-the-migration-pipeline)
     - [Appendix: Assumptions](#appendix-assumptions)
     - [Appendix: Centralized or Decentralized Coordination?](#appendix-centralized-or-decentralized-coordination)
     - [Appendix: CMS Schema](#appendix-cms-schema)
@@ -61,6 +62,8 @@ RFS Workers perform the work of migrating the data from a source cluster to a ta
 
 ### Coordinating Metadata Store (CMS)
 
+> **Note:** The original design below used the target cluster as the CMS. The current implementation defaults to a dedicated single-node OpenSearch coordinator cluster, which isolates coordination traffic from the target. The target cluster can still be used via `useTargetClusterForWorkCoordination: true`. The dedicated coordinator also enables migration to targets that don't support coordination workloads, such as Amazon OpenSearch Serverless.
+
 The Coordinating Metadata Store (CMS) is the source of truth for the status of the overall Reindex-from-Snapshot operation.  For the first iteration, the target Elasticsearch/Opensearch cluster is used for this purpose (see A1 in [Appendix: Assumptions](#appendix-assumptions)), but it could just as easily be a PostgreSQL instance, Dynamo DB, etc.  The schema for this metadata can be found in [Appendix: CMS Schema](#appendix-cms-schema).
 
 RFS Workers query the CMS to infer what work they should next attempt, and update the CMS with any progress they have made.  RFS Workers interact with the CMS without making assumptions about how many other RFS Workers are doing the same thing.
@@ -81,9 +84,24 @@ Lease timing is deterministic as a function of 1/ the "initial lease time" param
 
 Claiming a lease involves a clock-check (rejecting the lease if the worker's clock is too far off from the CMS's clock), after which the RFS workers monitor the time remaining until the lease expires. When it expires without the work being completed, they (in most cases) create a successor work item including a progress cursor of the current progress through the shard, mark the original work item as completed, and kill the worker process. If shard setup (downloading, unpacking, and beginning to read the shard) takes too little (<2.5%) or too much (>10%) of the lease time, the lease time is considered wrong-sized and is adjusted for the successor item. This adjustment is done by setting the number of attempt field when creating the successor item. If the lease was too short (setup took too large a percent of the time), the number of attempts on the successor item will be the number of attempts on the original item plus one. In the opposite case, it will be initialized as the attempts on the original item minus one. And if the lease was "right-sized", the successor item will get the same number of attempts value as the original currently has.
 
+#### Lease-timeout checkpoint timing
+
+Trigger time for cancellation/checkpoint:
+- `trigger = max(leaseDuration * 0.75, leaseDuration - PT4M30S)`
+
+At this trigger, the worker:
+1. Cancels in-flight document migration for the current shard.
+2. Captures the most recent progress cursor.
+3. Runs `createSuccessorWorkItemsAndMarkComplete` to persist handoff metadata.
+4. Exits so the next worker can reclaim and continue.
+
+This is meant to preserve progress during transient coordinator outages that happen shortly before lease expiry, giving coordinator retry/backoff logic additional time to persist successor metadata.
+
 ### One work lease at a time
 
 An RFS Worker retains no more than a single work lease at a time.  If the work item associated with that lease has multiple steps or components, the work lease covers the completion of all of them as a combined unit.  As a specific example, the RFS Worker that wins the lease to migrate an Elasticsearch shard is responsible for migrating every document in that shard starting at the given doc num (or at the beginning if not specified). After completing a lease, the worker process exits.
+
+In lease-timeout handoff scenarios, the process exits after checkpoint/handoff work is attempted so that a subsequent worker can reclaim remaining documents.
 
 ### Work lease backoff
 
@@ -105,6 +123,12 @@ A successor item is created when a worker does not complete the shard referenced
 If this process fails at any point before step 4 is successful, another worker will acquire the lease for the original work item. However, before beginning work, the worker checks whether the `successorWorkItems` field was set. If so, it knows that a previous worker completed up to the point indicated by the successor work item id, and it picks up the work of steps 3 and 4 (creating the successor work item, if it doesn't exist, and marking the original as complete).
 
 If this process fails before the `successorWorkItems` field is updated, a new worker will acquire the lease, but it won't be clear to that worker that this work was already started, so it will begin from the progress cursor in the original work item. While this means that excess document processing and reindexing work is being done, it does not put the CMS in an inconsistent state. Additionally, as detailed below, reindexing documents is idempotent by ID, so re-writing a document does not cause duplicate copies on the target cluster.
+
+Coordinator outage contract around the early-checkpoint trigger:
+- If coordinator is unavailable at trigger time, worker retries coordinator operations using existing retry/backoff policies.
+- Retry backoff waits are deadline-bounded by the original lease expiry. A retry will not begin a new backoff sleep if it would exceed the lease boundary.
+- If retries succeed before the deadline, handoff metadata is persisted and successor work can be reclaimed.
+- If retries hit the deadline, worker exits and later workers may need to re-drive work from the last persisted cursor.
 
 ```mermaid
 sequenceDiagram
@@ -216,11 +240,64 @@ While performing its work, if an RFS Worker is tasked to create an Elasticsearch
 
 The pending work items are the remaining docs for each Elasticsearch Shard. The RFS Workers have a consistent view of the position of a document within the entire shard. If a lease is about to expire and a shard has not been fully migrated, the RFS Workers use the latest continuous migrated doc number to reduce the duplicate work a successor work item has. On the target cluster, overwritten documents appear as deleted documents, so the amount of duplicative work can be assessed from the deleted items metric (assuming there is not other activity on the cluster creating deleted documents).
 
+## Pipeline Integration — How Work Coordination Drives the Migration Pipeline
+
+The document migration pipeline (`RfsPipeline` module) is driven by work coordination through `PipelineDocumentsRunner`. This section describes how the two systems connect.
+
+### Coordinated Mode (Production)
+
+Multiple RFS workers each call `PipelineDocumentsRunner.migrateNextShard()` in a loop. The work coordinator ensures no two workers process the same shard.
+
+```
+RfsMigrateDocuments (CLI entry point)
+  │
+  ▼
+DocumentMigrationBootstrap (DI wiring)
+  │
+  ├── LuceneSnapshotSource (DocumentSource)
+  ├── OpenSearchDocumentSink (DocumentSink)
+  └── PipelineDocumentsRunner (work coordination)
+        │
+        ├── acquire shard ──► IWorkCoordinator (lease-based)
+        │
+        ├── migrate shard ──► DocumentMigrationPipeline.migratePartition()
+        │                       │
+        │                       ├── source.readDocuments(partition, offset)
+        │                       ├── batch by count + byte size
+        │                       ├── sink.writeBatch(collectionName, batch)
+        │                       └── emit ProgressCursor per batch
+        │
+        ├── progress ──► WorkItemCursor (successor work items)
+        │
+        └── cancellation on lease expiry ──► checkpoint + exit
+```
+
+### Standalone Mode (Testing / Small Migrations)
+
+`DocumentMigrationPipeline.migrateAll()` processes everything in a single process with no coordination:
+
+- Collections: sequential (`concatMap`)
+- Partitions within a collection: configurable concurrency (`flatMap(partitionConcurrency)`)
+- Batches within a partition: concurrent writes (`flatMapSequential(batchConcurrency)`)
+- Batch boundaries: configurable by `maxDocsPerBatch` and `maxBytesPerBatch`
+
+### Exit Codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success — work completed |
+| 2 | Process timed out |
+| 3 | No work left at all |
+| 4 | Work exists but none available to this worker (all leased by others) |
+
+Exit code 4 prevents Kubernetes from rapid-cycling pods when all work is leased by other workers.
+
 ## Appendix: Assumptions
 
 We start with the following high-level assumptions about the structure of the solution.  Changes to these assumptions would likely have a substantial impact on the design.  
 
 * (A1) - The RFS Workers cannot assume access to a data store other than the migration’s target cluster as a state-store for coordinating their work.
+  *(Note: The current implementation relaxes this assumption - a dedicated single-node OpenSearch coordinator cluster is now deployed by default, separate from the target.)*
 * (A2) - The RFS Worker will perform all the work required to complete a historical migration.
 
 We have the following, additional assumptions about the process of performing a Reindex-from-Snapshot operation:

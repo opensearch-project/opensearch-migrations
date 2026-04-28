@@ -33,6 +33,7 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly customKafkaGroupId?: string,
     readonly userAgentSuffix?: string,
     readonly extraArgs?: string,
+    readonly jvmArgs?: string,
     readonly otelCollectorEnabled: boolean,
     readonly maxUptime?: Duration
 }
@@ -85,7 +86,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         });
         const groupId = props.customKafkaGroupId ?? `logging-group-${deployId}`
 
-        let command = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint}`
+        let command = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer --target-uri ${osClusterEndpoint}`
         const extraArgsDict = parseArgsToDict(props.extraArgs)
         if (props.skipClusterCertCheck != false) { // when true or unspecified, add the flag
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--insecure")
@@ -126,12 +127,13 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             mountPoints: [sharedLogFileSystem.asMountPoint()],
             taskRolePolicies: servicePolicies,
             environment: {
-                "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/traffic-replayer-${deployId}`
+                "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/traffic-replayer-${deployId}`,
+                ...(props.jvmArgs ? { "JDK_JAVA_OPTIONS": props.jvmArgs } : {}),
             },
             secrets: secrets,
             cpuArchitecture: props.fargateCpuArch,
-            taskCpuUnits: 1024,
-            taskMemoryLimitMiB: 4096,
+            taskCpuUnits: 16384,
+            taskMemoryLimitMiB: 122880,
             ...props
         });
 

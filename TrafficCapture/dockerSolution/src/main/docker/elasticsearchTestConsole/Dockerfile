@@ -1,5 +1,9 @@
+# Global ARGs (must be before first FROM to be usable in FROM lines)
+ARG BUILDER_IMAGE=docker.io/library/amazonlinux:2023
+ARG RUNTIME_IMAGE=docker.io/library/amazonlinux:2023
+
 # ---------- 1) Builder ----------
-FROM amazonlinux:2023 AS builder
+FROM ${BUILDER_IMAGE} AS builder
 
 # Build deps (toolchain + headers)
 RUN dnf install -y \
@@ -17,10 +21,10 @@ RUN dnf install -y \
       python3.11-devel \
       python3.11-pip \
       python3.11-wheel \
-  && dnf clean all && rm -rf /var/cache/dnf
+  && dnf clean all
 
-ENV PIP_ROOT_USER_ACTION ignore
-ENV LANG C.UTF-8
+ENV PIP_ROOT_USER_ACTION=ignore
+ENV LANG=C.UTF-8
 
 # Define the virtual environment path to use for all pipenv runs
 ENV WORKON_HOME=/
@@ -29,17 +33,17 @@ ENV PIPENV_DEFAULT_PYTHON_VERSION=3.11
 ENV PIPENV_MAX_DEPTH=1
 
 # Pipenv & project install into a project-local venv we can copy out
-RUN python3.11 -m pip install pipenv
+RUN python3.11 -m pip install pipenv==2026.5.0
 WORKDIR /
 RUN python3.11 -m venv .venv
 COPY Pipfile Pipfile.lock ./
 RUN pipenv install --deploy
 
 # ---------- 2) Runtime ----------
-FROM amazonlinux:2023
+FROM ${RUNTIME_IMAGE}
 
-ENV PIP_ROOT_USER_ACTION ignore
-ENV LANG C.UTF-8
+ENV PIP_ROOT_USER_ACTION=ignore
+ENV LANG=C.UTF-8
 
 # Minimal runtime deps (no compilers, no *-devel)
 RUN dnf install -y \
@@ -53,7 +57,7 @@ RUN dnf install -y \
         git \
         gzip \
         hostname \
-        java-17-amazon-corretto-headless \
+        java-21-amazon-corretto-headless \
         jq \
         less \
         make \
@@ -69,16 +73,16 @@ RUN dnf install -y \
         wget \
         zlib \
         && \
-    dnf clean all && \
-    rm -rf /var/cache/dnf
+    dnf clean all
 
 # Define the virtual environment path to use for all pipenv runs
 ENV WORKON_HOME=/
 ENV PIPENV_CUSTOM_VENV_NAME=.venv
 ENV PIPENV_DEFAULT_PYTHON_VERSION=3.11
 ENV PIPENV_MAX_DEPTH=1
+ENV PATH="/.venv/bin:${PATH}"
 
-RUN python3.11 -m pip install pipenv
+RUN python3.11 -m pip install pipenv==2026.5.0
 WORKDIR /
 COPY --from=builder /.venv /.venv
 
@@ -95,4 +99,4 @@ RUN chmod ug+x /root/*.sh
 RUN chmod ug+x /root/*.py
 RUN ln -s $(command -v vim) /usr/local/bin/vi
 
-CMD tail -f /dev/null
+CMD ["tail", "-f", "/dev/null"]

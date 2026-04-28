@@ -26,7 +26,7 @@ import org.testcontainers.kafka.ConfluentKafkaContainer;
 @Testcontainers(disabledWithoutDocker = true)
 @Tag("isolatedTest")
 public class KafkaCommitsWorkBetweenLongPollsTest extends InstrumentationTest {
-    private static final long DEFAULT_POLL_INTERVAL_MS = 1000;
+    private static final long DEFAULT_POLL_INTERVAL_MS = 500;
     private static final int NUM_RUNS = 5;
     public static final String TEST_TOPIC_NAME = "test-topic";
     @Container
@@ -39,7 +39,9 @@ public class KafkaCommitsWorkBetweenLongPollsTest extends InstrumentationTest {
         var kafkaConsumerProps = KafkaTrafficCaptureSource.buildKafkaProperties(
             embeddedKafkaBroker.getBootstrapServers(),
             "TEST_GROUP_CONSUMER_ID",
-            false,
+            "none",
+            null,
+            null,
             null
         );
         kafkaConsumerProps.setProperty("max.poll.interval.ms", DEFAULT_POLL_INTERVAL_MS + "");

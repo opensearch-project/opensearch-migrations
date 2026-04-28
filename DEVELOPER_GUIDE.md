@@ -16,9 +16,10 @@
 
 ## Prerequisites
 
-- Java Development Kit (JDK) 11-17
+- Java Development Kit (JDK) 17+
 - Python3
 - Docker/Minikube/K3s/etc (for local deployment)
+- [Helm](https://helm.sh/docs/intro/install/)
 - [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html#getting-started-install-instructions) (for AWS deployment)
 - Node.js v22 (downloaded automatically by Gradle)
 - [AWS Cloud Development Kit (CDK)](https://docs.aws.amazon.com/cdk/v2/guide/getting_started.html) (for AWS deployment, downloaded automatically by Gradle)
@@ -78,7 +79,7 @@ Users can interact with the migration process through the CLI, which orchestrate
 Build images with docker (requires docker)
 
 ```bash
-../gradlew buildDockerImages
+./gradlew buildDockerImages
 ```
 
 Build images with buildkit and jib. 
@@ -86,7 +87,7 @@ See [buildImages](buildImages/README-K8s.md) for instructions to set
 that up.
 
 ```bash
-../gradlew :buildImages:buildImagesToRegistry
+./gradlew :buildImages:buildImagesToRegistry
 ```
 
 ## Running the Project

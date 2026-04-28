@@ -45,7 +45,27 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     static final int MAX_CREATE_SUCCESSOR_WORK_ITEMS_RETRIES = 10;
     static final int CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS = 10; // last delay before failure: 10 seconds
     static final int MAX_CREATE_UNASSIGNED_SUCCESSOR_WORK_ITEM_RETRIES = 7; // last delay before failure: 1.2 seconds
-    static final int MAX_MARK_AS_COMPLETED_RETRIES = 7; // last delay before failure: 1.2 seconds
+    static final int MAX_MARK_AS_COMPLETED_RETRIES = 7; // last delay before failure: ~64 seconds, total window: ~127 seconds
+    static final int MARK_AS_COMPLETED_RETRY_BASE_MS = 1000;
+    // Multiplier is fixed to be 2x (standard exponential backoff)
+    public static final int EXPONENTIAL_BACKOFF_MULTIPLIER = 2;
+
+    /**
+     * Configuration for the exponential backoff retry used when marking work items as completed.
+     * @param maxRetries maximum number of retries (total executions = maxRetries + 1)
+     * @param initialDelayMs base delay in milliseconds (doubles each retry)
+     * @param maxDelayMs upper bound on any single retry delay
+     */
+    public record CompletionRetryConfig(int maxRetries, long initialDelayMs, long maxDelayMs) {
+        public CompletionRetryConfig {
+            if (maxRetries < 0) throw new IllegalArgumentException("maxRetries must be >= 0, got " + maxRetries);
+            if (initialDelayMs <= 0) throw new IllegalArgumentException("initialDelayMs must be > 0, got " + initialDelayMs);
+            if (maxDelayMs <= 0) throw new IllegalArgumentException("maxDelayMs must be > 0, got " + maxDelayMs);
+        }
+        public static final CompletionRetryConfig DEFAULT = new CompletionRetryConfig(
+            MAX_MARK_AS_COMPLETED_RETRIES, MARK_AS_COMPLETED_RETRY_BASE_MS, 64_000
+        );
+    }
 
 
     public static final String SCRIPT_VERSION_TEMPLATE = "{SCRIPT_VERSION}";
@@ -128,6 +148,7 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     @Getter
     private final Clock clock;
     private final Consumer<WorkItemAndDuration> workItemConsumer;
+    private CompletionRetryConfig completionRetryConfig = CompletionRetryConfig.DEFAULT;
 
     protected OpenSearchWorkCoordinator(
         AbstractedHttpClient httpClient,
@@ -160,6 +181,10 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         this.workItemConsumer = workItemConsumer;
     }
 
+    void setCompletionRetryConfig(CompletionRetryConfig config) {
+        this.completionRetryConfig = config;
+    }
+
     public static String getFinalIndexName(String indexNameAppendage) {
         return INDEX_BASENAME + Optional.ofNullable(indexNameAppendage)
             .filter(s->!s.isEmpty())
@@ -174,7 +199,20 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     private static void retryWithExponentialBackoff(
             RetryableAction action, int maxRetries, long baseRetryTimeMs, Consumer<Exception> exceptionConsumer) throws InterruptedException, IllegalStateException {
+        retryWithExponentialBackoff(action, maxRetries, baseRetryTimeMs, Long.MAX_VALUE, null, null, exceptionConsumer);
+    }
+
+    private static void retryWithExponentialBackoff(
+            RetryableAction action, int maxRetries, long baseRetryTimeMs, long maxDelayMs,
+            String operationName, Consumer<Exception> exceptionConsumer) throws InterruptedException, IllegalStateException {
+        retryWithExponentialBackoff(action, maxRetries, baseRetryTimeMs, maxDelayMs, null, operationName, exceptionConsumer);
+    }
+
+    private static void retryWithExponentialBackoff(
+            RetryableAction action, int maxRetries, long baseRetryTimeMs, long maxDelayMs,
+            Instant deadline, String operationName, Consumer<Exception> exceptionConsumer) throws InterruptedException, IllegalStateException {
         int attempt = 0;
+        long delay = baseRetryTimeMs;
         while (true) {
             try {
                 action.execute();
@@ -194,11 +232,33 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     exceptionConsumer.accept(e);
                     throw new RetriesExceededException(e, attempt);
                 }
-                Duration sleepDuration = Duration.ofMillis((long) (Math.pow(2.0, attempt - 1.0) * baseRetryTimeMs));
+                long cappedDelay = Math.min(delay, maxDelayMs);
+                if (deadline != null) {
+                    long remainingMs = Duration.between(Instant.now(), deadline).toMillis();
+                    if (remainingMs <= 0 || cappedDelay > remainingMs) {
+                        log.atWarn().setMessage("Retry would exceed deadline (remaining={}ms, nextSleep={}ms), aborting")
+                            .addArgument(remainingMs).addArgument(cappedDelay).log();
+                        exceptionConsumer.accept(e);
+                        throw new RetriesExceededException(e, attempt);
+                    }
+                }
+                Duration sleepDuration = Duration.ofMillis(cappedDelay);
                 log.atWarn().setCause(e)
-                        .setMessage("Couldn't complete action due to exception. Backing off {} and trying again.")
-                        .addArgument(sleepDuration).log();
-                Thread.sleep(sleepDuration.toMillis());
+                        .setMessage("Retry attempt {}/{} for {}. Backing off {} before next attempt. Error: {}")
+                        .addArgument(attempt)
+                        .addArgument(maxRetries)
+                        .addArgument(operationName != null ? operationName : "operation")
+                        .addArgument(sleepDuration)
+                        .addArgument(e.getClass().getSimpleName())
+                        .log();
+                Thread.sleep(cappedDelay);
+                
+                // Iterative saturating doubling for next attempt
+                if (delay < maxDelayMs) {
+                    delay = (delay > maxDelayMs / EXPONENTIAL_BACKOFF_MULTIPLIER)
+                        ? maxDelayMs
+                        : delay * EXPONENTIAL_BACKOFF_MULTIPLIER;
+                }
             }
         }
     }
@@ -445,8 +505,10 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
     ) throws InterruptedException {
             retryWithExponentialBackoff(
                 () -> completeWorkItemWithoutRetry(workItemId, contextSupplier),
-                MAX_MARK_AS_COMPLETED_RETRIES,
-                CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
+                completionRetryConfig.maxRetries(),
+                completionRetryConfig.initialDelayMs(),
+                completionRetryConfig.maxDelayMs(),
+                "completeWorkItem[" + workItemId + "]",
                 ignored -> {}
             );
     }
@@ -881,6 +943,18 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             int successorNextAcquisitionLeaseExponent,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException, IllegalStateException {
+        createSuccessorWorkItemsAndMarkComplete(workItemId, successorWorkItemIds,
+            successorNextAcquisitionLeaseExponent, null, contextSupplier);
+    }
+
+    @Override
+    public void createSuccessorWorkItemsAndMarkComplete(
+            String workItemId,
+            List<String> successorWorkItemIds,
+            int successorNextAcquisitionLeaseExponent,
+            Instant deadline,
+            Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+    ) throws IOException, InterruptedException, IllegalStateException {
         if (successorWorkItemIds.contains(workItemId)) {
             throw new IllegalArgumentException(String.format("successorWorkItemIds %s can not not contain the parent workItemId: %s", successorWorkItemIds, workItemId));
         }
@@ -888,26 +962,31 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
             throw new IllegalArgumentException("successorWorkItemIds can not contain the delimiter: " + SUCCESSOR_ITEM_DELIMITER);
         }
         try (var ctx = contextSupplier.get()) {
-            // It is extremely valuable to try hard to get the work item updated with successor item ids. If it fails without
-            // completing this step, the next worker to pick up this lease will rerun all of the work. If it fails after this
-            // step, the next worker to pick it up will see this update and resume the work of creating the successor work items,
-            // without redriving the work.
             retryWithExponentialBackoff(
                     () -> updateWorkItemWithSuccessors(workItemId, successorWorkItemIds),
                     MAX_CREATE_SUCCESSOR_WORK_ITEMS_RETRIES,
                     CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
+                    Long.MAX_VALUE,
+                    deadline,
+                    "updateWorkItemWithSuccessors[" + workItemId + "]",
                     e -> ctx.addTraceException(e, true)
             );
             retryWithExponentialBackoff(
                     () -> createUnassignedWorkItemsIfNonexistent(successorWorkItemIds, successorNextAcquisitionLeaseExponent),
                     MAX_CREATE_UNASSIGNED_SUCCESSOR_WORK_ITEM_RETRIES,
                     CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
+                    Long.MAX_VALUE,
+                    deadline,
+                    "createUnassignedWorkItems[" + workItemId + "]",
                     e -> ctx.addTraceException(e, true)
             );
             retryWithExponentialBackoff(
                     () -> completeWorkItemWithoutRetry(workItemId, ctx::getCompleteWorkItemContext),
-                    MAX_MARK_AS_COMPLETED_RETRIES,
-                    CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
+                    completionRetryConfig.maxRetries(),
+                    completionRetryConfig.initialDelayMs(),
+                    completionRetryConfig.maxDelayMs(),
+                    deadline,
+                    "completeWorkItem[" + workItemId + "]",
                     e -> ctx.addTraceException(e, true)
             );
         }

@@ -23,6 +23,7 @@ export interface CaptureProxyProps extends StackPropsExt {
     readonly serviceName?: string,
     readonly targetGroups: ELBTargetGroup[],
     readonly extraArgs?: string,
+    readonly jvmArgs?: string,
     readonly taskInstanceCount?: number,
 }
 
@@ -121,7 +122,8 @@ export class CaptureProxyStack extends MigrationServiceCore {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--insecureDestination")
         }
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--listenPort", "9200")
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--sslConfigFile", "/usr/share/captureProxy/config/proxy_tls.yml")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--sslCertChainFile", "/usr/share/captureProxy/config/pub.pem")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--sslKeyFile", "/usr/share/captureProxy/config/key.pem")
         if (props.streamingSourceType !== StreamingSourceType.DISABLED) {
             const brokerEndpoints = getMigrationStringParameterValue(this, {
                 ...props,
@@ -147,6 +149,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 2048,
             taskMemoryLimitMiB: 4096,
+            ...(props.jvmArgs ? { environment: { "JDK_JAVA_OPTIONS": props.jvmArgs } } : {}),
             ...props
         });
     }

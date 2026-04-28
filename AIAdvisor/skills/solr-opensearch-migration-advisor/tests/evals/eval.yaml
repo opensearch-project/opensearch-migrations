@@ -1,0 +1,550 @@
+description: "Config for claude agent based migration advisor tests"
+
+providers:
+  - id: 'file://claude_requests.py'
+    label: 'Claude agent invocation'
+    config:
+      timeout: 3000000
+
+defaultTest:
+  options:
+    provider:
+      id: bedrock:us.anthropic.claude-sonnet-4-5-20250929-v1:0
+      config:
+        region: us-east-1
+        max_tokens: 512
+        # Prohibit error messages 'Could not extract JSON from llm-rubric response':
+        # https://github.com/promptfoo/promptfoo/issues/2084
+        response_format: json_object
+
+prompts:
+  - |-
+    Do only stick to resources within the the directory set as your cwd, but ignore all resources under the test folder.
+    Load the skill in .claude/skills/migration-advisor (if you have not already done so) before answering the following query: 
+    {{query}}
+
+tests:
+
+  # Note the sequence of continue: False to start new session, and continue: True if building on the previous prompts
+  - description: "Ensure the agent asks for the specific role of the user."
+    metadata:
+      continue: false # flag on / off if the last used session should be picked up or not
+    vars:
+      query: |
+        Help me migrate my solr system to opensearch.
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response clarifies the actual role of the user. Provides 2 explicit role examples to choose from:
+          search relevance engineer and devops / platform engineer.
+        metric: clarify-role
+
+  - description: "Ask for Solr version"
+    metadata:
+      continue: true # flag on / off if the last used session should be picked up or not
+    vars:
+      query: |
+        To your previous question: Search Engineer is the correct role.
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response asks for the Solr version the user is migrating from.
+        metric: clarify-solr-version
+
+  - description: "Provide Solr version 6 and expect version acknowledgement and schema request"
+    metadata:
+      continue: true
+    vars:
+      query: |
+        We are migrating from Solr 6.6.
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response acknowledges Solr version 6.6 response then asks the user to provide their Solr schema.
+        metric: solr-version-acknowledged
+  - description: "Provide Solr 6 schema and verify OpenSearch mapping is generated correctly"
+    metadata:
+      continue: true
+    vars:
+      query: |
+        Here is our Solr 6 schema:
+
+        <?xml version="1.0" encoding="UTF-8" ?>
+        <schema name="example-solr6" version="1.6">
+          <fields>
+            <field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false" />
+            <field name="product_name" type="text_general" indexed="true" stored="true" />
+            <field name="price" type="currency" indexed="true" stored="true"/>
+            <field name="priority" type="priority_enum" indexed="true" stored="true"/>
+            <field name="_version_" type="long" indexed="true" stored="true"/>
+            <field name="copy_source" type="text_general" indexed="true"  stored="true"/>
+            <field name="copy_target" type="text_general" indexed="true"  stored="false"/>
+            <copyField source="copy_source" dest="copy_target"/>
+            <field name="collation_field" type="coll_de" indexed="true"  stored="false"/>
+          </fields>
+          <uniqueKey>id</uniqueKey>
+          <types>
+            <fieldType name="string" class="solr.StrField" sortMissingLast="true" />
+            <fieldType name="long" class="solr.TrieLongField" precisionStep="0" positionIncrementGap="0"/>
+            <fieldType name="text_general" class="solr.TextField" positionIncrementGap="100">
+              <analyzer>
+                <tokenizer class="solr.StandardTokenizerFactory"/>
+                <filter class="solr.LowerCaseFilterFactory"/>
+              </analyzer>
+            </fieldType>
+            <fieldType name="currency" class="solr.CurrencyField"
+                       precisionStep="8"
+                       defaultCurrency="USD"
+                       currencyConfig="currency.xml" />
+            <fieldType name="priority_enum" class="solr.EnumField"
+                       enumsConfig="enumsConfig.xml"
+                       enumName="priority" />
+            <fieldType name="coll_de"
+               class="solr.ICUCollationField"
+               locale="de@collation=phonebook"
+               strength="primary"
+               caseLevel="false"/>
+          </types>
+        </schema>
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response produces a valid OpenSearch index mapping JSON that satisfies all of the following:
+          (0) '_version_' is not included in the OpenSearch mapping.
+          (1) 'id' is mapped to type 'keyword';
+          (2) 'product_name' is mapped to type 'text' with a standard or equivalent analyzer;
+          (3) The response should note that the TrieLongField type has no direct OpenSearch equivalent,
+            recommending and using the `long` field type instead;
+          (4) 'price' (solr.CurrencyField) is flagged as unsupported in OpenSearch.
+          (5) 'priority' (solr.EnumField) is flagged as unsupported in OpenSearch.
+          (6) 'collationField' (solr.ICUCollationField) is flagged as unsupported in OpenSearch.
+          (7) 'copyField' conversion via `copy_to`.
+          (8) the response notes the TF-IDF to BM25 similarity change as a behavioral incompatibility
+              given the source is Solr 6.x.
+        metric: solr6-schema-mapping-correct
+
+  - description: "Translate Solr queries to OpenSearch"
+    metadata:
+      continue: true
+    vars:
+      query: |
+        My Solr queries to translate are:
+        Query #1: title:opensearch AND price:[10 TO 100]
+        Query #2: defType=edismax&q=the dark knight&qf=title^10 tagline^2 overview^1 cast^0.5&pf=title^20 overview^5&mm=2<-25%
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response translates Query #1 to an OpenSearch bool query with a must clause containing
+          a match on the title field for "opensearch" and a range on the price field with gte 10 and lte 100.
+        metric: query1-bool-match-range
+
+      - type: llm-rubric
+        value: >-
+          Response translates Query #2 using multi_match with type best_fields across the fields
+          title (boost 10), tagline (boost 2), overview (boost 1), and cast (boost 0.5).
+        metric: query2-multimatch-qf-fields
+
+      - type: llm-rubric
+        value: >-
+          Response translates Query #2 with phrase boost (pf) clauses for title (boost 20) and
+          overview (boost 5) expressed as multi_match with type phrase in a should clause.
+        metric: query2-pf-phrase-boost
+
+      - type: llm-rubric
+        value: >-
+          Response translates Query #2 with minimum_should_match set to reflect the mm value of "2<-25%".
+        metric: query2-mm-minimum-should-match
+
+      - type: llm-rubric
+        value: >-
+          Response notes that eDisMax pf phrase boost fields have no direct OpenSearch equivalent
+          and that the translation is a behavioral approximation.
+        metric: query2-edismax-behavioral-note
+
+  - description: "Provide full migration plan for search engineer"
+    metadata:
+      continue: true
+    vars:
+      query: |
+        On top of that, the operational setup consists of 3 nodes with 8gb ram (4gb heap) and 4 cores each, 2 shards, 
+        50M docs, 10GB index. 
+        Provide me with the final migration plan, given all so far provided information.
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response contains a full solr to opensearch migration plan for the role of Search Engineer, 
+          covering the main steps and for migrating Solr 6.6.  
+          It should be suitable for the following Solr 6 Schema:
+          <?xml version="1.0" encoding="UTF-8" ?>
+          <schema name="example-solr6" version="1.6">
+            <fields>
+              <field name="id" type="string" indexed="true" stored="true" required="true" multiValued="false" />
+              <field name="product_name" type="text_general" indexed="true" stored="true" />
+              <field name="price" type="currency" indexed="true" stored="true"/>
+              <field name="priority" type="priority_enum" indexed="true" stored="true"/>
+              <field name="_version_" type="long" indexed="true" stored="true"/>
+              <field name="copy_source" type="text_general" indexed="true"  stored="true"/>
+              <field name="copy_target" type="text_general" indexed="true"  stored="false"/>
+              <copyField source="copy_source" dest="copy_target"/>
+              <field name="collation_field" type="coll_de" indexed="true"  stored="false"/>
+            </fields>
+            <uniqueKey>id</uniqueKey>
+            <types>
+              <fieldType name="string" class="solr.StrField" sortMissingLast="true" />
+              <fieldType name="long" class="solr.TrieLongField" precisionStep="0" positionIncrementGap="0"/>
+              <fieldType name="text_general" class="solr.TextField" positionIncrementGap="100">
+                <analyzer>
+                  <tokenizer class="solr.StandardTokenizerFactory"/>
+                  <filter class="solr.LowerCaseFilterFactory"/>
+                </analyzer>
+              </fieldType>
+              <fieldType name="currency" class="solr.CurrencyField"
+                         precisionStep="8"
+                         defaultCurrency="USD"
+                         currencyConfig="currency.xml" />
+              <fieldType name="priority_enum" class="solr.EnumField"
+                         enumsConfig="enumsConfig.xml"
+                         enumName="priority" />
+              <fieldType name="coll_de"
+                 class="solr.ICUCollationField"
+                 locale="de@collation=phonebook"
+                 strength="primary"
+                 caseLevel="false"/>
+            </types>
+          </schema>
+          
+          It should also incorporate ops considerations based on an initial solr hardware setup of 3 nodes with 8gb ram 
+          (4gb heap) and 4 cores each, 2 shards, 50M docs, 10GB index.
+          It also contains dedicated sections on incompatibilities, milestones, blockers and costs. Under the following
+          bullet points you find some facts that should be mentioned under the respective sections:
+          
+          # Incompatibilities:
+          - Trie field types (Solr) need mapping to Point types (OpenSearch)
+          - Relevance scores will differ between Solr (TF-IDF) and OpenSearch (BM25) without additional changes
+          - Do not migrate the ` _version_` field to the OpenSearch index mapping
+          - `solr.EnumField` unsupported
+          - `solr.ICUCollationField` unsupported
+          - Fields marked `stored="true"` but `indexed="false"` in Solr may behave differently under `_source` filtering
+            in OpenSearch
+          - eDismax `pf` phrase boost field with no direct equivalent; approximate with `multi_match` type `phrase` in a `should` clause
+          
+          # Milestones
+          - Section provides plausible milestones where steps build logically on top of each other and later steps 
+            do not come before other steps that are logically reqiured before.
+          - Since the role asking for the report is a Search Engineer, check if the report leads with full 
+            incompatibility list and query translation details and contains the previously passed query translations
+            as examples for translated queries:
+            Query #1: title:opensearch AND price:[10 TO 100]
+            Query #2: defType=edismax&q=the dark knight&qf=title^10 tagline^2 overview^1 cast^0.5&pf=title^20 overview^5&mm=2<-25%
+          
+          # Blockers
+          - Section describing expectable difficulties or stoppers when migrating Solr 6.6 to OpenSearch.
+          
+          # Cost
+          - Reasonable cost estimates for infrastructure, effort, and required tooling changes where applicable.
+        metric: generate-full-report
+  - description: "Provide full migration plan for Devops Engineer"
+    metadata:
+      continue: true
+    vars:
+      query: |
+        Now provide the migration plan assuming I would be a Devops Engineer.
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response contains a full solr to opensearch migration plan for the role of DevOps Engineer, 
+          covering the main steps and for migrating Solr 6.6.  
+          The plan should emphasize the following points:
+          - Breaking issues that could cause index creation or reindex failures
+          - required cluster level changes
+          - emphasizes the ops side of things over the search relevancy topics
+          - emphasizes resource intensive queries and infrastructure implications
+          - emphasizes authentication, authorization, and operational constraints
+          - gives details regarding the following aspects: instance types, storage (EBS vs. instance store), 
+            node roles (data, coordinating, cluster manager), auto-scaling, monitoring, and deployment automation
+          
+          Regarding the migration plan outline, the response should reflect the following:
+          - lead with the cluster sizing recommendation and infrastructure plan
+          - most prominent sections: deployment sequencing and operational runbook
+        metric: generate-full-report
+  - description: "Translate SearchHandler to OpenSearch equivalent"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        I am a Search Engineer and for a solr to opensearch migration I need to migrate the following requestHandler
+        to its opensearch equivalent. Give an example json that can directly be used in
+        PUT requests against opensearch PUT _scripts/[template-name] endpoints.
+        Assume the template will be available as search template with name `my-search-template`.
+        Give examples how to invoke it against an existing index of name `my-index`.
+
+        <requestHandler name="/custom-search" class="solr.SearchHandler">
+          <lst name="defaults">
+            <str name="defType">edismax</str>
+            <str name="qf">title^2.0 content^1.0 author^1.5</str>
+            <str name="pf">title^3.0 content^1.5</str>
+            <str name="mm">75%</str>
+            <int name="rows">10</int>
+            <str name="fl">id,title,author,score</str>
+            <str name="wt">json</str>
+
+            <!-- Highlighting -->
+            <str name="hl">true</str>
+            <str name="hl.fl">title,content</str>
+            <str name="hl.snippets">3</str>
+            <str name="hl.fragsize">150</str>
+
+            <!-- Faceting -->
+            <str name="facet">true</str>
+            <str name="facet.field">category</str>
+            <str name="facet.field">author</str>
+            <str name="facet.mincount">1</str>
+          </lst>
+        </requestHandler>
+    assert:
+      - type: llm-rubric
+        value: >-
+          Give your evaluation response in json format (!!), and properly escape chars where this is needed.
+          The response contains a search template json payload equivalent to the following:
+          ```json
+          {
+            "script": {
+              "lang": "mustache",
+              "source": {
+                "size": {{ "{{size}}{{^size}}10{{/size}}" }},
+                "_source": ["id", "title", "author"],
+                "query": {
+                  "bool": {
+                    "must": [
+                      {
+                        "multi_match": {
+                          "query": "{{query_string}}",
+                          "type": "best_fields",
+                          "fields": ["title^2.0", "content^1.0", "author^1.5"],
+                          "minimum_should_match": "75%"
+                        }
+                      }
+                    ],
+                    "should": [
+                      {
+                        "match_phrase": {
+                          "title": {
+                            "query": "{{query_string}}",
+                            "boost": 3.0
+                          }
+                        }
+                      },
+                      {
+                        "match_phrase": {
+                          "content": {
+                            "query": "{{query_string}}",
+                            "boost": 1.5
+                          }
+                        }
+                      }
+                    ]
+                  }
+                },
+                "highlight": {
+                  "fields": {
+                    "title": { "number_of_fragments": 3, "fragment_size": 150 },
+                    "content": { "number_of_fragments": 3, "fragment_size": 150 }
+                  }
+                },
+                "aggs": {
+                  "category": {
+                    "terms": { "field": "category", "min_doc_count": 1 }
+                  },
+                  "author": {
+                    "terms": { "field": "author", "min_doc_count": 1 }
+                  }
+                }
+              }
+            }
+          }
+          ```
+
+          Be lenient on the following deviations:
+          - It is ok if the should block condenses the multiple match_phrase blocks to a single multi_match block
+          of type 'phrase' and a 'fields' attribute containing title and content field with the respective boosts.
+          - For the naming of facet aggregations, both the field names as well as field names with some facet-indicating
+          pre- or suffix are valid.
+          - If 'from' attribute is contained and contains a 0 as default value, that is fine, too.
+
+          Further, the response shall contain an example search request formulated as POST request
+          to the endpoint `my-index/_search/template` with json payload parameters
+          id: "my-search-template" and a params section with query_string parameter and
+          optionally size, as in the following example, where parameter values are solely
+          examples and can be different in the response, with `size` as optional parameter:
+
+          POST my-index/_search/template
+          ```json
+          {
+            "id": "my-search-template",
+            "params": {
+              "query_string": "my query",
+              "size": 10
+            }
+          }
+          ```
+
+          The response should also explicitly summarize the mappings utilized to reflect the example solr edismax
+          query in opensearch. Basic facts highlighted should match the ones given below:
+
+           ┌──────────────────────────────────────────┬─────────────────────────────────────────────────────────────────────────┐
+           │           Solr (SearchHandler)           │                          OpenSearch Equivalent                          │
+           ├──────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────┤
+           │ defType=edismax                          │ multi_match with best_fields                                            │
+           ├──────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────┤
+           │ qf=title^2.0 content^1.0 author^1.5      │ "fields": ["title^2.0", "content^1.0", "author^1.5"]                    │
+           ├──────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────┤
+           │ pf=title^3.0 content^1.5                 │ match_phrase in bool.should with boosts                                 │
+           ├──────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────┤
+           │ mm=75%                                   │ "minimum_should_match": "75%"                                           │
+           ├──────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────┤
+           │ rows=10                                  │ "size": 10                                                              │
+           ├──────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────┤
+           │ fl=id,title,author,score                 │ "_source": ["id","title","author"] (score is always returned in _score) │
+           ├──────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────┤
+           │ hl=true, hl.fl, hl.snippets, hl.fragsize │ "highlight" with number_of_fragments and fragment_size                  │
+           ├──────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────┤
+           │ facet.field=category,author              │ "aggs" with terms aggregation                                           │
+           ├──────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────┤
+        metric: assess-customizations-search-handler
+  - description: "Migrate Kerberos auth"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        I am a Devops Engineer and want to migrate solr to opensearch.
+        In our current solr setup we use kerberos authentication. Help me migrate this authentication to opensearch.
+    assert:
+      - type: llm-rubric
+        value: >-
+          Give your evaluation response in json format, and properly escape chars where this is needed.
+
+          The answer mentions a range of steps to configure kerberos in opensearch, representing the following steps:
+
+          ### Opensearch Node Configuration Steps:
+          1) Create a service principal and keytab for your OpenSearch nodes.
+          2) Within opensearch.yml:
+          Configure the following attributes (the response should also include descriptions of the attributes similar to what is provided below):
+          - `plugins.security.kerberos.krb5_filepath`: The path to your Kerberos configuration file.
+          - `plugins.security.kerberos.acceptor_keytab_filepath`: The path to the keytab file, which contains the principal that the Security plugin uses to issue requests through Kerberos.
+          - `plugins.security.kerberos.acceptor_principal`: The principal that the Security plugin uses to issue requests through Kerberos. This value must be present in the keytab file.
+
+          The response should highlight that both keytab and krb5 config file must be placed in the `config` directory of opensearch or a subdirectory.
+          Further the response should mention that their paths in opensearch.yml must be relative, not absolute.
+
+          ### Cluster security configuration steps:
+          1) Configure Kerberos authentication domain in the config.yml.
+          An example is given below. The specific settings might differ, but ensure its a valid configuration for a Kerberos authentication domain:
+          ```yaml
+          kerberos_auth_domain:
+            enabled: true
+            order: 1
+            http_authenticator:
+              type: kerberos
+              challenge: true
+              config:
+                krb_debug: false
+                strip_realm_from_principal: true
+            authentication_backend:
+              type: noop
+          ```
+        metric: assess-customizations-kerberos-auth-auth
+  - description: "Ask nonexistent feature"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        I am a Search Engineer and want to migrate solr to opensearch.
+        Id like to migrate the solr feature of wormhole vectors to opensearch, help me with that.
+    assert:
+      - type: llm-rubric
+        value: >-
+          The response should clearly state that no such feature exists and might ask for clarification.
+        metric: accuracy-no-hallucination
+  - description: "Maps libraries correctly"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        I am a Search Engineer and want to migrate solr to opensearch.
+        We are using the libraries SolrJ and pysolr. Help me migrating those.
+    assert:
+      - type: llm-rubric
+        value: >-
+          The response should mention the following replacements:
+          - opensearch-java as solrJ replacement
+          - opensearch-py as pysolr replacement
+        metric: map-client-integrations
+      - type: icontains-all
+        value:
+          - opensearch-java
+          - opensearch-py
+        metric: map-client-integrations
+  - description: "Translate cluster sizing"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        I am a DevOps engineer. We are currently running a solr setup consisting of the following:
+        3-node SolrCloud with 8gb ram (4gb heap) and 4 cores each, 2 shards, 50M docs, 10GB index. Help me migrate this to respective infra needed to run this
+        migrated to OpenSearch.
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response shall be close to the following recommendations:
+          - 2 - 4 OpenSearch shards
+          - replicas: 1
+          - 3 OpenSearch nodes with 8gb - 16gb ram and 4 cores each
+          - 4gb - 8gb jvm heap per node
+          - SolrCloud setup needs migration to OpenSearch ClusterManager
+          - if ZooKeeper was mentioned as SolrCloud dependency, that is not valid for OpenSearch, this dependency is not needed anymore
+        metric: sizing-recommendation
+  - description: "Resumes session 1"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        I am a Search Relevancy Engineer. We want to migrate our system based on Solr 8.0 to OpenSearch.
+        We are using the TMDB schema. And my name is Peter Parker. Remember this session as 'my-test-session'
+  - description: "Resume session 2"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        Hi there, please resume the session 'my-test-session' and fill me in on already stated facts about my role,
+        used solr version, schema used, and my name :).
+    assert:
+      - type: llm-rubric
+        value: >-
+          Response shall state the following facts:
+          - Role is Search Relevancy Engineer
+          - Solr is Solr 8.0
+          - Schema is the TMDB schema
+          - Name is Peter Parker
+        metric: session-resumption
+  - description: "Resumes session 3 - Clear session"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        Hi there, please clear the session state for the session name 'my-test-session'.
+  - description: "Resumes session 4 - No session resumption after clearance"
+    metadata:
+      continue: false
+    vars:
+      query: |
+        Hi there, please resume the session 'my-test-session' and fill me in on already stated facts about my role,
+        used solr version, schema used, and my name :).
+    assert:
+    - type: llm-rubric
+      value: >-
+        Response shall not contain any of the following facts:
+        - Role is Search Relevancy Engineer
+        - Solr is Solr 8.0
+        - Schema is the TMDB schema
+        - Name is Peter Parker
+        The response should state that no session with name 'my-test-session' exists.

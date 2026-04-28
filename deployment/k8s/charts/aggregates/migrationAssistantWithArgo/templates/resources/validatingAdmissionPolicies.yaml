@@ -1,0 +1,660 @@
+{{- if get .Values.conditionalPackageInstalls "argo-workflows" }}
+# ValidatingAdmissionPolicies for migration resources
+# Enforces Impossible (hard block), Gated (UID approval), and Lock-on-Complete rules
+# See docs/reconfiguringWorkflows.md for the design
+
+# ─────────────────────────────────────────────────────────────
+# Shared UID approval CEL fragment (used by all Gated checks):
+#   has(object.metadata.annotations) &&
+#   'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+#   has(object.metadata.labels) &&
+#   'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+#   object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+#     object.metadata.labels['workflows.argoproj.io/run-uid']
+# ─────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────
+# KafkaCluster Policy - cluster infrastructure fields
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-kafkacluster-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["migrations.opensearch.org"]
+      apiVersions: ["v1alpha1"]
+      operations: ["UPDATE"]
+      resources: ["kafkaclusters"]
+  validations:
+    # Impossible: auth type
+    - expression: |
+        !has(oldObject.spec.auth) || !has(object.spec.auth) ||
+        !has(oldObject.spec.auth.type) || !has(object.spec.auth.type) ||
+        object.spec.auth.type == oldObject.spec.auth.type
+      message: "Impossible: auth type cannot be changed. Delete and recreate."
+    # Gated: version, nodePool replica scaling, nodePool storage size
+    - expression: |
+        (
+          (!has(oldObject.spec.version) || !has(object.spec.version) ||
+           object.spec.version == oldObject.spec.version) &&
+          (!has(oldObject.spec.nodePool) || !has(object.spec.nodePool) ||
+           !has(oldObject.spec.nodePool.replicas) || !has(object.spec.nodePool.replicas) ||
+           object.spec.nodePool.replicas == oldObject.spec.nodePool.replicas) &&
+          (!has(oldObject.spec.nodePool) || !has(object.spec.nodePool) ||
+           !has(oldObject.spec.nodePool.storage) || !has(object.spec.nodePool.storage) ||
+           !has(oldObject.spec.nodePool.storage.size) || !has(object.spec.nodePool.storage.size) ||
+           object.spec.nodePool.storage.size == oldObject.spec.nodePool.storage.size)
+        ) ||
+        (has(object.metadata.annotations) &&
+         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+         has(object.metadata.labels) &&
+         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+           object.metadata.labels['workflows.argoproj.io/run-uid'])
+      messageExpression: |
+        "Gated changes detected on KafkaCluster fields: [" +
+        (
+          (has(object.spec.version) && has(oldObject.spec.version) &&
+           object.spec.version != oldObject.spec.version ? "version" : "") +
+          (has(object.spec.nodePool) && has(oldObject.spec.nodePool) &&
+           has(object.spec.nodePool.replicas) && has(oldObject.spec.nodePool.replicas) &&
+           object.spec.nodePool.replicas != oldObject.spec.nodePool.replicas ?
+             ((has(object.spec.version) && has(oldObject.spec.version) &&
+               object.spec.version != oldObject.spec.version) ? ", nodePool.replicas" : "nodePool.replicas") : "") +
+          (has(object.spec.nodePool) && has(oldObject.spec.nodePool) &&
+           has(object.spec.nodePool.storage) && has(oldObject.spec.nodePool.storage) &&
+           has(object.spec.nodePool.storage.size) && has(oldObject.spec.nodePool.storage.size) &&
+           object.spec.nodePool.storage.size != oldObject.spec.nodePool.storage.size ?
+             ((has(object.spec.version) && has(oldObject.spec.version) &&
+               object.spec.version != oldObject.spec.version) ||
+              (has(object.spec.nodePool) && has(oldObject.spec.nodePool) &&
+               has(object.spec.nodePool.replicas) && has(oldObject.spec.nodePool.replicas) &&
+               object.spec.nodePool.replicas != oldObject.spec.nodePool.replicas) ? ", nodePool.storage.size" : "nodePool.storage.size") : "")
+        ) + "]. Approve the corresponding ApprovalGate to proceed."
+    # Impossible: nodePool storage type
+    - expression: |
+        !has(oldObject.spec.nodePool) || !has(object.spec.nodePool) ||
+        !has(oldObject.spec.nodePool.storage) || !has(object.spec.nodePool.storage) ||
+        !has(oldObject.spec.nodePool.storage.type) || !has(object.spec.nodePool.storage.type) ||
+        object.spec.nodePool.storage.type == oldObject.spec.nodePool.storage.type
+      message: "Impossible: Storage type cannot be changed. Delete and recreate."
+    # Impossible: nodePool roles
+    - expression: |
+        !has(oldObject.spec.nodePool) || !has(object.spec.nodePool) ||
+        !has(oldObject.spec.nodePool.roles) || !has(object.spec.nodePool.roles) ||
+        object.spec.nodePool.roles == oldObject.spec.nodePool.roles
+      message: "Impossible: Node pool roles cannot be changed. Delete and recreate."
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-kafkacluster-binding
+spec:
+  policyName: {{ .Release.Namespace }}-kafkacluster-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+# ─────────────────────────────────────────────────────────────
+# CapturedTraffic Policy - topic/stream contract fields
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-capturedtraffic-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["migrations.opensearch.org"]
+      apiVersions: ["v1alpha1"]
+      operations: ["UPDATE"]
+      resources: ["capturedtraffics"]
+  validations:
+    # Impossible: kafkaClusterName
+    - expression: |
+        !has(oldObject.spec.kafkaClusterName) || !has(object.spec.kafkaClusterName) ||
+        object.spec.kafkaClusterName == oldObject.spec.kafkaClusterName
+      message: "Impossible: kafkaClusterName cannot be changed. Delete and recreate."
+    # Impossible: topicName
+    - expression: |
+        !has(oldObject.spec.topicName) || !has(object.spec.topicName) ||
+        object.spec.topicName == oldObject.spec.topicName
+      message: "Impossible: topicName cannot be changed. Delete and recreate."
+    # Impossible: partition decrease
+    - expression: |
+        !has(oldObject.spec.partitions) || !has(object.spec.partitions) ||
+        object.spec.partitions >= oldObject.spec.partitions
+      message: "Impossible: partition count cannot decrease."
+    # Gated: partition increase, replica change, topicConfig
+    - expression: |
+        (
+          (!has(oldObject.spec.partitions) || !has(object.spec.partitions) ||
+           object.spec.partitions == oldObject.spec.partitions) &&
+          (!has(oldObject.spec.replicas) || !has(object.spec.replicas) ||
+           object.spec.replicas == oldObject.spec.replicas) &&
+          (!has(oldObject.spec.topicConfig) || !has(object.spec.topicConfig) ||
+           object.spec.topicConfig == oldObject.spec.topicConfig)
+        ) ||
+        (has(object.metadata.annotations) &&
+         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+         has(object.metadata.labels) &&
+         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+           object.metadata.labels['workflows.argoproj.io/run-uid'])
+      messageExpression: |
+        "Gated changes detected on CapturedTraffic fields: [" +
+        (
+          (has(object.spec.partitions) && has(oldObject.spec.partitions) &&
+           object.spec.partitions != oldObject.spec.partitions ? "partitions" : "") +
+          (has(object.spec.replicas) && has(oldObject.spec.replicas) &&
+           object.spec.replicas != oldObject.spec.replicas ?
+             ((has(object.spec.partitions) && has(oldObject.spec.partitions) &&
+               object.spec.partitions != oldObject.spec.partitions) ? ", replicas" : "replicas") : "") +
+          (has(object.spec.topicConfig) && has(oldObject.spec.topicConfig) &&
+           object.spec.topicConfig != oldObject.spec.topicConfig ?
+             ((has(object.spec.partitions) && has(oldObject.spec.partitions) &&
+               object.spec.partitions != oldObject.spec.partitions) ||
+              (has(object.spec.replicas) && has(oldObject.spec.replicas) &&
+               object.spec.replicas != oldObject.spec.replicas) ? ", topicConfig" : "topicConfig") : "")
+        ) + "]. Approve the corresponding ApprovalGate to proceed."
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-capturedtraffic-binding
+spec:
+  policyName: {{ .Release.Namespace }}-capturedtraffic-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+# ─────────────────────────────────────────────────────────────
+# CaptureProxy Policy - impossible + gated proxy config fields
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-captureproxy-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["migrations.opensearch.org"]
+      apiVersions: ["v1alpha1"]
+      operations: ["UPDATE"]
+      resources: ["captureproxies"]
+  validations:
+    # Impossible: listenPort
+    - expression: |
+        !has(oldObject.spec.listenPort) || !has(object.spec.listenPort) ||
+        object.spec.listenPort == oldObject.spec.listenPort
+      message: "Impossible: listenPort cannot be changed. Delete and recreate the proxy."
+    # Impossible: internetFacing
+    - expression: |
+        !has(oldObject.spec.internetFacing) || !has(object.spec.internetFacing) ||
+        object.spec.internetFacing == oldObject.spec.internetFacing
+      message: "Impossible: internetFacing cannot be changed. Delete and recreate the proxy."
+    # Gated: noCapture, enableMSKAuth, tls, suppressCapture* fields
+    - expression: |
+        (
+          (!has(object.spec.noCapture) || !has(oldObject.spec.noCapture) ||
+           object.spec.noCapture == oldObject.spec.noCapture) &&
+          (!has(object.spec.enableMSKAuth) || !has(oldObject.spec.enableMSKAuth) ||
+           object.spec.enableMSKAuth == oldObject.spec.enableMSKAuth) &&
+          (!has(object.spec.tls) || !has(oldObject.spec.tls) ||
+           object.spec.tls == oldObject.spec.tls) &&
+          (!has(object.spec.suppressCaptureForHeaderMatch) || !has(oldObject.spec.suppressCaptureForHeaderMatch) ||
+           object.spec.suppressCaptureForHeaderMatch == oldObject.spec.suppressCaptureForHeaderMatch) &&
+          (!has(object.spec.suppressCaptureForMethod) || !has(oldObject.spec.suppressCaptureForMethod) ||
+           object.spec.suppressCaptureForMethod == oldObject.spec.suppressCaptureForMethod) &&
+          (!has(object.spec.suppressCaptureForUriPath) || !has(oldObject.spec.suppressCaptureForUriPath) ||
+           object.spec.suppressCaptureForUriPath == oldObject.spec.suppressCaptureForUriPath) &&
+          (!has(object.spec.suppressMethodAndPath) || !has(oldObject.spec.suppressMethodAndPath) ||
+           object.spec.suppressMethodAndPath == oldObject.spec.suppressMethodAndPath)
+        ) ||
+        (has(object.metadata.annotations) &&
+         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+         has(object.metadata.labels) &&
+         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+           object.metadata.labels['workflows.argoproj.io/run-uid'])
+      messageExpression: |
+        "Gated changes detected on CaptureProxy fields [" +
+        (
+          (has(object.spec.noCapture) && has(oldObject.spec.noCapture) &&
+           object.spec.noCapture != oldObject.spec.noCapture ? "noCapture" : "") +
+          (has(object.spec.enableMSKAuth) && has(oldObject.spec.enableMSKAuth) &&
+           object.spec.enableMSKAuth != oldObject.spec.enableMSKAuth ?
+             ((has(object.spec.noCapture) && has(oldObject.spec.noCapture) &&
+               object.spec.noCapture != oldObject.spec.noCapture) ? ", enableMSKAuth" : "enableMSKAuth") : "") +
+          (has(object.spec.tls) && has(oldObject.spec.tls) &&
+           object.spec.tls != oldObject.spec.tls ?
+             (((has(object.spec.noCapture) && has(oldObject.spec.noCapture) &&
+                object.spec.noCapture != oldObject.spec.noCapture) ||
+               (has(object.spec.enableMSKAuth) && has(oldObject.spec.enableMSKAuth) &&
+                object.spec.enableMSKAuth != oldObject.spec.enableMSKAuth)) ? ", tls" : "tls") : "") +
+          (has(object.spec.suppressCaptureForHeaderMatch) && has(oldObject.spec.suppressCaptureForHeaderMatch) &&
+           object.spec.suppressCaptureForHeaderMatch != oldObject.spec.suppressCaptureForHeaderMatch ?
+             (((has(object.spec.noCapture) && has(oldObject.spec.noCapture) &&
+                object.spec.noCapture != oldObject.spec.noCapture) ||
+               (has(object.spec.enableMSKAuth) && has(oldObject.spec.enableMSKAuth) &&
+                object.spec.enableMSKAuth != oldObject.spec.enableMSKAuth) ||
+               (has(object.spec.tls) && has(oldObject.spec.tls) &&
+                object.spec.tls != oldObject.spec.tls)) ? ", suppressCaptureForHeaderMatch" : "suppressCaptureForHeaderMatch") : "") +
+          (has(object.spec.suppressCaptureForMethod) && has(oldObject.spec.suppressCaptureForMethod) &&
+           object.spec.suppressCaptureForMethod != oldObject.spec.suppressCaptureForMethod ?
+             (((has(object.spec.noCapture) && has(oldObject.spec.noCapture) &&
+                object.spec.noCapture != oldObject.spec.noCapture) ||
+               (has(object.spec.enableMSKAuth) && has(oldObject.spec.enableMSKAuth) &&
+                object.spec.enableMSKAuth != oldObject.spec.enableMSKAuth) ||
+               (has(object.spec.tls) && has(oldObject.spec.tls) &&
+                object.spec.tls != oldObject.spec.tls) ||
+               (has(object.spec.suppressCaptureForHeaderMatch) && has(oldObject.spec.suppressCaptureForHeaderMatch) &&
+                object.spec.suppressCaptureForHeaderMatch != oldObject.spec.suppressCaptureForHeaderMatch)) ? ", suppressCaptureForMethod" : "suppressCaptureForMethod") : "") +
+          (has(object.spec.suppressCaptureForUriPath) && has(oldObject.spec.suppressCaptureForUriPath) &&
+           object.spec.suppressCaptureForUriPath != oldObject.spec.suppressCaptureForUriPath ?
+             (((has(object.spec.noCapture) && has(oldObject.spec.noCapture) &&
+                object.spec.noCapture != oldObject.spec.noCapture) ||
+               (has(object.spec.enableMSKAuth) && has(oldObject.spec.enableMSKAuth) &&
+                object.spec.enableMSKAuth != oldObject.spec.enableMSKAuth) ||
+               (has(object.spec.tls) && has(oldObject.spec.tls) &&
+                object.spec.tls != oldObject.spec.tls) ||
+               (has(object.spec.suppressCaptureForHeaderMatch) && has(oldObject.spec.suppressCaptureForHeaderMatch) &&
+                object.spec.suppressCaptureForHeaderMatch != oldObject.spec.suppressCaptureForHeaderMatch) ||
+               (has(object.spec.suppressCaptureForMethod) && has(oldObject.spec.suppressCaptureForMethod) &&
+                object.spec.suppressCaptureForMethod != oldObject.spec.suppressCaptureForMethod)) ? ", suppressCaptureForUriPath" : "suppressCaptureForUriPath") : "") +
+          (has(object.spec.suppressMethodAndPath) && has(oldObject.spec.suppressMethodAndPath) &&
+           object.spec.suppressMethodAndPath != oldObject.spec.suppressMethodAndPath ?
+             (((has(object.spec.noCapture) && has(oldObject.spec.noCapture) &&
+                object.spec.noCapture != oldObject.spec.noCapture) ||
+               (has(object.spec.enableMSKAuth) && has(oldObject.spec.enableMSKAuth) &&
+                object.spec.enableMSKAuth != oldObject.spec.enableMSKAuth) ||
+               (has(object.spec.tls) && has(oldObject.spec.tls) &&
+                object.spec.tls != oldObject.spec.tls) ||
+               (has(object.spec.suppressCaptureForHeaderMatch) && has(oldObject.spec.suppressCaptureForHeaderMatch) &&
+                object.spec.suppressCaptureForHeaderMatch != oldObject.spec.suppressCaptureForHeaderMatch) ||
+               (has(object.spec.suppressCaptureForMethod) && has(oldObject.spec.suppressCaptureForMethod) &&
+                object.spec.suppressCaptureForMethod != oldObject.spec.suppressCaptureForMethod) ||
+               (has(object.spec.suppressCaptureForUriPath) && has(oldObject.spec.suppressCaptureForUriPath) &&
+                object.spec.suppressCaptureForUriPath != oldObject.spec.suppressCaptureForUriPath)) ? ", suppressMethodAndPath" : "suppressMethodAndPath") : "")
+        ) +
+        "]. Approve the corresponding ApprovalGate to proceed."
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-captureproxy-binding
+spec:
+  policyName: {{ .Release.Namespace }}-captureproxy-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+
+# ─────────────────────────────────────────────────────────────
+# TrafficReplay Policy - impossible + gated replayer fields
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-trafficreplay-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["migrations.opensearch.org"]
+      apiVersions: ["v1alpha1"]
+      operations: ["UPDATE"]
+      resources: ["trafficreplays"]
+  validations:
+    # Impossible: kafkaTrafficEnableMSKAuth
+    - expression: |
+        !has(oldObject.spec.kafkaTrafficEnableMSKAuth) || !has(object.spec.kafkaTrafficEnableMSKAuth) ||
+        object.spec.kafkaTrafficEnableMSKAuth == oldObject.spec.kafkaTrafficEnableMSKAuth
+      message: "Impossible: kafkaTrafficEnableMSKAuth cannot be changed. Delete and recreate the replayer."
+    # Impossible: kafkaTrafficPropertyFile
+    - expression: |
+        !has(oldObject.spec.kafkaTrafficPropertyFile) || !has(object.spec.kafkaTrafficPropertyFile) ||
+        object.spec.kafkaTrafficPropertyFile == oldObject.spec.kafkaTrafficPropertyFile
+      message: "Impossible: kafkaTrafficPropertyFile cannot be changed. Delete and recreate the replayer."
+    # Gated: auth, transformer, and tuple transformer fields
+    - expression: |
+        (
+          (!has(object.spec.removeAuthHeader) || !has(oldObject.spec.removeAuthHeader) ||
+           object.spec.removeAuthHeader == oldObject.spec.removeAuthHeader) &&
+          (!has(object.spec.transformerConfig) || !has(oldObject.spec.transformerConfig) ||
+           object.spec.transformerConfig == oldObject.spec.transformerConfig) &&
+          (!has(object.spec.transformerConfigEncoded) || !has(oldObject.spec.transformerConfigEncoded) ||
+           object.spec.transformerConfigEncoded == oldObject.spec.transformerConfigEncoded) &&
+          (!has(object.spec.transformerConfigFile) || !has(oldObject.spec.transformerConfigFile) ||
+           object.spec.transformerConfigFile == oldObject.spec.transformerConfigFile) &&
+          (!has(object.spec.tupleTransformerConfig) || !has(oldObject.spec.tupleTransformerConfig) ||
+           object.spec.tupleTransformerConfig == oldObject.spec.tupleTransformerConfig) &&
+          (!has(object.spec.tupleTransformerConfigBase64) || !has(oldObject.spec.tupleTransformerConfigBase64) ||
+           object.spec.tupleTransformerConfigBase64 == oldObject.spec.tupleTransformerConfigBase64) &&
+          (!has(object.spec.tupleTransformerConfigFile) || !has(oldObject.spec.tupleTransformerConfigFile) ||
+           object.spec.tupleTransformerConfigFile == oldObject.spec.tupleTransformerConfigFile)
+        ) ||
+        (has(object.metadata.annotations) &&
+         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+         has(object.metadata.labels) &&
+         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+           object.metadata.labels['workflows.argoproj.io/run-uid'])
+      messageExpression: |
+        "Gated changes detected on TrafficReplay fields [" +
+        (
+          (has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
+           object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader ? "removeAuthHeader" : "") +
+          (has(object.spec.transformerConfig) && has(oldObject.spec.transformerConfig) &&
+           object.spec.transformerConfig != oldObject.spec.transformerConfig ?
+             ((has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
+               object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader) ? ", transformerConfig" : "transformerConfig") : "") +
+          (has(object.spec.transformerConfigEncoded) && has(oldObject.spec.transformerConfigEncoded) &&
+           object.spec.transformerConfigEncoded != oldObject.spec.transformerConfigEncoded ?
+             (((has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
+                object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader) ||
+               (has(object.spec.transformerConfig) && has(oldObject.spec.transformerConfig) &&
+                object.spec.transformerConfig != oldObject.spec.transformerConfig)) ? ", transformerConfigEncoded" : "transformerConfigEncoded") : "") +
+          (has(object.spec.transformerConfigFile) && has(oldObject.spec.transformerConfigFile) &&
+           object.spec.transformerConfigFile != oldObject.spec.transformerConfigFile ?
+             (((has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
+                object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader) ||
+               (has(object.spec.transformerConfig) && has(oldObject.spec.transformerConfig) &&
+                object.spec.transformerConfig != oldObject.spec.transformerConfig) ||
+               (has(object.spec.transformerConfigEncoded) && has(oldObject.spec.transformerConfigEncoded) &&
+                object.spec.transformerConfigEncoded != oldObject.spec.transformerConfigEncoded)) ? ", transformerConfigFile" : "transformerConfigFile") : "") +
+          (has(object.spec.tupleTransformerConfig) && has(oldObject.spec.tupleTransformerConfig) &&
+           object.spec.tupleTransformerConfig != oldObject.spec.tupleTransformerConfig ?
+             (((has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
+                object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader) ||
+               (has(object.spec.transformerConfig) && has(oldObject.spec.transformerConfig) &&
+                object.spec.transformerConfig != oldObject.spec.transformerConfig) ||
+               (has(object.spec.transformerConfigEncoded) && has(oldObject.spec.transformerConfigEncoded) &&
+                object.spec.transformerConfigEncoded != oldObject.spec.transformerConfigEncoded) ||
+               (has(object.spec.transformerConfigFile) && has(oldObject.spec.transformerConfigFile) &&
+                object.spec.transformerConfigFile != oldObject.spec.transformerConfigFile)) ? ", tupleTransformerConfig" : "tupleTransformerConfig") : "") +
+          (has(object.spec.tupleTransformerConfigBase64) && has(oldObject.spec.tupleTransformerConfigBase64) &&
+           object.spec.tupleTransformerConfigBase64 != oldObject.spec.tupleTransformerConfigBase64 ?
+             (((has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
+                object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader) ||
+               (has(object.spec.transformerConfig) && has(oldObject.spec.transformerConfig) &&
+                object.spec.transformerConfig != oldObject.spec.transformerConfig) ||
+               (has(object.spec.transformerConfigEncoded) && has(oldObject.spec.transformerConfigEncoded) &&
+                object.spec.transformerConfigEncoded != oldObject.spec.transformerConfigEncoded) ||
+               (has(object.spec.transformerConfigFile) && has(oldObject.spec.transformerConfigFile) &&
+                object.spec.transformerConfigFile != oldObject.spec.transformerConfigFile) ||
+               (has(object.spec.tupleTransformerConfig) && has(oldObject.spec.tupleTransformerConfig) &&
+                object.spec.tupleTransformerConfig != oldObject.spec.tupleTransformerConfig)) ? ", tupleTransformerConfigBase64" : "tupleTransformerConfigBase64") : "") +
+          (has(object.spec.tupleTransformerConfigFile) && has(oldObject.spec.tupleTransformerConfigFile) &&
+           object.spec.tupleTransformerConfigFile != oldObject.spec.tupleTransformerConfigFile ?
+             (((has(object.spec.removeAuthHeader) && has(oldObject.spec.removeAuthHeader) &&
+                object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader) ||
+               (has(object.spec.transformerConfig) && has(oldObject.spec.transformerConfig) &&
+                object.spec.transformerConfig != oldObject.spec.transformerConfig) ||
+               (has(object.spec.transformerConfigEncoded) && has(oldObject.spec.transformerConfigEncoded) &&
+                object.spec.transformerConfigEncoded != oldObject.spec.transformerConfigEncoded) ||
+               (has(object.spec.transformerConfigFile) && has(oldObject.spec.transformerConfigFile) &&
+                object.spec.transformerConfigFile != oldObject.spec.transformerConfigFile) ||
+               (has(object.spec.tupleTransformerConfig) && has(oldObject.spec.tupleTransformerConfig) &&
+                object.spec.tupleTransformerConfig != oldObject.spec.tupleTransformerConfig) ||
+               (has(object.spec.tupleTransformerConfigBase64) && has(oldObject.spec.tupleTransformerConfigBase64) &&
+                object.spec.tupleTransformerConfigBase64 != oldObject.spec.tupleTransformerConfigBase64)) ? ", tupleTransformerConfigFile" : "tupleTransformerConfigFile") : "")
+        ) +
+        "]. Approve the corresponding ApprovalGate to proceed."
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-trafficreplay-binding
+spec:
+  policyName: {{ .Release.Namespace }}-trafficreplay-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+# ─────────────────────────────────────────────────────────────
+# SnapshotMigration Policy - identity impossible + RFS impossible/gated fields
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-snapshotmigration-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["migrations.opensearch.org"]
+      apiVersions: ["v1alpha1"]
+      operations: ["UPDATE"]
+      resources: ["snapshotmigrations"]
+  validations:
+    # Impossible: migration identity fields
+    - expression: |
+        (!has(oldObject.spec.sourceVersion) || !has(object.spec.sourceVersion) ||
+         object.spec.sourceVersion == oldObject.spec.sourceVersion) &&
+        (!has(oldObject.spec.sourceLabel) || !has(object.spec.sourceLabel) ||
+         object.spec.sourceLabel == oldObject.spec.sourceLabel) &&
+        (!has(oldObject.spec.targetLabel) || !has(object.spec.targetLabel) ||
+         object.spec.targetLabel == oldObject.spec.targetLabel) &&
+        (!has(oldObject.spec.migrationLabel) || !has(object.spec.migrationLabel) ||
+         object.spec.migrationLabel == oldObject.spec.migrationLabel) &&
+        (!has(oldObject.spec.snapshotLabel) || !has(object.spec.snapshotLabel) ||
+         object.spec.snapshotLabel == oldObject.spec.snapshotLabel)
+      message: "Impossible: SnapshotMigration identity fields cannot be changed. Delete and recreate."
+    # Impossible: USER_RFS_PROCESS_OPTIONS fields marked impossible
+    - expression: |
+        (!has(oldObject.spec.documentBackfillIndexAllowlist) || !has(object.spec.documentBackfillIndexAllowlist) ||
+         object.spec.documentBackfillIndexAllowlist == oldObject.spec.documentBackfillIndexAllowlist) &&
+        (!has(oldObject.spec.documentBackfillAllowLooseVersionMatching) || !has(object.spec.documentBackfillAllowLooseVersionMatching) ||
+         object.spec.documentBackfillAllowLooseVersionMatching == oldObject.spec.documentBackfillAllowLooseVersionMatching) &&
+        (!has(oldObject.spec.documentBackfillDocTransformerConfigBase64) || !has(object.spec.documentBackfillDocTransformerConfigBase64) ||
+         object.spec.documentBackfillDocTransformerConfigBase64 == oldObject.spec.documentBackfillDocTransformerConfigBase64) &&
+        (!has(oldObject.spec.documentBackfillDocTransformerConfig) || !has(object.spec.documentBackfillDocTransformerConfig) ||
+         object.spec.documentBackfillDocTransformerConfig == oldObject.spec.documentBackfillDocTransformerConfig) &&
+        (!has(oldObject.spec.documentBackfillDocTransformerConfigFile) || !has(object.spec.documentBackfillDocTransformerConfigFile) ||
+         object.spec.documentBackfillDocTransformerConfigFile == oldObject.spec.documentBackfillDocTransformerConfigFile)
+      message: "Impossible: SnapshotMigration document backfill fields cannot be changed. Delete and recreate."
+    # Gated: USER_RFS_PROCESS_OPTIONS fields marked gated
+    - expression: |
+        (
+          (!has(oldObject.spec.documentBackfillInitialLeaseDuration) || !has(object.spec.documentBackfillInitialLeaseDuration) ||
+           object.spec.documentBackfillInitialLeaseDuration == oldObject.spec.documentBackfillInitialLeaseDuration) &&
+          (!has(oldObject.spec.documentBackfillMaxConnections) || !has(object.spec.documentBackfillMaxConnections) ||
+           object.spec.documentBackfillMaxConnections == oldObject.spec.documentBackfillMaxConnections) &&
+          (!has(oldObject.spec.documentBackfillMaxShardSizeBytes) || !has(object.spec.documentBackfillMaxShardSizeBytes) ||
+           object.spec.documentBackfillMaxShardSizeBytes == oldObject.spec.documentBackfillMaxShardSizeBytes)
+        ) ||
+        (has(object.metadata.annotations) &&
+         'migrations.opensearch.org/approved-by-run' in object.metadata.annotations &&
+         has(object.metadata.labels) &&
+         'workflows.argoproj.io/run-uid' in object.metadata.labels &&
+         object.metadata.annotations['migrations.opensearch.org/approved-by-run'] ==
+           object.metadata.labels['workflows.argoproj.io/run-uid'])
+      messageExpression: |
+        "Gated changes detected on SnapshotMigration document backfill fields [" +
+        (
+          (has(object.spec.documentBackfillInitialLeaseDuration) && has(oldObject.spec.documentBackfillInitialLeaseDuration) &&
+           object.spec.documentBackfillInitialLeaseDuration != oldObject.spec.documentBackfillInitialLeaseDuration ? "documentBackfillInitialLeaseDuration" : "") +
+          (has(object.spec.documentBackfillMaxConnections) && has(oldObject.spec.documentBackfillMaxConnections) &&
+           object.spec.documentBackfillMaxConnections != oldObject.spec.documentBackfillMaxConnections ?
+             ((has(object.spec.documentBackfillInitialLeaseDuration) && has(oldObject.spec.documentBackfillInitialLeaseDuration) &&
+               object.spec.documentBackfillInitialLeaseDuration != oldObject.spec.documentBackfillInitialLeaseDuration) ? ", documentBackfillMaxConnections" : "documentBackfillMaxConnections") : "") +
+          (has(object.spec.documentBackfillMaxShardSizeBytes) && has(oldObject.spec.documentBackfillMaxShardSizeBytes) &&
+           object.spec.documentBackfillMaxShardSizeBytes != oldObject.spec.documentBackfillMaxShardSizeBytes ?
+             (((has(object.spec.documentBackfillInitialLeaseDuration) && has(oldObject.spec.documentBackfillInitialLeaseDuration) &&
+                object.spec.documentBackfillInitialLeaseDuration != oldObject.spec.documentBackfillInitialLeaseDuration) ||
+               (has(object.spec.documentBackfillMaxConnections) && has(oldObject.spec.documentBackfillMaxConnections) &&
+                object.spec.documentBackfillMaxConnections != oldObject.spec.documentBackfillMaxConnections)) ? ", documentBackfillMaxShardSizeBytes" : "documentBackfillMaxShardSizeBytes") : "")
+        ) +
+        "]. Approve the corresponding ApprovalGate to proceed."
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-snapshotmigration-binding
+spec:
+  policyName: {{ .Release.Namespace }}-snapshotmigration-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+# ─────────────────────────────────────────────────────────────
+# Lock-on-Complete - freezes spec for terminal resources
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-lock-on-complete-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["migrations.opensearch.org"]
+      apiVersions: ["v1alpha1"]
+      operations: ["UPDATE"]
+      resources: ["datasnapshots", "snapshotmigrations"]
+  validations:
+    - expression: |
+        !has(oldObject.status) ||
+        !has(oldObject.status.phase) ||
+        oldObject.status.phase != 'Completed' ||
+        (object.spec == oldObject.spec)
+      message: "Consistency Guard: This resource is 'Completed'. The specification is permanently sealed to maintain provenance. Delete the resource to run a new job with these parameters."
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-lock-on-complete-binding
+spec:
+  policyName: {{ .Release.Namespace }}-lock-on-complete-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+# ─────────────────────────────────────────────────────────────
+# Managed Deployment Policy - blocks direct edits to workflow-managed Deployments
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-managed-deployment-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["apps"]
+      apiVersions: ["v1"]
+      operations: ["UPDATE"]
+      resources: ["deployments"]
+  matchConditions:
+    - name: is-managed
+      expression: |
+        has(object.metadata.annotations) &&
+        'migrations.opensearch.org/managed-by' in object.metadata.annotations
+  validations:
+    - expression: |
+        has(object.metadata.annotations) &&
+        'migrations.opensearch.org/allow-direct-edit' in object.metadata.annotations &&
+        object.metadata.annotations['migrations.opensearch.org/allow-direct-edit'] == 'true'
+      messageExpression: |
+        "Direct edit blocked: This Deployment is managed by '" +
+        object.metadata.annotations['migrations.opensearch.org/managed-by'] +
+        "'. Edit the corresponding CRD instead. " +
+        "To override (use with caution): kubectl annotate deployment/" + object.metadata.name +
+        " migrations.opensearch.org/allow-direct-edit=true --overwrite"
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-managed-deployment-binding
+spec:
+  policyName: {{ .Release.Namespace }}-managed-deployment-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+# ─────────────────────────────────────────────────────────────
+# Deleting Phase Guard - blocks all updates to resources being torn down
+# ─────────────────────────────────────────────────────────────
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Release.Namespace }}-deleting-phase-guard-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["migrations.opensearch.org"]
+      apiVersions: ["v1alpha1"]
+      operations: ["UPDATE"]
+      resources: ["kafkaclusters", "capturedtraffics", "captureproxies", "datasnapshots", "snapshotmigrations", "trafficreplays"]
+  validations:
+    - expression: |
+        !has(oldObject.status) ||
+        !has(oldObject.status.phase) ||
+        oldObject.status.phase != 'Deleting'
+      message: "This resource is being deleted. No updates are permitted during teardown."
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Release.Namespace }}-deleting-phase-guard-binding
+spec:
+  policyName: {{ .Release.Namespace }}-deleting-phase-guard-policy
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values: ["{{ .Release.Namespace }}"]
+
+{{- end }}

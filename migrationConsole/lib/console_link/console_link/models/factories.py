@@ -8,7 +8,7 @@ from console_link.models.metrics_source import CloudwatchMetricsSource, Promethe
 from console_link.models.backfill_base import Backfill
 from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill, K8sRFSBackfill
 from console_link.models.cluster import Cluster
-from console_link.models.kafka import MSK, StandardKafka
+from console_link.models.kafka import MSK, StandardKafka, ScramKafka
 from console_link.models.replayer_ecs import ECSReplayer
 from console_link.models.snapshot import FileSystemSnapshot, S3Snapshot
 import logging
@@ -51,9 +51,7 @@ def get_snapshot(config: Dict, source_cluster: Optional[Cluster]):
     elif 's3' in config:
         return S3Snapshot(config, source_cluster)
     logger.error(f"An unsupported snapshot type was provided: {config.keys()}")
-    if len(config.keys()) > 1:
-        raise UnsupportedSnapshotError(', '.join(config.keys()))
-    raise UnsupportedSnapshotError(next(iter(config.keys())))
+    raise UnsupportedSnapshotError(', '.join(config.keys()) if config else '<empty>')
 
 
 def get_replayer(config: Dict, client_options: Optional[ClientOptions] = None):
@@ -64,7 +62,7 @@ def get_replayer(config: Dict, client_options: Optional[ClientOptions] = None):
     if 'k8s' in config:
         return K8sReplayer(config=config, client_options=client_options)
     logger.error(f"An unsupported replayer type was provided: {config.keys()}")
-    raise UnsupportedReplayerError(next(iter(config.keys())))
+    raise UnsupportedReplayerError(', '.join(config.keys()) if config else '<empty>')
 
 
 def get_kafka(config: Dict):
@@ -72,6 +70,8 @@ def get_kafka(config: Dict):
         return MSK(config)
     if 'standard' in config:
         return StandardKafka(config)
+    if 'scram' in config:
+        return ScramKafka(config)
     config.pop("broker_endpoints", None)
     logger.error(f"An unsupported kafka source type was provided: {config.keys()}")
     raise UnsupportedKafkaError(', '.join(config.keys()))
@@ -90,7 +90,7 @@ def get_backfill(config: Dict, target_cluster: Cluster,
                                   target_cluster=target_cluster,
                                   client_options=client_options)
         elif 'k8s' in config[BackfillType.reindex_from_snapshot.name]:
-            logger.debug("Creating K8s RFS backfill instance")
+            logger.debug("Creating K8s RFS backfill instance with config=" + str(config))
             return K8sRFSBackfill(config=config,
                                   target_cluster=target_cluster,
                                   client_options=client_options)

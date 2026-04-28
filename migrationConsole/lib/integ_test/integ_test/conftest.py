@@ -1,4 +1,14 @@
 # conftest.py
+#
+# Test ID naming convention:
+#   0001-0009  Basic tests (single doc backfill, coordinator cluster)
+#   0004-0005  Multi-type index tests (union, split)
+#   0006       Benchmark backfill (OpenSearch Benchmark)
+#   0010-0019  Snapshot-only tests (BYOS / externally managed snapshots)
+#   0021-0029  AOSS collection tests (search, time-series, vector)
+#   0030-0039  CDC tests (capture proxy + replayer + live traffic)
+#   0040-0049  CDC full E2E tests (capture proxy + replayer + backfill + generate-data)
+#
 import json
 import os
 from pathlib import Path
@@ -12,6 +22,14 @@ from .test_cases.ma_argo_test_base import ClusterVersionCombinationUnsupported, 
 from .test_cases.basic_tests import *
 from .test_cases.multi_type_tests import *
 from .test_cases.backfill_tests import *
+from .test_cases.snapshot_only_tests import *
+from .test_cases.cdc_tests import *
+from .test_cases.cdc_generate_data_tests import *
+from .test_cases.cdc_mixed_operations_tests import *
+from .test_cases.cdc_simple_bulk_e2e_tests import *
+from .test_cases.cdc_aoss_tests import *
+from .test_cases.aoss_collection_tests import *
+from .test_cases.solr_tests import *
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +51,8 @@ def pytest_addoption(parser):
                      help="Specify test IDs like '0001,0003' to filter tests to execute")
     parser.addoption("--source_version", action="store", default=None)
     parser.addoption("--target_version", action="store", default=None)
+    parser.addoption("--target_type", action="store", default="OS",
+                     help="Target type: 'OS' (default) or 'AOSS' for Amazon OpenSearch Serverless")
     parser.addoption("--keep_workflows", action="store_true", default=False,
                      help="If set, will not delete Argo workflows created by tests")
     parser.addoption("--reuse_clusters", action="store_true", default=False,
@@ -43,6 +63,12 @@ def pytest_addoption(parser):
                      help="Specify the Migration ALB endpoint for the source capture proxy")
     parser.addoption("--target_proxy_alb_endpoint", action="store", default=None,
                      help="Specify the Migration ALB endpoint for the target proxy")
+    parser.addoption("--image_registry_prefix", action="store", default="",
+                     help="Registry prefix for custom ES cluster images (e.g. 'localhost:5000/')")
+    parser.addoption("--speedup_factor", type=int, default=20,
+                     help="Speedup factor for traffic replayer (default: 20)")
+    parser.addoption("--observed_packet_timeout", type=int, default=30,
+                     help="Observed packet connection timeout for traffic replayer (default: 30)")
 
 
 def pytest_configure(config):
@@ -51,6 +77,7 @@ def pytest_configure(config):
     config.test_summary = {
         "passed": 0,
         "failed": 0,
+        "expected": 0,
         "source_version": "",
         "target_version": ""
     }
@@ -60,26 +87,53 @@ def pytest_generate_tests(metafunc):
     if metafunc.function.__name__ == "test_migration_assistant_workflow":
         source_version = metafunc.config.getoption("source_version")
         target_version = metafunc.config.getoption("target_version")
+        target_type = metafunc.config.getoption("target_type")
         reuse_clusters = metafunc.config.getoption("reuse_clusters")
-        if not source_version or not target_version:
-            raise ValueError("The migration_assistant_workflow test requires both a '--source_version' "
-                             "and '--target_version' parameter")
+        if not source_version:
+            raise ValueError("The migration_assistant_workflow test requires a '--source_version' parameter")
+        if target_type != "AOSS" and not target_version:
+            raise ValueError("The migration_assistant_workflow test requires a '--target_version' parameter "
+                             "(or use '--target_type=AOSS' for serverless targets)")
         unique_id = metafunc.config.getoption("unique_id")
         metafunc.config.test_summary["source_version"] = source_version
-        metafunc.config.test_summary["target_version"] = target_version
+        metafunc.config.test_summary["target_version"] = target_version if target_type != "AOSS" else "AOSS"
         test_ids_list = metafunc.config.getoption("test_ids")
+        image_registry_prefix = metafunc.config.getoption("image_registry_prefix")
+        speedup_factor = metafunc.config.getoption("speedup_factor")
+        observed_packet_timeout = metafunc.config.getoption("observed_packet_timeout")
         user_args = MATestUserArguments(source_version=source_version, target_version=target_version,
-                                        unique_id=unique_id, reuse_clusters=reuse_clusters)
+                                        target_type=target_type, unique_id=unique_id, reuse_clusters=reuse_clusters,
+                                        image_registry_prefix=image_registry_prefix,
+                                        speedup_factor=speedup_factor,
+                                        observed_packet_timeout=observed_packet_timeout)
         test_cases_param = _generate_test_cases(user_args=user_args, test_ids_list=test_ids_list)
+        metafunc.config.test_summary["expected"] = len(test_cases_param)
+        if not test_cases_param and not test_ids_list:
+            target_label = target_version if target_type != "AOSS" else "AOSS"
+            metafunc.config.test_summary["error"] = (
+                f"No default test cases compatible with {source_version} → {target_label}. "
+                f"Version pair may be untested."
+            )
         metafunc.parametrize("test_case", test_cases_param)
 
 
 def _filter_test_cases(test_ids_list: List[str]) -> List:
+    """
+    Filter test cases based on test_ids_list.
+    
+    - If test_ids_list is empty: return all tests EXCEPT those with requires_explicit_selection=True
+    - If test_ids_list is provided: return only tests matching the IDs (including explicit-only tests)
+    
+    Note: Matching uses substring search (e.g., '000' matches Test0001, Test0002, etc.).
+    """
     if not test_ids_list:
-        return ALL_TEST_CASES
+        # Default run: exclude tests that require explicit selection
+        return [case for case in ALL_TEST_CASES if not getattr(case, 'requires_explicit_selection', False)]
+    
+    # Explicit selection: include matching tests regardless of requires_explicit_selection
     filtered_cases = []
     for case in ALL_TEST_CASES:
-        if test_ids_list and any(tid in str(case) for tid in test_ids_list):
+        if any(tid in str(case) for tid in test_ids_list):
             filtered_cases.append(case)
     return filtered_cases
 
@@ -124,6 +178,18 @@ def pytest_runtest_makereport(item, call):
 
 
 def pytest_sessionfinish(session, exitstatus):
+    # If no compatible tests were found, record it in the report as a skip (not a failure).
+    # Version pairs with zero compatible tests (e.g. OS_1.3 → OS_2.19) are expected —
+    # the outer test_runner.py uses the expected==0 field to handle this gracefully.
+    error = session.config.test_summary.get("error")
+    if error:
+        session.config.collected_data.append({
+            "name": "test_compatibility_check",
+            "description": error,
+            "result": "skipped",
+            "duration": 0.0,
+        })
+
     # Write test report file at end of test session
     unique_id = session.config.getoption("unique_id")
     results = {

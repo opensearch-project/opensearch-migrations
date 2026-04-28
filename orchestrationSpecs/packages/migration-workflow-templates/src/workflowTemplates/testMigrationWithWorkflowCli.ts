@@ -1,4 +1,5 @@
 import {
+    defineParam,
     expr,
     INTERNAL,
     selectInputsForRegister,
@@ -11,15 +12,22 @@ import {
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {configureAndSubmitScript, monitorScript} from "../testResourceLoader";
 
 export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
     k8sResourceName: "full-migration-with-workflow-cli",
     parallelism: 1,
-    serviceAccountName: "argo-workflow-executor"
+    serviceAccountName: "argo-test-workflow-executor"
 })
 
     .addParams(CommonWorkflowParameters)
+
+    .addParams({
+        // Max retries for monitoring workflow with fixed 60s interval between attempts
+        // Default 33 (~33 min at 60s intervals); increase (e.g. 900) for longer migrations
+        "monitor-retry-limit": defineParam({expression: "33"})
+    })
 
     .addTemplate("configureAndSubmitWorkflow", t => t
         // TODO: Remove base64 encoding to maintain strong typing throughout workflows
@@ -31,7 +39,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/bash", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
             .addEnvVar("MIGRATION_CONFIG_BASE64", cb.inputs.migrationConfigBase64)
             .addArgs([configureAndSubmitScript])
         )
@@ -43,7 +51,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/bash", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
             .addArgs([monitorScript])
             // Monitor script exit codes:
             // - Exit 0: Workflow is in terminal state (Succeeded or Failed) - stop retrying
@@ -54,14 +62,14 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
                 typeToken<string>(),
                 "Workflow status output from monitor script"
             )
+            .addArtifactOutput("monitorResult", "/tmp/outputs/monitorResult")
         )
         .addRetryParameters({
-            limit: "33",          // ~30 minutes
+            limit: "{{workflow.parameters.monitor-retry-limit}}",
             retryPolicy: "Always",
             backoff: {
-                duration: "5",     // Start at 5 seconds
-                factor: "2",       // Exponential backoff  
-                cap: "60"         // Cap at 1 minute
+                duration: "60",    // Fixed 60 second interval
+                factor: "1"        // No exponential increase
             }
         })
     )
@@ -73,7 +81,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
         .addContainer(cb => cb
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/bash", "-c"])
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
             .addEnvVar("MONITOR_RESULT", cb.inputs.monitorResult)
             .addArgs([`
 set -e
@@ -106,6 +114,7 @@ fi
                 }
             })
         )
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
     .addTemplate("main", t => t
@@ -113,6 +122,9 @@ fi
         .addRequiredInput("migrationConfigBase64", typeToken<string>())
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+
+        // When true, skip deleting the inner migration-workflow (useful for local debugging)
+        .addOptionalInput("keepMigrationWorkflow", () => false)
 
         .addSteps(b => b
             // Step 1: Configure and submit workflow
@@ -138,8 +150,10 @@ fi
                 })
             )
 
-            // Step 4: Delete the migration workflow (always executes)
-            .addStep("deleteMigrationWorkflow", INTERNAL, "deleteMigrationWorkflow")
+            // Step 4: Delete the migration workflow (skipped when keepMigrationWorkflow=true)
+            .addStep("deleteMigrationWorkflow", INTERNAL, "deleteMigrationWorkflow",
+                {when: expr.not(b.inputs.keepMigrationWorkflow)}
+            )
         )
     )
 

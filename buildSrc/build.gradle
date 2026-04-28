@@ -7,6 +7,13 @@ plugins {
     id 'groovy-gradle-plugin'
 }
 
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
+        vendor.set(JvmVendorSpec.AMAZON)
+    }
+}
+
 repositories {
     // Use the plugin portal to apply community plugins in convention plugins.
     gradlePluginPortal()

@@ -19,7 +19,7 @@ import org.opensearch.migrations.cli.ClusterReaderExtractor;
 import org.opensearch.migrations.cli.Clusters;
 import org.opensearch.migrations.cli.Items;
 import org.opensearch.migrations.cli.Transformers;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.ClusterWriterRegistry;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.GlobalMetadataCreatorResults;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
@@ -47,7 +47,7 @@ public abstract class MigratorEvaluatorBase {
         var sourceCluster = clusterReaderCliExtractor.extractClusterReader();
         clusters.source(sourceCluster);
 
-        var targetCluster = ClusterProviderRegistry.getRemoteWriter(arguments.targetArgs.toConnectionContext(), null, arguments.dataFilterArgs, arguments.versionStrictness.allowLooseVersionMatches);
+        var targetCluster = ClusterWriterRegistry.getRemoteWriter(arguments.targetArgs.toConnectionContext(), null, arguments.dataFilterArgs, arguments.versionStrictness.allowLooseVersionMatches);
         clusters.target(targetCluster);
         return clusters.build();
     }
@@ -104,6 +104,7 @@ public abstract class MigratorEvaluatorBase {
     protected Items migrateAllItems(MigrationMode migrationMode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {
         var items = Items.builder();
         items.dryRun(migrationMode.equals(MigrationMode.SIMULATE));
+        items.succeedOnEmpty(arguments.succeedOnEmpty);
         var metadataResults = migrateGlobalMetadata(migrationMode, clusters, transformer, context);
 
         var indexTemplates = new ArrayList<CreationResult>();

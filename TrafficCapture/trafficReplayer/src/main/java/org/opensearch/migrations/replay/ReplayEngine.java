@@ -6,7 +6,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
-import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
@@ -39,6 +39,11 @@ public class ReplayEngine {
      */
     private final AtomicLong totalCountOfScheduledTasksOutstanding;
     ScheduledFuture<?> updateContentTimeControllerScheduledFuture;
+    // Heartbeat: response status code counters (reset each heartbeat)
+    private final java.util.concurrent.ConcurrentHashMap<Integer, AtomicLong> responseCodeCounters =
+        new java.util.concurrent.ConcurrentHashMap<>();
+    private static final org.slf4j.Logger heartbeatLogger =
+        org.slf4j.LoggerFactory.getLogger("ReplayHeartbeat");
 
     /**
      *
@@ -121,7 +126,7 @@ public class ReplayEngine {
             f -> f.whenComplete((v, t) -> Utils.setIfLater(lastCompletedSourceTimeEpochMs, timestamp.toEpochMilli()))
                 .whenComplete((v, t) -> {
                     var newCount = totalCountOfScheduledTasksOutstanding.decrementAndGet();
-                    log.atInfo().setMessage("Scheduled task '{}' finished ({}) decremented tasksOutstanding to {}")
+                    log.atDebug().setMessage("Scheduled task '{}' finished ({}) decremented tasksOutstanding to {}")
                         .addArgument(taskDescription)
                         .addArgument(stringableKey)
                         .addArgument(newCount)
@@ -140,7 +145,7 @@ public class ReplayEngine {
     }
 
     private static void logStartOfWork(Object stringableKey, long newCount, Instant start, String label) {
-        log.atInfo().setMessage("Scheduling '{}' ({}) to run at {} incremented tasksOutstanding to {}")
+        log.atDebug().setMessage("Scheduling '{}' ({}) to run at {} incremented tasksOutstanding to {}")
             .addArgument(label)
             .addArgument(stringableKey)
             .addArgument(start)
@@ -170,12 +175,32 @@ public class ReplayEngine {
         Instant originalStart,
         Instant originalEnd,
         int numPackets,
-        ByteBufList packets,
+        ByteBufListProducer packetProducer,
         RequestSenderOrchestrator.RetryVisitor<T> retryVisitor
+    ) {
+        return scheduleRequest(ctx, originalStart, originalEnd, numPackets, packetProducer, retryVisitor, null);
+    }
+
+    public <T> TrackedFuture<String, T> scheduleRequest(
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        Instant originalStart,
+        Instant originalEnd,
+        int numPackets,
+        ByteBufListProducer packetProducer,
+        RequestSenderOrchestrator.RetryVisitor<T> retryVisitor,
+        Duration quiescentDurationForRequest
     ) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "request";
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
+        // Apply quiescent delay relative to the time-shifted start (not wall-clock now),
+        // so the delay is consistent regardless of when the request is processed
+        if (quiescentDurationForRequest != null) {
+            var quiescentUntil = start.plus(quiescentDurationForRequest);
+            log.atInfo().setMessage("Applying quiescent delay: shifting start from {} to {} for {}")
+                .addArgument(start).addArgument(quiescentUntil).addArgument(ctx).log();
+            start = quiescentUntil;
+        }
         var end = timeShifter.transformSourceTimeToRealTime(originalEnd);
         var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets - 1L) : Duration.ZERO;
         var requestKey = ctx.getReplayerRequestKey();
@@ -188,8 +213,22 @@ public class ReplayEngine {
             .addArgument(interval)
             .addArgument(numPackets)
             .log();
-        var result = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packets, retryVisitor);
+        var result = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packetProducer, retryVisitor);
         return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
+    }
+
+    /**
+     * Immediately cancels a connection due to a traffic source reader interruption.
+     * Unlike {@link #closeConnection}, this bypasses the OnlineRadixSorter and time-shifting —
+     * the channel is closed directly and the session is marked cancelled to prevent reconnection.
+     */
+    public TrackedFuture<String, Void> cancelConnection(
+        IReplayContexts.IChannelKeyContext ctx,
+        int channelSessionNumber
+    ) {
+        var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
+        var future = networkSendOrchestrator.cancelConnection(ctx, channelSessionNumber);
+        return hookWorkFinishingUpdates(future, Instant.now(), ctx.getChannelKey(), "cancel");
     }
 
     public TrackedFuture<String, Void> closeConnection(
@@ -210,4 +249,45 @@ public class ReplayEngine {
     public void setFirstTimestamp(Instant firstPacketTimestamp) {
         timeShifter.setFirstTimestamp(firstPacketTimestamp);
     }
+
+    /** Record a target response status code for heartbeat reporting. */
+    public void recordTargetResponseCode(int statusCode) {
+        responseCodeCounters.computeIfAbsent(statusCode, k -> new AtomicLong()).incrementAndGet();
+    }
+
+    /** Emit a periodic heartbeat log summarizing the replay engine state. */
+    public void logHeartbeat() {
+        var sb = new StringBuilder();
+        sb.append("tasksOutstanding=").append(totalCountOfScheduledTasksOutstanding.get());
+
+        // Scheduling lag: how far wall clock is ahead of source time
+        var sourceTimeOp = timeShifter.transformRealTimeToSourceTime(Instant.now());
+        var lastCompletedMs = lastCompletedSourceTimeEpochMs.get();
+        if (sourceTimeOp.isPresent() && lastCompletedMs > 0) {
+            var currentSourceTime = sourceTimeOp.get();
+            var lastCompleted = Instant.ofEpochMilli(lastCompletedMs);
+            var lag = Duration.between(lastCompleted, currentSourceTime);
+            sb.append(" schedulingLag=").append(org.opensearch.migrations.Utils.formatDurationInSeconds(lag));
+            sb.append(" lastCompletedSourceTime=").append(lastCompleted);
+        }
+
+        sb.append(" bufferWindow=").append(org.opensearch.migrations.Utils.formatDurationInSeconds(contentTimeController.getBufferTimeWindow()));
+
+        // Response codes since last heartbeat
+        sb.append(" targetResponses={");
+        var first = new java.util.concurrent.atomic.AtomicBoolean(true);
+        responseCodeCounters.entrySet().stream()
+            .sorted(java.util.Map.Entry.comparingByKey())
+            .forEach(e -> {
+                var count = e.getValue().getAndSet(0);
+                if (count > 0) {
+                    if (!first.getAndSet(false)) sb.append(", ");
+                    sb.append(e.getKey()).append("=").append(count);
+                }
+            });
+        sb.append("}");
+
+        heartbeatLogger.atInfo().setMessage("{}").addArgument(sb).log();
+    }
+
 }

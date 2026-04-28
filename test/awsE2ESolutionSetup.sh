@@ -10,53 +10,6 @@ TMP_DIR_PATH="$TEST_DIR_PATH/tmp"
 EC2_SOURCE_CDK_PATH="$ROOT_REPO_PATH/test/opensearch-cluster-cdk"
 MIGRATION_CDK_PATH="$ROOT_REPO_PATH/deployment/cdk/opensearch-service-migration"
 
-# Note: This function is still in an experimental state
-# Modify EC2 nodes to add required Kafka security group if it doesn't exist, as well as call the ./startCaptureProxy.sh
-# script on each node which will detect if ES and the Capture Proxy are running and on the correct port, and attempt
-# to mediate if this is not the case.
-prepare_source_nodes_for_capture () {
-  deploy_stage=$1
-  instance_ids=($(aws ec2 describe-instances --filters "Name=tag:Name,Values=$SOURCE_INFRA_STACK_NAME/*" 'Name=instance-state-name,Values=running' --query 'Reservations[*].Instances[*].InstanceId' --output text))
-  kafka_brokers=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/kafkaBrokers" --query 'Parameter.Value' --output text)
-  # Substitute @ to be used instead of ',' for cases where ',' would disrupt formatting of arguments, i.e. AWS SSM commands
-  kafka_brokers=$(echo "$kafka_brokers" | tr ',' '@')
-  kafka_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/trafficStreamSourceAccessSecurityGroupId" --query 'Parameter.Value' --output text)
-  for id in "${instance_ids[@]}"
-  do
-    echo "Performing capture proxy source node setup for: $id"
-    group_ids=($(aws ec2 describe-instance-attribute --instance-id $id --attribute groupSet  --query 'Groups[*].GroupId' --output text))
-    kafka_sg_match=false
-    for group_id in "${group_ids[@]}"; do
-        if [[ $group_id = "$kafka_sg_id" ]]; then
-            kafka_sg_match=true
-        fi
-    done
-    if [[ $kafka_sg_match = false ]]; then
-      echo "Adding security group: $kafka_sg_id to node: $id"
-      group_ids+=("$kafka_sg_id")
-      printf -v group_ids_string '%s ' "${group_ids[@]}"
-      aws ec2 modify-instance-attribute --instance-id $id --groups $group_ids_string
-    fi
-    start_proxy_command="./startCaptureProxy.sh --stage $deploy_stage --kafka-endpoints $kafka_brokers --git-url $MIGRATIONS_GIT_URL --git-branch $MIGRATIONS_GIT_BRANCH"
-    echo "Executing $start_proxy_command on node: $id"
-    command_id=$(aws ssm send-command --instance-ids "$id" --document-name "AWS-RunShellScript" --parameters commands="cd /home/ec2-user/capture-proxy && $start_proxy_command" --output text --query 'Command.CommandId')
-    sleep 10
-    command_status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$id" --output text --query 'Status')
-    # TODO for multi-node setups, we should collect all command ids and allow to run in parallel
-    while [ "$command_status" != "Success" ] && [ "$command_status" != "Failed" ] && [ "$command_status" != "TimedOut" ]
-    do
-      echo "Waiting for command to complete, current status is $command_status"
-      sleep 60
-      command_status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$id" --output text --query 'Status')
-    done
-    echo "Command has completed with status: $command_status, appending output"
-    echo "Standard Output:"
-    aws --no-cli-pager ssm get-command-invocation --command-id "$command_id" --instance-id "$id" --output text --query 'StandardOutputContent'
-    echo "Standard Error:"
-    aws --no-cli-pager ssm get-command-invocation --command-id "$command_id" --instance-id "$id" --output text --query 'StandardErrorContent'
-  done
-}
-
 validate_required_options () {
   suffix_required_value='ec2-source-<STAGE>'
   source_infra_suffix=$(jq ".[\"$SOURCE_CONTEXT_ID\"].suffix" "$SOURCE_GEN_CONTEXT_FILE" -r)
@@ -79,36 +32,107 @@ create_service_linked_roles () {
   aws iam create-service-linked-role --aws-service-name osis.amazonaws.com
 }
 
+clean_up_migration () {
+  # Destroy the migration CDK app ("*" in its cdk.json) and block until all of
+  # its CloudFormation stacks are fully deleted. `npx cdk destroy` is already
+  # synchronous (it polls CFN until DELETE_COMPLETE), but we also explicitly
+  # wait afterwards so that any stack cdk couldn't see (e.g. out-of-band
+  # resources left behind by a prior partial deploy) still holds up the
+  # source destroy that follows.
+  cd "$MIGRATION_CDK_PATH" || exit
+  # `cdk destroy` goes through the app entrypoint (`npx ts-node bin/app.ts`),
+  # which requires the migration CDK's node_modules to be installed so the
+  # `source-map-support/register` side-effect import (and its type decls)
+  # resolves. In the full deploy flow `npm ci` runs before `cdk deploy`, but
+  # the --clean-up-migration-only short-circuit skips that path, so install
+  # deps here unconditionally. `npm ci` is cheap relative to the destroy.
+  npm ci
+  echo "Destroying migration CDK app stacks..."
+  CDK_SKIP_LOCAL_IMAGE_HASH=true npx cdk destroy "*" --force --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID"
+  local cdk_rc=$?
+  if [ $cdk_rc -ne 0 ]; then
+    echo "Error: cdk destroy for migration stacks exited with code $cdk_rc. Aborting before the subsequent source-CDK destroy (i.e. the EC2 source cluster teardown) so that failure is visible rather than masked by a best-effort source destroy."
+    exit $cdk_rc
+  fi
+
+  # Defensive: wait for any lingering migration stacks to finish deleting
+  # before continuing. The migration app prefixes stacks with "OSMigrations-<stage>".
+  local migration_stack_prefix="OSMigrations-${STAGE}"
+  local leftover
+  leftover=$(aws cloudformation list-stacks \
+      --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE UPDATE_ROLLBACK_COMPLETE ROLLBACK_COMPLETE DELETE_FAILED DELETE_IN_PROGRESS CREATE_IN_PROGRESS UPDATE_IN_PROGRESS \
+      --query "StackSummaries[?starts_with(StackName, \`${migration_stack_prefix}\`)].StackName" \
+      --output text)
+  if [ -n "$leftover" ]; then
+    echo "Waiting for lingering migration stacks to reach DELETE_COMPLETE: $leftover"
+    # `aws cloudformation wait stack-delete-complete` is bounded, not indefinite:
+    # it polls every 30s for at most 120 attempts (~1 hour) and then exits
+    # non-zero, which we propagate below. Jenkins also wraps this stage in its
+    # own 1-hour timeout, so worst case we surface a bounded failure rather
+    # than hanging the pipeline.
+    for s in $leftover; do
+      aws cloudformation wait stack-delete-complete --stack-name "$s" || {
+        echo "Error: stack $s did not reach DELETE_COMPLETE."
+        exit 1
+      }
+    done
+  fi
+  echo "Migration CDK app destroy complete."
+}
+
+clean_up_source () {
+  vpc_id=$1
+  if [ -n "$vpc_id" ] && [ "$vpc_id" != "None" ]; then
+    default_sg=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$vpc_id" "Name=group-name,Values=default" --query "SecurityGroups[*].GroupId" --output text)
+    instance_ids=($(aws ec2 describe-instances --filters "Name=tag:Name,Values=$SOURCE_INFRA_STACK_NAME/*" 'Name=instance-state-name,Values=running' --query 'Reservations[*].Instances[*].InstanceId' --output text))
+    # Revert source cluster back to default SG to remove added SGs
+    for id in "${instance_ids[@]}"
+    do
+      echo "Removing security groups from node: $id"
+      aws ec2 modify-instance-attribute --instance-id $id --groups $default_sg
+    done
+  fi
+
+  cd "$EC2_SOURCE_CDK_PATH" || exit
+  # Do NOT `npm ci` here: the main flow above (line ~294) already ran `npm ci`
+  # in this directory AND overlaid a compatible aws-cdk CLI via
+  # `npm install --no-save aws-cdk@<ver>`. A second `npm ci` would wipe the
+  # overlaid CLI and reinstall the broken 2.139.0 from upstream's
+  # package-lock.json, re-triggering the cloud-assembly schema mismatch on
+  # destroy. `clean_up_source` is only reachable after the main-flow install
+  # (via --clean-up-source-only short-circuit at line ~304 or clean_up_all
+  # at line ~327), so the install state is guaranteed.
+  echo "Destroying source CDK app stacks..."
+  # The upstream opensearch-cluster-cdk reads context from cdk.context.json via --context contextKey=<id>
+  cp "$SOURCE_GEN_CONTEXT_FILE" cdk.context.json
+  npx cdk destroy "*" --force --c contextKey="$SOURCE_CONTEXT_ID"
+  local cdk_rc=$?
+  if [ $cdk_rc -ne 0 ]; then
+    echo "Error: cdk destroy for source stacks exited with code $cdk_rc."
+    exit $cdk_rc
+  fi
+  echo "Source CDK app destroy complete."
+}
+
 clean_up_all () {
   vpc_id=$1
-  default_sg=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$vpc_id" "Name=group-name,Values=default" --query "SecurityGroups[*].GroupId" --output text)
-  instance_ids=($(aws ec2 describe-instances --filters "Name=tag:Name,Values=$SOURCE_INFRA_STACK_NAME/*" 'Name=instance-state-name,Values=running' --query 'Reservations[*].Instances[*].InstanceId' --output text))
-  # Revert source cluster back to default SG to remove added SGs
-  for id in "${instance_ids[@]}"
-  do
-    echo "Removing security groups from node: $id"
-    aws ec2 modify-instance-attribute --instance-id $id --groups $default_sg
-  done
-
-  cd "$MIGRATION_CDK_PATH" || exit
-  cdk destroy "*" --force --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID"
-  cd "$EC2_SOURCE_CDK_PATH" || exit
-  cdk destroy "*" --force --c contextFile="$SOURCE_GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID"
+  clean_up_migration
+  clean_up_source "$vpc_id"
 }
 
 # One-time required CDK bootstrap setup for a given region. Only required if the 'CDKToolkit' CFN stack does not exist
 bootstrap_region () {
   # Picking arbitrary context values to satisfy required values for CDK synthesis. These should not need to be kept in sync with the actual deployment context values
-  cdk bootstrap --require-approval never --c contextFile="$SOURCE_GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID"
+  # The upstream opensearch-cluster-cdk reads context from cdk.context.json via --context contextKey=<id>
+  cp "$SOURCE_GEN_CONTEXT_FILE" cdk.context.json
+  npx cdk bootstrap --require-approval never --c contextKey="$SOURCE_CONTEXT_ID"
 }
 
 usage() {
   echo ""
   echo "Script to setup E2E AWS infrastructure for simulating a test environment with a source cluster on EC2, the "
-  echo "opensearch-migrations tooling, and a target cluster. Once this script has deployed these resources, it will add "
-  echo "any needed security groups to the source cluster nodes as well as install and start the capture proxy on the "
-  echo "source cluster nodes. The source cluster, migration tooling, and target cluster can all be customized by use "
-  echo "of CDK context in the provided 'context-file' option"
+  echo "opensearch-migrations tooling, and a target cluster. The source cluster, migration tooling, and target cluster "
+  echo "can all be customized by use of CDK context in the provided 'context-file' option"
   echo ""
   echo "The following placeholder values are replaced before a source deployment: <STAGE>, and the following"
   echo "placeholder values are replaced after a source deployment: <SOURCE_CLUSTER_ENDPOINT> <VPC_ID>"
@@ -121,15 +145,14 @@ usage() {
   echo "  --migration-context-file                         A file path for a given context file from which migration infrastructure and target context options will be used, default is './defaultMigrationContext.json'."
   echo "  --source-context-id                              The CDK context block identifier within the context-file to use, default is 'source-single-node-ec2'."
   echo "  --migration-context-id                           The CDK context block identifier within the context-file to use, default is 'migration-default'."
-  echo "  --migrations-git-url                             The Github http url used for building the capture proxy on setups with a dedicated source cluster, default is 'https://github.com/opensearch-project/opensearch-migrations.git'."
-  echo "  --migrations-git-branch                          The Github branch associated with the 'git-url' to pull from, default is 'main'."
   echo "  --stage                                          The stage name to use for naming/grouping of AWS deployment resources, default is 'aws-integ'."
   echo "  --create-service-linked-roles                    Flag to create required service linked roles for the AWS account"
   echo "  --bootstrap-region                               Flag to CDK bootstrap the region to allow CDK deployments"
-  echo "  --skip-capture-proxy                             Flag to skip setting up the Capture Proxy on source cluster nodes"
   echo "  --skip-source-deploy                             Flag to skip deploying the EC2 source cluster"
   echo "  --skip-migration-deploy                          Flag to skip deploying the Migration solution"
-  echo "  --clean-up-all                                   Flag to remove all deployed CloudFormation resources"
+  echo "  --clean-up-all                                   Flag to remove all deployed CloudFormation resources (migration first, then source)"
+  echo "  --clean-up-migration-only                        Flag to destroy ONLY the migration CDK app stacks (waits for DELETE_COMPLETE)"
+  echo "  --clean-up-source-only                           Flag to destroy ONLY the source (EC2) CDK app stacks"
   echo ""
   exit 1
 }
@@ -137,16 +160,15 @@ usage() {
 STAGE='aws-integ'
 CREATE_SLR=false
 BOOTSTRAP_REGION=false
-SKIP_CAPTURE_PROXY=false
 SKIP_SOURCE_DEPLOY=false
 SKIP_MIGRATION_DEPLOY=false
 SOURCE_CONTEXT_FILE='./defaultSourceContext.json'
 MIGRATION_CONTEXT_FILE='./defaultMigrationContext.json'
 SOURCE_CONTEXT_ID='source-single-node-ec2'
 MIGRATION_CONTEXT_ID='migration-default'
-MIGRATIONS_GIT_URL='https://github.com/opensearch-project/opensearch-migrations.git'
-MIGRATIONS_GIT_BRANCH='main'
 CLEAN_UP_ALL=false
+CLEAN_UP_MIGRATION_ONLY=false
+CLEAN_UP_SOURCE_ONLY=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -156,10 +178,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --bootstrap-region)
       BOOTSTRAP_REGION=true
-      shift # past argument
-      ;;
-    --skip-capture-proxy)
-      SKIP_CAPTURE_PROXY=true
       shift # past argument
       ;;
     --skip-source-deploy)
@@ -190,16 +208,6 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
-    --migrations-git-url)
-      MIGRATIONS_GIT_URL="$2"
-      shift # past argument
-      shift # past value
-      ;;
-    --migrations-git-branch)
-      MIGRATIONS_GIT_BRANCH="$2"
-      shift # past argument
-      shift # past value
-      ;;
     --stage)
       STAGE="$2"
       shift # past argument
@@ -207,6 +215,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --clean-up-all)
       CLEAN_UP_ALL=true
+      shift # past argument
+      ;;
+    --clean-up-migration-only)
+      CLEAN_UP_MIGRATION_ONLY=true
+      shift # past argument
+      ;;
+    --clean-up-source-only)
+      CLEAN_UP_SOURCE_ONLY=true
       shift # past argument
       ;;
     -h|--h|--help)
@@ -221,6 +237,18 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# Mutually exclusive cleanup flags: --clean-up-all is a superset of the other
+# two, so combining them is almost certainly a caller mistake. Reject early
+# rather than silently letting --clean-up-all win further down.
+if [ "$CLEAN_UP_ALL" = true ] && { [ "$CLEAN_UP_MIGRATION_ONLY" = true ] || [ "$CLEAN_UP_SOURCE_ONLY" = true ]; }; then
+  echo "Error: --clean-up-all cannot be combined with --clean-up-migration-only or --clean-up-source-only"
+  exit 1
+fi
+if [ "$CLEAN_UP_MIGRATION_ONLY" = true ] && [ "$CLEAN_UP_SOURCE_ONLY" = true ]; then
+  echo "Error: --clean-up-migration-only and --clean-up-source-only cannot be combined; omit both or pass --clean-up-all"
+  exit 1
+fi
 
 SOURCE_NETWORK_STACK_NAME="opensearch-network-stack-ec2-source-$STAGE"
 SOURCE_INFRA_STACK_NAME="opensearch-infra-stack-ec2-source-$STAGE"
@@ -239,20 +267,67 @@ validate_required_options
 sed -i -e "s/<STAGE>/$STAGE/g" "$SOURCE_GEN_CONTEXT_FILE"
 sed -i -e "s/<STAGE>/$STAGE/g" "$MIGRATION_GEN_CONTEXT_FILE"
 
+# Short-circuit for --clean-up-migration-only: don't touch the source CDK tree at all,
+# just destroy the migration app stacks and wait for their CFN delete to complete.
+# The migration CDK app still synths on destroy, so resolve <VPC_ID> and
+# <SOURCE_CLUSTER_ENDPOINT> the same way the full path does (via CFN outputs of
+# the source stacks if they still exist), falling back to dummy values when the
+# source side has already been destroyed -- cdk destroy doesn't actually hit the
+# endpoint/vpc, it only needs synth to succeed so it can match CFN stack names.
+if [ "$CLEAN_UP_MIGRATION_ONLY" = true ] ; then
+  source_endpoint=$(aws cloudformation describe-stacks --stack-name "$SOURCE_INFRA_STACK_NAME" --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text 2>/dev/null || echo "")
+  if [ -z "$source_endpoint" ] || [ "$source_endpoint" = "None" ]; then
+    source_endpoint="placeholder-source-endpoint.invalid"
+  fi
+  vpc_id=$(aws cloudformation describe-stacks --stack-name "$SOURCE_NETWORK_STACK_NAME" --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue | [0]" --output text 2>/dev/null || echo "")
+  if [ -z "$vpc_id" ] || [ "$vpc_id" = "None" ]; then
+    # CDK sentinel: Vpc.fromLookup returns a dummy VPC with id "vpc-12345"
+    # on cache miss; network-stack.ts explicitly short-circuits validation
+    # when it sees that id (see NetworkSetup ctor).
+    vpc_id="vpc-12345"
+  fi
+  sed -i -e "s/<VPC_ID>/$vpc_id/g" "$MIGRATION_GEN_CONTEXT_FILE"
+  sed -i -e "s/<SOURCE_CLUSTER_ENDPOINT>/http:\/\/${source_endpoint}:9200/g" "$MIGRATION_GEN_CONTEXT_FILE"
+  clean_up_migration
+  exit 0
+fi
+
 if [ ! -d "opensearch-cluster-cdk" ]; then
-  git clone https://github.com/lewijacn/opensearch-cluster-cdk.git
+  git clone https://github.com/opensearch-project/opensearch-cluster-cdk.git
 else
   echo "Repo already exists, skipping clone."
 fi
-cd opensearch-cluster-cdk && git pull && git checkout migration-es && git pull
-npm install
+cd opensearch-cluster-cdk && git pull
+npm ci
+# Upstream opensearch-cluster-cdk pins `aws-cdk` (CLI) 2.139.0 against
+# `aws-cdk-lib` 2.248.0, which emits a cloud-assembly schema (53.0.0) that
+# the pinned CLI (max 36.0.0) cannot read -- `npx cdk deploy|destroy|bootstrap`
+# then fails with "Cloud assembly schema version mismatch". Overlay a newer
+# CLI into ./node_modules/.bin/cdk so every subsequent `npx cdk` in this
+# directory (bootstrap_region, source deploy, and clean_up_source destroy)
+# resolves to a CLI that can read the library's output. `--no-save` keeps
+# upstream's package.json and package-lock.json untouched; newer CDK CLIs
+# are backwards-compatible with older assemblies. Pinned to the same version
+# as the in-tree migration CDK (deployment/cdk/opensearch-service-migration/package.json).
+npm install --no-save --no-audit --no-fund aws-cdk@2.1118.4
+# The upstream opensearch-cluster-cdk reads context from cdk.context.json via --context contextKey=<id>
+cp "$SOURCE_GEN_CONTEXT_FILE" cdk.context.json
 if [ "$BOOTSTRAP_REGION" = true ] ; then
   bootstrap_region
 fi
 
+# Short-circuit for --clean-up-source-only: destroy the source CDK app stacks and exit.
+# vpc_id is best-effort here; if the source network stack is already gone we pass
+# an empty value and clean_up_source skips the SG-revert loop.
+if [ "$CLEAN_UP_SOURCE_ONLY" = true ] ; then
+  vpc_id=$(aws cloudformation describe-stacks --stack-name "$SOURCE_NETWORK_STACK_NAME" --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue | [0]" --output text 2>/dev/null || echo "")
+  clean_up_source "$vpc_id"
+  exit 0
+fi
+
 if [ "$SKIP_SOURCE_DEPLOY" = false ] && [ "$CLEAN_UP_ALL" = false ] ; then
   # Deploy source cluster on EC2 instances
-  cdk deploy "*" --c contextFile="$SOURCE_GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID" --require-approval never
+  npx cdk deploy "*" --c contextKey="$SOURCE_CONTEXT_ID" --require-approval never
   if [ $? -ne 0 ]; then
     echo "Error: deploy source cluster failed, exiting."
     exit 1
@@ -261,7 +336,7 @@ fi
 
 source_endpoint=$(aws cloudformation describe-stacks --stack-name "$SOURCE_INFRA_STACK_NAME" --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
 echo "Source endpoint: $source_endpoint"
-vpc_id=$(aws cloudformation describe-stacks --stack-name "$SOURCE_NETWORK_STACK_NAME" --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue" --output text)
+vpc_id=$(aws cloudformation describe-stacks --stack-name "$SOURCE_NETWORK_STACK_NAME" --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue | [0]" --output text)
 echo "VPC ID: $vpc_id"
 
 # Replace source dependent placeholders in CDK context
@@ -280,18 +355,10 @@ if [ "$SKIP_MIGRATION_DEPLOY" = false ] ; then
     echo "Error: building docker images failed, exiting."
     exit 1
   fi
-  npm install
-  cdk deploy "*" --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID" --require-approval never --concurrency 3
+  npm ci
+  npx cdk deploy "*" --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID" --require-approval never --concurrency 3
   if [ $? -ne 0 ]; then
     echo "Error: deploying migration stacks failed, exiting."
-    exit 1
-  fi
-fi
-
-if [ "$SKIP_CAPTURE_PROXY" = false ] ; then
-  prepare_source_nodes_for_capture "$STAGE"
-  if [ $? -ne 0 ]; then
-    echo "Error: enabling capture proxy on source cluster, exiting."
     exit 1
   fi
 fi

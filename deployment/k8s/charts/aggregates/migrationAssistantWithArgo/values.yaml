@@ -1,12 +1,16 @@
 conditionalPackageInstalls:
   kyverno: false
   # Migration infrastructure components
-  etcd-operator: true           # Aenix etcd operator for workflow coordination
-  cert-manager: true            # needed by etcd-operator and otel operator
-  kube-prometheus-stack: true   # will be needed for auto-scaling
   argo-workflows: true          # orchestrates the steps of a migration
-  strimzi-kafka-operator: true  # Required by capture and replay
+  cert-manager: true            # needed for proxy certificates
   fluent-bit: true
+  kube-prometheus-stack: true   # needed for metric gathering; will be needed for auto-scaling
+  strimzi-kafka-operator: true  # Required by capture and replay
+
+  # TLS certificate infrastructure for capture proxy
+  ack-acmpca-controller: false  # opt-in: manages AWS PCA as K8s resources via ACK
+  aws-privateca-issuer: false   # opt-in: bridges cert-manager to AWS PCA
+  ack-cloudwatch-controller: false  # opt-in: manages CloudWatch dashboards as K8s resources via ACK
 
   # Simpler alternative to the opentelemetry-operator.
   # ONLY set up the otel-collector and require manual instrumentation
@@ -25,14 +29,6 @@ conditionalPackageInstalls:
   gatekeeper: false
   grafana: false
   jaeger: true
-
-# etcd cluster configuration (managed by Aenix etcd-operator)
-etcdCluster:
-  replicas: 3
-  storageCapacity: 10Gi
-  storageClass: ""  # Use default storage class
-  cpu: 100m
-  memory: 256Mi
 
 # Kyverno policy toggles (requires conditionalPackageInstalls.kyverno: true)
 kyvernoPolicies:
@@ -61,6 +57,10 @@ images:
     repository: migrations/migration_console
     tag: latest
     pullPolicy: IfNotPresent
+  coordinatorCluster:
+    repository: mirror.gcr.io/opensearchproject/opensearch
+    tag: "3.1.0"
+    pullPolicy: IfNotPresent
 
 # Default AWS values are dummy values for LocalStack usage
 aws:
@@ -71,9 +71,32 @@ aws:
 # EKS cluster configuration for Karpenter NodeClass
 cluster:
   # Set to true for EKS clusters with Karpenter, false for other cluster types
-  isEKS: false
-  name: ""  # Set this to your EKS cluster name (required when isEKS: true)
-  nodeInstanceProfile: "KarpenterNodeInstanceProfile"  # Default Karpenter node instance profile
+  dedicatedKarpenterNodePoolForMigrationConsole: false
+  useCustomKarpenterNodePool: false
+
+# Migrations NodePool configuration (EKS only)
+workloadsNodePool:
+  architectures: []  # Empty = no constraint (Karpenter picks). Set ["amd64"] or ["arm64"] to restrict.
+  # These limits are keep the entire aggregate compute size under these values.
+  # This is an arbiter on total cost that a deployment can consume per unit of time
+  limits:
+    cpu: "64000m"
+    memory: "128Gi"
+
+# Worker fleets: migration-console-identical pods on bigger hardware.
+# Dormant at replicas: 0. Scale up with: kubectl scale deployment/worker-fleet-<name> --replicas=N
+# Pods get karpenter.sh/do-not-disrupt to prevent mid-task eviction.
+workerFleets: {}
+  # kafka-heavy:
+  #   enabled: true
+  #   replicas: 0
+  #   resources:
+  #     requests:
+  #       cpu: 4000m
+  #       memory: 8Gi
+  #     limits:
+  #       cpu: 4000m
+  #       memory: 8Gi
 
 stageName: dev
 
@@ -191,24 +214,20 @@ otelConfiguration:
           processors:
           exporters: [ debug ]
 
-charts:
-  # Aenix etcd-operator - simple and reliable etcd management
-  # Handles node drain gracefully, automatic PDB management
-  # See: https://etcd.aenix.io/docs/v0.4/
-  etcd-operator:
-    version: "0.4.2"
-    repository: "oci://ghcr.io/aenix-io/charts/etcd-operator"
-    namespace: ma
-    dependsOn: cert-manager
-    waitForInstallation: true
-    values:
-      etcdOperator:
-        vpa:
-          enabled: false
-      kubeRbacProxy:
-        vpa:
-          enabled: false
+# AWS Private CA configuration for TLS certificate issuance
+awsPrivateCA:
+  create: false          # true = create PCA via ACK, false = bring your own
+  arn: ""                # PCA ARN (required if create: false and using PCA)
+  region: ""             # AWS region of the PCA
+  caConfig:              # only used when create: true
+    type: SUBORDINATE
+    keyAlgorithm: RSA_2048
+    signingAlgorithm: SHA256WITHRSA
+    subject:
+      commonName: "Migration Assistant CA"
+    deletionPolicy: delete  # or retain (keeps PCA after helm uninstall)
 
+charts:
 
   cert-manager:
     version: 1.17.2
@@ -217,6 +236,45 @@ charts:
     values:
       crds:
         enabled: true
+      resources:
+        requests: { cpu: 50m, memory: 64Mi }
+        limits:   { cpu: 250m, memory: 128Mi }
+      cainjector:
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits:   { cpu: 250m, memory: 128Mi }
+      webhook:
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits:   { cpu: 100m, memory: 128Mi }
+
+  aws-privateca-issuer:
+    version: "1.4.0"
+    repository: "https://cert-manager.github.io/aws-privateca-issuer"
+    dependsOn: cert-manager
+    values:
+      serviceAccount:
+        name: aws-pca-issuer
+      resources:
+        requests: { cpu: 25m, memory: 64Mi }
+        limits:   { cpu: 100m, memory: 128Mi }
+
+  ack-acmpca-controller:
+    version: "1.2.2"
+    repository: "oci://public.ecr.aws/aws-controllers-k8s/acmpca-chart"
+    dependsOn: cert-manager
+    values:
+      serviceAccount:
+        name: ack-acmpca-controller
+
+  ack-cloudwatch-controller:
+    version: "1.4.2"
+    repository: "oci://public.ecr.aws/aws-controllers-k8s/cloudwatch-chart"
+    waitForInstallation: true
+    deletionPolicy: delete
+    values:
+      serviceAccount:
+        name: ack-cloudwatch-controller
 
   opentelemetry-operator:
     version: "0.86.4"
@@ -238,60 +296,55 @@ charts:
 
 
   strimzi-kafka-operator:
-    version: 0.47.0
+    version: 0.50.1
     repository: "https://strimzi.io/charts/"
     values:
-      replicas: 1
-      storageType: ephemeral
-      storageSize: 100Gi
-      storageDeleteClaim: true
-      dedicatedController:
-        replicas: 1
-        storageSize: 10Gi
+      storageType: ephemeral # strimzi is stateless
+      storageSize: 5Gi
+      resources:
+        requests: { cpu: 250m, memory: 384Mi }
+        limits:   { cpu: 1000m, memory: 512Mi }
 
+      # Increase probe thresholds to prevent unnecessary restarts during high API load.
       readinessProbe:
-        initialDelaySeconds: 5
-        periodSeconds: 2
-        timeoutSeconds: 3
-        failureThreshold: 1
+        initialDelaySeconds: 15
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
       livenessProbe:
-        initialDelaySeconds: 5
-        periodSeconds: 2
-        timeoutSeconds: 3
-        failureThreshold: 1
+        initialDelaySeconds: 15
+        periodSeconds: 15
+        timeoutSeconds: 5
+        failureThreshold: 3
 
-      kafka:
-        template:
-          pod:
-            readinessProbe:
-              initialDelaySeconds: 5
-              periodSeconds: 5
-              timeoutSeconds: 3
-              failureThreshold: 1
-
-        readinessProbe:
-          initialDelaySeconds: 5
-          periodSeconds: 2
-          timeoutSeconds: 3
-          failureThreshold: 1
-        livenessProbe:
-          initialDelaySeconds: 5
-          periodSeconds: 2
-          timeoutSeconds: 3
-          failureThreshold: 1
 
   argo-workflows:
-    version: "0.45.24"
+    version: "1.0.5"
     repository: "https://argoproj.github.io/argo-helm"
     values:
       fullnameOverride: "argo"
+      # Credentials are configured per-environment:
+      # - valuesForLocalK8s.yaml: static credentials for LocalStack
+      # - valuesEks.yaml: SDK credentials (IAM roles)
+      useStaticCredentials: false
+      artifactRepository:
+        archiveLogs: true
+        s3:
+          insecure: false
+          keyFormat: "argo-artifacts/{{workflow.name}}/{{pod.name}}"
       images:
         pullPolicy: IfNotPresent
+      crds:
+        # Full CRDs enable Validating Admission Policy support and kubectl explain on Argo CRDs
+        full: true
       controller:
         pdb:
           enabled: true
           minAvailable: 1  # Ensures at least 1 pod always running
-        containerSecurityContext:
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits:   { cpu: 500m, memory: 256Mi }
+        securityContext:
           runAsNonRoot: true
           allowPrivilegeEscalation: false
         clusterWorkflowTemplates:
@@ -300,6 +353,11 @@ charts:
           enabled: true
         resourceRateLimit: { "limit": 10.0, "burst": 25 }
         workflowWorkers: 16
+        # Auto-restart pods that fail before entering Running state (e.g. DiskPressure, MemoryPressure evictions)
+        # Avoids needing retryStrategy on every template for transient infrastructure issues
+        failedPodRestart:
+          enabled: true
+          maxRestarts: 3
 
         replicas: 2
         affinity:
@@ -320,10 +378,16 @@ charts:
           - name: RESOURCE_STATE_CHECK_INTERVAL
             value: "1s"
       server:
+        secure: true
         replicas: 2
+        resources:
+          requests: { cpu: 100m, memory: 512Mi }
+          limits:   { cpu: 500m, memory: 512Mi }
         pdb:
           enabled: true
           minAvailable: 1  # Ensures at least 1 pod always running
+        livenessProbe:
+          enabled: true
         affinity:
           podAntiAffinity:
             preferredDuringSchedulingIgnoredDuringExecution:
@@ -345,9 +409,21 @@ charts:
           name: argo-workflow-executor
 
   fluent-bit:
-    version: "0.49.0"
+    version: "0.51.0"
     repository: "https://fluent.github.io/helm-charts"
     values:
+      resources:
+        requests: { cpu: 50m, memory: 32Mi }
+        limits:   { cpu: 200m, memory: 64Mi }
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: karpenter.sh/nodepool
+                    operator: NotIn
+                    values:
+                      - dedicated-small-instance-migration-console-pool
       env:
         - name: OUTPUT_FORMAT
           valueFrom:
@@ -415,7 +491,7 @@ charts:
           
           [FILTER]
               Name               parser
-              Match_Regex        ^fluentbit-argo-.*$|^fluentbit-.*-(etcd|run-console|latch|create-rs|delete-rs)-.*$
+              Match_Regex        ^fluentbit-argo-.*$|^fluentbit-.*-(run-console|create-rs|delete-rs)-.*$
               Key_Name           log
               Parser             logfmt_parser
               Preserve_Key       On
@@ -515,6 +591,40 @@ charts:
         enabled: true  # If OpenTelemetry for is handling host metrics, this can be disabled
       kubeStateMetrics:
         enabled: true
+      prometheusOperator:
+        resources:
+          requests: { cpu: 50m, memory: 128Mi }
+          limits:   { cpu: 250m, memory: 256Mi }
+      kube-state-metrics:
+        resources:
+          requests: { cpu: 50m, memory: 64Mi }
+          limits:   { cpu: 200m, memory: 128Mi }
+      prometheus-node-exporter:
+        resources:
+          requests: { cpu: 25m, memory: 16Mi }
+          limits:   { cpu: 100m, memory: 32Mi }
+      grafana:
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits:   { cpu: 500m, memory: 256Mi }
+        sidecar:
+          image:
+            tag: 1.30.11
+          dashboards:
+            resources:
+              requests: { cpu: 50m, memory: 100Mi }
+              limits:   { cpu: 200m, memory: 200Mi }
+          datasources:
+            resources:
+              requests: { cpu: 50m, memory: 100Mi }
+              limits:   { cpu: 200m, memory: 200Mi }
+        additionalDataSources:
+          - name: Jaeger
+            type: jaeger
+            url: http://jaeger-query:16686
+            access: proxy
+            isDefault: false
+            editable: true
       defaultRules:
         create: false
         rules:
@@ -535,14 +645,6 @@ charts:
           node: true
           prometheus: true
           prometheusOperator: true
-      grafana:
-        additionalDataSources:
-          - name: Jaeger
-            type: jaeger
-            url: http://jaeger-query:16686
-            access: proxy
-            isDefault: false
-            editable: true
 
 # OPA Gatekeeper dependency to lock down what images we can spin up - not implemented yet
 #  - name: gatekeeper
@@ -608,9 +710,14 @@ charts:
         enabled: false
 
   kyverno:
-    version: "3.5.2"
+    uninstallTimeout: 120         # Timeout for helm uninstall (seconds), with force-cleanup fallback
+    preUninstallCleanup:
+      webhooks: true             # Delete mutating/validating webhook configs before uninstall
+    postUninstallCleanup:
+      crds: true                 # Delete CRDs after uninstall
+    version: "3.7.1"
     repository: "https://kyverno.github.io/kyverno/"
-    namespace: ma
+    namespace: kyverno-ma
     values:
       admissionController:
         replicas: 1
@@ -638,4 +745,4 @@ charts:
           requests: null
           limits: null
       config:
-        excludeKyvernoNamespace: false
+        excludeKyvernoNamespace: true

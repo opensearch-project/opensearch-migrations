@@ -4,14 +4,24 @@
     "noEmit": true,
     "moduleResolution": "bundler",
     "paths": {
+      "@opensearch-migrations/argo-types": ["./packages/argo-types/src/index.ts"],
       "@opensearch-migrations/argo-workflow-builders": ["./packages/argo-workflow-builders/src/index.ts"],
-      "@opensearch-migrations/schemas": ["./packages/schemas/src/index.ts"]
+      "@opensearch-migrations/config-processor": ["./packages/config-processor/src/index.ts"],
+      "@opensearch-migrations/crd-type-generator": ["./packages/crd-type-generator/src/index.ts"],
+      "@opensearch-migrations/k8s-types": ["./packages/k8s-types/src/index.ts"],
+      "@opensearch-migrations/migration-workflow-templates": ["./packages/migration-workflow-templates/src/index.ts"],
+      "@opensearch-migrations/schemas": ["./packages/schemas/src/index.ts"],
+      "@opensearch-migrations/strimzi-types": ["./packages/strimzi-types/src/index.ts"]
     }
   },
   "include": [
+    "./packages/argo-types/src/**/*",
     "./packages/argo-workflow-builders/src/**/*",
     "./packages/config-processor/src/**/*",
+    "./packages/crd-type-generator/src/**/*",
+    "./packages/k8s-types/src/**/*",
     "./packages/migration-workflow-templates/src/**/*",
-    "./packages/schemas/src/**/*"
+    "./packages/schemas/src/**/*",
+    "./packages/strimzi-types/src/**/*"
   ]
 }

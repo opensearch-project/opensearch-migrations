@@ -1,4 +1,5 @@
-import {ARGO_WORKFLOW_SCHEMA} from "@opensearch-migrations/schemas";
+import {ARGO_MIGRATION_CONFIG_PRE_ENRICH} from "@opensearch-migrations/schemas";
+import {z} from "zod";
 import {MigrationInitializer} from "./migrationInitializer";
 import {MigrationConfigTransformer} from "./migrationConfigTransformer";
 import {parse} from "yaml";
@@ -13,23 +14,15 @@ global.console = new Console({
 const COMMAND_LINE_HELP_MESSAGE = `
 Usage: initialize-workflow [options] [input-file]
 
-Initialize migration workflow in etcd.  
+Initialize migration workflow and its requisite resources.  
 When the configuration is provided in the user-schema with the --user-config option, 
 that configuration will first be validated and transformed before doing the initialization.
-The transformed user configuration will also be output to stdout.  
 
 Arguments:
   --user-config <file>         (stdin: '-') User-specified YAML/JSON configuration file ('-' for stdin)
   --transformed-config <file>  (stdin: '-') Workflow-ready YAML/JSON configuration file (output of MigrationConfigTransformer)
-  --etcd-endpoints <urls>      Comma-separated etcd endpoints (env: ETCD_ENDPOINTS)
-  --unique-run-nonce <string>  Value to disambiguate workflow instances for snapshot names, keys, etc (env: UNIQUE_RUN_NONCE)
-  --etcd-user <user>           Username for etcd authentication (env: ETCD_USER)
-  --etcd-password <pass>       Password for etcd authentication (env: ETCD_PASSWORD)
+  --output-dir <dir>           Directory to write output files (workflowMigration.config.yaml, approvalConfigMaps.yaml, concurrencyConfigMaps.yaml)
 
-Options:
-  --skip-initialize            Only do transformation of user-config. Does no processing if passed a transformed config.            
-  --silent                     Suppress outputting the workflow configuration to stdout            
-  
   -h, --help               Show this help message
 `;
 
@@ -57,57 +50,27 @@ export async function main() {
     }
 
     // Parse command line arguments
-    let etcdEndpoints = process.env.ETCD_ENDPOINTS;
-    let etcdUser = process.env.ETCD_USER;
-    let etcdPassword = process.env.ETCD_PASSWORD;
-    let uniqueRunNonce = process.env.UNIQUE_RUN_NONCE;
     let userConfigFile = process.env.USER_WORKFLOW_CONFIGURATION;
     let workflowConfigFile = process.env.TRANSFORMED_WORKFLOW_CONFIGURATION;
-    let skipInitialize = false;
-    let silent = false;
+    let outputDir: string | undefined;
+    let workflowName: string | undefined;
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
 
-        if (arg === '--etcd-endpoints' && i + 1 < args.length) {
-            etcdEndpoints = args[++i];
-        } else if (arg === '--etcd-user' && i + 1 < args.length) {
-            etcdUser = args[++i];
-        } else if (arg === '--etcd-password' && i + 1 < args.length) {
-            etcdPassword = args[++i];
-        } else if (arg === '--unique-run-nonce' && i + 1 < args.length) {
-            uniqueRunNonce = args[++i];
-        } else if (arg === '--user-config' && i + 1 < args.length) {
+        if (arg === '--user-config' && i + 1 < args.length) {
             userConfigFile = args[++i];
         } else if (arg === '--transformed-config' && i + 1 < args.length) {
             workflowConfigFile = args[++i];
-        } else if (arg === '--skip-initialize') {
-            skipInitialize = true;
-        } else if (arg === '--silent') {
-            silent = true;
+        } else if (arg === '--output-dir' && i + 1 < args.length) {
+            outputDir = args[++i];
+        } else if (arg === '--workflow-name' && i + 1 < args.length) {
+            workflowName = args[++i];
+        } else {
+            console.error('Error: unknown arg: `' + arg + '`.');
+            process.stderr.write(COMMAND_LINE_HELP_MESSAGE);
+            process.exit(5);
         }
-    }
-
-    // Verify required etcd configuration values are set
-    const missingVars: string[] = [];
-
-    if (!skipInitialize) {
-        if (!etcdEndpoints) {
-            missingVars.push('ETCD_ENDPOINTS (or --etcd-endpoints)');
-        }
-        if (!uniqueRunNonce) {
-            missingVars.push('UNIQUE_RUN_NONCE (or --unique-run-nonce)');
-        }
-    }
-
-    if (missingVars.length > 0) {
-        console.error('Error: Missing required configuration values:');
-        missingVars.forEach(varName => {
-            console.error(`  - ${varName}`);
-        });
-        console.error('\nPlease provide these via environment variables or command line arguments.');
-        console.error('Run with --help for usage information.');
-        process.exit(2);
     }
 
     // Verify that either configJson or inputFile is provided
@@ -124,40 +87,26 @@ export async function main() {
     }
 
     try {
-        const workflows: ARGO_WORKFLOW_SCHEMA = await (async ()=>{
+        const workflows: z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH> = await (async ()=>{
             if (userConfigFile) {
                 const processor = new MigrationConfigTransformer();
                 const userConfig = await parseInput(userConfigFile) as any;
                 return processor.processFromObject(userConfig);
             } else if (workflowConfigFile) {
-                return parseInput(workflowConfigFile) as any;
+                return ARGO_MIGRATION_CONFIG_PRE_ENRICH.parse(await parseInput(workflowConfigFile));
             } else {
                 throw new Error("Neither userConfigFile nor workflowConfigFile found");
             }
         }) ();
 
-        if (!skipInitialize) {
-            const initializer = new MigrationInitializer({
-                    endpoints: [etcdEndpoints as string],
-                    ...(!etcdUser || !etcdPassword ? {} : {
-                        auth: {
-                            username: etcdUser as string,
-                            password: etcdPassword as string
-                        }
-                    })
-                },
-                uniqueRunNonce as string
-            );
-
-            try {
-                await initializer.initializeWorkflow(workflows);
-            } finally {
-                await initializer.close();
-            }
+        // Generate output files
+        if (outputDir) {
+            const initializer = new MigrationInitializer();
+            await initializer.generateOutputFiles(workflows, outputDir, userConfigFile ? await parseInput(userConfigFile) : null, workflowName);
         }
 
-        // PRINT THE TRANSFORMED RESULTS SO THAT THE WORKFLOW CAN BE CREATED FROM THEM!
-        if (!silent) {
+        // Output transformed workflow to stdout if no output directory specified - ignoring auxiliary configmap values
+        if (!outputDir) {
             process.stdout.write(JSON.stringify(workflows, null, 2));
         }
     } catch (error) {
@@ -169,7 +118,7 @@ export async function main() {
             console.error('JSON parsing error:', error.message);
             process.exit(1);
         } else if (error instanceof Error) {
-            console.error('Error:', error.message);
+            console.error('Error:', error);
             process.exit(1);
         } else {
             console.error('Unknown error:', error);

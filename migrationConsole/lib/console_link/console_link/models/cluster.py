@@ -1,8 +1,10 @@
 from typing import Any, Dict, Generator, NamedTuple, Optional, TypeAlias
+from urllib.parse import urlparse
 from enum import Enum
 import json
 import logging
 import subprocess
+import time
 from pydantic import BaseModel
 
 import boto3
@@ -94,6 +96,31 @@ SCHEMA = {
     }
 }
 
+SOURCE_PROXY_SCHEMA = {
+    "type": "dict",
+    "schema": {
+        "name": {"type": "string", "required": False},
+        "endpoint": {"type": "string", "required": True},
+        "allow_insecure": {"type": "boolean", "required": False},
+    }
+}
+
+SOURCE_CLUSTER_SCHEMA = {
+    "cluster": {
+        "type": "dict",
+        "schema": {
+            "endpoint": {"type": "string", "required": True},
+            "allow_insecure": {"type": "boolean", "required": False},
+            "version": {"type": "string", "required": False},
+            "no_auth": NO_AUTH_SCHEMA,
+            "basic_auth": BASIC_AUTH_SCHEMA,
+            "sigv4": SIGV4_SCHEMA,
+            "proxy": SOURCE_PROXY_SCHEMA,
+        },
+        "check_with": contains_one_of({auth.name.lower() for auth in AuthMethod})
+    }
+}
+
 
 class AuthDetails(NamedTuple):
     username: str
@@ -135,6 +162,69 @@ class Cluster:
             self.auth_details = config["sigv4"] if config["sigv4"] is not None else {}
         self.client_options = client_options
 
+    @property
+    def is_serverless(self) -> bool:
+        """Check if this is an Amazon OpenSearch Serverless (AOSS) collection.
+        Config-based detection: SigV4 service=aoss or .aoss.amazonaws.com endpoint pattern.
+        For runtime detection (like Java's GET / probe), use detect_serverless_collection_type()."""
+        if (self.auth_type == AuthMethod.SIGV4 and
+                self.auth_details is not None and
+                self.auth_details.get("service") == "aoss"):
+            return True
+        try:
+            hostname = urlparse(self.endpoint or "").hostname or ""
+            return hostname.endswith(".aoss.amazonaws.com")
+        except Exception:
+            return False
+
+    def detect_serverless_collection_type(self, skip_root_probe: bool = False) -> Optional[str]:
+        """Detect AOSS collection type by mirroring Java OpenSearchClientFactory logic:
+        1. Probe GET / — if 200, not serverless (return None). Skip if skip_root_probe=True.
+        2. If 404 (or skip_root_probe), probe with invalid KNN index to detect SEARCH/TIMESERIES/VECTOR.
+        Returns 'SEARCH', 'TIMESERIES', 'VECTOR', 'UNKNOWN' (serverless but undetected), or None (not serverless)."""
+        if not skip_root_probe:
+            # Step 1: probe root API (mirrors Java getClusterVersion())
+            try:
+                r = self.call_api("/", raise_error=False, timeout=5)
+                if r.status_code == 200:
+                    return None  # Not serverless
+                if r.status_code != 404:
+                    logger.debug(f"Unexpected status {r.status_code} from GET /, cannot determine serverless type")
+                    return None
+            except Exception as e:
+                logger.debug(f"GET / probe failed: {e}")
+                return None
+
+        # Step 2: KNN probe to detect collection type (mirrors Java detectServerlessCollectionType())
+        probe_index = f"migrations_type_probe_{int(time.time())}"
+        probe_body = json.dumps({
+            "settings": {"index.knn": True},
+            "mappings": {"properties": {"v": {"type": "knn_vector", "dimension": -1}}}
+        })
+        try:
+            r = self.call_api(f"/{probe_index}", method=HttpMethod.PUT,
+                              data=probe_body,
+                              headers={"Content-Type": "application/json"},
+                              raise_error=False, timeout=10)
+            body = r.text or ""
+            if r.status_code < 400:
+                self.call_api(f"/{probe_index}", method=HttpMethod.DELETE, raise_error=False)
+        except Exception as e:
+            body = str(e)
+
+        if "KNN features not supported on TIMESERIES collection type" in body:
+            return "TIMESERIES"
+        elif "KNN features not supported on SEARCH collection type" in body:
+            return "SEARCH"
+        elif "Dimension value must be greater than 0" in body:
+            return "VECTOR"
+        return "UNKNOWN"
+
+    @property
+    def display_name(self) -> str:
+        """Human-readable cluster type label."""
+        return "Amazon OpenSearch Serverless" if self.is_serverless else "cluster"
+
     def get_basic_auth_details(self) -> AuthDetails:
         """Return a tuple of (username, password) for basic auth. Will use username/password if provided in plaintext,
         otherwise will pull both username/password as keys in the specified secrets manager secret.
@@ -158,7 +248,7 @@ class Cluster:
             kubectl_runner = KubectlRunner("ma", "")
             secret_dict = kubectl_runner.read_secret(self.auth_details["k8s_secret_name"])
 
-        if not secret_dict or type(secret_dict) is not dict:
+        if not secret_dict or not isinstance(secret_dict, dict):
             raise ValueError("Secret is not a valid object containing a username and password.")
 
         missing_keys = [k for k in ("username", "password") if k not in secret_dict]
@@ -226,7 +316,8 @@ class Cluster:
         return r
 
     def execute_benchmark_workload(self, workload: str,
-                                   workload_params='bulk_size:10,bulk_indexing_clients:1'):
+                                   workload_params='bulk_size:10,bulk_indexing_clients:1',
+                                   test_procedure: str = None):
         client_options = "verify_certs:false"
         if not self.allow_insecure:
             client_options += ",use_ssl:true"
@@ -238,8 +329,10 @@ class Cluster:
             client_options += (f",basic_auth_user:{username},"
                                f"basic_auth_password:{password_to_censor}")
         elif self.auth_type == AuthMethod.SIGV4:
-            raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "
-                                      f"benchmark workloads")
+            service, region = self._get_sigv4_details(force_region=True)
+            client_options += (f",amazon_aws_log_in:session,"
+                               f"service:{service},"
+                               f"region:{region}")
         logger.info(f"Running opensearch-benchmark with '{workload}' workload")
         command = (f"opensearch-benchmark run "
                    f"--exclude-tasks=check-cluster-health "
@@ -249,6 +342,8 @@ class Cluster:
                    "--test-mode --kill-running-processes "
                    f"--workload-params={workload_params} "
                    f"--client-options={client_options}")
+        if test_procedure:
+            command += f" --test-procedure={test_procedure}"
         # While a little wordier, this approach prevents us from censoring the password if it appears in other contexts,
         # e.g. username:admin,password:admin.
         display_command = command.replace(f"basic_auth_password:{password_to_censor}", "basic_auth_password:********")
@@ -313,6 +408,30 @@ class Cluster:
                 session=session,
                 raise_error=False
             )
+
+
+class SourceCluster(Cluster):
+    proxy: Optional[Cluster] = None
+    proxy_name: Optional[str] = None
+
+    def __init__(self, config: Dict, client_options: Optional[ClientOptions] = None) -> None:
+        logger.info(f"Initializing source cluster with config: {config}")
+        v = Validator(SOURCE_CLUSTER_SCHEMA)
+        if not v.validate({'cluster': config}):
+            raise ValueError("Invalid config file for source cluster", v.errors)
+
+        proxy_config = config.get("proxy")
+        base_config = {k: v for k, v in config.items() if k != "proxy"}
+        super().__init__(config=base_config, client_options=client_options)
+
+        if proxy_config is not None:
+            merged_proxy_config = {
+                **base_config,
+                "endpoint": proxy_config["endpoint"],
+                "allow_insecure": proxy_config.get("allow_insecure", False),
+            }
+            self.proxy = Cluster(config=merged_proxy_config, client_options=client_options)
+            self.proxy_name = proxy_config.get("name")
 
 
 class NoSourceClusterDefinedError(Exception):

@@ -1,0 +1,60 @@
+{{ if get .Values.conditionalPackageInstalls "argo-workflows" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argo-test-workflow-executor
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: workflow-test-console-role
+  namespace: {{ .Release.Namespace }}
+rules:
+  # The outer integration-test workflow waits on and execs into migration-console-0
+  # to run workflow CLI commands from inside the console pod.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+
+  # Test cleanup still deletes the inner migration workflow directly.
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows"]
+    verbs: ["get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: workflow-test-console-rolebinding
+  namespace: {{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: argo-test-workflow-executor
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: workflow-test-console-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# The test SA also needs the full deployer permissions to stand up source/target
+# clusters, issue certs, etc. Reuse the production workflow-deployer-role rather
+# than duplicating its rules.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: workflow-test-deployer-rolebinding
+  namespace: {{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: argo-test-workflow-executor
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: Role
+  name: workflow-deployer-role
+  apiGroup: rbac.authorization.k8s.io
+
+{{ end }}

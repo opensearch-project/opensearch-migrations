@@ -13,7 +13,7 @@ import java.util.function.Supplier;
 
 import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.ChannelTask;
 import org.opensearch.migrations.replay.datatypes.ChannelTaskType;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
@@ -156,11 +156,12 @@ public class RequestSenderOrchestrator {
         IReplayContexts.IReplayerHttpTransactionContext ctx,
         Instant start,
         Duration interval,
-        ByteBufList packets,
+        ByteBufListProducer packetProducer,
         RetryVisitor<T> visitor
     ) {
         var sessionNumber = requestKey.sourceRequestIndexSessionIdentifier;
         var channelInteractionNum = requestKey.getReplayerRequestIndex();
+        var generation = requestKey.trafficStreamKey.getSourceGeneration();
         // TODO: Separate socket connection from the first bytes sent.
         // Ideally, we would match the relative timestamps of when connections were being initiated
         // as well as the period between connection and the first bytes sent. However, this code is a
@@ -171,15 +172,24 @@ public class RequestSenderOrchestrator {
             ctx.getLogicalEnclosingScope(),
             sessionNumber,
             channelInteractionNum,
+            generation,
             connectionReplaySession -> scheduleSendRequestOnConnectionReplaySession(
                 ctx,
                 connectionReplaySession,
                 start,
                 interval,
-                packets,
+                packetProducer,
                 visitor
             )
         );
+    }
+
+    /**
+     * Immediately cancels a connection without going through the OnlineRadixSorter.
+     * Delegates directly to {@link ClientConnectionPool#cancelConnection}.
+     */
+    public TrackedFuture<String, Void> cancelConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
+        return clientConnectionPool.cancelConnection(ctx, sessionNumber);
     }
 
     public TrackedFuture<String, Void> scheduleClose(
@@ -248,7 +258,17 @@ public class RequestSenderOrchestrator {
         int channelInteractionNumber,
         Function<ConnectionReplaySession, TrackedFuture<String, T>> onSessionCallback
     ) {
-        final var replaySession = clientConnectionPool.getCachedSession(ctx, sessionNumber);
+        return submitUnorderedWorkToEventLoop(ctx, sessionNumber, channelInteractionNumber, 0, onSessionCallback);
+    }
+
+    private <T> TrackedFuture<String, T> submitUnorderedWorkToEventLoop(
+        IReplayContexts.IChannelKeyContext ctx,
+        int sessionNumber,
+        int channelInteractionNumber,
+        int generation,
+        Function<ConnectionReplaySession, TrackedFuture<String, T>> onSessionCallback
+    ) {
+        final var replaySession = clientConnectionPool.getCachedSession(ctx, sessionNumber, generation);
         return NettyFutureBinders.bindNettySubmitToTrackableFuture(replaySession.eventLoop)
             .getDeferredFutureThroughHandle((v, t) -> {
                 log.atTrace().setMessage("adding work item at slot {} for {} with {}")
@@ -271,7 +291,7 @@ public class RequestSenderOrchestrator {
         ConnectionReplaySession connectionReplaySession,
         Instant startTime,
         Duration interval,
-        ByteBufList packets,
+        ByteBufListProducer packetProducer,
         RetryVisitor<T> visitor
     ) {
         var eventLoop = connectionReplaySession.eventLoop;
@@ -281,7 +301,7 @@ public class RequestSenderOrchestrator {
             ctx.getLogicalEnclosingScope().getChannelKey(),
             channelInterationNum
         );
-        packets.retain();
+        packetProducer.retain();
         return scheduleOnConnectionReplaySession(
             diagnosticCtx,
             connectionReplaySession,
@@ -290,11 +310,11 @@ public class RequestSenderOrchestrator {
                 scheduledContext.close();
                 final Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier =
                     () -> packetConsumerFactory.apply(connectionReplaySession, ctx);
-                return sendRequestWithRetries(senderSupplier, eventLoop, packets, startTime, initialRetryDelay,
+                return sendRequestWithRetries(senderSupplier, eventLoop, packetProducer, startTime, initialRetryDelay,
                     interval, visitor);
             }, () -> "sending packets for request"))
         )
-            .whenComplete((v,t) -> packets.release(), () -> "waiting for request to be sent to release ByteBufList");
+            .whenComplete((v,t) -> packetProducer.release(), () -> "waiting for request to be sent to release ByteBufListProducer");
     }
 
     private TrackedFuture<String, Void> scheduleCloseOnConnectionReplaySession(
@@ -311,7 +331,7 @@ public class RequestSenderOrchestrator {
             connectionReplaySession,
             timestamp,
             new ChannelTask<>(ChannelTaskType.CLOSE, tf -> tf.whenComplete((v, t) -> {
-                log.trace("Calling closeConnection at slot " + channelInteraction);
+                log.atTrace().setMessage("Calling closeConnection at slot {}").addArgument(channelInteraction).log();
                 clientConnectionPool.closeConnection(ctx, connectionReplaySessionNum);
             }, () -> "Close connection"))
         );
@@ -323,7 +343,7 @@ public class RequestSenderOrchestrator {
         Instant atTime,
         ChannelTask<T> task
     ) {
-        log.atInfo().setMessage("{} scheduling {} at {}")
+        log.atDebug().setMessage("{} scheduling {} at {}")
             .addArgument(channelInteraction)
             .addArgument(task.kind)
             .addArgument(atTime)
@@ -376,7 +396,7 @@ public class RequestSenderOrchestrator {
     private <T> TrackedFuture<String, T>
     sendRequestWithRetries(Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier,
                            EventLoop eventLoop,
-                           ByteBufList byteBufList,
+                           ByteBufListProducer packetProducer,
                            Instant referenceStartTime,
                            Duration nextRetryDelay,
                            Duration interval,
@@ -386,6 +406,7 @@ public class RequestSenderOrchestrator {
             return TextTrackedFuture.failedFuture(new IllegalStateException("EventLoop is shutting down"),
                 () -> "sendRequestWithRetries is failing due to the pending shutdown of the EventLoop");
         }
+        var byteBufList = packetProducer.get();
         return sendPackets(senderSupplier.get(), eventLoop,
             byteBufList.streamUnretained().iterator(), referenceStartTime, interval, new AtomicInteger())
             .getDeferredFutureThroughHandle((response, t) -> {
@@ -399,13 +420,19 @@ public class RequestSenderOrchestrator {
                     return TextTrackedFuture.failedFuture(t, () -> "failed future");
                 }
                 if (dtr.directive == RetryDirective.RETRY) {
-                    var newStartTime = referenceStartTime.plus(nextRetryDelay);
-                    log.atInfo().setMessage("Making request scheduled at {}").addArgument(newStartTime).log();
+                    var computedStartTime = referenceStartTime.plus(nextRetryDelay);
+                    // Ensure retry is not scheduled in the past to prevent tight retry loops
+                    // that monopolize event loop threads when referenceStartTime is far in the past
+                    var now = now();
+                    var newStartTime = computedStartTime.isBefore(now)
+                        ? now.plus(nextRetryDelay)
+                        : computedStartTime;
+                    log.atDebug().setMessage("Making request scheduled at {}").addArgument(newStartTime).log();
                     var schedulingDelay = Duration.between(now(), newStartTime);
                     return NettyFutureBinders.bindNettyScheduleToCompletableFuture(
                         eventLoop, schedulingDelay)
                         .thenCompose(
-                            v -> sendRequestWithRetries(senderSupplier, eventLoop, byteBufList, newStartTime,
+                            v -> sendRequestWithRetries(senderSupplier, eventLoop, packetProducer, newStartTime,
                                 doubleRetryDelayCapped(nextRetryDelay), interval, visitor),
                             () -> "retrying request with delay of " + schedulingDelay);
                 } else {

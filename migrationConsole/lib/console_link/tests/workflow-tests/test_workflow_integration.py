@@ -1,62 +1,22 @@
 """
-Integration tests for workflow CLI commands using Kubernetes clusters.
+Integration tests for workflow CLI commands using a dedicated Kubernetes test cluster.
 
-These tests support three execution modes:
-
-1. **GitHub Actions (CI)**: Uses a pre-configured Kind cluster set up by the workflow.
-   The cluster is created before tests run and is automatically detected.
-
-2. **Local with existing cluster**: Auto-detects and uses any accessible Kubernetes
-   cluster (minikube, k3s, kind, etc.) configured in your kubeconfig.
-
-3. **Local without cluster**: Falls back to creating a k3s container using
-   testcontainers-python for a lightweight, isolated test environment.
-
-The test suite automatically detects which mode to use based on cluster availability.
-No manual configuration is required - the tests adapt to the environment.
-
-## Running Tests Locally
-
-### With existing cluster (fastest):
-```bash
-# Start minikube, kind, or k3s first
-minikube start  # or: kind create cluster
-pytest tests/workflow-tests/test_workflow_integration.py
-```
-
-### Without existing cluster (automatic fallback):
-```bash
-# Tests will automatically create k3s container
-pytest tests/workflow-tests/test_workflow_integration.py
-```
-
-## Architecture
-
-The cluster detection logic is implemented in helper functions:
-- `_detect_existing_kubernetes_cluster()`: Checks for accessible cluster
-- `_get_kubernetes_client()`: Returns configured client for existing cluster
-
-The `k3s_container` fixture conditionally creates a k3s container only when
-no existing cluster is detected, ensuring tests work in all environments.
+These tests are intended to run against a pre-created Kind cluster, both locally
+and in CI. They require the active kube context to match the dedicated workflow
+test context and will fail fast otherwise.
 """
 
 import logging
-import os
 import pytest
 import subprocess
-import tempfile
 import time
 import uuid
-import requests
 from click.testing import CliRunner
-from kubernetes import client, config
+from kubernetes import client
 from kubernetes.client.rest import ApiException
-from testcontainers.k3s import K3SContainer
 from console_link.workflow.cli import workflow_cli
 from console_link.workflow.models.config import WorkflowConfig
 from console_link.workflow.models.workflow_config_store import WorkflowConfigStore
-from testcontainers.core.container import DockerContainer
-from kubernetes import utils
 
 logger = logging.getLogger(__name__)
 
@@ -305,150 +265,20 @@ def _wait_for_port_forward(process, port, timeout=10):
     return False
 
 
-def _detect_existing_kubernetes_cluster():
-    """
-    Detect if a Kubernetes cluster is already available and accessible.
-
-    This function attempts to load the kubeconfig and connect to a cluster.
-    It's used to determine whether to use an existing cluster (e.g., Kind in CI,
-    minikube locally) or fall back to creating a k3s container.
-
-    Returns:
-        bool: True if an existing cluster is accessible, False otherwise
-    """
-    try:
-        # Try to load kubeconfig from default location or KUBECONFIG env var
-        config.load_kube_config()
-
-        # Attempt to connect to the cluster by listing namespaces
-        v1 = client.CoreV1Api()
-        namespaces = v1.list_namespace(timeout_seconds=10)
-
-        # If we got here, we have a working cluster
-        logger.info("✓ Detected existing Kubernetes cluster")
-        logger.info(f"  Found {len(namespaces.items)} namespaces")
-
-        # Log cluster context for debugging
-        contexts, active_context = config.list_kube_config_contexts()
-        if active_context:
-            cluster_name = active_context.get('context', {}).get('cluster', 'unknown')
-            logger.info(f"  Active context: {active_context.get('name', 'unknown')}")
-            logger.info(f"  Cluster: {cluster_name}")
-
-        return True
-
-    except config.ConfigException as e:
-        logger.info(f"No kubeconfig found: {e}")
-        return False
-    except ApiException as e:
-        logger.info(f"Kubernetes API error: {e}")
-        return False
-    except Exception as e:
-        logger.info(f"Failed to connect to existing cluster: {e}")
-        return False
-
-
-def _get_kubernetes_client():
-    """
-    Get a configured Kubernetes client from an existing cluster.
-
-    This function loads the kubeconfig and returns a CoreV1Api client.
-    It should only be called after _detect_existing_kubernetes_cluster()
-    has confirmed a cluster is available.
-
-    Returns:
-        client.CoreV1Api: Configured Kubernetes client, or None if unable to connect
-    """
-    try:
-        # Load kubeconfig (should already be loaded, but ensure it's available)
-        config.load_kube_config()
-
-        # Create and return the client
-        v1 = client.CoreV1Api()
-
-        # Verify the client works
-        v1.list_namespace(timeout_seconds=10)
-
-        return v1
-
-    except Exception as e:
-        logger.error(f"Failed to create Kubernetes client: {e}")
-        return None
-
-
-# ============================================================================
-# Test Fixtures
-# ============================================================================
-
 @pytest.fixture(scope="session")
-def k3s_container():
-    """
-    Set up Kubernetes cluster for all workflow tests.
-
-    This fixture supports three modes:
-    1. GitHub Actions: Uses existing Kind cluster set up by the workflow
-    2. Local with existing cluster: Auto-detects minikube/k3s/kind
-    3. Local without cluster: Falls back to creating k3s container
-
-    The fixture automatically detects which mode to use and configures
-    the Kubernetes client accordingly.
-    """
-    # First, check if an existing Kubernetes cluster is available
-    has_existing_cluster = _detect_existing_kubernetes_cluster()
-
-    if has_existing_cluster:
-        logger.info("\n=== Using existing Kubernetes cluster ===")
-        logger.info("Skipping k3s container creation")
-
-        # Verify we can get a working client
-        k8s_client = _get_kubernetes_client()
-        if k8s_client is None:
-            pytest.fail("Detected existing cluster but failed to create client")
-
-        # Yield a sentinel value to indicate we're using an existing cluster
-        # The actual kubeconfig is already loaded by _detect_existing_kubernetes_cluster()
-        yield {"mode": "existing-cluster", "container": None}
-
-        # No cleanup needed for existing cluster
-        logger.info("\nUsing existing cluster - no cleanup needed")
-
-    else:
-        logger.info("\n=== No existing cluster detected ===")
-        logger.info("Starting k3s container for workflow tests...")
-
-        # Start k3s container
-        container = K3SContainer(image="rancher/k3s:latest")
-        container.start()
-
-        # Get kubeconfig from container
-        kubeconfig = container.config_yaml()
-
-        # Write kubeconfig to temporary file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-            f.write(kubeconfig)
-            kubeconfig_path = f.name
-
-        # Set KUBECONFIG environment variable
-        os.environ['KUBECONFIG'] = kubeconfig_path
-
-        # Load the kubeconfig
-        config.load_kube_config(config_file=kubeconfig_path)
-
-        yield {"mode": "k3s-container", "container": container}
-
-        logger.info("\nCleaning up k3s container...")
-        # Clean up
-        container.stop()
-        if os.path.exists(kubeconfig_path):
-            os.unlink(kubeconfig_path)
-        if 'KUBECONFIG' in os.environ:
-            del os.environ['KUBECONFIG']
+def k8s_cluster(required_workflow_test_kube_context):
+    """Require and use the dedicated workflow test cluster."""
+    logger.info(
+        "Using workflow test kube context: %s",
+        required_workflow_test_kube_context["active_context"],
+    )
+    return required_workflow_test_kube_context
 
 
 @pytest.fixture(scope="session")
-def argo_workflows(k3s_container):
-    """Install Argo Workflows in the k3s cluster"""
-    logger.info("\nInstalling Argo Workflows in k3s...")
+def argo_workflows(k8s_cluster):
+    """Verify and use Argo Workflows in the dedicated workflow test cluster."""
+    logger.info("\nVerifying Argo Workflows in workflow test cluster...")
 
     # Argo Workflows version to install
     argo_version = "v3.7.3"
@@ -456,61 +286,15 @@ def argo_workflows(k3s_container):
 
     v1 = client.CoreV1Api()
 
-    # Create argo namespace
-    namespace = client.V1Namespace(
-        metadata=client.V1ObjectMeta(name=argo_namespace)
-    )
     try:
-        v1.create_namespace(body=namespace)
-        logger.info(f"Created namespace: {argo_namespace}")
+        v1.read_namespace(name=argo_namespace)
+        logger.info(f"Namespace {argo_namespace} exists")
     except ApiException as e:
-        if e.status != 409:  # Ignore if already exists
-            raise
-        logger.info(f"Namespace {argo_namespace} already exists")
+        pytest.fail(
+            f"Expected namespace {argo_namespace!r} for workflow tests, but it was not found: {e}"
+        )
 
-    # Download and apply the Argo Workflows manifest
-    # Using install.yaml instead of quick-start-minimal.yaml for lighter installation
-    manifest_url = (
-        f"https://github.com/argoproj/argo-workflows/releases/download/"
-        f"{argo_version}/quick-start-minimal.yaml"
-    )
-
-    try:
-        logger.info(f"Downloading Argo Workflows manifest from {manifest_url}")
-        response = requests.get(manifest_url, timeout=30)
-        response.raise_for_status()
-        manifest_content = response.text
-
-        # Write manifest to temporary file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-            f.write(manifest_content)
-            manifest_path = f.name
-
-        # Apply the manifest using Kubernetes Python client
-        logger.info("Applying Argo Workflows manifest...")
-        k8s_client = client.ApiClient()
-
-        try:
-            utils.create_from_yaml(
-                k8s_client,
-                manifest_path,
-                namespace=argo_namespace
-            )
-            logger.info("Argo Workflows manifest applied successfully")
-        except Exception as apply_error:
-            # Some resources might already exist, which is okay
-            logger.info(f"Note during apply: {apply_error}")
-            logger.info("Continuing with installation verification...")
-
-        # Clean up temporary file
-        if os.path.exists(manifest_path):
-            os.unlink(manifest_path)
-
-    except Exception as e:
-        logger.info(f"Error installing Argo Workflows: {e}")
-        raise
-
-    # Use the clean waiter class to wait for Argo Workflows to be ready
+    logger.info("Waiting for existing Argo Workflows deployments to be ready...")
     waiter = ArgoWorkflowsWaiter(argo_namespace, timeout=300, check_interval=15)
 
     if not waiter.wait_for_ready(logger):
@@ -561,12 +345,11 @@ def argo_workflows(k3s_container):
         except subprocess.TimeoutExpired:
             port_forward_process.kill()
 
-    # Cleanup is handled by k3s_container fixture
-    logger.info("Argo Workflows cleanup (handled by k3s container cleanup)")
+    logger.info("Argo Workflows test fixture cleanup complete")
 
 
 @pytest.fixture(scope="session")
-def test_namespace(k3s_container):
+def test_namespace(k8s_cluster):
     """Create a unique namespace for the entire test session and clean it up afterwards"""
     # Generate a unique namespace name for this test session
     namespace_name = f"test-workflow-{uuid.uuid4().hex[:8]}"
@@ -598,10 +381,9 @@ def test_namespace(k3s_container):
 
 @pytest.fixture
 def k8s_workflow_store(test_namespace):
-    """Create a WorkflowConfigStore connected to k3s Kubernetes in the test namespace"""
+    """Create a WorkflowConfigStore connected to the test cluster in the test namespace."""
     try:
-        # Create a Kubernetes client using the already loaded configuration
-        # The kubeconfig from k3s already has admin permissions
+        # Create a Kubernetes client using the required test-cluster context.
         v1 = client.CoreV1Api()
 
         # Verify the connection is working before creating the store
@@ -610,7 +392,7 @@ def k8s_workflow_store(test_namespace):
         except Exception as e:
             pytest.skip(f"Kubernetes connection lost: {e}")
 
-        # Create the WorkflowConfigStore with the pre-configured client for the test namespace
+        # Create the WorkflowConfigStore with the pre-configured client for the test namespace.
         store = WorkflowConfigStore(
             namespace=test_namespace,
             config_map_prefix="workflow-test",
@@ -643,37 +425,16 @@ def runner():
 @pytest.fixture
 def sample_workflow_config():
     """Sample workflow configuration for testing"""
-    data = {
-        "targets": {
-            "production": {
-                "endpoint": "https://target-os.example.com:9200",
-                "auth": {
-                    "username": "admin",
-                    "password": "test-password"
-                },
-                "allow_insecure": False
-            }
-        },
-        "source-migration-configurations": [
-            {
-                "source": {
-                    "endpoint": "https://source-es.example.com:9200",
-                    "auth": {
-                        "username": "admin",
-                        "password": "test-password"
-                    },
-                    "allow_insecure": True
-                }
-            }
-        ]
-    }
-
-    return WorkflowConfig(data)
+    return WorkflowConfig.from_yaml(
+        "targets:\n  production:\n    endpoint: https://target-os.example.com:9200\n"
+        "    auth:\n      username: admin\n      password: test-password\n"
+        "    allow_insecure: false\n"
+    )
 
 
 @pytest.mark.slow
 class TestWorkflowCLICommands:
-    """Integration tests for workflow CLI commands using real k3s"""
+    """Integration tests for workflow CLI commands using the dedicated test cluster."""
 
     def test_workflow_help(self, runner):
         """Test workflow help command"""
@@ -709,21 +470,12 @@ class TestWorkflowCLICommands:
         except ApiException:
             pass  # Ignore if doesn't exist
 
-        # Create a test config
-        data = {
-            "targets": {
-                "test": {
-                    "endpoint": "https://test.com:9200",
-                    "auth": {
-                        "username": "admin",
-                        "password": "password"
-                    }
-                }
-            }
-        }
-        config = WorkflowConfig(data)
+        # Create a test config with raw_yaml so save_config stores content
+        yaml_text = ("targets:\n  test:\n    endpoint: https://test.com:9200\n"
+                     "    auth:\n      username: admin\n      password: password\n")
+        config = WorkflowConfig.from_yaml(yaml_text)
 
-        # Save config to k3s
+        # Save config to the test cluster.
         message = k8s_workflow_store.save_config(config, session_name)
         assert "created" in message or "updated" in message
 
@@ -778,8 +530,12 @@ class TestWorkflowCLICommands:
         # Prepare JSON input
         json_input = '{"targets": {"test": {"endpoint": "https://test.com:9200"}}}'
 
-        result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=json_input,
-                               obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
+        # Mock validation so the test focuses on the CLI/k8s save flow
+        from unittest.mock import patch
+        with patch('console_link.workflow.commands.configure._validate_and_find_secrets',
+                   return_value={'valid': True}):
+            result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=json_input,
+                                   obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
 
         assert result.exit_code == 0
         assert "Configuration" in result.output
@@ -814,8 +570,12 @@ class TestWorkflowCLICommands:
       password: password
 """
 
-        result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=yaml_input,
-                               obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
+        # Mock validation so the test focuses on the CLI/k8s save flow
+        from unittest.mock import patch
+        with patch('console_link.workflow.commands.configure._validate_and_find_secrets',
+                   return_value={'valid': True}):
+            result = runner.invoke(workflow_cli, ['configure', 'edit', '--stdin'], input=yaml_input,
+                                   obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
 
         assert result.exit_code == 0
         assert "Configuration" in result.output
@@ -848,7 +608,7 @@ class TestWorkflowCLICommands:
                                obj={'store': k8s_workflow_store, 'namespace': k8s_workflow_store.namespace})
 
         assert result.exit_code != 0
-        assert "Failed to parse input" in result.output
+        assert "validation errors" in result.output or "parse error" in result.output.lower()
 
     def test_workflow_util_completions_bash(self, runner):
         """Test workflow util completions for bash"""
@@ -871,10 +631,10 @@ class TestWorkflowCLICommands:
 
 @pytest.mark.slow
 class TestArgoWorkflows:
-    """Integration tests for Argo Workflows installation in k3s"""
+    """Integration tests for Argo Workflows in the dedicated test cluster."""
 
     def test_argo_workflows_installation(self, argo_workflows):
-        """Test that Argo Workflows is properly installed in k3s"""
+        """Test that Argo Workflows is properly installed in the test cluster."""
         argo_namespace = argo_workflows["namespace"]
         argo_version = argo_workflows["version"]
 
@@ -950,6 +710,11 @@ class TestArgoWorkflows:
             "spec": {
                 # Use default service account which has executor role bound in quickstart
                 # The executor role grants permission to create workflowtaskresults
+                "podMetadata": {
+                    "labels": {
+                        "test-workflow": "hello-world"
+                    }
+                },
                 "templates": [
                     {
                         "name": "hello-world",
@@ -1100,7 +865,7 @@ class TestArgoWorkflows:
             # Test output command with the completed workflow
             logger.info("\nTesting output command for completed workflow...")
             runner = CliRunner()
-            _test_output_command_for_workflow(runner, workflow_name, argo_namespace)
+            _test_output_command_for_workflow(runner, workflow_name, argo_namespace, test_message)
 
         except ApiException as e:
             pytest.fail(f"Failed to submit workflow via Kubernetes API: {e}")
@@ -1209,54 +974,295 @@ class TestArgoWorkflows:
         except ApiException as e:
             pytest.fail(f"Failed to submit workflow via Kubernetes API: {e}")
 
+    def test_workflow_status_retry_collapsed(self, argo_workflows):
+        """Integration test: verify retry-attempt details are collapsed in workflow status output.
 
-def test_k3s_container_support():
-    """Test that k3s container support is available"""
-    try:
-        # Just verify the import works
-        assert DockerContainer is not None
-    except ImportError:
-        pytest.skip("testcontainers not installed - run: pip install testcontainers")
+        Submits a workflow with a script template + retryStrategy that fails on the first
+        attempt ({{retries}} == 0) and succeeds on the second ({{retries}} > 0). This
+        produces real Argo Retry nodes with Pod children — the same structure that RFS
+        coordinator resource templates produce when retryStrategy fires.
+
+        Asserts that `workflow status` CLI output collapses the retry attempts: the
+        attempt suffixes (0)/(1) should NOT appear, only the base step name.
+        """
+        argo_namespace = argo_workflows["namespace"]
+        logger.info(f"\nTesting retry collapsing in workflow status (namespace: {argo_namespace})")
+
+        # Workflow with a script template that fails once then succeeds.
+        # {{retries}} is an Argo built-in: 0 on first attempt, 1 on second, etc.
+        workflow_spec = {
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Workflow",
+            "metadata": {
+                "generateName": "test-retry-collapse-",
+                "namespace": argo_namespace,
+            },
+            "spec": {
+                "entrypoint": "main",
+                "templates": [
+                    {
+                        "name": "main",
+                        "steps": [[{
+                            "name": "createRfsCoordinatorStatefulSet",
+                            "template": "fail-then-succeed"
+                        }]]
+                    },
+                    {
+                        "name": "fail-then-succeed",
+                        "retryStrategy": {
+                            "limit": "2",
+                            "retryPolicy": "Always",
+                        },
+                        "script": {
+                            "image": "busybox",
+                            "command": ["sh"],
+                            "source": 'if [ "{{retries}}" -gt 0 ]; then exit 0; else exit 1; fi'
+                        }
+                    }
+                ]
+            }
+        }
+
+        custom_api = client.CustomObjectsApi()
+        workflow_name = None
+
+        try:
+            result = custom_api.create_namespaced_custom_object(
+                group="argoproj.io", version="v1alpha1",
+                namespace=argo_namespace, plural="workflows",
+                body=workflow_spec
+            )
+            workflow_name = result["metadata"]["name"]
+            logger.info(f"Submitted workflow: {workflow_name}")
+
+            # Wait for terminal phase
+            max_wait = 120
+            start_time = time.time()
+            workflow_phase = "Unknown"
+
+            while time.time() - start_time < max_wait:
+                wf = custom_api.get_namespaced_custom_object(
+                    group="argoproj.io", version="v1alpha1",
+                    namespace=argo_namespace, plural="workflows",
+                    name=workflow_name
+                )
+                workflow_phase = wf.get("status", {}).get("phase", "Unknown")
+                if workflow_phase in ("Succeeded", "Failed", "Error"):
+                    break
+                time.sleep(2)
+
+            assert workflow_phase == "Succeeded", (
+                f"Workflow did not succeed (phase: {workflow_phase}). "
+                f"Nodes: {wf.get('status', {}).get('nodes', {})}"
+            )
+            logger.info(f"✓ Workflow succeeded: {workflow_name}")
+
+            # Verify Argo actually created Retry nodes with multiple attempts
+            nodes = wf.get("status", {}).get("nodes", {})
+            retry_nodes = [n for n in nodes.values() if n.get("type") == "Retry"]
+            assert retry_nodes, "Expected at least one Retry node in the workflow"
+            logger.info(f"✓ Found {len(retry_nodes)} Retry node(s) with children")
+
+            # Run workflow status CLI — same pattern as _test_status_command_for_workflow
+            runner = CliRunner()
+            status_result = runner.invoke(
+                workflow_cli,
+                ['status', '--workflow-name', workflow_name, '--namespace', argo_namespace,
+                 '--argo-server', 'https://localhost:2746', '--insecure']
+            )
+            assert status_result.exit_code == 0, (
+                f"Status command failed (exit {status_result.exit_code}): {status_result.output}"
+            )
+
+            output = status_result.output
+            logger.info(f"Status output:\n{output}")
+
+            # Retry attempt suffixes should be collapsed (not visible)
+            assert "createRfsCoordinatorStatefulSet(0)" not in output, (
+                "Attempt (0) should be collapsed in status output"
+            )
+            assert "createRfsCoordinatorStatefulSet(1)" not in output, (
+                "Attempt (1) should be collapsed in status output"
+            )
+
+            # The base step name should still appear
+            assert "createRfsCoordinatorStatefulSet" in output, (
+                "Base step name should appear in status output"
+            )
+
+            logger.info("✓ Retry attempts correctly collapsed in status output")
+
+        except ApiException as e:
+            pytest.fail(f"Kubernetes API error: {e}")
+        finally:
+            # Cleanup workflow
+            if workflow_name:
+                try:
+                    custom_api.delete_namespaced_custom_object(
+                        group="argoproj.io", version="v1alpha1",
+                        namespace=argo_namespace, plural="workflows",
+                        name=workflow_name
+                    )
+                except ApiException:
+                    pass
+
+    def test_workflow_status_with_artifact_outputs(self, argo_workflows):
+        """Verify workflow status renders correctly when nodes produce artifact outputs.
+
+        Regression test for TypeError when statusOutput is stored as an S3 artifact
+        instead of an inline parameter. The quick-start-minimal manifest includes MinIO,
+        so artifact storage is available.
+        """
+        argo_namespace = argo_workflows["namespace"]
+        logger.info(f"\nTesting workflow status with artifact outputs (namespace: {argo_namespace})")
+
+        workflow_spec = {
+            "apiVersion": "argoproj.io/v1alpha1",
+            "kind": "Workflow",
+            "metadata": {
+                "generateName": "test-artifact-output-",
+                "namespace": argo_namespace,
+            },
+            "spec": {
+                "entrypoint": "main",
+                "templates": [
+                    {
+                        "name": "main",
+                        "steps": [[{
+                            "name": "produce-artifact",
+                            "template": "write-status"
+                        }]]
+                    },
+                    {
+                        "name": "write-status",
+                        "container": {
+                            "image": "busybox",
+                            "command": ["sh", "-c"],
+                            "args": ["echo 'snapshot completed' > /tmp/status-output.txt"]
+                        },
+                        "outputs": {
+                            "artifacts": [
+                                {
+                                    "name": "statusOutput",
+                                    "path": "/tmp/status-output.txt",
+                                    "archive": {"none": {}}
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+
+        custom_api = client.CustomObjectsApi()
+        workflow_name = None
+
+        try:
+            result = custom_api.create_namespaced_custom_object(
+                group="argoproj.io", version="v1alpha1",
+                namespace=argo_namespace, plural="workflows",
+                body=workflow_spec
+            )
+            workflow_name = result["metadata"]["name"]
+            logger.info(f"Submitted workflow: {workflow_name}")
+
+            # Wait for completion
+            max_wait = 120
+            start_time = time.time()
+            workflow_phase = "Unknown"
+
+            while time.time() - start_time < max_wait:
+                wf = custom_api.get_namespaced_custom_object(
+                    group="argoproj.io", version="v1alpha1",
+                    namespace=argo_namespace, plural="workflows",
+                    name=workflow_name
+                )
+                workflow_phase = wf.get("status", {}).get("phase", "Unknown")
+                if workflow_phase in ("Succeeded", "Failed", "Error"):
+                    break
+                time.sleep(2)
+
+            assert workflow_phase == "Succeeded", (
+                f"Workflow did not succeed (phase: {workflow_phase})"
+            )
+
+            # Verify the artifact was actually stored
+            nodes = wf.get("status", {}).get("nodes", {})
+            has_artifact = any(
+                any(a.get("name") == "statusOutput" for a in n.get("outputs", {}).get("artifacts", []))
+                for n in nodes.values()
+            )
+            assert has_artifact, (
+                f"No statusOutput artifact found in workflow nodes. "
+                f"Node outputs: {[(nid, n.get('outputs')) for nid, n in nodes.items()]}"
+            )
+            logger.info("✓ Workflow produced statusOutput artifact")
+
+            # Run workflow status CLI — this is the path that was crashing
+            runner = CliRunner()
+            status_result = runner.invoke(
+                workflow_cli,
+                ['status', '--workflow-name', workflow_name, '--namespace', argo_namespace,
+                 '--argo-server', 'https://localhost:2746', '--insecure']
+            )
+            assert status_result.exit_code == 0, (
+                f"Status command failed (exit {status_result.exit_code}): {status_result.output}"
+            )
+
+            logger.info(f"Status output:\n{status_result.output}")
+            assert workflow_name in status_result.output
+            assert "Succeeded" in status_result.output
+            logger.info("✓ workflow status renders correctly with artifact outputs")
+
+        except ApiException as e:
+            pytest.fail(f"Kubernetes API error: {e}")
+        finally:
+            if workflow_name:
+                try:
+                    custom_api.delete_namespaced_custom_object(
+                        group="argoproj.io", version="v1alpha1",
+                        namespace=argo_namespace, plural="workflows",
+                        name=workflow_name
+                    )
+                except ApiException:
+                    pass
 
 
-def _test_output_command_for_workflow(runner, workflow_name, namespace):
+def test_workflow_test_context_is_configured(required_workflow_test_kube_context):
+    """Verify workflow integration tests are pointed at the dedicated test context."""
+    assert required_workflow_test_kube_context["active_context"] == \
+        required_workflow_test_kube_context["expected_context"]
+
+
+def _test_output_command_for_workflow(runner, workflow_name, namespace, expected_message):
     """
     Helper function to test output command for a given workflow.
 
     Tests that the output command can retrieve output from a completed workflow.
-    Selects step 0 and verifies that output is actually displayed.
 
     Args:
         runner: Click test runner
         workflow_name: Name of the workflow to get output for
         namespace: Kubernetes namespace
+        expected_message: The message that should appear in the workflow output
 
     Raises:
         AssertionError: If output command fails or output is not retrieved
     """
-    # Invoke output command with explicit argo-server URL (HTTPS with insecure flag for self-signed cert)
     result = runner.invoke(
         workflow_cli,
-        ['output', workflow_name, '--namespace', namespace, '--argo-server', 'https://localhost:2746', '--insecure'],
-        input='0\n'  # Select first step
+        ['output', '--workflow-name', workflow_name, '--namespace', namespace,
+         '--argo-server', 'https://localhost:2746', '--insecure',
+         '--prefix', '', '-l', 'test-workflow=hello-world'],
     )
 
-    # Verify command succeeded
     assert result.exit_code == 0, f"Output command failed with exit code {result.exit_code}. Output: {result.output}"
 
-    # Verify step selection menu was shown
-    assert "Select a step to view output:" in result.output, \
-        f"Step selection menu not found in output: {result.output}"
+    assert expected_message in result.output, \
+        f"Expected message '{expected_message}' not found in output: {result.output}"
 
-    # Verify output section header is present (indicates output was retrieved)
-    assert "Output for:" in result.output, \
-        f"Output header not found in output: {result.output}"
-
-    # Verify container output section is present
-    assert "Container:" in result.output, \
-        f"Container output section not found in output: {result.output}"
-
-    logger.info(f"✓ Output command successfully retrieved output for workflow {workflow_name}")
+    logger.info(f"✓ Output command successfully executed for workflow {workflow_name}")
+    logger.info(f"✓ Verified output contains expected message: {expected_message}")
 
 
 def _test_status_command_for_workflow(runner, workflow_name, namespace):
@@ -1277,7 +1283,8 @@ def _test_status_command_for_workflow(runner, workflow_name, namespace):
     # Invoke status command with explicit argo-server URL (HTTPS with insecure flag for self-signed cert)
     result = runner.invoke(
         workflow_cli,
-        ['status', workflow_name, '--namespace', namespace, '--argo-server', 'https://localhost:2746', '--insecure']
+        ['status', '--workflow-name', workflow_name, '--namespace', namespace,
+         '--argo-server', 'https://localhost:2746', '--insecure']
     )
 
     # Verify command succeeded

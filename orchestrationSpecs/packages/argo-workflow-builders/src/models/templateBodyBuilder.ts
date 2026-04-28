@@ -10,16 +10,17 @@ import {
     UniqueNameConstraintAtDeclaration,
     UniqueNameConstraintOutsideDeclaration
 } from "./scopeConstraints";
-import {InputParametersRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
+import {InputParametersRecord, OutputArtifactsRecord, OutputParamDef, OutputParametersRecord} from "./parameterSchemas";
 import {PlainObject} from "./plainObject";
-import {AllowLiteralOrExpression, toExpression} from "./expression";
+import {AllowLiteralOrExpression, BaseExpression, isExpression, toExpression} from "./expression";
 import {templateInputParametersAsExpressions, workflowParametersAsExpressions} from "./parameterConversions";
+import {SynchronizationConfig} from "./synchronization";
 
 export type RetryParameters = GenericScope;
 
-/** Rebinder type the concrete subclass provides to the base. */
+/** Rebinder type for non-retryable templates */
 export type TemplateRebinder<
-    ContextualScope extends WorkflowAndTemplatesScope,
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
     BodyBound extends GenericScope,
     ExpressionBuilderContext = { inputs: InputParamsToExpressions<InputParamsScope> }
@@ -27,7 +28,7 @@ export type TemplateRebinder<
     NewBodyScope extends BodyBound,
     NewOutputScope extends OutputParametersRecord,
     Self extends TemplateBodyBuilder<
-        ContextualScope,
+        ParentWorkflowScope,
         InputParamsScope,
         NewBodyScope,
         NewOutputScope,
@@ -36,15 +37,42 @@ export type TemplateRebinder<
         ExpressionBuilderContext
     >
 >(
-    ctx: ContextualScope,
+    ctx: ParentWorkflowScope,
     inputs: InputParamsScope,
     body: NewBodyScope,
     outputs: NewOutputScope,
-    retryParameters: RetryParameters
+    synchronization: SynchronizationConfig | undefined
+) => Self;
+
+/** Rebinder type for retryable templates */
+export type RetryableTemplateRebinder<
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
+    InputParamsScope extends InputParametersRecord,
+    BodyBound extends GenericScope,
+    ExpressionBuilderContext = { inputs: InputParamsToExpressions<InputParamsScope> }
+> = <
+    NewBodyScope extends BodyBound,
+    NewOutputScope extends OutputParametersRecord,
+    Self extends RetryableTemplateBodyBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        NewBodyScope,
+        NewOutputScope,
+        Self,
+        BodyBound,
+        ExpressionBuilderContext
+    >
+>(
+    ctx: ParentWorkflowScope,
+    inputs: InputParamsScope,
+    body: NewBodyScope,
+    outputs: NewOutputScope,
+    retryParameters: RetryParameters,
+    synchronization: SynchronizationConfig | undefined
 ) => Self;
 
 type ReplaceOutputTypedMembers<
-    ContextualScope extends WorkflowAndTemplatesScope,
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
     BodyScope extends BodyBound,
     OutputParamsScope extends OutputParametersRecord,
@@ -54,7 +82,7 @@ type ReplaceOutputTypedMembers<
 > =
     Omit<Self, "outputsScope" | "getFullTemplateScope"> &
     TemplateBodyBuilder<
-        ContextualScope,
+        ParentWorkflowScope,
         InputParamsScope,
         BodyScope,
         OutputParamsScope,
@@ -63,13 +91,16 @@ type ReplaceOutputTypedMembers<
         ExpressionBuilderContext
     >;
 
+type OutputValueFromBuilderReturn<V extends PlainObject | BaseExpression<any, any>> =
+    V extends BaseExpression<infer U, any> ? U : V extends PlainObject ? V : never;
+
 export abstract class TemplateBodyBuilder<
-    ContextualScope extends WorkflowAndTemplatesScope,
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
     BodyScope extends BodyBound,
     OutputParamsScope extends OutputParametersRecord,
     Self extends TemplateBodyBuilder<
-        ContextualScope,
+        ParentWorkflowScope,
         InputParamsScope,
         BodyScope,
         any,
@@ -81,19 +112,20 @@ export abstract class TemplateBodyBuilder<
     ExpressionBuilderContext = { inputs: InputParamsToExpressions<InputParamsScope> }
 > {
     constructor(
-        protected readonly contextualScope: ContextualScope,
+        protected readonly parentWorkflowScope: ParentWorkflowScope,
         public readonly inputsScope: InputParamsScope,
         protected readonly bodyScope: BodyScope,
         public readonly outputsScope: OutputParamsScope,
-        protected readonly retryParameters: GenericScope,
-        protected readonly rebind: TemplateRebinder<ContextualScope, InputParamsScope, BodyBound, ExpressionBuilderContext>
+        protected readonly synchronization: SynchronizationConfig | undefined,
+        protected readonly rebind: TemplateRebinder<ParentWorkflowScope, InputParamsScope, BodyBound, ExpressionBuilderContext>,
+        public readonly outputArtifacts: OutputArtifactsRecord = {}
     ) {}
 
     addOutputs<NewOutputScope extends OutputParametersRecord>(
         builderFn: (
             tb: Self
         ) => TemplateBodyBuilder<
-            ContextualScope,
+            ParentWorkflowScope,
             InputParamsScope,
             BodyScope,
             NewOutputScope,
@@ -103,20 +135,20 @@ export abstract class TemplateBodyBuilder<
         >,
         _check: ScopeIsEmptyConstraint<OutputParamsScope, boolean>
     ): ReplaceOutputTypedMembers<
-        ContextualScope, InputParamsScope, BodyScope, NewOutputScope, Self, BodyBound, ExpressionBuilderContext
+        ParentWorkflowScope, InputParamsScope, BodyScope, NewOutputScope, Self, BodyBound, ExpressionBuilderContext
     > {
         return builderFn(this as unknown as Self) as unknown as ReplaceOutputTypedMembers<
-            ContextualScope, InputParamsScope, BodyScope, NewOutputScope, Self, BodyBound, ExpressionBuilderContext
+            ParentWorkflowScope, InputParamsScope, BodyScope, NewOutputScope, Self, BodyBound, ExpressionBuilderContext
         >;
     }
 
-    public addRetryParameters(retryParameters: GenericScope) {
+    public addSynchronization(synchronizationBuilderFn: (b: ExpressionBuilderContext) => SynchronizationConfig) {
         return this.rebind(
-            this.contextualScope,
+            this.parentWorkflowScope,
             this.inputsScope,
             this.bodyScope,
             this.outputsScope,
-            retryParameters
+            synchronizationBuilderFn(this.getExpressionBuilderContext())
         );
     }
 
@@ -129,40 +161,43 @@ export abstract class TemplateBodyBuilder<
     }
 
     public addExpressionOutput<
-        T extends PlainObject,
-        Name extends string
+        Name extends string,
+        F extends (b: ExpressionBuilderContext) => (PlainObject | BaseExpression<any, any>)
     >(
         name: UniqueNameConstraintAtDeclaration<Name, OutputParamsScope>,
         expressionBuilder: UniqueNameConstraintOutsideDeclaration<Name, OutputParamsScope,
-            (b: ExpressionBuilderContext) => AllowLiteralOrExpression<T>>,
+            F>,
         descriptionValue?: string
     ): ReplaceOutputTypedMembers<
-        ContextualScope,
+        ParentWorkflowScope,
         InputParamsScope,
         BodyScope,
-        ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>,
+        ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<OutputValueFromBuilderReturn<ReturnType<F>>> }>,
         Self,
         BodyBound,
         ExpressionBuilderContext
     > {
-        const fn = expressionBuilder as (b: ExpressionBuilderContext) => AllowLiteralOrExpression<T>;
+        const fn = expressionBuilder as F;
+        const outputValue = fn(this.getExpressionBuilderContext());
         const newOutputs = {
             ...this.outputsScope,
             [name as string]: {
                 fromWhere: "expression" as const,
-                expression: toExpression(fn(this.getExpressionBuilderContext())),
+                expression: isExpression(outputValue)
+                    ? outputValue
+                    : toExpression(outputValue as AllowLiteralOrExpression<OutputValueFromBuilderReturn<ReturnType<F>>>),
                 description: descriptionValue
             }
-        } as ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<T> }>;
+        } as ExtendScope<OutputParamsScope, { [K in Name]: OutputParamDef<OutputValueFromBuilderReturn<ReturnType<F>>> }>;
 
         return this.rebind(
-            this.contextualScope,
+            this.parentWorkflowScope,
             this.inputsScope,
             this.bodyScope,
             newOutputs,
-            this.retryParameters
+            this.synchronization
         ) as unknown as ReplaceOutputTypedMembers<
-            ContextualScope,
+            ParentWorkflowScope,
             InputParamsScope,
             BodyScope,
             typeof newOutputs,
@@ -177,22 +212,97 @@ export abstract class TemplateBodyBuilder<
         return rval as unknown as InputParamsToExpressions<InputParamsScope>;
     }
 
-    get workflowInputs(): WorkflowInputsToExpressions<ContextualScope> {
-        const rval = workflowParametersAsExpressions(this.contextualScope.workflowParameters ?? {});
-        return rval as WorkflowInputsToExpressions<ContextualScope>;
+    get workflowInputs(): WorkflowInputsToExpressions<ParentWorkflowScope> {
+        const rval = workflowParametersAsExpressions(this.parentWorkflowScope.workflowParameters ?? {});
+        return rval as WorkflowInputsToExpressions<ParentWorkflowScope>;
     }
 
-    // Type-erasure is fine here.  This is only used for getFullTemplate, where we don't want to allow
-    // others to reach into the body anyway.  They should interface through the inputs and outputs exclusively
     protected abstract getBody(): Record<string, any>;
 
-    // used by the TemplateBuilder!
     getFullTemplateScope() {
         return {
             inputs: this.inputsScope,
             outputs: this.outputsScope,
+            outputArtifacts: this.outputArtifacts,
+            body: this.getBody(),
+            synchronization: this.synchronization
+        };
+    }
+}
+
+/** Extended builder for templates that support retry strategies */
+export abstract class RetryableTemplateBodyBuilder<
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
+    InputParamsScope extends InputParametersRecord,
+    BodyScope extends BodyBound,
+    OutputParamsScope extends OutputParametersRecord,
+    Self extends RetryableTemplateBodyBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        BodyScope,
+        any,
+        Self,
+        BodyBound,
+        ExpressionBuilderContext
+    >,
+    BodyBound extends GenericScope = GenericScope,
+    ExpressionBuilderContext = { inputs: InputParamsToExpressions<InputParamsScope> }
+> extends TemplateBodyBuilder<
+    ParentWorkflowScope,
+    InputParamsScope,
+    BodyScope,
+    OutputParamsScope,
+    Self,
+    BodyBound,
+    ExpressionBuilderContext
+> {
+    constructor(
+        parentWorkflowScope: ParentWorkflowScope,
+        inputsScope: InputParamsScope,
+        bodyScope: BodyScope,
+        outputsScope: OutputParamsScope,
+        protected readonly retryParameters: RetryParameters,
+        synchronization: SynchronizationConfig | undefined,
+        protected readonly retryableRebind: RetryableTemplateRebinder<ParentWorkflowScope, InputParamsScope, BodyBound, ExpressionBuilderContext>,
+        outputArtifacts: OutputArtifactsRecord = {}
+    ) {
+        const baseRebind: TemplateRebinder<ParentWorkflowScope, InputParamsScope, BodyBound, ExpressionBuilderContext> = (
+            ctx, inputs, body, outputs, sync
+        ) => retryableRebind(ctx, inputs, body, outputs, this.retryParameters, sync) as any;
+        
+        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, synchronization, baseRebind, outputArtifacts);
+    }
+
+    public addRetryParameters(retryParameters: GenericScope) {
+        return this.retryableRebind(
+            this.parentWorkflowScope,
+            this.inputsScope,
+            this.bodyScope,
+            this.outputsScope,
+            retryParameters,
+            this.synchronization
+        );
+    }
+
+    public addSynchronization(synchronizationBuilderFn: (b: ExpressionBuilderContext) => SynchronizationConfig) {
+        return this.retryableRebind(
+            this.parentWorkflowScope,
+            this.inputsScope,
+            this.bodyScope,
+            this.outputsScope,
+            this.retryParameters,
+            synchronizationBuilderFn(this.getExpressionBuilderContext())
+        );
+    }
+
+    getFullTemplateScope() {
+        return {
+            inputs: this.inputsScope,
+            outputs: this.outputsScope,
+            outputArtifacts: this.outputArtifacts,
             retryStrategy: this.retryParameters,
-            body: this.getBody()
+            body: this.getBody(),
+            synchronization: this.synchronization
         };
     }
 }

@@ -77,6 +77,11 @@ public class MigrateOrEvaluateArgs {
     @ParametersDelegate
     public TransformerParams metadataCustomTransformationParams = new MetadataCustomTransformationParams();
 
+    @Parameter(names = { "--succeed-on-empty" }, arity = 1, description = "When true (default), the command succeeds even if no migration items"
+        + " (index templates, component templates, indexes, aliases) are found. Set to false to treat 0 items as a failure,"
+        + " which can help catch configuration problems early (such as an incorrect snapshot or wrong allowlist).")
+    public boolean succeedOnEmpty = true;
+
     @ParametersDelegate
     public VersionStrictness versionStrictness = new VersionStrictness();
 

@@ -87,11 +87,10 @@ describe('scrapeSecrets', () => {
             },
             targetClusters: {
                 target1: {
-                    endpoint: 'https://target.example.com:9200',
-                    version: 'OS 2.5.0'
+                    endpoint: 'https://target.example.com:9200'
                 }
             },
-            migrationConfigs: []
+            snapshotMigrationConfigs: []
         };
 
         const secrets = scrapeSecrets(config as any);
@@ -103,7 +102,7 @@ describe('scrapeSecrets', () => {
             skipApprovals: false,
             sourceClusters: {},
             targetClusters: {},
-            migrationConfigs: []
+            snapshotMigrationConfigs: []
         };
 
         const secrets = scrapeSecrets(config as any);
@@ -168,7 +167,7 @@ describe('scrapeAndCategorize', () => {
                 }
             },
             targetClusters: {},
-            migrationConfigs: []
+            snapshotMigrationConfigs: []
         };
 
         const result = getCategorizedCredentialsSecretsFromConfig(config as any);
@@ -202,7 +201,7 @@ describe('scrapeAndCategorize', () => {
             },
             targetClusters: {
                 target1: {
-                    version: 'OS 2.5.0',
+                    endpoint: 'https://target.example.com:9200',
                     authConfig: {
                         basic: {
                             secretName: 'another-valid.secret'
@@ -210,6 +209,7 @@ describe('scrapeAndCategorize', () => {
                     }
                 },
                 target2: {
+                    endpoint: 'https://target2.example.com:9200',
                     authConfig: {
                         basic: {
                             secretName: '.bad.secret.name'
@@ -217,7 +217,7 @@ describe('scrapeAndCategorize', () => {
                     }
                 }
             },
-            migrationConfigs: []
+            snapshotMigrationConfigs: []
         };
 
         const result = getCategorizedCredentialsSecretsFromConfig(config as any);

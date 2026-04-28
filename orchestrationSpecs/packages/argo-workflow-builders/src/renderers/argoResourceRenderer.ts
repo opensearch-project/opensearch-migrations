@@ -1,4 +1,4 @@
-import {InputParamDef, InputParametersRecord, OutputParamDef, OutputParametersRecord} from "../models/parameterSchemas";
+import {InputParamDef, InputParametersRecord, OutputArtifactsRecord, OutputParamDef, OutputParametersRecord} from "../models/parameterSchemas";
 import {
     REMOVE_NEXT_QUOTE_SENTINEL,
     REMOVE_PREVIOUS_QUOTE_SENTINEL,
@@ -8,10 +8,17 @@ import {StepGroup} from "../models/stepsBuilder";
 import {MISSING_FIELD, PlainObject} from "../models/plainObject";
 import {GenericScope, LoopWithUnion} from "../models/workflowTypes";
 import {WorkflowBuilder} from "../models/workflowBuilder";
-import {BaseExpression, makeDirectTypeProxy, UnquotedTypeWrapper} from "../models/expression";
+import {
+    BaseExpression,
+    makeDirectTypeProxy,
+    SimpleExpression,
+    TemplateExpression,
+    UnquotedTypeWrapper
+} from "../models/expression";
 import {NamedTask} from "../models/sharedTypes";
-import { omit } from 'lodash';
+import * as _ from 'lodash';
 import {toSafeYamlOutput} from "../utils";
+import {SynchronizationConfig} from "../models/synchronization";
 
 function isDefault<T extends PlainObject>(
     p: InputParamDef<T, boolean>
@@ -20,6 +27,9 @@ function isDefault<T extends PlainObject>(
 }
 
 export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder<any, any, any>["getFullScope"]>>(wf: WF) {
+    // Validate synchronization before rendering
+    validateSynchronizationUniqueness(wf);
+    
     return {
         apiVersion: "argoproj.io/v1alpha1",
         kind: "WorkflowTemplate",
@@ -30,8 +40,9 @@ export function renderWorkflowTemplate<WF extends ReturnType<WorkflowBuilder<any
             entrypoint: wf.metadata.entrypoint,
             parallelism: 100,
             ...(wf.workflowParameters != null && {arguments: formatParameters(wf.workflowParameters)}),
+            ...(wf.metadata.synchronization && {synchronization: formatSynchronization(wf.metadata.synchronization)}),
             templates: (() => {
-                const list = [];
+                const list: ReturnType<typeof formatTemplate>[] = [];
                 for (const k in wf.templates) {
                     list.push(formatTemplate(wf.templates, k));
                 }
@@ -48,7 +59,11 @@ function formatParameterDefinition<T extends PlainObject, P extends InputParamDe
     }
     if (isDefault(input)) {
         if (input.defaultValue.expression !== undefined) {
-            out.value = transformExpressionsDeep(input.defaultValue.expression);
+            const transformed = transformExpressionsDeep(input.defaultValue.expression);
+            // Argo parameter values must be strings; serialize object/array defaults as JSON
+            out.value = (typeof transformed === "object" && transformed !== null)
+                ? JSON.stringify(transformed)
+                : transformed;
         }
         if (input.defaultValue.from !== undefined) {
             const f = input.defaultValue.from;
@@ -102,6 +117,15 @@ function formatArguments(passedParameters: { parameters?: Record<string, any> | 
     }));
 }
 
+function formatInlineTemplate(inline: Record<string, any>): Record<string, any> {
+    const {retryStrategy, inputsScope, ...bodyContent} = inline;
+    return {
+        ...(inputsScope ? {inputs: formatParameters(inputsScope)} : {}),
+        ...formatBody(bodyContent),
+        ...(retryStrategy ? {retryStrategy} : {})
+    };
+}
+
 function formatStepOrTask<T extends NamedTask & { withLoop?: unknown }>(step: T) {
     const {
         templateRef: {template: trTemplate, ...trRest} = {},
@@ -109,15 +133,17 @@ function formatStepOrTask<T extends NamedTask & { withLoop?: unknown }>(step: T)
         withLoop,
         when,
         args,
+        inline = undefined,
         ...rest
-    } = step;
+    } = step as T & { inline?: Record<string, any> };
     return {
         ...(undefined === template   ? {} : {template: convertTemplateName(template as string)} ),
         ...(undefined === trTemplate ? {} : {templateRef: { template: convertTemplateName(trTemplate as string), ...trRest}}),
+        ...(undefined === inline     ? {} : {inline: formatInlineTemplate(inline)}),
         ...(undefined === withLoop   ? {} : renderWithLoop(withLoop as LoopWithUnion<any>)),
         ...(undefined === when       ? {} : {
             when:
-                (when && typeof when === "object" && "templateExp" in when) ?
+                isTemplateWhenWrapper(when) ?
                 `${toArgoExpressionString(when.templateExp, "Outer")}` :
                     `${toArgoExpressionString(when, "IdentifierOnly").replace(/^'|'$/g, '')}`
         }),
@@ -126,12 +152,18 @@ function formatStepOrTask<T extends NamedTask & { withLoop?: unknown }>(step: T)
     };
 }
 
+function isTemplateWhenWrapper(
+    when: SimpleExpression<boolean> | { templateExp: TemplateExpression<boolean> }
+): when is { templateExp: TemplateExpression<boolean> } {
+    return typeof when === "object" && when !== null && "templateExp" in when;
+}
+
 function formatContainerEnvs(envVars: Record<string, BaseExpression<any>>) {
     const result: any[] = [];
     Object.entries(envVars).forEach(([key, value]) => {
         const transformedValue = transformExpressionsDeep(value);
         const v = ("configMapKeyRef" in value || "secretKeyRef" in value) ?
-            { valueFrom: omit(transformedValue, "type") } :
+            { valueFrom: _.omit(transformedValue, "type") } :
             { value: transformedValue };
         result.push({name: key, ...v});
     });
@@ -175,7 +207,10 @@ function formatBody(body: GenericScope) {
                 ...transformExpressionsDeep(restOfBody)
             };
         } else if (body.suspend !== undefined) {
-            return {suspend: {}};
+            const { duration } = body.suspend;
+            return duration !== undefined
+                ? { suspend: { duration: String(Math.floor(duration / 1000)) } }
+                : { suspend: {} };
         } else {
             return transformExpressionsDeep(body);
         }
@@ -191,7 +226,7 @@ function formatOutputSource(def: OutputParamDef<any>) {
                 case "path":
                     return {path: def.path};
                 case "expression":
-                    return {expression: toArgoExpressionString(def.expression, "None")};
+                    return {expression: toArgoExpressionString(def.expression, "None", "Expression")};
                 case "parameter":
                     return {parameter: toArgoExpressionString(def.parameter)};
                 case "jsonPath":
@@ -229,16 +264,65 @@ function convertTemplateName(n: string) {
     return n.toLowerCase();
 }
 
+function formatSynchronization(sync: SynchronizationConfig) {
+    const result: any = {};
+    
+    if (sync.semaphores && sync.semaphores.length > 0) {
+        result.semaphores = sync.semaphores.map(sem => {
+            if ('configMapKeyRef' in sem) {
+                return {
+                    configMapKeyRef: {
+                        name: transformExpressionsDeep(sem.configMapKeyRef.name),
+                        key: transformExpressionsDeep(sem.configMapKeyRef.key)
+                    },
+                    ...(sem.namespace && { namespace: sem.namespace })
+                };
+            } else {
+                return {
+                    database: sem.database,
+                    ...(sem.namespace && { namespace: sem.namespace })
+                };
+            }
+        });
+    }
+    
+    if (sync.mutexes && sync.mutexes.length > 0) {
+        result.mutexes = sync.mutexes.map(mutex => ({
+            name: mutex.name,
+            ...(mutex.database && { database: mutex.database }),
+            ...(mutex.namespace && { namespace: mutex.namespace })
+        }));
+    }
+    
+    return result;
+}
+
 function formatTemplate(templates: GenericScope, templateName: string) {
     const template = templates[templateName];
+    const paramOutputs = formatOutputParameters(template.outputs);
+    const artifactOutputs = formatOutputArtifacts(template.outputArtifacts);
+    const outputs = {
+        ...paramOutputs,
+        ...(artifactOutputs ? { artifacts: artifactOutputs } : {})
+    };
     return {
         name: convertTemplateName(templateName),
         ...(template.inputs === undefined ? {} : {inputs: formatParameters(template.inputs)}),
         ...formatBody(template.body),
         ...(template.retryStrategy && Object.keys(template.retryStrategy).length > 0 ?
             {retryStrategy: template.retryStrategy} : {}),
-        outputs: formatOutputParameters(template.outputs)
+        ...(template.synchronization && {synchronization: formatSynchronization(template.synchronization)}),
+        outputs
     }
+}
+
+function formatOutputArtifacts(artifacts: OutputArtifactsRecord | undefined) {
+    if (!artifacts || Object.keys(artifacts).length === 0) return undefined;
+    return Object.values(artifacts).map(a => ({
+        name: a.name,
+        path: a.path,
+        archive: a.archive ?? { none: {} }
+    }));
 }
 
 // Helper: detect plain objects (not class instances)
@@ -288,4 +372,34 @@ export function transformExpressionsDeep<T>(input: T) {
     }
 
     return visit(input);
+}
+
+function validateSynchronizationUniqueness<WF extends ReturnType<WorkflowBuilder<any, any, any>["getFullScope"]>>(wf: WF) {
+    const configMapRefs = new Set<string>();
+    
+    // Check workflow-level synchronization
+    if (wf.metadata.synchronization) {
+        collectConfigMapRefs(wf.metadata.synchronization, configMapRefs, 'workflow');
+    }
+    
+    // Check template-level synchronization
+    for (const [templateName, template] of Object.entries(wf.templates)) {
+        if (template.synchronization) {
+            collectConfigMapRefs(template.synchronization, configMapRefs, `template '${templateName}'`);
+        }
+    }
+}
+
+function collectConfigMapRefs(sync: SynchronizationConfig, refs: Set<string>, location: string) {
+    if (sync.semaphores) {
+        for (const sem of sync.semaphores) {
+            if ('configMapKeyRef' in sem) {
+                const refKey = `${sem.namespace || 'default'}/${sem.configMapKeyRef.name}/${sem.configMapKeyRef.key}`;
+                if (refs.has(refKey)) {
+                    throw new Error(`Duplicate ConfigMap reference found: ${refKey} in ${location}`);
+                }
+                refs.add(refKey);
+            }
+        }
+    }
 }

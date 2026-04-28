@@ -19,8 +19,10 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
+import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
@@ -44,6 +46,18 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     public static final int MAX_ITEMS_TO_SHOW_FOR_LEFTOVER_WORK_AT_INFO_LEVEL = 10;
 
     public static final AtomicInteger targetConnectionPoolUniqueCounter = new AtomicInteger();
+    private final AtomicReference<CapturedTrafficToHttpTransactionAccumulator> currentAccumulator = new AtomicReference<>();
+    private final AtomicReference<ReplayEngine> currentReplayEngine = new AtomicReference<>();
+
+    /** Returns the current accumulator, or null if not yet initialized. */
+    public CapturedTrafficToHttpTransactionAccumulator getCurrentAccumulator() {
+        return currentAccumulator.get();
+    }
+
+    /** Returns the current replay engine, or null if not yet initialized. */
+    public ReplayEngine getCurrentReplayEngine() {
+        return currentReplayEngine.get();
+    }
 
     public interface IStreamableWorkTracker<T> extends IWorkTracker<T> {
         public Stream<Map.Entry<UniqueReplayerRequestKey, TrackedFuture<String, T>>> getRemainingItems();
@@ -91,6 +105,20 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         TrafficStreamLimiter trafficStreamLimiter,
         IStreamableWorkTracker<Void> workTracker
     ) {
+        this(context, serverUri, authTransformerFactory, jsonTransformerSupplier,
+            clientConnectionPool, trafficStreamLimiter, workTracker, new BulkItemErrorClassifier());
+    }
+
+    public TrafficReplayerTopLevel(
+        IRootReplayerContext context,
+        URI serverUri,
+        IAuthTransformerFactory authTransformerFactory,
+        Supplier<IJsonTransformer> jsonTransformerSupplier,
+        ClientConnectionPool clientConnectionPool,
+        TrafficStreamLimiter trafficStreamLimiter,
+        IStreamableWorkTracker<Void> workTracker,
+        BulkItemErrorClassifier errorClassifier
+    ) {
         super(
             context,
             serverUri,
@@ -98,7 +126,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             jsonTransformerSupplier,
             trafficStreamLimiter,
             workTracker,
-            new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry())
+            new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry(errorClassifier))
         );
         this.clientConnectionPool = clientConnectionPool;
         allRemainingWorkFutureOrShutdownSignalRef = new AtomicReference<>();
@@ -150,19 +178,73 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
-        Consumer<SourceTargetCaptureTuple> resultTupleConsumer
+        ThreadLocalTupleWriter tupleWriter,
+        Duration quiescentDuration
+    ) throws InterruptedException, ExecutionException {
+        setupRunAndWaitForReplayToFinish(observedPacketConnectionTimeout, targetServerResponseTimeout,
+            trafficSource, timeShifter, tupleWriter, null, quiescentDuration);
+    }
+
+    /** Legacy overload: uses the old synchronous Consumer-based tuple path (Log4J). */
+    public void setupRunAndWaitForReplayToFinish(
+        Duration observedPacketConnectionTimeout,
+        Duration targetServerResponseTimeout,
+        BlockingTrafficSource trafficSource,
+        TimeShifter timeShifter,
+        Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
+        Duration quiescentDuration
+    ) throws InterruptedException, ExecutionException {
+        doSetupRunAndWaitForReplayToFinish(observedPacketConnectionTimeout, targetServerResponseTimeout,
+            trafficSource, timeShifter, null, resultTupleConsumer, null, quiescentDuration);
+    }
+
+    public void setupRunAndWaitForReplayToFinish(
+        Duration observedPacketConnectionTimeout,
+        Duration targetServerResponseTimeout,
+        BlockingTrafficSource trafficSource,
+        TimeShifter timeShifter,
+        ThreadLocalTupleWriter tupleWriter,
+        Consumer<SourceTargetCaptureTuple> tupleObserver,
+        Duration quiescentDuration
+    ) throws InterruptedException, ExecutionException {
+        doSetupRunAndWaitForReplayToFinish(observedPacketConnectionTimeout, targetServerResponseTimeout,
+            trafficSource, timeShifter, tupleWriter, null, tupleObserver, quiescentDuration);
+    }
+
+    private void doSetupRunAndWaitForReplayToFinish(
+        Duration observedPacketConnectionTimeout,
+        Duration targetServerResponseTimeout,
+        BlockingTrafficSource trafficSource,
+        TimeShifter timeShifter,
+        ThreadLocalTupleWriter tupleWriter,
+        Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
+        Consumer<SourceTargetCaptureTuple> tupleObserver,
+        Duration quiescentDuration
     ) throws InterruptedException, ExecutionException {
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
             (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout)
         );
         var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
+        this.currentReplayEngine.set(replayEngine);
+        // Wire session close callback so KafkaTrafficCaptureSource can track synthetic close drain
+        clientConnectionPool.setGlobalOnSessionClose(session ->
+            trafficSource.onNetworkConnectionClosed(
+                session.getChannelKeyContext().getConnectionId(),
+                // sessionNumber is the key used in the pool — derive from the session's context
+                // For now use 0 as a placeholder; full GenerationalSessionKey wiring is Phase A4
+                0,
+                session.generation
+            )
+        );
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
             new CapturedTrafficToHttpTransactionAccumulator(
                 observedPacketConnectionTimeout,
                 "(see command line option " + TrafficReplayer.PACKET_TIMEOUT_SECONDS_PARAMETER_NAME + ")",
-                new TrafficReplayerAccumulationCallbacks(replayEngine, resultTupleConsumer, trafficSource)
+                new TrafficReplayerAccumulationCallbacks(replayEngine, tupleWriter, resultTupleConsumer,
+                    tupleObserver, trafficSource, quiescentDuration)
             );
+        this.currentAccumulator.set(trafficToHttpTransactionAccumulator);
         try {
             pullCaptureFromSourceToAccumulator(trafficSource, trafficToHttpTransactionAccumulator);
         } catch (InterruptedException ex) {
@@ -237,15 +319,59 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Duration targetServerResponseTimeout,
         BlockingTrafficSource trafficSource,
         TimeShifter timeShifter,
-        Consumer<SourceTargetCaptureTuple> resultTupleConsumer
+        ThreadLocalTupleWriter tupleWriter,
+        Duration quiescentDuration
+    ) throws TrafficReplayer.TerminationException, ExecutionException, InterruptedException {
+        setupRunAndWaitForReplayWithShutdownChecks(observedPacketConnectionTimeout, targetServerResponseTimeout,
+            trafficSource, timeShifter, tupleWriter, null, quiescentDuration);
+    }
+
+    /** Legacy overload: uses the old synchronous Consumer-based tuple path (Log4J). */
+    public void setupRunAndWaitForReplayWithShutdownChecks(
+        Duration observedPacketConnectionTimeout,
+        Duration targetServerResponseTimeout,
+        BlockingTrafficSource trafficSource,
+        TimeShifter timeShifter,
+        Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
+        Duration quiescentDuration
+    ) throws TrafficReplayer.TerminationException, ExecutionException, InterruptedException {
+        doSetupRunAndWaitForReplayWithShutdownChecks(observedPacketConnectionTimeout, targetServerResponseTimeout,
+            trafficSource, timeShifter, null, resultTupleConsumer, null, quiescentDuration);
+    }
+
+    public void setupRunAndWaitForReplayWithShutdownChecks(
+        Duration observedPacketConnectionTimeout,
+        Duration targetServerResponseTimeout,
+        BlockingTrafficSource trafficSource,
+        TimeShifter timeShifter,
+        ThreadLocalTupleWriter tupleWriter,
+        Consumer<SourceTargetCaptureTuple> tupleObserver,
+        Duration quiescentDuration
+    ) throws TrafficReplayer.TerminationException, ExecutionException, InterruptedException {
+        doSetupRunAndWaitForReplayWithShutdownChecks(observedPacketConnectionTimeout, targetServerResponseTimeout,
+            trafficSource, timeShifter, tupleWriter, null, tupleObserver, quiescentDuration);
+    }
+
+    private void doSetupRunAndWaitForReplayWithShutdownChecks(
+        Duration observedPacketConnectionTimeout,
+        Duration targetServerResponseTimeout,
+        BlockingTrafficSource trafficSource,
+        TimeShifter timeShifter,
+        ThreadLocalTupleWriter tupleWriter,
+        Consumer<SourceTargetCaptureTuple> resultTupleConsumer,
+        Consumer<SourceTargetCaptureTuple> tupleObserver,
+        Duration quiescentDuration
     ) throws TrafficReplayer.TerminationException, ExecutionException, InterruptedException {
         try {
-            setupRunAndWaitForReplayToFinish(
+            doSetupRunAndWaitForReplayToFinish(
                 observedPacketConnectionTimeout,
                 targetServerResponseTimeout,
                 trafficSource,
                 timeShifter,
-                resultTupleConsumer
+                tupleWriter,
+                resultTupleConsumer,
+                tupleObserver,
+                quiescentDuration
             );
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

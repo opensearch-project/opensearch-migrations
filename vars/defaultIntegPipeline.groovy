@@ -15,11 +15,11 @@ def call(Map config = [:]) {
     if(jobName == null || jobName.isEmpty()){
         throw new RuntimeException("The jobName argument must be provided");
     }
+    def defaultGitBranch = config.defaultGitBranch ?: 'main'
     def source_context_id = config.sourceContextId ?: 'source-single-node-ec2'
     def migration_context_id = config.migrationContextId ?: 'migration-default'
     def source_context_file_name = 'sourceJenkinsContext.json'
     def migration_context_file_name = 'migrationJenkinsContext.json'
-    def skipCaptureProxyOnNodeSetup = config.skipCaptureProxyOnNodeSetup ?: false
     def time = new Date().getTime()
     def testUniqueId = config.testUniqueId ?: "integ_full_${time}_${currentBuild.number}"
     def testDir = "/root/lib/integ_test/integ_test"
@@ -29,8 +29,10 @@ def call(Map config = [:]) {
 
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
-            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+            string(name: 'GIT_BRANCH', defaultValue: defaultGitBranch, description: 'Git branch to use for repository')
+            string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
+            string(name: 'VERSION', defaultValue: '', description: 'Release version to deploy (e.g. "2.9.0"). When set, checks out the release tag instead of GIT_BRANCH.')
         }
 
         options {
@@ -46,6 +48,7 @@ def call(Map config = [:]) {
                     genericVariables: [
                             [key: 'GIT_REPO_URL', value: '$.GIT_REPO_URL'],
                             [key: 'GIT_BRANCH', value: '$.GIT_BRANCH'],
+                            [key: 'GIT_COMMIT', value: '$.GIT_COMMIT'],
                             [key: 'job_name', value: '$.job_name']
                     ],
                     tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
@@ -59,21 +62,22 @@ def call(Map config = [:]) {
             stage('Checkout') {
                 steps {
                     script {
+                        def checkoutBranch = params.VERSION?.trim() ? params.VERSION : params.GIT_BRANCH
+                        env.CHECKOUT_BRANCH = checkoutBranch
+                        echo """
+                            ================================================================
+                            Default Integration Pipeline
+                            ================================================================
+                            Git:                    ${params.GIT_REPO_URL} @ ${checkoutBranch}
+                            Stage:                  ${params.STAGE}
+                            Version:                ${params.VERSION ?: 'N/A (using GIT_BRANCH)'}
+                            ================================================================
+                        """
                         // Allow overwriting this step
                         if (config.checkoutStep) {
                             config.checkoutStep()
                         } else {
-                            sh 'sudo chown -R $(whoami) .'
-                            sh 'sudo chmod -R u+w .'
-                            // If in an existing git repository, remove any additional files in git tree that are not listed in .gitignore
-                            if (sh(script: 'git rev-parse --git-dir > /dev/null 2>&1', returnStatus: true) == 0) {
-                                echo 'Cleaning any existing git files in workspace'
-                                sh 'git reset --hard'
-                                sh 'git clean -fd'
-                            } else {
-                                echo 'No git project detected, this is likely an initial run of this pipeline on the worker'
-                            }
-                            git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
+                            checkoutStep(branch: checkoutBranch, repo: params.GIT_REPO_URL, commit: params.GIT_COMMIT)
                         }
                     }
                 }
@@ -123,6 +127,31 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Pre-Deploy Cleanup') {
+                when {
+                    expression { config.preDeployStep != null }
+                }
+                steps {
+                    timeout(time: 60, unit: 'MINUTES') {
+                        dir('test') {
+                            script {
+                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 5400, roleSessionName: 'jenkins-session') {
+                                        config.preDeployStep(
+                                            stage: stage,
+                                            sourceContextFileName: source_context_file_name,
+                                            migrationContextFileName: migration_context_file_name,
+                                            sourceContextId: source_context_id,
+                                            migrationContextId: migration_context_id
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             stage('Deploy') {
                 steps {
                     timeout(time: 90, unit: 'MINUTES') {
@@ -137,15 +166,28 @@ def call(Map config = [:]) {
                                             "--migration-context-file './$migration_context_file_name' " +
                                             "--source-context-id $source_context_id " +
                                             "--migration-context-id $migration_context_id " +
-                                            "--stage ${stage} " +
-                                            "--migrations-git-url ${params.GIT_REPO_URL} " +
-                                            "--migrations-git-branch ${params.GIT_BRANCH}"
-                                    if (skipCaptureProxyOnNodeSetup) {
-                                        baseCommand += " --skip-capture-proxy"
-                                    }
+                                            "--stage ${stage}"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                         withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 5400, roleSessionName: 'jenkins-session') {
                                             sh baseCommand
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            stage('Pre-Integ Test Cleanup') {
+                steps {
+                    timeout(time: 10, unit: 'MINUTES') {
+                        dir('test') {
+                            script {
+                                if (config.preIntegTestStep) {
+                                    withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
+                                            config.preIntegTestStep(stage)
                                         }
                                     }
                                 }

@@ -2,18 +2,20 @@
   "name": "@opensearch-migrations/migration-workflow-templates",
   "version": "1.0.0",
   "scripts": {
+    "build": "echo 'migration-workflow-templates: no build step needed'",
     "dev": "tsx src/makeTemplates.ts",
     "make-templates": "tsx makeTemplates.cjs",
     "type-check-deps": "npm run -w @opensearch-migrations/argo-workflow-builders type-check && npm run -w @opensearch-migrations/schemas type-check",
     "type-check": "npx tsgo -p ../../tsconfig.typecheck.templates.json --noEmit",
     "type-check-all": "npm run type-check && npm run type-check-deps",
-    "test": "jest --config ./jest.config.js",
+    "test": "jest --coverage --config ./jest.config.js",
     "test-all": "npm run test && npm run -w @opensearch-migrations/argo-workflow-builders test && npm run -w @opensearch-migrations/schemas test",
     "check-and-make-templates": "npm run type-check-all && npm run test-all && tsx makeTemplates.cjs"
   },
   "dependencies": {
     "@opensearch-migrations/argo-workflow-builders": "*",
-    "@opensearch-migrations/schemas": "*"
+    "@opensearch-migrations/schemas": "*",
+    "@opensearch-migrations/strimzi-types": "*"
   },
   "devDependencies": {
     "@types/jest": "*",

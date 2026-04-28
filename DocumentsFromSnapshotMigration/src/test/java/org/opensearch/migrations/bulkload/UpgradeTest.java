@@ -11,7 +11,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
@@ -99,7 +99,7 @@ public class UpgradeTest extends SourceTestBase {
 
             sourceCluster.copySnapshotData(sourceSnapshotDirectory.toString());
 
-            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
                     sourceCluster.getContainerVersion().getVersion(), true);
             var sourceRepo = new FileSystemRepo(sourceSnapshotDirectory.toPath(), fileFinder);
             var counter = new AtomicInteger();
@@ -119,7 +119,7 @@ public class UpgradeTest extends SourceTestBase {
             assertThat("Expected workers should spin up", result.numRuns, equalTo(expectedWorkers));
 
             var targetOperations = new ClusterOperations(targetCluster);
-            targetOperations.get("/_refresh");
+            targetOperations.refresh();
             var allDocs = targetOperations.get("/" + testData.indexName + "*/_search");
             var searchResponseBody = allDocs.getValue();
 
@@ -132,12 +132,11 @@ public class UpgradeTest extends SourceTestBase {
 
             // Assert single_type index for versions that support it
             if (hasEs5SingleTypeIndex) {
-                var countResponse = targetOperations.get("/" + testData.singleTypeIndexName + "/_count");
                 var expectedCount = 2; // createEs5SingleTypeIndexWithDocs creates 2 documents
                 assertThat(
                         "Single-type index doc count should match after ES 5.x upgraded and migrated to OS",
-                        countResponse.getValue(),
-                        containsString("\"count\":" + expectedCount)
+                        targetOperations.getDocCount(testData.singleTypeIndexName),
+                        equalTo((long) expectedCount)
                 );
             }
         }

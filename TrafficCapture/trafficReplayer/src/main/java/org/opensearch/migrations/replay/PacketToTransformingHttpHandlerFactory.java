@@ -5,7 +5,7 @@ import java.util.function.Supplier;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.TransformedPacketReceiver;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
-import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
@@ -25,7 +25,7 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class PacketToTransformingHttpHandlerFactory
-    implements PacketConsumerFactory<TransformedOutputAndResult<ByteBufList>>, AutoCloseable {
+    implements PacketConsumerFactory<TransformedOutputAndResult<ByteBufListProducer>>, AutoCloseable {
 
     private final ThreadSafeTransformerWrapper threadSafeTransformer;
 
@@ -41,7 +41,7 @@ public class PacketToTransformingHttpHandlerFactory
     }
 
     @Override
-    public IPacketFinalizingConsumer<TransformedOutputAndResult<ByteBufList>> create(
+    public IPacketFinalizingConsumer<TransformedOutputAndResult<ByteBufListProducer>> create(
         IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext
     ) {
         log.trace("creating HttpJsonTransformingConsumer");

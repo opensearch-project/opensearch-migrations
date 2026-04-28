@@ -43,7 +43,8 @@ class WorkflowConfigStore:
         else:
             # Load Kubernetes configuration
             load_k8s_config()
-            self.v1 = client.CoreV1Api()
+            api_client = client.ApiClient(client.Configuration.get_default_copy())
+            self.v1 = client.CoreV1Api(api_client)
 
     def save_config(self, config: WorkflowConfig, session_name: str = "default") -> str:
         """Save workflow configuration to Kubernetes ConfigMap
@@ -59,7 +60,7 @@ class WorkflowConfigStore:
             ApiException: If Kubernetes API call fails
             Exception: For other errors during save operation
         """
-        config_yaml = config.to_yaml()
+        config_yaml = config.raw_yaml
 
         # Create ConfigMap body
         config_map_body = client.V1ConfigMap(

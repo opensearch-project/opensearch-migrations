@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import java.io.EOFException;
 import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -19,6 +20,7 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
+import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
@@ -95,14 +97,24 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     @AllArgsConstructor
     class TrafficReplayerAccumulationCallbacks implements AccumulationCallbacks {
         private final ReplayEngine replayEngine;
-        private Consumer<SourceTargetCaptureTuple> resultTupleConsumer;
+        private final ThreadLocalTupleWriter tupleWriter;
+        /** Legacy synchronous tuple consumer (Log4J path). Mutually exclusive with tupleWriter. */
+        private final Consumer<SourceTargetCaptureTuple> resultTupleConsumer;
+        @lombok.Setter
+        private Consumer<SourceTargetCaptureTuple> tupleObserver;
         private ITrafficCaptureSource trafficCaptureSource;
+        /** How long to delay the first request on a resumed connection. Configurable via CLI. */
+        private final Duration quiescentDuration;
 
         @Override
         public Consumer<RequestResponsePacketPair> onRequestReceived(
             @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
-            @NonNull HttpMessageAndTimestamp request
+            @NonNull HttpMessageAndTimestamp request,
+            boolean isResumedConnection
         ) {
+            // quiescentDuration is passed to ReplayEngine which applies it relative to the
+            // time-shifted start, not relative to now
+            var quiescentDurationForRequest = isResumedConnection ? quiescentDuration : null;
             replayEngine.setFirstTimestamp(request.getFirstPacketTimestamp());
 
             var requestKey = ctx.getReplayerRequestKey();
@@ -119,7 +131,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             );
 
             var allWorkFinishedForTransactionFuture =
-                sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey, finishedAccumulatingResponseFuture)
+                sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey, finishedAccumulatingResponseFuture, quiescentDurationForRequest)
                     .getDeferredFutureThroughHandle(
                         // TODO - what if finishedAccumulatingResponseFuture completed exceptionally?
                         (arr, httpRequestException) -> finishedAccumulatingResponseFuture.thenCompose(
@@ -133,7 +145,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     );
 
             assert !allWorkFinishedForTransactionFuture.future.isDone();
-            log.trace("Adding " + requestKey + " to targetTransactionInProgressMap");
+            log.atTrace().setMessage("Adding {} to targetTransactionInProgressMap").addArgument(requestKey).log();
             requestWorkTracker.put(requestKey, allWorkFinishedForTransactionFuture);
 
             return finishedAccumulatingResponseFuture.future::complete;
@@ -146,13 +158,18 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             IReplayContexts.IReplayerHttpTransactionContext ctx,
             HttpMessageAndTimestamp request,
             UniqueReplayerRequestKey requestKey,
-            TextTrackedFuture<RequestResponsePacketPair> finishedAccumulatingResponseFuture) {
+            TextTrackedFuture<RequestResponsePacketPair> finishedAccumulatingResponseFuture,
+            Duration quiescentDurationForRequest) {
             var workDequeuedByLimiterFuture = new TextTrackedFuture<TrafficStreamLimiter.WorkItem>(
                 () -> "waiting for " + ctx + " to be queued and run through TrafficStreamLimiter"
             );
+            log.atDebug().setMessage("[{}] Queuing request to TrafficStreamLimiter, permits={}")
+                .addArgument(ctx::getConnectionId)
+                .addArgument(liveTrafficStreamLimiter.liveTrafficStreamCostGate::availablePermits)
+                .log();
             var wi = liveTrafficStreamLimiter.queueWork(1, ctx, workDequeuedByLimiterFuture.future::complete);
             var httpSentRequestFuture = workDequeuedByLimiterFuture.thenCompose(
-                    ignored -> transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx),
+                    ignored -> transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx, quiescentDurationForRequest),
                     () -> "Waiting to get response from target"
                 )
                 .whenComplete(
@@ -179,15 +196,39 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 // Escalate it up out handling stack and shutdown.
                 if (t == null || t instanceof Exception) {
                     try (var tupleHandlingContext = httpContext.createTupleContext()) {
-                        packageAndWriteResponse(
-                            tupleHandlingContext,
-                            resultTupleConsumer,
-                            rrPair,
-                            summary,
-                            (Exception) t
-                        );
+                        if (tupleWriter != null) {
+                            var writeFuture = packageAndWriteTuple(
+                                tupleHandlingContext,
+                                tupleWriter,
+                                rrPair,
+                                summary,
+                                (Exception) t
+                            );
+                            writeFuture.whenComplete((v, writeErr) -> {
+                                if (writeErr != null) {
+                                    log.atError().setCause(writeErr)
+                                        .setMessage("Tuple write failed for {} (streams={})")
+                                        .addArgument(context)
+                                        .addArgument(rrPair.trafficStreamKeysBeingHeld).log();
+                                }
+                                commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
+                            });
+                        } else {
+                            packageAndWriteResponse(
+                                tupleHandlingContext,
+                                resultTupleConsumer,
+                                rrPair,
+                                summary,
+                                (Exception) t
+                            );
+                        }
                     }
-                    commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
+                    // Count the final outcome once per request (not per retry)
+                    countFinalOutcome(summary, t);
+                    recordTargetResponseCodes(summary);
+                    if (tupleWriter == null) {
+                        commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
+                    }
                     return null;
                 } else {
                     log.atError().setCause(t)
@@ -210,17 +251,33 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             } finally {
                 var requestKey = context.getReplayerRequestKey();
                 requestWorkTracker.remove(requestKey);
-                log.trace("removed rrPair.requestData to " + "targetTransactionInProgressMap for " + requestKey);
+                log.atTrace().setMessage("removed rrPair.requestData from targetTransactionInProgressMap for {}").addArgument(requestKey).log();
             }
         }
 
-        @Override
-        public void onTrafficStreamsExpired(
-            RequestResponsePacketPair.ReconstructionStatus status,
-            @NonNull IReplayContexts.IChannelKeyContext ctx,
-            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
-        ) {
-            commitTrafficStreams(status, trafficStreamKeysBeingHeld);
+        private void countFinalOutcome(TransformedTargetRequestAndResponseList summary, Throwable t) {
+            if (t != null) {
+                exceptionRequestCount.incrementAndGet();
+            } else if (summary == null || summary.getResponseList().isEmpty()) {
+                // no response to count
+            } else {
+                var lastResponse = summary.getResponseList().get(summary.getResponseList().size() - 1);
+                if (lastResponse.getError() != null || summary.getTransformationStatus().isError()) {
+                    exceptionRequestCount.incrementAndGet();
+                } else {
+                    successfulRequestCount.incrementAndGet();
+                }
+            }
+        }
+
+        private void recordTargetResponseCodes(TransformedTargetRequestAndResponseList summary) {
+            if (summary != null) {
+                for (var resp : summary.responses()) {
+                    if (resp.getRawResponse() != null) {
+                        replayEngine.recordTargetResponseCode(resp.getRawResponse().status().code());
+                    }
+                }
+            }
         }
 
         @SneakyThrows
@@ -236,10 +293,12 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
 
         @SneakyThrows
         private void commitTrafficStreams(boolean shouldCommit, List<ITrafficStreamKey> trafficStreamKeysBeingHeld) {
-            if (shouldCommit && trafficStreamKeysBeingHeld != null) {
+            if (trafficStreamKeysBeingHeld != null) {
                 for (var tsk : trafficStreamKeysBeingHeld) {
                     tsk.getTrafficStreamsContext().close();
-                    trafficCaptureSource.commitTrafficStream(tsk);
+                    if (shouldCommit) {
+                        trafficCaptureSource.commitTrafficStream(tsk);
+                    }
                 }
             }
         }
@@ -253,6 +312,17 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             @NonNull Instant timestamp,
             @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
         ) {
+            // For TRAFFIC_SOURCE_READER_INTERRUPTED: close tracing contexts (no commit) AND schedule channel close
+            // so the ConnectionReplaySession drains and the onClose callback fires
+            if (status == RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED) {
+                commitTrafficStreams(false, trafficStreamKeysBeingHeld);
+                notifyConnectionDone(trafficStreamKeysBeingHeld);
+                // cancelConnection bypasses the sorter and time-shifting: marks the session cancelled
+                // (prevents reconnection) and closes the channel immediately
+                replayEngine.cancelConnection(ctx, channelSessionNumber);
+                return;
+            }
+            notifyConnectionDone(trafficStreamKeysBeingHeld);
             replayEngine.setFirstTimestamp(timestamp);
             var cf = replayEngine.closeConnection(channelInteractionNum, ctx, channelSessionNumber, timestamp);
             cf.map(
@@ -262,13 +332,29 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         }
 
         @Override
+        public void onTrafficStreamsExpired(
+            RequestResponsePacketPair.ReconstructionStatus status,
+            @NonNull IReplayContexts.IChannelKeyContext ctx,
+            @NonNull List<ITrafficStreamKey> trafficStreamKeysBeingHeld
+        ) {
+            notifyConnectionDone(trafficStreamKeysBeingHeld);
+            commitTrafficStreams(status, trafficStreamKeysBeingHeld);
+        }
+
+        private void notifyConnectionDone(List<ITrafficStreamKey> keys) {
+            if (keys != null && !keys.isEmpty()) {
+                trafficCaptureSource.onConnectionAccumulationComplete(keys.get(0));
+            }
+        }
+
+        @Override
         public void onTrafficStreamIgnored(@NonNull IReplayContexts.ITrafficStreamsLifecycleContext ctx) {
             commitTrafficStreams(true, List.of(ctx.getTrafficStreamKey()));
         }
 
-        private void packageAndWriteResponse(
+        private CompletableFuture<Void> packageAndWriteTuple(
             IReplayContexts.ITupleHandlingContext tupleHandlingContext,
-            Consumer<SourceTargetCaptureTuple> tupleWriter,
+            ThreadLocalTupleWriter tupleWriter,
             RequestResponsePacketPair rrPair,
             TransformedTargetRequestAndResponseList summary,
             Exception t
@@ -276,12 +362,47 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             log.trace("done sending and finalizing data to the packet handler");
 
             if (t != null) {
-                log.error("Got exception in CompletableFuture callback: ", t);
+                log.atError().setMessage("Got exception in CompletableFuture callback for {}")
+                    .addArgument(tupleHandlingContext)
+                    .setCause(t)
+                    .log();
+            }
+            CompletableFuture<Void> writeFuture;
+            try (var requestResponseTuple = new SourceTargetCaptureTuple(tupleHandlingContext, rrPair, summary, t)) {
+                log.atDebug()
+                    .setMessage("Source/Target Request/Response tuple: {}").addArgument(requestResponseTuple).log();
+                if (tupleObserver != null) {
+                    tupleObserver.accept(requestResponseTuple);
+                }
+                var parsedMsgs = new ParsedHttpMessagesAsDicts(requestResponseTuple);
+                writeFuture = tupleWriter.writeTuple(requestResponseTuple, parsedMsgs);
+            }
+
+            if (t != null) {
+                throw new CompletionException(t);
+            }
+            return writeFuture;
+        }
+
+        private void packageAndWriteResponse(
+            IReplayContexts.ITupleHandlingContext tupleHandlingContext,
+            Consumer<SourceTargetCaptureTuple> tupleConsumer,
+            RequestResponsePacketPair rrPair,
+            TransformedTargetRequestAndResponseList summary,
+            Exception t
+        ) {
+            log.trace("done sending and finalizing data to the packet handler");
+
+            if (t != null) {
+                log.atError().setMessage("Got exception in CompletableFuture callback for {}")
+                    .addArgument(tupleHandlingContext)
+                    .setCause(t)
+                    .log();
             }
             try (var requestResponseTuple = new SourceTargetCaptureTuple(tupleHandlingContext, rrPair, summary, t)) {
                 log.atDebug()
                     .setMessage("Source/Target Request/Response tuple: {}").addArgument(requestResponseTuple).log();
-                tupleWriter.accept(requestResponseTuple);
+                tupleConsumer.accept(requestResponseTuple);
             }
 
             if (t != null) {
@@ -297,7 +418,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         ReplayEngine replayEngine,
         HttpMessageAndTimestamp request,
         TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
-        IReplayContexts.IReplayerHttpTransactionContext ctx
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        Duration quiescentDurationForRequest
     ) {
         return transformAndSendRequest(
             inputRequestTransformerFactory,
@@ -306,30 +428,37 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             ctx,
             request.getFirstPacketTimestamp(),
             request.getLastPacketTimestamp(),
-            request.packetBytes::stream);
+            request.packetBytes::stream,
+            quiescentDurationForRequest);
+    }
+
+    public TrackedFuture<String, TransformedTargetRequestAndResponseList> transformAndSendRequest(
+        ReplayEngine replayEngine,
+        HttpMessageAndTimestamp request,
+        TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
+        IReplayContexts.IReplayerHttpTransactionContext ctx
+    ) {
+        return transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx, null);
     }
 
     @Override
     protected void perResponseConsumer(AggregatedRawResponse summary,
                                        HttpRequestTransformationStatus transformationStatus,
                                        IReplayContexts.IReplayerHttpTransactionContext context) {
+        // Logging only — counting moved to handleCompletedTransaction to avoid double-counting on retries
         if (summary != null && summary.getError() != null) {
             log.atInfo().setCause(summary.getError())
                 .setMessage("Exception for {}: ").addArgument(context).log();
-            exceptionRequestCount.incrementAndGet();
         } else if (transformationStatus.isError()) {
             log.atInfo()
                 .setCause(Optional.ofNullable(summary).map(AggregatedRawResponse::getError).orElse(null))
                 .setMessage("Unknown error transforming {}: ")
                 .addArgument(context)
                 .log();
-            exceptionRequestCount.incrementAndGet();
         } else if (summary == null) {
-            log.atInfo().setMessage("Not counting this response.  No result at all for {}: ")
+            log.atInfo().setMessage("No result at all for {}: ")
                 .addArgument(context)
                 .log();
-        } else {
-            successfulRequestCount.incrementAndGet();
         }
     }
 
@@ -368,7 +497,19 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     .filter(s -> !s.isEmpty())
                     .ifPresent(s -> log.atDebug().setMessage("TrafficStream Summary: {{}}").addArgument(s).log());
             }
+            log.atDebug().setMessage("Read {} traffic stream(s) from source")
+                .addArgument(trafficStreams::size)
+                .log();
+            var batchStart = System.nanoTime();
             trafficStreams.forEach(trafficToHttpTransactionAccumulator::accept);
+            var batchDurationMs = (System.nanoTime() - batchStart) / 1_000_000;
+            if (batchDurationMs > 5_000) {
+                log.atWarn().setMessage("Batch processing took {}ms ({} records). " +
+                        "This delays the next Kafka poll. max.poll.interval.ms may be at risk.")
+                    .addArgument(batchDurationMs)
+                    .addArgument(trafficStreams::size)
+                    .log();
+            }
         }
     }
 }

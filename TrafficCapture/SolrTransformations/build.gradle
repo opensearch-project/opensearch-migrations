@@ -1,0 +1,79 @@
+import com.github.gradle.node.npm.task.NpmTask
+
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+    id 'com.github.node-gradle.node' version '7.1.0'
+}
+
+node {
+    version = '22.14.0'
+    download = true
+    nodeProjectDir = file("${projectDir}/transforms")
+    workDir = file("${project.buildDir}/nodejs")
+    npmWorkDir = file("${project.buildDir}/npm")
+}
+
+tasks.register('installTransformDeps', NpmTask) {
+    description = 'Install TypeScript transform dependencies'
+    args = ['install', '--ignore-scripts']
+}
+
+// esbuild's postinstall validates its binary with execFileSync immediately after writing it,
+// which can hit ETXTBSY on Linux CI. Running it separately with a retry avoids the flake.
+tasks.register('runPostInstallScripts', Exec) {
+    dependsOn installTransformDeps
+    workingDir "${projectDir}/transforms"
+    commandLine 'bash', '-c', '''
+        for i in 1 2 3; do
+            npm rebuild esbuild 2>&1 && exit 0
+            echo "esbuild rebuild attempt $i failed, retrying in 2s..."
+            sleep 2
+        done
+        exit 1
+    '''
+}
+
+tasks.register('buildTransforms', NpmTask) {
+    description = 'Build TypeScript transforms to GraalVM-compatible JS'
+    args = ['run', 'build']
+    dependsOn runPostInstallScripts
+    inputs.dir("${projectDir}/transforms/src")
+    outputs.dir("${projectDir}/transforms/dist")
+}
+
+tasks.register('testTransforms', NpmTask) {
+    description = 'Run vitest tests for TypeScript transforms'
+    args = ['run', 'test:nocov']
+    dependsOn runPostInstallScripts
+    inputs.dir("${projectDir}/transforms/src")
+    inputs.file("${projectDir}/transforms/package.json")
+}
+
+tasks.register('copyTransforms', Copy) {
+    description = 'Copy built JS transforms to test resources'
+    from "${projectDir}/transforms/dist"
+    into "${buildDir}/resources/test/transforms"
+    dependsOn buildTransforms
+}
+
+processTestResources.dependsOn copyTransforms
+test.dependsOn testTransforms
+
+dependencies {
+    implementation project(':TrafficCapture:transformationShim')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformer')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
+
+    implementation libs.jackson.databind
+    implementation libs.slf4j.api
+
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
+    testImplementation libs.testcontainers
+    testImplementation libs.testcontainers.junit.jupiter
+    testImplementation libs.testcontainers.opensearch
+    testRuntimeOnly libs.junit.jupiter.engine
+    testRuntimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformerProvider')
+}

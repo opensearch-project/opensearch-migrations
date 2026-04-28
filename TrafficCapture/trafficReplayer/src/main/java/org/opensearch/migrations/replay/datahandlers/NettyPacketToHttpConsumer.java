@@ -92,7 +92,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
             socketContext.addTraceException(cause, true);
             log.atDebug().setCause(cause)
-                .setMessage("Exception caught in ConnectionClosedListenerHandler.  Closing channel due to exception")
+                .setMessage("Exception caught in ConnectionClosedListenerHandler for {}.  Closing channel due to exception")
+                .addArgument(() -> socketContext)
                 .log();
             ctx.close();
             super.exceptionCaught(ctx, cause);
@@ -109,7 +110,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         this.responseBuilder = AggregatedRawResponse.builder(Instant.now());
         var parentContext = ctx.createTargetRequestContext();
         this.setCurrentMessageContext(parentContext.createHttpSendingContext());
-        log.atDebug().setMessage("C'tor: incoming session={}").addArgument(replaySession).log();
+        log.atDebug().setMessage("C'tor: incoming session={} connId={}").addArgument(replaySession).addArgument(ctx::getConnectionId).log();
         this.activeChannelFuture = activateLiveChannel();
     }
 
@@ -124,7 +125,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     if (t != null) {
                         channelCtx.addFailedChannelCreation();
                         channelCtx.addTraceException(channelFuture.cause(), true);
-                        log.atWarn().setCause(t).setMessage("error creating channel, not retrying").log();
+                        log.atWarn().setCause(t).setMessage("{} error creating channel, not retrying")
+                            .addArgument(this::httpContext).log();
                         throw Lombok.sneakyThrow(t);
                     }
 
@@ -140,7 +142,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                         // (see the ClientConnectionPool::shutdownNow())
                         channelCtx.addFailedChannelCreation();
                         log.atWarn()
-                            .setMessage("Channel wasn't active, trying to create another for this request").log();
+                            .setMessage("{} Channel wasn't active, trying to create another for this request")
+                            .addArgument(this::httpContext).log();
                         return activateLiveChannel();
                     }
                 }, () -> "acting on ready channelFuture to retry if inactive or to return"),
@@ -214,7 +217,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     var t = TrackedFuture.unwindPossibleCompletionException(tWrapped);
                     if (t != null) {
                         log.atWarn().setCause(t)
-                            .setMessage("Caught exception while trying to get an active channel").log();
+                            .setMessage("{} Caught exception while trying to get an active channel")
+                            .addArgument(channelKeyCtx).log();
                     } else if (!outboundChannelFuture.channel().isActive()) {
                         t = new ChannelNotActiveException();
                     }
@@ -333,7 +337,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     private void deactivateChannel() {
         try {
             var pipeline = channel.pipeline();
-            log.atDebug().setMessage("Resetting the pipeline for channel {} currently at: {}")
+            log.atDebug().setMessage("[{}] Resetting the pipeline for channel {} currently at: {}")
+                .addArgument(this::connId)
                 .addArgument(channel)
                 .addArgument(pipeline)
                 .log();
@@ -353,7 +358,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 pipeline.removeLast();
             }
             channel.config().setAutoRead(false);
-            log.atDebug().setMessage("Reset the pipeline for channel {} back to: {}")
+            log.atDebug().setMessage("[{}] Reset the pipeline for channel {} back to: {}")
+                .addArgument(this::connId)
                 .addArgument(channel)
                 .addArgument(pipeline)
                 .log();
@@ -367,20 +373,22 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     public TrackedFuture<String, Void> consumeBytes(ByteBuf packetData) {
         activeChannelFuture = activeChannelFuture.getDeferredFutureThroughHandle((v, channelException) -> {
             if (channelException == null) {
-                log.atTrace().setMessage("outboundChannelFuture is ready. Writing packets (hash={}): {}: {}")
+                log.atTrace().setMessage("[{}] outboundChannelFuture is ready. Writing packets (hash={}): {}: {}")
+                    .addArgument(this::connId)
                     .addArgument(() -> System.identityHashCode(packetData))
                     .addArgument(this::httpContext)
                     .addArgument(() -> packetData.toString(StandardCharsets.UTF_8))
                     .log();
                 return writePacketAndUpdateFuture(packetData).whenComplete((v2, t2) ->
-                    log.atTrace().setMessage("finished writing {} t={}")
+                    log.atTrace().setMessage("[{}] finished writing {} t={}")
+                        .addArgument(this::connId)
                         .addArgument(this::httpContext)
                         .addArgument(t2)
                         .log(), () -> "");
             } else {
                 log.atWarn()
-                    .setMessage("{} outbound channel was not set up successfully, NOT writing bytes hash={}")
-                    .addArgument(() -> httpContext().getReplayerRequestKey())
+                    .setMessage("[{}] outbound channel was not set up successfully, NOT writing bytes hash={}")
+                    .addArgument(this::connId)
                     .addArgument(() -> System.identityHashCode(packetData))
                     .setCause(channelException)
                     .log();
@@ -403,6 +411,14 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         return getParentContext().getLogicalEnclosingScope();
     }
 
+    private String connId() {
+        try {
+            return httpContext().getConnectionId();
+        } catch (Exception e) {
+            return "<unknown>";
+        }
+    }
+
     private TrackedFuture<String, Void> writePacketAndUpdateFuture(ByteBuf packetData) {
         return NettyFutureBinders.bindNettyFutureToTrackableFuture(
             channel.writeAndFlush(packetData),
@@ -413,8 +429,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     @Override
     public TrackedFuture<String, AggregatedRawResponse> finalizeRequest() {
         var ff = activeChannelFuture.getDeferredFutureThroughHandle((v, t) -> {
-            log.atDebug().setMessage("finalization running since all prior work has completed for {}")
-                .addArgument(() -> httpContext()).log();
+            log.atDebug().setMessage("[{}] finalization running since all prior work has completed for {}")
+                .addArgument(this::connId).addArgument(() -> httpContext()).log();
             if (!(this.currentRequestContextUnion instanceof IReplayContexts.IReceivingHttpResponseContext)) {
                 this.getCurrentRequestSpan().close();
                 this.setCurrentMessageContext(getParentContext().createWaitingForResponseContext());
@@ -432,19 +448,17 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             return rval;
         }, () -> "Waiting for previous consumes to set the future")
         .map(f -> f.whenComplete((v, t) -> {
-            try {
-                if (channel == null) {
-                    log.atTrace().setMessage(
-                        "finalizeRequest().whenComplete has no channel present that needs to be to deactivated.").log();
-                } else {
-                    deactivateChannel();
-                }
-            } finally {
+            if (channel == null) {
+                log.atTrace().setMessage(
+                    "finalizeRequest().whenComplete has no channel present that needs to be to deactivated.").log();
                 getCurrentRequestSpan().close();
                 getParentContext().close();
+            } else {
+                deactivateChannel();
             }
         }), () -> "clearing pipeline");
-        log.atDebug().setMessage("Chaining finalization work off of {} for {}.  Returning finalization future={}")
+        log.atDebug().setMessage("[{}] Chaining finalization work off of {} for {}.  Returning finalization future={}")
+            .addArgument(this::connId)
             .addArgument(activeChannelFuture)
             .addArgument(() -> httpContext())
             .addArgument(ff)

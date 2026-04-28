@@ -1,0 +1,438 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "setup-kafka"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "deploykafkanodepool",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "nodePoolSpec"
+            },
+            {
+              "name": "workflowUid"
+            },
+            {
+              "name": "ownerUid"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaNodePool\nmetadata:\n  name: dual-role\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\nspec: {{=fromJSON(inputs.parameters.nodePoolSpec)}}\n",
+          "action": "apply",
+          "setOwnerReference": false
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deploykafkaclusterkraftnoauth",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "kafkaSpec"
+            },
+            {
+              "name": "workflowUid"
+            },
+            {
+              "name": "ownerUid"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{=fromJSON(inputs.parameters.kafkaSpec)}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
+          "action": "apply",
+          "setOwnerReference": false,
+          "successCondition": "status.listeners"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "brokers",
+              "valueFrom": {
+                "jsonPath": "{.status.listeners[?(@.name=='plain')].bootstrapServers}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "deploykafkaclusterkraftscram",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "kafkaSpec"
+            },
+            {
+              "name": "workflowUid"
+            },
+            {
+              "name": "ownerUid"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{=fromJSON(inputs.parameters.kafkaSpec)}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
+          "action": "apply",
+          "setOwnerReference": false,
+          "successCondition": "status.listeners"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "brokers",
+              "valueFrom": {
+                "jsonPath": "{.status.listeners[?(@.name=='tls')].bootstrapServers}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "deploykafkacluster",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "version"
+            },
+            {
+              "name": "clusterConfig"
+            },
+            {
+              "name": "workflowUid"
+            },
+            {
+              "name": "ownerUid"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "deploykafkaclusterkraftnoauth",
+              "when": "{{=!(sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512')}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "kafkaSpec",
+                    "value": "{{=toJSON(sprig.merge(sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"listeners\", [sprig.dict(\"name\", 'plain', \"port\", 9092, \"type\", 'internal', \"tls\", false), sprig.dict(\"name\", 'tls', \"port\", 9093, \"type\", 'internal', \"tls\", true)]), sprig.dig('clusterSpecOverrides', 'kafka', sprig.dict(), fromJSON(inputs.parameters.clusterConfig))))}}"
+                  },
+                  {
+                    "name": "workflowUid",
+                    "value": "{{inputs.parameters.workflowUid}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.ownerUid}}"
+                  }
+                ]
+              },
+              "name": "deployNoAuthCluster"
+            }
+          ],
+          [
+            {
+              "template": "deploykafkaclusterkraftscram",
+              "when": "{{=sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "kafkaSpec",
+                    "value": "{{=toJSON(sprig.merge(sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"listeners\", [sprig.dict(\"name\", 'tls', \"port\", 9093, \"type\", 'internal', \"tls\", true, \"authentication\", sprig.dict(\"type\", 'scram-sha-512'))]), sprig.dig('clusterSpecOverrides', 'kafka', sprig.dict(), fromJSON(inputs.parameters.clusterConfig))))}}"
+                  },
+                  {
+                    "name": "workflowUid",
+                    "value": "{{inputs.parameters.workflowUid}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.ownerUid}}"
+                  }
+                ]
+              },
+              "name": "deployScramCluster"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": [
+            {
+              "name": "bootstrapServers",
+              "valueFrom": {
+                "expression": "((sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512') ? (steps.deployScramCluster.outputs.parameters.brokers) : (steps.deployNoAuthCluster.outputs.parameters.brokers))"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "createkafkatopic",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "topicName"
+            },
+            {
+              "name": "workflowUid"
+            },
+            {
+              "name": "ownerUid"
+            },
+            {
+              "name": "partitions"
+            },
+            {
+              "name": "replicas"
+            },
+            {
+              "name": "topicConfig"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\nspec:\n  partitions: {{inputs.parameters.partitions}}\n  replicas: {{inputs.parameters.replicas}}\n  config: {{=fromJSON(inputs.parameters.topicConfig)}}\n",
+          "action": "apply",
+          "setOwnerReference": false,
+          "successCondition": "status.topicName"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "topicName",
+              "valueFrom": {
+                "jsonPath": "{.status.topicName}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "createkafkauser",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "userSpec"
+            },
+            {
+              "name": "workflowUid"
+            },
+            {
+              "name": "ownerUid"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaUser\nmetadata:\n  name: \"{{=inputs.parameters.clusterName+'-migration-app'}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\nspec: {{=fromJSON(inputs.parameters.userSpec)}}\n",
+          "action": "apply",
+          "setOwnerReference": false,
+          "successCondition": "status.conditions"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "deploykafkaclusterandtopics",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "clusterName"
+            },
+            {
+              "name": "version"
+            },
+            {
+              "name": "clusterConfig"
+            },
+            {
+              "name": "ownerUid"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "deploykafkanodepool",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "nodePoolSpec",
+                    "value": "{{=toJSON(sprig.dig('nodePoolSpecOverrides', sprig.dict(), fromJSON(inputs.parameters.clusterConfig)))}}"
+                  },
+                  {
+                    "name": "workflowUid",
+                    "value": "{{workflow.uid}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.ownerUid}}"
+                  }
+                ]
+              },
+              "name": "deployNodePool"
+            }
+          ],
+          [
+            {
+              "template": "deploykafkacluster",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "version",
+                    "value": "{{inputs.parameters.version}}"
+                  },
+                  {
+                    "name": "clusterConfig",
+                    "value": "{{inputs.parameters.clusterConfig}}"
+                  },
+                  {
+                    "name": "workflowUid",
+                    "value": "{{workflow.uid}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.ownerUid}}"
+                  }
+                ]
+              },
+              "name": "deployCluster"
+            }
+          ],
+          [
+            {
+              "template": "createkafkauser",
+              "when": "{{=sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  },
+                  {
+                    "name": "userSpec",
+                    "value": "{{=toJSON(sprig.dict(\"authentication\", sprig.dict(\"type\", sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)))))}}"
+                  },
+                  {
+                    "name": "workflowUid",
+                    "value": "{{workflow.uid}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.ownerUid}}"
+                  }
+                ]
+              },
+              "name": "deployKafkaUser"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      }
+    ]
+  }
+}

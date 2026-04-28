@@ -1,0 +1,18 @@
+[
+  {
+    "id": "pod1",
+    "display_name": "pod1",
+    "phase": "Succeeded",
+    "type": "Pod",
+    "boundary_id": "container",
+    "children": []
+  },
+  {
+    "id": "pod2",
+    "display_name": "pod2",
+    "phase": "Running",
+    "type": "Pod",
+    "boundary_id": "container",
+    "children": []
+  }
+]

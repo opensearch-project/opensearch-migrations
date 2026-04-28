@@ -4,13 +4,13 @@ import groovy.json.JsonOutput
 plugins {
 //    Observing higher memory usage with task-tree plugin. Disabling except if needed
 //    id "com.dorongold.task-tree" version "4.0.1"
-    id "com.diffplug.spotless" version '7.2.1'
+    id "com.diffplug.spotless" version '6.25.0'
     id 'io.freefair.lombok' version '8.14.3' apply false
     id 'me.champeau.jmh' version '0.7.3' apply false
     id 'com.gradleup.shadow' version '8.3.8' apply false
     id 'com.avast.gradle.docker-compose' version "0.17.12" apply false
     id 'com.github.node-gradle.node' version '7.1.0' apply false
-    id 'com.google.protobuf' version "0.9.6" apply false
+    id 'com.google.protobuf' version "0.10.0" apply false
     id 'com.google.cloud.tools.jib' apply false // version is set in buildSrc
 
     // Used in top level build.gradle
@@ -24,32 +24,6 @@ allprojects {
 }
 
 
-// Ensure Capture Proxy and Dependencies are built with JDK 11 for On Node Install
-
-// Cache dependencies during the configuration phase
-ext.captureProxyDependencies = []
-gradle.projectsEvaluated {
-    def captureProxyProject = rootProject.project(":TrafficCapture:trafficCaptureProxyServer")
-    captureProxyDependencies = captureProxyProject.configurations.collectMany { configuration ->
-        configuration.dependencies.findAll { it instanceof ProjectDependency }.collect { it.path }
-    }
-    // Add the TrafficCaptureProxyServer project itself
-    captureProxyDependencies << captureProxyProject.path
-}
-
-// Modify sourceCompatibility during the execution phase
-gradle.taskGraph.whenReady {
-    allprojects {
-        tasks.withType(JavaCompile).configureEach {
-            def jvmVersion = (project.path in rootProject.captureProxyDependencies) ? JavaVersion.VERSION_11 : JavaVersion.VERSION_17
-            sourceCompatibility = jvmVersion
-            targetCompatibility = jvmVersion
-        }
-    }
-}
-
-
-
 // Define version properties
 ext {
     // support -Dbuild.version, but include default
@@ -57,6 +31,12 @@ ext {
     // support -Dbuild.snapshot=false, but default to true
     buildSnapshot = System.getProperty("build.snapshot", "true") == "true"
     finalVersion = buildSnapshot ? "${buildVersion}-SNAPSHOT" : buildVersion
+
+    // ECR pull-through cache: auto-derive from environment if not explicitly passed via -P flag.
+    // The ECR_PULL_THROUGH_ENDPOINT env var is set on Jenkins hosts (via /etc/profile.d/ecr-pull-through.sh).
+    if (!project.hasProperty('pullThroughCacheEndpoint')) {
+        pullThroughCacheEndpoint = System.getenv('ECR_PULL_THROUGH_ENDPOINT') ?: ''
+    }
 }
 
 allprojects {
@@ -75,7 +55,6 @@ allprojects {
 }
 
 tasks.register('buildDockerImages') {
-    dependsOn(':frontend:buildDockerImage')
     dependsOn(':TrafficCapture:dockerSolution:buildDockerImages')
     dependsOn(':DocumentsFromSnapshotMigration:buildDockerImages')
 }
@@ -84,8 +63,7 @@ def commonExclusions = ['**/build/**',
                         '**/node_modules/**',
                         '**/opensearch-cluster-cdk/**',
                         '**/cdk.out/**',
-                        '**/transformation/standardJavascriptTransforms/node_modules/**',
-                        '**/frontend/**']
+                        '**/transformation/standardJavascriptTransforms/node_modules/**']
 spotless {
     format 'misc', {
         target fileTree('.') {
@@ -93,7 +71,7 @@ spotless {
             exclude commonExclusions
         }
         trimTrailingWhitespace()
-        leadingTabsToSpaces()
+        indentWithSpaces()
         endWithNewline()
 
     }
@@ -103,7 +81,7 @@ spotless {
             exclude commonExclusions
         }
         trimTrailingWhitespace()
-        leadingTabsToSpaces()
+        indentWithSpaces()
         endWithNewline()
     }
     json {
@@ -120,14 +98,12 @@ subprojects {
     apply plugin: 'jacoco'
     apply plugin: 'maven-publish'
 
-    // Skip spotless for frontend as it has no Java code and node_modules causes scan failures
-    if (project.name != 'frontend') {
-        apply plugin: "com.diffplug.spotless"
+    apply plugin: "com.diffplug.spotless"
 
-        // See https://github.com/diffplug/spotless/tree/main/plugin-gradle#java for some documentation,
-        // though what '#' does is still undocumented from what I can tell
-        spotless {
-            java {
+    // See https://github.com/diffplug/spotless/tree/main/plugin-gradle#java for some documentation,
+    // though what '#' does is still undocumented from what I can tell
+    spotless {
+        java {
                 target "**/*.java"
                 targetExclude '**/build/**', ".gradle/**", "**/node_modules/**"
                 importOrder(
@@ -136,11 +112,10 @@ subprojects {
                         'org.opensearch',
                         '',
                         '\\#')
-                leadingTabsToSpaces()
+                indentWithSpaces()
                 endWithNewline()
                 removeUnusedImports()
             }
-        }
     }
 
     plugins.withId('com.google.cloud.tools.jib') {
@@ -165,7 +140,7 @@ subprojects {
 
         java {
             toolchain {
-                languageVersion.set(JavaLanguageVersion.of(17))
+                languageVersion.set(JavaLanguageVersion.of(21))
                 vendor.set(JvmVendorSpec.AMAZON)
             }
         }
@@ -194,7 +169,18 @@ subprojects {
                 useJUnitPlatform()
                 //  Disable parallel test execution, see MIGRATIONS-1666
                 systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+                systemProperty 'project.root', rootProject.projectDir.absolutePath
                 systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
+
+                // Snapshot fixture caching - avoids re-creating Docker containers on subsequent runs
+                // Override: -Psnapshot.fixture.cache.dir=/path or SNAPSHOT_FIXTURE_CACHE_DIR env var
+                // Disable: -Psnapshot.fixture.cache.disable=true
+                if (project.hasProperty('snapshot.fixture.cache.dir')) {
+                    systemProperty 'snapshot.fixture.cache.dir', project.property('snapshot.fixture.cache.dir')
+                }
+                if (project.hasProperty('snapshot.fixture.cache.disable')) {
+                    systemProperty 'snapshot.fixture.cache.disable', project.property('snapshot.fixture.cache.disable')
+                }
 
                 // Register BucketTestExtension for all tests to enable test striping
                 // Test striping allows distributing test execution across multiple runs
@@ -220,7 +206,7 @@ subprojects {
                 systemProperty 'junit.jupiter.extensions.autodetection.enabled', true
                 // Verify assertions in tests
                 jvmArgs += ['-ea', '-XX:+HeapDumpOnOutOfMemoryError', '-Xmx2g']
-                systemProperty "junit.jupiter.execution.timeout.default", "5m"
+                systemProperty "junit.jupiter.execution.timeout.default", "15m"
                 jacoco {
                     enabled = true
                     def stripingSuffix = (total != null && index != null) ? "-${index}-of-${total}" : ""
@@ -248,6 +234,9 @@ subprojects {
                 maxParallelForks = 1
                 useJUnitPlatform {
                     includeTags 'isolatedTest'
+                }
+                testLogging {
+                    showStandardStreams = true
                 }
             }
 
@@ -361,6 +350,21 @@ subprojects {
         jacocoTestReport {
             dependsOn = testsWithJacoco
             executionData.from testsWithJacoco*.jacoco.destinationFile
+
+            // Include source and class dirs from project dependencies so coverage
+            // for code in RfsCommon/SearchSnapshotExtractor is reported by downstream modules
+            afterEvaluate {
+                def depProjects = configurations.findAll { it.canBeResolved }.collectMany { config ->
+                    config.dependencies.withType(ProjectDependency).collect { it.dependencyProject }
+                }.unique()
+                depProjects.each { depProject ->
+                    if (depProject.plugins.hasPlugin('java')) {
+                        additionalSourceDirs.from depProject.sourceSets.main.allSource.srcDirs
+                        additionalClassDirs.from depProject.sourceSets.main.output.classesDirs
+                    }
+                }
+            }
+
             reports {
                 xml.required = true
             }

@@ -6,8 +6,11 @@ plugins {
 dependencies {
     implementation project(":coreUtilities")
     implementation project(":RFS")
+    implementation project(":SnapshotReader")
+    implementation project(":SolrReader")
     implementation project(':transformation')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
+    runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonPythonTransformerProvider')
 
     implementation libs.jcommander
     implementation libs.slf4j.api
@@ -16,6 +19,7 @@ dependencies {
     implementation libs.jackson.databind
 
     testImplementation testFixtures(project(':RFS'))
+    testImplementation testFixtures(project(':SolrReader'))
     testImplementation testFixtures(project(':testHelperFixtures'))
     testImplementation project(":CreateSnapshot")
     testImplementation libs.log4j.slf4j2.impl
@@ -25,6 +29,9 @@ dependencies {
     testImplementation libs.mockito.junit.jupiter
     testImplementation libs.hamcrest
     testImplementation libs.testcontainers
+    testImplementation libs.testcontainers.junit.jupiter
+    testImplementation libs.testcontainers.localstack
+    testImplementation libs.aws.s3
     testImplementation libs.jackson.databind
 
     testRuntimeOnly libs.junit.jupiter.engine

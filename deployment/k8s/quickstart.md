@@ -71,10 +71,10 @@ The following wrapper script command will start Minikube, which will create a mi
 
 ## Build the Docker images
 
-Since we are building from source here, we will need to build the necessary Docker images for the Migration Assistant that our K8s containers will utilize. An important point to note is that Minikube will use its own Docker registry separate from that of your local machine, this means it will have its own set of images separate from that of your local.
+Since we are building from source here, we will need to build the necessary Docker images for the Migration Assistant that our K8s containers will utilize. The `localTesting.sh` script handles minikube setup, image builds (via BuildKit), and deployment all-in-one. See the [Local Testing](#local-testing) section or run:
 
 ```shell
-./buildDockerImagesMini.sh
+./localTesting.sh
 ```
 
 If you are ever curious what images are in your Minikube environment the following command will list the images:
@@ -88,7 +88,9 @@ minikube image ls
 This will deploy our main Migration Assistant Helm chart which will create the needed resources to perform the Migration Assistant suite of migration tooling
 
 ```shell
-helm install ma -n ma charts/aggregates/migrationAssistantWithArgo --create-namespace
+helm install ma -n ma charts/aggregates/migrationAssistantWithArgo \
+  --create-namespace \
+  -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
 ```
 
 To see all helm deployments for this namespace

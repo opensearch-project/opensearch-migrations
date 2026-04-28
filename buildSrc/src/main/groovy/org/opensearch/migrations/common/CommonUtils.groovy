@@ -155,10 +155,13 @@ class CommonUtils {
                 def dependencyName = "buildDockerImage_${baseImageProjectOverride}";
                 dependsOn dependencyName
                 if (baseImageProjectOverride.startsWith("elasticsearch")) {
-                    runCommand("sed -i -e \"s|mirrorlist=|#mirrorlist=|g\" /etc/yum.repos.d/CentOS-* ;  sed -i -e \"s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g\" /etc/yum.repos.d/CentOS-*")
+                    // Custom ES images run as non-root user; switch to root for setup
+                    user("root")
+                    // Fix CentOS mirror URLs (no-op on Alpine-based custom images)
+                    runCommand("[ -d /etc/yum.repos.d ] && { sed -i -e \"s|mirrorlist=|#mirrorlist=|g\" /etc/yum.repos.d/CentOS-* ;  sed -i -e \"s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g\" /etc/yum.repos.d/CentOS-* ; } || true")
                 }
             } else {
-                from 'amazoncorretto:17-al2023-headless'
+                from 'amazoncorretto:21-al2023-headless'
             }
 
             copyFile("jars", "/jars")
@@ -168,7 +171,8 @@ class CommonUtils {
             // constructed in the configuration phase and the classpath won't be realized until the
             // execution phase.  Therefore, we need to have docker run the command to resolve the classpath
             // and it's simplest to pack that up into a helper script.
-            runCommand("printf \"#!/bin/sh\\njava ${jvmParams} -cp `echo /jars/*.jar | tr \\   :` \\\"\\\$@\\\" \" > /runJavaWithClasspath.sh");
+            // Application defaults are set via JAVA_TOOL_OPTIONS; users can override via JDK_JAVA_OPTIONS.
+            runCommand("printf \"#!/bin/sh\\nexport JAVA_TOOL_OPTIONS=\\\"\\\${JAVA_TOOL_OPTIONS:+\\\$JAVA_TOOL_OPTIONS }${jvmParams}\\\"\\njava -cp `echo /jars/*.jar | tr \\   :` \\\"\\\$@\\\" \" > /runJavaWithClasspath.sh");
             runCommand("chmod +x /runJavaWithClasspath.sh")
             // container stay-alive
             defaultCommand('tail', '-f', '/dev/null')

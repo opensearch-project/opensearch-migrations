@@ -174,7 +174,7 @@ class OpenSearchClientTest {
         var finalDocSuccess = bulkItemResponse(false, List.of(itemEntry(docId2)));
         var server500 = new HttpResponse(500, "", null, "{\"error\":\"Cannot Process Error!\"}");
 
-        when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(bothDocsFail))
+        when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(bothDocsFail))
             .thenReturn(Mono.just(oneFailure))
             .thenReturn(Mono.just(server500))
             .thenReturn(Mono.just(finalDocSuccess));
@@ -186,14 +186,16 @@ class OpenSearchClientTest {
         var responseMono = openSearchClient.sendBulkRequest(
             "myIndex",
             bulkDocs,
-            mock(IRfsContexts.IRequestContext.class)
+            mock(IRfsContexts.IRequestContext.class),
+            false,
+            DocumentExceptionAllowlist.empty()
         );
         responseMono.block();
 
         // Assertions
         // StepVerifier.create(responseMono).expectComplete().verify();
 
-        verify(restClient, times(4)).postAsync(any(), any(), any(), any());
+        verify(restClient, times(4)).postAsyncBytes(any(), any(), any(), any());
         verifyNoInteractions(failedRequestLogger);
     }
 
@@ -202,7 +204,7 @@ class OpenSearchClientTest {
         var docId1 = "tt1979320";
         var docFails = bulkItemResponse(true, List.of(itemEntryFailure(docId1)));
 
-        when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
+        when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
 
         var maxRetries = 6;
         doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
@@ -214,7 +216,9 @@ class OpenSearchClientTest {
         var responseMono = openSearchClient.sendBulkRequest(
             indexName,
             List.of(bulkDoc),
-            mock(IRfsContexts.IRequestContext.class)
+            mock(IRfsContexts.IRequestContext.class),
+            false,
+            DocumentExceptionAllowlist.empty()
         );
         var exception = assertThrows(Exception.class, () -> responseMono.block());
 
@@ -222,7 +226,7 @@ class OpenSearchClientTest {
         assertThat(exception.getMessage(), containsString("Retries exhausted"));
 
         var maxAttempts = maxRetries + 1;
-        verify(restClient, times(maxAttempts)).postAsync(any(), any(), any(), any());
+        verify(restClient, times(maxAttempts)).postAsyncBytes(any(), any(), any(), any());
         verify(failedRequestLogger).logBulkFailure(any(), any(), any(), any());
         verifyNoMoreInteractions(failedRequestLogger);
     }
@@ -254,7 +258,7 @@ class OpenSearchClientTest {
         var docId = "tt1979320";
         var bulkSuccess = bulkItemResponse(false, List.of(itemEntry(docId)));
 
-        when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(bulkSuccess));
+        when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(bulkSuccess));
         openSearchClient = spy(new OpenSearchClient_OS_2_11(restClient, failedRequestLogger, Version.fromString("OS 2.11"),
                 CompressionMode.GZIP_BODY_COMPRESSION));
 
@@ -265,12 +269,14 @@ class OpenSearchClientTest {
         openSearchClient.sendBulkRequest(
             indexName,
             List.of(bulkDoc),
-            mock(IRfsContexts.IRequestContext.class)
+            mock(IRfsContexts.IRequestContext.class),
+            false,
+            DocumentExceptionAllowlist.empty()
         ).block();
 
         // Assertions
         ArgumentCaptor<Map<String, List<String>>> headersCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(restClient).postAsync(eq(indexName + "/_bulk"), any(), headersCaptor.capture(), any());
+        verify(restClient).postAsyncBytes(eq(indexName + "/_bulk"), any(), headersCaptor.capture(), any());
 
         Map<String, List<String>> capturedHeaders = headersCaptor.getValue();
         assertThat(capturedHeaders.get("accept-encoding"), equalTo(List.of("gzip")));
@@ -284,7 +290,7 @@ class OpenSearchClientTest {
 
         openSearchClient = spy(new OpenSearchClient_OS_2_11(restClient, failedRequestLogger, Version.fromString("OS 2.11"),
                 CompressionMode.UNCOMPRESSED));
-        when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(bulkSuccess));
+        when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(bulkSuccess));
 
         var bulkDoc = createBulkDoc(docId);
         var indexName = "testIndex";
@@ -293,12 +299,14 @@ class OpenSearchClientTest {
         openSearchClient.sendBulkRequest(
             indexName,
             List.of(bulkDoc),
-            mock(IRfsContexts.IRequestContext.class)
+            mock(IRfsContexts.IRequestContext.class),
+            false,
+            DocumentExceptionAllowlist.empty()
         ).block();
 
         // Assertions
         ArgumentCaptor<Map<String, List<String>>> headersCaptor = ArgumentCaptor.forClass(Map.class);
-        verify(restClient).postAsync(eq(indexName + "/_bulk"), any(), headersCaptor.capture(), any());
+        verify(restClient).postAsyncBytes(eq(indexName + "/_bulk"), any(), headersCaptor.capture(), any());
 
         Map<String, List<String>> capturedHeaders = headersCaptor.getValue();
         assertThat(capturedHeaders.get("accept-encoding"), equalTo(null));
@@ -311,7 +319,7 @@ class OpenSearchClientTest {
             var docId1 = "tt1979320";
             var docFails = bulkItemResponse(true, List.of(itemEntryFailure(docId1)));
 
-            when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
+            when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
 
             var maxRetries = 1;
             doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
@@ -323,7 +331,9 @@ class OpenSearchClientTest {
             var responseMono = openSearchClient.sendBulkRequest(
                     indexName,
                     List.of(bulkDoc),
-                    mock(IRfsContexts.IRequestContext.class)
+                    mock(IRfsContexts.IRequestContext.class),
+            false,
+            DocumentExceptionAllowlist.empty()
             );
             assertThrows(Exception.class, responseMono::block);
 
@@ -354,7 +364,7 @@ class OpenSearchClientTest {
             var largeResponse = BulkItemResponseEntry.builder().raw(jsonString).build();
             var docFails = bulkItemResponse(true, List.of(largeResponse));
 
-            when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
+            when(restClient.postAsyncBytes(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
 
             var maxRetries = 1;
             doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
@@ -366,7 +376,9 @@ class OpenSearchClientTest {
             var responseMono = openSearchClient.sendBulkRequest(
                     indexName,
                     List.of(bulkDoc),
-                    mock(IRfsContexts.IRequestContext.class)
+                    mock(IRfsContexts.IRequestContext.class),
+            false,
+            DocumentExceptionAllowlist.empty()
             );
             assertThrows(Exception.class, responseMono::block);
 

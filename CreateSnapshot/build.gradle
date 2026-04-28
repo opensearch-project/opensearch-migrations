@@ -6,18 +6,22 @@ plugins {
 dependencies {
     implementation project(':coreUtilities')
     implementation project(":RFS")
+    implementation project(":SolrReader")
 
     implementation libs.jcommander
     implementation libs.slf4j.api
     implementation libs.log4j.slf4j2.impl
+    implementation libs.jackson.databind
+    implementation libs.aws.s3
 
     testImplementation testFixtures(project(":RFS"))
     testImplementation testFixtures(project(":coreUtilities"))
     testImplementation testFixtures(project(":testHelperFixtures"))
+    testImplementation testFixtures(project(":SolrReader"))
     testImplementation libs.testcontainers.junit.jupiter
+    testImplementation libs.testcontainers.localstack
     testImplementation libs.hamcrest
     testImplementation libs.netty.all
-    testImplementation libs.jackson.databind
 }
 
 application {

@@ -19,19 +19,43 @@ spec:
       labels:
         app.kubernetes.io/name: {{ .Chart.Name }}
         app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
     spec:
       serviceAccountName: {{ .Values.installer.serviceAccount.name }}
       restartPolicy: Never
+{{- if and .Values.conditionalPackageInstalls.kyverno .Values.kyvernoPolicies.zeroResourceRequests }}
+      volumes:
+        - name: policy
+          configMap:
+            name: {{ .Release.Name }}-kyverno-zero-resources-policy
+{{- end }}
       containers:
         - name: helm-installer
           image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
+{{- if and .Values.conditionalPackageInstalls.kyverno .Values.kyvernoPolicies.zeroResourceRequests }}
+          volumeMounts:
+            - name: policy
+              mountPath: /policy
+{{- end }}
           command:
             - /bin/sh
             - -c
             - |
               #!/bin/sh
               set -e
+
+      {{- if .Values.ecrAuth }}
+              echo "Authenticating with ECR for OCI chart pulls..."
+      {{- if .Values.ecrAuth.token }}
+              echo "{{ .Values.ecrAuth.token }}" | helm registry login --username AWS --password-stdin {{ .Values.ecrAuth.registry }}
+      {{- else }}
+              aws ecr get-login-password --region "${AWS_DEFAULT_REGION}" 2>/dev/null | \
+                helm registry login --username AWS --password-stdin {{ .Values.ecrAuth.registry }} || \
+                echo "WARNING: Could not authenticate with ECR. OCI chart pulls may fail."
+      {{- end }}
+      {{- end }}
 
       {{- if (and (get $.Values.conditionalPackageInstalls "otel-collector-daemonset")
                   (get $.Values.conditionalPackageInstalls "opentelemetry-operator")) }}
@@ -53,7 +77,7 @@ spec:
       {{- end }}
 
       {{- if .Values.charts }}
-              time helm repo update
+              time helm repo update || echo "No traditional helm repos to update (OCI repos don't need it)"
       {{- end }}
 
               # Helper function.  Charts that define "dependsOn" will check a dependency with this.
@@ -85,11 +109,40 @@ spec:
         {{- if $kyvernoChart }}
               echo "Installing Kyverno first (must be ready before other charts)..."
               {{- include "migration.installChart" (dict "name" "kyverno" "chart" $kyvernoChart "root" $ "forceWait" true) | nindent 14 }}
-              echo "Kyverno installed and ready"
+              echo "Kyverno helm install complete, waiting for admission webhook to be ready..."
+              kubectl wait --for=condition=Ready -n {{ $kyvernoChart.namespace | default $.Release.Namespace }} pod -l app.kubernetes.io/component=admission-controller --timeout=60s
+              echo "Kyverno webhook is ready"
+
+      {{- if $.Values.kyvernoPolicies.zeroResourceRequests }}
+              echo "Applying zero-resource-requests ClusterPolicy before installing other charts..."
+              kubectl wait --for=condition=Established crd/clusterpolicies.kyverno.io --timeout=60s
+              kubectl apply -f /policy/policy.yaml
+              echo "Waiting for zero-resource-requests policy to be ready..."
+              kubectl wait --for=condition=Ready clusterpolicy/zero-resource-requests --timeout=60s
+              echo "Verifying policy is actively enforcing via canary pod..."
+              INSTALLER_IMAGE="{{ $.Values.images.installer.repository }}:{{ $.Values.images.installer.tag }}"
+              until kubectl run kyverno-canary -n {{ $.Release.Namespace }} --image="$INSTALLER_IMAGE" --restart=Never --command -- sleep 999 2>/dev/null \
+                && kubectl get pod -n {{ $.Release.Namespace }} kyverno-canary -o jsonpath='{.metadata.annotations.kyverno\.io/mutated-by}' 2>/dev/null | grep -q zero-resource-requests; do
+                kubectl delete pod kyverno-canary -n {{ $.Release.Namespace }} --ignore-not-found 2>/dev/null
+                echo "Policy not yet enforcing, retrying..."
+                sleep 2
+              done
+              kubectl delete pod kyverno-canary -n {{ $.Release.Namespace }} --ignore-not-found
+              echo "Zero-resource-requests policy is active and enforcing"
+      {{- end }}
+
+
+              # Set ownerReference on kyverno namespace so it gets cascade-deleted with the release namespace
+              {{- if ne ($kyvernoChart.namespace | default $.Release.Namespace) $.Release.Namespace }}
+              echo "Setting {{ $kyvernoChart.namespace }} namespace ownership to {{ $.Release.Namespace }}..."
+              PARENT_NS_UID=$(kubectl get namespace {{ $.Release.Namespace }} -o jsonpath='{.metadata.uid}')
+              kubectl patch namespace {{ $kyvernoChart.namespace }} --type=merge -p \
+                "{\"metadata\":{\"ownerReferences\":[{\"apiVersion\":\"v1\",\"kind\":\"Namespace\",\"name\":\"{{ $.Release.Namespace }}\",\"uid\":\"$PARENT_NS_UID\"}]}}"
+              {{- end }}
         {{- end }}
       {{- end }}
 
-              # Install charts
+              # Install remaining charts in parallel
       {{- range $name, $chart := .Values.charts }}
         {{- if eq $name "kyverno" }}
               echo "Skipping kyverno in main loop (already installed)"
@@ -140,6 +193,18 @@ spec:
           {{- end }}
                   --timeout {{ default "300" $chart.timeout }}s \
                   --set global.managedBy="{{ $.Release.Name }}" \
+          {{- if eq $name "argo-workflows" }}
+                  --set artifactRepository.s3.bucket="{{ printf "migrations-default-%s-%s-%s" (toString $.Values.aws.account) $.Values.stageName $.Values.aws.region }}" \
+                  --set artifactRepository.s3.region="{{ $.Values.aws.region }}" \
+            {{- if $.Values.defaultBucketConfiguration.useLocalStack }}
+                  --set artifactRepository.s3.endpoint="{{ $.Values.defaultBucketConfiguration.endpoint }}.{{ $.Release.Namespace }}.svc.cluster.local:4566" \
+            {{- else }}
+                  --set artifactRepository.s3.endpoint="s3.{{ $.Values.aws.region }}.amazonaws.com" \
+            {{- end }}
+          {{- end }}
+          {{- if eq $name "ack-cloudwatch-controller" }}
+                  --set aws.region="{{ $.Values.aws.region }}" \
+          {{- end }}
                   $VALUE_PARAM \
           {{- if $chart.waitForInstallation }}
                   --wait
@@ -155,6 +220,17 @@ spec:
 
               # Wait for all helm upgrades/installs to complete
               time wait
+
+      {{- if get .Values.conditionalPackageInstalls "ack-cloudwatch-controller" }}
+      {{- $region := required "Missing required value: .Values.aws.region" .Values.aws.region }}
+      {{- $account := required "Missing required value: .Values.aws.account" (toString .Values.aws.account) }}
+      {{- $stage := required "Missing required value: .Values.stageName" .Values.stageName }}
+              echo "Waiting for Dashboard CRD to be established..."
+              kubectl wait --for=condition=Established crd/dashboards.cloudwatch.services.k8s.aws --timeout=120s
+              echo "Applying CloudWatch Dashboard CRs..."
+              echo '{{ include "cloudwatch.dashboardCRs" (dict "region" $region "account" $account "stage" $stage "root" $) | b64enc }}' | base64 -d | kubectl apply -f -
+              echo "Dashboard CRs applied."
+      {{- end }}
 
               # Combine all notes and create a ConfigMap to store them
               echo "All charts installed successfully!"

@@ -36,7 +36,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # Check that these Node-22/NPM references are valid
-yum update && yum install -y git java-17-amazon-corretto-devel docker nodejs22 nodejs22-npm https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm
+yum update && yum install -y git java-21-amazon-corretto-devel docker nodejs22 nodejs22-npm https://s3.amazonaws.com/session-manager-downloads/plugin/latest/linux_64bit/session-manager-plugin.rpm
 systemctl start docker
 git init
 git remote | grep "origin" || git remote add -f origin https://github.com/opensearch-project/opensearch-migrations.git

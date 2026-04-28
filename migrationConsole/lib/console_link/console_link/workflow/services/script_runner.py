@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
+SAMPLE_CONFIG_PATH_ENV = "MIGRATION_SAMPLE_CONFIG_PATH"
 
 
 class ScriptRunner:
@@ -45,7 +46,8 @@ class ScriptRunner:
             self,
             program_name: str,
             input_data: Optional[str] = None,
-            *args: str
+            *args: str,
+            direct_output: bool = False
     ) -> str:
         """
         Run a program with standard interface.
@@ -54,6 +56,7 @@ class ScriptRunner:
             program_name: Name of command
             input_data: Optional data to pass via stdin
             *args: Additional command line arguments
+            direct_output: If True, output errors directly to stderr instead of using logger
 
         Returns:
             stripped output (stdout) from running program_name
@@ -85,15 +88,25 @@ class ScriptRunner:
             return result.stdout.strip()
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"Script failed with exit code {e.returncode}")
-            logger.error(f"stderr: {e.stderr}")
-            raise
+            if direct_output:
+                import sys
+                print(f"Script failed with exit code {e.returncode}", file=sys.stderr)
+                if e.stderr:
+                    print(f"stderr: {e.stderr}", file=sys.stderr)
+            else:
+                logger.debug(f"Script failed with exit code {e.returncode}")
+                if e.stderr:
+                    logger.debug(f"stderr: {e.stderr}")
+            raise subprocess.CalledProcessError(
+                e.returncode, e.cmd, e.stdout, e.stderr
+            ) from None
 
     def run_script(
             self,
             script_name: str,
             input_data: Optional[str] = None,
-            *args: str
+            *args: str,
+            direct_output: bool = False
     ) -> str:
         """
         Run a script with standard interface.
@@ -102,6 +115,7 @@ class ScriptRunner:
             script_name: Name of script (e.g., 'createMigrationWorkflowFromUserConfiguration.sh')
             input_data: Optional data to pass via stdin
             *args: Additional command line arguments
+            direct_output: If True, output errors directly to stderr instead of using logger
 
         Returns:
             Script stdout output
@@ -110,7 +124,7 @@ class ScriptRunner:
             FileNotFoundError: If script doesn't exist
             subprocess.CalledProcessError: If script fails
         """
-        return self.run(self.script_dir / script_name, input_data, *args)
+        return self.run(self.script_dir / script_name, input_data, *args, direct_output=direct_output)
 
     def run_config_processor_node_script(
             self,
@@ -144,18 +158,20 @@ class ScriptRunner:
     def get_sample_config(self) -> str:
         """Get sample workflow configuration.
 
-        Reads sample.yaml from the configured script directory. If sample.yaml
-        doesn't exist (e.g., when CONFIG_PROCESSOR_DIR is not set), returns a
-        blank starter configuration template instead.
+        Reads the configured sample path when MIGRATION_SAMPLE_CONFIG_PATH is
+        set. Otherwise reads sample.yaml from the configured script directory.
+        If no sample file exists, returns a blank starter configuration
+        template instead.
 
         Returns:
-            YAML content as string (either from sample.yaml or blank starter)
+            YAML content as string (either from override, sample.yaml, or blank starter)
 
         Raises:
-            IOError: If sample.yaml exists but cannot be read
+            IOError: If the sample file exists but cannot be read
         """
         logger.info("Getting sample configuration")
-        sample_path = self.script_dir / "sample.yaml"
+        sample_path_override = os.environ.get(SAMPLE_CONFIG_PATH_ENV)
+        sample_path = Path(sample_path_override) if sample_path_override else self.script_dir / "sample.yaml"
 
         if not sample_path.exists():
             logger.info(f"Sample configuration not found at {sample_path}, using blank starter config")
@@ -202,8 +218,24 @@ class ScriptRunner:
 
         try:
             logger.debug(f"Config file: {temp_file_path}")
-            output = self.run_script("createMigrationWorkflowFromUserConfiguration.sh", None,
-                                     *([temp_file_path] + args))
+            script_path = self.script_dir / "createMigrationWorkflowFromUserConfiguration.sh"
+            if not script_path.exists():
+                raise FileNotFoundError(f"Script not found: {script_path}")
+
+            result = subprocess.run(
+                [str(script_path), temp_file_path] + args,
+                capture_output=True, text=True, check=True,
+                cwd=str(self.script_dir)
+            )
+            output = result.stdout.strip()
+
+            # Extract initialization warnings from stderr
+            stderr_text = result.stderr if isinstance(result.stderr, str) else ""
+            warnings = [
+                line.removeprefix("INIT_WARNING: ")
+                for line in stderr_text.splitlines()
+                if line.startswith("INIT_WARNING: ")
+            ]
 
             # Parse kubectl output to extract workflow information
             # The script should output workflow creation details
@@ -212,20 +244,12 @@ class ScriptRunner:
             # Try to parse as JSON first (if script returns JSON)
             try:
                 workflow_info = json.loads(output)
-                logger.info(f"Workflow submitted successfully: {workflow_info.get('workflow_name', 'unknown')}")
-                return workflow_info
             except json.JSONDecodeError:
-                # If not JSON, parse kubectl output format
-                # Expected format: "workflow.argoproj.io/<workflow-name> created"
-                # or similar kubectl output
-                workflow_name = self._parse_kubectl_output(output)
+                workflow_info = {'workflow_name': self._parse_kubectl_output(output)}
 
-                workflow_info = {
-                    'workflow_name': workflow_name
-                }
-
-                logger.info(f"Workflow submitted successfully: {workflow_name}")
-                return workflow_info
+            workflow_info['warnings'] = warnings
+            logger.info(f"Workflow submitted successfully: {workflow_info.get('workflow_name', 'unknown')}")
+            return workflow_info
 
         finally:
             # Clean up temporary file
@@ -263,20 +287,33 @@ class ScriptRunner:
         # If we can't parse it, raise an error
         raise ValueError(f"Could not extract workflow name from output: {output}")
 
-    def get_basic_creds_secrets_in_config(self, config_data: str):
-        # Create temporary file with config data
+    def _run_config_processor_with_temp_file(self, command: str, config_data: str):
+        """Write config to a temp file, run a config-processor command, and return parsed JSON."""
         with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as temp_file:
             temp_file.write(config_data)
             temp_file_path = temp_file.name
 
         try:
-            result_str = self.run_config_processor_node_script("findSecrets", temp_file_path)
-            return json.loads(result_str)
-        finally:
-            # Clean up temporary file
+            result_str = self.run_config_processor_node_script(
+                command, temp_file_path)
             try:
-                # os.unlink(temp_file_path)
+                return json.loads(result_str)
+            except json.JSONDecodeError:
+                # Handle case where config processor outputs multiple JSON objects
+                decoder = json.JSONDecoder()
+                obj, _ = decoder.raw_decode(result_str)
+                return obj
+        finally:
+            try:
+                os.unlink(temp_file_path)
                 logger.debug(f"Cleaned up temporary file: {temp_file_path}")
             except OSError as e:
                 logger.warning(f"Failed to clean up temporary file {temp_file_path}: {e}")
-                raise e
+
+    def get_basic_creds_secrets_in_config(self, config_data: str):
+        """Validate config against Zod schema and scrape secrets. Returns combined result."""
+        return self._run_config_processor_with_temp_file("findSecrets", config_data)
+
+    def validate_config(self, config_data: str):
+        """Validate config against Zod schema. Returns dict with 'valid' bool and optional 'errors'."""
+        return self._run_config_processor_with_temp_file("validate", config_data)

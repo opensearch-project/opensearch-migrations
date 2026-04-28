@@ -4,13 +4,9 @@ import java.util.List;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
-import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
-import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
-import org.opensearch.migrations.bulkload.common.S3SnapshotCreator;
-import org.opensearch.migrations.bulkload.common.SnapshotCreator;
+import org.opensearch.migrations.bulkload.common.ClusterVersionDetector;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICreateSnapshotContext;
-import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.snapshot.creation.tracing.RootSnapshotContext;
@@ -118,6 +114,18 @@ public class CreateSnapshot {
                 description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
                 + "forwarded. If no value is provided, metrics will not be forwarded.")
         String otelCollectorEndpoint;
+
+        @Parameter(
+                names = {"--source-type"},
+                required = false,
+                description = "Source cluster type: 'elasticsearch' (default) or 'solr'")
+        public String sourceType = "elasticsearch";
+
+        @Parameter(
+                names = {"--solr-collections"},
+                required = false,
+                description = "Comma-separated list of Solr collection names to back up (required when source-type=solr)")
+        public List<String> solrCollections = List.of();
     }
 
     @Getter
@@ -128,7 +136,7 @@ public class CreateSnapshot {
     }
 
     public static void main(String[] args) throws Exception {
-        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_SOURCE_ARGS)));
+        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
         Args arguments = EnvVarParameterPuller.injectFromEnv(new Args(), "CREATE_SNAPSHOT_");
         var argParser = JsonCommandLineParser.newBuilder().addObject(arguments).build();
         argParser.parse(args);
@@ -162,46 +170,29 @@ public class CreateSnapshot {
     private ICreateSnapshotContext context;
 
     public void run() {
-        var clientFactory = new OpenSearchClientFactory(arguments.sourceArgs.toConnectionContext());
-        var client = clientFactory.determineVersionAndCreate();
-        SnapshotCreator snapshotCreator;
-        if (arguments.fileSystemRepoPath != null) {
-            snapshotCreator = new FileSystemSnapshotCreator(
-                    arguments.snapshotName,
-                    arguments.snapshotRepoName,
-                    client,
-                    arguments.fileSystemRepoPath,
-                    arguments.indexAllowlist,
-                    context,
-                    arguments.compressionEnabled,
-                    arguments.includeGlobalState
-                );
-        } else {
-            snapshotCreator = new S3SnapshotCreator(
-                arguments.snapshotName,
-                arguments.snapshotRepoName,
-                client,
-                arguments.s3RepoUri,
-                arguments.s3Region,
-                arguments.s3Endpoint,
-                arguments.indexAllowlist,
-                arguments.maxSnapshotRateMBPerNode,
-                arguments.s3RoleArn,
-                context,
-                arguments.compressionEnabled,
-                arguments.includeGlobalState
-            );
-        }
+        resolveStrategy().run();
+    }
 
+    private SourceBackupStrategy resolveStrategy() {
+        if (isSolrSource()) {
+            return new SolrBackupStrategy(arguments);
+        }
+        return new ElasticsearchBackupStrategy(arguments, context);
+    }
+
+    private boolean isSolrSource() {
+        if ("solr".equalsIgnoreCase(arguments.sourceType)) {
+            return true;
+        }
         try {
-            if (arguments.noWait) {
-                SnapshotRunner.run(snapshotCreator);
-            } else {
-                SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
+            var version = ClusterVersionDetector.detect(arguments.sourceArgs.toConnectionContext());
+            if (version.getFlavor() == Flavor.SOLR) {
+                log.atInfo().setMessage("Detected Solr source ({}), using Solr backup path").addArgument(version).log();
+                return true;
             }
         } catch (Exception e) {
-            log.atError().setCause(e).setMessage("Unexpected error running CreateSnapshot").log();
-            throw e;
+            log.atWarn().setMessage("Version detection failed, assuming Elasticsearch: {}").addArgument(e.getMessage()).log();
         }
+        return false;
     }
 }

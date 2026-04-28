@@ -50,7 +50,9 @@ public class TrafficCaptureSourceFactory {
                 appParams.kafkaTrafficBrokers,
                 appParams.kafkaTrafficTopic,
                 appParams.kafkaTrafficGroupId,
-                appParams.kafkaTrafficEnableMSKAuth,
+                appParams.getEffectiveKafkaAuthType(),
+                appParams.kafkaTrafficUserName,
+                appParams.kafkaTrafficPassword,
                 appParams.kafkaTrafficPropertyFile,
                 Clock.systemUTC(),
                 new KafkaBehavioralPolicy()

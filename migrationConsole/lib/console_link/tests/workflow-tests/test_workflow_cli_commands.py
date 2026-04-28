@@ -10,15 +10,28 @@ from console_link.workflow.models.config import WorkflowConfig
 class TestWorkflowCLICommands:
     """Test suite for workflow CLI command integration."""
 
+    @patch('console_link.workflow.commands.submit.delete_workflow')
+    @patch('console_link.workflow.commands.submit.stop_workflow')
+    @patch('console_link.workflow.commands.submit.workflow_exists')
+    @patch('console_link.workflow.commands.submit.load_k8s_config')
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
-    def test_submit_command_basic(self, mock_store_class, mock_subprocess):
+    def test_submit_command_basic(
+        self,
+        mock_store_class,
+        mock_subprocess,
+        _mock_k8s,
+        mock_exists,
+        mock_stop,
+        mock_delete,
+    ):
         """Test basic submit command execution."""
         # Mock subprocess to avoid actual Kubernetes submission
         mock_subprocess.return_value = Mock(
             returncode=0,
             stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
         )
+        mock_exists.return_value = False
 
         runner = CliRunner()
 
@@ -40,17 +53,35 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         # Check for workflow name pattern from test scripts (test-workflow-<timestamp>)
         assert 'test-workflow-' in result.output
+        assert "--workflow-name" in mock_subprocess.call_args[0][0]
+        assert "migration-workflow" in mock_subprocess.call_args[0][0]
+        mock_stop.assert_not_called()
+        mock_delete.assert_not_called()
 
+    @patch('console_link.workflow.commands.submit.delete_workflow')
+    @patch('console_link.workflow.commands.submit.stop_workflow')
+    @patch('console_link.workflow.commands.submit.workflow_exists')
+    @patch('console_link.workflow.commands.submit.load_k8s_config')
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     @patch('console_link.workflow.commands.submit.WorkflowService')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
-    def test_submit_command_with_wait(self, mock_store_class, mock_service_class, mock_subprocess):
+    def test_submit_command_with_wait(
+        self,
+        mock_store_class,
+        mock_service_class,
+        mock_subprocess,
+        _mock_k8s,
+        mock_exists,
+        mock_stop,
+        mock_delete,
+    ):
         """Test submit command with --wait flag."""
         # Mock subprocess to avoid actual Kubernetes submission
         mock_subprocess.return_value = Mock(
             returncode=0,
             stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
         )
+        mock_exists.return_value = False
 
         runner = CliRunner()
 
@@ -88,9 +119,63 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         assert 'Waiting for workflow to complete' in result.output
         assert 'Succeeded' in result.output
+        mock_stop.assert_not_called()
+        mock_delete.assert_not_called()
 
+    @patch('console_link.workflow.commands.submit.delete_workflow')
+    @patch('console_link.workflow.commands.submit.wait_until_workflow_deleted')
+    @patch('console_link.workflow.commands.submit.stop_workflow')
+    @patch('console_link.workflow.commands.submit.workflow_exists')
+    @patch('console_link.workflow.commands.submit.load_k8s_config')
+    @patch('console_link.workflow.services.script_runner.subprocess.run')
+    @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
+    def test_submit_command_replaces_existing_workflow(
+        self,
+        mock_store_class,
+        mock_subprocess,
+        _mock_k8s,
+        mock_exists,
+        mock_stop,
+        mock_wait_until_deleted,
+        mock_delete,
+    ):
+        """Test submit replaces an existing workflow before resubmitting."""
+        mock_subprocess.return_value = Mock(
+            returncode=0,
+            stdout='{"workflow_name": "test-workflow-abc", "workflow_uid": "uid-123", "namespace": "ma"}'
+        )
+        mock_exists.return_value = True
+        mock_stop.return_value = True
+        mock_delete.return_value = True
+        mock_wait_until_deleted.return_value = True
+
+        runner = CliRunner()
+
+        mock_store = Mock()
+        mock_store_class.return_value = mock_store
+        mock_config = WorkflowConfig({
+            'parameters': {
+                'message': 'test',
+                'requiresApproval': False,
+                'approver': ''
+            }
+        })
+        mock_store.load_config.return_value = mock_config
+
+        result = runner.invoke(workflow_cli, ['submit', '--workflow-name', 'migration-workflow'])
+
+        assert result.exit_code == 0
+        assert "Existing workflow 'migration-workflow' found; replacing..." in result.output
+        assert 'Stopped' in result.output
+        assert 'Deleted' in result.output
+        mock_exists.assert_called_once_with('ma', 'migration-workflow')
+        mock_stop.assert_called_once_with('ma', 'migration-workflow')
+        mock_delete.assert_called_once_with('ma', 'migration-workflow')
+        mock_wait_until_deleted.assert_called_once_with('ma', 'migration-workflow')
+
+    @patch('console_link.workflow.commands.status.requests.get')
     @patch('console_link.workflow.commands.status.WorkflowService')
-    def test_status_command_single_workflow(self, mock_service_class):
+    def test_status_command_single_workflow(self, mock_service_class, mock_requests_get):
         """Test status command for a specific workflow."""
         runner = CliRunner()
 
@@ -98,22 +183,47 @@ class TestWorkflowCLICommands:
         mock_service = Mock()
         mock_service_class.return_value = mock_service
 
-        mock_service.get_workflow_status.return_value = {
-            'success': True,
-            'workflow_name': 'test-workflow',
-            'namespace': 'ma',
-            'phase': 'Running',
-            'progress': '1/2',
-            'started_at': '2024-01-01T10:00:00Z',
-            'finished_at': None,
-            'steps': [
-                {'name': 'step1', 'phase': 'Succeeded', 'type': 'Pod', 'started_at': '2024-01-01T10:00:00Z'},
-                {'name': 'step2', 'phase': 'Running', 'type': 'Pod', 'started_at': '2024-01-01T10:01:00Z'}
-            ],
-            'error': None
+        # Mock the Argo API response with full workflow data
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'metadata': {
+                'name': 'test-workflow',
+                'namespace': 'ma'
+            },
+            'status': {
+                'phase': 'Running',
+                'startedAt': '2024-01-01T10:00:00Z',
+                'finishedAt': None,
+                'nodes': {
+                    'test-workflow': {
+                        'id': 'test-workflow',
+                        'displayName': 'test-workflow',
+                        'type': 'Steps',
+                        'phase': 'Running'
+                    },
+                    'test-workflow-step1': {
+                        'id': 'test-workflow-step1',
+                        'displayName': 'step1',
+                        'type': 'Pod',
+                        'phase': 'Succeeded',
+                        'boundaryID': 'test-workflow',
+                        'startedAt': '2024-01-01T10:00:00Z'
+                    },
+                    'test-workflow-step2': {
+                        'id': 'test-workflow-step2',
+                        'displayName': 'step2',
+                        'type': 'Pod',
+                        'phase': 'Running',
+                        'boundaryID': 'test-workflow',
+                        'startedAt': '2024-01-01T10:01:00Z'
+                    }
+                }
+            }
         }
+        mock_requests_get.return_value = mock_response
 
-        result = runner.invoke(workflow_cli, ['status', 'test-workflow'])
+        result = runner.invoke(workflow_cli, ['status', '--workflow-name', 'test-workflow'])
 
         assert result.exit_code == 0
         assert 'test-workflow' in result.output
@@ -122,8 +232,9 @@ class TestWorkflowCLICommands:
         assert 'step2' in result.output
         assert 'workflow output test-workflow' in result.output
 
+    @patch('console_link.workflow.commands.status.requests.get')
     @patch('console_link.workflow.commands.status.WorkflowService')
-    def test_status_command_list_all(self, mock_service_class):
+    def test_status_command_list_all(self, mock_service_class, mock_requests_get):
         """Test status command listing all workflows."""
         runner = CliRunner()
 
@@ -138,126 +249,170 @@ class TestWorkflowCLICommands:
             'error': None
         }
 
-        mock_service.get_workflow_status.side_effect = [
-            {
-                'success': True,
-                'workflow_name': 'workflow-1',
-                'namespace': 'ma',
-                'phase': 'Running',
-                'progress': '1/2',
-                'started_at': '2024-01-01T10:00:00Z',
-                'finished_at': None,
-                'steps': [],
-                'error': None
-            },
-            {
-                'success': True,
-                'workflow_name': 'workflow-2',
-                'namespace': 'ma',
-                'phase': 'Succeeded',
-                'progress': '2/2',
-                'started_at': '2024-01-01T09:00:00Z',
-                'finished_at': '2024-01-01T09:05:00Z',
-                'steps': [],
-                'error': None
-            }
-        ]
+        # Mock requests.get to return workflow data for each workflow
+        def mock_get_response(*args, **kwargs):
+            url = args[0]
+            mock_response = Mock()
+            mock_response.status_code = 200
+            
+            if 'workflow-1' in url:
+                mock_response.json.return_value = {
+                    'metadata': {'name': 'workflow-1', 'namespace': 'ma'},
+                    'status': {
+                        'phase': 'Running',
+                        'startedAt': '2024-01-01T10:00:00Z',
+                        'finishedAt': None,
+                        'nodes': {
+                            'workflow-1': {
+                                'id': 'workflow-1',
+                                'displayName': 'workflow-1',
+                                'type': 'Steps',
+                                'phase': 'Running'
+                            }
+                        }
+                    }
+                }
+            elif 'workflow-2' in url:
+                mock_response.json.return_value = {
+                    'metadata': {'name': 'workflow-2', 'namespace': 'ma'},
+                    'status': {
+                        'phase': 'Succeeded',
+                        'startedAt': '2024-01-01T09:00:00Z',
+                        'finishedAt': '2024-01-01T09:05:00Z',
+                        'nodes': {
+                            'workflow-2': {
+                                'id': 'workflow-2',
+                                'displayName': 'workflow-2',
+                                'type': 'Steps',
+                                'phase': 'Succeeded'
+                            }
+                        }
+                    }
+                }
+            return mock_response
+        
+        mock_requests_get.side_effect = mock_get_response
 
-        result = runner.invoke(workflow_cli, ['status'])
+        result = runner.invoke(workflow_cli, ['status', '--all-workflows'])
 
         assert result.exit_code == 0
         assert 'Found 2 workflow(s)' in result.output
         assert 'workflow-1' in result.output
         assert 'workflow-2' in result.output
 
-    @patch('console_link.workflow.commands.stop.WorkflowService')
-    def test_stop_command_auto_detect(self, mock_service_class):
-        """Test stop command with auto-detection."""
+    @patch('console_link.workflow.commands.approve.approve_gate')
+    @patch('console_link.workflow.commands.approve._pending_gate_names')
+    @patch('console_link.workflow.commands.approve.load_k8s_config')
+    def test_approve_command_with_exact_key(self, mock_k8s, mock_list, mock_approve):
+        """Test approve command with exact key match."""
         runner = CliRunner()
 
-        # Mock the service
-        mock_service = Mock()
-        mock_service_class.return_value = mock_service
+        mock_list.return_value = [
+            'source.target.metadataMigrate',
+            'source.target.backfill',
+        ]
+        mock_approve.return_value = True
 
-        # Mock list_workflows to return single workflow
-        mock_service.list_workflows.return_value = {
-            'success': True,
-            'workflows': ['test-workflow'],
-            'count': 1,
-            'error': None
-        }
-
-        mock_service.stop_workflow.return_value = {
-            'success': True,
-            'workflow_name': 'test-workflow',
-            'namespace': 'ma',
-            'message': 'Workflow test-workflow stopped successfully',
-            'error': None
-        }
-
-        result = runner.invoke(workflow_cli, ['stop'])
+        result = runner.invoke(workflow_cli, ['approve', 'source.target.metadataMigrate'])
 
         assert result.exit_code == 0
-        assert 'Auto-detected workflow' in result.output
-        assert 'stopped successfully' in result.output
+        assert 'Approved 1 gate' in result.output
+        mock_approve.assert_called_once_with('ma', 'source.target.metadataMigrate')
 
-    @patch('console_link.workflow.commands.approve.WorkflowService')
-    def test_approve_command_auto_detect(self, mock_service_class):
-        """Test approve command with auto-detection."""
+    @patch('console_link.workflow.commands.approve.approve_gate')
+    @patch('console_link.workflow.commands.approve._pending_gate_names')
+    @patch('console_link.workflow.commands.approve.load_k8s_config')
+    def test_approve_command_with_glob_pattern(self, mock_k8s, mock_list, mock_approve):
+        """Test approve command with glob pattern matching multiple steps."""
         runner = CliRunner()
 
-        # Mock the service
-        mock_service = Mock()
-        mock_service_class.return_value = mock_service
+        mock_list.return_value = [
+            'a.b.metadataMigrate',
+            'x.y.metadataMigrate',
+            'a.b.backfill',
+        ]
+        mock_approve.return_value = True
 
-        # Mock list_workflows to return single workflow
-        mock_service.list_workflows.return_value = {
-            'success': True,
-            'workflows': ['test-workflow'],
-            'count': 1,
-            'error': None
-        }
-
-        # Mock get_workflow_status to return workflow details
-        mock_service.get_workflow_status.return_value = {
-            'success': True,
-            'workflow_name': 'test-workflow',
-            'namespace': 'ma',
-            'phase': 'Running',
-            'progress': '1/2',
-            'started_at': '2024-01-01T10:00:00Z',
-            'finished_at': None,
-            'steps': [
-                {'name': 'step1', 'phase': 'Succeeded', 'type': 'Pod', 'started_at': '2024-01-01T10:00:00Z'},
-                {'name': 'approval', 'phase': 'Running', 'type': 'Suspend', 'started_at': '2024-01-01T10:01:00Z'}
-            ],
-            'error': None
-        }
-
-        mock_service.approve_workflow.return_value = {
-            'success': True,
-            'workflow_name': 'test-workflow',
-            'namespace': 'ma',
-            'message': 'Workflow test-workflow resumed successfully',
-            'error': None
-        }
-
-        result = runner.invoke(workflow_cli, ['approve', '--acknowledge'])
+        result = runner.invoke(workflow_cli, ['approve', '*.metadataMigrate'])
 
         assert result.exit_code == 0
-        assert 'Auto-detected workflow' in result.output
-        assert 'resumed successfully' in result.output
-        # Note: output suggestion is not shown when --acknowledge flag is used
+        assert 'Approved 2 gate' in result.output
+        assert mock_approve.call_count == 2
 
+    @patch('console_link.workflow.commands.approve.approve_gate')
+    @patch('console_link.workflow.commands.approve._pending_gate_names')
+    @patch('console_link.workflow.commands.approve.load_k8s_config')
+    def test_approve_command_with_multiple_task_names(self, mock_k8s, mock_list, mock_approve):
+        """Test approve command with multiple task names."""
+        runner = CliRunner()
+
+        mock_list.return_value = ['step1', 'step2', 'step3']
+        mock_approve.return_value = True
+
+        result = runner.invoke(workflow_cli, ['approve', 'step1', 'step3'])
+
+        assert result.exit_code == 0
+        assert 'Approved 2 gate' in result.output
+        assert mock_approve.call_count == 2
+
+    @patch('console_link.workflow.commands.approve._pending_gate_names')
+    @patch('console_link.workflow.commands.approve.load_k8s_config')
+    def test_approve_command_no_matches(self, mock_k8s, mock_list):
+        """Test approve command when key matches no pending gates."""
+        runner = CliRunner()
+
+        mock_list.return_value = ['source.target.backfill']
+
+        result = runner.invoke(workflow_cli, ['approve', 'nonexistent'])
+
+        assert result.exit_code != 0
+        assert "No pending gates match" in result.output
+        assert 'source.target.backfill' in result.output
+
+    @patch('console_link.workflow.commands.approve._pending_gate_names')
+    @patch('console_link.workflow.commands.approve.load_k8s_config')
+    def test_approve_command_no_pending_gates(self, mock_k8s, mock_list):
+        """Test approve command fails when no gates are pending."""
+        runner = CliRunner()
+
+        mock_list.return_value = []
+
+        result = runner.invoke(workflow_cli, ['approve', 'anykey'])
+
+        assert result.exit_code != 0
+        assert 'No pending approval gates' in result.output
+
+    def test_approve_command_missing_task_names(self):
+        """Test approve command fails without required task names."""
+        runner = CliRunner()
+
+        result = runner.invoke(workflow_cli, ['approve'])
+
+        assert result.exit_code != 0
+        assert "Missing argument 'TASK_NAMES...'" in result.output
+
+    @patch('console_link.workflow.commands.submit.delete_workflow')
+    @patch('console_link.workflow.commands.submit.stop_workflow')
+    @patch('console_link.workflow.commands.submit.workflow_exists')
+    @patch('console_link.workflow.commands.submit.load_k8s_config')
     @patch('console_link.workflow.services.script_runner.subprocess.run')
     @patch('console_link.workflow.commands.submit.WorkflowConfigStore')
-    def test_submit_command_with_config_injection(self, mock_store_class, mock_subprocess):
+    def test_submit_command_with_config_injection(
+        self,
+        mock_store_class,
+        mock_subprocess,
+        _mock_k8s,
+        mock_exists,
+        mock_stop,
+        mock_delete,
+    ):
         """Test submit command with parameter injection from config."""
         # Mock subprocess to avoid actual Kubernetes submission
         mock_subprocess.return_value = Mock(
             returncode=0,
             stdout='{"workflow_name": "test-workflow-def", "workflow_uid": "uid-789", "namespace": "ma"}'
         )
+        mock_exists.return_value = False
 
         runner = CliRunner()
 
@@ -279,6 +434,8 @@ class TestWorkflowCLICommands:
         assert 'submitted successfully' in result.output
         # Check for workflow name pattern from test scripts
         assert 'test-workflow-' in result.output
+        mock_stop.assert_not_called()
+        mock_delete.assert_not_called()
 
 
 class TestConfigureCommands:

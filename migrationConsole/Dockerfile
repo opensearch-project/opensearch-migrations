@@ -1,6 +1,6 @@
 ARG BASE_IMAGE=migrations/elasticsearch_client_test_console:latest
 
-# Stage 1: Download and install tools (kafka, kubectl, helm, etcd)
+# Stage 1: Download and install tools (kafka, kubectl, helm)
 FROM ${BASE_IMAGE} AS migration-console-tools
 
 RUN ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/') && \
@@ -12,7 +12,8 @@ RUN ARCH=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/') && \
 
 ARG HELM_VERSION="3.14.0"
 ARG KUBECTL_VERSION="1.32.1"
-ARG KAFKA_VERSION="3.9.1"
+ARG KAFKA_VERSION="3.9.2"
+ARG STERN_VERSION="1.33.1"
 
 # Get kafka distribution and unpack to 'kafka'
 RUN mkdir -p /root/kafka-tools/kafka && \
@@ -24,7 +25,7 @@ RUN mkdir -p /root/kafka-tools/kafka && \
     rm -f /tmp/kafka.tgz && \
     mkdir -p /root/kafka-tools/aws && \
     curl --retry 5 --retry-delay 5 --retry-connrefused -fSL \
-        https://github.com/aws/aws-msk-iam-auth/releases/download/v2.0.3/aws-msk-iam-auth-2.0.3-all.jar \
+        https://github.com/aws/aws-msk-iam-auth/releases/download/v2.3.4/aws-msk-iam-auth-2.3.4-all.jar \
         -o /root/kafka-tools/kafka/libs/msk-iam-auth.jar
 
 # Get kubectl and Helm distributions
@@ -37,14 +38,12 @@ RUN ARCH=$(cat /arch.env) && \
     curl --retry 5 --retry-delay 5 --retry-connrefused -fSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-${ARCH}.tar.gz" | tar -xz && \
     mv linux-${ARCH}/helm /k8s/bin/
 
-# Install etcdctl
+# Install stern - used by 'workflow output -f' for multi-pod log tailing
 RUN ARCH=$(cat /arch.env) && \
-    ETCD_VER=v3.5.21 && \
-    DOWNLOAD_URL=https://github.com/etcd-io/etcd/releases/download && \
-    mkdir -p /etcd/bin && \
-    curl -L ${DOWNLOAD_URL}/${ETCD_VER}/etcd-${ETCD_VER}-linux-${ARCH}.tar.gz | tar -xz && \
-    mv etcd-${ETCD_VER}-linux-${ARCH}/etcdctl /etcd/bin && \
-    rm -rf etcd-${ETCD_VER}-linux-amd64 etcd.tar.gz
+    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL \
+        "https://github.com/stern/stern/releases/download/v${STERN_VERSION}/stern_${STERN_VERSION}_linux_${ARCH}.tar.gz" | tar -xz && \
+    mv stern /k8s/bin/ && \
+    chmod +x /k8s/bin/stern
 
 
 # Stage 2: Main migration console base image with Python environment and scripts
@@ -55,11 +54,11 @@ ENV WORKON_HOME=/
 ENV PIPENV_CUSTOM_VENV_NAME=.venv
 ENV PIPENV_DEFAULT_PYTHON_VERSION=3.11
 ENV PIPENV_MAX_DEPTH=1
+ENV PATH="/.venv/bin:${PATH}"
 
 # Copy tools from previous stage
 COPY --from=migration-console-tools /root/kafka-tools /root/kafka-tools
 COPY --from=migration-console-tools /k8s/bin/ /usr/local/bin
-COPY --from=migration-console-tools /etcd/bin/ /usr/local/bin
 
 RUN kubectl completion bash > /etc/bash_completion.d/kubectl && \
     helm completion bash > /etc/bash_completion.d/helm && \
@@ -79,8 +78,17 @@ RUN dnf install -y  \
         nodejs22-npm \
         bash-completion \
         && \
-        dnf clean all && \
-        rm -rf /var/cache/dnf
+        dnf clean all
+
+# Install mount-s3 for direct S3 bucket mounting (requires SYS_ADMIN capability at runtime)
+RUN MOUNT_S3_VERSION="1.22.2" && \
+    ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi && \
+    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL \
+        "https://s3.amazonaws.com/mountpoint-s3-release/${MOUNT_S3_VERSION}/${ARCH}/mount-s3-${MOUNT_S3_VERSION}-${ARCH}.rpm" \
+        -o /tmp/mount-s3.rpm && \
+    dnf install -y /tmp/mount-s3.rpm && \
+    rm -f /tmp/mount-s3.rpm
 
 COPY setupVimSchemaChecker.sh /tmp/setupVimSchemaChecker.sh
 RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
@@ -118,15 +126,12 @@ WORKDIR /root
 COPY nodeStaging/configProcessor /root/configProcessor
 
 RUN chmod +x /root/configProcessor/*.sh
-ENV WORKFLOW_SCHEMA_FILENAME=/root/.workflowUser.schema.json
 ENV CONFIG_PROCESSOR_DIR=/root/configProcessor
 ENV NODEJS=node-22
-RUN "$NODEJS" "$CONFIG_PROCESSOR_DIR" showSchema > "$WORKFLOW_SCHEMA_FILENAME" && \
-    echo "# yaml-language-server: \$schema=$WORKFLOW_SCHEMA_FILENAME" > "${CONFIG_PROCESSOR_DIR}/sample.yaml" && \
-    "$NODEJS" "$CONFIG_PROCESSOR_DIR" makeSample >> "${CONFIG_PROCESSOR_DIR}/sample.yaml"
 
 COPY nodeStaging/workflowTemplates /root/workflows
-
+COPY workflowConfigToServicesConfig.jq /root/
+ENV WORKFLOW_CONFIG_JQ_SCRIPT=/root/workflowConfigToServicesConfig.jq
 
 # Console setup bash completion and venv for interactive access
 RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh && \
@@ -134,7 +139,6 @@ RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh && \
     echo '. /etc/profile.d/venv.sh' >> ~/.bashrc && \
     echo 'echo Welcome to the Migration Assistant Console' >> ~/.bashrc && \
     echo 'eval "$(register-python-argcomplete cluster_tools)"' >> ~/.bashrc && \
-    echo 'source /.venv/bin/activate' >> ~/.bashrc && \
     echo 'console completion bash 2> /dev/null > /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
     echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo 'PS1="(\\t) \\[\\e[92m\\]migration-console \\[\\e[0m\\](\\w) -> "'>> ~/.bashrc

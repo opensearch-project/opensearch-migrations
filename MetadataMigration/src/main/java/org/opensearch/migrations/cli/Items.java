@@ -9,6 +9,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.commands.JsonOutput;
 import org.opensearch.migrations.metadata.CreationResult;
+import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -26,6 +27,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class Items implements JsonOutput {
     static final String NONE_FOUND_MARKER = "<NONE FOUND>";
+    static final String EMPTY_ITEMS_ERROR = "No migration items found (0 index templates, 0 component templates, "
+        + "0 indexes, 0 aliases). This usually indicates a configuration problem such as an incorrect snapshot, "
+        + "wrong allowlist, or missing source data.";
     private final boolean dryRun;
     @NonNull
     private final List<CreationResult> indexTemplates;
@@ -36,11 +40,23 @@ public class Items implements JsonOutput {
     @NonNull
     private final List<CreationResult> aliases;
     private final String failureMessage;
+    @SuppressWarnings("java:S1170") // Builder.Default fields are instance-level, not static
+    @Builder.Default
+    private final boolean succeedOnEmpty = true;
+
+    public boolean isEmpty() {
+        return indexTemplates.isEmpty() && componentTemplates.isEmpty()
+            && indexes.isEmpty() && aliases.isEmpty();
+    }
 
     public List<String> getAllErrors() {
         var errors = new ArrayList<String>();
         if (failureMessage != null) {
             errors.add(failureMessage);
+        }
+
+        if (isEmpty() && !succeedOnEmpty) {
+            errors.add(EMPTY_ITEMS_ERROR);
         }
 
         Stream.of(indexTemplates, componentTemplates, indexes, aliases)
@@ -132,6 +148,20 @@ public class Items implements JsonOutput {
                 ? result.getException().getMessage()
                 : result.getException().toString();
             sb.append(": " + exceptionDetail);
+        }
+
+        if (result.getFailureType() == CreationFailureType.INDEX_ALREADY_EXISTS) {
+            sb.append(System.lineSeparator())
+              .append(Format.indentToLevel(3))
+              .append("To resolve, you can either:")
+              .append(System.lineSeparator())
+              .append(Format.indentToLevel(3))
+              .append("  1. Remove conflicting indices on the target cluster with: ")
+              .append("console clusters clear-indices --cluster target")
+              .append(System.lineSeparator())
+              .append(Format.indentToLevel(3))
+              .append("  2. Migrate only specific indices with: ")
+              .append("--index-allowlist <index1,index2,...>");
         }
 
         return sb.toString();

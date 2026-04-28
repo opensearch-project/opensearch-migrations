@@ -2,8 +2,9 @@ import {z} from "zod";
 import {
     COMPLETE_SNAPSHOT_CONFIG,
     DEFAULT_RESOURCES,
-    METADATA_OPTIONS,
-    NAMED_SOURCE_CLUSTER_CONFIG,
+    ARGO_METADATA_OPTIONS,
+    ARGO_METADATA_WORKFLOW_OPTION_KEYS,
+    NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
     NAMED_TARGET_CLUSTER_CONFIG,
     S3_REPO_CONFIG
 } from "@opensearch-migrations/schemas";
@@ -27,18 +28,19 @@ import {
     getApprovalMap,
     getSourceTargetPathAndSnapshotAndMigrationIndex
 } from "./commonUtils/configContextPathConstructors";
+import {ResourceManagement} from "./resourceManagement";
 
 const COMMON_METADATA_PARAMETERS = {
-    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({ description:
-            "Snapshot storage details (region, endpoint, etc)"}),
-    sourceConfig: defineRequiredParam<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>(),
+    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({
+        description: "Snapshot storage details (region, endpoint, etc)"
+    }),
+    sourceLabel: defineRequiredParam<string>(),
+    sourceVersion: defineRequiredParam<string>(),
     targetConfig: defineRequiredParam<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
+    migrationLabel: defineRequiredParam<string>(),
+    crdName: defineRequiredParam<string>(),
+    crdUid: defineRequiredParam<string>(),
     ...makeRequiredImageParametersForKeys(["MigrationConsole"])
-};
-
-const IDENTIFIER_PARAMETERS = {
-    perSnapshotName: defineRequiredParam<string>(),
-    perMigrationName: defineRequiredParam<string>()
 };
 
 export function makeRepoParamDict(
@@ -58,50 +60,81 @@ export function makeRepoParamDict(
         expr.makeDict({
             "s3RepoUri": expr.get(repoConfig, "s3RepoPathUri"),
             "s3Region": expr.get(repoConfig, "awsRegion"),
-            ...(includes3LocalDir ? { "s3LocalDir": expr.literal("/tmp") } : {})
+            ...(includes3LocalDir ? {"s3LocalDir": expr.literal("/tmp")} : {})
         })
     );
 }
 
-function makeParamsDict(
-    sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
-    targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
-    snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
-    options: BaseExpression<Serialized<z.infer<typeof METADATA_OPTIONS>>>
+function makeSnapshotParamsDict(
+    sourceVersion: BaseExpression<string>,
+    snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>
 ) {
     return expr.mergeDicts(
-        expr.mergeDicts(
-            makeTargetParamDict(targetConfig),
-             // TODO - tighten the type on mergeDicts - it allowed this to go through w/out first calling fromJSON
-            expr.omit(expr.deserializeRecord(options), "loggingConfigurationOverrideConfigMap")
-        ),
-        expr.mergeDicts(
-            expr.makeDict({
-                "snapshotName": expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
-                "sourceVersion": expr.get(expr.deserializeRecord(sourceConfig), "version")
-            }),
-            makeRepoParamDict(
-                expr.omit(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), "s3RoleArn"),
-                true)
-        )
+        expr.makeDict({
+            "snapshotName": expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
+            "sourceVersion": sourceVersion
+        }),
+        makeRepoParamDict(
+            expr.omit(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), "s3RoleArn"),
+            true)
     );
 }
 
+function makeSourceHostParamsDict(
+    sourceVersion: BaseExpression<string>,
+    sourceEndpoint: BaseExpression<string>
+) {
+    return expr.makeDict({
+        "sourceHost": sourceEndpoint,
+        "sourceVersion": sourceVersion
+    });
+}
+
+function makeParamsDict(
+    sourceVersion: BaseExpression<string>,
+    targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
+    snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
+    options: BaseExpression<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>,
+    sourceEndpoint?: BaseExpression<string>
+) {
+    const targetAndOptions = expr.mergeDicts(
+        makeTargetParamDict(targetConfig),
+        expr.omit(expr.deserializeRecord(options), ...ARGO_METADATA_WORKFLOW_OPTION_KEYS)
+    );
+
+    const snapshotParams = makeSnapshotParamsDict(sourceVersion, snapshotConfig);
+
+    const base = expr.mergeDicts(targetAndOptions, snapshotParams);
+
+    // When sourceEndpoint is non-empty at runtime, add sourceHost param.
+    // MetadataMigration CLI prioritizes --source-host over snapshot params.
+    if (sourceEndpoint) {
+        return expr.mergeDicts(base,
+            expr.ternary(
+                expr.isEmpty(sourceEndpoint),
+                expr.makeDict({}),
+                makeSourceHostParamsDict(sourceVersion, sourceEndpoint)
+            )
+        );
+    }
+
+    return base;
+}
+
 function makeApprovalCheck<
-    IPR extends InputParamsToExpressions<typeof COMMON_METADATA_PARAMETERS, InputParameterSource> &
-        InputParamsToExpressions<typeof IDENTIFIER_PARAMETERS, InputParameterSource>
+    IPR extends InputParamsToExpressions<typeof COMMON_METADATA_PARAMETERS, InputParameterSource>
 >(
     inputs: IPR,
     skipApprovalMap: BaseExpression<any>,
     ...innerSkipFlags: string[]
 ) {
     return new FunctionExpression<boolean, any, any, "complicatedExpression">("sprig.dig", [
-        ...getSourceTargetPathAndSnapshotAndMigrationIndex(inputs.sourceConfig,
+        ...getSourceTargetPathAndSnapshotAndMigrationIndex(inputs.sourceLabel,
             inputs.targetConfig,
-            inputs.perSnapshotName,
-            inputs.perMigrationName
+            expr.jsonPathStrict(inputs.snapshotConfig, "label"),
+            inputs.migrationLabel
         ),
-        ...(innerSkipFlags !== undefined ? innerSkipFlags.map(f=>expr.literal(f)) : []),
+        ...(innerSkipFlags !== undefined ? innerSkipFlags.map(f => expr.literal(f)) : []),
         expr.literal(false),
         expr.deserializeRecord(skipApprovalMap)
     ]);
@@ -115,15 +148,28 @@ export const MetadataMigration = WorkflowBuilder.create({
     .addParams(CommonWorkflowParameters)
 
 
-    .addTemplate("runMetadata", t=>t
-        .addRequiredInput("commandMode", typeToken<"evaluate"|"migrate">())
-        .addInputsFromRecord(COMMON_METADATA_PARAMETERS)
-        .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof METADATA_OPTIONS>>())
+    .addTemplate("runMetadata", t => t
+        .addRequiredInput("commandMode", typeToken<"evaluate" | "migrate">())
+        .addRequiredInput("sourceVersion", typeToken<string>())
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
+        .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof ARGO_METADATA_OPTIONS>>())
+        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addRequiredInput("targetK8sLabel", typeToken<string>())
+        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
+        .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
+        .addOptionalInput("taskK8sLabel", c => expr.ternary(
+            expr.equals(c.inputParameters.commandMode, expr.literal("evaluate")),
+            expr.literal("metadataEvaluate"),
+            expr.literal("metadataMigrate")
+        ))
 
-        .addContainer(b=>b
+        .addContainer(b => b
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addVolumesFromRecord({
-                'test-creds':  {
+                'test-creds': {
                     configMap: {
                         name: expr.literal("localstack-test-creds"),
                         optional: true
@@ -138,53 +184,102 @@ export const MetadataMigration = WorkflowBuilder.create({
                     expr.literal("/config/credentials/configuration"),
                     expr.literal(""))
             )
+            .addEnvVar("JDK_JAVA_OPTIONS",
+                expr.dig(expr.deserializeRecord(b.inputs.metadataMigrationConfig), ["jvmArgs"], "")
+            )
             .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(b.inputs.targetConfig)))
-            .addResources(DEFAULT_RESOURCES.MIGRATION_CONSOLE_CLI)
+            .addResources(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI)
             .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
             .addArgs([
                 b.inputs.commandMode,
                 expr.literal("---INLINE-JSON"),
                 expr.asString(expr.serialize(
-                    makeParamsDict(b.inputs.sourceConfig, b.inputs.targetConfig, b.inputs.snapshotConfig, b.inputs.metadataMigrationConfig
+                    makeParamsDict(b.inputs.sourceVersion, b.inputs.targetConfig, b.inputs.snapshotConfig, b.inputs.metadataMigrationConfig,
+                        b.inputs.sourceEndpoint
                     )
                 ))
             ])
+            .addPodMetadata(({inputs}) => ({
+                labels: {
+                    'migrations.opensearch.org/source': inputs.sourceK8sLabel,
+                    'migrations.opensearch.org/target': inputs.targetK8sLabel,
+                    'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
+                    'migrations.opensearch.org/from-snapshot-migration': inputs.fromSnapshotMigrationK8sLabel,
+                    'migrations.opensearch.org/task': inputs.taskK8sLabel
+                }
+            }))
         )
     )
 
 
-    .addSuspendTemplate("approveEvaluate")
-    .addSuspendTemplate("approveMigrate")
+    .addTemplate("approveEvaluate", t => t
+        .addRequiredInput("name", typeToken<string>())
+        .addSteps(b => b
+            .addStep("waitForApproval", ResourceManagement, "waitForApproval", c =>
+                c.register({resourceName: b.inputs.name}))
+        )
+    )
+    .addTemplate("approveMigrate", t => t
+        .addRequiredInput("name", typeToken<string>())
+        .addSteps(b => b
+            .addStep("waitForApproval", ResourceManagement, "waitForApproval", c =>
+                c.register({resourceName: b.inputs.name}))
+        )
+    )
 
 
     .addTemplate("migrateMetaData", t => t
-        .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof METADATA_OPTIONS>>())
+        .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof ARGO_METADATA_OPTIONS>>())
+        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addInputsFromRecord(COMMON_METADATA_PARAMETERS)
-        .addInputsFromRecord(IDENTIFIER_PARAMETERS)
         .addInputsFromRecord(
             getApprovalMap(t.inputs.workflowParameters.approvalConfigMapName, typeToken<{}>()))
-        .addOptionalInput("skipEvaluateApproval", c=>
+        .addOptionalInput("skipEvaluateApproval", c =>
             makeApprovalCheck(c.inputParameters, c.inputParameters.skipApprovalMap, "evaluateMetadata"))
-        .addOptionalInput("skipMigrateApproval", c=>
+        .addOptionalInput("skipMigrateApproval", c =>
             makeApprovalCheck(c.inputParameters, c.inputParameters.skipApprovalMap, "migrateMetadata"))
+        .addOptionalInput("approvalNamePrefix", c =>
+            expr.concat(
+                c.inputParameters.sourceLabel, expr.literal("."),
+                expr.jsonPathStrict(c.inputParameters.targetConfig, "label"), expr.literal("."),
+                expr.jsonPathStrict(c.inputParameters.snapshotConfig, "label"), expr.literal("."),
+                c.inputParameters.migrationLabel, expr.literal(".")
+            )
+        )
 
         .addSteps(b => b
             .addStep("evaluateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    commandMode: "evaluate"
+                    commandMode: "evaluate",
+                    sourceK8sLabel: b.inputs.sourceLabel,
+                    targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
+                    snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
+                    fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
                 })
             )
-            .addStep("approveEvaluate", INTERNAL, "approveEvaluate",
-                { when: expr.not(expr.cast(b.inputs.skipEvaluateApproval).to<boolean>()) })
+            .addStep("approveEvaluate", INTERNAL, "approveEvaluate", c =>
+                c.register({
+                    "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("evaluatemetadata"))
+                }),
+                {when: expr.not(b.inputs.skipEvaluateApproval)}
+            )
             .addStep("migrateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    commandMode: "migrate"
+                    commandMode: "migrate",
+                    sourceK8sLabel: b.inputs.sourceLabel,
+                    targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
+                    snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label"),
+                    fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel
                 })
             )
-            .addStep("approveMigrate", INTERNAL, "approveMigrate",
-                { when:  { templateExp: expr.not(expr.deserializeRecord(b.inputs.skipMigrateApproval))}})
+            .addStep("approveMigrate", INTERNAL, "approveMigrate", c =>
+                c.register({
+                    "name": expr.concat(b.inputs.approvalNamePrefix, expr.literal("migratemetadata"))
+                }),
+                {when: expr.not(b.inputs.skipMigrateApproval)}
+            )
         )
     )
 

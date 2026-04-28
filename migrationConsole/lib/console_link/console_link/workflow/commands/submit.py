@@ -1,18 +1,21 @@
-"""Submit command for workflow CLI - submits workflows to Argo Workflows."""
+"""Submit command for workflow CLI - submits workflows to Argo Workflows.
+
+If a workflow already exists, it is stopped, deleted, and resubmitted while
+preserving any migration CRD-owned resources.
+"""
 
 import logging
-import os
+import subprocess
 import click
 
-from ..models.utils import ExitCode
+from ..models.utils import ExitCode, load_k8s_config
 from ..models.workflow_config_store import WorkflowConfigStore
 from ..services.workflow_service import WorkflowService
 from ..services.script_runner import ScriptRunner
+from .argo_utils import workflow_exists, stop_workflow, delete_workflow, wait_until_workflow_deleted
+from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 
 logger = logging.getLogger(__name__)
-
-# Terminal workflow phases
-ENDING_PHASES = ["Succeeded", "Failed", "Error", "Stopped", "Terminated"]
 
 
 def _handle_workflow_wait(
@@ -21,15 +24,7 @@ def _handle_workflow_wait(
         workflow_name: str,
         timeout: int,
         wait_interval: int):
-    """Handle waiting for workflow completion.
-
-    Args:
-        service: WorkflowService instance
-        namespace: Kubernetes namespace
-        workflow_name: Name of workflow
-        timeout: Timeout in seconds
-        wait_interval: Interval between checks
-    """
+    """Handle waiting for workflow completion."""
     click.echo(f"\nWaiting for workflow to complete (timeout: {timeout}s)...")
 
     try:
@@ -50,6 +45,31 @@ def _handle_workflow_wait(
         click.echo(f"Workflow {workflow_name} is still running", err=True)
     except Exception as e:
         click.echo(f"\nError monitoring workflow: {str(e)}", err=True)
+
+
+def _remove_existing_workflow(workflow_name, namespace):
+    """Stop and delete an existing workflow if one is found. Returns True if removed."""
+    if not workflow_exists(namespace, workflow_name):
+        return False
+
+    click.echo(f"Existing workflow '{workflow_name}' found; replacing...")
+    if stop_workflow(namespace, workflow_name):
+        click.echo("  Stopped")
+    else:
+        click.echo("  Could not stop (may already be finished)")
+
+    if delete_workflow(namespace, workflow_name):
+        click.echo("  Deleted")
+    else:
+        click.echo("  Could not delete")
+        return True
+
+    if not wait_until_workflow_deleted(namespace, workflow_name):
+        raise click.ClickException(
+            f"Timed out waiting for workflow '{workflow_name}' to be deleted"
+        )
+
+    return True
 
 
 @click.command(name="submit")
@@ -81,21 +101,18 @@ def _handle_workflow_wait(
     default='default',
     help='Configuration session name to load parameters from (default: default)'
 )
+@click.option(
+    '--workflow-name',
+    default=DEFAULT_WORKFLOW_NAME,
+    shell_complete=get_workflow_completions,
+    help='Name of the workflow to replace if it already exists'
+)
 @click.pass_context
-def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
+def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workflow_name):
     """Submit a migration workflow using the config processor.
 
-    This command submits a migration workflow by:
-    1. Loading the configuration from the specified session
-    2. Initializing the workflow state in etcd
-    3. Submitting the workflow to Kubernetes via the config processor script
-
-    The workflow is created using the actual config processor and submission scripts
-    located in CONFIG_PROCESSOR_DIR (default: /root/configProcessor).
-
-    Environment variables:
-        - CONFIG_PROCESSOR_DIR: Path to config processor (default: /root/configProcessor)
-        - ETCD_ENDPOINTS: etcd endpoints (default: http://etcd.{namespace}.svc.cluster.local:2379)
+    If a workflow already exists, it is automatically stopped, deleted, and
+    resubmitted while preserving existing CRD-owned resources.
 
     Example:
         workflow submit
@@ -114,29 +131,20 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
     click.echo("NOT checking if all secrets have been created.  Run `workflow configure edit` to confirm")
 
     try:
-        # Initialize ScriptRunner
+        load_k8s_config()
         runner = ScriptRunner()
 
-        # Get config data as YAML
-        config_yaml = config.to_yaml()
-
-        # Get etcd_endpoints from environment variable or use default
-        etcd_endpoints = os.getenv('ETCD_ENDPOINTS')
-        if not etcd_endpoints:
-            etcd_endpoints = f"http://etcd.{namespace}.svc.cluster.local:2379"
+        config_yaml = config.raw_yaml
 
         click.echo(f"Initializing workflow from session: {session}")
+        _remove_existing_workflow(workflow_name, namespace)
 
-        # Step 2: Submit workflow to Kubernetes
         click.echo(f"Submitting workflow to namespace: {namespace}")
         try:
-            # Construct arguments for the submission script
-            args = [
-                f"--prefix {namespace}",
-                f"--etcd-endpoints {etcd_endpoints}"
-            ]
-
-            submit_result = runner.submit_workflow(config_yaml, args)
+            submit_result = runner.submit_workflow(
+                config_yaml,
+                ["--workflow-name", workflow_name],
+            )
 
             workflow_name = submit_result.get('workflow_name', 'unknown')
 
@@ -144,9 +152,11 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
             click.echo(f"  Name: {workflow_name}")
             click.echo(f"  Namespace: {namespace}")
 
+            for warning in submit_result.get('warnings', []):
+                click.echo(f"\n{warning}", err=True)
+
             logger.info(f"Workflow {workflow_name} submitted successfully with namespace {namespace}")
 
-            # Wait for workflow completion if requested
             if wait:
                 service = WorkflowService()
                 _handle_workflow_wait(service, namespace, workflow_name, timeout, wait_interval)
@@ -156,12 +166,15 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session):
             click.echo("\nEnsure CONFIG_PROCESSOR_DIR is set correctly and contains:", err=True)
             click.echo("  - createMigrationWorkflowFromUserConfiguration.sh", err=True)
             ctx.exit(ExitCode.FAILURE.value)
+        except subprocess.CalledProcessError as e:
+            click.echo(f"Script failed with exit code {e.returncode}", err=True)
+            if e.stderr:
+                click.echo(e.stderr, err=True)
+            ctx.exit(ExitCode.FAILURE.value)
         except Exception as e:
             click.echo(f"Error submitting workflow: {str(e)}", err=True)
-            logger.exception("Workflow submission failed")
             ctx.exit(ExitCode.FAILURE.value)
 
     except Exception as e:
-        logger.exception(f"Unexpected error submitting workflow: {e}")
         click.echo(f"Error: {str(e)}", err=True)
         ctx.exit(ExitCode.FAILURE.value)

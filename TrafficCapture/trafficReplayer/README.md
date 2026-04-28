@@ -166,6 +166,152 @@ can be augmented however it may choose.
 ## Authorization Header for Replayed Requests
 
 There is a level of precedence that will determine which or if any Auth header should be added to outgoing Replayer requests, which is listed below.
-1. If the user provides an explicit auth header option to the Replayer, such as providing a static value auth header(--auth-header-value), this mechanism will be used for the auth header of outgoing requests. The options can be found as Parameters [here](src/main/java/org/opensearch/migrations/replay/TrafficReplayer.java)
+1. If the user provides an explicit auth option to the Replayer, such as `--target-username`/`--target-password` for basic auth, `--sigv4-auth-header-service-region` for SigV4, or `--remove-auth-header` to strip auth, this mechanism will be used for the auth header of outgoing requests. The options can be found as Parameters [here](src/main/java/org/opensearch/migrations/replay/TrafficReplayer.java)
 2. If the user provides no auth header option and incoming captured requests have an auth header, this auth header will try to be reused for outgoing requests. **Note**: Reusing existing auth headers has a certain level of risk. Reusing Basic Auth headers may work without issue, but reusing SigV4 headers likely won't unless the content AND headers are NOT reformatted
 3. If the user provides no auth header option and incoming captured requests have no auth header, then no auth header will be used for outgoing requests
+
+## Diagnostic Dump Modes
+
+In addition to replaying traffic, the replayer binary supports two diagnostic modes that print
+summaries of captured traffic without sending anything to a target cluster. These are useful for
+inspecting what the capture proxy recorded and diagnosing issues before or during a replay.
+
+Both modes are invoked via the `--mode` flag and reuse the same Kafka/file source configuration
+as the replayer (brokers, topic, MSK auth, property file, or `-i` for file input).
+No target URI is required.
+
+**Dump modes do not use a consumer group.** They use Kafka's `assign()` API to read
+partitions directly, so they will never interfere with a running replayer's committed offsets.
+The `--kafka-traffic-group-id` parameter is rejected in dump modes.
+
+#### Offset and time windowing
+
+Dump modes support optional start/end bounds to inspect a slice of the topic:
+
+- `--start-offset N` — begin reading at offset N on every partition (default: beginning)
+- `--end-offset N` — stop after passing offset N on every partition
+- `--start-time EPOCH_SECONDS` — begin at the earliest record at or after this timestamp
+  (uses Kafka's `offsetsForTimes`)
+- `--end-time EPOCH_SECONDS` — stop after the first record whose timestamp exceeds this value
+
+Start/end offset and start/end time are mutually exclusive (offsets take precedence if both
+are provided). When neither is specified, the dump reads from the beginning of the topic to
+the current end.
+
+### Mode: `dump-raw`
+
+Prints one line per TrafficStream record directly from Kafka/file, with no cross-record
+aggregation. Each line shows the observations within that single record.
+
+**Usage:**
+```
+traffic-replayer --mode dump-raw \
+  --kafka-traffic-brokers kafka:9092 \
+  --kafka-traffic-topic my-topic \
+  [--start-time 1709596300] [--end-time 1709596400] \
+  [--preview-bytes-read 64] \
+  [--preview-bytes-write 64]
+```
+
+**Output format:**
+```
+[1709596356-1709596357] p:0 o:1234 ncs:node1.conn123.5: OPEN W[110]: GET /cat/indic... R[56]: HTTP/1.1 200 OK... EOM CLOSE
+```
+
+Fields:
+- `[start-end]` — min/max epoch-seconds of observation timestamps within this record
+- `p:0 o:1234` — Kafka partition and offset (omitted for file input)
+- `ncs:node1.conn123.5` — nodeId.connectionId.streamIndex (matches log format from
+  `TrafficChannelKeyFormatter`)
+- Observation tokens:
+  - `OPEN` — ConnectObservation or BindObservation
+  - `CLOSE` — CloseObservation
+  - `DISCONNECT` — DisconnectObservation
+  - `EOM` — EndOfMessageIndication (marks the boundary between request and response)
+  - `DROPPED` — RequestIntentionallyDropped
+  - `EXCEPTION` — ConnectionExceptionObservation
+  - `R[size]: preview...` — Coalesced consecutive Read + ReadSegment observations. Size is the
+    total bytes across the run. Preview shows the first `--preview-bytes-read` bytes (default 64).
+  - `W[size]: preview...` — Same for Write + WriteSegment observations, controlled by
+    `--preview-bytes-write` (default 64).
+
+Consecutive reads (Read/ReadSegment) are coalesced into a single `R[totalSize]` token.
+Consecutive writes (Write/WriteSegment) are coalesced into a single `W[totalSize]` token.
+Any non-read/write observation breaks the run.
+
+**Example analysis with unix tools:**
+
+Note: a single TrafficStream record can contain multiple EOM markers (keep-alive connections),
+so use `grep -o ... | wc -l` to count all occurrences rather than `grep -c` which counts lines.
+
+```bash
+# Count request/response boundaries
+grep -o 'EOM' dump.txt | wc -l
+
+# Count opens and closes
+grep -o 'OPEN' dump.txt | wc -l
+grep -o 'CLOSE' dump.txt | wc -l
+
+# Connections that opened but didn't close within the record
+grep 'OPEN' dump.txt | grep -v 'CLOSE' | wc -l
+
+# Records with reads (requests) or writes (responses)
+grep -c 'R\[' dump.txt
+grep -c 'W\[' dump.txt
+
+# Partial captures — reads with no EOM (request started but didn't finish in this record)
+grep 'R\[' dump.txt | grep -v 'EOM' | wc -l
+```
+
+### Mode: `dump-http`
+
+Runs the full HTTP transaction accumulator to reconstruct request/response pairs, then prints
+one line per request and one line per response as they become available.
+
+**Usage:**
+```
+traffic-replayer --mode dump-http \
+  --kafka-traffic-brokers kafka:9092 \
+  --kafka-traffic-topic my-topic \
+  [-t 360]
+```
+
+The `-t` (packet timeout) flag controls how long the accumulator waits for a connection to
+complete before expiring it, same as in replay mode.
+
+**Output format:**
+```
+[1709596356-1709596357] p:0 o:1234 s:5 nc:node1.conn123: REQ GET /_cat/indices HTTP/1.1
+[1709596358-1709596359] p:0 o:1234 s:5 nc:node1.conn123: RSP HTTP/1.1 200 OK
+[1709596360-1709596360] p:0 o:1240 s:8 nc:node1.conn456: EXPIRED (ACCUMULATING_READS)
+[1709596361-1709596361] p:0 o:1242 s:9 nc:node1.conn789: CLOSED (2 requests completed)
+```
+
+Fields:
+- `[start-end]` — epoch-seconds of the first and last packet in the request or response
+- `p:0 o:1234 s:5` — Kafka partition, offset, and TrafficStream index
+- `nc:node1.conn123` — nodeId.connectionId
+- `REQ` line — first line of the HTTP request (extracted from accumulated bytes)
+- `RSP` line — first line of the HTTP response
+- `EXPIRED` — connection timed out before completing; shows the accumulator state at expiry
+- `CLOSED` — connection closed normally; shows how many requests were completed
+
+### Implementation notes
+
+- Both modes bypass the replay engine, connection pool, transformers, and backpressure
+  (`BlockingTrafficSource`). They use `TrafficCaptureSourceFactory.createUnbufferedTrafficCaptureSource`
+  directly.
+- For Kafka sources, dump modes create a bare `KafkaConsumer` using `assign()` instead of
+  `subscribe()`. This avoids all group coordination and offset tracking. Partitions are
+  discovered via `partitionsFor(topic)`, then seeked to the requested start position.
+  Offset windowing uses `seek()`; time windowing uses `offsetsForTimes()`.
+- `dump-raw` is implemented in `TrafficStreamDumper` — a standalone class with no dependency on
+  the accumulator. It iterates observations from each `TrafficStream` record and formats output.
+- `dump-http` is implemented in `HttpTransactionDumper` — a custom `AccumulationCallbacks`
+  implementation wired into `CapturedTrafficToHttpTransactionAccumulator`. It reuses the existing
+  `pullCaptureFromSourceToAccumulator` loop from `TrafficReplayerCore` but with no replay
+  machinery.
+- The `--mode` parameter is added to `TrafficReplayer.Parameters`. The `targetUriString` positional
+  parameter is only required when mode is `replay` (the default). Dump modes branch in
+  `TrafficReplayer.main()` after creating the traffic source, skipping all replay setup.
+- Output goes to stdout. Log messages go to stderr (via slf4j, same as existing behavior).

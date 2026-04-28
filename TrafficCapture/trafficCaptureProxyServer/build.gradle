@@ -8,33 +8,14 @@ plugins {
     id 'com.google.cloud.tools.jib'
 }
 
-configurations {
-    // This is included to load certs and keys.  Doing it again isn't currently worth it.
-    opensearchSecurityPlugin
-}
-
 dependencies {
-    def openSearch = '2.19.4'
-    implementation "org.opensearch:opensearch:${openSearch}"
-    implementation "org.opensearch:opensearch-core:${openSearch}"
-    implementation "org.opensearch:opensearch-common:${openSearch}"
-    implementation "org.opensearch.plugin:opensearch-security:${openSearch}.0"
-    opensearchSecurityPlugin "org.opensearch.plugin:opensearch-security:${openSearch}.0"
-    implementation files(zipTree("$configurations.opensearchSecurityPlugin.singleFile").matching {
-        include "*.jar"
-        exclude "slf*.jar"
-        exclude "netty*.jar"
-        exclude "google-java-format-*.jar"
-    })
-
     implementation project(':TrafficCapture:captureOffloader')
     implementation project(':TrafficCapture:nettyWireLogging')
     implementation project(':TrafficCapture:captureKafkaOffloader')
     implementation project(':coreUtilities')
 
     implementation libs.protobuf.java
-    implementation libs.jackson.core
-    implementation libs.jackson.databind
+    implementation libs.kafka.clients
     implementation libs.disruptor
     implementation libs.netty.all
     implementation libs.log4j.api
@@ -68,111 +49,51 @@ application {
     mainClass = 'org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy'
 }
 
-import org.gradle.api.DefaultTask
-import org.gradle.api.tasks.InputFiles
-import org.gradle.api.tasks.TaskAction
-import groovy.io.FileType
-import java.util.zip.ZipInputStream
+def certDir = layout.buildDirectory.dir("docker/usr/share/captureProxy/config")
 
-// Custom task type
-class VerifyCompatibilityWithJDK11Task extends DefaultTask {
-    @InputFiles
-    File compiledClassesDir = new File("${project.buildDir}/classes/java/main")
+tasks.register("generateSelfSignedCerts") {
+    description = "Generate self-signed PEM certificates for the capture proxy default TLS config"
+    outputs.dir(certDir)
+    doLast {
+        def outDir = certDir.get().asFile
+        outDir.mkdirs()
+        def caFile = new File(outDir, "ca.pem")
+        if (caFile.exists()) return
 
-    @InputFiles
-    FileTree compileClasspath = project.configurations.compileClasspath.asFileTree
+        def ksFile = File.createTempFile("proxy-ks", ".p12")
+        ksFile.delete() // keytool needs a non-existent path
+        ksFile.deleteOnExit()
+        def pass = "changeit"
 
-    @InputFiles
-    FileTree runtimeClasspath = project.configurations.runtimeClasspath.asFileTree
-
-    @Internal
-    boolean isCompatible = true
-
-    @Internal
-    HashSet analyzedFiles = new HashSet<File>()
-
-    int getMajorVersion(InputStream inputStream) {
-        // Skip first 6 bytes (magic and minor version)
-        inputStream.skip(6)
-        int majorVersion = (inputStream.read() << 8) | inputStream.read()
-        inputStream.close()
-        return majorVersion
-    }
-
-    void processClassFile(InputStream inputStream, String name, String source) {
-        int majorVersion = getMajorVersion(inputStream)
-        if (majorVersion > 55) {
-            isCompatible = false
-            println "Incompatible class file in ${source}: ${name} (Java major version ${majorVersion})"
+        // Generate self-signed cert via keytool (ships with every JDK)
+        def keytool = "${System.getProperty('java.home')}/bin/keytool"
+        exec {
+            commandLine keytool, "-genkeypair", "-alias", "proxy",
+                "-keyalg", "RSA", "-keysize", "4096",
+                "-validity", "36500", "-dname", "CN=localhost",
+                "-keystore", ksFile.absolutePath, "-storetype", "PKCS12",
+                "-storepass", pass, "-keypass", pass
         }
-    }
 
-    void analyzeCompiledClasses() {
-        if (compiledClassesDir.exists()) {
-            println "Analyzing compiled classes in ${compiledClassesDir}..."
-            compiledClassesDir.eachFileRecurse(FileType.FILES) { File file ->
-                if (file.name.endsWith('.class')) {
-                    file.withInputStream { InputStream inputStream ->
-                        processClassFile(inputStream, file.name, compiledClassesDir.toString())
-                    }
-                }
-            }
-        } else {
-            println "No compiled classes found in ${compiledClassesDir}."
-        }
-    }
+        // Extract PEM via Java APIs (no openssl needed)
+        def ks = java.security.KeyStore.getInstance("PKCS12")
+        ks.load(ksFile.newInputStream(), pass.toCharArray())
+        def cert = ks.getCertificate("proxy")
+        def key = ks.getKey("proxy", pass.toCharArray())
+        def enc = java.util.Base64.getMimeEncoder(64, "\n".bytes)
 
-    void analyzeDependencies(FileTree classpathFiles) {
-        println "\nAnalyzing dependencies..."
-        classpathFiles.files.each { File dependency ->
-            if (dependency.name.endsWith(".jar") && !analyzedFiles.contains(dependency)) {
-                analyzedFiles.add(dependency)
-                def zipStream = new ZipInputStream(new FileInputStream(dependency))
-                def entry
-                while ((entry = zipStream.nextEntry) != null) {
-                    if (entry.name.endsWith(".class")) {
-                        // If this is a multi-release jar entry and its version is above 11, skip it.
-                        if (entry.name.startsWith("META-INF/versions/")) {
-                            def parts = entry.name.split("/")
-                            if (parts.size() >= 3 && parts[2].isInteger()) {
-                                def versionNumber = parts[2].toInteger()
-                                if (versionNumber > 11) {
-                                    continue
-                                }
-                            }
-                        }
-                        // Copy the entry contents to a temporary file and process it.
-                        File tempFile = File.createTempFile("class", ".tmp")
-                        tempFile.deleteOnExit()
-                        tempFile.withOutputStream { os -> os << zipStream }
-                        tempFile.withInputStream { InputStream inputStream ->
-                            processClassFile(inputStream, entry.name, dependency.name)
-                        }
-                    }
-                }
-                zipStream.close()
-            }
-        }
-    }
-
-    @TaskAction
-    void verify() {
-        analyzeCompiledClasses()
-        analyzeDependencies(runtimeClasspath)
-
-        if (!isCompatible) {
-            throw new GradleException("Incompatible class files detected! Ensure all classes are compatible with JDK 11 (major version ≤ 55).")
-        }
+        def certPem = "-----BEGIN CERTIFICATE-----\n${enc.encodeToString(cert.encoded)}\n-----END CERTIFICATE-----\n"
+        caFile.text = certPem
+        new File(outDir, "pub.pem").text = certPem
+        new File(outDir, "key.pem").text = "-----BEGIN PRIVATE KEY-----\n${enc.encodeToString(key.encoded)}\n-----END PRIVATE KEY-----\n"
+        ksFile.delete()
     }
 }
 
-tasks.register("verifyCompatibilityWithJDK11", VerifyCompatibilityWithJDK11Task) {
-    group = "verification"
-    description = "Verify Java major versions of compiled classes and dependencies for compatibility with JDK 11."
-    dependsOn tasks.named("assemble")
-}
+tasks.named("classes") { dependsOn("generateSelfSignedCerts") }
 
-// Add class version verification to slowTest
-tasks.named("slowTest") {
-    finalizedBy("verifyCompatibilityWithJDK11")
+
+tasks.withType(Test).configureEach {
+    // Allow lenient line parsing for compatibility with older clients and tests
+    systemProperty 'io.netty.handler.codec.http.defaultStrictLineParsing', false
 }

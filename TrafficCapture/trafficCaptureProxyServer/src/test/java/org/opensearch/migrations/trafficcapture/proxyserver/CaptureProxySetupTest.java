@@ -1,9 +1,7 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.util.List;
-import java.util.Map;
+import java.net.URI;
 import java.util.Properties;
 
 import org.apache.kafka.clients.CommonClientConfigs;
@@ -18,7 +16,6 @@ import static org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfi
 public class CaptureProxySetupTest {
 
     public static final String kafkaBrokerString = "invalid:9092";
-    public static final String TLS_PROTOCOLS_KEY = "plugins.security.ssl.http.enabled_protocols";
 
     @Test
     public void testBuildKafkaPropertiesBaseCase() throws IOException {
@@ -44,6 +41,37 @@ public class CaptureProxySetupTest {
             props.get(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG)
         );
 
+    }
+
+    @Test
+    public void testBuildKafkaPropertiesWithNormalizedKafkaFlagNames() throws IOException {
+        CaptureProxy.Parameters parameters = CaptureProxy.parseArgs(
+            new String[] {
+                "--destinationUri",
+                "invalid:9200",
+                "--listenPort",
+                "80",
+                "--kafkaBrokers",
+                kafkaBrokerString,
+                "--kafkaPropertyFile",
+                "src/test/resources/simple-kafka.properties",
+                "--kafkaAuthType",
+                "msk-iam" }
+        );
+        Properties props = buildKafkaProperties(parameters.kafkaParameters);
+
+        Assertions.assertEquals(kafkaBrokerString, props.get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG));
+        Assertions.assertEquals("SASL_SSL", props.get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
+        Assertions.assertEquals("212", props.get("reconnect.backoff.max.ms"));
+    }
+
+    @Test
+    public void testKafkaAuthFlagsRejectConflictingLegacyAndNormalizedValues() {
+        var parameters = new org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.KafkaParameters();
+        parameters.legacyEnableMSKAuth = true;
+        parameters.kafkaAuthType = "scram-sha-512";
+
+        Assertions.assertThrows(IllegalArgumentException.class, parameters::validateKafkaAuthFlags);
     }
 
     @Test
@@ -120,39 +148,29 @@ public class CaptureProxySetupTest {
     }
 
     @Test
-    public void testTlsParametersAreProperlyRead() throws Exception {
-        for (var kvp : Map.of(
-            "[ TLSv1.3, TLSv1.2 ]", List.of("TLSv1.3","TLSv1.2"),
-            "[ TLSv1.2, TLSv1.3 ]", List.of("TLSv1.2","TLSv1.3"),
-            "\n - TLSv1.2\n - TLSv1.3", List.of("TLSv1.2","TLSv1.3"),
-            "\n - TLSv1.2", List.of("TLSv1.2"))
-            .entrySet())
-        {
-            testTlsParametersAreProperlyRead(TLS_PROTOCOLS_KEY + ": " + kvp.getKey(), kvp.getValue());
-        }
+    public void testConvertStringToUriWithExplicitPort() {
+        URI uri = CaptureProxy.convertStringToUri("https://search-my-domain.us-east-1.es.amazonaws.com:9200");
+        Assertions.assertEquals(9200, uri.getPort());
+        Assertions.assertEquals("https", uri.getScheme());
     }
 
     @Test
-    public void testNoProtocolConfigDefaultsToSecureOnesOnly() throws Exception {
-        testTlsParametersAreProperlyRead("", List.of("TLSv1.2","TLSv1.3"));
+    public void testConvertStringToUriHttpsDefaultPort() {
+        URI uri = CaptureProxy.convertStringToUri("https://search-my-domain.us-east-1.es.amazonaws.com");
+        Assertions.assertEquals(443, uri.getPort());
+        Assertions.assertEquals("https", uri.getScheme());
     }
 
-    public void testTlsParametersAreProperlyRead(String protocolsBlockString, List<String> expectedList)
-        throws Exception
-    {
-        var tempFile = Files.createTempFile("captureProxy_tlsConfig", "yaml");
-        try {
-            Files.writeString(tempFile, "plugins.security.ssl.http.enabled: true\n" +
-                "plugins.security.ssl.http.pemcert_filepath: esnode.pem\n" +
-                "plugins.security.ssl.http.pemkey_filepath: esnode-key.pem\n" +
-                "plugins.security.ssl.http.pemtrustedcas_filepath: root-ca.pem\n" +
-                protocolsBlockString);
+    @Test
+    public void testConvertStringToUriHttpDefaultPort() {
+        URI uri = CaptureProxy.convertStringToUri("http://search-my-domain.us-east-1.es.amazonaws.com");
+        Assertions.assertEquals(80, uri.getPort());
+        Assertions.assertEquals("http", uri.getScheme());
+    }
 
-            var settings = CaptureProxy.getSettings(tempFile.toAbsolutePath().toString());
-            Assertions.assertEquals(String.join(", ", expectedList),
-                String.join(", ", settings.getAsList(TLS_PROTOCOLS_KEY)));
-        } finally {
-            Files.deleteIfExists(tempFile);
-        }
+    @Test
+    public void testConvertStringToUriExplicit443() {
+        URI uri = CaptureProxy.convertStringToUri("https://search-my-domain.us-east-1.es.amazonaws.com:443");
+        Assertions.assertEquals(443, uri.getPort());
     }
 }

@@ -1,8 +1,14 @@
 conditionalPackageInstalls:
   source: true
   target: true
+  solrSource: false
 
 useDedicatedKarpenterPool: false
+
+# Override to restrict instance types in the dedicated search NodePool.
+# If empty, allows any c/m/r instance gen 6+.
+# nodePoolInstanceTypes:
+#   - m6i.2xlarge
 
 source:
   http:
@@ -55,17 +61,28 @@ source:
 
   imageTag: "latest"
   image: "migrations/elasticsearch_searchguard"
-  roles: [ master, data, ingest ]
+  roles:
+    - "master " # PURPOSEFULLY ADD THIS SPACE.
+                # This is critical the cheat with the chart.
+                # The chart does an exact-match for 'master' in a place that is incompatible with
+                # a single-node cluster but later these values will be implicitly trimmed
+    - "data"
+    - "ingest"
   antiAffinity: "soft"
   esJavaOpts: "-Xms512m -Xmx512m"
   protocol: https
   # for simplest dev testing
   replicas: 1
   createCert: false
+  cluster.initial_master_nodes: ""
+  elasticsearch:
+    endpoints: []
   esConfig:
     elasticsearch.yml: |
       cluster.name: "docker-cluster"
       network.host: 0.0.0.0
+      xpack.security.enabled: false
+      xpack.ml.enabled: false
       
       ######## Start Search Guard Demo Configuration ########
       # WARNING: revise all the lines below before you go into production
@@ -94,12 +111,11 @@ source:
       s3.client.default.endpoint: "http://localstack:4566"
       s3.client.default.path_style_access: true
 
+  sysctlInitContainer:
+    enabled: false
   minimumMasterNodes: 1
   persistence:
     enabled: false
-  extraEnvs:
-    - name: cluster.initial_master_nodes
-      value: null  # Set to null to disable
 
 target:
   image:
@@ -110,3 +126,69 @@ target:
   singleNode: true
   persistence:
     enabled: false
+
+# Solr Operator configuration (only used when conditionalPackageInstalls.solrSource is true)
+solr-operator:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+  zookeeper-operator:
+    install: true
+    crd:
+      create: true
+
+# SolrCloud source cluster via the Solr Operator
+# Override image.tag to deploy a specific Solr version (e.g. "8.11.4", "9.7.0")
+solrSource:
+  fullnameOverride: "solr-source"
+  replicas: 1
+  image:
+    tag: "9.7.0"
+  solrOptions:
+    javaMemory: "-Xms512m -Xmx512m"
+  dataStorage:
+    type: "persistent"
+    persistent:
+      reclaimPolicy: "Delete"
+      pvc: {}
+  podOptions:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        memory: 1Gi
+    # Solr startup can be slow; relax probes to avoid restart loops
+    startupProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 10
+      failureThreshold: 30
+      timeoutSeconds: 5
+    livenessProbe:
+      initialDelaySeconds: 30
+      periodSeconds: 30
+      failureThreshold: 5
+      timeoutSeconds: 5
+    readinessProbe:
+      periodSeconds: 10
+      failureThreshold: 5
+      timeoutSeconds: 5
+  zk:
+    provided:
+      replicas: 1
+      zookeeperPodPolicy:
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            memory: 512Mi
+  # S3 backup repository — configured per-environment in valuesSolrSource*.yaml
+  backupRepositories: []
+
+# Create a Secret with dummy localstack credentials for Solr S3 backups.
+# Only needed when using localstack; EKS Pod Identity provides credentials automatically.
+solrSourceLocalstackCredentials: false

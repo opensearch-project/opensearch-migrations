@@ -6,39 +6,65 @@
  */
 import {z} from "zod";
 
+const SIMPLE_CONSOLE_CLI_RESOURCES = {
+    limits: {
+        cpu: "500m",
+        memory: "500Mi",
+    },
+    requests: {
+        cpu: "500m",
+        memory: "500Mi",
+    }
+};
+
 // See https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#guaranteed for details
 // about how these values effect eviction priorities of pods.
 export const DEFAULT_RESOURCES = {
-    REPLAYER: {
+    PROXY: {
         limits: {
-            cpu: "2000m",
-            memory: "4000Mi",
+            cpu: "3500m",
+            memory: "3500Mi",
         },
         requests: {
-            cpu: "2000m",
-            memory: "4000Mi",
+            cpu: "3500m",
+            memory: "3500Mi",
         }
     },
 
-    MIGRATION_CONSOLE_CLI: {
+    REPLAYER: {
+        limits: {
+            cpu: "3500m",
+            memory: "3500Mi",
+        },
+        requests: {
+            cpu: "3500m",
+            memory: "3500Mi",
+        }
+    },
+
+    SHELL_MIGRATION_CONSOLE_CLI: SIMPLE_CONSOLE_CLI_RESOURCES,
+
+    PYTHON_MIGRATION_CONSOLE_CLI: SIMPLE_CONSOLE_CLI_RESOURCES,
+
+    JAVA_MIGRATION_CONSOLE_CLI: {
         limits: {
             cpu: "500m",
-            memory: "2000Mi",
+            memory: "1800Mi",
         },
         requests: {
             cpu: "500m",
-            memory: "2000Mi",
+            memory: "1800Mi",
         }
     },
 
     RFS: {
         limits: {
-            cpu: "2000m",
-            memory: "4000Mi",
+            cpu: "3300m",
+            memory: "7000Mi",
         },
         requests: {
-            cpu: "1000m",
-            memory: "4000Mi",
+            cpu: "3300m",
+            memory: "7000Mi",
         }
     },
 } as const;

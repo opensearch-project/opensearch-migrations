@@ -10,7 +10,7 @@ import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.utils.FileSystemUtils;
@@ -133,7 +133,7 @@ public class SnapshotConfigurationTest extends SourceTestBase {
             sourceClusterOperations.createDocument(indexName, "doc5", "{\"field\": \"value5\", \"number\": 100}");
 
             // Refresh to ensure documents are searchable
-            sourceClusterOperations.post("/" + indexName + "/_refresh", null);
+            sourceClusterOperations.refresh(indexName);
 
             // === ACTION: Take a snapshot with specific configuration ===
             var snapshotName = "test_snapshot";
@@ -150,7 +150,7 @@ public class SnapshotConfigurationTest extends SourceTestBase {
             );
             sourceCluster.copySnapshotData(localDirectory.toString());
             
-            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
                     sourceCluster.getContainerVersion().getVersion(), true);
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
 

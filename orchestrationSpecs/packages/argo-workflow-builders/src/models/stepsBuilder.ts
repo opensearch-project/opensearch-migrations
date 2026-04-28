@@ -19,49 +19,132 @@ import {
     TasksWithOutputs,
     WorkflowAndTemplatesScope
 } from "./workflowTypes";
-import {TemplateBodyBuilder} from "./templateBodyBuilder";
+import {RetryableTemplateBodyBuilder, RetryableTemplateRebinder} from "./templateBodyBuilder";
 import {UniqueNameConstraintAtDeclaration, UniqueNameConstraintOutsideDeclaration} from "./scopeConstraints";
-import {NonSerializedPlainObject, PlainObject} from "./plainObject";
+import {PlainObject} from "./plainObject";
+import {Workflow} from "./workflowBuilder";
 import {
     LabelledAllTasksAsOutputReferenceable,
     getTaskOutputsByTaskName,
+    INLINE,
+    INTERNAL,
+    InlineInputsFrom,
+    InlineOutputsFrom,
+    InlineTemplateFn,
     InputsFrom,
     KeyFor,
     OutputsFrom,
     ParamsTuple,
+    unpackParams,
     TaskBuilder, TaskOpts,
     TaskRebinder
 } from "./taskBuilder";
 import {NamedTask} from "./sharedTypes";
+import {SynchronizationConfig} from "./synchronization";
 
 export interface StepGroup {
     steps: NamedTask[];
 }
 
 class StepGroupBuilder<
-    ContextualScope extends WorkflowAndTemplatesScope,
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
+    InputParamsScope extends InputParametersRecord,
     TasksScope extends TasksOutputsScope
 > extends TaskBuilder<
-    ContextualScope,
+    ParentWorkflowScope,
     TasksScope,
     "steps",
-    TaskRebinder<ContextualScope>
-> {
+    TaskRebinder<ParentWorkflowScope>
+    > {
     protected readonly label = "steps";
 
     constructor(
-        contextualScope: ContextualScope,
+        parentWorkflowScope: ParentWorkflowScope,
+        private readonly currentTemplateInputs: InputParamsScope,
         tasksScope: TasksScope,
         tasks: NamedTask[]
     ) {
-        const rebind: TaskRebinder<ContextualScope> =
-            <NS extends TasksOutputsScope>(ctx: ContextualScope, scope: NS, t: NamedTask[]) =>
-                new StepGroupBuilder<ContextualScope, NS>(ctx, scope, t);
-        super(contextualScope, tasksScope, tasks, rebind);
+        const templateRebind: TaskRebinder<ParentWorkflowScope> =
+            <NS extends TasksOutputsScope>(ctx: ParentWorkflowScope, scope: NS, t: NamedTask[]) =>
+                new StepGroupBuilder<ParentWorkflowScope, InputParamsScope, NS>(
+                    ctx, this.currentTemplateInputs, scope, t
+                );
+        super(parentWorkflowScope, tasksScope, tasks, templateRebind);
+    }
+
+    public addStep<
+        Name extends string,
+        TemplateSource extends typeof INTERNAL | Workflow<any, any, any>,
+        K extends KeyFor<ParentWorkflowScope, TemplateSource>,
+        LoopT extends PlainObject = never
+    >(
+        name: UniqueNameConstraintAtDeclaration<Name, TasksScope>,
+        source: UniqueNameConstraintOutsideDeclaration<Name, TasksScope, TemplateSource>,
+        key: UniqueNameConstraintOutsideDeclaration<Name, TasksScope, K>,
+        ...args: ParamsTuple<
+            InputsFrom<ParentWorkflowScope, TemplateSource, K>,
+            Name,
+            TasksScope,
+            "steps",
+            LoopT,
+            TaskOpts<TasksScope, "steps", LoopT>>
+    ): StepGroupBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        ExtendScope<
+            TasksScope,
+            { [P in Name]: TasksWithOutputs<Name, OutputsFrom<ParentWorkflowScope, TemplateSource, K>> }
+        >
+    > {
+        return this.addTask<Name, TemplateSource, K, LoopT, TaskOpts<TasksScope, "steps", LoopT>>(
+            name, source, key, ...args
+        );
+    }
+
+    public addStepToSelf<
+        Name extends string,
+        LoopT extends PlainObject = never
+    >(
+        name: UniqueNameConstraintAtDeclaration<Name, TasksScope>,
+        ...args: ParamsTuple<
+            InputParamsScope,
+            Name,
+            TasksScope,
+            "steps",
+            LoopT,
+            TaskOpts<TasksScope, "steps", LoopT>
+        >
+    ): StepGroupBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        ExtendScope<TasksScope, { [P in Name]: TasksWithOutputs<Name, {}> }>
+    > {
+        const currentTemplateName = this.parentWorkflowScope.currentTemplateName;
+        if (!currentTemplateName) {
+            throw new Error("Self-referential step registration requires a current template name");
+        }
+
+        const {paramsFn, opts} = unpackParams<InputParamsScope, TasksScope, "steps", LoopT>(args);
+        const loopWith = (opts?.loopWith === undefined)
+            ? undefined
+            : (typeof opts.loopWith === "function"
+                ? opts.loopWith(this.getTaskOutputsByTaskName())
+                : opts.loopWith);
+        const params = this.getParamsFromCallback<InputParamsScope, LoopT>(
+            this.currentTemplateInputs,
+            paramsFn,
+            loopWith
+        );
+        const templateCall: NamedTask<InputParamsScope, {}, LoopT> = {
+            name: String(name),
+            template: currentTemplateName,
+            args: params,
+            ...(loopWith === undefined ? {} : {withLoop: loopWith})
+        };
+
+        return this.addTaskHelper(name, templateCall, {}, opts);
     }
 }
-
-type BuilderLike = { getTasks(): { scope: any; taskList: NamedTask[] } };
 
 // Define the expression context type for StepsBuilder
 type StepsExpressionContext<
@@ -72,42 +155,39 @@ type StepsExpressionContext<
 } & LabelledAllTasksAsOutputReferenceable<StepsScope, "steps">;
 
 export class StepsBuilder<
-    ContextualScope extends WorkflowAndTemplatesScope,
+    ParentWorkflowScope extends WorkflowAndTemplatesScope,
     InputParamsScope extends InputParametersRecord,
     StepsScope extends TasksOutputsScope,
     OutputParamsScope extends OutputParametersRecord
-> extends TemplateBodyBuilder<
-    ContextualScope,
+> extends RetryableTemplateBodyBuilder<
+    ParentWorkflowScope,
     InputParamsScope,
     StepsScope,
     OutputParamsScope,
-    StepsBuilder<ContextualScope, InputParamsScope, StepsScope, any>,
-    TasksOutputsScope, // <-- BodyBound for this subclass
+    StepsBuilder<ParentWorkflowScope, InputParamsScope, StepsScope, any>,
+    TasksOutputsScope,
     StepsExpressionContext<InputParamsScope, StepsScope>
 > {
     constructor(
-        public readonly contextualScope: ContextualScope,
+        public readonly parentWorkflowScope: ParentWorkflowScope,
         inputsScope: InputParamsScope,
         public readonly bodyScope: StepsScope,
         readonly stepGroups: StepGroup[],
         public readonly outputsScope: OutputParamsScope,
-        protected readonly retryParameters: GenericScope
+        retryParameters: GenericScope,
+        public readonly synchronization: SynchronizationConfig | undefined
     ) {
-        const rebind = <
-            NewBodyScope extends TasksOutputsScope,
-            NewOutputScope extends OutputParametersRecord,
-            Self extends TemplateBodyBuilder<any, any, any, any, any, any, any>
-        >(
-            ctx: ContextualScope,
-            inputs: InputParamsScope,
-            body: NewBodyScope,
-            outputs: NewOutputScope,
-            retry: GenericScope,
-        ): Self => {
-            return new StepsBuilder(ctx, inputs, body, this.stepGroups, outputs, retry) as any;
-        };
+        const templateRebind: RetryableTemplateRebinder<
+            ParentWorkflowScope,
+            InputParamsScope,
+            // This builder only exposes and needs to expose its task outputs, not the whole body.
+            // That's why we ONLY bind the body to the task outputs
+            TasksOutputsScope,
+            StepsExpressionContext<InputParamsScope, StepsScope>
+        > = (ctx, inputs, body, outputs, retry, synchronization) =>
+            new StepsBuilder(ctx, inputs, body, this.stepGroups, outputs, retry, synchronization) as any;
 
-        super(contextualScope, inputsScope, bodyScope, outputsScope, retryParameters, rebind);
+        super(parentWorkflowScope, inputsScope, bodyScope, outputsScope, retryParameters, synchronization, templateRebind);
     }
 
     protected getExpressionBuilderContext(): StepsExpressionContext<InputParamsScope, StepsScope> {
@@ -118,67 +198,117 @@ export class StepsBuilder<
     }
 
     /**
-     * Accept **any** builder-like result that has getTasks().
+     * Adds one parallel step group (one inner `steps` array in Argo).
+     * The callback must return StepGroupBuilder to keep strong typing
+     * for chained step additions and step-output references.
      */
-    public addStepGroup<R>(
-        builderFn: (groupBuilder: StepGroupBuilder<ContextualScope, StepsScope>) => R
-    ): R extends BuilderLike
-        ? StepsBuilder<ContextualScope, InputParamsScope, ReturnType<R["getTasks"]>["scope"], OutputParamsScope>
-        : R
-    {
+    public addStepGroup<NewStepsScope extends TasksOutputsScope>(
+        builderFn: (
+            groupBuilder: StepGroupBuilder<ParentWorkflowScope, InputParamsScope, StepsScope>
+        ) => StepGroupBuilder<ParentWorkflowScope, InputParamsScope, NewStepsScope>
+    ): StepsBuilder<ParentWorkflowScope, InputParamsScope, NewStepsScope, OutputParamsScope> {
         const newGroup = builderFn(
-            new StepGroupBuilder(this.contextualScope, this.bodyScope, [])
+            new StepGroupBuilder(this.parentWorkflowScope, this.inputsScope, this.bodyScope, [])
+        );
+        const results = newGroup.getTasks();
+        return new StepsBuilder(
+            this.parentWorkflowScope,
+            this.inputsScope,
+            results.scope,
+            [...this.stepGroups, {steps: results.taskList}],
+            this.outputsScope,
+            this.retryParameters,
+            this.synchronization
         ) as any;
-
-        if (newGroup && typeof newGroup.getTasks === "function") {
-            const results = newGroup.getTasks();
-            return new StepsBuilder(
-                this.contextualScope,
-                this.inputsScope,
-                results.scope,
-                [...this.stepGroups, {steps: results.taskList}],
-                this.outputsScope,
-                this.retryParameters
-            ) as any;
-        } else {
-            return newGroup; // Propagate the error object to the callsite
-        }
     }
 
     // Convenience method for single step
     public addStep<
         Name extends string,
-        TemplateSource,
-        K extends KeyFor<ContextualScope, TemplateSource>,
-        LoopT extends NonSerializedPlainObject = never
+        TemplateSource extends typeof INTERNAL | Workflow<any, any, any>,
+        K extends KeyFor<ParentWorkflowScope, TemplateSource>,
+        LoopT extends PlainObject = never
     >(
         name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
         source: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, TemplateSource>,
         key: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, K>,
         ...args: ParamsTuple<
-            InputsFrom<ContextualScope, TemplateSource, K>,
+            InputsFrom<ParentWorkflowScope, TemplateSource, K>,
             Name,
             StepsScope,
             "steps",
             LoopT,
             TaskOpts<StepsScope, "steps", LoopT>>
     ): StepsBuilder<
-        ContextualScope,
+        ParentWorkflowScope,
         InputParamsScope,
         ExtendScope<
             StepsScope,
-            { [P in Name]: TasksWithOutputs<Name, OutputsFrom<ContextualScope, TemplateSource, K>> }
+            { [P in Name]: TasksWithOutputs<Name, OutputsFrom<ParentWorkflowScope, TemplateSource, K>> }
         >,
         OutputParamsScope
-    > {
-        return this.addStepGroup(gb => {
-            return gb.addTask<Name, TemplateSource, K, LoopT, TaskOpts<StepsScope, "steps", LoopT>>(
-                name, source, key, ...args
-            );
-        }) as any;
+    >;
+    public addStep<
+        Name extends string,
+        InlineFnType extends InlineTemplateFn<ParentWorkflowScope>,
+        LoopT extends PlainObject = never
+    >(
+        name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
+        source: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, typeof INLINE>,
+        inlineFn: UniqueNameConstraintOutsideDeclaration<Name, StepsScope, InlineFnType>,
+        ...args: ParamsTuple<InlineInputsFrom<InlineFnType>, Name, StepsScope, "steps", LoopT, TaskOpts<StepsScope, "steps", LoopT>>
+    ): StepsBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        ExtendScope<StepsScope, { [P in Name]: TasksWithOutputs<Name, InlineOutputsFrom<InlineFnType>> }>,
+        OutputParamsScope
+    >;
+    public addStep(name: any, source: any, keyOrFn?: any, ...restArgs: any[]): any {
+        return this.addStepGroup(gb => (gb as any).addTask(name, source, keyOrFn, ...restArgs));
     }
 
-    protected getBody() {
+    public addStepToSelf<
+        Name extends string,
+        LoopT extends PlainObject = never
+    >(
+        name: UniqueNameConstraintAtDeclaration<Name, StepsScope>,
+        ...args: ParamsTuple<
+            InputParamsScope,
+            Name,
+            StepsScope,
+            "steps",
+            LoopT,
+            TaskOpts<StepsScope, "steps", LoopT>
+        >
+    ): StepsBuilder<
+        ParentWorkflowScope,
+        InputParamsScope,
+        ExtendScope<StepsScope, { [P in Name]: TasksWithOutputs<Name, {}> }>,
+        OutputParamsScope
+    > {
+        const newGroup = new StepGroupBuilder<ParentWorkflowScope, InputParamsScope, StepsScope>(
+            this.parentWorkflowScope,
+            this.inputsScope,
+            this.bodyScope,
+            []
+        ).addStepToSelf<Name, LoopT>(name, ...args);
+        const results = newGroup.getTasks();
+
+        return new StepsBuilder(
+            this.parentWorkflowScope,
+            this.inputsScope,
+            results.scope,
+            [...this.stepGroups, {steps: results.taskList}],
+            this.outputsScope,
+            this.retryParameters,
+            this.synchronization
+        );
+    }
+
+    /**
+     * Made public because waitForResourceBuilder uses this to make its own body.
+     */
+    public getBody() {
         return {steps: this.stepGroups};
     }
 }

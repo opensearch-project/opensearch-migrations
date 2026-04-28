@@ -41,10 +41,32 @@ public class KafkaLoader {
 
     public void loadRecordsToKafkaFromCompressedFile(String fileName, String topicName, int batchSize) throws Exception {
         var kafkaProperties =
-            KafkaConfig.buildKafkaProperties(kafkaPropertiesFile, kafkaConnection, kafkaClientId, mskAuthEnabled);
+            KafkaConfig.buildKafkaProperties(
+                kafkaPropertiesFile,
+                kafkaConnection,
+                kafkaClientId,
+                mskAuthEnabled ? KafkaConfig.AUTH_TYPE_MSK_IAM : KafkaConfig.AUTH_TYPE_NONE,
+                null,
+                null
+            );
         try (var kafkaProducer = new KafkaProducer<String, byte[]>(kafkaProperties)) {
             BufferedReader bufferedReader = createBufferedReaderFromFile(fileName);
             readLinesAndSendToKafka(bufferedReader, kafkaProducer, topicName, batchSize);
+        }
+    }
+
+    public void loadRecordsToKafkaFromReader(BufferedReader reader, String topicName, int batchSize) throws Exception {
+        var kafkaProperties =
+            KafkaConfig.buildKafkaProperties(
+                kafkaPropertiesFile,
+                kafkaConnection,
+                kafkaClientId,
+                mskAuthEnabled ? KafkaConfig.AUTH_TYPE_MSK_IAM : KafkaConfig.AUTH_TYPE_NONE,
+                null,
+                null
+            );
+        try (var kafkaProducer = new KafkaProducer<String, byte[]>(kafkaProperties)) {
+            readLinesAndSendToKafka(reader, kafkaProducer, topicName, batchSize);
         }
     }
 

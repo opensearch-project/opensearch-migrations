@@ -1,0 +1,62 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+    id 'com.gradleup.shadow'
+}
+
+group = 'org.opensearch.migrations.snapshots'
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            pom {
+                description = 'Shared IR types and interfaces for OpenSearch snapshot reading and migration'
+            }
+        }
+    }
+}
+
+configurations {
+    lucene9
+    lucene10
+}
+
+tasks.register('shadowLucene9', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    mergeServiceFiles()
+    configurations = [project.configurations.lucene9]
+    archiveClassifier.set('lucene9-shadow')
+    relocate 'org.apache.lucene', 'shadow.lucene9.org.apache.lucene'
+}
+
+tasks.register('shadowLucene10', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    mergeServiceFiles()
+    configurations = [project.configurations.lucene10]
+    archiveClassifier.set('lucene10-shadow')
+    relocate 'org.apache.lucene', 'shadow.lucene10.org.apache.lucene'
+}
+
+tasks.named('build') {
+    dependsOn shadowLucene9, shadowLucene10
+}
+
+tasks.named('compileJava') {
+    dependsOn shadowLucene9, shadowLucene10
+}
+
+dependencies {
+    api project(':transformation')
+    api project(':coreUtilities')
+
+    implementation libs.jackson.databind
+    implementation libs.jackson.core
+    implementation libs.jackson.annotations
+    implementation libs.jackson.dataformat.smile
+
+    compileOnly libs.jcommander
+    implementation libs.slf4j.api
+
+    lucene9 libs.lucene.v9.core
+    lucene10 libs.lucene.v10.core
+    implementation shadowLucene9.outputs.files
+    implementation shadowLucene10.outputs.files
+}

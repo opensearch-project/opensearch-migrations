@@ -12,37 +12,40 @@ import {
     WorkflowParameterSource
 } from "@opensearch-migrations/argo-workflow-builders";
 import {z} from "zod";
-import {NAMED_SOURCE_CLUSTER_CONFIG, NAMED_TARGET_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
+import {
+    NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
+    NAMED_TARGET_CLUSTER_CONFIG
+} from "@opensearch-migrations/schemas";
 
 export function getSourceTargetPath(
-    source: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
+    sourceLabel: AllowLiteralOrExpression<string>,
     target: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>
 ) {
     return [
-        expr.get(expr.deserializeRecord(source), "name"),
-        expr.get(expr.deserializeRecord(target), "name")
+        toExpression(sourceLabel),
+        expr.get(expr.deserializeRecord(target), "label")
     ];
 }
 
 export function getSourceTargetPathAndSnapshotIndex(
-    source: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
+    sourceLabel: AllowLiteralOrExpression<string>,
     target: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     snapshotName: AllowLiteralOrExpression<string>
 ) {
     return [
-        ...getSourceTargetPath(source, target),
+        ...getSourceTargetPath(sourceLabel, target),
         toExpression(snapshotName)
     ];
 }
 
 export function getSourceTargetPathAndSnapshotAndMigrationIndex(
-    source: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG>>>,
+    sourceLabel: AllowLiteralOrExpression<string>,
     target: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     snapshotName: AllowLiteralOrExpression<string>,
     migrationName: AllowLiteralOrExpression<string>
 ) {
     return [
-        ...getSourceTargetPathAndSnapshotIndex(source, target, toExpression(snapshotName)),
+        ...getSourceTargetPathAndSnapshotIndex(sourceLabel, target, toExpression(snapshotName)),
         toExpression(migrationName)
     ];
 }
@@ -51,8 +54,7 @@ export function getSourceTargetPathAndSnapshotAndMigrationIndex(
 export function getApprovalMap<T extends PlainObject & Partial<Record<string, boolean>>>(
     approvalConfigMapName: FromParameterExpression<string, WorkflowParameterSource>,
     tt: TypeToken<T>
-)
-{
+) {
     return {
         skipApprovalMap: defineParam({
             from: configMapKey(approvalConfigMapName, "autoApprove", true),
@@ -68,8 +70,7 @@ export function getApprovalsFromMap<
 >(
     map: BaseExpression<Record<string, boolean>>,
     paramsToBuild: Record<K, PATH>
-): Record<K, InputParamDef<boolean, false>>
-{
+): Record<K, InputParamDef<boolean, false>> {
     const result = {} as Record<K, InputParamDef<boolean, false>>;
     for (const key in paramsToBuild) {
         const v: string = paramsToBuild[key];

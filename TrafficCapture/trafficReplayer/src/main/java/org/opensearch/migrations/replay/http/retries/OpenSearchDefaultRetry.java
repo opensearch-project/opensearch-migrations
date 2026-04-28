@@ -30,74 +30,201 @@ import lombok.extern.slf4j.Slf4j;
 public class OpenSearchDefaultRetry extends DefaultRetry {
 
     private static final Pattern bulkPathMatcher = Pattern.compile("^(/[^/]*)?/_bulk(/.*)?$");
+    private final BulkItemErrorClassifier errorClassifier;
 
-    private static class BulkErrorFindingHandler extends ChannelInboundHandlerAdapter {
+    public OpenSearchDefaultRetry() {
+        this(new BulkItemErrorClassifier());
+    }
+
+    public OpenSearchDefaultRetry(BulkItemErrorClassifier errorClassifier) {
+        this.errorClassifier = errorClassifier;
+    }
+
+    enum BulkResponseAnalysis {
+        /** No errors at all */
+        NO_ERRORS,
+        /** Has errors, but at least one is retryable */
+        HAS_RETRYABLE_ERRORS,
+        /** Has errors, but ALL are non-retryable */
+        ONLY_NON_RETRYABLE_ERRORS
+    }
+
+    /**
+     * Streaming JSON analyzer that processes bulk response chunks as they arrive.
+     * Uses Jackson's non-blocking parser to avoid buffering the entire response body.
+     * Short-circuits as soon as a determination can be made (e.g. "errors":false).
+     */
+    static class BulkResponseAnalyzer extends ChannelInboundHandlerAdapter {
         private final JsonParser parser;
         private final ByteBufferFeeder feeder;
-        private Boolean errorField = null;
+        private final BulkItemErrorClassifier errorClassifier;
+        private BulkResponseAnalysis result = null;
+
+        // Parsing state
+        private Boolean errorsFieldValue = null;
+        private boolean inItems = false;
+        private int itemDepth = 0;
+        private boolean inErrorObject = false;
+        private int errorObjectDepth = 0;
+        private boolean hasAnyError = false;
+        private boolean hasRetryableError = false;
+        private String pendingFieldName = null;
+        private boolean parseFailed = false;
+
+        private boolean foundTypeInCurrentError = false;
 
         @SneakyThrows
-        public BulkErrorFindingHandler() {
-            JsonFactory jsonFactory = new JsonFactory();
+        public BulkResponseAnalyzer(BulkItemErrorClassifier errorClassifier) {
+            this.errorClassifier = errorClassifier;
+            var jsonFactory = new JsonFactory();
             parser = jsonFactory.createNonBlockingByteBufferParser();
             feeder = (ByteBufferFeeder) parser.getNonBlockingInputFeeder();
         }
 
-        /**
-         * @return true iff the "errors" field was present at the root and its value was false.  false otherwise.
-         */
-        boolean hadNoErrors() {
-            return errorField != null && !errorField;
+        BulkResponseAnalysis getAnalysis() {
+            return result;
         }
 
         @Override
         public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
-            if (msg instanceof HttpContent && errorField == null) {
-                log.atDebug().setMessage("body contents: {}")
-                    .addArgument(((HttpContent) msg).content().duplicate()).log();
+            if (msg instanceof HttpContent && result == null && !parseFailed) {
                 feeder.feedInput(((HttpContent) msg).content().nioBuffer());
-                consumeInput();
+                consumeTokens();
                 if (msg instanceof LastHttpContent) {
                     feeder.endOfInput();
-                    consumeInput();
+                    consumeTokens();
+                    if (result == null && !parseFailed) {
+                        result = finalizeAnalysis();
+                    }
                 }
             }
-            ctx.fireChannelRead(msg); // Pass other messages down the pipeline
+            ctx.fireChannelRead(msg);
         }
 
-        private void consumeInput() throws IOException {
-            if (errorField != null) {
+        private void consumeTokens() {
+            if (result != null || parseFailed) {
                 return;
             }
-            JsonToken token;
-            while (!parser.isClosed() &&
-                ((token = parser.nextToken()) != null) &&
-                token != JsonToken.NOT_AVAILABLE)
-            {
-                JsonToken finalToken = token;
-                log.atTrace().setMessage("Got token: {}").addArgument(finalToken).log();
-                if (token == JsonToken.FIELD_NAME && "errors".equals(parser.currentName())) {
-                    parser.nextToken();
-                    errorField = parser.getValueAsBoolean();
-                    break;
-                } else if (parser.getParsingContext().inRoot() && token == JsonToken.END_OBJECT) {
-                    break;
-                } else if (token != JsonToken.START_OBJECT &&
-                    token != JsonToken.END_OBJECT &&
-                    !parser.getParsingContext().inRoot())
-                {
-                    // Skip non-root level content
-                    parser.skipChildren();
-                }
+            try {
+                parseTokens();
+            } catch (Exception e) {
+                log.atWarn().setCause(e)
+                    .setMessage("Failed to parse bulk response body, falling back to status code comparison")
+                    .log();
+                parseFailed = true;
             }
+        }
+
+        @SuppressWarnings("java:S3776") // Cognitive complexity — streaming parser requires state tracking
+        private void parseTokens() throws IOException {
+            JsonToken token;
+            while (result == null
+                && !parser.isClosed()
+                && (token = parser.nextToken()) != null
+                && token != JsonToken.NOT_AVAILABLE)
+            {
+                if (token == JsonToken.FIELD_NAME) {
+                    pendingFieldName = parser.currentName();
+                    continue;
+                }
+
+                // Root-level "errors" field
+                if ("errors".equals(pendingFieldName) && !inItems) {
+                    boolean errors = parser.getValueAsBoolean();
+                    errorsFieldValue = errors;
+                    if (!errors) {
+                        result = BulkResponseAnalysis.NO_ERRORS;
+                        return;
+                    }
+                    pendingFieldName = null;
+                    continue;
+                }
+
+                // Entering "items" array
+                if ("items".equals(pendingFieldName) && token == JsonToken.START_ARRAY) {
+                    inItems = true;
+                    pendingFieldName = null;
+                    continue;
+                }
+
+                if (inItems) {
+                    processItemToken(token);
+                    if (hasRetryableError) {
+                        result = BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
+                        return;
+                    }
+                }
+                pendingFieldName = null;
+            }
+        }
+
+        private void processItemToken(JsonToken token) throws IOException {
+            if (token == JsonToken.END_ARRAY && itemDepth == 0) {
+                inItems = false;
+                return;
+            }
+            trackObjectDepth(token);
+            processErrorFields(token);
+        }
+
+        private void trackObjectDepth(JsonToken token) {
+            if (token == JsonToken.START_OBJECT) {
+                itemDepth++;
+            } else if (token == JsonToken.END_OBJECT) {
+                if (inErrorObject && itemDepth == errorObjectDepth) {
+                    if (!foundTypeInCurrentError) {
+                        hasRetryableError = true;
+                    }
+                    inErrorObject = false;
+                }
+                itemDepth--;
+            }
+        }
+
+        private void processErrorFields(JsonToken token) throws IOException {
+            if (inErrorObject && "type".equals(pendingFieldName) && token.isScalarValue()) {
+                hasAnyError = true;
+                foundTypeInCurrentError = true;
+                var errorType = parser.getValueAsString();
+                if (!errorClassifier.isNonRetryable(errorType)) {
+                    log.atDebug().setMessage("Found retryable bulk item error type: {}")
+                        .addArgument(errorType).log();
+                    hasRetryableError = true;
+                }
+            } else if ("error".equals(pendingFieldName) && token == JsonToken.START_OBJECT) {
+                hasAnyError = true;
+                inErrorObject = true;
+                errorObjectDepth = itemDepth;
+                foundTypeInCurrentError = false;
+            } else if ("error".equals(pendingFieldName) && token.isScalarValue()) {
+                hasAnyError = true;
+                hasRetryableError = true;
+            }
+        }
+
+        private BulkResponseAnalysis finalizeAnalysis() {
+            if (errorsFieldValue != null && !errorsFieldValue) {
+                return BulkResponseAnalysis.NO_ERRORS;
+            }
+            if (hasRetryableError) {
+                return BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
+            }
+            if (hasAnyError) {
+                return BulkResponseAnalysis.ONLY_NON_RETRYABLE_ERRORS;
+            }
+            // No error items found — trust the top-level "errors" field
+            if (errorsFieldValue != null) {
+                return BulkResponseAnalysis.HAS_RETRYABLE_ERRORS;
+            }
+            return BulkResponseAnalysis.NO_ERRORS;
         }
     }
 
-    boolean bulkResponseHadNoErrors(ByteBuf responseByteBuf) {
-        var errorFieldFinderHandler = new BulkErrorFindingHandler();
+    BulkResponseAnalysis analyzeBulkResponse(ByteBuf responseByteBuf) {
+        var analyzer = new BulkResponseAnalyzer(errorClassifier);
         HttpByteBufFormatter.processHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
-            Stream.of(responseByteBuf), errorFieldFinderHandler);
-        return errorFieldFinderHandler.hadNoErrors();
+            Stream.of(responseByteBuf), analyzer);
+        return analyzer.getAnalysis();
     }
 
 
@@ -109,26 +236,34 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
 
         var targetRequestByteBuf = Unpooled.wrappedBuffer(targetRequestBytes);
         var parsedRequest = HttpByteBufFormatter.parseHttpRequestFromBufs(Stream.of(targetRequestByteBuf), 0);
-        if (parsedRequest != null &&
-            bulkPathMatcher.matcher(parsedRequest.uri()).matches() &&
-            // do a more granular check.  If the raw response wasn't present, then just push it to the superclass
-            // since it isn't going to be any kind of response, let alone a bulk one
-            Optional.ofNullable(currentResponse.getRawResponse())
-                .map(r->r.status().code() == 200)
-                .orElse(false))
+        if (parsedRequest == null ||
+            !bulkPathMatcher.matcher(parsedRequest.uri()).matches())
         {
-            if (bulkResponseHadNoErrors(currentResponse.getResponseAsByteBuf())) {
+            return super.shouldRetry(targetRequestBytes, currentResponse, reconstructedSourceTransactionFuture);
+        }
+
+        var targetStatusCode = Optional.ofNullable(currentResponse.getRawResponse())
+            .map(r -> r.status().code());
+
+        // If target returned 429 or 5xx for a bulk request, retry immediately without parsing the response body
+        if (targetStatusCode.map(code -> code == 429 || code / 100 == 5).orElse(false)) {
+            return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.RETRY,
+                () -> "target returned 429/5xx for bulk request, retrying");
+        }
+
+        // do a more granular check.  If the raw response wasn't present, then just push it to the superclass
+        // since it isn't going to be any kind of response, let alone a bulk one
+        if (targetStatusCode.map(code -> code == 200).orElse(false)) {
+            var analysis = analyzeBulkResponse(currentResponse.getResponseAsByteBuf());
+            if (analysis != null) {
+                if (analysis == BulkResponseAnalysis.HAS_RETRYABLE_ERRORS) {
+                    return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.RETRY,
+                        () -> "bulk response has retryable errors, retrying");
+                }
                 return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
-                    () -> "no errors found in the target response, so not retrying");
-            } else {
-                return reconstructedSourceTransactionFuture.thenCompose(rrp ->
-                        TextTrackedFuture.completedFuture(
-                            bulkResponseHadNoErrors(rrp.getResponseData().asByteBuf()) ?
-                                RequestSenderOrchestrator.RetryDirective.RETRY :
-                                RequestSenderOrchestrator.RetryDirective.DONE,
-                            () -> "evaluating retry status dependent upon source error field"),
-                    () -> "checking the accumulated source response value");
+                    () -> "bulk response has no retryable errors");
             }
+            // Couldn't parse response body — fall through to superclass status code comparison
         }
 
         return super.shouldRetry(targetRequestBytes, currentResponse, reconstructedSourceTransactionFuture);

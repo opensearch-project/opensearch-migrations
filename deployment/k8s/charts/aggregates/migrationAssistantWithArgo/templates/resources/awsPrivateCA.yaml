@@ -1,0 +1,45 @@
+{{- if and (not .Values.awsPrivateCA.create) .Values.awsPrivateCA.arn }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: create-pca-issuer-from-arn
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "51"
+    helm.sh/hook-delete-policy: hook-succeeded
+spec:
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      serviceAccountName: {{ .Values.argoWorkflowServiceAccountName | default "argo-workflow-executor" }}
+      containers:
+      - name: create-issuer
+        image: {{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Creating AWSPCAClusterIssuer (retrying until aws-privateca-issuer is ready)..."
+          for i in $(seq 1 60); do
+            if cat <<'EOF' | kubectl apply -f - 2>&1; then
+          apiVersion: awspca.cert-manager.io/v1beta1
+          kind: AWSPCAClusterIssuer
+          metadata:
+            name: aws-pca-issuer
+          spec:
+            arn: {{ .Values.awsPrivateCA.arn }}
+            region: {{ .Values.awsPrivateCA.region }}
+          EOF
+              echo "AWSPCAClusterIssuer created successfully."
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "ERROR: Failed to create AWSPCAClusterIssuer after 60 attempts"
+          exit 1
+      restartPolicy: Never
+  backoffLimit: 3
+{{- end }}

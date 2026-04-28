@@ -1,20 +1,20 @@
 [versions]
-aws-crt = "0.42.2"
+aws-crt = "0.45.1"
 aws-msk-iam-auth = "2.3.4"
-aws-sdk = "2.41.10"
-bouncycastle = "1.83"
+aws-sdk = "2.42.36"
+bouncycastle = "1.84"
 commons-collections = "4.5.0"
 commons-compress = "1.26.2"
 disruptor = "4.0.0"
-dockerapi = "3.7.0"
+dockerapi = "3.7.1"
 errorprone = "2.42.0"
 errorprone-slf4j = "0.1.29"
-graalvm = "25.0.1"
+graalvm = "25.0.2"
 groovy = "3.0.25"
-guava = "33.5.0-jre"
+guava = "33.6.0-jre"
 hamcrest = "3.0"
-httpclient5 = "5.6"
-jackson = "2.21.0"
+httpclient5 = "5.6.1"
+jackson = "2.21.2"
 jackson-annotations = "2.21"
 jcommander = "2.0"
 jenkins-pipeline-unit = "1.23"
@@ -25,27 +25,29 @@ jolt-core = "0.1.8"
 json = "20251224"
 junit-platform = "1.14.0"
 junit-jupiter = "5.14.0"
-kafka-clients = "4.1.1"
-log4j = "2.25.3"
-lombok = "1.18.42"
+kafka-clients = "4.2.0"
+log4j = "2.25.4"
+lombok = "1.18.44"
 lucene5 = '5.5.5'
 lucene6 = '6.6.6'
 lucene7 = '7.7.3'
 lucene9 = "9.12.1"
-mockito = "5.21.0"
-netty = "4.1.124.Final"
+lucene10 = "10.4.0"
+mockito = "5.23.0"
+netty = "4.1.128.Final"
 opensearch-testcontainers = "2.0.1"
-opentelemetry = "1.58.0"
+opentelemetry = "1.61.0"
 opentelemetry-semconv = "1.23.1-alpha"
-protobuf = "4.33.4"
+protobuf = "4.34.1"
+reactor-core = "3.8.5"
 reactor-netty = "1.2.11"
 reactor-test = "3.7.12"
 semver4j = "6.0.0"
 slf4j = "2.0.17"
-testcontainers = "2.0.3"
+testcontainers = "2.0.4"
 testcontainers-modules = "1.21.4"
 toxiproxy = "2.1.11"
-zstd-jni = "1.5.7-6"
+zstd-jni = "1.5.7-7"
 
 [libraries]
 aws-arns = { module = "software.amazon.awssdk:arns", version.ref = "aws-sdk" }
@@ -130,6 +132,10 @@ lucene-v9-analysis-common = { module = "org.apache.lucene:lucene-analysis-common
 lucene-v9-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene9" }
 lucene-v9-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene9" }
 lucene-v9-suggest = { module = "org.apache.lucene:lucene-suggest", version.ref = "lucene9" }
+lucene-v10-analysis-common = { module = "org.apache.lucene:lucene-analysis-common", version.ref = "lucene10" }
+lucene-v10-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene10" }
+lucene-v10-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene10" }
+lucene-v10-suggest = { module = "org.apache.lucene:lucene-suggest", version.ref = "lucene10" }
 
 mockito-core = { module = "org.mockito:mockito-core", version.ref = "mockito" }
 mockito-junit-jupiter = { module = "org.mockito:mockito-junit-jupiter", version.ref = "mockito" }
@@ -147,10 +153,13 @@ opentelemetry-semconv = { module = "io.opentelemetry.semconv:opentelemetry-semco
 
 polyglot = { module = "org.graalvm.polyglot:polyglot", version.ref = "graalvm" }
 polyglot-js-community = { module = "org.graalvm.polyglot:js-community", version.ref = "graalvm" }
+polyglot-python-community = { module = "org.graalvm.polyglot:python-community", version.ref = "graalvm" }
+python-embedding = { module = "org.graalvm.python:python-embedding", version.ref = "graalvm" }
 
 protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
 protobuf-protoc = { module = "com.google.protobuf:protoc", version.ref = "protobuf" }
 
+reactor-core = {module = "io.projectreactor:reactor-core", version.ref = "reactor-core" }
 reactor-netty-core = {module = "io.projectreactor.netty:reactor-netty-core", version.ref = "reactor-netty" }
 reactor-netty-http = {module = "io.projectreactor.netty:reactor-netty-http", version.ref = "reactor-netty" }
 
@@ -163,7 +172,9 @@ slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 testcontainers = {module = "org.testcontainers:testcontainers", version.ref = "testcontainers" }
 testcontainers-junit-jupiter = {module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers-modules" }
 testcontainers-kafka = {module = "org.testcontainers:kafka", version.ref = "testcontainers-modules" }
+testcontainers-localstack = {module = "org.testcontainers:localstack", version.ref = "testcontainers-modules" }
 testcontainers-opensearch = {module = "org.opensearch:opensearch-testcontainers", version.ref = "opensearch-testcontainers" }
+testcontainers-solr = {module = "org.testcontainers:solr", version.ref = "testcontainers-modules" }
 testcontainers-toxiproxy = {module = "org.testcontainers:toxiproxy", version.ref = "testcontainers-modules" }
 toxiproxy = {module = "eu.rekawek.toxiproxy:toxiproxy-java", version.ref = "toxiproxy" }
 
@@ -180,13 +191,13 @@ boms-opentelemetry    = { module = "io.opentelemetry:opentelemetry-bom", version
 # Transitive dependencies to force based on CVEs
 transitive-apache-httpclient = { module = "org.apache.httpcomponents:httpclient",    version = "4.5.14"   }
 transitive-commons-lang3     = { module = "org.apache.commons:commons-lang3",        version = "3.20.0"   }
-transitive-commons-net       = { module = "commons-net:commons-net",                 version = "3.12.0"   }
+transitive-commons-net       = { module = "commons-net:commons-net",                 version = "3.13.0"   }
 transitive-dnsjava           = { module = "dnsjava:dnsjava",                         version = "3.6.4"    }
-transitive-jersey-common     = { module = "org.glassfish.jersey.core:jersey-common", version = "4.0.0"   }
-transitive-json-path         = { module = "com.jayway.jsonpath:json-path",           version = "2.10.0"    }
+transitive-jersey-common     = { module = "org.glassfish.jersey.core:jersey-common", version = "4.0.2"   }
+transitive-json-path         = { module = "com.jayway.jsonpath:json-path",           version = "3.0.0"    }
 transitive-json-smart        = { module = "net.minidev:json-smart",                  version = "2.6.0"    }
-transitive-jsoup             = { module = "org.jsoup:jsoup",                         version = "1.22.1"   }
+transitive-jsoup             = { module = "org.jsoup:jsoup",                         version = "1.22.2"   }
 transitive-snappy-java       = { module = "org.xerial.snappy:snappy-java",           version = "1.1.10.8" }
-transitive-tika-core         = { module = "org.apache.tika:tika-core",               version = "3.2.3"    }
+transitive-tika-core         = { module = "org.apache.tika:tika-core",               version = "3.3.0"    }
 transitive-xalan             = { module = "xalan:xalan",                             version = "2.7.3"    }
 transitive-xstream           = { module = "com.thoughtworks.xstream:xstream",        version = "1.4.21"   }

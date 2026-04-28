@@ -21,8 +21,7 @@ the Migration Assistant Helm chart alongside a test chart that creates a source
 and target cluster.
 
 ```bash
-export BUILD_IMAGES_WITHOUT_DOCKER=false
-echo "Will build images without docker=${BUILD_IMAGES_WITHOUT_DOCKER}"
+echo "Will start minikube, build images, and install the MA helm chart for those images"
 $(git rev-parse --show-toplevel)/deployment/k8s/localTesting.sh
 ```
 
@@ -123,6 +122,14 @@ chart consists of:
 * Strimzi (to create Kafka clusters)
 * Observability services - Prometheus, Jaeger, and Grafana
 
+During startup, the migration console pod runs a `workflow-schema-generator`
+init container after the Strimzi operator is available. That init container
+reads the live Strimzi OpenAPI schema from the cluster, builds the unified
+migration workflow schema, and writes the resulting
+`workflowMigration.schema.json` and `sample.yaml` into a shared in-pod volume.
+The main migration console container then uses those generated files for
+workflow-config validation.
+
 Run this to install this chart to a new K8s namespace named 'ma'
 
 ```bash
@@ -209,14 +216,4 @@ TRUST_POLICY=$(aws iam get-role --role-name $role_name --query 'Role.AssumeRoleP
 aws iam update-assume-role-policy --role-name $role_name --policy-document "$TRUST_POLICY"
 eksctl create addon --cluster $cluster_name --name aws-efs-csi-driver --version latest --service-account-role-arn <role_arn> --force
 kubectl apply -f aws/storage-class-efs.yml
-```
-
-Create an ECR to store images
-```shell
-./buildDockerImagesMini.sh --create-ecr
-```
-
-Build images and push to ECR
-```shell
-./buildDockerImagesMini.sh --sync-ecr
 ```

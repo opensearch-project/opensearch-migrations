@@ -2,53 +2,58 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiFunction;
-import java.util.function.Function;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
-import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
+import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
-import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
-import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
-import org.opensearch.migrations.bulkload.delta.DeltaDocumentReaderEngine;
-import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
-import org.opensearch.migrations.bulkload.models.ShardMetadata;
+import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
+import org.opensearch.migrations.bulkload.solr.SolrBackupIndexMetadataFactory;
+import org.opensearch.migrations.bulkload.solr.SolrBackupLayout;
+import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
+import org.opensearch.migrations.bulkload.solr.SolrSchemaXmlParser;
+import org.opensearch.migrations.bulkload.solr.SolrShardPartition;
+import org.opensearch.migrations.bulkload.solr.SolrSnapshotReader;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
+import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
+import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
-import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
-import org.opensearch.migrations.bulkload.worker.RegularDocumentReaderEngine;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
@@ -68,6 +73,7 @@ import com.beust.jcommander.IValueValidator;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -78,6 +84,7 @@ import org.slf4j.MDC;
 public class RfsMigrateDocuments {
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
+    public static final int NO_WORK_AVAILABLE_EXIT_CODE = 4;
 
     // Arbitrary value, increasing from 5 to 15 seconds due to prevalence of clock skew exceptions
     // observed on production clusters during migrations
@@ -109,23 +116,36 @@ public class RfsMigrateDocuments {
                 return DeltaMode.valueOf(value.toUpperCase());
             } catch (IllegalArgumentException e) {
                 throw new ParameterException("Invalid delta mode: " + value + ". Valid values are: " + 
-                    String.join(", ", java.util.Arrays.stream(DeltaMode.values())
+                    String.join(", ", Arrays.stream(DeltaMode.values())
                         .map(Enum::name)
                         .toArray(String[]::new)));
             }
         }
     }
 
+    public enum ServerGeneratedIdMode {
+        AUTO,   // Auto-detect serverless TIMESERIES/VECTOR collections and enable
+        ALWAYS, // Always use server-generated IDs
+        NEVER   // Always preserve source IDs
+    }
+
     public static class Args {
+        /** Default maximum documents per bulk batch. */
+        static final int DEFAULT_MAX_DOCS_PER_BATCH = Integer.MAX_VALUE;
+        /** Default maximum bytes per bulk batch (10 MiB). */
+        static final long DEFAULT_MAX_BYTES_PER_BATCH = 10L * 1024 * 1024;
+        /** Default number of concurrent batches in flight. */
+        static final int DEFAULT_BATCH_CONCURRENCY = 10;
+
         @Parameter(
             names = {"--help", "-h"},
             help = true,
             description = "Displays information about how to use this tool")
         private boolean help;
 
-        @Parameter(required = true,
+        @Parameter(required = false,
             names = { "--snapshot-name", "--snapshotName" },
-            description = "The name of the snapshot to migrate")
+            description = "The name of the snapshot to migrate. Required when --source-type is SNAPSHOT.")
         public String snapshotName;
 
         @Parameter(required = false,
@@ -161,9 +181,9 @@ public class RfsMigrateDocuments {
                 "For use when the default AWS ones won't work for a particular context."))
         public String s3Endpoint = null;
 
-        @Parameter(required = true,
+        @Parameter(required = false,
             names = { "--lucene-dir", "--luceneDir" },
-            description = "The absolute path to the directory where we'll put the Lucene docs")
+            description = "The absolute path to the directory where we'll put the Lucene docs. Required when --source-type is SNAPSHOT.")
         public String luceneDir;
 
         @Parameter(required = false,
@@ -208,25 +228,33 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
         names =  {"--documents-per-bulk-request", "--documentsPerBulkRequest"},
         description = "Optional.  The number of documents to be included within each bulk request sent. " +
-            "Default no max (controlled by documents size)")
-        int numDocsPerBulkRequest = Integer.MAX_VALUE;
+            "Default " + DEFAULT_MAX_DOCS_PER_BATCH)
+        int numDocsPerBulkRequest = DEFAULT_MAX_DOCS_PER_BATCH;
 
         @Parameter(required = false,
             names = { "--documents-size-per-bulk-request", "--documentsSizePerBulkRequest" },
             description = "Optional. The maximum aggregate document size to be used in bulk requests in bytes. " +
                 "Note does not apply to single document requests. Default 10 MiB")
-        long numBytesPerBulkRequest = 10 * 1024L * 1024L;
+        long numBytesPerBulkRequest = DEFAULT_MAX_BYTES_PER_BATCH;
 
         @Parameter(required = false,
             names = {"--max-connections", "--maxConnections" },
             description = "Optional.  The maximum number of connections to simultaneously " +
-                "used to communicate to the target, default 10")
-        int maxConnections = 10;
+                "used to communicate to the target, default " + DEFAULT_BATCH_CONCURRENCY)
+        int maxConnections = DEFAULT_BATCH_CONCURRENCY;
 
-        @Parameter(required = true,
+        @Parameter(required = false,
+            names = { "--server-generated-ids" },
+            description = "Optional. Controls document ID generation on target. " +
+                "AUTO (default): auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
+                "ALWAYS: always use server-generated IDs. " +
+                "NEVER: always preserve source IDs (may fail on serverless TIMESERIES/VECTOR).")
+        public ServerGeneratedIdMode serverGeneratedIds = ServerGeneratedIdMode.AUTO;
+
+        @Parameter(required = false,
             names = { "--source-version", "--sourceVersion" },
             converter = VersionConverter.class,
-            description = ("Version of the source cluster. Required parameter - no default fallback."))
+            description = ("Version of the source cluster. Required when --source-type is SNAPSHOT."))
         public Version sourceVersion;
 
         @Parameter(required = false,
@@ -235,6 +263,23 @@ public class RfsMigrateDocuments {
                 "This will be appended to the name of the index that is used for work coordination.",
             validateValueWith = IndexNameValidator.class)
         public String indexNameSuffix = "";
+
+        // Defaults mirror OpenSearchWorkCoordinator.CompletionRetryConfig.DEFAULT
+        // (defined again as literals because annotations require compile time constants)
+        @Parameter(required = false,
+            names = { "--coordinator-retry-max-retries" },
+            description = "Optional. Maximum number of retries when marking work items as completed on the coordinator. Default: 7")
+        public int coordinatorRetryMaxRetries = 7;
+
+        @Parameter(required = false,
+            names = { "--coordinator-retry-initial-delay-ms" },
+            description = "Optional. Initial delay in milliseconds for coordinator completion retries (doubles each attempt). Default: 1000")
+        public long coordinatorRetryInitialDelayMs = 1000;
+
+        @Parameter(required = false,
+            names = { "--coordinator-retry-max-delay-ms" },
+            description = "Optional. Maximum delay in milliseconds for any single coordinator completion retry. Default: 64000")
+        public long coordinatorRetryMaxDelayMs = 64_000;
 
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
@@ -252,6 +297,7 @@ public class RfsMigrateDocuments {
                 "allowing specific errors (e.g., 'version_conflict_engine_exception') to be treated as success " +
                 "rather than failure. Example: --allowed-doc-exception-types version_conflict_engine_exception")
         public List<String> allowedDocExceptionTypes = List.of();
+
     }
 
     public static class ExperimentalArgs {
@@ -330,6 +376,33 @@ public class RfsMigrateDocuments {
         boolean areAllS3ArgsProvided = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
         boolean areAnyS3ArgsProvided = args.s3LocalDir != null || args.s3RepoUri != null || args.s3Region != null;
 
+        // Solr backup path requires either local dir or S3 args
+        if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
+            boolean hasLocal = args.snapshotLocalDir != null;
+            boolean hasS3 = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
+            if (!hasLocal && !hasS3) {
+                throw new ParameterException(
+                    "For Solr backup migration, provide either --snapshot-local-dir or S3 args (--s3-local-dir, --s3-repo-uri, --s3-region)."
+                );
+            }
+            if (args.coordinatorArgs.host == null) {
+                throw new ParameterException(
+                    "When source version is SOLR, --coordinator-host must be provided for work coordination."
+                );
+            }
+            return;
+        }
+
+        if (args.snapshotName == null) {
+            throw new ParameterException("--snapshot-name is required when --source-type is SNAPSHOT.");
+        }
+        if (args.luceneDir == null) {
+            throw new ParameterException("--lucene-dir is required when --source-type is SNAPSHOT.");
+        }
+        if (args.sourceVersion == null) {
+            throw new ParameterException("--source-version is required when --source-type is SNAPSHOT.");
+        }
+
         if (isSnapshotLocalDirProvided && areAnyS3ArgsProvided) {
             throw new ParameterException(
                 "You must provide either --snapshot-local-dir or --s3-local-dir, --s3-repo-uri, and --s3-region, but not both."
@@ -355,11 +428,11 @@ public class RfsMigrateDocuments {
                     "When --experimental-delta-mode is specified, --experimental-previous-snapshot-name must be provided."
                 );
             }
-            log.warn("EXPERIMENTAL FEATURE: Delta snapshot migration mode {} is enabled. " +
-                    "This feature is experimental and should not be used in production.", 
-                    args.experimental.experimentalDeltaMode);
+            log.atWarn().setMessage("EXPERIMENTAL FEATURE: Delta snapshot migration mode {} is enabled. " +
+                    "This feature is experimental and should not be used in production.")
+                    .addArgument(args.experimental.experimentalDeltaMode).log();
         } else if (args.experimental.previousSnapshotName != null) {
-            log.error("--experimental-previous-snapshot-name was provided but --experimental-delta-mode is not specified.");
+            log.atError().setMessage("--experimental-previous-snapshot-name was provided but --experimental-delta-mode is not specified.").log();
             throw new ParameterException(
                 "When --experimental-previous-snapshot-name is specified, --experimental-delta-mode must be provided."
             );
@@ -368,17 +441,17 @@ public class RfsMigrateDocuments {
         // Validate coordinator args - the ConnectionContext constructor will validate auth param consistency,
         // but we log here if coordinator is enabled for visibility
         if (args.coordinatorArgs.isEnabled()) {
-            log.info("Coordinator connection enabled with host: {}", args.coordinatorArgs.host);
+            log.atInfo().setMessage("Coordinator connection enabled with host: {}").addArgument(args.coordinatorArgs.host).log();
         }
     }
 
     public static void main(String[] args) throws Exception {
         var workerId = ProcessHelpers.getNodeInstanceName();
-        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_TARGET_ARGS)));
+        System.err.println("Starting program with: " + String.join(" ", ArgLogUtils.getRedactedArgs(args, ArgNameConstants.CENSORED_ARGS)));
         // Ensure that log4j2 doesn't execute shutdown hooks until ours have completed. This means that we need to take
         // responsibility for calling `LogManager.shutdown()` in our own shutdown hook..
         System.setProperty("log4j2.shutdownHookEnabled", "false");
-        log.info("Starting RfsMigrateDocuments with workerId=" + workerId);
+        log.atInfo().setMessage("Starting RfsMigrateDocuments with workerId={}").addArgument(workerId).log();
 
         Args arguments = EnvVarParameterPuller.injectFromEnv(new Args(), "RFS_");
         var jCommander = JsonCommandLineParser.newBuilder().addObject(arguments).build();
@@ -396,15 +469,25 @@ public class RfsMigrateDocuments {
         }
 
         var context = makeRootContext(arguments, workerId);
-        var luceneDirPath = Paths.get(arguments.luceneDir);
-        var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
         var targetConnectionContext = arguments.targetArgs.toConnectionContext();
-        OpenSearchClient targetClient = new OpenSearchClientFactory(targetConnectionContext).determineVersionAndCreate();
+        var targetClientFactory = new OpenSearchClientFactory(targetConnectionContext, arguments.maxConnections);
+        OpenSearchClient targetClient = targetClientFactory.determineVersionAndCreate();
         var targetVersion = targetClient.getClusterVersion();
-
-        // Determine coordinator connection and version
-        var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
+        
+        // Determine if server-generated IDs should be used
+        boolean useServerGeneratedIds = switch (arguments.serverGeneratedIds) {
+            case ALWAYS -> true;
+            case NEVER -> false;
+            case AUTO -> {
+                var collectionType = targetClientFactory.detectServerlessCollectionType();
+                if (collectionType.requiresServerGeneratedIds()) {
+                    log.atInfo().setMessage("Auto-enabling server-generated IDs for {} serverless collection").addArgument(collectionType).log();
+                    yield true;
+                }
+                yield false;
+            }
+        };
 
         var docTransformerConfig = Optional.ofNullable(TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams))
             .orElse(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
@@ -413,11 +496,24 @@ public class RfsMigrateDocuments {
         var transformationLoader = new TransformationLoader();
         Supplier<IJsonTransformer> docTransformerSupplier = () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
 
+        if (arguments.sourceVersion != null && arguments.sourceVersion.getFlavor() == Flavor.SOLR) {
+            runSolrBackupMigration(arguments, targetClient, docTransformerSupplier, useServerGeneratedIds, context);
+            return;
+        }
+
+        var luceneDirPath = Paths.get(arguments.luceneDir);
+        var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
+
+        // Determine coordinator connection and version
+        var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
+
         var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
         var progressCursor = new AtomicReference<WorkItemCursor>();
         var cancellationRunnableRef = new AtomicReference<Runnable>();
         var workItemTimeProvider = new WorkItemTimeProvider();
-        var coordinatorFactory = new WorkCoordinatorFactory(coordinatorInfo.version(), arguments.indexNameSuffix);
+        var completionRetryConfig = buildCompletionRetryConfig(arguments);
+        var coordinatorFactory = new WorkCoordinatorFactory(
+            coordinatorInfo.version(), arguments.indexNameSuffix, completionRetryConfig);
         var cleanShutdownCompleted = new AtomicBoolean(false);
 
         try (var workCoordinator = coordinatorFactory.get(
@@ -460,24 +556,10 @@ public class RfsMigrateDocuments {
             }));
 
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
-            
-            // Create document exception allowlist from command-line arguments
-            Set<String> allowedExceptionTypesSet = new HashSet<>(arguments.allowedDocExceptionTypes);
-            DocumentExceptionAllowlist allowlist = new DocumentExceptionAllowlist(allowedExceptionTypesSet);
-            if (!allowedExceptionTypesSet.isEmpty()) {
-                log.atInfo().setMessage("Document exception allowlist configured with types: {}")
-                    .addArgument(String.join(", ", allowedExceptionTypesSet))
-                    .log();
-            }
-            
-            DocumentReindexer reindexer = new DocumentReindexer(targetClient,
-                arguments.numDocsPerBulkRequest,
-                arguments.numBytesPerBulkRequest,
-                arguments.maxConnections,
-                docTransformerSupplier,
-                allowlist);
 
-            var finder = ClusterProviderRegistry.getSnapshotFileFinder(
+            DocumentExceptionAllowlist allowlist = buildDocumentExceptionAllowlist(arguments);
+
+            var finder = SnapshotReaderRegistry.getSnapshotFileFinder(
                     arguments.sourceVersion,
                     arguments.versionStrictness.allowLooseVersionMatches);
 
@@ -490,34 +572,38 @@ public class RfsMigrateDocuments {
                     finder)
                 : new FileSystemRepo(snapshotLocalDirPath, finder);
 
-            var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
+            var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo, arguments.versionStrictness.allowLooseVersionMatches);
 
-            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo, arguments.versionStrictness.allowLooseVersionMatches);
-
-            var unpackerFactory = new SnapshotShardUnpacker.Factory(
-                repoAccessor,
-                luceneDirPath
-            );
-
-            run(
-                new LuceneIndexReader.Factory(sourceResourceProvider),
-                reindexer,
+            var extractor = SnapshotExtractor.create(
+                arguments.sourceVersion, sourceResourceProvider, sourceRepo);
+            var status = runWithPipeline(
+                extractor,
+                targetClient,
+                arguments.snapshotName,
+                luceneDirPath,
+                docTransformerSupplier,
+                useServerGeneratedIds,
+                allowlist,
+                arguments.numDocsPerBulkRequest,
+                arguments.numBytesPerBulkRequest,
+                arguments.maxConnections,
+                arguments.maxShardSizeBytes,
                 progressCursor,
                 workCoordinator,
                 arguments.initialLeaseDuration,
                 processManager,
+                workItemTimeProvider,
                 sourceResourceProvider.getIndexMetadata(),
-                arguments.snapshotName,
-                arguments.experimental.previousSnapshotName,
-                arguments.experimental.experimentalDeltaMode,
                 arguments.indexAllowlist,
-                sourceResourceProvider.getShardMetadata(),
-                unpackerFactory,
-                arguments.maxShardSizeBytes,
                 context,
                 cancellationRunnableRef,
-                workItemTimeProvider);
+                arguments.experimental.previousSnapshotName,
+                arguments.experimental.experimentalDeltaMode);
             cleanShutdownCompleted.set(true);
+            if (status == CompletionStatus.NOTHING_DONE) {
+                log.atInfo().setMessage("Work exists but none available to this worker. Exiting with exit code " + NO_WORK_AVAILABLE_EXIT_CODE).log();
+                System.exit(NO_WORK_AVAILABLE_EXIT_CODE);
+            }
         } catch (NoWorkLeftException e) {
             log.atInfo().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
             cleanShutdownCompleted.set(true);
@@ -530,6 +616,61 @@ public class RfsMigrateDocuments {
 
     @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
     private record CoordinatorInfo(ConnectionContext connectionContext, Version version) {}
+
+    /**
+     * Calculates the approximate total retry window in seconds based on exponential backoff with a max delay cap.
+     * This sums the backoff delays (initial * 2^n, capped at maxDelay) across all retry attempts.
+     * Does not include request execution time or network latency.
+     * Logic matches the runtime retry implementation in OpenSearchWorkCoordinator.retryWithExponentialBackoff()
+     */
+    private static long calculateTotalRetryWindowSeconds(OpenSearchWorkCoordinator.CompletionRetryConfig config) {
+        long totalMs = 0;
+        long delay = config.initialDelayMs();
+        for (int i = 0; i < config.maxRetries(); i++) {
+            totalMs += Math.min(delay, config.maxDelayMs());
+            
+            // Update delay for next iteration
+            if (delay < config.maxDelayMs()) {
+                delay = (delay > config.maxDelayMs() / OpenSearchWorkCoordinator.EXPONENTIAL_BACKOFF_MULTIPLIER)
+                    ? config.maxDelayMs()
+                    : delay * OpenSearchWorkCoordinator.EXPONENTIAL_BACKOFF_MULTIPLIER;
+            }
+        }
+        return totalMs / 1000;
+    }
+
+    /**
+     * Build the coordinator completion-retry configuration from CLI args and log its summary.
+     * Shared between the ES and Solr backfill paths.
+     */
+    private static OpenSearchWorkCoordinator.CompletionRetryConfig buildCompletionRetryConfig(Args arguments) {
+        var completionRetryConfig = new OpenSearchWorkCoordinator.CompletionRetryConfig(
+            arguments.coordinatorRetryMaxRetries,
+            arguments.coordinatorRetryInitialDelayMs,
+            arguments.coordinatorRetryMaxDelayMs);
+        log.atInfo().setMessage("Coordinator completion retry config: maxRetries={}, initialDelay={}ms, maxDelay={}ms, totalWindow=~{}s")
+            .addArgument(completionRetryConfig.maxRetries())
+            .addArgument(completionRetryConfig.initialDelayMs())
+            .addArgument(completionRetryConfig.maxDelayMs())
+            .addArgument(calculateTotalRetryWindowSeconds(completionRetryConfig))
+            .log();
+        return completionRetryConfig;
+    }
+
+    /**
+     * Build the document-exception allowlist from CLI args and log when non-empty.
+     * Shared between the ES and Solr backfill paths.
+     */
+    private static DocumentExceptionAllowlist buildDocumentExceptionAllowlist(Args arguments) {
+        var allowedExceptionTypesSet = new HashSet<>(arguments.allowedDocExceptionTypes);
+        var allowlist = new DocumentExceptionAllowlist(allowedExceptionTypesSet);
+        if (!allowedExceptionTypesSet.isEmpty()) {
+            log.atInfo().setMessage("Document exception allowlist configured with types: {}")
+                .addArgument(String.join(", ", allowedExceptionTypesSet))
+                .log();
+        }
+        return allowlist;
+    }
 
     private static CoordinatorInfo resolveCoordinatorConnection(Args arguments, ConnectionContext targetConnectionContext, Version targetVersion) {
         if (arguments.coordinatorArgs.isEnabled()) {
@@ -623,6 +764,7 @@ public class RfsMigrateDocuments {
                             workItemId,
                             successorWorkItemIds,
                             successorNextAcquisitionLeaseExponent,
+                            workItemAndDuration.getLeaseExpirationTime(),
                             contextSupplier
                     );
                 }
@@ -731,68 +873,281 @@ public class RfsMigrateDocuments {
     }
 
 
-    public static CompletionStatus run(LuceneIndexReader.Factory readerFactory,
-                                       DocumentReindexer reindexer,
-                                       AtomicReference<WorkItemCursor> progressCursor,
-                                       IWorkCoordinator workCoordinator,
-                                       Duration maxInitialLeaseDuration,
-                                       LeaseExpireTrigger leaseExpireTrigger,
-                                       IndexMetadata.Factory indexMetadataFactory,
-                                       String snapshotName,
-                                       String previousSnapshotName,
-                                       DeltaMode deltaMode,
-                                       List<String> indexAllowlist,
-                                       ShardMetadata.Factory shardMetadataFactory,
-                                       SnapshotShardUnpacker.Factory unpackerFactory,
-                                       long maxShardSizeBytes,
-                                       RootDocumentMigrationContext rootDocumentContext,
-                                       AtomicReference<Runnable> cancellationRunnable,
-                                       WorkItemTimeProvider timeProvider)
-        throws IOException, InterruptedException, NoWorkLeftException
-    {
-        var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
-        confirmShardPrepIsComplete(indexMetadataFactory,
-            snapshotName,
-            indexAllowlist,
-            scopedWorkCoordinator,
-            rootDocumentContext
+    private static void runSolrBackupMigration(
+        Args arguments,
+        OpenSearchClient targetClient,
+        Supplier<IJsonTransformer> docTransformerSupplier,
+        boolean useServerGeneratedIds,
+        RootDocumentMigrationContext context
+    ) {
+        try {
+            // Check the coordinator for pending work BEFORE downloading anything from S3.
+            // This avoids wasting time/bandwidth downloading schema metadata on every pod restart
+            // when all work items have already been completed.
+            var targetConnectionContext = arguments.targetArgs.toConnectionContext();
+            var targetVersion = targetClient.getClusterVersion();
+            var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
+
+            var workerId = ProcessHelpers.getNodeInstanceName();
+            var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+            var progressCursor = new AtomicReference<WorkItemCursor>();
+            var cancellationRunnableRef = new AtomicReference<Runnable>();
+            var workItemTimeProvider = new WorkItemTimeProvider();
+            var completionRetryConfig = buildCompletionRetryConfig(arguments);
+            var coordinatorFactory = new WorkCoordinatorFactory(
+                coordinatorInfo.version(), arguments.indexNameSuffix, completionRetryConfig);
+            var cleanShutdownCompleted = new AtomicBoolean(false);
+            var allowlist = buildDocumentExceptionAllowlist(arguments);
+
+            try (var workCoordinator = coordinatorFactory.get(
+                     new CoordinateWorkHttpClient(coordinatorInfo.connectionContext()),
+                     TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                     workerId,
+                     Clock.systemUTC(),
+                     workItemRef::set);
+                 var processManager = new LeaseExpireTrigger(
+                    w -> exitOnLeaseTimeout(
+                            workItemRef, workCoordinator, w, progressCursor, workItemTimeProvider,
+                            arguments.initialLeaseDuration,
+                            () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
+                            cleanShutdownCompleted,
+                            context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
+                    Clock.systemUTC())) {
+
+                // Work coordination will naturally short-circuit via ShardWorkPreparer.onAlreadyCompleted
+                // and prepareWorkCoordination will throw NoWorkLeftException if there's nothing to do.
+                // Both cases are handled below without any S3 schema downloads thanks to the lazy
+                // collectionPreparer wired into the factory/source.
+
+                // Work is available — now download metadata from S3 / local
+                Path backupDir;
+                S3Repo s3Repo = null;
+                if (arguments.snapshotLocalDir != null) {
+                    backupDir = Paths.get(arguments.snapshotLocalDir);
+                    log.atInfo().setMessage("Starting Solr backup document migration from local dir: {}").addArgument(backupDir).log();
+                } else if (arguments.s3RepoUri != null && arguments.s3Region != null && arguments.s3LocalDir != null) {
+                    // Solr's BACKUP API writes to <location>/<snapshotName>/ where <location> is
+                    // the path portion of s3RepoUri (or / when no subpath is configured).
+                    // Mirror the path-extraction logic so reader & writer land on the same URI.
+                    var backupS3Uri = SolrBackupLayout.buildBackupS3Uri(
+                        new S3Uri(arguments.s3RepoUri), arguments.snapshotName);
+                    log.atInfo().setMessage("Downloading Solr backup metadata from S3: {}").addArgument(backupS3Uri).log();
+                    s3Repo = S3Repo.createRaw(
+                        Paths.get(arguments.s3LocalDir),
+                        new S3Uri(backupS3Uri),
+                        arguments.s3Region,
+                        arguments.s3Endpoint != null ? URI.create(arguments.s3Endpoint) : null
+                    );
+                    backupDir = s3Repo.getRepoRootDir();
+                } else {
+                    throw new ParameterException(
+                        "When source version is SOLR, provide either --snapshot-local-dir or S3 args (--s3-local-dir, --s3-repo-uri, --s3-region)."
+                    );
+                }
+
+                // Discover collection names (cheap: single S3 list-directories call or local dir scan).
+                // The schema XMLs themselves are fetched lazily by the collectionPreparer below -- only
+                // when ShardWorkPreparer actually needs to iterate shards for an uncompleted work item.
+                // If work-coordination already has everything marked complete, ShardWorkPreparer short-
+                // circuits via onAlreadyCompleted and no schema downloads happen at all.
+                var schemas = new LinkedHashMap<String, JsonNode>();
+                final List<String> collections;
+                if (s3Repo != null) {
+                    collections = new ArrayList<>(s3Repo.listTopLevelDirectories());
+                } else {
+                    collections = new ArrayList<>(SolrSnapshotReader.discoverCollections(backupDir));
+                }
+                if (!arguments.indexAllowlist.isEmpty()) {
+                    collections.retainAll(arguments.indexAllowlist);
+                }
+                for (var collection : collections) {
+                    schemas.put(collection, null);  // placeholder; populated lazily by collectionPreparer
+                }
+
+                // collectionPreparer hydrates a collection on first access: resolves the backup
+                // layout (flat vs. two-level), downloads the latest zk_backup_N and
+                // shard_backup_metadata (S3 only), then parses the schema into the schemas map.
+                // Called from SolrBackupIndexMetadataFactory.fromRepo and
+                // SolrMultiCollectionSource.readDocuments, wrapped so it runs at most once per
+                // collection per process.
+                final S3Repo finalS3Repo = s3Repo;
+                final Path finalBackupDir = backupDir;
+                // dataPrefixByCollection caches the resolved layout for each collection so the
+                // collectionPreparer (which downloads metadata) and the shardPreparer
+                // (which downloads shard index files) both use the same prefix, even for the
+                // two-level Solr 8 incremental layout.
+                final Map<String, String> dataPrefixByCollection = new ConcurrentHashMap<>();
+                Consumer<String> collectionPreparer = collection -> {
+                    if (finalS3Repo != null) {
+                        var resolved = SolrBackupLayout.resolveCollectionDataPrefix(
+                            collection, finalS3Repo::listSubDirectories);
+                        if (resolved != null) {
+                            dataPrefixByCollection.put(collection, resolved.dataPrefix());
+                            var dataRoot = resolved.joinWith(collection);
+                            finalS3Repo.downloadPrefix(dataRoot + "/" + resolved.latestZkBackupName());
+                            log.atInfo().setMessage("Downloading shard metadata for collection '{}' from S3").addArgument(collection).log();
+                            finalS3Repo.downloadPrefix(dataRoot + "/shard_backup_metadata");
+                        } else {
+                            log.warn("No zk_backup directories found for collection '{}' in S3", collection);
+                        }
+                    }
+                    var collectionRoot = finalBackupDir.resolve(collection);
+                    var dataPrefix = dataPrefixByCollection.getOrDefault(collection, "");
+                    var dataDir = dataPrefix.isEmpty() ? collectionRoot : collectionRoot.resolve(dataPrefix);
+                    schemas.put(collection, SolrSchemaXmlParser.findAndParse(dataDir));
+                };
+                Consumer<SolrShardPartition> shardPreparer = (finalS3Repo != null) ? partition -> {
+                    var dataPrefix = dataPrefixByCollection.getOrDefault(partition.collection(), "");
+                    var collectionDataPrefix = dataPrefix.isEmpty()
+                        ? partition.collection()
+                        : partition.collection() + "/" + dataPrefix;
+                    var mapping = partition.fileNameMapping();
+                    if (mapping != null) {
+                        // SolrCloud UUID backup: download only the UUID files for this shard
+                        log.atInfo().setMessage("Downloading {} index files for shard '{}/{}' from S3")
+                            .addArgument(mapping.size()).addArgument(partition.collection()).addArgument(partition.shard()).log();
+                        for (var uuid : mapping.values()) {
+                            finalS3Repo.downloadFile(collectionDataPrefix + "/index/" + uuid);
+                        }
+                    } else {
+                        // Non-UUID layout: download the shard's directory
+                        log.atInfo().setMessage("Downloading index data for shard '{}/{}' from S3")
+                            .addArgument(partition.collection()).addArgument(partition.shard()).log();
+                        finalS3Repo.downloadPrefix(collectionDataPrefix + "/index");
+                    }
+                } : null;
+
+                var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, collectionPreparer);
+                var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer, shardPreparer);
+
+                // Set up a hook to attempt to shut down cleanly (to mark progress in the worker coordination system) in the
+                // event of a SIGTERM signal.
+                Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                    Thread.currentThread().setName("Cleanup-Hook-Thread");
+                    log.atWarn().setMessage("Received shutdown signal. Trying to mark progress and shutdown cleanly.").log();
+                    try {
+                        executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
+                                context.getWorkCoordinationContext()::createSuccessorWorkItemsContext);
+                        log.atInfo().setMessage("Clean shutdown completed.").log();
+                    } catch (InterruptedException e) {
+                        log.atError().setMessage("Clean exit process was interrupted: {}").addArgument(e).log();
+                        Thread.currentThread().interrupt();
+                    } catch (Exception e) {
+                        log.atError().setMessage("Could not complete clean exit process: {}").addArgument(e).log();
+                    } finally {
+                        LogManager.shutdown();
+                    }
+                }));
+
+                var scopedWorkCoordinator = prepareWorkCoordination(
+                    workCoordinator, processManager, indexMetadataFactory,
+                    arguments.snapshotName, arguments.indexAllowlist, context);
+
+                var runner = DocumentMigrationBootstrap.builder()
+                    .targetClient(targetClient)
+                    .snapshotName(arguments.snapshotName)
+                    .maxDocsPerBatch(arguments.numDocsPerBulkRequest)
+                    .maxBytesPerBatch(arguments.numBytesPerBulkRequest)
+                    .batchConcurrency(arguments.maxConnections)
+                    .transformerSupplier(docTransformerSupplier)
+                    .allowServerGeneratedIds(useServerGeneratedIds)
+                    .allowlist(allowlist)
+                    .externalDocumentSource(documentSource)
+                    .workCoordinator(scopedWorkCoordinator)
+                    .workItemTimeProvider(workItemTimeProvider)
+                    .maxInitialLeaseDuration(arguments.initialLeaseDuration)
+                    .cursorConsumer(progressCursor::set)
+                    .cancellationTriggerConsumer(cancellationRunnableRef::set)
+                    .build();
+
+                runner.migrateOneShard(context::createReindexContext);
+                cleanShutdownCompleted.set(true);
+            }
+            log.atInfo().setMessage("Solr backup document migration completed successfully").log();
+        } catch (NoWorkLeftException e) {
+            log.atInfo().setMessage("No more Solr work items to process: {}").addArgument(e.getMessage()).log();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to migrate Solr backup", e);
+        }
+    }
+
+    public static CompletionStatus runWithPipeline(
+        SnapshotExtractor extractor,
+        OpenSearchClient targetClient,
+        String snapshotName,
+        Path workDir,
+        Supplier<IJsonTransformer> transformerSupplier,
+        boolean useServerGeneratedIds,
+        DocumentExceptionAllowlist allowlist,
+        int maxDocsPerBatch,
+        long maxBytesPerBatch,
+        int batchConcurrency,
+        long maxShardSizeBytes,
+        AtomicReference<WorkItemCursor> progressCursor,
+        IWorkCoordinator workCoordinator,
+        Duration maxInitialLeaseDuration,
+        LeaseExpireTrigger leaseExpireTrigger,
+        WorkItemTimeProvider workItemTimeProvider,
+        IndexMetadata.Factory indexMetadataFactory,
+        List<String> indexAllowlist,
+        RootDocumentMigrationContext rootDocumentContext,
+        AtomicReference<Runnable> cancellationRunnable,
+        String previousSnapshotName,
+        DeltaMode deltaMode
+    ) throws IOException, InterruptedException, NoWorkLeftException {
+        var scopedWorkCoordinator = prepareWorkCoordination(
+            workCoordinator, leaseExpireTrigger, indexMetadataFactory,
+            snapshotName, indexAllowlist, rootDocumentContext
         );
+
+        var runner = DocumentMigrationBootstrap.builder()
+            .extractor(extractor)
+            .targetClient(targetClient)
+            .snapshotName(snapshotName)
+            .workDir(workDir)
+            .maxDocsPerBatch(maxDocsPerBatch)
+            .maxBytesPerBatch(maxBytesPerBatch)
+            .batchConcurrency(batchConcurrency)
+            .maxShardSizeBytes(maxShardSizeBytes)
+            .transformerSupplier(transformerSupplier)
+            .allowServerGeneratedIds(useServerGeneratedIds)
+            .allowlist(allowlist)
+            .previousSnapshotName(previousSnapshotName)
+            .deltaMode(deltaMode)
+            .deltaContextFactory(previousSnapshotName != null && deltaMode != null
+                ? () -> new RfsContexts.DeltaStreamContext(rootDocumentContext, null)
+                : null)
+            .workCoordinator(scopedWorkCoordinator)
+            .workItemTimeProvider(workItemTimeProvider)
+            .maxInitialLeaseDuration(maxInitialLeaseDuration)
+            .cursorConsumer(progressCursor::set)
+            .cancellationTriggerConsumer(cancellationRunnable::set)
+            .build();
+
+        return runner.migrateOneShard(rootDocumentContext::createReindexContext);
+    }
+
+    /**
+     * Shared work-coordination setup: creates a scoped coordinator, ensures shard prep
+     * is complete, and verifies there is still work to do.
+     */
+    private static ScopedWorkCoordinator prepareWorkCoordination(
+        IWorkCoordinator workCoordinator,
+        LeaseExpireTrigger leaseExpireTrigger,
+        IndexMetadata.Factory indexMetadataFactory,
+        String snapshotName,
+        List<String> indexAllowlist,
+        RootDocumentMigrationContext rootDocumentContext
+    ) throws IOException, InterruptedException, NoWorkLeftException {
+        var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
+        confirmShardPrepIsComplete(indexMetadataFactory, snapshotName, indexAllowlist,
+            scopedWorkCoordinator, rootDocumentContext);
         if (!workCoordinator.workItemsNotYetComplete(
             rootDocumentContext.getWorkCoordinationContext()::createItemsPendingContext
         )) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
-        Function<String, BiFunction<String, Integer, ShardMetadata>> shardMetadataSupplierFactory = snapshot -> (indexName, shardId) -> {
-            var shardMetadata = shardMetadataFactory.fromRepo(snapshot, indexName, shardId);
-            log.atInfo()
-                .setMessage("Shard size: {} for snapshotName={} indexName={} shardId={}")
-                .addArgument(shardMetadata.getTotalSizeBytes())
-                .addArgument(snapshot)
-                .addArgument(indexName)
-                .addArgument(shardId)
-                .log();
-            if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
-                throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);
-            }
-            return shardMetadata;
-        };
-
-        var shardMetadataSupplier = shardMetadataSupplierFactory.apply(snapshotName);
-        var strategy = (previousSnapshotName == null)
-            ? new RegularDocumentReaderEngine(shardMetadataSupplier)
-            : new DeltaDocumentReaderEngine(
-                shardMetadataSupplierFactory.apply(previousSnapshotName), shardMetadataSupplier, deltaMode);
-
-        DocumentsRunner runner = new DocumentsRunner(scopedWorkCoordinator,
-            maxInitialLeaseDuration,
-            reindexer,
-            unpackerFactory,
-            readerFactory,
-            progressCursor::set,
-            cancellationRunnable::set,
-            timeProvider,
-            strategy);
-        return runner.migrateNextShard(rootDocumentContext::createReindexContext);
+        return scopedWorkCoordinator;
     }
 
     private static void confirmShardPrepIsComplete(

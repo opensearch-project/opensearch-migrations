@@ -8,8 +8,10 @@ process.argv.splice(2, 1);
         ['constrainSchema', async () => require('./constrainUserSchema').main()],
         ['initialize', async () => require('./runMigrationInitializer').main()],
         ['findSecrets', async () => require('./findSecrets').main()],
+        ['validate', async () => require('./validateConfig').main()],
         ['formatApprovals', async () => require('./formatApprovals').main()],
 
+        ['buildUnifiedSchema', async () => require('@opensearch-migrations/schemas/buildUnifiedSchema').main()],
         ['makeSample', async () => require('@opensearch-migrations/schemas/makeSample').main()],
         ['showSchema', async () => require('@opensearch-migrations/schemas/showUserSchema').main()],
     ]);

@@ -54,7 +54,31 @@ public class ItemsTest {
         assertThat(jsonOutput.toPrettyString(), jsonOutput.has("indexes"), is(true));
         assertThat(jsonOutput.toPrettyString(), jsonOutput.has("aliases"), is(true));
         assertThat(jsonOutput.toPrettyString(), jsonOutput.has("errors"), is(true));
+        // Default succeedOnEmpty=true: empty items should NOT produce an error
         assertThat(jsonOutput.toPrettyString(), jsonOutput.get("errors").size(), equalTo(0));
+    }
+
+    @Test
+    void testEmptyWithSucceedOnEmptyFalse() throws Exception {
+        var items = createEmptyItemsBuilder()
+            .succeedOnEmpty(false)
+            .build();
+
+        // Test String Output
+        var stringOutput = items.asCliOutput();
+        
+        // Test JSON Output
+        var jsonOutput = items.asJsonOutput();
+        
+        // String output assertions — same visual output regardless of succeedOnEmpty
+        assertThat(stringOutput, containsString("Migrated Items:"));
+        assertThat(stringOutput, containsStringCount(Items.NONE_FOUND_MARKER, 4));
+        assertThat(stringOutput, hasLineCount(12));
+        
+        // JSON output assertions — strict mode (succeedOnEmpty=false) should produce an error
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.has("errors"), is(true));
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.get("errors").size(), equalTo(1));
+        assertThat(jsonOutput.toPrettyString(), jsonOutput.get("errors").get(0).asText(), containsString("No migration items found"));
     }
 
     @Test
@@ -122,7 +146,7 @@ public class ItemsTest {
     void testIndexTemplatesFailures() throws Exception {
         var items = createEmptyItemsBuilder()
             .indexTemplates(List.of(
-                CreationResult.builder().name("it1").failureType(CreationFailureType.ALREADY_EXISTS).build(),
+                CreationResult.builder().name("it1").failureType(CreationFailureType.METADATA_ALREADY_EXISTS).build(),
                 CreationResult.builder().name("it2").failureType(CreationFailureType.TARGET_CLUSTER_FAILURE).exception(new RuntimeException("403 Forbidden")).build()
             ))
             .build();
@@ -148,7 +172,7 @@ public class ItemsTest {
         assertThat(jsonOutput.toPrettyString(), it1.get("name").asText(), equalTo("it1"));
         assertThat(jsonOutput.toPrettyString(), it1.get("successful").asBoolean(), is(false));
         var failure1 = it1.get("failure");
-        assertThat(jsonOutput.toPrettyString(), failure1.get("type").asText(), equalTo("ALREADY_EXISTS"));
+        assertThat(jsonOutput.toPrettyString(), failure1.get("type").asText(), equalTo("METADATA_ALREADY_EXISTS"));
         assertThat(jsonOutput.toPrettyString(), failure1.get("fatal").asBoolean(), is(false));
         var it2 = indexTemplates.get(1);
         assertThat(jsonOutput.toPrettyString(), it2.get("name").asText(), equalTo("it2"));
@@ -228,13 +252,32 @@ public class ItemsTest {
         assertThat(jsonOutput.toPrettyString(), failure5.get("exception").asText(), equalTo("re1"));
 
     }
+    @Test
+    void testIndexAlreadyExistsSuggestions() throws Exception {
+        var items = createEmptyItemsBuilder()
+            .indexes(List.of(
+                CreationResult.builder().name("my_index").failureType(CreationFailureType.INDEX_ALREADY_EXISTS).build()
+            ))
+            .build();
+
+        var stringOutput = items.asCliOutput();
+        assertThat(stringOutput, containsString("ERROR - my_index already exists"));
+        assertThat(stringOutput, containsString("console clusters clear-indices --cluster target"));
+        assertThat(stringOutput, containsString("--index-allowlist"));
+
+        var jsonOutput = items.asJsonOutput();
+        var indexes = jsonOutput.get("indexes");
+        assertThat(jsonOutput.toPrettyString(), indexes.get(0).get("failure").get("type").asText(), equalTo("INDEX_ALREADY_EXISTS"));
+        assertThat(jsonOutput.toPrettyString(), indexes.get(0).get("failure").get("fatal").asBoolean(), is(true));
+    }
+
 
     @Test
     void testWithFailures() throws Exception {
         var items = createEmptyItemsBuilder()
             .failureMessage("Overall failure message")
             .indexTemplates(List.of(
-                CreationResult.builder().name("it1").failureType(CreationFailureType.ALREADY_EXISTS).build(),
+                CreationResult.builder().name("it1").failureType(CreationFailureType.METADATA_ALREADY_EXISTS).build(),
                 CreationResult.builder().name("it2").failureType(CreationFailureType.TARGET_CLUSTER_FAILURE).exception(new RuntimeException("403 Forbidden")).build()
             ))
             .build();

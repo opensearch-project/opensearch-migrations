@@ -1,6 +1,9 @@
 conditionalPackageInstalls:
   localstack: false
   jaeger: false
+  aws-privateca-issuer: true     # pre-install on EKS; lightweight, idle without a PCA ARN
+  ack-acmpca-controller: false   # opt-in only — creates real AWS PCA with cost implications
+  ack-cloudwatch-controller: true
 
 aws:
   configureAwsEksResources: true
@@ -8,7 +11,16 @@ aws:
   account: ""
 
 cluster:
-  isEKS: true
+  dedicatedKarpenterNodePoolForMigrationConsole: true
+  # When true, deploys a custom Karpenter NodePool (general-work-pool) with conservative
+  # settings (WhenEmpty consolidation, 30m cooldown, 4xlarge max) instead of using the
+  # EKS Auto Mode general-purpose pool. Recommended for production stability.
+  useCustomKarpenterNodePool: true
+
+# Enable multi-arch for EKS
+workloadsNodePool:
+  architectures: ["amd64", "arm64"]
+
 
 defaultBucketConfiguration:
   useLocalStack: false
@@ -16,6 +28,7 @@ defaultBucketConfiguration:
   emptyBeforeDelete: true
   endpoint: ""
   snapshotRoleArn: ""
+  bucketOperationImagePullPolicy: "IfNotPresent"
 
 # Useful for updating images while developing
 #images:
@@ -96,11 +109,19 @@ otelConfiguration:
         verbosity: detailed
         sampling_initial: 5
         sampling_thereafter: 200
-      awsemf:
+      awsemf/app:
         namespace: 'OpenSearchMigrations'
-        dimension_rollup_option: NoDimensionRollup # Reduce number of metrics by only publishing with all dimensions
+        dimension_rollup_option: NoDimensionRollup
         resource_to_telemetry_conversion:
           enabled: true
+      awsemf/cadvisor:
+        namespace: 'OpenSearchMigrations'
+        dimension_rollup_option: NoDimensionRollup
+        metric_declarations:
+          - dimensions: [[container, namespace]]
+            metric_name_selectors:
+              - container_cpu_usage_seconds_total
+              - container_memory_working_set_bytes
       prometheus:
         endpoint: "0.0.0.0:8889"
         send_timestamps: true
@@ -109,12 +130,22 @@ otelConfiguration:
     service:
       extensions: [health_check]
       pipelines:
-        metrics:
-          receivers: [otlp, prometheus]
+        metrics/app:
+          receivers: [otlp]
           processors: [batch, resource/remove_default_attributes, resource/metrics, cumulativetodelta]
-          exporters: [awsemf, prometheus]
+          exporters: [awsemf/app, prometheus]
+        metrics/cadvisor:
+          receivers: [prometheus]
+          processors: [batch]
+          exporters: [awsemf/cadvisor, prometheus]
 
 charts:
+  argo-workflows:
+    values:
+      artifactRepository:
+        s3:
+          useSDKCreds: true
+
   fluent-bit:
     values:
       env:
@@ -151,8 +182,25 @@ charts:
           mountPath: /fluentbit/scripts
           readOnly: true
 
+  strimzi-kafka-operator:
+     # Use EKS-specific node selectors or tolerations if you have dedicated infra
+#    nodeSelector:
+#    workload-type: "operator-control-plane"
 
-# Higher resources for EKS production
-etcdCluster:
-  cpu: 500m
-  memory: 1Gi
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "1Gi"
+      limits:
+        cpu: "2000m"
+        memory: "2Gi"
+
+    # Handle higher latency that might happen at greater scale
+    env:
+      - name: STRIMZI_OPERATION_TIMEOUT_MS
+        value: "600000"  # This is for orchestration events, like syncing reconciling nodes
+      - name: STRIMZI_FULL_RECONCILIATION_INTERVAL_MS
+        value: "120000" # 2 minutes (slows down background chatter)
+      - name: KUBERNETES_CLIENT_READ_TIMEOUT_MS
+        value: "30000"  # Avoid timing out on heavy K8s API responses
+

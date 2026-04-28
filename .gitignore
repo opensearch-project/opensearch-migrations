@@ -1,6 +1,7 @@
 .coverage
 coverage.xml
 .idea
+.kiro
 .DS_Store
 .gradle/
 .venv
@@ -39,9 +40,18 @@ orchestrationSpecs/dist/
 orchestrationSpecs/node_modules/
 orchestrationSpecs/packages/**/dist/
 orchestrationSpecs/packages/**/node_modules/
+orchestrationSpecs/packages/**/coverage/
 orchestrationSpecs/packages/migration-workflow-templates/k8sResources
 orchestrationSpecs/k8s-schemas
 orchestrationSpecs/packages/argo-workflow-builders/src/generated
 orchestrationSpecs/packages/config-processor/bundled
 orchestrationSpecs/packages/migration-workflow-templates/workflowTemplates
 orchestrationSpecs/packages/argo-workflow-builders/k8sSchemas
+frontend/
+
+# IDE / Java tooling
+.settings/
+.factorypath
+deployment/k8s/aws/dist/
+.scannerwork/
+.sisyphus/

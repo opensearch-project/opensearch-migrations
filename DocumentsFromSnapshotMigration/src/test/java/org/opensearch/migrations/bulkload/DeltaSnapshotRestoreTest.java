@@ -14,7 +14,7 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParam
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.utils.FileSystemUtils;
@@ -175,7 +175,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
             sourceClusterOperations.createDocument(indexName, docIdOnBoth, doc);
 
             // Refresh to ensure documents are searchable
-            sourceClusterOperations.post("/_refresh", null);
+            sourceClusterOperations.refresh();
 
             // === ACTION: Take first snapshot ===
             var snapshot1Name = "snapshot1";
@@ -201,7 +201,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
             sourceClusterOperations.deleteDocument(indexName, docIdDeletedOnSecondSnapshot, null, null);
             var docIdOnlyOnSecond = "docOnlyOnSecond";
             sourceClusterOperations.createDocument(indexName, docIdOnlyOnSecond, doc);
-            sourceClusterOperations.post("/_refresh", null);
+            sourceClusterOperations.refresh();
 
             // === ACTION: Take second snapshot ===
             var snapshot2Name = "snapshot2";
@@ -217,7 +217,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
             
             // Copy snapshot data to local directory
             sourceCluster.copySnapshotData(localDirectory.toString());
-            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
                     sourceCluster.getContainerVersion().getVersion(), true);
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
 
@@ -251,7 +251,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 Assertions.assertEquals(numberOfShards + 1, expectedTerminationException.numRuns);
 
                 // === VERIFICATION: Check the results ===
-                targetClusterOperations.post("/_refresh", null);
+                targetClusterOperations.refresh();
                 {
                     var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdDeletedOnSecondSnapshot);
                      Assertions.assertEquals(404, response.getKey(), "doc2 should be deleted on target");
@@ -297,7 +297,7 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                 Assertions.assertEquals(numberOfShards + 1, expectedTerminationException.numRuns);
 
                 // === VERIFICATION: Check the results ===
-                targetClusterOperations.post("/_refresh", null);
+                targetClusterOperations.refresh();
                 {
                     var response = targetClusterOperations.get("/" + indexName + "/_source/" + docIdDeletedOnSecondSnapshot);
                     Assertions.assertEquals(200, response.getKey(), docIdDeletedOnSecondSnapshot + " should created when restoring first snapshot");

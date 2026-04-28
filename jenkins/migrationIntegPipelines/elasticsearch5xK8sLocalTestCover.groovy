@@ -5,6 +5,9 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
         [$class: 'GitSCMSource',
          remote: "${gitUrl}"])
 
-// Shared library function (location from root: vars/elasticsearch5xK8sLocalTest.groovy)
-elasticsearch5xK8sLocalTest()
+// Use JOB_NAME_OVERRIDE if set, otherwise derive from the Jenkins job name.
+// This ensures the GenericTrigger regex stays in sync with the actual job name
+// (e.g., main-* vs pr-*) across runs.
+def jobNameOverride = params.JOB_NAME_OVERRIDE ?: env.JOB_BASE_NAME ?: ''
+elasticsearch5xK8sLocalTest(jobName: jobNameOverride ?: null)
 

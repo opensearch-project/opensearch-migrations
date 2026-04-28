@@ -129,6 +129,23 @@ public class ParsedHttpMessagesAsDicts {
         fillStatusCodeMetrics(context, sourceResponseOp, targetResponseOps4);
     }
 
+    /**
+     * Build the structured tuple map used by {@link org.opensearch.migrations.replay.sink.TupleSink} implementations.
+     */
+    public Map<String, Object> toTupleMap(SourceTargetCaptureTuple tuple) {
+        var map = new LinkedHashMap<String, Object>();
+        sourceRequestOp.ifPresent(r -> map.put("sourceRequest", r));
+        sourceResponseOp.ifPresent(r -> map.put("sourceResponse", r));
+        targetRequestOp.ifPresent(r -> map.put("targetRequest", r));
+        map.put("targetResponses", targetResponseList);
+        var key = tuple.getRequestKey();
+        map.put("connectionId", key.getTrafficStreamKey().getConnectionId() + "." + key.getSourceRequestIndex());
+        Optional.ofNullable(tuple.topLevelErrorCause).ifPresent(e -> map.put("error", e.toString()));
+        map.put("numRequests", tuple.responseList.size());
+        map.put("numErrors", tuple.responseList.stream().filter(r -> r.getErrorCause() != null).count());
+        return map;
+    }
+
     public static void fillStatusCodeMetrics(
         @NonNull IReplayContexts.ITupleHandlingContext context,
         Optional<Map<String, Object>> sourceResponseOp,
@@ -157,7 +174,7 @@ public class ParsedHttpMessagesAsDicts {
         } catch (Exception e) {
             // TODO - this isn't a good design choice.
             // We should follow through with the spirit of this class and leave this as empty optional values
-            log.atWarn().setCause(e)
+            log.atDebug().setCause(e)
                 .setMessage("Putting what may be a bogus value in the output because transforming it "
                         + "into json threw an exception for {}")
                 .addArgument(context)

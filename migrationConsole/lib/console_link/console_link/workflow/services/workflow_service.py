@@ -41,24 +41,6 @@ class WorkflowSubmitResult(TypedDict):
     error: Optional[str]
 
 
-class WorkflowStopResult(TypedDict):
-    """Result of workflow stop operation."""
-    success: bool
-    workflow_name: str
-    namespace: str
-    message: str
-    error: Optional[str]
-
-
-class WorkflowApproveResult(TypedDict):
-    """Result of workflow approve/resume operation."""
-    success: bool
-    workflow_name: str
-    namespace: str
-    message: str
-    error: Optional[str]
-
-
 class WorkflowListResult(TypedDict):
     """Result of workflow list operation."""
     success: bool
@@ -359,200 +341,6 @@ class WorkflowService:
             logger.error(error_msg)
             return self._create_error_status_result(workflow_name, namespace, error_msg)
 
-    def stop_workflow(
-        self,
-        workflow_name: str,
-        namespace: str,
-        argo_server: str,
-        token: Optional[str] = None,
-        insecure: bool = False
-    ) -> WorkflowStopResult:
-        """Stop a running workflow via Argo Workflows REST API.
-
-        Args:
-            workflow_name: Name of the workflow to stop
-            namespace: Kubernetes namespace
-            argo_server: Argo Server URL
-            token: Bearer token for authentication
-            insecure: Whether to skip TLS verification
-
-        Returns:
-            WorkflowStopResult dict with success status, message, and error
-        """
-        try:
-            headers = self._prepare_headers(token)
-
-            # Construct URL for stop endpoint
-            url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}/stop"
-
-            logger.info(f"Stopping workflow {workflow_name} in namespace {namespace}")
-            logger.debug(f"Stop request URL: {url}")
-
-            # Make PUT request to stop the workflow
-            response = requests.put(
-                url,
-                headers=headers,
-                verify=not insecure
-            )
-
-            # Handle response
-            if response.status_code == 200:
-                logger.info(f"Workflow {workflow_name} stopped successfully")
-                return WorkflowStopResult(
-                    success=True,
-                    workflow_name=workflow_name,
-                    namespace=namespace,
-                    message=f"Workflow {workflow_name} stopped successfully",
-                    error=None
-                )
-            elif response.status_code == 404:
-                error_msg = f"Workflow {workflow_name} not found in namespace {namespace}"
-                logger.error(error_msg)
-                return WorkflowStopResult(
-                    success=False,
-                    workflow_name=workflow_name,
-                    namespace=namespace,
-                    message=error_msg,
-                    error=error_msg
-                )
-            else:
-                error_msg = f"Failed to stop workflow: HTTP {response.status_code}"
-                try:
-                    error_detail = response.json()
-                    error_msg = f"Failed to stop workflow: {error_detail}"
-                except Exception:
-                    error_msg = f"Failed to stop workflow: {response.text}"
-
-                logger.error(error_msg)
-                return WorkflowStopResult(
-                    success=False,
-                    workflow_name=workflow_name,
-                    namespace=namespace,
-                    message=error_msg,
-                    error=error_msg
-                )
-
-        except requests.exceptions.RequestException as e:
-            error_msg = f"Network error stopping workflow: {e}"
-            logger.error(error_msg)
-
-            return WorkflowStopResult(
-                success=False,
-                workflow_name=workflow_name,
-                namespace=namespace,
-                message=error_msg,
-                error=str(e)
-            )
-
-        except Exception as e:
-            error_msg = f"Unexpected error stopping workflow: {e}"
-            logger.exception(error_msg)
-
-            return WorkflowStopResult(
-                success=False,
-                workflow_name=workflow_name,
-                namespace=namespace,
-                message=error_msg,
-                error=str(e)
-            )
-
-    def approve_workflow(
-        self,
-        workflow_name: str,
-        namespace: str,
-        argo_server: str,
-        token: Optional[str] = None,
-        insecure: bool = False
-    ) -> WorkflowApproveResult:
-        """Approve/resume a suspended workflow via Argo Workflows REST API.
-
-        Args:
-            workflow_name: Name of the workflow to approve
-            namespace: Kubernetes namespace
-            argo_server: Argo Server URL
-            token: Bearer token for authentication
-            insecure: Whether to skip TLS verification
-
-        Returns:
-            WorkflowApproveResult dict with success status, message, and error
-        """
-        try:
-            headers = self._prepare_headers(token)
-
-            # Construct URL for resume endpoint
-            url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}/resume"
-
-            logger.info(f"Resuming workflow {workflow_name} in namespace {namespace}")
-            logger.debug(f"Resume request URL: {url}")
-
-            # Make PUT request to resume the workflow
-            response = requests.put(
-                url,
-                headers=headers,
-                verify=not insecure
-            )
-
-            # Handle response
-            if response.status_code == 200:
-                logger.info(f"Workflow {workflow_name} resumed successfully")
-                return WorkflowApproveResult(
-                    success=True,
-                    workflow_name=workflow_name,
-                    namespace=namespace,
-                    message=f"Workflow {workflow_name} resumed successfully",
-                    error=None
-                )
-            elif response.status_code == 404:
-                error_msg = f"Workflow {workflow_name} not found in namespace {namespace}"
-                logger.error(error_msg)
-                return WorkflowApproveResult(
-                    success=False,
-                    workflow_name=workflow_name,
-                    namespace=namespace,
-                    message=error_msg,
-                    error=error_msg
-                )
-            else:
-                error_msg = f"Failed to resume workflow: HTTP {response.status_code}"
-                try:
-                    error_detail = response.json()
-                    error_msg = f"Failed to resume workflow: {error_detail}"
-                except Exception:
-                    error_msg = f"Failed to resume workflow: {response.text}"
-
-                logger.error(error_msg)
-                return WorkflowApproveResult(
-                    success=False,
-                    workflow_name=workflow_name,
-                    namespace=namespace,
-                    message=error_msg,
-                    error=error_msg
-                )
-
-        except requests.exceptions.RequestException as e:
-            error_msg = f"Network error resuming workflow: {e}"
-            logger.error(error_msg)
-
-            return WorkflowApproveResult(
-                success=False,
-                workflow_name=workflow_name,
-                namespace=namespace,
-                message=error_msg,
-                error=str(e)
-            )
-
-        except Exception as e:
-            error_msg = f"Unexpected error resuming workflow: {e}"
-            logger.exception(error_msg)
-
-            return WorkflowApproveResult(
-                success=False,
-                workflow_name=workflow_name,
-                namespace=namespace,
-                message=error_msg,
-                error=str(e)
-            )
-
     def _prepare_headers(self, token: Optional[str] = None) -> Dict[str, str]:
         """Prepare HTTP headers for API requests.
 
@@ -752,7 +540,8 @@ class WorkflowService:
                     "name": node.get("displayName", ""),
                     "phase": node.get("phase", "Unknown"),
                     "type": node_type,
-                    "started_at": node.get("startedAt", "")
+                    "started_at": node.get("startedAt", ""),
+                    "inputs": node.get('inputs')
                 })
 
         # Sort chronologically by start time
@@ -787,6 +576,67 @@ class WorkflowService:
             step_tree=[],
             error=error_msg
         )
+
+    def create_artifact_resolver(
+        self,
+        workflow_name: str,
+        namespace: str,
+        argo_server: str,
+        token: Optional[str] = None,
+        insecure: bool = False
+    ):
+        """Create a lazy artifact resolver for a specific workflow.
+
+        Returns a callable that fetches artifact content on demand, only when
+        invoked. Suitable for passing to display functions that may or may not
+        need to resolve each node's artifacts.
+        """
+        from ..tree_utils import ArtifactRef
+
+        def resolver(ref: ArtifactRef) -> Optional[str]:
+            return self.get_artifact_content(
+                workflow_name=workflow_name,
+                node_id=ref.node_id,
+                artifact_name=ref.artifact_name,
+                namespace=namespace,
+                argo_server=argo_server,
+                token=token,
+                insecure=insecure
+            )
+        return resolver
+
+    def get_artifact_content(
+        self,
+        workflow_name: str,
+        node_id: str,
+        artifact_name: str,
+        namespace: str,
+        argo_server: str,
+        token: Optional[str] = None,
+        insecure: bool = False
+    ) -> Optional[str]:
+        """Fetch artifact content from Argo Server artifact API.
+
+        Args:
+            workflow_name: Name of the workflow
+            node_id: Node ID that produced the artifact
+            artifact_name: Name of the artifact
+            namespace: Kubernetes namespace
+            argo_server: Argo Server URL
+            token: Bearer token for authentication
+            insecure: Whether to skip TLS verification
+
+        Returns:
+            Artifact content as string, or None if not found
+        """
+        headers = self._prepare_headers(token)
+        url = f"{argo_server}/api/v1/workflows/{namespace}/{workflow_name}/artifacts/{node_id}/{artifact_name}"
+        try:
+            resp = requests.get(url, headers=headers, verify=not insecure)
+            return resp.text if resp.status_code == 200 else None
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to fetch artifact {artifact_name}: {e}")
+            return None
 
     def wait_for_workflow_completion(
         self,

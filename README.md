@@ -13,6 +13,7 @@
     - [Performance Limitations](#performance-limitations)
       - [Test Results](#test-results)
   - [Issue Tracking](#issue-tracking)
+  - [Roadmap](#roadmap)
   - [User Guide Documentation](#user-guide-documentation)
   - [Getting Started](#getting-started)
     - [Local Deployment](#local-deployment)
@@ -43,9 +44,11 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 
 - **User-Friendly Interface via [Migration Console](https://github.com/opensearch-project/opensearch-migrations/blob/main/docs/migration-console.md)**: Command Line Interface (CLI) that guides you through each migration step.
 
+- **AI-Assisted Migration with [Kiro](kiro-cli/README.md)**: An AI agent that can guide you through the entire migration process — from source discovery to target provisioning to data migration. See [`agent-sops/`](agent-sops/) for the standard operating procedures and [`kiro-cli/`](kiro-cli/) for configuration.
+
 - **Flexible Deployment Options**:
   - **[AWS Deployment](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/)**: Fully automated deployment to AWS.
-  - **[Local Docker Deployment](/TrafficCapture/dockerSolution/README.md)**: Run the solution locally in a container for testing and development.
+  - **[Local Docker Deployment](./TrafficCapture/dockerSolution/README.md)**: Run the solution locally in a container for testing and development.
   - Contribute to add more deployment options.
 
 ## Supported Migration Paths and Platforms
@@ -71,7 +74,10 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 <tr><td>OpenSearch 1.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
 <tr><td>OpenSearch 2.x</td><td></td><td>✅</td><td>✅</td></tr>
 <tr><td>OpenSearch 3.x</td><td></td><td></td><td>🔜 <a href="https://github.com/orgs/opensearch-project/projects/229?pane=issue&itemId=117495207">link</a></td></tr>
+<tr><td>Apache Solr 8.x–9.x*</td><td></td><td></td><td>✅</td></tr>
 </table>
+
+\* Backfill only — Capture and Replay is not supported for Solr sources.
 
 Note that testing is done on specific minor versions, but any minor versions within a listed major version are expected to work.
 
@@ -79,6 +85,7 @@ Note that testing is done on specific minor versions, but any minor versions wit
   - Self-managed (cloud provider hosted)
   - Self-managed (on-premises)
   - Managed cloud offerings (e.g., Amazon OpenSearch)
+  - Managed serverless cloud offerings (e.g. Amazon OpenSearch Serverless)
 
 ### Performance Limitations
 A performance test was performed on 03/10/25 alongside [PR 1337](https://github.com/opensearch-project/opensearch-migrations/pull/1337)
@@ -117,6 +124,10 @@ We encourage users to open bugs and feature requests in this GitHub repository.
 For issue prioritization and management, the migrations team uses Jira, but uses GitHub issues for community intake:
 
 https://opensearch.atlassian.net/
+
+## Roadmap
+
+For upcoming features, enhancements, and priorities, check out the [OpenSearch Migrations Project Board](https://github.com/orgs/opensearch-project/projects/229/views/1).
 
 ## User Guide Documentation
 

@@ -19,6 +19,8 @@ spec:
       labels:
         app.kubernetes.io/name: {{ .Chart.Name }}
         app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
     spec:
       serviceAccountName: {{ .Values.installer.serviceAccount.name }}
       restartPolicy: Never
@@ -34,10 +36,14 @@ spec:
               set -e
 
               {{ include "migration.helmUninstallFunctions" . | nindent 14 }}
-              # Skip fluent-bit (logging); kyverno handled at end of uninstall_charts
-              uninstall_charts fluent-bit
+              # Phase 1: Uninstall all charts except fluent-bit (kept for logging) and kyverno (uninstalled last).
+              # See _uninstallHelper.tpl for the full uninstall strategy documentation.
+              uninstall_all_charts_except fluent-bit
 
 ---
+# Phase 2: Post-delete job to clean up charts that were intentionally kept alive during Phase 1.
+# Runs after Helm deletes the umbrella chart's own resources. The service account and RBAC
+# survive because they are hook resources (delete-policy: before-hook-creation), not chart resources.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -59,6 +65,8 @@ spec:
       labels:
         app.kubernetes.io/name: {{ .Chart.Name }}
         app.kubernetes.io/instance: {{ .Release.Name }}
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
     spec:
       serviceAccountName: {{ .Values.installer.serviceAccount.name }}
       restartPolicy: Never
@@ -74,4 +82,12 @@ spec:
               set -e
 
               {{ include "migration.helmUninstallFunctions" . | nindent 14 }}
-              uninstall_charts
+              # Phase 2: Uninstall remaining charts (fluent-bit etc.) that were kept active during Phase 1.
+              # Charts already removed in Phase 1 are safely skipped (discovery-based, ownership-checked).
+              uninstall_all_charts_except
+
+              # Final cleanup: delete the release namespace itself.
+              # --wait=false returns immediately (marks for deletion); the namespace
+              # terminates asynchronously after this pod exits and helm completes.
+              echo "Deleting release namespace: {{ .Release.Namespace }}"
+              kubectl delete namespace {{ .Release.Namespace }} --wait=false --ignore-not-found || true

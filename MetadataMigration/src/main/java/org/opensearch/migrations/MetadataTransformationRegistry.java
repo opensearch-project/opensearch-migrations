@@ -98,6 +98,17 @@ public class MetadataTransformationRegistry {
                 .name("flattened to flat_object")
                 .descriptionLine("Convert field data type flattened to OpenSearch flat_object")
                 .build())
+            .build(),
+        TransformerConfigs.builder()
+            .filename("js/solr-field-type-metadata.js")
+            .isRelevantForVersions(andSourceTargetVersionPredicate(
+                UnboundVersionMatchers.anySolr,
+                v -> true
+            ))
+            .transformerInfo(Transformers.TransformerInfo.builder()
+                .name("Solr field type conversion")
+                .descriptionLine("Convert Solr field types to OpenSearch equivalents")
+                .build())
             .build()
     );
 

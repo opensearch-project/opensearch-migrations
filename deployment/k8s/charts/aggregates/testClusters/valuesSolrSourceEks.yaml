@@ -1,0 +1,55 @@
+# Values for deploying a Solr source cluster on EKS with S3 via Pod Identity.
+# Layered on top of valuesSolrSource.yaml — overrides credentials and S3 config.
+#
+# The Solr S3 backup repository uses the AWS SDK credential chain. On EKS,
+# Pod Identity injects credentials automatically, but Solr's bundled SDK
+# needs AWS_WEB_IDENTITY_TOKEN_FILE + AWS_ROLE_ARN to discover them.
+#
+# Usage (mirrors the ES source pattern in valuesEks.yaml):
+#   helm install test-clusters . \
+#     -f valuesSolrSource.yaml \
+#     -f valuesSolrSourceEks.yaml \
+#     --set solrSource.serviceAccount.name=<sa-with-s3-access> \
+#     --set solrSource.backupRepositories[0].s3.bucket=<your-bucket> \
+#     --set solrSource.backupRepositories[0].s3.region=<your-region>
+
+conditionalPackageInstalls:
+  source: false
+  solrSource: true
+
+useDedicatedKarpenterPool: true
+
+solrSourceLocalstackCredentials: false
+
+solrSource:
+  # Mirrors source.rbac.serviceAccountName from valuesEks.yaml
+  serviceAccount:
+    create: false
+    name: "migration-console-access-role"
+
+  # Pod Identity provides credentials, but Solr's AWS SDK needs these env vars
+  # to find the token file. SOLR_MODULES and security manager are inherited
+  # from valuesSolrSource.yaml; we add the AWS credential env vars here.
+  podOptions:
+    envVars:
+      - name: SOLR_MODULES
+        value: s3-repository
+      - name: SOLR_SECURITY_MANAGER_ENABLED
+        value: "false"
+      - name: AWS_WEB_IDENTITY_TOKEN_FILE
+        value: /var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token
+      - name: AWS_ROLE_ARN
+        value: ""  # Override: --set solrSource.podOptions.envVars[3].value=arn:aws:iam::ACCOUNT:role/ROLE
+    tolerations:
+      - key: dedicated-search
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+    nodeSelector: {}
+
+  # No explicit credentials — Pod Identity provides them via the service account
+  backupRepositories:
+    - name: default-s3
+      s3:
+        region: us-east-2
+        bucket: solr-backups

@@ -10,7 +10,6 @@ def call(Map config = [:]) {
             "networkStackSuffix": "ec2-source-<STAGE>",
             "distVersion": "7.10.2",
             "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz",
-            "captureProxyEnabled": false,
             "securityDisabled": true,
             "minDistribution": false,
             "cpuArch": "x64",
@@ -20,7 +19,8 @@ def call(Map config = [:]) {
             "dataNodeCount": 1,
             "managerNodeCount": 0,
             "serverAccessType": "ipv4",
-            "restrictServerAccessTo": "0.0.0.0/0"
+            "restrictServerAccessTo": "0.0.0.0/0",
+            "enableImdsCredentialRefresh": true
           }
         }
     """
@@ -59,8 +59,7 @@ def call(Map config = [:]) {
             sourceContextId: sourceContextId,
             migrationContextId: migrationContextId,
             defaultStageId: 'rfs-integ',
-            skipCaptureProxyOnNodeSetup: true,
-            jobName: 'rfs-default-e2e-test',
+            jobName: config.jobName ?: 'rfs-default-e2e-test',
             integTestCommand: '/root/lib/integ_test/integ_test/backfill_tests.py'
     )
 }

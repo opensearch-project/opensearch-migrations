@@ -13,13 +13,23 @@
 # migration-workflow-templates-test) to break this dependency cycle.
 # ============================================================================
 
-set -e -x
+set -x
 
-# Activate the Python virtual environment to get access to workflow CLI
-. /etc/profile.d/venv.sh
-source /.venv/bin/activate
+# Write error details to /dev/termination-log so Argo surfaces the reason, not just the exit code
+fail() { echo "$1" | tee /dev/termination-log >&2; exit 1; }
+
+WORKFLOW_NAMESPACE="${WORKFLOW_NAMESPACE:-ma}"
+MIGRATION_CONSOLE_POD="${MIGRATION_CONSOLE_POD:-migration-console-0}"
+
+wait_for_console_pod() {
+  kubectl wait \
+    --namespace "$WORKFLOW_NAMESPACE" \
+    --for=condition=ready "pod/$MIGRATION_CONSOLE_POD" \
+    --timeout=300s >/dev/null || fail "migration-console pod '$MIGRATION_CONSOLE_POD' was not ready"
+}
 
 echo "Building and submitting migration workflow..."
+wait_for_console_pod
 
 # Decode base64 migration config from environment variable and write to file
 echo "$MIGRATION_CONFIG_BASE64" | base64 -d > /tmp/migration_config.json
@@ -28,9 +38,16 @@ echo "Migration config contents:"
 cat /tmp/migration_config.json
 
 echo "Loading configuration from JSON..."
-cat /tmp/migration_config.json | workflow configure edit --stdin
+CONFIG_OUTPUT=$(
+  kubectl exec -i --namespace "$WORKFLOW_NAMESPACE" "$MIGRATION_CONSOLE_POD" -- \
+    /bin/bash -lc 'workflow configure edit --stdin' < /tmp/migration_config.json 2>&1
+) || fail "Configure failed: $CONFIG_OUTPUT"
+echo "$CONFIG_OUTPUT"
 
 # Submit workflow
 echo "Submitting workflow..."
-WORKFLOW_OUTPUT=$(workflow submit 2>&1)
+WORKFLOW_OUTPUT=$(
+  kubectl exec --namespace "$WORKFLOW_NAMESPACE" "$MIGRATION_CONSOLE_POD" -- \
+    /bin/bash -lc 'workflow submit' 2>&1
+) || fail "Submit failed: $WORKFLOW_OUTPUT"
 echo "Workflow submit output: $WORKFLOW_OUTPUT"

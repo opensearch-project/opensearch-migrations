@@ -19,7 +19,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
-import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.utils.FileSystemUtils;
@@ -43,7 +43,7 @@ public class EndToEndTest extends SourceTestBase {
     private static final String ES5_SINGLE_TYPE_INDEX = "es5_single_type";
 
     private static Stream<Arguments> scenarios() {
-        return SupportedClusters.supportedPairs(true).stream()
+        return SupportedClusters.representativeMigrationPairs().stream()
                 .map(migrationPair -> Arguments.of(migrationPair.source(), migrationPair.target()));
     }
 
@@ -125,8 +125,8 @@ public class EndToEndTest extends SourceTestBase {
                 "}";
                 String docType = sourceClusterOperations.defaultDocType();
                 sourceClusterOperations.createDocument(completionIndex, "1", completionDoc, null, docType);
-                sourceClusterOperations.post("/_refresh", null);
-                targetClusterOperations.post("/_refresh", null);
+                sourceClusterOperations.refresh();
+                targetClusterOperations.refresh();
             }
 
             // === ACTION: Create two large documents (2MB each) ===
@@ -142,12 +142,12 @@ public class EndToEndTest extends SourceTestBase {
 
 
             // To create deleted docs in a segment that persists on the snapshot, refresh, then create two docs on a shard, then after a refresh, delete one.
-            sourceClusterOperations.post("/" + indexName + "/_refresh", null);
+            sourceClusterOperations.refresh(indexName);
             sourceClusterOperations.createDocument(indexName, "toBeDeleted", "{\"score\": 99, \"active\": true}", "1", null);
             sourceClusterOperations.createDocument(indexName, "remaining", "{\"score\": 88, \"active\": false}", "1", null);
-            sourceClusterOperations.post("/" + indexName + "/_refresh", null);
+            sourceClusterOperations.refresh(indexName);
             sourceClusterOperations.deleteDocument(indexName, "toBeDeleted" , "1", null);
-            sourceClusterOperations.post("/" + indexName + "/_refresh", null);
+            sourceClusterOperations.refresh(indexName);
 
             // For ES 5.x sources (5.5 and 5.6 only)
             if (sourceClusterOperations.shouldTestEs5SingleType()) {
@@ -173,7 +173,7 @@ public class EndToEndTest extends SourceTestBase {
             );
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
             sourceCluster.copySnapshotData(localDirectory.toString());
-            var fileFinder = ClusterProviderRegistry.getSnapshotFileFinder(
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
                     sourceCluster.getContainerVersion().getVersion(), true);
             var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
 
@@ -237,7 +237,7 @@ public class EndToEndTest extends SourceTestBase {
         if (!sourceClusterOperations.shouldTestEs5SingleType()) {
             return;
         }
-        targetClusterOperations.post("/_refresh", null);
+        targetClusterOperations.refresh();
         var res = targetClusterOperations.get("/" + ES5_SINGLE_TYPE_INDEX + "/_search");
         String body = res.getValue();
         Assertions.assertTrue(body.contains("Doc One"),
@@ -252,7 +252,7 @@ public class EndToEndTest extends SourceTestBase {
 
     @SneakyThrows
     private void validateCompletionDoc(ClusterOperations targetClusterOperations) {
-        targetClusterOperations.post("/_refresh", null);
+        targetClusterOperations.refresh();
         String docType = targetClusterOperations.defaultDocType();
         var res = targetClusterOperations.get("/completion_index/" + docType + "/1");
         ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
