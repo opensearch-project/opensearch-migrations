@@ -26,6 +26,10 @@ the root cause, and provides a workaround where one exists.
 | [MM-EDISMAX-OPERATOR-DEFAULT](#mm-edismax-operator-default) | eDisMax `mm` default with explicit operators not fully replicated |
 | [MM-EDISMAX-MIXED-OPERATORS](#mm-edismax-mixed-operators) | eDisMax `mm` with mixed explicit and implicit operators applies to wrong scope |
 | [MM-STOPWORD-MULTIFIELD](#mm-stopword-multifield) | `mm` with per-field stopword removal differs from Solr |
+| [BQ-DISMAX-MM](#bq-dismax-mm)                   | DisMax `bq` with boolean/negation clauses may affect matching |
+| [BQ-NEG-BOOST](#bq-neg-boost)                   | Negative boost in `bq` (e.g., `^-10`) not supported |
+| [BF](#bf)                                       | `bf` (boost functions) parameter not supported |
+| [BOOST-MULTIPLICATIVE](#boost-multiplicative)   | eDisMax multiplicative `boost` parameter not supported |
 
 ---
 
@@ -644,3 +648,101 @@ due to this difference should consider aligning stopword lists across fields
 or lowering the `mm` value.
 
 **Reference:** https://solr.apache.org/guide/solr/latest/query-guide/dismax-query-parser.html#mm-minimum-should-match-parameter
+
+---
+
+## BQ-DISMAX-MM
+
+**Feature:** DisMax `bq` with boolean operators or negation
+
+**Solr behaviour:**
+In DisMax, `bq` clauses are added as `should` clauses to the final boolean
+query. DisMax counts these `bq` should clauses when evaluating `mm` (minimum
+should match), which means complex `bq` values containing boolean operators
+(`AND`, `OR`) or negation (`-`) can affect which documents match — not just
+scoring. For example, `bq=-category:food^5` with DisMax may reduce the result
+count because the negation clause interacts with `mm` counting.
+
+In eDisMax, `bq` clauses are explicitly excluded from `mm` counting, so they
+only affect scoring as intended.
+
+**Current status:**
+The shim translates `bq` clauses to OpenSearch `bool.should` without
+replicating DisMax's `mm`-counting behavior for `bq` clauses. This means:
+- **eDisMax**: Fully correct — `bq` only affects scoring.
+- **DisMax with simple `bq`** (e.g., `bq=category:food^10`): Correct — simple
+  field:value clauses behave identically.
+- **DisMax with boolean/negation `bq`** (e.g., `bq=a AND b`, `bq=-field:val`):
+  May return more results than Solr because the shim does not count `bq`
+  clauses against `mm`.
+
+**Workaround:**
+Use `defType=edismax` instead of `dismax`. eDisMax is a superset of DisMax
+and handles `bq` clauses correctly without `mm` interaction.
+
+**Reference:** https://solr.apache.org/guide/solr/latest/query-guide/dismax-query-parser.html#bq-boost-query-parameter
+
+---
+
+## BQ-NEG-BOOST
+
+**Feature:** Negative boost values in `bq` (e.g., `bq=category:spam^-10`)
+
+**Solr behaviour:**
+Solr accepts negative boost values via Java's `Float.parseFloat()`. A negative
+boost reduces the score contribution of matching documents additively — the
+document is still returned, just ranked lower.
+
+**Current status:**
+Not supported. The shim rejects `bq` values containing `^-` with a fail-fast
+error. OpenSearch does not support negative boost values — they produce
+undefined scoring behavior. Without fail-fast, the PEG grammar would
+reinterpret `category:spam^-10` as `-(category:spam^10)` (negation with
+positive boost), which would **exclude** matching documents instead of
+demoting them — a silent correctness bug.
+
+**Workaround:**
+Remove negative boosts from `bq` params. If score demotion is needed,
+consider restructuring the query to use positive boosts on the preferred
+documents instead.
+
+---
+
+## BF
+
+**Feature:** `bf` (boost functions) parameter
+
+**Solr behaviour:**
+The `bf` parameter in DisMax/eDisMax specifies function expressions with
+optional boosts that are added as scoring clauses. For example:
+`bf=div(1,sum(1,price))^1.5` is shorthand for
+`bq={!func}div(1,sum(1,price))^1.5`. Multiple `bf` values are supported.
+
+**Current status:**
+Not supported. The `bf` parameter is entirely function-based and requires
+a dedicated transform to parse the function shorthand syntax and delegate
+to the query engine. Sending `bf` will be rejected by validation as an
+unsupported parameter.
+
+**Reference:** https://solr.apache.org/guide/solr/latest/query-guide/dismax-query-parser.html#bf-boost-functions-parameter
+
+---
+
+## BOOST-MULTIPLICATIVE
+
+**Feature:** eDisMax multiplicative `boost` parameter
+
+**Solr behaviour:**
+The eDisMax `boost` parameter applies a multiplicative boost to the entire
+query score. Unlike `bq` (additive), `boost` acts as a scaling factor.
+For example: `boost=popularity` multiplies each document's score by its
+`popularity` field value. This is shorthand for wrapping the query in a
+`{!boost}` QParser.
+
+**Current status:**
+Not supported. Multiplicative boosting requires OpenSearch's `function_score`
+query with `script_score` or `field_value_factor`, which is architecturally
+different from additive `bq`/`bf`. Sending `boost` will be rejected by
+validation as an unsupported parameter.
+
+**Reference:** https://solr.apache.org/guide/solr/latest/query-guide/edismax-query-parser.html#extended-dismax-parameters
