@@ -174,7 +174,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "default": {
                         "partitions": 1,
-                        "replicas": 1,
+                        "replicas": 3,
                         "config": {
                           "retention.ms": 604800000,
                           "segment.bytes": 1073741824
@@ -1374,7 +1374,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "default": {
                         "partitions": 1,
-                        "replicas": 1,
+                        "replicas": 3,
                         "config": {
                           "retention.ms": 604800000,
                           "segment.bytes": 1073741824
@@ -3231,6 +3231,22 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         },
         "storage": {
           "$ref": "#/$defs/io.strimzi.api.kafka.model.storage.Storage"
+        },
+        "template": {
+          "type": "object",
+          "properties": {
+            "pod": {
+              "type": "object",
+              "properties": {
+                "affinity": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
         }
       },
       "additionalProperties": false

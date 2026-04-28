@@ -210,8 +210,9 @@ def cleanup_cdc_resources(namespace: str):
     _kubectl_delete("deployment", f"capture-proxy-{TARGET_LABEL}-replayer", namespace)
     _kubectl_delete("service", "capture-proxy", namespace)
 
-    # 4. Kafka PVC
-    _kubectl_delete("pvc", "data-default-dual-role-0", namespace)
+    # 4. Kafka PVCs (one per broker replica)
+    for i in range(3):
+        _kubectl_delete("pvc", f"data-default-dual-role-{i}", namespace)
 
     # 5. Workflow-created configmaps not owned by Strimzi
     for cm in ["approval-config", "concurrency-config",
