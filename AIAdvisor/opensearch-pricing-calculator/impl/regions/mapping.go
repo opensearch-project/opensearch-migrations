@@ -56,7 +56,7 @@ var (
 // fetchAWSRegions fetches the AWS regions from the official AWS locations endpoint
 func fetchAWSRegions() error {
 	// Make HTTP request to the AWS locations endpoint
-	client := &http.Client{Timeout: 30 * time.Minute}
+	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Get(AWSLocationsEndpoint)
 	if err != nil {
 		return fmt.Errorf("failed to fetch AWS locations: %w", err)
@@ -68,7 +68,8 @@ func fetchAWSRegions() error {
 	}
 
 	// Read the response body
-	body, err := io.ReadAll(resp.Body)
+	const maxResponseSize = 10 << 20 // 10 MB
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		return fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -126,7 +127,8 @@ func fetchIsolatedRegions(endpoint, continentLabel string, targetMap map[string]
 		return
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	const maxIsolatedResponseSize = 10 << 20 // 10 MB
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxIsolatedResponseSize))
 	if err != nil {
 		zap.L().Warn("failed to read isolated region locations response",
 			zap.String("continent", continentLabel), zap.Error(err))

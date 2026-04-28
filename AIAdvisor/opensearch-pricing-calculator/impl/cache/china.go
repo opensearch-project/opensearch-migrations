@@ -370,7 +370,7 @@ func parseCNY(pricePerUnit map[string]string) float64 {
 // downloadChinaBulkPricing fetches and parses the AWS China Bulk Pricing API response.
 func downloadChinaBulkPricing(url string) (*chinaBulkPricing, error) {
 	client := http.Client{
-		Timeout: 30 * time.Minute,
+		Timeout: 5 * time.Minute,
 	}
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -388,7 +388,8 @@ func downloadChinaBulkPricing(url string) (*chinaBulkPricing, error) {
 		return nil, fmt.Errorf("china pricing API returned status %d for %s", res.StatusCode, url)
 	}
 
-	body, err := io.ReadAll(res.Body)
+	const maxResponseSize = 10 << 20 // 10 MB
+	body, err := io.ReadAll(io.LimitReader(res.Body, maxResponseSize))
 	if err != nil {
 		return nil, err
 	}

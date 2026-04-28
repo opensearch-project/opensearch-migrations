@@ -180,7 +180,7 @@ func getRateCodeAndPrice(itemValue map[string]interface{}) (rateCode string, pri
 // The function uses the json.Unmarshal function to unmarshal the JSON into an interface, and then uses the jsonpath.Read function to read the "$.regions" property from the interface.
 func downloadJson(url string) (gi interface{}, err error) {
 	spaceClient := http.Client{
-		Timeout: 30 * time.Minute,
+		Timeout: 5 * time.Minute,
 	}
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -209,7 +209,8 @@ func downloadJson(url string) (gi interface{}, err error) {
 		}(res.Body)
 	}
 	var f interface{}
-	body, err := io.ReadAll(res.Body)
+	const maxResponseSize = 10 << 20 // 10 MB
+	body, err := io.ReadAll(io.LimitReader(res.Body, maxResponseSize))
 	if err != nil {
 		return nil, err
 	}

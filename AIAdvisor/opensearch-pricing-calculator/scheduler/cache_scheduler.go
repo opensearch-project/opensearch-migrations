@@ -59,7 +59,7 @@ func NewCacheScheduler(logger *zap.Logger, baseURL string) *CacheScheduler {
 		logger:  logger.Named("cache_scheduler"),
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Minute,
+			Timeout: 5 * time.Minute,
 		},
 		done: make(chan bool),
 	}
