@@ -288,6 +288,11 @@ function makeCertificateManifest(args: {
             dnsNames: makeDirectTypeProxy(args.dnsNames),
             duration: args.duration,
             renewBefore: args.renewBefore,
+            privateKey: {
+                algorithm: "RSA",
+                encoding: "PKCS8",
+                size: 2048,
+            },
         }
     };
 }
