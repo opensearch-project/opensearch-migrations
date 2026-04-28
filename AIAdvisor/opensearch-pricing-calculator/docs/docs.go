@@ -456,6 +456,9 @@ const docTemplate = `{
         "price.ProvisionedRegion": {
             "type": "object",
             "properties": {
+                "currency": {
+                    "type": "string"
+                },
                 "hotInstances": {
                     "type": "object",
                     "additionalProperties": {
@@ -580,6 +583,9 @@ const docTemplate = `{
                 "leaderNodes": {
                     "$ref": "#/definitions/provisioned.HotNodes"
                 },
+                "score": {
+                    "type": "number"
+                },
                 "totalCost": {
                     "type": "number"
                 },
@@ -647,6 +653,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/provisioned.ClusterConfig"
                     }
+                },
+                "currency": {
+                    "type": "string"
                 },
                 "searchRequest": {
                     "$ref": "#/definitions/provisioned.SearchEstimateRequest"
@@ -884,6 +893,10 @@ const docTemplate = `{
                     "description": "Storage compression options",
                     "type": "boolean"
                 },
+                "dynamicSizing": {
+                    "description": "Enable workload-aware configuration scoring instead of cheapest-first ranking",
+                    "type": "boolean"
+                },
                 "edp": {
                     "type": "number"
                 },
@@ -968,6 +981,10 @@ const docTemplate = `{
                 },
                 "derivedSource": {
                     "description": "Storage compression options",
+                    "type": "boolean"
+                },
+                "dynamicSizing": {
+                    "description": "Enable workload-aware configuration scoring instead of cheapest-first ranking",
                     "type": "boolean"
                 },
                 "edp": {
@@ -1074,6 +1091,10 @@ const docTemplate = `{
                 },
                 "dimensionsCount": {
                     "type": "integer"
+                },
+                "dynamicSizing": {
+                    "description": "Enable workload-aware configuration scoring instead of cheapest-first ranking",
+                    "type": "boolean"
                 },
                 "edp": {
                     "type": "number"
@@ -1247,6 +1268,10 @@ const docTemplate = `{
             "properties": {
                 "continent": {
                     "description": "Continent name (e.g., \"North America\")",
+                    "type": "string"
+                },
+                "currency": {
+                    "description": "Currency code (e.g., \"USD\", \"CNY\")",
                     "type": "string"
                 },
                 "displayName": {

@@ -14,15 +14,15 @@ import (
 )
 
 var (
-	fcClusterURL    string
-	fcUsername       string
-	fcPassword       string
-	fcInsecure      bool
-	fcRegion        string
-	fcPricing       string
-	fcAzs           int
-	fcOutputFormat  string
-	fcMetricsOnly   bool
+	fcClusterURL   string
+	fcUsername     string
+	fcPassword     string
+	fcInsecure     bool
+	fcRegion       string
+	fcPricing      string
+	fcAzs          int
+	fcOutputFormat string
+	fcMetricsOnly  bool
 )
 
 var estimateFromClusterCmd = &cobra.Command{

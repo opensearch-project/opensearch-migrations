@@ -258,7 +258,7 @@ func (cs *CacheScheduler) invalidateCache() CacheInvalidationResult {
 		result.Duration = time.Since(start).String()
 		return result
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	result.StatusCode = resp.StatusCode
 	result.Duration = time.Since(start).String()

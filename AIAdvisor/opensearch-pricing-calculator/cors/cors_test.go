@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestIsOriginAllowedExactMatch(t *testing.T) {
+func TestIsOriginAllowed_ExactMatch(t *testing.T) {
 	tests := []struct {
 		origin  string
 		allowed bool
@@ -24,7 +24,7 @@ func TestIsOriginAllowedExactMatch(t *testing.T) {
 	}
 }
 
-func TestIsOriginAllowedSuffixMatch(t *testing.T) {
+func TestIsOriginAllowed_SuffixMatch(t *testing.T) {
 	tests := []struct {
 		origin  string
 		allowed bool
@@ -43,7 +43,7 @@ func TestIsOriginAllowedSuffixMatch(t *testing.T) {
 	}
 }
 
-func TestIsOriginAllowedRejected(t *testing.T) {
+func TestIsOriginAllowed_Rejected(t *testing.T) {
 	tests := []string{
 		"https://evil.com",
 		"http://malicious.site",
@@ -57,7 +57,7 @@ func TestIsOriginAllowedRejected(t *testing.T) {
 	}
 }
 
-func TestAllowedOriginsContainsDefaults(t *testing.T) {
+func TestAllowedOrigins_ContainsDefaults(t *testing.T) {
 	defaults := []string{
 		"http://localhost:3000",
 		"http://localhost:3002",

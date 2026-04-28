@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestGetCompressionMultiplierNoCompression(t *testing.T) {
+func TestGetCompressionMultiplier_NoCompression(t *testing.T) {
 	// When no compression is enabled, multiplier should be 1.0
 	multiplier := GetCompressionMultiplier(false, false, TimeSeriesCompressionRatios)
 	if multiplier != 1.0 {
@@ -16,7 +16,7 @@ func TestGetCompressionMultiplierNoCompression(t *testing.T) {
 	}
 }
 
-func TestGetCompressionMultiplierDerivedSourceOnlyTimeSeries(t *testing.T) {
+func TestGetCompressionMultiplier_DerivedSourceOnly_TimeSeries(t *testing.T) {
 	// Derived source only should reduce storage by 30% for timeseries
 	multiplier := GetCompressionMultiplier(true, false, TimeSeriesCompressionRatios)
 	expected := 0.70 // 1 - 0.30
@@ -25,7 +25,7 @@ func TestGetCompressionMultiplierDerivedSourceOnlyTimeSeries(t *testing.T) {
 	}
 }
 
-func TestGetCompressionMultiplierZstdOnlyTimeSeries(t *testing.T) {
+func TestGetCompressionMultiplier_ZstdOnly_TimeSeries(t *testing.T) {
 	// ZSTD only should reduce storage by 20% for timeseries
 	multiplier := GetCompressionMultiplier(false, true, TimeSeriesCompressionRatios)
 	expected := 0.80 // 1 - 0.20
@@ -34,7 +34,7 @@ func TestGetCompressionMultiplierZstdOnlyTimeSeries(t *testing.T) {
 	}
 }
 
-func TestGetCompressionMultiplierBothCompressionsTimeSeries(t *testing.T) {
+func TestGetCompressionMultiplier_BothCompressions_TimeSeries(t *testing.T) {
 	// Both compressions should be multiplicative: (1-0.30) * (1-0.20) = 0.56
 	multiplier := GetCompressionMultiplier(true, true, TimeSeriesCompressionRatios)
 	expected := 0.56 // 0.70 * 0.80
@@ -43,7 +43,7 @@ func TestGetCompressionMultiplierBothCompressionsTimeSeries(t *testing.T) {
 	}
 }
 
-func TestGetCompressionMultiplierDerivedSourceOnlySearch(t *testing.T) {
+func TestGetCompressionMultiplier_DerivedSourceOnly_Search(t *testing.T) {
 	// Derived source only should reduce storage by 25% for search
 	multiplier := GetCompressionMultiplier(true, false, SearchCompressionRatios)
 	expected := 0.75 // 1 - 0.25
@@ -52,7 +52,7 @@ func TestGetCompressionMultiplierDerivedSourceOnlySearch(t *testing.T) {
 	}
 }
 
-func TestGetCompressionMultiplierZstdOnlySearch(t *testing.T) {
+func TestGetCompressionMultiplier_ZstdOnly_Search(t *testing.T) {
 	// ZSTD only should reduce storage by 15% for search
 	multiplier := GetCompressionMultiplier(false, true, SearchCompressionRatios)
 	expected := 0.85 // 1 - 0.15
@@ -61,7 +61,7 @@ func TestGetCompressionMultiplierZstdOnlySearch(t *testing.T) {
 	}
 }
 
-func TestGetCompressionMultiplierBothCompressionsSearch(t *testing.T) {
+func TestGetCompressionMultiplier_BothCompressions_Search(t *testing.T) {
 	// Both compressions should be multiplicative: (1-0.25) * (1-0.15) = 0.6375
 	multiplier := GetCompressionMultiplier(true, true, SearchCompressionRatios)
 	expected := 0.6375 // 0.75 * 0.85
@@ -70,7 +70,7 @@ func TestGetCompressionMultiplierBothCompressionsSearch(t *testing.T) {
 	}
 }
 
-func TestGetCompressionMultiplierVectorRatios(t *testing.T) {
+func TestGetCompressionMultiplier_VectorRatios(t *testing.T) {
 	// Vector uses TimeSeries ratios for non-vector data storage
 	// This applies compression to document/metadata, not the vector graph
 	tests := []struct {

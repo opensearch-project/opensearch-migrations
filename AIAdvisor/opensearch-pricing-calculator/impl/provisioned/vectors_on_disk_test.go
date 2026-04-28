@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestVectorEstimateRequestOnDiskMode(t *testing.T) {
+func TestVectorEstimateRequest_OnDiskMode(t *testing.T) {
 	tests := []struct {
 		name              string
 		vectorEngineType  string
@@ -195,7 +195,7 @@ func TestIsValidCompressionLevel(t *testing.T) {
 	}
 }
 
-func TestVectorEstimateRequestCompressionEffect(t *testing.T) {
+func TestVectorEstimateRequest_CompressionEffect(t *testing.T) {
 	// Test that compression actually reduces memory usage
 	baseReq := &VectorEstimateRequest{
 		VectorEngineType: "hnsw",

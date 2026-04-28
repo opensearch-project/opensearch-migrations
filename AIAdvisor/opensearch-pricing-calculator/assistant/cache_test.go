@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-const testQuery = "test query"
-
 func TestNewAssistantCache(t *testing.T) {
 	cache := NewAssistantCache(5 * time.Minute)
 	if cache == nil {
@@ -20,16 +18,16 @@ func TestNewAssistantCache(t *testing.T) {
 	}
 }
 
-func TestAssistantCacheSetAndGet(t *testing.T) {
+func TestAssistantCache_SetAndGet(t *testing.T) {
 	cache := &AssistantCache{
 		entries: make(map[string]*CacheEntry),
 		ttl:     5 * time.Minute,
 	}
 
 	resp := &EstimateResponse{Success: true, WorkloadType: "search"}
-	cache.Set(testQuery, resp)
+	cache.Set("test query", resp)
 
-	got, found := cache.Get(testQuery)
+	got, found := cache.Get("test query")
 	if !found {
 		t.Fatal("expected to find cached entry")
 	}
@@ -38,7 +36,7 @@ func TestAssistantCacheSetAndGet(t *testing.T) {
 	}
 }
 
-func TestAssistantCacheGetMiss(t *testing.T) {
+func TestAssistantCache_GetMiss(t *testing.T) {
 	cache := &AssistantCache{
 		entries: make(map[string]*CacheEntry),
 		ttl:     5 * time.Minute,
@@ -50,7 +48,7 @@ func TestAssistantCacheGetMiss(t *testing.T) {
 	}
 }
 
-func TestAssistantCacheGetExpired(t *testing.T) {
+func TestAssistantCache_GetExpired(t *testing.T) {
 	cache := &AssistantCache{
 		entries: make(map[string]*CacheEntry),
 		ttl:     1 * time.Millisecond,
@@ -65,7 +63,7 @@ func TestAssistantCacheGetExpired(t *testing.T) {
 	}
 }
 
-func TestAssistantCacheInvalidate(t *testing.T) {
+func TestAssistantCache_Invalidate(t *testing.T) {
 	cache := &AssistantCache{
 		entries: make(map[string]*CacheEntry),
 		ttl:     5 * time.Minute,
@@ -83,7 +81,7 @@ func TestAssistantCacheInvalidate(t *testing.T) {
 	}
 }
 
-func TestAssistantCacheClear(t *testing.T) {
+func TestAssistantCache_Clear(t *testing.T) {
 	cache := &AssistantCache{
 		entries: make(map[string]*CacheEntry),
 		ttl:     5 * time.Minute,
@@ -101,7 +99,7 @@ func TestAssistantCacheClear(t *testing.T) {
 	}
 }
 
-func TestAssistantCacheSize(t *testing.T) {
+func TestAssistantCache_Size(t *testing.T) {
 	cache := &AssistantCache{
 		entries: make(map[string]*CacheEntry),
 		ttl:     5 * time.Minute,
@@ -116,20 +114,20 @@ func TestAssistantCacheSize(t *testing.T) {
 	}
 }
 
-func TestAssistantCacheGenerateKeyDeterministic(t *testing.T) {
+func TestAssistantCache_GenerateKey_Deterministic(t *testing.T) {
 	cache := &AssistantCache{
 		entries: make(map[string]*CacheEntry),
 		ttl:     5 * time.Minute,
 	}
 
-	key1 := cache.generateKey(testQuery)
-	key2 := cache.generateKey(testQuery)
+	key1 := cache.generateKey("test query")
+	key2 := cache.generateKey("test query")
 	if key1 != key2 {
 		t.Errorf("expected same key for same input, got %q and %q", key1, key2)
 	}
 }
 
-func TestAssistantCacheGenerateKeyDifferentInputs(t *testing.T) {
+func TestAssistantCache_GenerateKey_DifferentInputs(t *testing.T) {
 	cache := &AssistantCache{
 		entries: make(map[string]*CacheEntry),
 		ttl:     5 * time.Minute,
@@ -143,13 +141,13 @@ func TestAssistantCacheGenerateKeyDifferentInputs(t *testing.T) {
 }
 
 func TestNormalizeQuery(t *testing.T) {
-	result := normalizeQuery(testQuery)
-	if result != testQuery {
-		t.Errorf("expected %q, got %q", testQuery, result)
+	result := normalizeQuery("test query")
+	if result != "test query" {
+		t.Errorf("expected %q, got %q", "test query", result)
 	}
 }
 
-func TestAssistantCacheCleanup(t *testing.T) {
+func TestAssistantCache_Cleanup(t *testing.T) {
 	cache := &AssistantCache{
 		entries: make(map[string]*CacheEntry),
 		ttl:     1 * time.Millisecond,
@@ -165,7 +163,7 @@ func TestAssistantCacheCleanup(t *testing.T) {
 	}
 }
 
-func TestAssistantCacheCleanupKeepsNonExpired(t *testing.T) {
+func TestAssistantCache_Cleanup_KeepsNonExpired(t *testing.T) {
 	cache := &AssistantCache{
 		entries: make(map[string]*CacheEntry),
 		ttl:     5 * time.Minute,

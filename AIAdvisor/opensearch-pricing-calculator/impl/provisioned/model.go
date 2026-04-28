@@ -5,9 +5,9 @@ package provisioned
 
 import (
 	"errors"
-	"go.uber.org/zap"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/price"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/regions"
+	"go.uber.org/zap"
 	"regexp"
 	"strings"
 )
@@ -193,6 +193,7 @@ var MaxNodeCountPerCluster = map[int]int{
 var InstanceFamilies = []string{"General purpose", "Compute optimized", "Memory optimized", "Storage optimized", "OR1"}
 
 type EstimateResponse struct {
+	Currency                          string                     `json:"currency,omitempty"`
 	SearchRequest                     *SearchEstimateRequest     `json:"searchRequest,omitempty"`
 	TimeSeriesRequest                 *TimeSeriesEstimateRequest `json:"timeSeriesRequest,omitempty"`
 	VectorRequest                     *VectorEstimateRequest     `json:"vectorRequest,omitempty"`
@@ -274,6 +275,7 @@ type ClusterConfig struct {
 	TotalCost          float64            `json:"totalCost,omitempty"`
 	InfrastructureCost float64            `json:"infrastructureCost,omitempty"`
 	ColdStorageRampUp  *ColdStorageRampUp `json:"coldStorageRampUp,omitempty"`
+	Score              float64            `json:"score,omitempty"`
 }
 
 // Validate validates the fields of an EstimateRequest.
@@ -320,6 +322,22 @@ func (er *EstimateRequest) Normalize(logger *zap.Logger) {
 // It also calculates the price for the required resources.
 //
 // The function returns the calculated EstimationResponse.
+// GetCurrency returns the currency for the estimate based on the request region.
+func (er *EstimateRequest) GetCurrency() string {
+	var regionName string
+	if er.Search != nil {
+		regionName = er.Search.Region
+	} else if er.Vector != nil {
+		regionName = er.Vector.Region
+	} else if er.TimeSeries != nil {
+		regionName = er.TimeSeries.Region
+	}
+	if regions.IsChinaRegionDisplay(regionName) {
+		return "CNY"
+	}
+	return "USD"
+}
+
 func (er *EstimateRequest) Calculate() (response EstimateResponse, err error) {
 	if er.TimeSeries != nil {
 		return er.TimeSeries.Calculate()

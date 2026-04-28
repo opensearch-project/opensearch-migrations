@@ -155,9 +155,9 @@ func TestUltrawarmNodeCountLimits(t *testing.T) {
 	}
 }
 
-// TestTimeSeriesEstimateRequestCalculateUltrawarmNodeLimits tests the actual Calculate method
+// TestTimeSeriesEstimateRequest_Calculate_UltrawarmNodeLimits tests the actual Calculate method
 // with a focus on the ultrawarm node limits
-func TestTimeSeriesEstimateRequestCalculateUltrawarmNodeLimits(t *testing.T) {
+func TestTimeSeriesEstimateRequest_Calculate_UltrawarmNodeLimits(t *testing.T) {
 	// Skip this test for now as it requires more complex mocking
 	t.Skip("Skipping integration test that requires complex mocking")
 }

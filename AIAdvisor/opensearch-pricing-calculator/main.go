@@ -9,6 +9,7 @@ import (
 
 	"github.com/opensearch-project/opensearch-pricing-calculator/assistant"
 	_ "github.com/opensearch-project/opensearch-pricing-calculator/docs"
+	"github.com/opensearch-project/opensearch-pricing-calculator/mcp"
 
 	"go.uber.org/zap"
 )
@@ -18,13 +19,14 @@ const (
 	defaultMCPPort = 8081
 
 	ServiceName    = "opensearch-pricing-calculator"
-	ServiceVersion = "2.0.0"
+	ServiceVersion = "2.1.0"
 )
 
 type application struct {
 	Domain           string
 	logger           *zap.Logger
 	assistantHandler *assistant.Handler
+	toolExecutor     *mcp.ToolExecutor
 }
 
 //	@title			OpenSearch Pricing Calculator API

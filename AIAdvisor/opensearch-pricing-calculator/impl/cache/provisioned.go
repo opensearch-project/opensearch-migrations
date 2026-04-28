@@ -87,6 +87,21 @@ func (sl *ProvisionedPrice) InvalidateCache() (response InvalidationStatus) {
 			Message: err.Error(),
 		}
 	}
+	// Process China region pricing (separate API, CNY currency)
+	err = sl.processChinaPricing()
+	if err != nil {
+		zap.L().Warn("failed to process China pricing, continuing without China regions", zap.Error(err))
+	}
+	// Process Secret region pricing (aws-iso-b partition, USD currency)
+	err = sl.processSecretPricing()
+	if err != nil {
+		zap.L().Warn("failed to process Secret region pricing, continuing without Secret regions", zap.Error(err))
+	}
+	// Process Top Secret region pricing (aws-iso partition, USD currency)
+	err = sl.processTopSecretPricing()
+	if err != nil {
+		zap.L().Warn("failed to process Top Secret region pricing, continuing without Top Secret regions", zap.Error(err))
+	}
 	//write the output to file
 	file, err := json.MarshalIndent(sl.Regions, " ", "  ")
 	if err != nil {
@@ -126,6 +141,111 @@ func (sl *ProvisionedPrice) InvalidateCacheForRegion(regionName string) (respons
 	existingRegions := make(map[string]price.ProvisionedRegion)
 	for k, v := range sl.Regions {
 		existingRegions[k] = v
+	}
+
+	// Isolated partitions (Secret aws-iso-b, Top Secret aws-iso) use separate pricing APIs
+	if IsIsolatedRegion(regionName) {
+		partitionLabel := "Secret"
+		var processFunc func() error
+		if IsSecretRegion(regionName) {
+			processFunc = func() error {
+				tempCache := &ProvisionedPrice{Regions: make(map[string]price.ProvisionedRegion)}
+				if err := tempCache.processSecretPricing(); err != nil {
+					return err
+				}
+				newRegionData, found := tempCache.Regions[regionName]
+				if !found {
+					return fmt.Errorf("region '%s' not found in pricing data", regionName)
+				}
+				sl.Regions = existingRegions
+				sl.Regions[regionName] = newRegionData
+				return nil
+			}
+		} else {
+			partitionLabel = "Top Secret"
+			processFunc = func() error {
+				tempCache := &ProvisionedPrice{Regions: make(map[string]price.ProvisionedRegion)}
+				if err := tempCache.processTopSecretPricing(); err != nil {
+					return err
+				}
+				newRegionData, found := tempCache.Regions[regionName]
+				if !found {
+					return fmt.Errorf("region '%s' not found in pricing data", regionName)
+				}
+				sl.Regions = existingRegions
+				sl.Regions[regionName] = newRegionData
+				return nil
+			}
+		}
+
+		zap.L().Info("using isolated partition pricing API", zap.String("partition", partitionLabel), zap.String("region", regionName))
+		if err := processFunc(); err != nil {
+			return InvalidationStatus{
+				Message: fmt.Sprintf("Error processing %s region pricing: %s", partitionLabel, err.Error()),
+			}
+		}
+
+		zap.L().Info("cache update complete",
+			zap.String("updated_region", regionName),
+			zap.Int("preserved_regions", len(existingRegions)-1))
+
+		file, err := json.MarshalIndent(sl.Regions, " ", "  ")
+		if err != nil {
+			return InvalidationStatus{
+				Message: fmt.Sprintf("Error marshaling cache data: %s", err.Error()),
+			}
+		}
+		err = os.WriteFile("./priceCache.json", file, 0644)
+		if err != nil {
+			return InvalidationStatus{
+				Message: fmt.Sprintf("Error writing cache file: %s", err.Error()),
+			}
+		}
+		return InvalidationStatus{
+			Message:     fmt.Sprintf("Pricing updated for %s region: %s", partitionLabel, regionName),
+			UpdatedTime: time.Now(),
+		}
+	}
+
+	// China regions use a separate pricing API
+	if IsChinaRegion(regionName) {
+		zap.L().Info("using China Bulk Pricing API for region", zap.String("region", regionName))
+		tempCache := &ProvisionedPrice{Regions: make(map[string]price.ProvisionedRegion)}
+		err := tempCache.processChinaPricing()
+		if err != nil {
+			return InvalidationStatus{
+				Message: fmt.Sprintf("Error processing China pricing: %s", err.Error()),
+			}
+		}
+		newRegionData, found := tempCache.Regions[regionName]
+		if !found {
+			return InvalidationStatus{
+				Message: fmt.Sprintf("Region '%s' not found in China pricing data", regionName),
+			}
+		}
+		sl.Regions = existingRegions
+		sl.Regions[regionName] = newRegionData
+
+		zap.L().Info("cache update complete",
+			zap.String("updated_region", regionName),
+			zap.Int("preserved_regions", len(existingRegions)-1))
+
+		file, err := json.MarshalIndent(sl.Regions, " ", "  ")
+		if err != nil {
+			return InvalidationStatus{
+				Message: fmt.Sprintf("Error marshaling cache data: %s", err.Error()),
+			}
+		}
+		err = os.WriteFile("./priceCache.json", file, 0644)
+		if err != nil {
+			return InvalidationStatus{
+				Message: fmt.Sprintf("Error writing cache file: %s", err.Error()),
+			}
+		}
+		return InvalidationStatus{
+			Message:     fmt.Sprintf("Pricing updated for China region: %s", regionName),
+			UpdatedTime: time.Now(),
+		}
 	}
 
 	// Download and process pricing data for all regions initially
@@ -277,10 +397,10 @@ func (sl *ProvisionedPrice) processHotData1() (err error) {
 				instanceTypesSeen[instanceType]++
 				if instanceTypesSeen[instanceType] > 1 {
 					zap.L().Warn("multiple pricing entries for instance type",
-					zap.String("instance_type", instanceType),
-					zap.String("region", region),
-					zap.Int("entry_number", instanceTypesSeen[instanceType]),
-					zap.String("key", key))
+						zap.String("instance_type", instanceType),
+						zap.String("region", region),
+						zap.Int("entry_number", instanceTypesSeen[instanceType]),
+						zap.String("key", key))
 				}
 			}
 
@@ -653,7 +773,7 @@ func createNewOnDemandHotInstanceUnit(value map[string]interface{}) (iu price.In
 			y := strings.TrimSpace(storageType)
 			st1 := strings.Split(y, " ")
 			n, _ := strconv.Atoi(st1[0])
-			s, _ := strconv.Atoi(strings.Replace(st1[2], ",", "", -1))
+			s, _ := strconv.Atoi(strings.ReplaceAll(st1[2], ",", ""))
 			iu.Storage.Internal = n * s
 		} else {
 			ebsMap, found := instances.InstanceLimitsMap[iu.InstanceType]

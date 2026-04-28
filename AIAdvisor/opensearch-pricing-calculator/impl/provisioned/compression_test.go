@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestTimeSeriesEstimateWithDerivedSource(t *testing.T) {
+func TestTimeSeriesEstimate_WithDerivedSource(t *testing.T) {
 	// Test that derived source reduces storage by ~30%
 	baseReq := GetDefaultTimeSeriesRequest()
 	baseReq.IngestionSize = 100
@@ -44,7 +44,7 @@ func TestTimeSeriesEstimateWithDerivedSource(t *testing.T) {
 	}
 }
 
-func TestTimeSeriesEstimateWithZstdCompression(t *testing.T) {
+func TestTimeSeriesEstimate_WithZstdCompression(t *testing.T) {
 	// Test that ZSTD compression reduces storage by ~20%
 	baseReq := GetDefaultTimeSeriesRequest()
 	baseReq.IngestionSize = 100
@@ -80,7 +80,7 @@ func TestTimeSeriesEstimateWithZstdCompression(t *testing.T) {
 	}
 }
 
-func TestTimeSeriesEstimateWithBothCompressions(t *testing.T) {
+func TestTimeSeriesEstimate_WithBothCompressions(t *testing.T) {
 	// Test that both compressions combine multiplicatively
 	baseReq := GetDefaultTimeSeriesRequest()
 	baseReq.IngestionSize = 100
@@ -116,7 +116,7 @@ func TestTimeSeriesEstimateWithBothCompressions(t *testing.T) {
 	}
 }
 
-func TestTimeSeriesEstimateWarmStorageCompressed(t *testing.T) {
+func TestTimeSeriesEstimate_WarmStorageCompressed(t *testing.T) {
 	// Test that compression also applies to warm storage
 	baseReq := GetDefaultTimeSeriesRequest()
 	baseReq.IngestionSize = 100
@@ -154,7 +154,7 @@ func TestTimeSeriesEstimateWarmStorageCompressed(t *testing.T) {
 	}
 }
 
-func TestSearchEstimateWithDerivedSource(t *testing.T) {
+func TestSearchEstimate_WithDerivedSource(t *testing.T) {
 	// Test that derived source reduces storage by ~25% for search
 	baseReq := GetDefaultSearchRequest()
 	baseReq.DataSize = 500
@@ -188,7 +188,7 @@ func TestSearchEstimateWithDerivedSource(t *testing.T) {
 	}
 }
 
-func TestSearchEstimateWithBothCompressions(t *testing.T) {
+func TestSearchEstimate_WithBothCompressions(t *testing.T) {
 	// Test that both compressions combine for ~36% reduction for search
 	baseReq := GetDefaultSearchRequest()
 	baseReq.DataSize = 500
@@ -222,7 +222,7 @@ func TestSearchEstimateWithBothCompressions(t *testing.T) {
 	}
 }
 
-func TestTimeSeriesEstimateDefaultNoCompression(t *testing.T) {
+func TestTimeSeriesEstimate_DefaultNoCompression(t *testing.T) {
 	// Test that compression defaults to disabled (backward compatibility)
 	req := GetDefaultTimeSeriesRequest()
 	req.IngestionSize = 100
@@ -244,7 +244,7 @@ func TestTimeSeriesEstimateDefaultNoCompression(t *testing.T) {
 	}
 }
 
-func TestSearchEstimateDefaultNoCompression(t *testing.T) {
+func TestSearchEstimate_DefaultNoCompression(t *testing.T) {
 	// Test that compression defaults to disabled (backward compatibility)
 	req := GetDefaultSearchRequest()
 	req.DataSize = 100
