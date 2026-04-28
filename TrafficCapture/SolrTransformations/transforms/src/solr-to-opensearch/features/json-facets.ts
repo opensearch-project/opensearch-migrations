@@ -466,6 +466,13 @@ function convertStatFacet(expr: string): JavaMap {
 }
 
 function convertFuncToMetricAgg(func: FuncNode): JavaMap {
+  // count(*) → value_count on _id (every doc has one, equivalent to doc count)
+  if (func.name === 'count') {
+    const inner = new Map<string, any>();
+    inner.set('field', '_id');
+    return new Map<string, any>([['value_count', inner]]);
+  }
+
   const osAggType = STAT_FUNC_MAP[func.name];
   if (!osAggType) {
     throw new Error(`Unsupported stat function '${func.name}' in json.facet`);
@@ -550,11 +557,10 @@ export function convertJsonFacets(solrJsonFacet: JavaMap, ctx: RequestContext): 
   const aggs = new Map<string, any>();
   for (const name of solrJsonFacet.keys()) {
     const facetDef = solrJsonFacet.get(name);
-    if (typeof facetDef === 'string') {
-      aggs.set(name, convertStatFacet(facetDef));
-    } else {
-      aggs.set(name, convertSingleFacet(facetDef, ctx));
-    }
+    const converted = typeof facetDef === 'string'
+      ? convertStatFacet(facetDef)
+      : convertSingleFacet(facetDef, ctx);
+    aggs.set(name, converted);
   }
   return aggs;
 }
