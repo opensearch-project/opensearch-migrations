@@ -19,6 +19,7 @@ import * as cursorPagination from './features/cursor-pagination';
 import * as fieldList from './features/field-list';
 import * as sort from './features/sort';
 import * as jsonFacets from './features/json-facets';
+import * as minimumMatch from './features/minimum-match';
 import * as highlighting from './features/highlighting';
 import * as hitsToDocs from './features/hits-to-docs';
 import * as aggsToFacets from './features/aggs-to-facets';
@@ -42,7 +43,7 @@ export interface FeatureModule {
  */
 const FEATURE_MODULES: FeatureModule[] = [
   selectUri, queryQ, filterQueryFq, cursorPagination, fieldList,
-  sort, jsonFacets, highlighting,
+  sort, jsonFacets, highlighting, minimumMatch,
 ];
 
 /**
@@ -77,6 +78,7 @@ export const requestRegistry: TransformRegistry<RequestContext> = {
       solrconfigDefaults.request, // Apply solrconfig.xml defaults/invariants
       selectUri.request, // URI rewrite
       queryQ.request, // q=... → query DSL
+      minimumMatch.request, // mm → minimum_should_match (after query-q builds bool)
       filterQueryFq.request, // fq=... → bool.filter (after query-q)
       cursorPagination.request, // cursorMark → search_after (after query-q sets from)
       jsonFacets.request, // json.facet → aggs
