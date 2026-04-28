@@ -2,6 +2,8 @@
 
 This guide walks through setting up BuildKit and a local Docker registry in Minikube to build and store container images for this project. This approach provides consistent DNS resolution, proper networking, and uses the same BuildKit configuration as what's provided to users that need to build images from the aws-bootstrap script.
 
+The code for this setup lives in [backends/k8sHostedBuildkit.sh](backends/k8sHostedBuildkit.sh). Local Minikube and EKS-oriented deployment scripts source that backend directly.
+
 Pros of this approach:
 - The gradle package in this project builds java images (currently only 2) with Jib, which are able to be optimized more, especially to minimize developer rebuild times.
 - This lets one test the ability to build images similar to how a user would do so with the aws-bootstrap.sh flag `--build`.
@@ -159,7 +161,7 @@ echo "Build with custom registry endpoint (for both amd64 and arm64)"
   -PregistryEndpoint=$MIGRATIONS_ECR_REGISTRY
 ```
 
-This is how the production build job works - it uses the same BuildKit setup but pushes to ECR instead of a local registry.
+This is how the production build path works: it uses the same Kubernetes-hosted BuildKit setup but pushes to ECR instead of a local registry.
 
 
 **Note**: The first build may take several minutes as base images are pulled and layers are built.
