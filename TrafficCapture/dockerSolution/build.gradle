@@ -20,6 +20,7 @@ def ptc = new PullThroughCacheHelper(ptcEndpoint)
 
 // Build args for Dockerfiles that pull external base images
 def dockerBuildArgsMap = [
+
         "elasticsearch_client_test_console": [
                 BUILDER_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
                 RUNTIME_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),

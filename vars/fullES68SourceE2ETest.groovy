@@ -98,7 +98,6 @@ def call(Map config = [:]) {
             sourceContextId: sourceContextId,
             migrationContextId: migrationContextId,
             defaultStageId: 'full-es68',
-            skipCaptureProxyOnNodeSetup: true,
             jobName: config.jobName ?: 'full-es68source-e2e-test',
             testUniqueId: testUniqueId,
             defaultGitBranch: config.defaultGitBranch ?: 'main',

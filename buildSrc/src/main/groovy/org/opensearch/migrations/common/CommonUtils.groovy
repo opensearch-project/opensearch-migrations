@@ -161,7 +161,7 @@ class CommonUtils {
                     runCommand("[ -d /etc/yum.repos.d ] && { sed -i -e \"s|mirrorlist=|#mirrorlist=|g\" /etc/yum.repos.d/CentOS-* ;  sed -i -e \"s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g\" /etc/yum.repos.d/CentOS-* ; } || true")
                 }
             } else {
-                from 'amazoncorretto:17-al2023-headless'
+                from 'amazoncorretto:21-al2023-headless'
             }
 
             copyFile("jars", "/jars")
