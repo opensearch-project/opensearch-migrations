@@ -21,8 +21,9 @@ the root cause, and provides a workaround where one exists.
 | [FQ-CACHING](#fq-caching)                       | Filter query caching granularity differs between Solr and OpenSearch |
 | [JSON-QUERIES](#json-queries)                   | JSON Request API `queries` key not supported |
 | [JSON-PARAM-PREFIX](#json-param-prefix)         | JSON Request API `json.<param>` prefix passthrough not supported |
-| [UPDATE-COMMANDS](#update-commands)             | Only `add`, `delete-by-id`, and `delete-by-query` commands supported; JSON only |
+| [UPDATE-COMMANDS](#update-commands)             | `add`, `delete` (by id/query), `commit`, mixed commands, and bulk operations supported; JSON only |
 | [DELETE-BY-QUERY](#delete-by-query)             | Delete-by-query always synchronous; version conflicts treated as partial failure |
+| [COMMIT-SOFTCOMMIT](#commit-softcommit)         | `softCommit` and `hardCommit` both map to `_refresh` — OpenSearch has no distinction |
 | [BULK-PARTIAL-FAILURE](#bulk-partial-failure)   | `_bulk` partial failures surface as `errors[]`; Solr's default strict mode has no OpenSearch equivalent |
 | [NDJSON-INGEST-PARITY](#ndjson-ingest-parity)   | Shim does not parse NDJSON request bodies on ingress (not exercised by Solr clients, but diverges from replayer) |
 | [MM-AUTORELAX](#mm-autorelax)                   | eDisMax `mm.autoRelax` parameter not supported |
@@ -495,16 +496,60 @@ Both JSON and XML content types are supported.
 | `add` with `overwrite: false` | ❌ Not supported — fails fast (OpenSearch always overwrites) |
 | `delete` by id | ✅ Supported — `{"delete":{"id":"..."}}` |
 | `delete` by query | ✅ Supported — `{"delete":{"query":"..."}}` → `_delete_by_query` (see [DELETE-BY-QUERY](#delete-by-query)) |
-| `commit` | ❌ Not supported — fails fast |
+| `commit` | ✅ Supported — `{"commit":{}}` → `_refresh` (see [COMMIT-SOFTCOMMIT](#commit-softcommit)) |
 | `optimize` / `rollback` | ❌ Not supported — fails fast |
-| Mixed commands | ❌ Not supported — fails fast |
-| Array/bulk operations | ❌ Not supported — fails fast |
+| Mixed commands | ✅ Supported — `{"add":[...], "delete":[...], "commit":{}}` → `_bulk` + `?refresh=true` |
+| Array/bulk operations | ✅ Supported — `{"add":[...]}`, `{"delete":["1","2"]}`, `/update/json/docs [...]` → `_bulk` |
 | XML content type | ❌ Not supported — fails fast (JSON only) |
 
 **Content type:**
 Only `application/json` request bodies are supported. XML bodies
 (`text/xml`, `application/xml`) cannot be parsed by the shim and will
 fail with an error. Clients using XML format must switch to JSON.
+
+**Batch/bulk translation:**
+Array-based `add` and `delete` commands are translated to OpenSearch's
+`_bulk` API using NDJSON format. Each document in an `add` array becomes
+an `index` action; each ID in a `delete` array becomes a `delete` action.
+Mixed commands (`add` + `delete` + `commit` in one request) are flattened
+into a single `_bulk` call. When `commit` is present in a mixed request,
+`?refresh=true` is appended to the `_bulk` URL to make changes immediately
+searchable.
+
+**Commit translation:**
+Standalone `{"commit":{}}` maps to `POST /{collection}/_refresh`. Both
+hard commit and soft commit map to the same `_refresh` call — OpenSearch
+has no equivalent distinction. See [COMMIT-SOFTCOMMIT](#commit-softcommit).
+
+---
+
+## COMMIT-SOFTCOMMIT
+
+**Feature:** Solr `commit` and `softCommit` commands
+
+**Solr behaviour:**
+Solr distinguishes between hard commit (flush to disk + make visible) and
+soft commit (make visible without flushing to disk). `softCommit` is faster
+but less durable — documents are searchable but could be lost on crash until
+the next hard commit. Clients use `{"commit":{}}` for hard commit and
+`{"commit":{"softCommit":true}}` or `?softCommit=true` for soft commit.
+
+**OpenSearch behaviour:**
+OpenSearch's `_refresh` makes documents searchable (equivalent to soft commit).
+There is no separate "hard commit" — durability is handled by the translog,
+which is flushed independently. A `_refresh` is the closest equivalent to
+both Solr commit types.
+
+**Current behaviour (applied automatically by the transformer):**
+Both `{"commit":{}}` and `{"commit":{"softCommit":true}}` map to
+`POST /{collection}/_refresh`. The `softCommit` flag is ignored because
+OpenSearch has no equivalent distinction.
+
+**Residual impact:**
+Applications that rely on the durability guarantee of Solr's hard commit
+(data persisted to disk before the response returns) should be aware that
+OpenSearch's translog provides equivalent durability by default — the
+`_refresh` call only controls searchability, not persistence.
 
 ---
 

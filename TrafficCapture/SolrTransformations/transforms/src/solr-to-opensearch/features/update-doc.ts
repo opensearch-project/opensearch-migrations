@@ -12,20 +12,11 @@
  *     so we refresh immediately. This is more aggressive than Solr's batched commit
  *     but satisfies the "searchable within N ms" contract. See LIMITATIONS.md.)
  *
- * Fail-fast on:
- *   - Missing or empty body
- *   - Array body (bulk not supported yet)
- *   - Missing "id" field in document
- *
- * The body is passed through unchanged — no field-level translation needed.
+ * Array bodies are handled by update-batch.ts (routed by update-router.ts).
+ * This handler only processes single-document bodies.
  */
 import type { MicroTransform } from '../pipeline';
 import type { RequestContext } from '../context';
-
-/** Detect GraalVM Java ArrayList — exposes numeric keys + length, unlike a Map. */
-function isJavaList(obj: any): boolean {
-  return typeof obj.get === 'function' && obj.get('0') !== undefined && obj.get('length') !== undefined;
-}
 
 export const request: MicroTransform<RequestContext> = {
   name: 'update-doc',
@@ -34,10 +25,6 @@ export const request: MicroTransform<RequestContext> = {
 
     if (!body || body.size === 0) {
       throw new Error('[update-doc] Request body is empty — expected a JSON document');
-    }
-
-    if (isJavaList(body)) {
-      throw new Error('[update-doc] Array/bulk updates not supported yet — send one document at a time');
     }
 
     const id = body.get('id');

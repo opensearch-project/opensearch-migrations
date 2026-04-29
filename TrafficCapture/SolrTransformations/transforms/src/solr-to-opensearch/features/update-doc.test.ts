@@ -154,8 +154,9 @@ describe('update-doc', () => {
     expect(() => request.apply(ctx)).toThrow('must have an "id" field');
   });
 
-  it('throws on array body', () => {
-    // Simulate GraalVM ArrayList: has numeric keys + length
+  it('throws on body without id field (e.g. array-like body reaching single-doc handler)', () => {
+    // Array bodies are now routed to update-batch by the router.
+    // If an array-like body somehow reaches update-doc, it fails on missing id.
     const arrayLike = new Map<string, any>([
       ['0', { id: '1' }],
       ['1', { id: '2' }],
@@ -163,6 +164,6 @@ describe('update-doc', () => {
     ]);
     const ctx = buildCtx('/solr/mycore/update/json/docs', arrayLike);
 
-    expect(() => request.apply(ctx)).toThrow('Array/bulk updates not supported');
+    expect(() => request.apply(ctx)).toThrow('must have an "id" field');
   });
 });

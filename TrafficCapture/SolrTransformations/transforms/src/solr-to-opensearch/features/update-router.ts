@@ -32,6 +32,8 @@ import { request as deleteDocRequest } from './delete-doc';
 import { request as updateDocRequest } from './update-doc';
 import { response as bulkResponse, isBulkResponse } from './bulk/bulk-response';
 import { request as deleteByQueryRequest, response as deleteByQueryResponse, isDeleteByQueryResponse } from './delete-by-query';
+import { handleJsonDocsArray, handleBatchAdd, handleBatchDelete, handleMixedCommands } from './update-batch';
+import { request as commitRequest, response as commitResponse, isRefreshResponse } from './update-commit';
 
 /** Known Solr update command keys. */
 const KNOWN_COMMANDS = ['delete', 'add', 'commit', 'optimize', 'rollback'];
@@ -55,10 +57,17 @@ function hasMultipleCommands(body: any): boolean {
   return false;
 }
 
-/** Detect arrays — works for both JS arrays and GraalVM Java ArrayLists. */
+/** Detect arrays — works for both JS arrays and GraalVM Java Lists.
+ *  GraalVM with allowListAccess(true) exposes Java Lists as array-likes
+ *  with .length and numeric index access (list[0]), NOT with .get()/.set(). */
 function isArrayLike(val: any): boolean {
   if (val == null || typeof val === 'string') return false;
-  return Array.isArray(val) || (typeof val[Symbol.iterator] === 'function' && typeof val.get !== 'function');
+  if (Array.isArray(val)) return true;
+  // GraalVM Java List: has .length (number) and numeric index access, but no .has()
+  // A Map has .has() — use its absence to distinguish List from Map.
+  if (typeof val.length === 'number' && typeof val.has !== 'function') return true;
+  // Plain JS iterable without .get() (e.g. generator)
+  return typeof val[Symbol.iterator] === 'function' && typeof val.get !== 'function';
 }
 
 /** Extract body keys for error messages. */
@@ -93,11 +102,15 @@ export const request: MicroTransform<RequestContext> = {
 
     const uri = ctx.msg.get('URI') || '';
 
-    // /update/json/docs — body IS the document.
-    // Basic validation before delegating to update-doc handler.
+    // /update/json/docs — body IS the document (or array of documents).
     if (isJsonDocsPath(uri)) {
-      if (!ctx.body || ctx.body.size === 0) {
+      if (!ctx.body || (ctx.body.size === 0 && typeof ctx.body.length !== 'number')) {
         throw new Error('[update-router] json-docs: request body is empty — expected a JSON document');
+      }
+      // Array body → batch add via _bulk
+      if (isArrayLike(ctx.body)) {
+        handleJsonDocsArray(ctx, ctx.body);
+        return;
       }
       updateDocRequest.apply(ctx);
       return;
@@ -115,8 +128,10 @@ function dispatchCommand(ctx: RequestContext): void {
     throw new Error('[update-router] dispatch: request body is empty or not JSON — only JSON content type is supported');
   }
 
+  // Mixed commands: multiple command keys in one request → handle as batch
   if (hasMultipleCommands(body)) {
-    throw new Error('[update-router] dispatch: mixed commands in a single request are not supported yet');
+    handleMixedCommands(ctx);
+    return;
   }
 
   const command = identifyCommand(body);
@@ -126,8 +141,17 @@ function dispatchCommand(ctx: RequestContext): void {
 
   const commandData = body.get(command);
 
+  // Array data → route to batch handlers
   if (isArrayLike(commandData)) {
-    throw new Error(`[update-router] ${command}: array/bulk operations are not supported yet — send one command at a time`);
+    if (command === 'add') {
+      handleBatchAdd(ctx, commandData);
+      return;
+    }
+    if (command === 'delete') {
+      handleBatchDelete(ctx, commandData);
+      return;
+    }
+    throw new Error(`[update-router] ${command}: array format is not supported for this command`);
   }
 
   const handler = COMMAND_HANDLERS[command];
@@ -141,6 +165,7 @@ function dispatchCommand(ctx: RequestContext): void {
 const COMMAND_HANDLERS: Record<string, (ctx: RequestContext, data: any) => void> = {
   delete: handleDelete,
   add: handleAdd,
+  commit: handleCommit,
 };
 
 function handleDelete(ctx: RequestContext, data: any): void {
@@ -183,6 +208,10 @@ function handleAdd(ctx: RequestContext, data: any): void {
   }
   ctx.body = doc;
   updateDocRequest.apply(ctx);
+}
+
+function handleCommit(ctx: RequestContext, _data: any): void {
+  commitRequest.apply(ctx);
 }
 
 /**
@@ -234,7 +263,7 @@ function applySingleDocResponse(ctx: ResponseContext): void {
 
 export const response: MicroTransform<ResponseContext> = {
   name: 'update-response',
-  match: (ctx) => isSingleDocResponse(ctx) || isBulkResponse(ctx.responseBody) || isDeleteByQueryResponse(ctx.responseBody),
+  match: (ctx) => isSingleDocResponse(ctx) || isBulkResponse(ctx.responseBody) || isDeleteByQueryResponse(ctx.responseBody) || isRefreshResponse(ctx.responseBody),
   apply: (ctx) => {
     if (isBulkResponse(ctx.responseBody)) {
       bulkResponse.apply(ctx);
@@ -242,6 +271,10 @@ export const response: MicroTransform<ResponseContext> = {
     }
     if (isDeleteByQueryResponse(ctx.responseBody)) {
       deleteByQueryResponse.apply(ctx);
+      return;
+    }
+    if (isRefreshResponse(ctx.responseBody)) {
+      commitResponse.apply(ctx);
       return;
     }
     if (isSingleDocResponse(ctx)) {

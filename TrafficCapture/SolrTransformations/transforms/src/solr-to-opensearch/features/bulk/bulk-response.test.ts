@@ -270,4 +270,39 @@ describe('bulk-response.apply', () => {
     const ctx = buildCtx(body);
     expect(response.match!(ctx)).toBe(true);
   });
+
+  it('treats not_found on delete as success (matches Solr behavior)', () => {
+    const body = new Map<string, any>([
+      ['took', 5],
+      ['errors', false],
+      ['items', [
+        bulkItem('delete', { _index: 'mycore', _id: 'exists', status: 200, result: 'deleted' }),
+        bulkItem('delete', { _index: 'mycore', _id: 'missing', status: 404, result: 'not_found' }),
+      ]],
+    ]);
+    const ctx = buildCtx(body);
+    response.apply(ctx);
+    expect(ctx.responseBody.get('responseHeader').get('status')).toBe(0);
+    expect(ctx.responseBody.has('errors')).toBe(false);
+  });
+
+  it('still reports real delete errors (not not_found)', () => {
+    const body = new Map<string, any>([
+      ['took', 5],
+      ['errors', true],
+      ['items', [
+        bulkItem('delete', { _index: 'mycore', _id: '1', status: 404, result: 'not_found' }),
+        bulkItem('delete', {
+          _index: 'mycore', _id: '2', status: 409,
+          error: new Map([['type', 'version_conflict'], ['reason', 'conflict']]),
+        }),
+      ]],
+    ]);
+    const ctx = buildCtx(body);
+    response.apply(ctx);
+    expect(ctx.responseBody.get('responseHeader').get('status')).toBe(1);
+    const errors = ctx.responseBody.get('errors');
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as Map<string, any>).get('id')).toBe('2');
+  });
 });

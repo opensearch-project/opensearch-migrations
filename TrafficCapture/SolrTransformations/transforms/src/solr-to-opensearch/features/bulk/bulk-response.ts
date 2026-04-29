@@ -74,7 +74,11 @@ function aggregateItems(items: Iterable<unknown>): { hasFailure: boolean; errors
 /**
  * Inspect one `_bulk` items[] entry and return an aggregated-error record if
  * the item failed; otherwise `null`. Each entry has the shape
- * `{<op>: {_index, _id, status, error?}}` with exactly one op key.
+ * `{<op>: {_index, _id, status, result?, error?}}` with exactly one op key.
+ *
+ * `not_found` on a delete is treated as success — matches Solr's behavior
+ * where deleting a nonexistent document is a silent no-op, and matches the
+ * single-doc response handler's convention (result === 'not_found' → status 0).
  */
 function extractItemError(raw: unknown): BulkAggregatedError | null {
   const entry = toMapLike(raw);
@@ -82,7 +86,10 @@ function extractItemError(raw: unknown): BulkAggregatedError | null {
   const detail = firstOpDetail(entry);
   if (!detail) return null;
   const status = toNumber(detail.get('status'));
+  const result = detail.get('result');
   const errorDetail = toMapLike(detail.get('error'));
+  // not_found on delete → success (Solr treats delete of missing doc as success)
+  if (result === 'not_found') return null;
   const failed = (status != null && status >= 400) || errorDetail != null;
   if (!failed) return null;
   return {

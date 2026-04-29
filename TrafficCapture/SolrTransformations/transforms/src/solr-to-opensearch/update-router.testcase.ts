@@ -323,21 +323,11 @@ export const testCases: TestCase[] = [
     expectedErrorContains: 'Request transform failed',
   }),
 
-  solrTest('update-cmd-error-mixed-commands', {
-    description: 'Mixed commands should return 500',
+  solrTest('update-cmd-error-mixed-commands-unsupported', {
+    description: 'Mixed commands with unsupported optimize should return 500',
     documents: [],
     method: 'POST',
-    requestBody: JSON.stringify({ delete: { id: '1' }, add: { doc: { id: '2', title: 'x' } } }),
-    requestPath: '/solr/testcollection/update',
-    expectedStatusCode: 500,
-    expectedErrorContains: 'Request transform failed',
-  }),
-
-  solrTest('update-cmd-error-unsupported-commit', {
-    description: 'Standalone commit command should return 500',
-    documents: [],
-    method: 'POST',
-    requestBody: JSON.stringify({ commit: {} }),
+    requestBody: JSON.stringify({ optimize: {}, add: { doc: { id: '1', title: 'x' } } }),
     requestPath: '/solr/testcollection/update',
     expectedStatusCode: 500,
     expectedErrorContains: 'Request transform failed',
@@ -363,11 +353,11 @@ export const testCases: TestCase[] = [
     expectedErrorContains: 'Request transform failed',
   }),
 
-  solrTest('update-cmd-error-array-deletes', {
-    description: 'Array of deletes should return 500 (bulk not supported)',
+  solrTest('update-cmd-error-batch-delete-empty-id', {
+    description: 'Batch delete with empty ID in array should return 500',
     documents: [],
     method: 'POST',
-    requestBody: JSON.stringify({ delete: [{ id: '1' }, { id: '2' }] }),
+    requestBody: JSON.stringify({ delete: ['1', '', '3'] }),
     requestPath: '/solr/testcollection/update',
     expectedStatusCode: 500,
     expectedErrorContains: 'Request transform failed',

@@ -273,18 +273,22 @@ describe('update-router request', () => {
     expect(() => request.apply(ctx)).toThrow(/no recognized command.*keys:.*foo.*baz/);
   });
 
-  it('throws on mixed commands (delete + add)', () => {
+  it('routes mixed commands (delete + add) to _bulk', () => {
     const body = new Map<string, any>([
       ['delete', new Map([['id', '1']])],
-      ['add', new Map([['doc', new Map([['id', '2']])]])],
+      ['add', new Map([['doc', new Map([['id', '2'], ['title', 'x']])]])],
     ]);
     const ctx = buildCtx('/solr/mycore/update', body);
-    expect(() => request.apply(ctx)).toThrow('mixed commands');
+    request.apply(ctx);
+    expect(ctx.msg.get('URI')).toContain('/mycore/_bulk');
+    expect(ctx.msg.get('method')).toBe('POST');
   });
 
-  it('throws on unsupported commit command', () => {
+  it('routes commit command to _refresh', () => {
     const ctx = buildCtx('/solr/mycore/update', new Map([['commit', new Map()]]));
-    expect(() => request.apply(ctx)).toThrow('command is not supported yet');
+    request.apply(ctx);
+    expect(ctx.msg.get('URI')).toBe('/mycore/_refresh');
+    expect(ctx.msg.get('method')).toBe('POST');
   });
 
   it('throws on unsupported optimize command', () => {
@@ -292,11 +296,24 @@ describe('update-router request', () => {
     expect(() => request.apply(ctx)).toThrow('command is not supported yet');
   });
 
-  it('throws on array of deletes (JS array)', () => {
-    // Use a real JS array wrapped in a Map
-    const body = new Map<string, any>([['delete', [{ id: '1' }, { id: '2' }]]]);
+  it('routes array of deletes to _bulk', () => {
+    const body = new Map<string, any>([['delete', ['1', '2']]]);
     const ctx = buildCtx('/solr/mycore/update', body);
-    expect(() => request.apply(ctx)).toThrow('array/bulk operations are not supported');
+    request.apply(ctx);
+    expect(ctx.msg.get('URI')).toContain('/mycore/_bulk');
+    expect(ctx.msg.get('method')).toBe('POST');
+  });
+
+  it('routes array of adds to _bulk', () => {
+    const body = new Map<string, any>([
+      ['add', [
+        new Map([['doc', new Map([['id', '1'], ['title', 'a']])]]),
+        new Map([['doc', new Map([['id', '2'], ['title', 'b']])]]),
+      ]],
+    ]);
+    const ctx = buildCtx('/solr/mycore/update', body);
+    request.apply(ctx);
+    expect(ctx.msg.get('URI')).toContain('/mycore/_bulk');
   });
 });
 

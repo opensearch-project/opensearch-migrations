@@ -104,6 +104,10 @@ function getBodyMap(payload: JavaMap): JavaMap {
   if (!jsonBody) return new Map();
   // Map-shaped (typical JSON object) — return as-is
   if (typeof jsonBody.get === 'function') return jsonBody;
+  // Array-shaped (top-level JSON array, e.g. /update/json/docs bulk ingest).
+  // GraalVM with allowListAccess(true) exposes Java Lists as JS array-likes
+  // with numeric index access and .length — NOT with .get()/.set()/.has().
+  if (typeof jsonBody.length === 'number' && jsonBody.length >= 0) return jsonBody;
   // Fallback: non-Map (e.g. raw string from malformed body) — return empty map
   return new Map();
 }
