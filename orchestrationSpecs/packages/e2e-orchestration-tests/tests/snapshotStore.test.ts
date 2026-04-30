@@ -60,6 +60,7 @@ const MIN_SNAPSHOT: CaseSnapshot = {
             checkpoints: [],
         },
     },
+    events: [],
     checkers: [],
     diagnostics: [],
     violations: [],

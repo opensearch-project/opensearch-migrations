@@ -6,6 +6,7 @@ function stubCtx(phase: "setup" | "teardown"): ActorContext {
     return {
         namespace: "ma",
         phase,
+        baselineConfigPath: "/tmp/baseline.wf.yaml",
         workflowCli: new WorkflowCli({
             runner: () => ({ stdout: "", stderr: "", exitCode: 0 }),
             namespace: "ma",

@@ -22,8 +22,12 @@ import * as fs from "node:fs";
 import * as crypto from "node:crypto";
 
 import { K8sClient, MIGRATION_CRD_PLURALS, extractCrdObservation } from "./k8sClient";
-import { WorkflowCli, buildWorkflowCliRunner } from "./workflowCli";
-import { sanitizeWorkflowName } from "./workflowName";
+import {
+    WorkflowCli,
+    WorkflowCliError,
+    WorkflowCliRunResult,
+    buildWorkflowCliRunner,
+} from "./workflowCli";
 import { loadScenarioSpec } from "./specLoader";
 import {
     PhaseCompletionOutcome,
@@ -34,13 +38,22 @@ import {
     requireTopologyForBaseline,
 } from "./componentTopologyResolver";
 import { ComponentTopology } from "./componentTopology";
-import { CaseSnapshot, CaseOutcome, RunRecord, RunCheckpoint } from "./reportSchema";
+import {
+    CaseEvent,
+    CaseSnapshot,
+    CaseOutcome,
+    RunRecord,
+    RunCheckpoint,
+} from "./reportSchema";
 import { writeCaseSnapshot } from "./snapshotStore";
 import { Checkpoint, ComponentId, ObservedComponent, ScenarioSpec, Violation } from "./types";
 import { Actor, ActorContext, ActorRegistry } from "./actors";
 import { builtinActors } from "./builtinActors";
 
 // ── Types shared by the CLI entrypoint and its testable core ─────────
+
+const ARGO_WORKFLOW_RESOURCE = "workflows.argoproj.io";
+const INNER_MIGRATION_WORKFLOW_NAME = "migration-workflow";
 
 export interface ReadClusterObservations {
     (): Promise<{ components: Record<ComponentId, ObservedComponent> }>;
@@ -90,6 +103,7 @@ export async function runNoopSlice(deps: LiveRunnerDeps): Promise<string> {
     const diagnostics: string[] = [];
     const violations: Violation[] = [];
     const runs: Record<string, RunRecord> = {};
+    const events: CaseEvent[] = [];
     let outcome: CaseOutcome = "partial";
 
     // Resolved inside the try so an unknown actor becomes a diagnostic
@@ -100,6 +114,7 @@ export async function runNoopSlice(deps: LiveRunnerDeps): Promise<string> {
         workflowCli: deps.workflowCli,
         k8sClient: deps.k8sClient,
         namespace: deps.namespace,
+        baselineConfigPath: deps.baselineConfigPath,
         phase,
     });
 
@@ -112,6 +127,9 @@ export async function runNoopSlice(deps: LiveRunnerDeps): Promise<string> {
         // Setup actors — stop on first error so we don't submit a
         // workflow against an unprepared cluster.
         if (setupActors.length > 0) {
+            events.push(event(clock, "setup", "run-actors", "ok", {
+                message: `running ${setupActors.length} setup actor(s)`,
+            }));
             const res = await deps.actorRegistry.runAll(
                 setupActors,
                 actorCtxFor("setup"),
@@ -119,62 +137,66 @@ export async function runNoopSlice(deps: LiveRunnerDeps): Promise<string> {
             );
             diagnostics.push(...res.diagnostics);
             if (res.diagnostics.length > 0) {
+                events.push(event(clock, "setup", "run-actors", "error", {
+                    message: res.diagnostics.join("; "),
+                }));
                 throw new Error(
                     `setup aborted: ${res.diagnostics.join("; ")}`,
                 );
             }
+            events.push(event(clock, "setup", "run-actors", "ok", {
+                message: "setup actors completed",
+            }));
         }
 
         const baselineYaml = fs.readFileSync(deps.baselineConfigPath, "utf8");
 
-        // Run 1 — baseline submission.
-        const baselineCheckpoints: RunCheckpoint[] = [];
         const baselineWorkflowName = `${caseName}-baseline-${suffixer()}`;
-        deps.workflowCli.configureEditStdin(baselineYaml);
-        deps.workflowCli.submit({ wait: false, workflowName: baselineWorkflowName });
-        for (const gate of deps.spec.approvalGates) {
-            deps.workflowCli.approve(gate.approvePattern);
-        }
-        await waitAndCheckpoint(
+        runs["baseline"] = await runSubmittedWorkflow({
             deps,
-            baselineCheckpoints,
-            "mutated-complete",
+            runName: "baseline",
+            workflowName: baselineWorkflowName,
+            baselineYaml,
+            checkpoint: "mutated-complete",
             diagnostics,
+            events,
             clock,
-        );
-        runs["baseline"] = { name: "baseline", checkpoints: baselineCheckpoints };
+        });
 
-        // Run 2 — noop-pre: same YAML again, distinct workflow name.
-        const noopCheckpoints: RunCheckpoint[] = [];
         const noopWorkflowName = `${caseName}-noop-pre-${suffixer()}`;
-        deps.workflowCli.configureEditStdin(baselineYaml);
-        deps.workflowCli.submit({ wait: false, workflowName: noopWorkflowName });
-        for (const gate of deps.spec.approvalGates) {
-            deps.workflowCli.approve(gate.approvePattern);
-        }
-        await waitAndCheckpoint(
+        runs["noop-pre"] = await runSubmittedWorkflow({
             deps,
-            noopCheckpoints,
-            "noop",
+            runName: "noop-pre",
+            workflowName: noopWorkflowName,
+            baselineYaml,
+            checkpoint: "noop",
             diagnostics,
+            events,
             clock,
-        );
-        runs["noop-pre"] = { name: "noop-pre", checkpoints: noopCheckpoints };
+        });
 
         outcome = diagnostics.length === 0 ? "passed" : "partial";
     } catch (e) {
         outcome = "error";
-        diagnostics.push(`fatal: ${(e as Error).message}`);
+        diagnostics.push(...formatFatalDiagnostics(e));
     } finally {
         // Teardown actors always run, regardless of what went wrong.
         // Their own failures are recorded as diagnostics but do not
         // mask the original error or promote outcome beyond "error".
         if (teardownActors.length > 0) {
+            events.push(event(clock, "teardown", "run-actors", "ok", {
+                message: `running ${teardownActors.length} teardown actor(s)`,
+            }));
             const res = await deps.actorRegistry.runAll(
                 teardownActors,
                 actorCtxFor("teardown"),
             );
             diagnostics.push(...res.diagnostics);
+            events.push(event(clock, "teardown", "run-actors", res.diagnostics.length > 0 ? "error" : "ok", {
+                message: res.diagnostics.length > 0
+                    ? res.diagnostics.join("; ")
+                    : "teardown actors completed",
+            }));
             if (outcome === "passed" && res.diagnostics.length > 0) {
                 outcome = "partial";
             }
@@ -188,6 +210,7 @@ export async function runNoopSlice(deps: LiveRunnerDeps): Promise<string> {
         startedAt,
         finishedAt: new Date(clock.now()).toISOString(),
         runs,
+        events,
         checkers: [],
         diagnostics,
         violations,
@@ -200,17 +223,199 @@ export async function runNoopSlice(deps: LiveRunnerDeps): Promise<string> {
     });
 }
 
+async function runSubmittedWorkflow(args: {
+    deps: LiveRunnerDeps;
+    runName: string;
+    workflowName: string;
+    baselineYaml: string;
+    checkpoint: Checkpoint;
+    diagnostics: string[];
+    events: CaseEvent[];
+    clock: typeof realClock;
+}): Promise<RunRecord> {
+    const {
+        deps,
+        runName,
+        workflowName,
+        baselineYaml,
+        checkpoint,
+        diagnostics,
+        events,
+        clock,
+    } = args;
+    const checkpoints: RunCheckpoint[] = [];
+    let attemptedSubmit = false;
+    let primaryError: unknown;
+    let cleanupFailed = false;
+
+    try {
+        workflowEvent(
+            events,
+            clock,
+            runName,
+            "configure",
+            "workflow configure edit --stdin",
+            () => deps.workflowCli.configureEditStdin(baselineYaml),
+        );
+        attemptedSubmit = true;
+        workflowEvent(
+            events,
+            clock,
+            runName,
+            "submit",
+            `workflow submit --namespace ${deps.namespace} --workflow-name ${workflowName}`,
+            () => deps.workflowCli.submit({ wait: false, workflowName }),
+        );
+        for (const gate of deps.spec.approvalGates) {
+            workflowEvent(
+                events,
+                clock,
+                runName,
+                "approve",
+                `workflow approve ${gate.approvePattern} --namespace ${deps.namespace}`,
+                () => deps.workflowCli.approve(gate.approvePattern),
+            );
+        }
+        await waitAndCheckpoint(
+            deps,
+            checkpoints,
+            checkpoint,
+            diagnostics,
+            events,
+            clock,
+        );
+    } catch (e) {
+        primaryError = e;
+    } finally {
+        cleanupFailed = !cleanupWorkflowResources({
+            deps,
+            runName,
+            workflowName,
+            deleteOuterWorkflow: attemptedSubmit,
+            diagnostics,
+            events,
+            clock,
+        });
+    }
+
+    if (primaryError) throw primaryError;
+    if (cleanupFailed) {
+        throw new Error(`workflow cleanup failed for ${runName}`);
+    }
+    return { name: runName, checkpoints };
+}
+
+function cleanupWorkflowResources(args: {
+    deps: LiveRunnerDeps;
+    runName: string;
+    workflowName: string;
+    deleteOuterWorkflow: boolean;
+    diagnostics: string[];
+    events: CaseEvent[];
+    clock: typeof realClock;
+}): boolean {
+    const {
+        deps,
+        runName,
+        workflowName,
+        deleteOuterWorkflow,
+        diagnostics,
+        events,
+        clock,
+    } = args;
+    const targets = [
+        ...(deleteOuterWorkflow ? [workflowName] : []),
+        INNER_MIGRATION_WORKFLOW_NAME,
+    ];
+    let ok = true;
+
+    for (const name of targets) {
+        try {
+            deps.k8sClient.deleteResourceAndWait(ARGO_WORKFLOW_RESOURCE, name);
+            events.push(event(clock, runName, "delete-workflow", "ok", {
+                command: `kubectl delete ${ARGO_WORKFLOW_RESOURCE} ${name} -n ${deps.namespace} --ignore-not-found --wait=true --timeout=60s`,
+            }));
+        } catch (e) {
+            ok = false;
+            const err = e as Partial<Error> & { stderr?: string };
+            const diagnostic = `cleanup failed for ${ARGO_WORKFLOW_RESOURCE}/${name}: ${err.message ?? String(e)}`;
+            diagnostics.push(diagnostic);
+            events.push(event(clock, runName, "delete-workflow", "error", {
+                command: `kubectl delete ${ARGO_WORKFLOW_RESOURCE} ${name} -n ${deps.namespace} --ignore-not-found --wait=true --timeout=60s`,
+                message: err.message,
+                stderr: err.stderr || undefined,
+            }));
+        }
+    }
+    return ok;
+}
+
+function formatFatalDiagnostics(e: unknown): string[] {
+    const err = e as Partial<Error> & {
+        stdout?: string;
+        stderr?: string;
+        exitCode?: number | null;
+    };
+    const diagnostics = [`fatal: ${err.message ?? String(e)}`];
+    if (err.stderr) diagnostics.push(`stderr: ${err.stderr.trim()}`);
+    if (err.stdout) diagnostics.push(`stdout: ${err.stdout.trim()}`);
+    return diagnostics;
+}
+
+function event(
+    clock: typeof realClock,
+    phase: string,
+    action: string,
+    result: "ok" | "error",
+    details: Omit<CaseEvent, "at" | "phase" | "action" | "result"> = {},
+): CaseEvent {
+    return {
+        at: new Date(clock.now()).toISOString(),
+        phase,
+        action,
+        result,
+        ...details,
+    };
+}
+
+function workflowEvent(
+    events: CaseEvent[],
+    clock: typeof realClock,
+    phase: string,
+    action: string,
+    command: string,
+    fn: () => WorkflowCliRunResult,
+): WorkflowCliRunResult {
+    try {
+        const result = fn();
+        events.push(event(clock, phase, action, "ok", {
+            command,
+            stdout: result.stdout || undefined,
+            stderr: result.stderr || undefined,
+        }));
+        return result;
+    } catch (e) {
+        const err = e as Partial<WorkflowCliError>;
+        events.push(event(clock, phase, action, "error", {
+            command,
+            message: err.message,
+            stdout: err.stdout || undefined,
+            stderr: err.stderr || undefined,
+        }));
+        throw e;
+    }
+}
+
 async function waitAndCheckpoint(
     deps: LiveRunnerDeps,
     into: RunCheckpoint[],
     checkpoint: Checkpoint,
     diagnostics: string[],
+    events: CaseEvent[],
     clock: typeof realClock,
 ): Promise<void> {
-    const obs = await deps.readObservations();
-    const phases = Object.values(obs.components).map((c) => ({
-        componentId: c.componentId,
-        phase: c.phase,
+    events.push(event(clock, checkpoint, "wait-phase-completion", "ok", {
+        message: `waiting up to ${deps.spec.phaseCompletionTimeoutSeconds}s`,
     }));
     const outcome: PhaseCompletionOutcome = await waitForPhaseCompletion({
         components: deps.topology.components,
@@ -230,12 +435,24 @@ async function waitAndCheckpoint(
     const finalObs = await deps.readObservations();
 
     if (outcome.kind === "timeout") {
+        events.push(event(clock, checkpoint, "wait-phase-completion", "error", {
+            message: outcome.blockingComponents
+                .map((b) => `${b.componentId}=${b.phase}`)
+                .join(", "),
+        }));
         diagnostics.push(
             `phase-timeout at ${checkpoint}: ${outcome.blockingComponents
                 .map((b) => `${b.componentId}=${b.phase}`)
                 .join(", ")}`,
         );
+    } else {
+        events.push(event(clock, checkpoint, "wait-phase-completion", "ok", {
+            message: `ready after ${outcome.waitedMs}ms`,
+        }));
     }
+    events.push(event(clock, checkpoint, "observe", "ok", {
+        message: `captured ${Object.keys(finalObs.components).length} component(s)`,
+    }));
 
     into.push({
         checkpoint,
@@ -243,8 +460,6 @@ async function waitAndCheckpoint(
         components: finalObs.components,
         violations: [],
     });
-    // phases is used only for diagnostics debugging; suppress unused warning
-    void phases;
 }
 
 function buildCaseName(spec: ScenarioSpec): string {

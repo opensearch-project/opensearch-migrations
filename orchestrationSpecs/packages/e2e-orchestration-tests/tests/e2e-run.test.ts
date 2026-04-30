@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { runNoopSlice, LiveRunnerDeps } from "../src/e2e-run";
 import { buildTopology } from "../src/componentTopology";
 import { WorkflowCli } from "../src/workflowCli";
+import { WorkflowCliError } from "../src/workflowCli";
 import { K8sClient } from "../src/k8sClient";
 import { ActorRegistry, Actor } from "../src/actors";
 import { CaseSnapshot } from "../src/reportSchema";
@@ -23,6 +24,7 @@ const COMPONENTS = [
 function fakeDeps(overrides: Partial<LiveRunnerDeps> = {}): {
     deps: LiveRunnerDeps;
     calls: { args: readonly string[]; input?: string }[];
+    k8sCalls: { args: readonly string[]; input?: string }[];
     tmpDir: string;
     baselinePath: string;
 } {
@@ -39,11 +41,13 @@ function fakeDeps(overrides: Partial<LiveRunnerDeps> = {}): {
         namespace: "ma",
     });
 
-    // K8sClient is only used for actor context in the noop slice —
-    // give it a runner that never gets called.
+    const k8sCalls: { args: readonly string[]; input?: string }[] = [];
     const k8sClient = new K8sClient({
         namespace: "ma",
-        runner: () => ({ stdout: "", stderr: "", exitCode: 0 }),
+        runner: (args, opts) => {
+            k8sCalls.push({ args: [...args], input: opts?.input });
+            return { stdout: "", stderr: "", exitCode: 0 };
+        },
     });
 
     const readObservations: LiveRunnerDeps["readObservations"] = async () => {
@@ -86,7 +90,7 @@ function fakeDeps(overrides: Partial<LiveRunnerDeps> = {}): {
         workflowNameSuffix,
         ...overrides,
     };
-    return { deps, calls, tmpDir, baselinePath };
+    return { deps, calls, k8sCalls, tmpDir, baselinePath };
 }
 
 describe("runNoopSlice — basic flow", () => {
@@ -136,6 +140,33 @@ describe("runNoopSlice — basic flow", () => {
                 "*.evaluateMetadata",
                 "*.migrateMetadata",
             ]);
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it("deletes outer and inner workflow resources after each run", async () => {
+        const { deps, k8sCalls, tmpDir } = fakeDeps();
+        try {
+            await runNoopSlice(deps);
+            const deletes = k8sCalls.filter((c) => c.args[0] === "delete");
+            expect(deletes.map((c) => c.args.slice(0, 3))).toEqual([
+                ["delete", "workflows.argoproj.io", "captureproxy-capture-proxy-noop-baseline-s1"],
+                ["delete", "workflows.argoproj.io", "migration-workflow"],
+                ["delete", "workflows.argoproj.io", "captureproxy-capture-proxy-noop-noop-pre-s2"],
+                ["delete", "workflows.argoproj.io", "migration-workflow"],
+            ]);
+            for (const call of deletes) {
+                expect(call.args).toEqual(
+                    expect.arrayContaining([
+                        "-n",
+                        "ma",
+                        "--ignore-not-found",
+                        "--wait=true",
+                        "--timeout=60s",
+                    ]),
+                );
+            }
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }
@@ -351,13 +382,70 @@ describe("runNoopSlice — error paths", () => {
         const { deps, tmpDir } = fakeDeps();
         (deps.workflowCli as unknown as { configureEditStdin: () => never }).configureEditStdin =
             () => {
-                throw new Error("kubectl exec failed");
+                throw new WorkflowCliError(
+                    "workflow configure edit --stdin exited 1",
+                    1,
+                    "configuration updated",
+                    "missing secret source-creds",
+                );
             };
         try {
             const outPath = await runNoopSlice(deps);
             const snapshot: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
             expect(snapshot.outcome).toBe("error");
-            expect(snapshot.diagnostics[0]).toMatch(/kubectl exec failed/);
+            expect(snapshot.diagnostics[0]).toMatch(/workflow configure edit/);
+            expect(snapshot.diagnostics.join("\n")).toMatch(/stderr: missing secret source-creds/);
+            expect(snapshot.diagnostics.join("\n")).toMatch(/stdout: configuration updated/);
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it("still deletes workflow resources when a post-submit command fails", async () => {
+        const { deps, k8sCalls, tmpDir } = fakeDeps();
+        (deps.workflowCli as unknown as { approve: () => never }).approve =
+            () => {
+                throw new WorkflowCliError(
+                    "workflow approve *.evaluateMetadata --namespace ma exited 1",
+                    1,
+                    "",
+                    "No gates are currently being waited on by the workflow.",
+                );
+            };
+
+        try {
+            const outPath = await runNoopSlice(deps);
+            const snapshot: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            expect(snapshot.outcome).toBe("error");
+            const deletes = k8sCalls.filter((c) => c.args[0] === "delete");
+            expect(deletes.map((c) => c.args.slice(0, 3))).toEqual([
+                ["delete", "workflows.argoproj.io", "captureproxy-capture-proxy-noop-baseline-s1"],
+                ["delete", "workflows.argoproj.io", "migration-workflow"],
+            ]);
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it("stops before noop-pre if baseline workflow cleanup fails", async () => {
+        const { deps, calls, tmpDir } = fakeDeps();
+        const k8sClient = new K8sClient({
+            namespace: "ma",
+            runner: (args) => ({
+                stdout: "",
+                stderr: args[2] === "migration-workflow" ? "delete timed out" : "",
+                exitCode: args[2] === "migration-workflow" ? 1 : 0,
+            }),
+        });
+        deps.k8sClient = k8sClient;
+
+        try {
+            const outPath = await runNoopSlice(deps);
+            const snapshot: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            expect(snapshot.outcome).toBe("error");
+            expect(snapshot.diagnostics.join("\n")).toMatch(/workflow cleanup failed for baseline/);
+            expect(calls.filter((c) => c.args[0] === "submit")).toHaveLength(1);
+            expect(snapshot.runs["noop-pre"]).toBeUndefined();
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }

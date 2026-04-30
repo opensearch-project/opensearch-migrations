@@ -24,6 +24,8 @@ export interface ActorContext {
     workflowCli: WorkflowCli;
     k8sClient: K8sClient;
     namespace: string;
+    /** Absolute path to the baseline config file for this run. */
+    baselineConfigPath: string;
     /** Human-readable label of the phase this actor was invoked for. */
     phase: "setup" | "teardown";
 }

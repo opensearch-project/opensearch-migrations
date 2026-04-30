@@ -81,6 +81,26 @@ export const RunRecordSchema = z
 export type RunRecord = z.infer<typeof RunRecordSchema>;
 
 /**
+ * Ordered diagnostic event log for the case. This is intentionally
+ * operational rather than an oracle: it records what the runner tried
+ * to do and whether the command/action succeeded, so failed snapshots
+ * remain readable even when no checkpoint was reached.
+ */
+export const CaseEventSchema = z
+    .object({
+        at: z.string(),
+        phase: z.string(),
+        action: z.string(),
+        result: z.enum(["ok", "error"]),
+        command: z.string().optional(),
+        message: z.string().optional(),
+        stdout: z.string().optional(),
+        stderr: z.string().optional(),
+    })
+    .strict();
+export type CaseEvent = z.infer<typeof CaseEventSchema>;
+
+/**
  * Case-level outcome. 'partial' means the runner reached the case but
  * could not exercise the full behavior (e.g. missing implementation,
  * configured to stop early).
@@ -104,6 +124,8 @@ export const CaseSnapshotSchema = z
         finishedAt: z.string().optional(),
         /** Runs keyed by run name (baseline, noop-pre, etc.). */
         runs: z.record(z.string(), RunRecordSchema),
+        /** Ordered operational history of commands/actions attempted. */
+        events: z.array(CaseEventSchema).default([]),
         /** Checker verdicts collected across the case. */
         checkers: z.array(CheckerVerdictSchema).default([]),
         /** Additional failure/diagnostic context (phase-timeouts, errors). */

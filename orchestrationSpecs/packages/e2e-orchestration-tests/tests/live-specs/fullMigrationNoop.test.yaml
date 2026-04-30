@@ -1,0 +1,17 @@
+baseConfig: ../../../config-processor/scripts/samples/fullMigrationWithTraffic.wf.yaml
+phaseCompletionTimeoutSeconds: 600
+
+matrix:
+  subject: captureproxy:capture-proxy
+
+lifecycle:
+  setup: [create-basic-auth-secrets]
+  teardown: []
+
+approvalGates:
+  - approvePattern: "*.evaluateMetadata"
+    validations: []
+  - approvePattern: "*.migrateMetadata"
+    validations: []
+  - approvePattern: "*.documentBackfill"
+    validations: []

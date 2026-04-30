@@ -16,6 +16,7 @@
  */
 
 import { spawnSync, SpawnSyncReturns } from "node:child_process";
+import { stringify as stringifyYaml } from "yaml";
 
 import { ComponentId } from "./types";
 
@@ -119,6 +120,71 @@ export class K8sClient {
             );
         }
         return JSON.parse(res.stdout) as Record<string, unknown>;
+    }
+
+    /**
+     * Create or update an Opaque Secret with basic-auth keys. Uses
+     * `kubectl apply -f -` so repeated setup runs are idempotent.
+     */
+    applyBasicAuthSecret(
+        name: string,
+        creds: { username: string; password: string },
+    ): void {
+        const manifest = stringifyYaml({
+            apiVersion: "v1",
+            kind: "Secret",
+            metadata: {
+                name,
+                namespace: this.namespace,
+            },
+            type: "Opaque",
+            stringData: {
+                username: creds.username,
+                password: creds.password,
+            },
+        });
+        const res = this.runner(["apply", "-f", "-", ...this.extraArgs], {
+            input: manifest,
+        });
+        if (res.exitCode !== 0) {
+            throw new KubectlError(
+                `kubectl apply secret/${name} failed`,
+                res.exitCode,
+                res.stderr,
+            );
+        }
+    }
+
+    /**
+     * Delete a Kubernetes resource and wait for deletion to complete.
+     * `--ignore-not-found` keeps cleanup idempotent across failed or
+     * partially completed runs.
+     */
+    deleteResourceAndWait(
+        resource: string,
+        name: string,
+        timeoutSeconds = 60,
+    ): void {
+        const res = this.runner(
+            [
+                "delete",
+                resource,
+                name,
+                "-n",
+                this.namespace,
+                "--ignore-not-found",
+                "--wait=true",
+                `--timeout=${timeoutSeconds}s`,
+                ...this.extraArgs,
+            ],
+        );
+        if (res.exitCode !== 0) {
+            throw new KubectlError(
+                `kubectl delete ${resource}/${name} failed`,
+                res.exitCode,
+                res.stderr,
+            );
+        }
     }
 
     private runJson(args: readonly string[]): unknown {
