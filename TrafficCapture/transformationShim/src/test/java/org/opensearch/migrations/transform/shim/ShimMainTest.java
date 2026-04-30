@@ -211,6 +211,40 @@ class ShimMainTest {
 
     @Test
     @SuppressWarnings("unchecked")
+    void extractBindings_withFieldTypesInBindingsObject_extractsIt() {
+        // Operator provides fieldTypes inline in bindingsObject JSON — no schema file needed.
+        // This is the path used by the traffic replayer (JsonJSTransformerProvider) and
+        // any deployment where the schema file is not accessible.
+        var bindings = ShimMain.extractBindings(
+            "[{\"SolrTransformerProvider\":{\"initializationScript\":\"x\"," +
+            "\"bindingsObject\":\"{\\\"fieldTypes\\\":{\\\"id\\\":\\\"solr.StrField\\\"," +
+            "\\\"title\\\":\\\"solr.TextField\\\"}}\"}}]");
+
+        assertTrue(bindings.containsKey("fieldTypes"));
+        var fieldTypes = (java.util.Map<String, String>) bindings.get("fieldTypes");
+        assertEquals("solr.StrField",  fieldTypes.get("id"));
+        assertEquals("solr.TextField", fieldTypes.get("title"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void extractBindings_withFieldTypesAndSolrConfigBothInBindingsObject_extractsBoth() {
+        // Both fieldTypes and solrConfig can be inlined together in bindingsObject
+        var bindings = ShimMain.extractBindings(
+            "[{\"SolrTransformerProvider\":{\"initializationScript\":\"x\"," +
+            "\"bindingsObject\":\"{" +
+            "\\\"solrConfig\\\":{\\\"/select\\\":{\\\"defaults\\\":{\\\"df\\\":\\\"title\\\"}}}," +
+            "\\\"fieldTypes\\\":{\\\"status\\\":\\\"solr.StrField\\\"}" +
+            "}\"}}]");
+
+        assertTrue(bindings.containsKey("solrConfig"));
+        assertTrue(bindings.containsKey("fieldTypes"));
+        var fieldTypes = (java.util.Map<String, String>) bindings.get("fieldTypes");
+        assertEquals("solr.StrField", fieldTypes.get("status"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void extractBindings_withSolrConfigXmlFile_parsesXml(@TempDir java.nio.file.Path tempDir) throws Exception {
         var xml = tempDir.resolve("solrconfig.xml");
         java.nio.file.Files.writeString(xml, """
@@ -227,6 +261,73 @@ class ShimMainTest {
         assertTrue(bindings.containsKey("solrConfig"));
         var solrConfig = (java.util.Map<String, Object>) bindings.get("solrConfig");
         assertTrue(solrConfig.containsKey("/select"));
+    }
+
+    @Test
+    void extractBindings_withSolrSchemaXmlFile_parsesXml(@TempDir java.nio.file.Path tempDir) throws Exception {
+        var xml = tempDir.resolve("managed-schema.xml");
+        java.nio.file.Files.writeString(xml, """
+            <?xml version="1.0" encoding="UTF-8" ?>
+            <schema name="test" version="1.6">
+              <fieldType name="string"       class="solr.StrField"/>
+              <fieldType name="text_general" class="solr.TextField"/>
+              <field name="id"    type="string"/>
+              <field name="title" type="text_general"/>
+            </schema>
+            """);
+
+        var bindings = ShimMain.extractBindings(
+            "[{\"SolrTransformerProvider\":{\"initializationScript\":\"x\"," +
+            "\"bindingsObject\":\"{}\",\"solrSchemaXmlFile\":\"" + xml.toAbsolutePath() + "\"}}]");
+
+        assertTrue(bindings.containsKey("fieldTypes"));
+        @SuppressWarnings("unchecked")
+        var fieldTypes = (java.util.Map<String, String>) bindings.get("fieldTypes");
+        assertEquals("solr.StrField",  fieldTypes.get("id"));
+        assertEquals("solr.TextField", fieldTypes.get("title"));
+    }
+
+    @Test
+    void extractBindings_withBothSchemaAndConfigXmlFiles_loadsBoth(@TempDir java.nio.file.Path tempDir) throws Exception {
+        var schemaXml = tempDir.resolve("managed-schema.xml");
+        java.nio.file.Files.writeString(schemaXml, """
+            <?xml version="1.0" encoding="UTF-8" ?>
+            <schema name="test" version="1.6">
+              <fieldType name="string" class="solr.StrField"/>
+              <field name="id" type="string"/>
+            </schema>
+            """);
+
+        var configXml = tempDir.resolve("solrconfig.xml");
+        java.nio.file.Files.writeString(configXml, """
+            <?xml version="1.0" encoding="UTF-8" ?>
+            <config>
+              <requestHandler name="/select" class="solr.SearchHandler">
+                <lst name="defaults"><str name="df">title</str></lst>
+              </requestHandler>
+            </config>
+            """);
+
+        var bindings = ShimMain.extractBindings(
+            "[{\"SolrTransformerProvider\":{\"initializationScript\":\"x\"," +
+            "\"bindingsObject\":\"{}\"," +
+            "\"solrConfigXmlFile\":\"" + configXml.toAbsolutePath() + "\"," +
+            "\"solrSchemaXmlFile\":\"" + schemaXml.toAbsolutePath() + "\"}}]");
+
+        assertTrue(bindings.containsKey("solrConfig"),  "solrConfig should be present");
+        assertTrue(bindings.containsKey("fieldTypes"),  "fieldTypes should be present");
+    }
+
+    @Test
+    void extractBindings_withMissingSolrSchemaXmlFile_noFieldTypesKey(@TempDir java.nio.file.Path tempDir) {
+        var bindings = ShimMain.extractBindings(
+            "[{\"SolrTransformerProvider\":{\"initializationScript\":\"x\"," +
+            "\"bindingsObject\":\"{}\"," +
+            "\"solrSchemaXmlFile\":\"/nonexistent/managed-schema.xml\"}}]");
+
+        // Missing file → SolrSchemaProvider returns empty map → not put into bindings
+        assertTrue(!bindings.containsKey("fieldTypes"),
+            "fieldTypes should not be present when schema file is missing");
     }
 
     @Test

@@ -1,12 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fieldRule } from './fieldRule';
+import { translateQ } from '../../orchestrator/translateQ';
 import type { FieldNode } from '../../ast/nodes';
 
 /** Stub transformChild — not used by fieldRule but required by signature. */
 const stubTransformChild = () => new Map();
 
 describe('fieldRule', () => {
-  // --- Plain match queries ---
+  // --- Plain match queries (no fieldTypes / unknown field) ---
 
   it.each([
     { field: 'title', value: 'java', desc: 'simple field:value' },
@@ -14,7 +15,7 @@ describe('fieldRule', () => {
     { field: '_text_', value: 'search', desc: 'underscore field name' },
     { field: 'metadata.author', value: 'doe', desc: 'dotted field name' },
     { field: 'title', value: 'foo-bar_baz.v1@test#123', desc: 'multiple special chars' },
-  ])('transforms $desc to match query', ({ field, value }) => {
+  ])('transforms $desc to match query when no fieldTypes provided', ({ field, value }) => {
     const node: FieldNode = { type: 'field', field, value };
 
     const result = fieldRule(node, stubTransformChild);
@@ -22,6 +23,88 @@ describe('fieldRule', () => {
     expect(result).toEqual(
       new Map([['match', new Map([[field, new Map([['query', value]])]])]]),
     );
+  });
+
+  it('uses match query for unknown field even when fieldTypes map is provided', () => {
+    const node: FieldNode = { type: 'field', field: 'unknown_field', value: 'foo' };
+    const fieldTypes = new Map([['status', 'solr.StrField']]);
+
+    const result = fieldRule(node, stubTransformChild, fieldTypes);
+
+    expect(result).toEqual(
+      new Map([['match', new Map([['unknown_field', new Map([['query', 'foo']])]])]]),
+    );
+  });
+
+  // --- term queries when fieldTypes identifies non-text fields ---
+
+  it.each([
+    { fieldTypeClass: 'solr.StrField',         desc: 'StrField (string)' },
+    { fieldTypeClass: 'solr.IntPointField',     desc: 'IntPointField (integer)' },
+    { fieldTypeClass: 'solr.LongPointField',    desc: 'LongPointField (long)' },
+    { fieldTypeClass: 'solr.FloatPointField',   desc: 'FloatPointField (float)' },
+    { fieldTypeClass: 'solr.DoublePointField',  desc: 'DoublePointField (double)' },
+    { fieldTypeClass: 'solr.DatePointField',    desc: 'DatePointField (date)' },
+    { fieldTypeClass: 'solr.BoolField',         desc: 'BoolField (boolean)' },
+    { fieldTypeClass: 'solr.UUIDField',         desc: 'UUIDField (keyword)' },
+    { fieldTypeClass: 'com.example.CustomExactField', desc: 'custom non-text class' },
+  ])('emits term query for $desc', ({ fieldTypeClass }) => {
+    const node: FieldNode = { type: 'field', field: 'status', value: 'active' };
+    const fieldTypes = new Map([['status', fieldTypeClass]]);
+
+    const result = fieldRule(node, stubTransformChild, fieldTypes);
+
+    expect(result).toEqual(
+      new Map([['term', new Map([['status', new Map([['value', 'active']])]])]]),
+    );
+  });
+
+  // --- match queries when fieldTypes identifies text fields ---
+
+  it.each([
+    { fieldTypeClass: 'solr.TextField',                          desc: 'solr.TextField' },
+    { fieldTypeClass: 'org.apache.solr.schema.TextField',        desc: 'fully-qualified TextField' },
+    { fieldTypeClass: 'com.example.CustomTextField',             desc: 'custom class containing TextField' },
+  ])('emits match query for $desc', ({ fieldTypeClass }) => {
+    const node: FieldNode = { type: 'field', field: 'title', value: 'java' };
+    const fieldTypes = new Map([['title', fieldTypeClass]]);
+
+    const result = fieldRule(node, stubTransformChild, fieldTypes);
+
+    expect(result).toEqual(
+      new Map([['match', new Map([['title', new Map([['query', 'java']])]])]]),
+    );
+  });
+
+  it('fieldTypes does not affect existence search — always emits exists', () => {
+    const node: FieldNode = { type: 'field', field: 'status', value: '*' };
+    const fieldTypes = new Map([['status', 'solr.StrField']]);
+
+    const result = fieldRule(node, stubTransformChild, fieldTypes);
+
+    expect(result).toEqual(
+      new Map([['exists', new Map([['field', 'status']])]]),
+    );
+  });
+
+  it('fieldTypes does not affect wildcard search — always emits wildcard', () => {
+    const node: FieldNode = { type: 'field', field: 'status', value: 'act*' };
+    const fieldTypes = new Map([['status', 'solr.StrField']]);
+
+    const result = fieldRule(node, stubTransformChild, fieldTypes);
+
+    expect(result).toEqual(
+      new Map([['wildcard', new Map([['status', new Map([['value', 'act*']])]])]]),
+    );
+  });
+
+  it('fieldTypes does not affect fuzzy search — always emits fuzzy', () => {
+    const node: FieldNode = { type: 'field', field: 'status', value: 'activ~' };
+    const fieldTypes = new Map([['status', 'solr.StrField']]);
+
+    const result = fieldRule(node, stubTransformChild, fieldTypes);
+
+    expect(result.keys().next().value).toBe('fuzzy');
   });
 
   // --- Existence search ---
@@ -72,7 +155,7 @@ describe('fieldRule', () => {
     const result = fieldRule(node, stubTransformChild);
 
     expect(result).toEqual(
-      new Map([['fuzzy', new Map([['title', new Map([['value', 'roam'], ['fuzziness', 2]])]])]]),
+      new Map([['fuzzy', new Map([['title', new Map<string, any>([['value', 'roam'], ['fuzziness', 2]])]])]]),
     );
   });
 
@@ -82,7 +165,7 @@ describe('fieldRule', () => {
     const result = fieldRule(node, stubTransformChild);
 
     expect(result).toEqual(
-      new Map([['fuzzy', new Map([['title', new Map([['value', 'roam'], ['fuzziness', 1]])]])]]),
+      new Map([['fuzzy', new Map([['title', new Map<string, any>([['value', 'roam'], ['fuzziness', 1]])]])]]),
     );
   });
 
@@ -92,7 +175,7 @@ describe('fieldRule', () => {
     const result = fieldRule(node, stubTransformChild);
 
     expect(result).toEqual(
-      new Map([['fuzzy', new Map([['title', new Map([['value', 'roam'], ['fuzziness', 0]])]])]]),
+      new Map([['fuzzy', new Map([['title', new Map<string, any>([['value', 'roam'], ['fuzziness', 0]])]])]]),
     );
   });
 
@@ -102,7 +185,7 @@ describe('fieldRule', () => {
     const result = fieldRule(node, stubTransformChild);
 
     expect(result).toEqual(
-      new Map([['fuzzy', new Map([['title', new Map([['value', 'roam'], ['fuzziness', 2]])]])]]),
+      new Map([['fuzzy', new Map([['title', new Map<string, any>([['value', 'roam'], ['fuzziness', 2]])]])]]),
     );
   });
 
@@ -153,5 +236,63 @@ describe('fieldRule', () => {
     fieldRule(node, spy);
 
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  // --- fieldTypes propagates through bool queries ---
+
+  it.each([
+    { fieldTypeClass: 'solr.StrField',         desc: 'StrField (string)' },
+    { fieldTypeClass: 'solr.IntPointField',     desc: 'IntPointField (integer)' },
+    { fieldTypeClass: 'solr.LongPointField',    desc: 'LongPointField (long)' },
+    { fieldTypeClass: 'solr.FloatPointField',   desc: 'FloatPointField (float)' },
+    { fieldTypeClass: 'solr.DoublePointField',  desc: 'DoublePointField (double)' },
+    { fieldTypeClass: 'solr.DatePointField',    desc: 'DatePointField (date)' },
+    { fieldTypeClass: 'solr.BoolField',         desc: 'BoolField (boolean)' },
+    { fieldTypeClass: 'solr.UUIDField',         desc: 'UUIDField (keyword)' },
+  ])('term query is used for $desc field via translateQ', ({ fieldTypeClass }) => {
+    const fieldTypes = new Map([['status', fieldTypeClass]]);
+    const params = new Map([['q', 'status:active']]);
+
+    const { dsl } = translateQ(params, 'fail-fast', fieldTypes);
+
+    expect(dsl).toEqual(new Map([['term', new Map([['status', new Map([['value', 'active']])]])]]));
+  });
+
+  it('term query propagates through AND bool node', () => {
+    const fieldTypes = new Map([
+      ['status', 'solr.StrField'],
+      ['category', 'solr.StrField'],
+    ]);
+    const params = new Map([['q', 'status:active AND category:books']]);
+
+    const { dsl } = translateQ(params, 'fail-fast', fieldTypes);
+
+    expect(dsl).toEqual(
+      new Map([['bool', new Map([
+        ['must', [
+          new Map([['term', new Map([['status', new Map([['value', 'active']])]])]]),
+          new Map([['term', new Map([['category', new Map([['value', 'books']])]])]]),
+        ]],
+      ])]]),
+    );
+  });
+
+  it('term and match queries mixed in OR bool node', () => {
+    const fieldTypes = new Map([
+      ['status',   'solr.StrField'],   // exact → term
+      ['title',    'solr.TextField'],  // analyzed → match
+    ]);
+    const params = new Map([['q', 'status:active OR title:java']]);
+
+    const { dsl } = translateQ(params, 'fail-fast', fieldTypes);
+
+    expect(dsl).toEqual(
+      new Map([['bool', new Map([
+        ['should', [
+          new Map([['term',  new Map([['status', new Map([['value', 'active']])]])]]),
+          new Map([['match', new Map([['title',  new Map([['query', 'java']])]])]]),
+        ]],
+      ])]]),
+    );
   });
 });

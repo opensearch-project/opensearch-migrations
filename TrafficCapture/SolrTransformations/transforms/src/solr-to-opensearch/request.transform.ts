@@ -19,9 +19,20 @@ import { flushMetrics } from './metrics';
 // Read solrConfig from bindings once at init (closure, not global mutable state).
 // bindings is injected by Java via JavascriptTransformer's bindingsObject.
 declare const bindings: any;
-const solrConfig = (typeof bindings !== 'undefined' && bindings?.solrConfig) //NOSONAR — typeof required for undeclared closure var
-  ? bindings.solrConfig
-  : undefined;
+
+/**
+ * Resolve solrConfig from a bindings object.
+ * @param bindingsObj - The bindings object (may be undefined in tests or when
+ *   solrConfigXmlFile is not configured).
+ * @returns The solrConfig object, or undefined when not present in bindings.
+ */
+export function resolveSolrConfig(bindingsObj: any): any {
+  return bindingsObj?.solrConfig ?? undefined;
+}
+
+const solrConfig = resolveSolrConfig(
+  typeof bindings !== 'undefined' ? bindings : undefined, //NOSONAR — typeof required for undeclared closure var
+);
 
 /**
  * True when the body is a non-empty iterable/collection (Map or List). Guards against
@@ -37,10 +48,28 @@ function hasContent(body: any): boolean {
   return false;
 }
 
+// Read fieldTypes from bindings once at init. Java provides a flat map of
+// fieldName → solrTypeClass (e.g. {"title":"solr.TextField","id":"solr.StrField"})
+// resolved from managed-schema.xml via solrSchemaXmlFile config.
+// Empty map when solrSchemaXmlFile is not configured — fieldRule falls back to match.
+const EMPTY_FIELD_TYPES: ReadonlyMap<string, string> = new Map();
+export function resolveFieldTypes(bindingsObj: any): ReadonlyMap<string, string> {
+  if (bindingsObj?.fieldTypes) {
+    return new Map(Object.entries(bindingsObj.fieldTypes as Record<string, string>));
+  }
+  return EMPTY_FIELD_TYPES;
+}
+
+// Read fieldTypes from bindings once at init.
+const fieldTypes = resolveFieldTypes(
+  typeof bindings !== 'undefined' ? bindings : undefined, //NOSONAR — typeof required for undeclared closure var
+);
+
 export function transform(msg: JavaMap): JavaMap {
   const ctx = buildRequestContext(msg);
   if (ctx.endpoint === 'unknown') return msg;
   ctx.solrConfig = solrConfig;
+  ctx.fieldTypes = fieldTypes;
   runPipeline(requestRegistry, ctx);
 
   let payload = msg.get('payload');

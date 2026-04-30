@@ -77,4 +77,19 @@ describe('buildRequestContext', () => {
       expect(ctx.collection).toBeUndefined();
     });
   });
+
+  describe('fieldTypes default', () => {
+    it('initializes fieldTypes as empty map', () => {
+      const ctx = buildRequestContext(mockMsg('/solr/test/select?q=*:*'));
+      expect(ctx.fieldTypes).toBeDefined();
+      expect(ctx.fieldTypes.size).toBe(0);
+    });
+
+    it('fieldTypes can be overwritten after construction', () => {
+      const ctx = buildRequestContext(mockMsg('/solr/test/select?q=*:*'));
+      const fieldTypes = new Map([['status', 'solr.StrField']]);
+      ctx.fieldTypes = fieldTypes;
+      expect(ctx.fieldTypes.get('status')).toBe('solr.StrField');
+    });
+  });
 });

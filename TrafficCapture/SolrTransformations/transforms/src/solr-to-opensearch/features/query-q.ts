@@ -46,7 +46,7 @@ function paramsToMap(params: URLSearchParams): Map<string, string> {
 export const request: MicroTransform<RequestContext> = {
   name: 'query-q',
   apply: (ctx) => {
-    const result = translateQ(paramsToMap(ctx.params));
+    const result = translateQ(paramsToMap(ctx.params), 'fail-fast', ctx.fieldTypes);
     ctx.body.set('query', result.dsl);
 
     // TODO: expose result.warnings to caller for observability

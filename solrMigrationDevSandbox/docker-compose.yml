@@ -61,6 +61,7 @@ services:
     volumes:
       - transform-dist:/transforms:ro
       - ./config/solr/solrconfig.xml:/solr-config/solrconfig.xml:ro
+      - ./config/solr/schema.xml:/solr-config/managed-schema.xml:ro
     depends_on:
       opensearch:
         condition: service_healthy
@@ -78,7 +79,7 @@ services:
       - --primary
       - opensearch
       - --transformerConfig
-      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-request.js","bindingsObject":"{}","solrConfigXmlFile":"/solr-config/solrconfig.xml"}}]'
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-request.js","bindingsObject":"{}","solrConfigXmlFile":"/solr-config/solrconfig.xml","solrSchemaXmlFile":"/solr-config/managed-schema.xml"}}]'
       - --responseTransformerConfig
       - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-response.js","bindingsObject":"{}"}}]'
       - --transformTarget
@@ -97,6 +98,7 @@ services:
     volumes:
       - transform-dist:/transforms:ro
       - ./config/solr/solrconfig.xml:/solr-config/solrconfig.xml:ro
+      - ./config/solr/schema.xml:/solr-config/managed-schema.xml:ro
       - shim-reports-solr:/var/shim/reports
     depends_on:
       solr:
@@ -115,7 +117,7 @@ services:
       - --target
       - opensearch=http://opensearch:9200
       - --transformerConfig
-      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-request.js","bindingsObject":"{}","solrConfigXmlFile":"/solr-config/solrconfig.xml"}}]'
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-request.js","bindingsObject":"{}","solrConfigXmlFile":"/solr-config/solrconfig.xml","solrSchemaXmlFile":"/solr-config/managed-schema.xml"}}]'
       - --responseTransformerConfig
       - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-response.js","bindingsObject":"{}"}}]'
       - --transformTarget
@@ -144,6 +146,7 @@ services:
     volumes:
       - transform-dist:/transforms:ro
       - ./config/solr/solrconfig.xml:/solr-config/solrconfig.xml:ro
+      - ./config/solr/schema.xml:/solr-config/managed-schema.xml:ro
       - shim-reports-os:/var/shim/reports
     depends_on:
       solr:
@@ -162,7 +165,7 @@ services:
       - --target
       - opensearch=http://opensearch:9200
       - --transformerConfig
-      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-request.js","bindingsObject":"{}","solrConfigXmlFile":"/solr-config/solrconfig.xml"}}]'
+      - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-request.js","bindingsObject":"{}","solrConfigXmlFile":"/solr-config/solrconfig.xml","solrSchemaXmlFile":"/solr-config/managed-schema.xml"}}]'
       - --responseTransformerConfig
       - '[{"SolrTransformerProvider":{"initializationScriptFile":"/transforms/solr-to-opensearch-response.js","bindingsObject":"{}"}}]'
       - --transformTarget

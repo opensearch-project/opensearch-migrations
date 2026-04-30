@@ -21,8 +21,12 @@ export type TransformChild = (child: ASTNode) => Map<string, any>;
  * can ignore the `transformChild` parameter. Rules for composite nodes
  * (BoolNode, GroupNode, BoostNode) use it to recurse into children.
  *
+ * `fieldTypes` is optional schema metadata (field name → Solr fieldType class).
+ * Currently only `fieldRule` uses it to choose `term` vs `match`. All other
+ * rules can ignore it.
+ *
  * Example (leaf rule):
- *   (FieldNode { field: "title", value: "java" }, _)
+ *   (FieldNode { field: "title", value: "java" }, _transformChild)
  *   → Map{"match" → Map{"title" → "java"}}
  *
  * Example (composite rule):
@@ -32,4 +36,5 @@ export type TransformChild = (child: ASTNode) => Map<string, any>;
 export type TransformRuleFn = (
   node: ASTNode,
   transformChild: TransformChild,
+  fieldTypes?: ReadonlyMap<string, string>,
 ) => Map<string, any>;

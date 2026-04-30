@@ -406,6 +406,11 @@ public class ShimMain {
                                 var solrConfig = SolrConfigProvider.fromXmlFile(Path.of(xf));
                                 if (!solrConfig.isEmpty()) bindings.put("solrConfig", solrConfig);
                             }
+                            var schemaFile = pc.get(SolrTransformerProvider.SOLR_SCHEMA_XML_FILE_KEY);
+                            if (schemaFile instanceof String sf && !sf.isBlank()) {
+                                var fieldTypes = SolrSchemaProvider.fromXmlFile(Path.of(sf));
+                                if (!fieldTypes.isEmpty()) bindings.put("fieldTypes", fieldTypes);
+                            }
                         }
                     }
                 }

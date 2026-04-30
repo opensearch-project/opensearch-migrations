@@ -19,6 +19,8 @@ import lombok.extern.slf4j.Slf4j;
  * <ul>
  *   <li>Auto-prepends the GraalVM {@code URLSearchParams} polyfill to all scripts</li>
  *   <li>Supports {@code solrConfigXmlFile} config key to auto-parse solrconfig.xml into bindings</li>
+ *   <li>Supports {@code solrSchemaXmlFile} config key to derive field type metadata from
+ *       managed-schema.xml into bindings, enabling term vs match query selection</li>
  * </ul>
  *
  * <p>Registered via {@code META-INF/services/org.opensearch.migrations.transform.IJsonTransformerProvider}
@@ -29,7 +31,8 @@ import lombok.extern.slf4j.Slf4j;
  * {"SolrTransformerProvider": {
  *   "initializationScriptFile": "/path/to/request.js",
  *   "bindingsObject": "{}",
- *   "solrConfigXmlFile": "/path/to/solrconfig.xml"
+ *   "solrConfigXmlFile": "/path/to/solrconfig.xml",
+ *   "solrSchemaXmlFile": "/path/to/managed-schema.xml"
  * }}
  * }</pre>
  */
@@ -37,6 +40,7 @@ import lombok.extern.slf4j.Slf4j;
 public class SolrTransformerProvider extends ScriptTransformerProvider {
 
     public static final String SOLR_CONFIG_XML_FILE_KEY = "solrConfigXmlFile";
+    public static final String SOLR_SCHEMA_XML_FILE_KEY = "solrSchemaXmlFile";
 
     /**
      * Minimal URLSearchParams polyfill for GraalVM — the engine does not provide
@@ -96,6 +100,15 @@ public class SolrTransformerProvider extends ScriptTransformerProvider {
             if (!solrConfig.isEmpty()) {
                 bindings.put("solrConfig", solrConfig);
                 log.info("Loaded solrConfig from {}", xmlFile);
+            }
+        }
+
+        var schemaFile = (String) config.get(SOLR_SCHEMA_XML_FILE_KEY);
+        if (schemaFile != null && !schemaFile.isBlank()) {
+            var fieldTypes = SolrSchemaProvider.fromXmlFile(Path.of(schemaFile));
+            if (!fieldTypes.isEmpty()) {
+                bindings.put("fieldTypes", fieldTypes);
+                log.info("Loaded {} fieldTypes from {}", fieldTypes.size(), schemaFile);
             }
         }
         return bindings;

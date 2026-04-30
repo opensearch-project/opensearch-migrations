@@ -45,6 +45,13 @@ export interface RequestContext {
    * Uses Record (plain object) because GraalVM exposes Java Maps as JS objects via allowMapAccess.
    */
   solrConfig?: Record<string, { defaults?: Record<string, string>; invariants?: Record<string, string>; appends?: Record<string, string> }>;
+  /**
+   * Field name → Solr fieldType Java class, resolved from managed-schema.xml at shim startup.
+   * e.g. { "title": "solr.TextField", "id": "solr.StrField" }
+   * fieldRule uses class.includes("TextField") to choose match vs term.
+   * Empty map when solrSchemaXmlFile is not configured — all field:value queries use match.
+   */
+  fieldTypes: ReadonlyMap<string, string>;
   /** Record a limitation metric occurrence. */
   emitMetric(metric: TransformMetricName): void;
   /** Internal accumulator — use {@link emitMetric} instead. */
@@ -108,6 +115,9 @@ function getBodyMap(payload: JavaMap): JavaMap {
   return new Map();
 }
 
+/** Shared empty fieldTypes map — used as the default before request.transform.ts injects the real one. */
+const EMPTY_FIELD_TYPES: ReadonlyMap<string, string> = new Map();
+
 export function buildRequestContext(msg: JavaMap): RequestContext {
   const uri: string = msg.get('URI') || '';
   const metrics = createMetrics();
@@ -119,6 +129,7 @@ export function buildRequestContext(msg: JavaMap): RequestContext {
     body: getBodyMap(msg.get('payload')),
     targetName: msg.get('_targetName') || 'opensearch',
     mode: msg.get('_mode') || 'single',
+    fieldTypes: EMPTY_FIELD_TYPES,
     emitMetric: (metric: TransformMetricName) => incrementMetric(metrics, metric),
     _metrics: metrics,
   };

@@ -80,14 +80,21 @@ function passthroughDsl(query: string): Map<string, any> {
  *                 from this map and passes the full map to the parser
  *                 for configuration (e.g., `df`, `qf`, `pf`).
  * @param mode - 'fail-fast' (default) or 'passthrough-on-error'.
+ * @param fieldTypes - Optional map of field name → Solr type from the schema.
+ *                     Used by fieldRule to choose term vs match. Defaults to empty map
+ *                     (all plain field:value queries use match).
  *
  * Example:
  *   translateQ(new Map([['q', 'title:java'], ['df', 'content']]))
  *   → { dsl: Map{"match" → Map{"title" → "java"}}, warnings: [] }
+ *
+ *   translateQ(new Map([['q', 'status:active']]), 'fail-fast', new Map([['status', 'keyword']]))
+ *   → { dsl: Map{"term" → Map{"status" → "active"}}, warnings: [] }
  */
 export function translateQ(
   params: ReadonlyMap<string, string>,
   mode: TranslationMode = 'fail-fast',
+  fieldTypes: ReadonlyMap<string, string> = new Map(),
 ): TranslateResult {
   const query = params.get('q') || '*:*';
 
@@ -112,7 +119,7 @@ export function translateQ(
 
   // Stage 2: Transform
   try {
-    const mainDsl = transformNode(ast);
+    const mainDsl = transformNode(ast, fieldTypes);
 
     // Stage 3: pf phrase boost — wraps the main query in bool.must + bool.should
     // if pf is set. Delegated to phraseBoost.ts (transformer concern).

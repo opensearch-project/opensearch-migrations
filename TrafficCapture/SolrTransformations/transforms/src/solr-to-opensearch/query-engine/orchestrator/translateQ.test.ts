@@ -34,7 +34,7 @@ describe('translateQ', () => {
       const result = translateQ(params(['q', 'title:java'], ['df', 'content']));
 
       expect(mockParse).toHaveBeenCalledWith('title:java', params(['q', 'title:java'], ['df', 'content']));
-      expect(mockTransform).toHaveBeenCalledWith(fakeAst);
+      expect(mockTransform).toHaveBeenCalledWith(fakeAst, new Map());
       expect(result.dsl).toBe(fakeDsl);
       expect(result.warnings).toEqual([]);
     });
@@ -46,6 +46,29 @@ describe('translateQ', () => {
       translateQ(params(['df', 'content']));
 
       expect(mockParse).toHaveBeenCalledWith('*:*', expect.any(Map));
+    });
+
+    it('passes fieldTypes to transformNode when provided', () => {
+      const fakeAst: ASTNode = { type: 'matchAll' };
+      const fakeDsl = new Map([['match_all', new Map()]]);
+      const fieldTypes = new Map([['status', 'solr.StrField'], ['title', 'solr.TextField']]);
+      mockParse.mockReturnValue({ ast: fakeAst, errors: [] });
+      mockTransform.mockReturnValue(fakeDsl);
+
+      translateQ(params(['q', 'status:active']), 'fail-fast', fieldTypes);
+
+      expect(mockTransform).toHaveBeenCalledWith(fakeAst, fieldTypes);
+    });
+
+    it('passes empty fieldTypes to transformNode when not provided', () => {
+      const fakeAst: ASTNode = { type: 'matchAll' };
+      mockParse.mockReturnValue({ ast: fakeAst, errors: [] });
+      mockTransform.mockReturnValue(new Map([['match_all', new Map()]]));
+
+      translateQ(params(['q', '*:*']));
+
+      // Default empty map is passed — transformNode always receives fieldTypes
+      expect(mockTransform).toHaveBeenCalledWith(fakeAst, new Map());
     });
   });
 

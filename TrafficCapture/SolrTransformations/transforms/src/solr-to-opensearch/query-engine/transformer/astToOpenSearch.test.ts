@@ -93,3 +93,77 @@ describe('transformNode – LocalParamsNode handling', () => {
     expect(result).toEqual(new Map([['match_all', new Map()]]));
   });
 });
+
+describe('transformNode – fieldTypes threading', () => {
+  it('uses match for field when fieldTypes is absent (default)', () => {
+    const result = transformNode({ type: 'field', field: 'status', value: 'active' });
+
+    expect(result).toEqual(new Map([
+      ['match', new Map([['status', new Map([['query', 'active']])]])],
+    ]));
+  });
+
+  it('uses term for exact field when fieldTypes identifies it as non-text', () => {
+    const fieldTypes = new Map([['status', 'solr.StrField']]);
+
+    const result = transformNode({ type: 'field', field: 'status', value: 'active' }, fieldTypes);
+
+    expect(result).toEqual(new Map([['term', new Map([['status', new Map([['value', 'active']])]])]]));
+  });
+
+  it('uses match for text field when fieldTypes identifies it as TextField', () => {
+    const fieldTypes = new Map([['title', 'solr.TextField']]);
+
+    const result = transformNode({ type: 'field', field: 'title', value: 'java' }, fieldTypes);
+
+    expect(result).toEqual(new Map([
+      ['match', new Map([['title', new Map([['query', 'java']])]])],
+    ]));
+  });
+
+  it('threads fieldTypes through BoolNode to nested FieldNodes', () => {
+    // a:b AND c:d where both a and c are exact fields
+    const fieldTypes = new Map([
+      ['a', 'solr.StrField'],
+      ['c', 'solr.StrField'],
+    ]);
+
+    const result = transformNode({
+      type: 'bool',
+      and: [
+        { type: 'field', field: 'a', value: 'b' },
+        { type: 'field', field: 'c', value: 'd' },
+      ],
+      or: [],
+      not: [],
+    }, fieldTypes);
+
+    const must = (result.get('bool') as Map<string, any>).get('must') as Map<string, any>[];
+    expect(must[0]).toEqual(new Map([['term', new Map([['a', new Map([['value', 'b']])]])]]));
+    expect(must[1]).toEqual(new Map([['term', new Map([['c', new Map([['value', 'd']])]])]]));
+  });
+
+  it('threads fieldTypes through GroupNode to nested FieldNode', () => {
+    const fieldTypes = new Map([['id', 'solr.StrField']]);
+
+    const result = transformNode({
+      type: 'group',
+      child: { type: 'field', field: 'id', value: '42' },
+    }, fieldTypes);
+
+    expect(result).toEqual(new Map([['term', new Map([['id', new Map([['value', '42']])]])]]));
+  });
+
+  it('threads fieldTypes through LocalParamsNode body', () => {
+    const fieldTypes = new Map([['status', 'solr.StrField']]);
+
+    const result = transformNode({
+      type: 'localParams',
+      params: [],
+      rawBody: 'status:active',
+      body: { type: 'field', field: 'status', value: 'active' },
+    }, fieldTypes);
+
+    expect(result).toEqual(new Map([['term', new Map([['status', new Map([['value', 'active']])]])]]));
+  });
+});

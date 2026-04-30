@@ -177,4 +177,181 @@ class SolrTransformerProviderTest {
         var provider = new SolrTransformerProvider();
         assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(null));
     }
+
+    // ─── solrSchemaXmlFile tests ──────────────────────────────────────────────
+
+    @Test
+    void createTransformer_withSolrSchemaXmlFile_populatesFieldTypesBinding() throws Exception {
+        var schemaFile = tempDir.resolve("managed-schema.xml");
+        Files.writeString(schemaFile, """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <schema name="test" version="1.6">
+              <fieldType name="string"       class="solr.StrField"/>
+              <fieldType name="text_general" class="solr.TextField"/>
+              <field name="id"    type="string"/>
+              <field name="title" type="text_general"/>
+            </schema>
+            """);
+
+        // Script reads bindings.fieldTypes and exposes the class values for assertion
+        var script = "(function(bindings) { return function(msg) { " +
+            "var ft = bindings.fieldTypes; " +
+            "msg.set('hasFieldTypes', '' + (ft != null)); " +
+            "msg.set('idClass',    ft['id']); " +
+            "msg.set('titleClass', ft['title']); " +
+            "return msg; }; })";
+
+        var config = providerConfig(script, "{}");
+        config.put("solrSchemaXmlFile", schemaFile.toString());
+
+        var provider = new SolrTransformerProvider();
+        var transformer = provider.createTransformer(config);
+
+        var input = new LinkedHashMap<String, Object>();
+        input.put("URI", "/test");
+        @SuppressWarnings("unchecked")
+        var result = (Map<String, Object>) transformer.transformJson(input);
+
+        assertEquals("true",             result.get("hasFieldTypes"));
+        assertEquals("solr.StrField",    result.get("idClass"));
+        assertEquals("solr.TextField",   result.get("titleClass"));
+    }
+
+    @Test
+    void createTransformer_schemaXmlFileMergedWithOtherBindings() throws Exception {
+        var schemaFile = tempDir.resolve("managed-schema.xml");
+        Files.writeString(schemaFile, """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <schema name="test" version="1.6">
+              <fieldType name="string" class="solr.StrField"/>
+              <field name="status" type="string"/>
+            </schema>
+            """);
+
+        // Both customKey (from bindingsObject) and fieldTypes (from schema) should be present
+        var script = "(function(bindings) { return function(msg) { " +
+            "msg.set('customKey',   bindings.customKey); " +
+            "msg.set('statusClass', bindings.fieldTypes['status']); " +
+            "return msg; }; })";
+
+        var config = providerConfig(script, "{\"customKey\":\"myValue\"}");
+        config.put("solrSchemaXmlFile", schemaFile.toString());
+
+        var provider = new SolrTransformerProvider();
+        var transformer = provider.createTransformer(config);
+
+        var input = new LinkedHashMap<String, Object>();
+        input.put("URI", "/test");
+        @SuppressWarnings("unchecked")
+        var result = (Map<String, Object>) transformer.transformJson(input);
+
+        assertEquals("myValue",        result.get("customKey"));
+        assertEquals("solr.StrField",  result.get("statusClass"));
+    }
+
+    @Test
+    void createTransformer_schemaXmlFileAndSolrConfigXmlFileBothLoaded() throws Exception {
+        var schemaFile = tempDir.resolve("managed-schema.xml");
+        Files.writeString(schemaFile, """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <schema name="test" version="1.6">
+              <fieldType name="string" class="solr.StrField"/>
+              <field name="id" type="string"/>
+            </schema>
+            """);
+
+        var configFile = tempDir.resolve("solrconfig.xml");
+        Files.writeString(configFile, """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <config>
+              <requestHandler name="/select" class="solr.SearchHandler">
+                <lst name="defaults"><str name="df">title</str></lst>
+              </requestHandler>
+            </config>
+            """);
+
+        var script = "(function(bindings) { return function(msg) { " +
+            "msg.set('hasSolrConfig',  '' + (bindings.solrConfig != null)); " +
+            "msg.set('hasFieldTypes',  '' + (bindings.fieldTypes != null)); " +
+            "msg.set('idClass',        bindings.fieldTypes['id']); " +
+            "return msg; }; })";
+
+        var config = providerConfig(script, "{}");
+        config.put("solrConfigXmlFile",  configFile.toString());
+        config.put("solrSchemaXmlFile",  schemaFile.toString());
+
+        var provider = new SolrTransformerProvider();
+        var transformer = provider.createTransformer(config);
+
+        var input = new LinkedHashMap<String, Object>();
+        input.put("URI", "/test");
+        @SuppressWarnings("unchecked")
+        var result = (Map<String, Object>) transformer.transformJson(input);
+
+        assertEquals("true",           result.get("hasSolrConfig"));
+        assertEquals("true",           result.get("hasFieldTypes"));
+        assertEquals("solr.StrField",  result.get("idClass"));
+    }
+
+    @Test
+    void createTransformer_missingSchemaXmlFile_noFieldTypesBinding() throws Exception {
+        // When solrSchemaXmlFile points to a non-existent file, fieldTypes is absent
+        var script = "(function(bindings) { return function(msg) { " +
+            "msg.set('hasFieldTypes', '' + (bindings.fieldTypes != null)); " +
+            "return msg; }; })";
+
+        var config = providerConfig(script, "{}");
+        config.put("solrSchemaXmlFile", "/nonexistent/managed-schema.xml");
+
+        var provider = new SolrTransformerProvider();
+        var transformer = provider.createTransformer(config);
+
+        var input = new LinkedHashMap<String, Object>();
+        input.put("URI", "/test");
+        @SuppressWarnings("unchecked")
+        var result = (Map<String, Object>) transformer.transformJson(input);
+
+        // Missing file → SolrSchemaProvider returns empty map → not put into bindings
+        assertEquals("false", result.get("hasFieldTypes"));
+    }
+
+    @Test
+    void createTransformer_blankSchemaXmlFile_noFieldTypesBinding() throws Exception {
+        // Blank string for solrSchemaXmlFile is ignored
+        var script = "(function(bindings) { return function(msg) { " +
+            "msg.set('hasFieldTypes', '' + (bindings.fieldTypes != null)); " +
+            "return msg; }; })";
+
+        var config = providerConfig(script, "{}");
+        config.put("solrSchemaXmlFile", "   ");
+
+        var provider = new SolrTransformerProvider();
+        var transformer = provider.createTransformer(config);
+
+        var input = new LinkedHashMap<String, Object>();
+        input.put("URI", "/test");
+        @SuppressWarnings("unchecked")
+        var result = (Map<String, Object>) transformer.transformJson(input);
+
+        assertEquals("false", result.get("hasFieldTypes"));
+    }
+
+    @Test
+    void createTransformer_inlineFieldTypesInBindings_worksWithoutSchemaFile() {
+        // Operator can provide fieldTypes directly in bindingsObject — no file needed
+        var script = "(function(bindings) { return function(msg) { " +
+            "msg.set('statusClass', bindings.fieldTypes['status']); " +
+            "return msg; }; })";
+
+        var bindingsJson = "{\"fieldTypes\":{\"status\":\"solr.StrField\",\"title\":\"solr.TextField\"}}";
+        var provider = new SolrTransformerProvider();
+        var transformer = provider.createTransformer(providerConfig(script, bindingsJson));
+
+        var input = new LinkedHashMap<String, Object>();
+        input.put("URI", "/test");
+        @SuppressWarnings("unchecked")
+        var result = (Map<String, Object>) transformer.transformJson(input);
+
+        assertEquals("solr.StrField", result.get("statusClass"));
+    }
 }

@@ -78,13 +78,24 @@ const rules: Record<string, TransformRuleFn> = {
  * and values.
  *
  * @param node - The AST node to transform
+ * @param fieldTypes - Map of field name → Solr fieldType class from managed-schema.xml.
+ *                     Passed to every rule; currently used by fieldRule to choose
+ *                     term vs match. Empty map = match for all fields (safe default).
  * @returns A nested Map structure representing OpenSearch Query DSL
  * @throws Error if no rule is registered for the node type — the orchestrator
  *         catches this and handles it based on the translation mode:
  *         - passthrough-on-error: returns query_string passthrough + warning
  *         - partial: skips the node, adds a warning, continues translating
  */
-export function transformNode(node: ASTNode): Map<string, any> {
+export function transformNode(
+  node: ASTNode,
+  fieldTypes: ReadonlyMap<string, string> = new Map(),
+): Map<string, any> {
+  // Build a transformChild closure that carries fieldTypes down the tree.
+  // All composite rules (bool, boost, filter, group) call transformChild to
+  // recurse — this ensures fieldTypes propagates to every FieldNode in the tree.
+  const transformChild = (child: ASTNode) => transformNode(child, fieldTypes);
+
   /**
    * GroupNode represents parentheses in Solr syntax, used to override operator
    * precedence. OpenSearch doesn't have an equivalent concept — precedence is
@@ -99,7 +110,7 @@ export function transformNode(node: ASTNode): Map<string, any> {
    * OpenSearch DSL structure of its own.
    */
   if (node.type === 'group') {
-    return transformNode(node.child);
+    return transformNode(node.child, fieldTypes);
   }
 
   // LocalParamsNode: extract metadata and transform the body.
@@ -107,14 +118,13 @@ export function transformNode(node: ASTNode): Map<string, any> {
   // for the orchestrator to use. The transformer only handles the body query.
   if (node.type === 'localParams') {
     if (node.body) {
-      return transformNode(node.body);
+      return transformNode(node.body, fieldTypes);
     }
     // No body — return match_all as default
     return new Map([['match_all', new Map()]]);
   }
 
-  // FuncNode: no transform rule yet — the orchestrator handles this via
-  // existing error modes (passthrough-on-error or partial translation).
+  // FuncNode: no transform rule yet.
   if (node.type === 'func') {
     throw new Error('No transform rule registered for node type: func');
   }
@@ -123,5 +133,5 @@ export function transformNode(node: ASTNode): Map<string, any> {
   if (!rule) {
     throw new Error(`No transform rule registered for node type: ${node.type}`);
   }
-  return rule(node, transformNode);
+  return rule(node, transformChild, fieldTypes);
 }
