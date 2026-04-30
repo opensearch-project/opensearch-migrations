@@ -101,18 +101,20 @@ export type ComponentId = z.infer<typeof ComponentIdSchema>;
  * omit `response` entirely. See the design doc's "Scenario Model"
  * section.
  *
- * Some `DependencyPattern` values embed a change class in their name
- * (`subject-gated-change`, `subject-impossible-change`). Those may only
- * appear with their matching `changeClass`. Patterns without an embedded
- * class (`subject-change`, `immediate-dependent-change`,
- * `transitive-dependent-change`) are class-neutral and accepted with
- * any `changeClass`.
+ * All three `subject-*` `DependencyPattern` values are class-specific
+ * and only pair with their matching `changeClass`:
  *
- * The `subject-change` pattern is the exception to the "class-neutral"
- * rule by convention — the design doc pairs it with `safe`. We keep it
- * open here so that future selectors for gated or impossible
- * subject-scoped mutators on dependent components are still expressible
- * via `immediate-dependent-change`/`transitive-dependent-change`.
+ *   - `subject-change`              ↔ `safe`
+ *   - `subject-gated-change`        ↔ `gated`
+ *   - `subject-impossible-change`   ↔ `impossible`
+ *
+ * The other patterns are class-neutral and accepted with any
+ * `changeClass`:
+ *
+ *   - `immediate-dependent-change`
+ *   - `transitive-dependent-change`
+ *
+ * This mirrors the pairing enforced by the `superRefine` below.
  */
 const GATED_RESPONSES = ["approve", "leave-blocked"] as const;
 const IMPOSSIBLE_RESPONSES = [

@@ -19,9 +19,11 @@
 
 import * as path from "node:path";
 import * as fs from "node:fs";
+import * as crypto from "node:crypto";
 
 import { K8sClient, MIGRATION_CRD_PLURALS, extractCrdObservation } from "./k8sClient";
 import { WorkflowCli, buildWorkflowCliRunner } from "./workflowCli";
+import { sanitizeWorkflowName } from "./workflowName";
 import { loadScenarioSpec } from "./specLoader";
 import {
     PhaseCompletionOutcome,
@@ -35,6 +37,8 @@ import { ComponentTopology } from "./componentTopology";
 import { CaseSnapshot, CaseOutcome, RunRecord, RunCheckpoint } from "./reportSchema";
 import { writeCaseSnapshot } from "./snapshotStore";
 import { Checkpoint, ComponentId, ObservedComponent, ScenarioSpec, Violation } from "./types";
+import { Actor, ActorContext, ActorRegistry } from "./actors";
+import { builtinActors } from "./builtinActors";
 
 // ── Types shared by the CLI entrypoint and its testable core ─────────
 
@@ -44,8 +48,14 @@ export interface ReadClusterObservations {
 
 export interface LiveRunnerDeps {
     workflowCli: WorkflowCli;
+    /** Used only to build `ActorContext` for lifecycle actors. */
+    k8sClient: K8sClient;
     readObservations: ReadClusterObservations;
     topology: ComponentTopology;
+    /** Registry of lifecycle actors available to the spec. */
+    actorRegistry: ActorRegistry;
+    /** Namespace passed through to `ActorContext`. */
+    namespace: string;
     /** Spec that was loaded/validated by the caller. */
     spec: ScenarioSpec;
     specPath: string;
@@ -57,6 +67,12 @@ export interface LiveRunnerDeps {
      * provide a deterministic implementation.
      */
     clock?: typeof realClock;
+    /**
+     * Suffix generator for workflow names. Tests inject a deterministic
+     * implementation so assertions can pin the full name. Production
+     * uses a short crypto-random hex string.
+     */
+    workflowNameSuffix?: () => string;
 }
 
 // ── Core logic (easy to unit-test with fake deps) ────────────────────
@@ -69,18 +85,53 @@ export async function runNoopSlice(deps: LiveRunnerDeps): Promise<string> {
     const clock = deps.clock ?? realClock;
     const startedAt = new Date(clock.now()).toISOString();
     const caseName = buildCaseName(deps.spec);
+    const suffixer =
+        deps.workflowNameSuffix ?? (() => crypto.randomBytes(3).toString("hex"));
     const diagnostics: string[] = [];
     const violations: Violation[] = [];
     const runs: Record<string, RunRecord> = {};
     let outcome: CaseOutcome = "partial";
 
+    // Resolved inside the try so an unknown actor becomes a diagnostic
+    // on the snapshot rather than an uncaught throw.
+    let setupActors: ReturnType<ActorRegistry["resolveAll"]> = [];
+    let teardownActors: ReturnType<ActorRegistry["resolveAll"]> = [];
+    const actorCtxFor = (phase: "setup" | "teardown"): ActorContext => ({
+        workflowCli: deps.workflowCli,
+        k8sClient: deps.k8sClient,
+        namespace: deps.namespace,
+        phase,
+    });
+
     try {
+        setupActors = deps.actorRegistry.resolveAll(deps.spec.lifecycle.setup);
+        teardownActors = deps.actorRegistry.resolveAll(
+            deps.spec.lifecycle.teardown,
+        );
+
+        // Setup actors — stop on first error so we don't submit a
+        // workflow against an unprepared cluster.
+        if (setupActors.length > 0) {
+            const res = await deps.actorRegistry.runAll(
+                setupActors,
+                actorCtxFor("setup"),
+                { stopOnError: true },
+            );
+            diagnostics.push(...res.diagnostics);
+            if (res.diagnostics.length > 0) {
+                throw new Error(
+                    `setup aborted: ${res.diagnostics.join("; ")}`,
+                );
+            }
+        }
+
         const baselineYaml = fs.readFileSync(deps.baselineConfigPath, "utf8");
 
         // Run 1 — baseline submission.
         const baselineCheckpoints: RunCheckpoint[] = [];
+        const baselineWorkflowName = `${caseName}-baseline-${suffixer()}`;
         deps.workflowCli.configureEditStdin(baselineYaml);
-        deps.workflowCli.submit({ wait: false });
+        deps.workflowCli.submit({ wait: false, workflowName: baselineWorkflowName });
         for (const gate of deps.spec.approvalGates) {
             deps.workflowCli.approve(gate.approvePattern);
         }
@@ -93,10 +144,11 @@ export async function runNoopSlice(deps: LiveRunnerDeps): Promise<string> {
         );
         runs["baseline"] = { name: "baseline", checkpoints: baselineCheckpoints };
 
-        // Run 2 — noop-pre: same YAML again.
+        // Run 2 — noop-pre: same YAML again, distinct workflow name.
         const noopCheckpoints: RunCheckpoint[] = [];
+        const noopWorkflowName = `${caseName}-noop-pre-${suffixer()}`;
         deps.workflowCli.configureEditStdin(baselineYaml);
-        deps.workflowCli.submit({ wait: false });
+        deps.workflowCli.submit({ wait: false, workflowName: noopWorkflowName });
         for (const gate of deps.spec.approvalGates) {
             deps.workflowCli.approve(gate.approvePattern);
         }
@@ -113,6 +165,20 @@ export async function runNoopSlice(deps: LiveRunnerDeps): Promise<string> {
     } catch (e) {
         outcome = "error";
         diagnostics.push(`fatal: ${(e as Error).message}`);
+    } finally {
+        // Teardown actors always run, regardless of what went wrong.
+        // Their own failures are recorded as diagnostics but do not
+        // mask the original error or promote outcome beyond "error".
+        if (teardownActors.length > 0) {
+            const res = await deps.actorRegistry.runAll(
+                teardownActors,
+                actorCtxFor("teardown"),
+            );
+            diagnostics.push(...res.diagnostics);
+            if (outcome === "passed" && res.diagnostics.length > 0) {
+                outcome = "partial";
+            }
+        }
     }
 
     const snapshot: CaseSnapshot = {
@@ -195,6 +261,19 @@ export interface RunFromSpecOptions {
     /** Defaults to kubectl-exec against migration-console-0. */
     cliMode?: "local" | "kubectl-exec";
     pod?: string;
+    /**
+     * Optional additional actors to register. The CLI always starts
+     * with the default built-in registry (see `builtinActors.ts`);
+     * anything passed here is layered on top. Programmatic callers
+     * can replace the registry wholesale by calling `runNoopSlice`
+     * directly.
+     */
+    extraActors?: readonly Actor[];
+    /**
+     * When true, built-in stubs are not registered. Use this when a
+     * caller wants complete control over lifecycle actors.
+     */
+    omitBuiltinActors?: boolean;
 }
 
 /**
@@ -244,10 +323,19 @@ export async function runFromSpec(opts: RunFromSpecOptions): Promise<string> {
         return { components };
     };
 
+    const actorRegistry = new ActorRegistry();
+    if (!opts.omitBuiltinActors) {
+        for (const a of builtinActors()) actorRegistry.register(a);
+    }
+    for (const a of opts.extraActors ?? []) actorRegistry.register(a);
+
     return runNoopSlice({
         workflowCli,
+        k8sClient: k8s,
+        namespace: opts.namespace,
         readObservations,
         topology,
+        actorRegistry,
         spec: loaded.spec,
         specPath: path.resolve(opts.specPath),
         baselineConfigPath: loaded.resolvedBaseConfigPath,

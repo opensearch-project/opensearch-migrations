@@ -191,13 +191,90 @@ The framework intentionally uses double-entry bookkeeping. The migration framewo
 The test oracle has two independent inputs:
 
 - **Transition trees** — ground truth for field-level change class: `safe`, `gated`, or `impossible`.
-- **`ComponentTopology`** — ground truth for dependency relationships in the scenario: which components are downstream of the subject and which are independent.
+- **`ComponentTopology`** — ground truth for the expected Kubernetes resource dependency graph for the scenario: which observed CRD components exist, which CRD components depend on which other CRD components, which are downstream of the subject, and which are independent.
 
-Observed CRDs and live resource state may be adapted into an observed topology and compared to `ComponentTopology`. That comparison can itself fail the test because it catches production naming or dependency-generation defects. The assertion logic should depend on `ComponentTopology`, not on how the migration framework happened to generate resources for that run.
+`ComponentTopology` is not the user config tree and not the Argo workflow execution order. It is keyed by observed resource identity (`kind:name`) and should correspond to the CRD resources and `spec.dependsOn` relationships the migration framework is expected to create for a given baseline. If the workflow has sequencing that is not represented as CRD resource dependency, that belongs in a separate execution-order model and must not be smuggled into `ComponentTopology`.
+
+Observed CRDs and live resource state may be adapted into an observed topology and compared to `ComponentTopology`. That comparison can itself fail the test because it catches production naming or dependency-generation defects. The assertion logic should depend on the expected `ComponentTopology`, not on how the migration framework happened to generate resources for that run.
 
 Approval-gate assertions should use the migration framework's public gate/resource state: component phases, approval gate state, and whether the workflow advances after an action. The framework should not depend on Argo implementation details to decide whether an approval gate exists.
 
 Local and unattended execution must share the same semantics. The live runner and any generated outer workflow should execute the same expanded cases, checkpoints, fixture semantics, observations, assertions, and snapshot schema. Any behavioral difference between the two entrypoints is a framework bug.
+
+### Framework Relationship Diagram
+
+```mermaid
+graph TD
+   schema[User config schema<br/>changeRestriction annotations]
+   treeGen[transitionTreeGenerator]
+   trees[Committed transition trees<br/>field path to safe/gated/impossible]
+
+   spec[ScenarioSpec<br/>baseConfig, subject, matrix,<br/>approval gates, lifecycle actors]
+   specLoader[specLoader]
+   baseline[Baseline WorkflowConfig YAML]
+
+   fixtures[FixtureRegistry<br/>mutators, actors,<br/>observers, checkers, providers]
+   topologyResolver[ComponentTopologyResolver]
+   topology[ComponentTopology<br/>expected CRD resources<br/>expected spec.dependsOn edges]
+
+   expander[matrixExpander]
+   cases[ExpandedTestCases]
+   runPlan[Run plan per case<br/>baseline -> noop-pre -> mutated -> noop-post]
+
+   executor[liveExecutor / e2e-run<br/>loops over expanded cases]
+   workflowCli[workflow CLI]
+   cluster[Live cluster<br/>CRDs, ApprovalGates, workflow state]
+
+   observer[Observers<br/>k8sClient + fixture observers]
+   observed[ObservedSnapshot]
+   observedTopology[ObservedTopologyAdapter<br/>observed CRD spec.dependsOn]
+
+   assertLogic[assertLogic]
+   report[Snapshot report]
+   store[snapshotStore]
+
+   schema --> treeGen --> trees
+
+   spec --> specLoader --> baseline
+   specLoader --> expander
+
+   baseline --> topologyResolver
+   spec --> topologyResolver
+   fixtures --> topologyResolver
+   topologyResolver --> topology
+
+   spec --> expander
+   fixtures --> expander
+   topology --> expander
+   trees -. validate mutator tags<br/>and coverage .-> expander
+   expander --> cases --> runPlan --> executor
+
+   executor --> workflowCli --> cluster
+   executor --> observer --> observed
+   cluster --> observer
+   fixtures --> executor
+
+   observed --> observedTopology
+   observedTopology -. topology parity check .-> assertLogic
+
+   trees --> assertLogic
+   topology --> assertLogic
+   observed --> assertLogic
+   cases --> assertLogic
+   assertLogic --> report --> store
+
+   classDef input fill:#e8f4ff,stroke:#1d4ed8,stroke-width:2px,color:#0f172a
+   classDef group fill:#fff7ed,stroke:#c2410c,stroke-width:2px,stroke-dasharray: 6 3,color:#0f172a
+   class schema,spec,fixtures input
+   class runPlan group
+```
+
+The diagram separates the two oracle inputs from observed evidence:
+
+- `TransitionTrees` come from schema annotations and define change-class truth.
+- `ComponentTopology` is the expected CRD resource graph for the baseline scenario.
+- `ObservedSnapshot` and `ObservedTopologyAdapter` come from generated/live resources and are evidence checked against those expectations.
+- `ExpandedTestCase` is the execution plan: one baseline, one mutator, one response path, and the fixtures needed to run it.
 
 ---
 
@@ -319,7 +396,7 @@ Run output is written to `snapshots/<case-name>.json` for debugging and trending
 
 Before touching the cluster, the test framework expands the spec:
 
-1. Calls `ComponentTopologyResolver` for the baseline scenario to produce a `ComponentTopology` — the representation of which migration components exist and what they depend on.
+1. Calls `ComponentTopologyResolver` for the baseline scenario to produce a `ComponentTopology` — the expected CRD resources for the scenario and their expected CRD `spec.dependsOn` relationships.
 2. Queries the fixture registry for mutators whose `changeClass` and `dependencyPattern` tags match each selector entry. `safe + subject-change` on `proxy:capture-proxy` matches `proxy-numThreads`. `gated + subject-gated-change` matches `proxy-noCaptureToggle`. `impossible + subject-impossible-change` matches `proxy-storageClassChange`.
 3. Combines each mutator with its response to produce expanded cases. With one mutator per change class and the response set shown in the spec above: 1 safe case + 2 gated cases + 4 impossible cases = **7 expanded cases**.
 
@@ -661,9 +738,11 @@ At each phase, execution order is: **Actors → CRD state collection → Observe
 
 ### ComponentTopology And ComponentTopologyResolver
 
-`ComponentTopology` is the representation of the scenario's migration components and dependency relationships. It answers questions such as "what is downstream of this subject?" and "which components are independent of this subject?" The assertion logic depends on this representation, not on how it was created.
+`ComponentTopology` is the representation of the scenario's expected CRD resources and CRD dependency relationships. It answers questions such as "what is downstream of this subject?" and "which components are independent of this subject?" The assertion logic depends on this representation, not on how it was created.
 
-`ComponentTopologyResolver` creates a `ComponentTopology` from the baseline config, spec context, fixture metadata, and any independent deduction rules. It is not an Argo workflow parser, and it is not the source of truth for change classes. Fingerprint computation belongs to the migration framework; change-class truth comes from the transition trees.
+`ComponentTopologyResolver` creates a `ComponentTopology` from the baseline config, spec context, fixture metadata, and any independent deduction rules. The resulting graph must be stated in terms of expected CRD resources and expected CRD `spec.dependsOn` edges. It is not an Argo workflow parser, not a representation of user-config nesting, and not the source of truth for change classes. Fingerprint computation belongs to the migration framework; change-class truth comes from the transition trees.
+
+If a test needs to reason about ordering that is real in the workflow but not represented in CRD `spec.dependsOn`, model that separately. For example, a workflow step may wait for a snapshot before running a migration even when the `SnapshotMigration` CR itself has no `spec.dependsOn`; that sequencing is not a `ComponentTopology` edge.
 
 ### matrixExpander
 
@@ -883,8 +962,8 @@ Exit: all four sub-cases run end-to-end and produce complete snapshots.
 | File | Purpose |
 |------|---------|
 | `src/types.ts` | Core type definitions and Zod schemas |
-| `src/componentTopology.ts` | Scenario component dependency representation |
-| `src/componentTopologyResolver.ts` | Baseline config/spec/fixtures → `ComponentTopology` |
+| `src/componentTopology.ts` | Expected CRD resource dependency representation |
+| `src/componentTopologyResolver.ts` | Baseline config/spec/fixtures → expected CRD `ComponentTopology` |
 | `src/matrixExpander.ts` | Spec selectors + registry → expanded test cases |
 | `src/transitionTreeGenerator.ts` | User config schema → per-component field transition trees |
 | `src/transitionTrees/` | Committed transition trees (human-reviewed, source of ground truth) |

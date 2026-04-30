@@ -17,24 +17,44 @@
 import { ComponentId } from "./types";
 
 /**
- * Terminal or held phases the framework treats as "done waiting". See
- * design doc's "Phase-completion predicate". The exact vocabulary is
- * pinned to what the real CRDs report and may evolve with the live
- * runner; when it does, update this list and document the change.
+ * Terminal or held phases the framework treats as "done waiting" for
+ * ordinary topology components. See design doc's "Phase-completion
+ * predicate".
+ *
+ * Note: `Pending` is NOT terminal here. An ordinary component in
+ * `Pending` means it has not started yet, and waiting for the rest of
+ * the graph must not advance while it's in that state. Only
+ * `ApprovalGate` resources use `Pending` as a legitimate held state —
+ * see `APPROVAL_GATE_HELD_PHASES`.
+ *
+ * The exact vocabulary is pinned to what the real CRDs report and may
+ * evolve with the live runner; when it does, update this list and
+ * document the change.
  */
 export const TERMINAL_OR_HELD_PHASES: ReadonlySet<string> = new Set([
     "Ready",
     "Skipped",
     "Failed",
     "Blocked",
-    "Suspended", // legacy naming; gate CRDs actually use "Pending"
-    "Pending",   // ApprovalGate uses this while waiting
+    "Suspended",
     "Deleted",
+]);
+
+/**
+ * Phases that an `ApprovalGate` CRD is expected to sit at while it
+ * waits for user action or records the outcome. A gate in `Pending`
+ * is held (waiting on approval); `Approved` is terminal. These are
+ * distinct from topology-component phases above — don't fold them
+ * together.
+ */
+export const APPROVAL_GATE_HELD_PHASES: ReadonlySet<string> = new Set([
+    "Pending",
     "Approved",
 ]);
 
 export const NON_TERMINAL_PHASES: ReadonlySet<string> = new Set([
     "Initialized",
+    "Pending",
     "Running",
     "Deleting",
 ]);

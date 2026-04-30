@@ -21,7 +21,7 @@ Add this package to the existing workspace automatically by placing it under `pa
 
 ## Design Contract
 
-`e2eOrchestrationTestFramework.md` is the source of truth for framework semantics: specs, fixtures, responses, checkpoints, `ComponentTopology`, transition trees, snapshots, and the constraint walk. This plan only describes implementation order and repo placement. If this plan conflicts with the design document, update the plan.
+`e2eOrchestrationTestFramework.md` is the source of truth for framework semantics: specs, fixtures, responses, checkpoints, expected CRD `ComponentTopology`, transition trees, snapshots, and the constraint walk. This plan only describes implementation order and repo placement. If this plan conflicts with the design document, update the plan.
 
 ## Target Files
 
@@ -33,8 +33,8 @@ Create these files in `orchestrationSpecs/packages/e2e-orchestration-tests`:
 | `tsconfig.json` | Package TypeScript config |
 | `jest.config.js` | Unit test config |
 | `src/types.ts` | Shared Zod schemas and TypeScript types |
-| `src/componentTopology.ts` | `ComponentTopology` model and topology helpers |
-| `src/componentTopologyResolver.ts` | Creates `ComponentTopology` from spec/baseline/fixtures |
+| `src/componentTopology.ts` | Expected CRD `ComponentTopology` model and topology helpers |
+| `src/componentTopologyResolver.ts` | Creates expected CRD `ComponentTopology` from spec/baseline/fixtures |
 | `src/observedTopologyAdapter.ts` | Optional adapter from generated/live CRDs for comparison |
 | `src/specLoader.ts` | Test spec YAML loading and validation |
 | `src/fixtureRegistry.ts` | Registry for mutators, actors, observers, checkers, providers |
@@ -61,7 +61,20 @@ Also update:
 
 ## Implementation Sequence
 
-### 1. Package Skeleton And Pure Types
+Status markers are inline with the implementation sequence:
+
+- `[x]` done in the current branch
+- `[~]` partially done; usable scaffold exists but exit criteria are not complete
+- `[ ]` not started
+
+### 1. Package Skeleton And Pure Types `[x]`
+
+Current branch status:
+
+- `[x]` Workspace package skeleton exists under `orchestrationSpecs/packages/e2e-orchestration-tests`.
+- `[x]` Package-local `test` and `type-check` scripts run successfully.
+- `[x]` Core spec/schema loading exists for `baseConfig`, `phaseCompletionTimeoutSeconds`, `matrix`, `lifecycle`, and `approvalGates`.
+- `[~]` Selector validation exists, but the `subject-change` comment and implementation still need to be reconciled.
 
 Create the package with no cluster dependency yet.
 
@@ -76,7 +89,16 @@ Exit criteria:
 - `npm run -w @opensearch-migrations/e2e-orchestration-tests type-check` works.
 - Unit tests validate spec parsing and invalid enum failures.
 
-### 2. Thin Live E2E Harness
+### 2. Thin Live E2E Harness `[~]`
+
+Current branch status:
+
+- `[x]` A noop-oriented runner exists and can write snapshots.
+- `[x]` Baseline and noop submissions use distinct workflow names, with tests covering deterministic and production suffix paths.
+- `[x]` Minimal lifecycle actor registry exists; setup actors run before submission, teardown actors run from `finally`, and teardown failures are recorded as diagnostics.
+- `[x]` Generic phase-completion no longer treats `Pending` as terminal for topology components.
+- `[~]` CLI entrypoint currently uses an empty `ActorRegistry`; specs with lifecycle actor names need a registry-wiring path before they can run through the CLI.
+- `[~]` Workflow names are unique but not yet sanitized or length-limited for Kubernetes/Argo naming constraints.
 
 Get a real cluster-backed test running as early as possible, even if it covers only one safe/noop path and uses hardcoded scenario data. This is intentionally a vertical slice from the design document's "How A Test Case Runs" section, not the full framework.
 
@@ -84,19 +106,30 @@ Implement:
 
 - A CLI that accepts one spec path and one exact case name.
 - Submission of a baseline config using the existing config-processor path.
+- A generated unique workflow name for each submission, including the initial noop slice. Do not rely on the workflow CLI's default name.
 - Structural gate approval from the spec's `approvalGates`.
-- A basic wait loop for the Argo workflow to reach a terminal phase.
+- A basic phase-completion wait over observed CRD components. `Pending` must not be treated as terminal for ordinary topology components; approval-gate waiting should be handled separately.
 - A basic CRD observation dump after baseline.
 - A second submission of the same config for `noop-pre`.
+- Execution of lifecycle teardown actors in a `finally` path when configured. Setup actors may be minimal in the first slice, but teardown-on-failure must be wired before live runs are trusted.
 - A snapshot file with raw observations, even before all assertions exist.
 
 Exit criteria:
 
 - One local command submits `fullMigrationWithTraffic.wf.yaml`, approves structural gates, waits, resubmits unchanged config, and writes a snapshot.
+- Baseline and noop submissions have distinct workflow names in tests and live output.
+- A non-gate component in `Pending` does not satisfy phase completion.
 - Failures still run teardown actors if configured.
 - The snapshot shape matches the design document enough that later assertions can read it.
 
-### 3. Minimal Observation And Snapshot Model
+### 3. Minimal Observation And Snapshot Model `[~]`
+
+Current branch status:
+
+- `[x]` `k8sClient.ts`, `snapshotStore.ts`, and `reportSchema.ts` exist with focused tests.
+- `[x]` Snapshot storage/report schema validate snapshots and reject duplicate observation keys.
+- `[x]` CRD observation captures resource state including kind/name/phase/generation/UID/raw resource data.
+- `[~]` Raw Argo workflow phase and node diagnostics are not yet captured.
 
 Stabilize the data captured by the thin live test.
 
@@ -113,9 +146,20 @@ Exit criteria:
 - Duplicate observation keys are rejected.
 - A failed live run still writes enough diagnostic data to debug.
 
-### 4. Temporary ComponentTopology For The First Scenario
+### 4. Temporary Expected CRD ComponentTopology For The First Scenario `[~]`
 
-Add only the topology support needed by the first E2E case. Do not generate this topology from production CRDs.
+Current branch status:
+
+- `[x]` `ComponentTopology` exists with cycle, missing-node, upstream/downstream, and independence tests.
+- `[x]` Temporary `ComponentTopologyResolver` exists for `fullMigrationWithTraffic.wf.yaml`.
+- `[x]` The temporary topology uses expected CRD graph semantics: `DataSnapshot` depends on `CaptureProxy`; `SnapshotMigration` has no `spec.dependsOn` edge.
+- `[x]` Generator-backed regression test derives topology from the real sample via `MigrationInitializer` and compares it to the hardcoded topology.
+- `[x]` `fullMigrationWithTraffic.wf.yaml` was adjusted so it validates with current schema rules (`removeAuthHeader` removed from the replayer config).
+- `[~]` Live/generated observed-topology comparison is not yet wired into runner output.
+
+Add only the topology support needed by the first E2E case. `ComponentTopology` represents the expected CRD resource graph: expected resource IDs and expected CRD `spec.dependsOn` edges. It does not represent user-config nesting or workflow-only execution ordering.
+
+Do not generate this expected topology from live production CRDs. It may be hardcoded or deduced independently for the first slice, then compared against generated/live CRD observations as a double-entry check.
 
 Use a stable component ID format:
 
@@ -126,16 +170,17 @@ Use a stable component ID format:
 Examples:
 
 - `kafkacluster:default`
-- `capturedtraffic:source-proxy-topic`
-- `captureproxy:source-proxy`
+- `capturedtraffic:capture-proxy-topic`
+- `captureproxy:capture-proxy`
 - `datasnapshot:source-snap1`
 - `snapshotmigration:source-target-snap1-migration-0`
-- `trafficreplay:source-proxy-target-target-replay`
+- `trafficreplay:capture-proxy-target-replay1`
 
 Implement:
 
 - `componentTopology.ts` with `ComponentTopology` and helpers: `downstreamOf`, `upstreamOf`, and `independentOf`.
 - A temporary `ComponentTopologyResolver` path for `fullMigrationWithTraffic.wf.yaml`.
+- A generator-backed unit test that derives topology from the sample via `MigrationInitializer` and fails when the hardcoded topology drifts.
 - A comparison between expected topology and observed live/generated CRD `spec.dependsOn`, reported as its own failure category.
 
 Exit criteria:
@@ -143,7 +188,7 @@ Exit criteria:
 - A test can fail if production CRD generation emits an unexpected resource name or dependency.
 - The same `ComponentTopology` drives cascade and independence assertions.
 
-### 5. Assertion Logic
+### 5. Assertion Logic `[ ]`
 
 Build `assertLogic` as a pure library, then wire it into the thin live E2E slice.
 
@@ -173,7 +218,7 @@ Exit criteria:
 - Unit tests cover every checkpoint.
 - Violation messages include component ID, constraint, checkpoint, expected states, observed state, and relevant changed paths.
 
-### 6. Live Runner Safe Mutation Slice
+### 6. Live Runner Safe Mutation Slice `[ ]`
 
 Extend the thin live harness from noop-only to one safe mutator.
 
@@ -194,6 +239,8 @@ Sequence:
 13. Run teardown actors.
 14. Write snapshot.
 
+This slice assumes the noop runner already has unique workflow names, teardown-on-failure, and component phase-completion semantics. Do not defer those basics until multi-case execution; otherwise the first live safe run may overwrite evidence or assert against unsettled resources.
+
 Define behavior from CRD state deltas:
 
 - `ran`: no prior successful checksum for this resource in the case.
@@ -209,7 +256,7 @@ Exit criteria:
 - Snapshot is written.
 - `assertLogic` is the pass/fail oracle, not a direct snapshot comparison.
 
-### 7. Matrix Expander And Mutator Registry
+### 7. Matrix Expander And Mutator Registry `[ ]`
 
 Once one exact safe case works, add generalized case expansion. This can be straightforward nested-loop code; it does not need a complex topology resolver.
 
@@ -245,7 +292,7 @@ Exit criteria:
 - Mutated configs validate against `OVERALL_MIGRATION_CONFIG`.
 - The runner can execute one selected expanded case by exact case name.
 
-### 8. Transition Tree Generator
+### 8. Transition Tree Generator `[ ]`
 
 Implement a Zod schema walker over `OVERALL_MIGRATION_CONFIG`.
 
@@ -283,7 +330,13 @@ Exit criteria:
 - Unit tests cover explicit `gated`, explicit `impossible`, and default `safe`.
 - A mutator whose declared `changeClass` disagrees with generated tree data fails at expansion time.
 
-### 9. Phase Completion Predicate
+### 9. Phase Completion Predicate `[~]`
+
+Current branch status:
+
+- `[x]` Basic polling predicate exists and returns structured timeout diagnostics.
+- `[x]` `Pending` is not terminal for generic topology components; approval-gate held phases are modeled separately.
+- `[ ]` Phase names still need validation against the first live runs.
 
 After the safe slice works, harden waiting semantics.
 
@@ -299,7 +352,7 @@ Exit criteria:
 - Timeout produces a distinct `phase-timeout` result in the snapshot and process exit.
 - `assertNoViolations` is never called with non-terminal components unless the test is explicitly checking non-advancement.
 
-### 10. Gated Flow
+### 10. Gated Flow `[ ]`
 
 Implement `response: approve` and `response: leave-blocked` after safe flow is stable.
 
@@ -315,7 +368,7 @@ Exit criteria:
 - `leave-blocked` ends after verifying the gate is still pending/paused and writes a complete snapshot.
 - Gate-time validations use split observer/checker fixtures.
 
-### 11. Impossible Flow
+### 11. Impossible Flow `[ ]`
 
 Implement only after reset behavior is understood per component kind.
 
@@ -339,15 +392,14 @@ Exit criteria:
 - All four responses produce snapshots.
 - The AND condition is proven: approval alone does not advance, reset alone does not advance, reset plus approval does advance.
 
-### 12. Multi-Case Execution
+### 12. Multi-Case Execution `[ ]`
 
 Run all expanded cases in a spec after safe/gated/impossible single-case paths are reliable.
 
 Rules:
 
 - One case at a time in a namespace.
-- Unique workflow name per submission.
-- Mandatory teardown in `finally`.
+- Reuse the unique workflow naming and mandatory teardown behavior established in the noop/safe slices.
 - Snapshot filename includes spec, subject, mutator, and response.
 - Process exit is nonzero if any case fails.
 
@@ -356,7 +408,7 @@ Exit criteria:
 - A spec with multiple selectors creates one snapshot per expanded case.
 - Failure in one case does not skip teardown.
 
-### 13. Timing Capture
+### 13. Timing Capture `[ ]`
 
 Add Argo node timing once behavior assertions are stable.
 
@@ -374,7 +426,7 @@ Exit criteria:
 - Component entries include timing where an Argo node can be correlated.
 - Missing timing is represented explicitly rather than failing assertions.
 
-### 14. Outer Workflow / CI Wrapper
+### 14. Outer Workflow / CI Wrapper `[ ]`
 
 Only after the live runner is dependable, add the unattended path.
 

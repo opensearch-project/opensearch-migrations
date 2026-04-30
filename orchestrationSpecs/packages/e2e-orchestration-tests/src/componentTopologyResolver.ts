@@ -24,43 +24,73 @@ export class TopologyResolverError extends Error {
 }
 
 /**
- * fullMigrationWithTraffic.wf.yaml:
+ * fullMigrationWithTraffic.wf.yaml — expected CRD graph.
  *
- *   kafkacluster:default
- *         │
- *         ▼
- *   capturedtraffic:source-proxy-topic
- *         │
- *         ▼
- *   captureproxy:source-proxy
- *         │
- *         ▼
- *   trafficreplay:source-proxy-target-target-replay
+ * This topology is hand-authored to match the CRD resources produced
+ * by `MigrationInitializer` when applied to the sample YAML at
+ * `orchestrationSpecs/packages/config-processor/scripts/samples/
+ * fullMigrationWithTraffic.wf.yaml`. The resolver tests pin this by
+ * running the actual initializer on the sample and comparing its
+ * output to the topology below, so any drift in the generator or
+ * sample is caught at CI time.
  *
- *   datasnapshot:source-snap1
- *         │
- *         ▼
- *   snapshotmigration:source-target-snap1-migration-0
+ * Conventions derived from `MigrationConfigTransformer` and
+ * `MigrationInitializer`:
+ *   - KafkaCluster name  = `kafkaClusterConfiguration` key
+ *   - CapturedTraffic    = `<proxyName>-topic`
+ *   - CaptureProxy       = proxy user-config key
+ *   - DataSnapshot       = `<sourceClusterName>-<snapshotKey>`
+ *   - SnapshotMigration  = `<source>-<target>-<snapshotKey>-migration-<idx>`
+ *   - TrafficReplay      = `<fromProxy>-<toTarget>-<replayerKey>`
  *
- * The proxy/kafka/replay chain and the snapshot/migration chain are
- * independent branches. Names follow the kind:resource-name convention
- * described in the implementation plan; they track the CRDs the
- * migration framework creates for this baseline.
+ * Edge direction (see componentTopology.ts): `{ from, to }` means
+ * `from` depends on `to`. This matches `spec.dependsOn` on the CRDs.
+ *
+ *   KafkaCluster:default
+ *     ▲
+ *     │
+ *   CapturedTraffic:capture-proxy-topic
+ *     ▲
+ *     │
+ *   CaptureProxy:capture-proxy
+ *     ▲           ▲
+ *     │           │
+ *  TrafficReplay   DataSnapshot:source-snap1
+ *
+ *   SnapshotMigration:source-target-snap1-migration-0
+ *     (spec.dependsOn is absent — independent of everything above)
+ *
+ * Only `SnapshotMigration` is truly independent of the proxy chain.
+ * DataSnapshot does **not** gate SnapshotMigration — the migration runs
+ * against whatever snapshot exists when it reconciles.
  */
 const FULL_MIGRATION_WITH_TRAFFIC: ComponentTopology = buildTopology({
     components: [
         "kafkacluster:default",
-        "capturedtraffic:source-proxy-topic",
-        "captureproxy:source-proxy",
-        "trafficreplay:source-proxy-target-target-replay",
+        "capturedtraffic:capture-proxy-topic",
+        "captureproxy:capture-proxy",
         "datasnapshot:source-snap1",
         "snapshotmigration:source-target-snap1-migration-0",
+        "trafficreplay:capture-proxy-target-replay1",
     ] as ComponentId[],
     edges: [
-        { from: "capturedtraffic:source-proxy-topic", to: "kafkacluster:default" },
-        { from: "captureproxy:source-proxy", to: "capturedtraffic:source-proxy-topic" },
-        { from: "trafficreplay:source-proxy-target-target-replay", to: "captureproxy:source-proxy" },
-        { from: "snapshotmigration:source-target-snap1-migration-0", to: "datasnapshot:source-snap1" },
+        {
+            from: "capturedtraffic:capture-proxy-topic",
+            to: "kafkacluster:default",
+        },
+        {
+            from: "captureproxy:capture-proxy",
+            to: "capturedtraffic:capture-proxy-topic",
+        },
+        {
+            from: "datasnapshot:source-snap1",
+            to: "captureproxy:capture-proxy",
+        },
+        {
+            from: "trafficreplay:capture-proxy-target-replay1",
+            to: "captureproxy:capture-proxy",
+        },
+        // SnapshotMigration has no dependsOn — it is independent.
     ],
 });
 

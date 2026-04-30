@@ -119,3 +119,54 @@ describe("waitForPhaseCompletion", () => {
         }
     });
 });
+
+describe("waitForPhaseCompletion — Pending is not terminal for generic components", () => {
+    it("times out when a topology component stays in Pending", async () => {
+        const clock = makeFakeClock();
+        const result = await waitForPhaseCompletion({
+            components: COMPONENTS,
+            timeoutSeconds: 1,
+            pollIntervalMs: 200,
+            clock,
+            readObservations: async () => [
+                { componentId: "a:1" as ComponentId, phase: "Pending" },
+                { componentId: "b:1" as ComponentId, phase: "Ready" },
+            ],
+        });
+        expect(result.kind).toBe("timeout");
+        if (result.kind === "timeout") {
+            expect(result.blockingComponents).toEqual([
+                { componentId: "a:1", phase: "Pending" },
+            ]);
+        }
+    });
+
+    it("still returns ready when every component is in a true terminal/held phase", async () => {
+        const clock = makeFakeClock();
+        const result = await waitForPhaseCompletion({
+            components: COMPONENTS,
+            timeoutSeconds: 10,
+            pollIntervalMs: 200,
+            clock,
+            readObservations: async () => [
+                { componentId: "a:1" as ComponentId, phase: "Ready" },
+                { componentId: "b:1" as ComponentId, phase: "Blocked" },
+            ],
+        });
+        expect(result.kind).toBe("ready");
+    });
+});
+
+describe("APPROVAL_GATE_HELD_PHASES", () => {
+    it("treats Pending and Approved as held — but this set is NOT the generic default", async () => {
+        const { APPROVAL_GATE_HELD_PHASES, TERMINAL_OR_HELD_PHASES } =
+            require("../src/phaseCompletion") as typeof import("../src/phaseCompletion");
+
+        expect(APPROVAL_GATE_HELD_PHASES.has("Pending")).toBe(true);
+        expect(APPROVAL_GATE_HELD_PHASES.has("Approved")).toBe(true);
+        // The generic topology set must not include Pending, or
+        // ordinary components in Pending would falsely satisfy phase
+        // completion (regression guard for plan step 3).
+        expect(TERMINAL_OR_HELD_PHASES.has("Pending")).toBe(false);
+    });
+});

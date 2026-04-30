@@ -18,6 +18,7 @@
     "zod": "^4"
   },
   "devDependencies": {
+    "@opensearch-migrations/config-processor": "*",
     "@types/jest": "*",
     "@types/node": "^24.0.13",
     "ts-jest": "^29.4.4",
