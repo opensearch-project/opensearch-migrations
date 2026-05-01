@@ -348,19 +348,23 @@ The walk is triggered once per checkpoint, immediately after the **subject compo
 
 Before the walk runs, the framework verifies a **phase-completion predicate**: every component in the `ComponentTopology` must be in a terminal state (`Ready`, `Skipped`, `Failed`, `Blocked`, `Paused`, `Deleted`) or a held state waiting for action. If any component is still `Running` or `Pending`, that is itself a test failure — the migration framework left something in a non-terminal state. The predicate has a per-phase budget controlled by `phaseCompletionTimeoutSeconds` in the spec (600 seconds by default); exceeding it produces a `phase-timeout` failure that is distinct from any constraint violation. A `Running` component cannot appear at assertion time if the predicate was correctly enforced; if it does, the predicate was bypassed, not a constraint violation.
 
-**The three constraints checked at each sweep:**
+**The four constraints checked at each mutation sweep:**
 
 - **Constraint 1 — Change class:** for the subject component, the observed behavior must match what the transition tree says is allowed for the fields that changed. A `safe` field change allows `reran`; a `gated` field change requires `Paused` before approval and `reran` after; an `impossible` field change requires `Blocked` until both reset and approval have occurred.
 
 - **Constraint 2 — Cascade:** for each component downstream of the subject in the `ComponentTopology`, valid behavior depends on what the subject did. If the subject `reran`, every dependent must have `reran` — a reran upstream must cascade. The only way a dependent can legitimately avoid `reran` at this checkpoint is by being gated or blocked in its own right. If the subject was `Blocked`, dependents must be `Unstarted` or `Blocked`.
 
-- **Constraint 3 — Independence:** for each component with no dependency path from the subject in the `ComponentTopology`, behavior must be `skipped`. Because a test case applies exactly one mutation, an independent component has no reason to rerun; if it did, that's a scope isolation failure. Constraint 3 applies universally to noop runs (where no component should have reran), and to all mutation checkpoints **except** the impossible-case `on-blocked` and `after-approve-without-reset` checkpoints: at those checkpoints an independent branch may have already reached `Ready` on its own, and the test deliberately doesn't assert its state. All other checkpoints — including `after-reset` and `after-approve` for impossible cases — apply constraint 3 normally.
+- **Constraint 3 — Upstream stability:** for each component upstream of the subject in the `ComponentTopology`, behavior must be `skipped`. A subject mutation should not force its prerequisites to rerun. If an upstream component reruns, that's a reverse-cascade failure.
 
-**For noop runs**, `assertNoViolations` is called with a `noop` checkpoint and no mutated subject. Constraint 3 applies universally: every component must be `skipped`. Constraints 1 and 2 don't fire.
+- **Constraint 4 — Independence:** for each component with no dependency path from the subject in the `ComponentTopology`, behavior must be `skipped`. Because a test case applies exactly one mutation, an independent component has no reason to rerun; if it did, that's a scope isolation failure. Constraint 4 applies universally to noop runs (where no component should have reran), and to all mutation checkpoints **except** the impossible-case `on-blocked` and `after-approve-without-reset` checkpoints: at those checkpoints an independent branch may have already reached `Ready` on its own, and the test deliberately doesn't assert its state. All other checkpoints — including `after-reset` and `after-approve` for impossible cases — apply constraint 4 normally.
+
+**For the baseline run**, the framework records a `baseline-complete` checkpoint as the comparison anchor for later behavior derivation. It does not call mutation constraints because there is no changed subject yet.
+
+**For noop runs**, `assertNoViolations` is called with a `noop` checkpoint and no mutated subject. Every component must be `skipped`. Mutation constraints 1 through 4 don't fire individually.
 
 **Example — safe case:**
 
-For `proxy-numThreads` (changes `captureConfig.numThreads`, a `safe` field): once the proxy reaches `Ready`, the framework sweeps. The tree says `safe` → `reran` is consistent. `kafka` and `replayer` (dependents) also `reran` — consistent with constraint 2. `metadata` and `backfill` (independent) `skipped` — consistent with constraint 3. All pass.
+For `proxy-numThreads` (changes `captureConfig.numThreads`, a `safe` field): once the proxy reaches `Ready`, the framework sweeps. The tree says `safe` → `reran` is consistent. `replayer` and other dependents also `reran` — consistent with constraint 2. Kafka and any other prerequisites `skipped` — consistent with constraint 3. `metadata` and `backfill` (independent) `skipped` — consistent with constraint 4. All pass.
 
 If proxy had gated on a `safe` field change:
 
@@ -757,10 +761,11 @@ Writes run output to `snapshots/<case-name>.json`. Snapshots are diagnostic logs
 
 ### assertLogic
 
-`assertLogic` implements the constraint walk described in "How Tests Pass And Fail." It exposes one public entry point — `assertNoViolations` — which handles all three constraints and dispatches to checkpoint-specific logic for noop, gated, and impossible cases.
+`assertLogic` implements the constraint walk described in "How Tests Pass And Fail." It exposes one public entry point — `assertNoViolations` — which handles all four mutation constraints and dispatches to checkpoint-specific logic for noop, gated, and impossible cases.
 
 ```typescript
 type Checkpoint =
+  | 'baseline-complete'          // baseline run: observation anchor only
   | 'noop'                       // noop-pre and noop-post runs: no subject, all components must be skipped
   | 'mutated-complete'           // safe case terminal checkpoint
   | 'before-approval'            // gated: after pause
@@ -771,7 +776,7 @@ type Checkpoint =
   | 'after-approve';             // impossible: after reset+approve
 
 // Checkpoints where an independent branch may legitimately have completed
-// before the subject reached its held state. Constraint 3 is skipped for
+// before the subject reached its held state. Constraint 4 is skipped for
 // independents at these checkpoints; it applies everywhere else.
 const INDEPENDENTS_UNCHECKED: ReadonlySet<Checkpoint> = new Set([
   'on-blocked',
@@ -786,9 +791,14 @@ function assertNoViolations(
   observed: ObservedSnapshot,
   changeClass: ChangeClass | 'noop',
   checkpoint: Checkpoint,
-  subject: ComponentId | null,   // null on 'noop' checkpoints
+  subject: ComponentId | null,   // null on 'baseline-complete' and 'noop' checkpoints
   topology: ComponentTopology,
 ): Violation[] {
+
+  // Baseline runs: no subject, no mutation assertions.
+  if (checkpoint === 'baseline-complete') {
+    return [];
+  }
 
   // Noop runs: no subject, every component must be skipped
   if (checkpoint === 'noop') {
@@ -798,9 +808,15 @@ function assertNoViolations(
   }
 
   const dependents   = topology.downstreamOf(subject!);
+  const upstream     = topology.upstreamOf(subject!);
   const independents = topology.independentOf(subject!);
 
-  // Constraint 3: independent components must be skipped — except at the two
+  // Constraint 3: upstream components must be skipped.
+  const upstreamViolations = upstream
+    .filter(c => observed.get(c)?.behavior !== 'skipped')
+    .map(c => ({ type: 'upstream-reran', componentId: c, observed: observed.get(c) }));
+
+  // Constraint 4: independent components must be skipped — except at the two
   // impossible-case checkpoints where a branch may have legitimately completed.
   const independenceViolations = INDEPENDENTS_UNCHECKED.has(checkpoint)
     ? []
@@ -813,11 +829,11 @@ function assertNoViolations(
     changeClass, checkpoint, observed, subject!, dependents
   );
 
-  return [...independenceViolations, ...behaviorViolations];
+  return [...upstreamViolations, ...independenceViolations, ...behaviorViolations];
 }
 
 // Encodes valid states for subject and dependents at each checkpoint.
-// Independent components are handled entirely in assertNoViolations above.
+// Upstream and independent components are handled in assertNoViolations above.
 function assertAtCheckpoint(
   changeClass: ChangeClass,
   checkpoint: Checkpoint,

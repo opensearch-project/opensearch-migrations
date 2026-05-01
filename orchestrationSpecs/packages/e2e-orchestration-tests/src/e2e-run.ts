@@ -46,9 +46,14 @@ import {
     RunCheckpoint,
 } from "./reportSchema";
 import { writeCaseSnapshot } from "./snapshotStore";
+import { sanitizeWorkflowName } from "./workflowName";
 import { Checkpoint, ComponentId, ObservedComponent, ScenarioSpec, Violation } from "./types";
 import { Actor, ActorContext, ActorRegistry } from "./actors";
 import { builtinActors } from "./builtinActors";
+import { deriveBehavior } from "./behaviorDerivation";
+import { assertNoViolations } from "./assertLogic";
+import { ExpandedTestCase, expandCases } from "./matrixExpander";
+import { MutatorRegistry } from "./fixtures/mutators";
 
 // ── Types shared by the CLI entrypoint and its testable core ─────────
 
@@ -86,6 +91,11 @@ export interface LiveRunnerDeps {
      * uses a short crypto-random hex string.
      */
     workflowNameSuffix?: () => string;
+    /**
+     * Registry of mutators available for matrix expansion. Optional —
+     * only needed when running safe/gated/impossible cases.
+     */
+    mutatorRegistry?: MutatorRegistry;
 }
 
 // ── Core logic (easy to unit-test with fake deps) ────────────────────
@@ -151,31 +161,50 @@ export async function runNoopSlice(deps: LiveRunnerDeps): Promise<string> {
 
         const baselineYaml = fs.readFileSync(deps.baselineConfigPath, "utf8");
 
-        const baselineWorkflowName = `${caseName}-baseline-${suffixer()}`;
+        const baselineWorkflowName = sanitizeWorkflowName(
+            `${caseName}-baseline-${suffixer()}`,
+        );
         runs["baseline"] = await runSubmittedWorkflow({
             deps,
             runName: "baseline",
             workflowName: baselineWorkflowName,
-            baselineYaml,
-            checkpoint: "mutated-complete",
+            configYaml: baselineYaml,
+            checkpoint: "baseline-complete",
+            subject: null,
+            priorComponents: null,
             diagnostics,
             events,
             clock,
         });
 
-        const noopWorkflowName = `${caseName}-noop-pre-${suffixer()}`;
+        // Hand baseline observations to noop-pre so behavior can be
+        // derived (skipped vs reran) at the noop checkpoint.
+        const baselineLast =
+            runs["baseline"].checkpoints[runs["baseline"].checkpoints.length - 1]?.components ??
+            null;
+
+        const noopWorkflowName = sanitizeWorkflowName(
+            `${caseName}-noop-pre-${suffixer()}`,
+        );
         runs["noop-pre"] = await runSubmittedWorkflow({
             deps,
             runName: "noop-pre",
             workflowName: noopWorkflowName,
-            baselineYaml,
+            configYaml: baselineYaml,
             checkpoint: "noop",
+            subject: null,
+            priorComponents: baselineLast,
             diagnostics,
             events,
             clock,
         });
 
-        outcome = diagnostics.length === 0 ? "passed" : "partial";
+        // Noop checkpoint violations bump outcome to partial; we never
+        // promote past 'partial' from within assertLogic output alone.
+        const noopViolations = collectViolations(runs["noop-pre"]);
+        violations.push(...noopViolations);
+
+        outcome = diagnostics.length === 0 && violations.length === 0 ? "passed" : "partial";
     } catch (e) {
         outcome = "error";
         diagnostics.push(...formatFatalDiagnostics(e));
@@ -223,12 +252,146 @@ export async function runNoopSlice(deps: LiveRunnerDeps): Promise<string> {
     });
 }
 
+/**
+ * Run a 4-run safe mutation case: baseline → noop-pre → mutated → noop-post.
+ * Returns the path to the written snapshot file.
+ */
+export async function runSafeCase(deps: LiveRunnerDeps, expandedCase: ExpandedTestCase): Promise<string> {
+    const clock = deps.clock ?? realClock;
+    const startedAt = new Date(clock.now()).toISOString();
+    const caseName = expandedCase.caseName;
+    const suffixer =
+        deps.workflowNameSuffix ?? (() => crypto.randomBytes(3).toString("hex"));
+    const diagnostics: string[] = [];
+    const violations: Violation[] = [];
+    const runs: Record<string, RunRecord> = {};
+    const events: CaseEvent[] = [];
+    let outcome: CaseOutcome = "partial";
+
+    let setupActors: ReturnType<ActorRegistry["resolveAll"]> = [];
+    let teardownActors: ReturnType<ActorRegistry["resolveAll"]> = [];
+    const actorCtxFor = (phase: "setup" | "teardown"): ActorContext => ({
+        workflowCli: deps.workflowCli,
+        k8sClient: deps.k8sClient,
+        namespace: deps.namespace,
+        baselineConfigPath: deps.baselineConfigPath,
+        phase,
+    });
+
+    try {
+        setupActors = deps.actorRegistry.resolveAll(deps.spec.lifecycle.setup);
+        teardownActors = deps.actorRegistry.resolveAll(deps.spec.lifecycle.teardown);
+
+        if (setupActors.length > 0) {
+            events.push(event(clock, "setup", "run-actors", "ok", {
+                message: `running ${setupActors.length} setup actor(s)`,
+            }));
+            const res = await deps.actorRegistry.runAll(setupActors, actorCtxFor("setup"), { stopOnError: true });
+            diagnostics.push(...res.diagnostics);
+            if (res.diagnostics.length > 0) {
+                events.push(event(clock, "setup", "run-actors", "error", { message: res.diagnostics.join("; ") }));
+                throw new Error(`setup aborted: ${res.diagnostics.join("; ")}`);
+            }
+            events.push(event(clock, "setup", "run-actors", "ok", { message: "setup actors completed" }));
+        }
+
+        const baselineYaml = fs.readFileSync(deps.baselineConfigPath, "utf8");
+
+        // Run 1: baseline
+        const baselineWorkflowName = sanitizeWorkflowName(`${caseName}-baseline-${suffixer()}`);
+        runs["baseline"] = await runSubmittedWorkflow({
+            deps, runName: "baseline", workflowName: baselineWorkflowName,
+            configYaml: baselineYaml, checkpoint: "baseline-complete",
+            subject: null,
+            priorComponents: null, diagnostics, events, clock,
+        });
+        const baselineLast = lastComponents(runs["baseline"]);
+
+        // Run 2: noop-pre
+        const noopPreName = sanitizeWorkflowName(`${caseName}-noop-pre-${suffixer()}`);
+        runs["noop-pre"] = await runSubmittedWorkflow({
+            deps, runName: "noop-pre", workflowName: noopPreName,
+            configYaml: baselineYaml, checkpoint: "noop",
+            subject: null,
+            priorComponents: baselineLast, diagnostics, events, clock,
+        });
+        violations.push(...collectViolations(runs["noop-pre"]));
+        const noopPreLast = lastComponents(runs["noop-pre"]);
+
+        // Run 3: mutated submission
+        const mutatedConfig = expandedCase.mutator.apply(
+            (await import("yaml")).parse(baselineYaml),
+        );
+        const mutatedYaml = (await import("yaml")).stringify(mutatedConfig);
+        const mutatedWorkflowName = sanitizeWorkflowName(`${caseName}-mutated-${suffixer()}`);
+        runs["mutated"] = await runSubmittedWorkflow({
+            deps, runName: "mutated", workflowName: mutatedWorkflowName,
+            configYaml: mutatedYaml, checkpoint: "mutated-complete",
+            subject: expandedCase.subject,
+            priorComponents: noopPreLast, diagnostics, events, clock,
+        });
+        violations.push(...collectViolations(runs["mutated"]));
+        const mutatedLast = lastComponents(runs["mutated"]);
+
+        // Run 4: noop-post
+        const noopPostName = sanitizeWorkflowName(`${caseName}-noop-post-${suffixer()}`);
+        runs["noop-post"] = await runSubmittedWorkflow({
+            deps, runName: "noop-post", workflowName: noopPostName,
+            configYaml: mutatedYaml, checkpoint: "noop",
+            subject: null,
+            priorComponents: mutatedLast, diagnostics, events, clock,
+        });
+        violations.push(...collectViolations(runs["noop-post"]));
+
+        outcome = diagnostics.length === 0 && violations.length === 0 ? "passed" : "partial";
+    } catch (e) {
+        outcome = "error";
+        diagnostics.push(...formatFatalDiagnostics(e));
+    } finally {
+        if (teardownActors.length > 0) {
+            events.push(event(clock, "teardown", "run-actors", "ok", {
+                message: `running ${teardownActors.length} teardown actor(s)`,
+            }));
+            const res = await deps.actorRegistry.runAll(teardownActors, actorCtxFor("teardown"));
+            diagnostics.push(...res.diagnostics);
+            events.push(event(clock, "teardown", "run-actors", res.diagnostics.length > 0 ? "error" : "ok", {
+                message: res.diagnostics.length > 0 ? res.diagnostics.join("; ") : "teardown actors completed",
+            }));
+            if (outcome === "passed" && res.diagnostics.length > 0) outcome = "partial";
+        }
+    }
+
+    const snapshot: CaseSnapshot = {
+        case: caseName,
+        specPath: deps.specPath,
+        outcome,
+        startedAt,
+        finishedAt: new Date(clock.now()).toISOString(),
+        runs,
+        events,
+        checkers: [],
+        diagnostics,
+        violations,
+    };
+    return writeCaseSnapshot(snapshot, {
+        outputDir: deps.outputDir,
+        validate: outcome !== "error",
+    });
+}
+
+/** Extract the last checkpoint's components from a run, or null. */
+function lastComponents(run: RunRecord): Readonly<Record<ComponentId, ObservedComponent>> | null {
+    return run.checkpoints[run.checkpoints.length - 1]?.components ?? null;
+}
+
 async function runSubmittedWorkflow(args: {
     deps: LiveRunnerDeps;
     runName: string;
     workflowName: string;
-    baselineYaml: string;
+    configYaml: string;
     checkpoint: Checkpoint;
+    subject: ComponentId | null;
+    priorComponents: Readonly<Record<ComponentId, ObservedComponent>> | null;
     diagnostics: string[];
     events: CaseEvent[];
     clock: typeof realClock;
@@ -237,8 +400,10 @@ async function runSubmittedWorkflow(args: {
         deps,
         runName,
         workflowName,
-        baselineYaml,
+        configYaml,
         checkpoint,
+        subject,
+        priorComponents,
         diagnostics,
         events,
         clock,
@@ -255,7 +420,7 @@ async function runSubmittedWorkflow(args: {
             runName,
             "configure",
             "workflow configure edit --stdin",
-            () => deps.workflowCli.configureEditStdin(baselineYaml),
+            () => deps.workflowCli.configureEditStdin(configYaml),
         );
         attemptedSubmit = true;
         workflowEvent(
@@ -280,6 +445,8 @@ async function runSubmittedWorkflow(args: {
             deps,
             checkpoints,
             checkpoint,
+            subject,
+            priorComponents,
             diagnostics,
             events,
             clock,
@@ -410,6 +577,8 @@ async function waitAndCheckpoint(
     deps: LiveRunnerDeps,
     into: RunCheckpoint[],
     checkpoint: Checkpoint,
+    subject: ComponentId | null,
+    priorComponents: Readonly<Record<ComponentId, ObservedComponent>> | null,
     diagnostics: string[],
     events: CaseEvent[],
     clock: typeof realClock,
@@ -454,11 +623,18 @@ async function waitAndCheckpoint(
         message: `captured ${Object.keys(finalObs.components).length} component(s)`,
     }));
 
+    const withBehavior = deriveBehaviorOnAll(finalObs.components, priorComponents);
+
     into.push({
         checkpoint,
         observedAt: new Date(clock.now()).toISOString(),
-        components: finalObs.components,
-        violations: [],
+        components: withBehavior,
+        violations: assertNoViolations({
+            checkpoint,
+            subject,
+            topology: deps.topology,
+            observations: withBehavior,
+        }),
     });
 }
 
@@ -489,6 +665,12 @@ export interface RunFromSpecOptions {
      * caller wants complete control over lifecycle actors.
      */
     omitBuiltinActors?: boolean;
+    /**
+     * Optional mutator registry for safe/gated/impossible cases. When
+     * provided and the spec expands to at least one safe case, the
+     * runner executes the first expanded case instead of the noop slice.
+     */
+    mutatorRegistry?: MutatorRegistry;
 }
 
 /**
@@ -555,6 +737,7 @@ export async function runFromSpec(opts: RunFromSpecOptions): Promise<string> {
         specPath: path.resolve(opts.specPath),
         baselineConfigPath: loaded.resolvedBaseConfigPath,
         outputDir: opts.outputDir,
+        mutatorRegistry: opts.mutatorRegistry,
     });
 }
 
@@ -588,6 +771,30 @@ function takeFlag(args: string[], flag: string): string | undefined {
     const v = args[idx + 1];
     args.splice(idx, 2);
     return v;
+}
+
+/**
+ * Apply `deriveBehavior` to every observed component, using the
+ * matching component in `prior` (if any) as the previous state. The
+ * returned record preserves every entry in `curr` plus the derived
+ * behavior; entries in `prior` not present in `curr` are dropped —
+ * we observe what the CRD API returned now.
+ */
+function deriveBehaviorOnAll(
+    curr: Record<ComponentId, ObservedComponent>,
+    prior: Readonly<Record<ComponentId, ObservedComponent>> | null,
+): Record<ComponentId, ObservedComponent> {
+    const out: Record<ComponentId, ObservedComponent> = {};
+    for (const [id, current] of Object.entries(curr) as [ComponentId, ObservedComponent][]) {
+        const prev = prior?.[id] ?? null;
+        out[id] = { ...current, behavior: deriveBehavior({ prev, curr: current }) };
+    }
+    return out;
+}
+
+/** Collect every checkpoint-attached violation across a run's checkpoints. */
+function collectViolations(run: RunRecord): Violation[] {
+    return run.checkpoints.flatMap((cp) => cp.violations ?? []);
 }
 
 // `require.main === module` equivalent for CommonJS; tsx/ts-node both

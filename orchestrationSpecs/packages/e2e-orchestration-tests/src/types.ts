@@ -56,6 +56,7 @@ export type LifecyclePhase = z.infer<typeof LifecyclePhaseSchema>;
 
 /** Checkpoints at which assertNoViolations is called. */
 export const CheckpointSchema = z.enum([
+    "baseline-complete",
     "noop",
     "mutated-complete",
     "before-approval",
@@ -283,9 +284,11 @@ export const ViolationTypeSchema = z.enum([
     "change-class",
     "cascade",
     "independence",
+    "upstream-reran",
     "phase-timeout",
     "missing-observation",
     "topology-mismatch",
+    "unimplemented-checkpoint",
 ]);
 export type ViolationType = z.infer<typeof ViolationTypeSchema>;
 

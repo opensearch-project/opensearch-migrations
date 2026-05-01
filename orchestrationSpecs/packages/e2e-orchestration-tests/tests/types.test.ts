@@ -22,6 +22,7 @@ describe("enum schemas", () => {
 
     it("covers every checkpoint from the design doc", () => {
         for (const v of [
+            "baseline-complete",
             "noop",
             "mutated-complete",
             "before-approval",

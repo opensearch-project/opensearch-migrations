@@ -103,7 +103,7 @@ describe("runNoopSlice — basic flow", () => {
             const snapshot: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
             expect(snapshot.outcome).toBe("passed");
             expect(Object.keys(snapshot.runs)).toEqual(["baseline", "noop-pre"]);
-            expect(snapshot.runs["baseline"].checkpoints[0].checkpoint).toBe("mutated-complete");
+            expect(snapshot.runs["baseline"].checkpoints[0].checkpoint).toBe("baseline-complete");
             expect(snapshot.runs["noop-pre"].checkpoints[0].checkpoint).toBe("noop");
             for (const run of ["baseline", "noop-pre"]) {
                 const checkpoint = snapshot.runs[run].checkpoints[0];
@@ -446,6 +446,74 @@ describe("runNoopSlice — error paths", () => {
             expect(snapshot.diagnostics.join("\n")).toMatch(/workflow cleanup failed for baseline/);
             expect(calls.filter((c) => c.args[0] === "submit")).toHaveLength(1);
             expect(snapshot.runs["noop-pre"]).toBeUndefined();
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+});
+
+describe("runNoopSlice — assertLogic integration", () => {
+    it("records 'noop-not-skipped' violations when noop-pre observations differ from baseline", async () => {
+        const { deps, tmpDir } = fakeDeps();
+        // Flip the readObservations implementation so the checksum
+        // differs on the second read. deriveBehavior will see that as
+        // 'reran' and assertNoViolations will flag it.
+        let callCount = 0;
+        deps.readObservations = async () => {
+            callCount += 1;
+            const checksumFor = (c: ComponentId) =>
+                callCount < 3 ? `baseline-${c}` : `mutated-${c}`;
+            const components: Record<ComponentId, ObservedComponent> = {};
+            for (const c of COMPONENTS) {
+                components[c] = {
+                    componentId: c,
+                    phase: "Ready",
+                    configChecksum: checksumFor(c),
+                    uid: `uid-${c}`,
+                };
+            }
+            return { components };
+        };
+
+        try {
+            const outPath = await runNoopSlice(deps);
+            const snap: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+
+            // A violation per component on the noop checkpoint.
+            const noopCp = snap.runs["noop-pre"].checkpoints[0];
+            expect(noopCp.checkpoint).toBe("noop");
+            expect(noopCp.violations).toHaveLength(COMPONENTS.length);
+            for (const v of noopCp.violations) {
+                expect(v.type).toBe("noop-not-skipped");
+                expect(v.details).toMatchObject({
+                    observedBehavior: "reran",
+                    expectedBehavior: "skipped",
+                });
+            }
+            // The runner surfaces those violations at the top level
+            // and bumps outcome to 'partial'.
+            expect(snap.violations.length).toBe(COMPONENTS.length);
+            expect(snap.outcome).toBe("partial");
+
+            // And behavior is populated on the noop-pre observations
+            // themselves, so a human reading the snapshot can see it.
+            for (const id of Object.keys(noopCp.components) as ComponentId[]) {
+                expect(noopCp.components[id].behavior).toBe("reran");
+            }
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it("populates behavior='ran' on baseline observations (no prior state)", async () => {
+        const { deps, tmpDir } = fakeDeps();
+        try {
+            const outPath = await runNoopSlice(deps);
+            const snap: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const baselineCp = snap.runs["baseline"].checkpoints[0];
+            for (const id of Object.keys(baselineCp.components) as ComponentId[]) {
+                expect(baselineCp.components[id].behavior).toBe("ran");
+            }
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }
