@@ -12,6 +12,11 @@ import { ComponentId, ObservedComponent } from "../src/types";
 import { ExpandedTestCase } from "../src/matrixExpander";
 import { Mutator } from "../src/fixtures/mutators";
 
+function readDetailSnapshot(reportPath: string): CaseSnapshot {
+    const report = JSON.parse(fs.readFileSync(reportPath, "utf8")) as { detailPath: string };
+    return JSON.parse(fs.readFileSync(report.detailPath, "utf8")) as CaseSnapshot;
+}
+
 /**
  * Topology for safe-case tests:
  *   kafka → capturedtraffic → captureproxy → datasnapshot
@@ -173,7 +178,7 @@ describe("runSafeCase — happy path", () => {
 
         try {
             const outPath = await runSafeCase(deps, expandedCase());
-            const snap: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snap: CaseSnapshot = readDetailSnapshot(outPath);
 
             expect(snap.outcome).toBe("passed");
             expect(Object.keys(snap.runs).sort()).toEqual(
@@ -217,7 +222,7 @@ describe("runSafeCase — cascade violation", () => {
 
         try {
             const outPath = await runSafeCase(deps, expandedCase());
-            const snap: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snap: CaseSnapshot = readDetailSnapshot(outPath);
 
             expect(snap.outcome).toBe("partial");
             const cascadeViolations = snap.violations.filter(v => v.type === "cascade");
@@ -258,7 +263,7 @@ describe("runSafeCase — independence violation", () => {
 
         try {
             const outPath = await runSafeCase(deps, expandedCase());
-            const snap: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snap: CaseSnapshot = readDetailSnapshot(outPath);
 
             expect(snap.outcome).toBe("partial");
             const indViolations = snap.violations.filter(v => v.type === "independence");
@@ -303,13 +308,67 @@ describe("runSafeCase — noop-post catches residual state", () => {
 
         try {
             const outPath = await runSafeCase(deps, expandedCase());
-            const snap: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snap: CaseSnapshot = readDetailSnapshot(outPath);
 
             expect(snap.outcome).toBe("partial");
             // noop-post should have noop-not-skipped violations
             const noopPostViolations = snap.runs["noop-post"].checkpoints[0].violations;
             expect(noopPostViolations.length).toBeGreaterThan(0);
             expect(noopPostViolations.every(v => v.type === "noop-not-skipped")).toBe(true);
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+});
+
+describe("runExpandedCases", () => {
+    it("writes one snapshot per expanded case and returns every path", async () => {
+        // Build deps whose spec triggers expansion to a single case
+        // via a mutator registry we control. We use the existing
+        // fakeDeps happy-path observations so every case passes.
+        const { deps, tmpDir } = fakeDeps();
+        try {
+            const { runExpandedCases } = await import("../src/e2e-run");
+            const { MutatorRegistry } = await import("../src/fixtures/mutators");
+            const registry = new MutatorRegistry();
+            registry.register(safeMutator());
+
+            const paths = await runExpandedCases(deps, registry);
+            expect(paths).toHaveLength(1);
+            expect(fs.existsSync(paths[0])).toBe(true);
+
+            const snap: CaseSnapshot = readDetailSnapshot(paths[0]);
+            expect(snap.case).toBe(
+                "captureproxy-capture-proxy-subject-change-proxy-numThreads",
+            );
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it("writes one snapshot per case when the registry has multiple mutators for the subject", async () => {
+        const { deps, tmpDir } = fakeDeps();
+        try {
+            const { runExpandedCases } = await import("../src/e2e-run");
+            const { MutatorRegistry } = await import("../src/fixtures/mutators");
+
+            const secondMutator: Mutator = {
+                ...safeMutator(),
+                name: "proxy-otherKnob",
+                changedPaths: ["traffic.proxies.capture-proxy.proxyConfig.otherKnob"],
+            };
+
+            const registry = new MutatorRegistry();
+            registry.register(safeMutator());
+            registry.register(secondMutator);
+
+            const paths = await runExpandedCases(deps, registry);
+            expect(paths).toHaveLength(2);
+            const names = paths.map((p) => path.basename(p, ".json"));
+            expect(names.sort()).toEqual([
+                "captureproxy-capture-proxy-subject-change-proxy-numThreads",
+                "captureproxy-capture-proxy-subject-change-proxy-otherKnob",
+            ]);
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }

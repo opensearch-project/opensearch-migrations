@@ -174,16 +174,43 @@ describe("extractCrdObservation", () => {
         const item = {
             metadata: { name: "source-proxy", uid: "uid-1", generation: 3 },
             spec: { dependsOn: ["capturedtraffic:source-proxy-topic"] },
-            status: { phase: "Ready" },
+            status: { phase: "Ready", configChecksum: "status-checksum" },
         };
         const obs = extractCrdObservation("captureproxies", item);
         expect(obs).toMatchObject({
             componentId: "captureproxy:source-proxy",
             phase: "Ready",
+            configChecksum: "status-checksum",
             uid: "uid-1",
             generation: 3,
             dependsOn: ["capturedtraffic:source-proxy-topic"],
         });
+    });
+
+    it("uses the config checksum annotation as a defensive fallback", () => {
+        const obs = extractCrdObservation("captureproxies", {
+            metadata: {
+                name: "source-proxy",
+                annotations: {
+                    "migrations.opensearch.org/config-checksum": "annotation-checksum",
+                },
+            },
+            status: { phase: "Ready" },
+        });
+        expect(obs?.configChecksum).toBe("annotation-checksum");
+    });
+
+    it("prefers status.configChecksum over the fallback annotation", () => {
+        const obs = extractCrdObservation("captureproxies", {
+            metadata: {
+                name: "source-proxy",
+                annotations: {
+                    "migrations.opensearch.org/config-checksum": "annotation-checksum",
+                },
+            },
+            status: { phase: "Ready", configChecksum: "status-checksum" },
+        });
+        expect(obs?.configChecksum).toBe("status-checksum");
     });
 
     it("returns null when metadata.name is missing", () => {

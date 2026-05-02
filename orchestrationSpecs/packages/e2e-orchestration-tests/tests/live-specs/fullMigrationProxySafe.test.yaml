@@ -1,8 +1,15 @@
 baseConfig: ../../../config-processor/scripts/samples/fullMigrationWithTraffic.wf.yaml
 phaseCompletionTimeoutSeconds: 600
 
+# Safe variant of the noop spec. Runs the 4-run safe case sequence
+# (baseline → noop-pre → mutated → noop-post) for each mutator matched
+# by the selector. With the built-in mutator registry this resolves to
+# exactly one case: proxy-numThreads on captureproxy:capture-proxy.
 matrix:
   subject: captureproxy:capture-proxy
+  select:
+    - changeClass: safe
+      patterns: [subject-change]
 
 lifecycle:
   setup: [create-basic-auth-secrets]

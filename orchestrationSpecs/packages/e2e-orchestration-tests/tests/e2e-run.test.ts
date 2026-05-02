@@ -11,6 +11,11 @@ import { ActorRegistry, Actor } from "../src/actors";
 import { CaseSnapshot } from "../src/reportSchema";
 import { ComponentId, ObservedComponent, ScenarioSpec } from "../src/types";
 
+function readDetailSnapshot(reportPath: string): CaseSnapshot {
+    const report = JSON.parse(fs.readFileSync(reportPath, "utf8")) as { detailPath: string };
+    return JSON.parse(fs.readFileSync(report.detailPath, "utf8")) as CaseSnapshot;
+}
+
 const COMPONENTS = [
     "captureproxy:capture-proxy",
     "kafkacluster:default",
@@ -100,7 +105,7 @@ describe("runNoopSlice — basic flow", () => {
             const outPath = await runNoopSlice(deps);
             expect(outPath.startsWith(tmpDir)).toBe(true);
 
-            const snapshot: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snapshot.outcome).toBe("passed");
             expect(Object.keys(snapshot.runs)).toEqual(["baseline", "noop-pre"]);
             expect(snapshot.runs["baseline"].checkpoints[0].checkpoint).toBe("baseline-complete");
@@ -131,14 +136,14 @@ describe("runNoopSlice — basic flow", () => {
                 "approve",
                 "approve",
             ]);
-            const approvePatterns = calls
+            const approveCalls = calls
                 .filter((c) => c.args[0] === "approve")
-                .map((c) => c.args[1]);
-            expect(approvePatterns).toEqual([
-                "*.evaluateMetadata",
-                "*.migrateMetadata",
-                "*.evaluateMetadata",
-                "*.migrateMetadata",
+                .map((c) => c.args);
+            expect(approveCalls).toEqual([
+                ["approve", "*.evaluateMetadata", "--namespace", "ma"],
+                ["approve", "*.migrateMetadata", "--namespace", "ma"],
+                ["approve", "*.evaluateMetadata", "--namespace", "ma"],
+                ["approve", "*.migrateMetadata", "--namespace", "ma"],
             ]);
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -151,7 +156,9 @@ describe("runNoopSlice — basic flow", () => {
             await runNoopSlice(deps);
             const deletes = k8sCalls.filter((c) => c.args[0] === "delete");
             expect(deletes.map((c) => c.args.slice(0, 3))).toEqual([
+                ["delete", "workflows.argoproj.io", "migration-workflow"],
                 ["delete", "workflows.argoproj.io", "captureproxy-capture-proxy-noop-baseline-s1"],
+                ["delete", "workflows.argoproj.io", "migration-workflow"],
                 ["delete", "workflows.argoproj.io", "migration-workflow"],
                 ["delete", "workflows.argoproj.io", "captureproxy-capture-proxy-noop-noop-pre-s2"],
                 ["delete", "workflows.argoproj.io", "migration-workflow"],
@@ -253,7 +260,7 @@ describe("runNoopSlice — lifecycle actors", () => {
 
         try {
             const outPath = await runNoopSlice(deps);
-            const snap: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snap: CaseSnapshot = readDetailSnapshot(outPath);
             expect(log).toEqual(["setup-1:ok", "teardown-1:ok"]);
             expect(snap.outcome).toBe("passed");
         } finally {
@@ -275,7 +282,7 @@ describe("runNoopSlice — lifecycle actors", () => {
 
         try {
             const outPath = await runNoopSlice(deps);
-            const snap: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snap: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snap.outcome).toBe("error");
             expect(snap.diagnostics.join("\n")).toMatch(/kubectl exec failed/);
             // Teardown actor still ran despite the failure.
@@ -298,7 +305,7 @@ describe("runNoopSlice — lifecycle actors", () => {
 
         try {
             const outPath = await runNoopSlice(deps);
-            const snap: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snap: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snap.outcome).toBe("error");
 
             const msgs = snap.diagnostics.join("\n");
@@ -322,7 +329,7 @@ describe("runNoopSlice — lifecycle actors", () => {
 
         try {
             const outPath = await runNoopSlice(deps);
-            const snap: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snap: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snap.outcome).toBe("error");
             // No configure/submit calls happened.
             expect(calls.map((c) => c.args[0])).not.toContain("configure");
@@ -342,7 +349,7 @@ describe("runNoopSlice — lifecycle actors", () => {
             // an 'error' snapshot, so we don't assert a throw here —
             // we assert the diagnostic makes the bad name obvious.
             const outPath = await runNoopSlice(deps);
-            const snap: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snap: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snap.outcome).toBe("error");
             expect(snap.diagnostics.join("\n")).toMatch(/does-not-exist/);
         } finally {
@@ -370,7 +377,7 @@ describe("runNoopSlice — error paths", () => {
         });
         try {
             const outPath = await runNoopSlice(deps);
-            const snapshot: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snapshot.outcome).toBe("partial");
             expect(snapshot.diagnostics.join("\n")).toMatch(/phase-timeout/);
         } finally {
@@ -391,7 +398,7 @@ describe("runNoopSlice — error paths", () => {
             };
         try {
             const outPath = await runNoopSlice(deps);
-            const snapshot: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snapshot.outcome).toBe("error");
             expect(snapshot.diagnostics[0]).toMatch(/workflow configure edit/);
             expect(snapshot.diagnostics.join("\n")).toMatch(/stderr: missing secret source-creds/);
@@ -415,10 +422,11 @@ describe("runNoopSlice — error paths", () => {
 
         try {
             const outPath = await runNoopSlice(deps);
-            const snapshot: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snapshot.outcome).toBe("error");
             const deletes = k8sCalls.filter((c) => c.args[0] === "delete");
             expect(deletes.map((c) => c.args.slice(0, 3))).toEqual([
+                ["delete", "workflows.argoproj.io", "migration-workflow"],
                 ["delete", "workflows.argoproj.io", "captureproxy-capture-proxy-noop-baseline-s1"],
                 ["delete", "workflows.argoproj.io", "migration-workflow"],
             ]);
@@ -429,19 +437,27 @@ describe("runNoopSlice — error paths", () => {
 
     it("stops before noop-pre if baseline workflow cleanup fails", async () => {
         const { deps, calls, tmpDir } = fakeDeps();
+        let innerWorkflowDeletes = 0;
         const k8sClient = new K8sClient({
             namespace: "ma",
-            runner: (args) => ({
-                stdout: "",
-                stderr: args[2] === "migration-workflow" ? "delete timed out" : "",
-                exitCode: args[2] === "migration-workflow" ? 1 : 0,
-            }),
+            runner: (args) => {
+                const deletingInnerWorkflow =
+                    args[0] === "delete" && args[2] === "migration-workflow";
+                if (deletingInnerWorkflow) innerWorkflowDeletes += 1;
+                const failPostSubmitInnerDelete =
+                    deletingInnerWorkflow && innerWorkflowDeletes > 1;
+                return {
+                    stdout: "",
+                    stderr: failPostSubmitInnerDelete ? "delete timed out" : "",
+                    exitCode: failPostSubmitInnerDelete ? 1 : 0,
+                };
+            },
         });
         deps.k8sClient = k8sClient;
 
         try {
             const outPath = await runNoopSlice(deps);
-            const snapshot: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snapshot.outcome).toBe("error");
             expect(snapshot.diagnostics.join("\n")).toMatch(/workflow cleanup failed for baseline/);
             expect(calls.filter((c) => c.args[0] === "submit")).toHaveLength(1);
@@ -477,7 +493,7 @@ describe("runNoopSlice — assertLogic integration", () => {
 
         try {
             const outPath = await runNoopSlice(deps);
-            const snap: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snap: CaseSnapshot = readDetailSnapshot(outPath);
 
             // A violation per component on the noop checkpoint.
             const noopCp = snap.runs["noop-pre"].checkpoints[0];
@@ -509,7 +525,7 @@ describe("runNoopSlice — assertLogic integration", () => {
         const { deps, tmpDir } = fakeDeps();
         try {
             const outPath = await runNoopSlice(deps);
-            const snap: CaseSnapshot = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snap: CaseSnapshot = readDetailSnapshot(outPath);
             const baselineCp = snap.runs["baseline"].checkpoints[0];
             for (const id of Object.keys(baselineCp.components) as ComponentId[]) {
                 expect(baselineCp.components[id].behavior).toBe("ran");

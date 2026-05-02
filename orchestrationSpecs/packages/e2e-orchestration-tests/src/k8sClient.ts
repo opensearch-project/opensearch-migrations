@@ -215,6 +215,7 @@ export class K8sClient {
 export interface CrdObservation {
     componentId: ComponentId;
     phase: string;
+    configChecksum?: string;
     uid?: string;
     generation?: number;
     /** spec.dependsOn, if present. */
@@ -233,6 +234,8 @@ export function extractCrdObservation(
 
     const status = (item["status"] as Record<string, unknown> | undefined) ?? {};
     const spec = (item["spec"] as Record<string, unknown> | undefined) ?? {};
+    const annotations =
+        (meta["annotations"] as Record<string, unknown> | undefined) ?? {};
     const kind = pluralToKind(plural);
     const componentId = `${kind}:${name}` as ComponentId;
     const dependsOnRaw = spec["dependsOn"];
@@ -244,12 +247,30 @@ export function extractCrdObservation(
     return {
         componentId,
         phase: typeof status["phase"] === "string" ? (status["phase"] as string) : "Unknown",
+        configChecksum: extractConfigChecksum(status, annotations),
         uid: typeof meta["uid"] === "string" ? (meta["uid"] as string) : undefined,
         generation:
             typeof meta["generation"] === "number" ? (meta["generation"] as number) : undefined,
         dependsOn,
         raw: item,
     };
+}
+
+const CONFIG_CHECKSUM_ANNOTATION = "migrations.opensearch.org/config-checksum";
+
+function extractConfigChecksum(
+    status: Record<string, unknown>,
+    annotations: Record<string, unknown>,
+): string | undefined {
+    const statusChecksum = status["configChecksum"];
+    if (typeof statusChecksum === "string" && statusChecksum.length > 0) {
+        return statusChecksum;
+    }
+    const annotationChecksum = annotations[CONFIG_CHECKSUM_ANNOTATION];
+    if (typeof annotationChecksum === "string" && annotationChecksum.length > 0) {
+        return annotationChecksum;
+    }
+    return undefined;
 }
 
 /**

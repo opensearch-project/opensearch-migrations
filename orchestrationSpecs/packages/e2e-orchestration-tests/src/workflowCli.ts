@@ -152,9 +152,31 @@ export class WorkflowCli {
         return this.must(args, { timeoutMs: this.defaultTimeoutMs });
     }
 
-    /** `workflow approve <pattern> --namespace <ns>`. */
+    /**
+     * Approve structural step gates.
+     *
+     * The migration-console CLI approves pending gates directly by
+     * task name or glob pattern, e.g.:
+     * `workflow approve "*.evaluateMetadata" --namespace ma`.
+     */
     approve(pattern: string): WorkflowCliRunResult {
-        return this.must(["approve", pattern, "--namespace", this.namespace]);
+        const args = ["approve", pattern, "--namespace", this.namespace];
+        const res = this.runner(args, { timeoutMs: this.defaultTimeoutMs });
+        if (
+            res.exitCode !== 0 &&
+            /(No pending steps found|No gates are currently being waited on|No pending gates match)/i.test(res.stdout)
+        ) {
+            return { ...res, exitCode: 0 };
+        }
+        if (res.exitCode !== 0) {
+            throw new WorkflowCliError(
+                `workflow ${args.join(" ")} exited ${res.exitCode}`,
+                res.exitCode,
+                res.stdout,
+                res.stderr,
+            );
+        }
+        return res;
     }
 
     /**

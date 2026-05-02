@@ -45,7 +45,7 @@ import {
     RunRecord,
     RunCheckpoint,
 } from "./reportSchema";
-import { writeCaseSnapshot } from "./snapshotStore";
+import { CaseReport, writeCaseSnapshot } from "./snapshotStore";
 import { sanitizeWorkflowName } from "./workflowName";
 import { Checkpoint, ComponentId, ObservedComponent, ScenarioSpec, Violation } from "./types";
 import { Actor, ActorContext, ActorRegistry } from "./actors";
@@ -53,7 +53,8 @@ import { builtinActors } from "./builtinActors";
 import { deriveBehavior } from "./behaviorDerivation";
 import { assertNoViolations } from "./assertLogic";
 import { ExpandedTestCase, expandCases } from "./matrixExpander";
-import { MutatorRegistry } from "./fixtures/mutators";
+import { Mutator, MutatorRegistry } from "./fixtures/mutators";
+import { builtinMutators } from "./fixtures/builtinMutators";
 
 // ── Types shared by the CLI entrypoint and its testable core ─────────
 
@@ -414,6 +415,18 @@ async function runSubmittedWorkflow(args: {
     let cleanupFailed = false;
 
     try {
+        const preSubmitCleanupOk = cleanupWorkflowResources({
+            deps,
+            runName,
+            workflowName,
+            deleteOuterWorkflow: false,
+            diagnostics,
+            events,
+            clock,
+        });
+        if (!preSubmitCleanupOk) {
+            throw new Error(`pre-submit workflow cleanup failed for ${runName}`);
+        }
         workflowEvent(
             events,
             clock,
@@ -437,7 +450,7 @@ async function runSubmittedWorkflow(args: {
                 clock,
                 runName,
                 "approve",
-                `workflow approve ${gate.approvePattern} --namespace ${deps.namespace}`,
+                workflowApproveCommand(gate.approvePattern, deps.namespace),
                 () => deps.workflowCli.approve(gate.approvePattern),
             );
         }
@@ -604,16 +617,20 @@ async function waitAndCheckpoint(
     const finalObs = await deps.readObservations();
 
     if (outcome.kind === "timeout") {
+        const workflowSummary = summarizeArgoWorkflow(deps.k8sClient);
         events.push(event(clock, checkpoint, "wait-phase-completion", "error", {
             message: outcome.blockingComponents
                 .map((b) => `${b.componentId}=${b.phase}`)
-                .join(", "),
+                .join(", ") + (workflowSummary ? `; ${workflowSummary}` : ""),
         }));
         diagnostics.push(
             `phase-timeout at ${checkpoint}: ${outcome.blockingComponents
                 .map((b) => `${b.componentId}=${b.phase}`)
                 .join(", ")}`,
         );
+        if (workflowSummary) {
+            diagnostics.push(`argo: ${workflowSummary}`);
+        }
     } else {
         events.push(event(clock, checkpoint, "wait-phase-completion", "ok", {
             message: `ready after ${outcome.waitedMs}ms`,
@@ -671,15 +688,47 @@ export interface RunFromSpecOptions {
      * runner executes the first expanded case instead of the noop slice.
      */
     mutatorRegistry?: MutatorRegistry;
+    /**
+     * Extra mutators to register alongside the built-ins. Ignored if
+     * `mutatorRegistry` is provided.
+     */
+    extraMutators?: readonly Mutator[];
+    /**
+     * When true, built-in mutators are not registered. Use this when a
+     * caller wants complete control over available mutators. Ignored if
+     * `mutatorRegistry` is provided.
+     */
+    omitBuiltinMutators?: boolean;
+    /**
+     * When true, ignore the matrix and run the legacy noop slice
+     * (`runNoopSlice`). Preserves the original `baseline → noop-pre`
+     * behaviour for debugging and live-run bring-up. Defaults to false
+     * for CLI runs — normal execution expands the matrix and runs every
+     * case.
+     */
+    noopOnly?: boolean;
+    /**
+     * Optional per-invocation override for the spec's phase completion
+     * timeout. This is useful for live smoke runs where the environment
+     * may be unhealthy and the caller wants a quick diagnostic snapshot
+     * without editing the checked-in spec.
+     */
+    phaseCompletionTimeoutSeconds?: number;
 }
 
 /**
  * Top-level entrypoint. The CLI below wraps this with argv parsing; the
  * function itself is exported so in-process callers (and tests that
  * choose to use real resources) can run it directly.
+ *
+ * Returns an array of written snapshot paths — one per expanded case,
+ * or a single entry when `noopOnly` is set.
  */
-export async function runFromSpec(opts: RunFromSpecOptions): Promise<string> {
+export async function runFromSpec(opts: RunFromSpecOptions): Promise<string[]> {
     const loaded = loadScenarioSpec(opts.specPath);
+    if (opts.phaseCompletionTimeoutSeconds !== undefined) {
+        loaded.spec.phaseCompletionTimeoutSeconds = opts.phaseCompletionTimeoutSeconds;
+    }
     const topology = requireTopologyForBaseline(loaded.resolvedBaseConfigPath);
 
     const cliMode = opts.cliMode ?? "kubectl-exec";
@@ -711,6 +760,7 @@ export async function runFromSpec(opts: RunFromSpecOptions): Promise<string> {
                 components[obs.componentId] = {
                     componentId: obs.componentId,
                     phase: obs.phase,
+                    configChecksum: obs.configChecksum,
                     generation: obs.generation,
                     uid: obs.uid,
                     raw: obs.raw,
@@ -726,7 +776,20 @@ export async function runFromSpec(opts: RunFromSpecOptions): Promise<string> {
     }
     for (const a of opts.extraActors ?? []) actorRegistry.register(a);
 
-    return runNoopSlice({
+    // Build a mutator registry by layering built-ins under any caller
+    // overrides, unless the caller supplied a pre-built registry.
+    const mutatorRegistry =
+        opts.mutatorRegistry ??
+        (() => {
+            const reg = new MutatorRegistry();
+            if (!opts.omitBuiltinMutators) {
+                for (const m of builtinMutators()) reg.register(m);
+            }
+            for (const m of opts.extraMutators ?? []) reg.register(m);
+            return reg;
+        })();
+
+    const sharedDeps: LiveRunnerDeps = {
         workflowCli,
         k8sClient: k8s,
         namespace: opts.namespace,
@@ -737,8 +800,104 @@ export async function runFromSpec(opts: RunFromSpecOptions): Promise<string> {
         specPath: path.resolve(opts.specPath),
         baselineConfigPath: loaded.resolvedBaseConfigPath,
         outputDir: opts.outputDir,
-        mutatorRegistry: opts.mutatorRegistry,
-    });
+        mutatorRegistry,
+    };
+
+    // Noop-only mode keeps the original baseline → noop-pre harness
+    // intact. Useful for bring-up and for debugging phase-completion
+    // issues before touching mutation flow.
+    if (opts.noopOnly) {
+        return [await runNoopSlice(sharedDeps)];
+    }
+
+    return runExpandedCases(sharedDeps, mutatorRegistry);
+}
+
+/**
+ * Expand the shared deps' spec into cases and run each one in order.
+ *
+ * Factored out of `runFromSpec` so tests can exercise the
+ * expansion-and-run orchestration against fake deps without having
+ * to build a real kubectl/workflow CLI stack.
+ */
+export async function runExpandedCases(
+    deps: LiveRunnerDeps,
+    mutatorRegistry: MutatorRegistry,
+): Promise<string[]> {
+    const cases = expandCases(deps.spec, mutatorRegistry);
+    const out: string[] = [];
+    for (const expanded of cases) {
+        out.push(await runSafeCase(deps, expanded));
+    }
+    return out;
+}
+
+// ── Result summarisation ─────────────────────────────────────────────
+
+export interface CaseSummary {
+    path: string;
+    case: string;
+    outcome: CaseOutcome;
+    violationCount: number;
+    diagnosticCount: number;
+}
+
+export interface RunSummary {
+    cases: CaseSummary[];
+    totalViolations: number;
+    errorCount: number;
+    partialCount: number;
+    anyFailed: boolean;
+}
+
+/**
+ * Walk the snapshot files produced by `runFromSpec`/`runExpandedCases`
+ * and summarise case outcomes. A run has "failed" (for the CLI exit
+ * code) if any case is `error`, or if any case has at least one
+ * violation. `partial` without violations (e.g. teardown stub
+ * "NotImplementedActorError") is allowed to pass.
+ */
+export function summariseSnapshots(paths: readonly string[]): RunSummary {
+    const cases: CaseSummary[] = [];
+    let totalViolations = 0;
+    let errorCount = 0;
+    let partialCount = 0;
+
+    for (const p of paths) {
+        const raw = fs.readFileSync(p, "utf8");
+        const parsed = JSON.parse(raw) as Partial<CaseSnapshot> & Partial<CaseReport>;
+        const violationCount =
+            typeof parsed.violationCount === "number"
+                ? parsed.violationCount
+                : (parsed.violations ?? []).length;
+        const diagnosticCount =
+            typeof parsed.diagnosticCount === "number"
+                ? parsed.diagnosticCount
+                : (parsed.diagnostics ?? []).length;
+        if (!parsed.case || !parsed.outcome) {
+            throw new Error(`Summary file ${p} is missing case or outcome`);
+        }
+        const caseName = parsed.case;
+        const outcome = parsed.outcome;
+        cases.push({
+            path: p,
+            case: caseName,
+            outcome,
+            violationCount,
+            diagnosticCount,
+        });
+        totalViolations += violationCount;
+        if (parsed.outcome === "error") errorCount += 1;
+        if (parsed.outcome === "partial") partialCount += 1;
+    }
+
+    return {
+        cases,
+        totalViolations,
+        errorCount,
+        partialCount,
+        anyFailed: errorCount > 0 || totalViolations > 0,
+    };
 }
 
 // ── CLI shim ─────────────────────────────────────────────────────────
@@ -747,7 +906,7 @@ async function main(): Promise<void> {
     const args = process.argv.slice(2);
     if (args.length < 1) {
         console.error(
-            "Usage: e2e-run <spec-path> [--namespace ma] [--output-dir ./snapshots] [--local]",
+            "Usage: e2e-run <spec-path> [--namespace ma] [--output-dir ./snapshots] [--local] [--noop-only] [--phase-timeout-seconds 600]",
         );
         process.exit(2);
     }
@@ -755,10 +914,37 @@ async function main(): Promise<void> {
     const namespace = takeFlag(args, "--namespace") ?? "ma";
     const outputDir = takeFlag(args, "--output-dir") ?? path.resolve("snapshots");
     const cliMode = args.includes("--local") ? "local" : "kubectl-exec";
+    const noopOnly = args.includes("--noop-only");
 
     try {
-        const out = await runFromSpec({ specPath, namespace, outputDir, cliMode });
-        console.log(`Snapshot written to ${out}`);
+        const phaseCompletionTimeoutSeconds = parsePositiveIntFlag(
+            takeFlag(args, "--phase-timeout-seconds"),
+            "--phase-timeout-seconds",
+        );
+        const out = await runFromSpec({
+            specPath,
+            namespace,
+            outputDir,
+            cliMode,
+            noopOnly,
+            phaseCompletionTimeoutSeconds,
+        });
+        const summary = summariseSnapshots(out);
+        for (const c of summary.cases) {
+            const suffix =
+                c.violationCount > 0
+                    ? ` — ${c.violationCount} violation(s)`
+                    : "";
+            console.log(
+                `Snapshot written to ${c.path} [${c.outcome}]${suffix}`,
+            );
+        }
+        if (summary.anyFailed) {
+            console.error(
+                `Run failed: ${summary.errorCount} case(s) errored, ${summary.totalViolations} violation(s) across ${summary.cases.length} case(s).`,
+            );
+            process.exit(1);
+        }
     } catch (e) {
         console.error((e as Error).message);
         process.exit(1);
@@ -771,6 +957,15 @@ function takeFlag(args: string[], flag: string): string | undefined {
     const v = args[idx + 1];
     args.splice(idx, 2);
     return v;
+}
+
+function parsePositiveIntFlag(value: string | undefined, flag: string): number | undefined {
+    if (value === undefined) return undefined;
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+        throw new Error(`${flag} must be a positive integer`);
+    }
+    return parsed;
 }
 
 /**
@@ -795,6 +990,62 @@ function deriveBehaviorOnAll(
 /** Collect every checkpoint-attached violation across a run's checkpoints. */
 function collectViolations(run: RunRecord): Violation[] {
     return run.checkpoints.flatMap((cp) => cp.violations ?? []);
+}
+
+function workflowApproveCommand(pattern: string, namespace: string): string {
+    return `workflow approve ${pattern} --namespace ${namespace}`;
+}
+
+function summarizeArgoWorkflow(k8sClient: K8sClient): string | null {
+    try {
+        const workflow = k8sClient.getOne(ARGO_WORKFLOW_RESOURCE, INNER_MIGRATION_WORKFLOW_NAME);
+        if (!workflow) return null;
+        const status = asRecord(workflow["status"]);
+        const phase = typeof status?.["phase"] === "string" ? status["phase"] : "(unknown)";
+        const nodes = asRecord(status?.["nodes"]);
+        const interestingNodes = nodes
+            ? Object.values(nodes)
+                  .map((n) => asRecord(n))
+                  .filter((n): n is Record<string, unknown> => Boolean(n))
+                  .map((n) => ({
+                      name: workflowNodeName(n),
+                      phase: typeof n["phase"] === "string" ? n["phase"] : undefined,
+                      message: truncate(
+                          typeof n["message"] === "string" ? n["message"] : undefined,
+                          120,
+                      ),
+                  }))
+                  .filter((n) => n.phase && n.phase !== "Succeeded")
+                  .slice(0, 6)
+            : [];
+        if (interestingNodes.length === 0) {
+            return `${INNER_MIGRATION_WORKFLOW_NAME} phase=${phase}`;
+        }
+        return `${INNER_MIGRATION_WORKFLOW_NAME} phase=${phase}; nodes=${interestingNodes
+            .map((n) => `${n.name ?? "(unnamed)"}:${n.phase}${n.message ? ` (${n.message})` : ""}`)
+            .join(", ")}`;
+    } catch {
+        return null;
+    }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null;
+}
+
+function workflowNodeName(node: Record<string, unknown>): string | undefined {
+    const templateName =
+        typeof node["templateName"] === "string" ? node["templateName"] : undefined;
+    const displayName =
+        typeof node["displayName"] === "string" ? node["displayName"] : undefined;
+    return truncate(templateName ?? displayName, 80);
+}
+
+function truncate(value: string | undefined, max: number): string | undefined {
+    if (!value || value.length <= max) return value;
+    return `${value.slice(0, Math.max(0, max - 3))}...`;
 }
 
 // `require.main === module` equivalent for CommonJS; tsx/ts-node both

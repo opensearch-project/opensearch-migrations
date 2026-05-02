@@ -75,14 +75,20 @@ describe("writeCaseSnapshot", () => {
         fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
-    it("writes a validated snapshot to <outputDir>/<case>.json", () => {
+    it("writes a short report to <outputDir>/<case>.json and details beside it", () => {
         const out = writeCaseSnapshot(MIN_SNAPSHOT, { outputDir: tmpDir });
         expect(out).toBe(
             path.resolve(tmpDir, "proxy-subjectChange-numThreads.json"),
         );
-        const written = JSON.parse(fs.readFileSync(out, "utf8"));
-        expect(written.case).toBe("proxy-subjectChange-numThreads");
-        expect(written.outcome).toBe("partial");
+        const report = JSON.parse(fs.readFileSync(out, "utf8"));
+        expect(report.case).toBe("proxy-subjectChange-numThreads");
+        expect(report.outcome).toBe("partial");
+        expect(report.runCount).toBe(1);
+        expect(report.detailPath).toBe(
+            path.resolve(tmpDir, "proxy-subjectChange-numThreads.details.json"),
+        );
+        const details = JSON.parse(fs.readFileSync(report.detailPath, "utf8"));
+        expect(details.runs.baseline).toBeDefined();
     });
 
     it("creates the output directory if needed", () => {
@@ -109,6 +115,8 @@ describe("writeCaseSnapshot", () => {
         const bad = { ...MIN_SNAPSHOT, outcome: "never" } as unknown as CaseSnapshot;
         const out = writeCaseSnapshot(bad, { outputDir: tmpDir, validate: false });
         expect(fs.existsSync(out)).toBe(true);
+        const report = JSON.parse(fs.readFileSync(out, "utf8"));
+        expect(fs.existsSync(report.detailPath)).toBe(true);
     });
 });
 

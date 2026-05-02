@@ -70,7 +70,19 @@ describe("WorkflowCli subcommands", () => {
         ]);
     });
 
-    it("builds 'approve' with the given pattern and namespace", () => {
+    it("builds approve for exact gate names", () => {
+        const r = recordingRunner();
+        const cli = new WorkflowCli({ runner: r.runner, namespace: "ma" });
+        cli.approve("source.target.snap1.migration-0.evaluatemetadata");
+        expect(r.calls[0].args).toEqual([
+            "approve",
+            "source.target.snap1.migration-0.evaluatemetadata",
+            "--namespace",
+            "ma",
+        ]);
+    });
+
+    it("builds approve for glob-style patterns", () => {
         const r = recordingRunner();
         const cli = new WorkflowCli({ runner: r.runner, namespace: "ma" });
         cli.approve("*.evaluateMetadata");
@@ -80,6 +92,24 @@ describe("WorkflowCli subcommands", () => {
             "--namespace",
             "ma",
         ]);
+    });
+
+    it("treats no pending structural step gates as idempotent success", () => {
+        const r = recordingRunner();
+        r.respond("No gates are currently being waited on by the workflow.\n", "command terminated with exit code 1", 1);
+        const cli = new WorkflowCli({ runner: r.runner, namespace: "ma" });
+        const result = cli.approve("*.evaluateMetadata");
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("No gates are currently");
+    });
+
+    it("treats no matching pending gates as idempotent success", () => {
+        const r = recordingRunner();
+        r.respond("No pending gates match ('*.documentbackfill',).\nAvailable pending gates:\n  - default.vapretry\n", "command terminated with exit code 1", 1);
+        const cli = new WorkflowCli({ runner: r.runner, namespace: "ma" });
+        const result = cli.approve("*.documentbackfill");
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain("No pending gates match");
     });
 
     it("builds 'reset' with all documented flags in order", () => {

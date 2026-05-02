@@ -152,11 +152,11 @@ lifecycle:
 # Structural gates appear in every run regardless of mutation.
 # Listed validators run (as Observers + Checkers) before the framework approves each gate.
 approvalGates:
-  - approvePattern: "*.evaluateMetadata"
+  - approvePattern: "*.evaluatemetadata"
     validations: []
-  - approvePattern: "*.migrateMetadata"
+  - approvePattern: "*.migratemetadata"
     validations: [compare-indices]
-  - approvePattern: "*.documentBackfill"
+  - approvePattern: "*.documentbackfill"
     validations: [compare-indices]
 ```
 
