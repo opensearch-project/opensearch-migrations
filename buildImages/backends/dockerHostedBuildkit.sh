@@ -7,6 +7,7 @@ if [[ -z "${MIGRATIONS_REPO_ROOT_DIR:-}" ]]; then
 fi
 
 set_docker_hosted_defaults() {
+  : "${REGISTRY_IMAGE:=public.ecr.aws/docker/library/registry:2}"
   : "${EXTERNAL_DOCKER_NETWORK:=local-migrations-network}"
   : "${EXTERNAL_REGISTRY_NAME:=docker-registry}"
   : "${EXTERNAL_REGISTRY_PORT:=5001}"
@@ -16,7 +17,7 @@ set_docker_hosted_defaults() {
 
 get_docker_network_dns_servers() {
   local resolv_conf dns_line
-  resolv_conf="$(docker run --rm --network "${EXTERNAL_DOCKER_NETWORK}" registry:2 cat /etc/resolv.conf 2>/dev/null || true)"
+  resolv_conf="$(docker run --rm --network "${EXTERNAL_DOCKER_NETWORK}" "${REGISTRY_IMAGE}" cat /etc/resolv.conf 2>/dev/null || true)"
   dns_line="$(printf '%s\n' "${resolv_conf}" | sed -n 's/^# ExtServers: \[\(.*\)\]$/\1/p' | head -n1)"
 
   if [[ -z "${dns_line}" ]]; then
@@ -73,7 +74,7 @@ ensure_registry_container() {
       -p "127.0.0.1:${EXTERNAL_REGISTRY_PORT}:5000" \
       -v "${EXTERNAL_REGISTRY_VOLUME}:/var/lib/registry" \
       --restart=always \
-      registry:2 >/dev/null
+      "${REGISTRY_IMAGE}" >/dev/null
   else
     if [[ "$(docker inspect -f '{{.State.Running}}' "${EXTERNAL_REGISTRY_NAME}")" != "true" ]]; then
       docker start "${EXTERNAL_REGISTRY_NAME}" >/dev/null
