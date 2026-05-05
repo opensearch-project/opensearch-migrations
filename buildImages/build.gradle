@@ -95,12 +95,6 @@ def buildKitProjects = [
                 ]
         ],
         [
-                serviceName: "elasticsearchTestConsole",
-                contextDir: "TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole",
-                imageName:  "elasticsearch_test_console",
-                imageTag:   "latest"
-        ],
-        [
                 serviceName: "migrationConsoleBase",
                 contextDir: "migrationConsole/build/dockerContext",
                 imageName:  "migration_console_base",
