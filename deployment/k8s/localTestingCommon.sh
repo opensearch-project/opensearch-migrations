@@ -73,14 +73,19 @@ set_up_local_build_services() {
 }
 
 build_local_images() {
-  local builder_name platform
+  local builder_name platform image_tag
   builder_name="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"
   platform=$(detect_platform)
+  image_tag="${LOCAL_IMAGE_TAG:-latest}"
   local gradle_args=()
 
   export LOCAL_REGISTRY
   echo "Using local registry for cluster image pulls: ${LOCAL_REGISTRY}"
+  echo "Using local image tag: ${image_tag}"
   echo "Using build registry endpoint: ${BUILD_REGISTRY_ENDPOINT}"
+  if [[ "${image_tag}" != "latest" ]]; then
+    gradle_args+=("-PimageVersion=${image_tag}")
+  fi
   if [[ -n "${BUILD_CONTAINER_REGISTRY_ENDPOINT:-}" ]]; then
     echo "Using container-visible registry endpoint for builds: ${BUILD_CONTAINER_REGISTRY_ENDPOINT}"
     gradle_args+=("-PlocalContainerRegistryEndpoint=${BUILD_CONTAINER_REGISTRY_ENDPOINT}")
@@ -103,6 +108,7 @@ run_named_hook() {
 
 deploy_local_charts() {
   cd "${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s/"
+  local image_tag="${LOCAL_IMAGE_TAG:-latest}"
 
   print_step "Updating Helm dependencies"
   helm dependency update charts/aggregates/testClusters
@@ -110,32 +116,35 @@ deploy_local_charts() {
 
   if [[ "${USE_LOCAL_REGISTRY:-false}" == "true" ]]; then
     echo "Using LOCAL_REGISTRY for images: ${LOCAL_REGISTRY}"
+    echo "Using local image tag: ${image_tag}"
     print_step "Installing Migration Assistant chart"
     helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma ma charts/aggregates/migrationAssistantWithArgo \
       --wait --timeout 10m \
       -f charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml \
       --set "images.captureProxy.repository=${LOCAL_REGISTRY}/migrations/capture_proxy" \
-      --set "images.captureProxy.tag=latest" \
+      --set "images.captureProxy.tag=${image_tag}" \
       --set "images.captureProxy.pullPolicy=Always" \
       --set "images.installer.repository=${LOCAL_REGISTRY}/migrations/migration_console" \
-      --set "images.installer.tag=latest" \
+      --set "images.installer.tag=${image_tag}" \
       --set "images.installer.pullPolicy=Always" \
       --set "images.migrationConsole.repository=${LOCAL_REGISTRY}/migrations/migration_console" \
-      --set "images.migrationConsole.tag=latest" \
+      --set "images.migrationConsole.tag=${image_tag}" \
       --set "images.migrationConsole.pullPolicy=Always" \
       --set "images.trafficReplayer.repository=${LOCAL_REGISTRY}/migrations/traffic_replayer" \
-      --set "images.trafficReplayer.tag=latest" \
+      --set "images.trafficReplayer.tag=${image_tag}" \
       --set "images.trafficReplayer.pullPolicy=Always" \
       --set "images.reindexFromSnapshot.repository=${LOCAL_REGISTRY}/migrations/reindex_from_snapshot" \
-      --set "images.reindexFromSnapshot.tag=latest" \
-      --set "images.reindexFromSnapshot.pullPolicy=Always"
+      --set "images.reindexFromSnapshot.tag=${image_tag}" \
+      --set "images.reindexFromSnapshot.pullPolicy=Always" \
+      --set "charts.kyverno.values.webhooksCleanup.image.tag=${image_tag}"
 
     run_named_hook "${POST_MA_INSTALL_HOOK:-}"
 
     print_step "Installing local source and target test clusters"
     helm --kube-context "${KUBE_CONTEXT}" upgrade --install --create-namespace -n ma tc charts/aggregates/testClusters \
       --wait --timeout 10m \
-      --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard"
+      --set "source.image=${LOCAL_REGISTRY}/migrations/elasticsearch_searchguard" \
+      --set "source.imageTag=${image_tag}"
   else
     echo "Using non-local registry (USE_LOCAL_REGISTRY=false). Adjust repositories as needed."
     print_step "Installing Migration Assistant chart"
