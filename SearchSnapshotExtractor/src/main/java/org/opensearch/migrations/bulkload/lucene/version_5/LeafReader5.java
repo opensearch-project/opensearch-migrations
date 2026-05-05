@@ -7,7 +7,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
@@ -265,39 +264,39 @@ public class LeafReader5 implements LuceneLeafReader {
     }
 
     /**
-     * Single-pass walk of the terms dictionary for {@code fieldName}. Produces a
-     * docId -> position-ordered term list map used by {@link SegmentTermIndex}
-     * to reconstruct analyzed-text fields when neither stored fields nor
-     * doc_values are available.
-     *
-     * No caching here: the surrounding {@link SegmentTermIndex} owns the
-     * returned map, and that index lives only as long as the per-segment Flux
-     * created in {@link org.opensearch.migrations.bulkload.lucene.LuceneReader#readDocsFromSegment}.
+     * See {@link LuceneLeafReader#streamFieldPostings}. Single-pass walk of the terms
+     * dictionary for {@code fieldName}, streaming {@code (termId, docId, positions[])}
+     * callbacks to the sink. Used by {@link SegmentTermIndex} to reconstruct
+     * analyzed-text fields when neither stored fields nor doc_values are available.
      */
     @Override
-    public Map<Integer, List<String>> buildTermPositionIndex(String fieldName) throws IOException {
+    public void streamFieldPostings(String fieldName,
+            org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink sink) throws IOException {
         Terms terms = wrapped.terms(fieldName);
-        if (terms == null) return Collections.emptyMap();
-        // docId -> (position -> term)
-        Map<Integer, TreeMap<Integer, String>> docPositions = new HashMap<>();
+        if (terms == null) return;
         TermsEnum termsEnum = terms.iterator();
         BytesRef term;
+        int[] positions = new int[16];
         while ((term = termsEnum.next()) != null) {
-            String termStr = term.utf8ToString();
+            int termId = sink.registerTerm(
+                new org.opensearch.migrations.bulkload.lucene.sidecar.BytesRefLike(
+                    term.bytes, term.offset, term.length));
             PostingsEnum postings = termsEnum.postings(null, PostingsEnum.POSITIONS);
             int doc;
             while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
-                TreeMap<Integer, String> positions = docPositions.computeIfAbsent(doc, k -> new TreeMap<>());
                 int freq = postings.freq();
+                if (freq > positions.length) {
+                    positions = new int[Math.max(freq, positions.length * 2)];
+                }
+                int n = 0;
                 for (int i = 0; i < freq; i++) {
                     int pos = postings.nextPosition();
-                    positions.put(pos, termStr);
+                    if (pos < 0) continue;
+                    positions[n++] = pos;
                 }
+                if (n > 0) sink.accept(termId, doc, positions, n);
             }
         }
-        Map<Integer, List<String>> result = new HashMap<>(docPositions.size());
-        docPositions.forEach((docId, positions) -> result.put(docId, new ArrayList<>(positions.values())));
-        return result;
     }
 
     /**

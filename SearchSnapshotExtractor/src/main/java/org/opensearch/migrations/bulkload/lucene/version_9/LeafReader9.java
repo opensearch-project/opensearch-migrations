@@ -4,10 +4,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
 
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
@@ -261,29 +258,38 @@ public class LeafReader9 implements LuceneLeafReader {
         return null;
     }
 
-    /** See {@link LuceneLeafReader#buildTermPositionIndex}. */
+    /** See {@link LuceneLeafReader#streamFieldPostings}. */
     @Override
-    public Map<Integer, List<String>> buildTermPositionIndex(String fieldName) throws IOException {
+    public void streamFieldPostings(String fieldName,
+            org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink sink) throws IOException {
         Terms terms = wrapped.terms(fieldName);
-        if (terms == null) return Collections.emptyMap();
-        Map<Integer, TreeMap<Integer, String>> docPositions = new HashMap<>();
+        if (terms == null) return;
         TermsEnum termsEnum = terms.iterator();
         BytesRef term;
+        int[] positions = new int[16];
         while ((term = termsEnum.next()) != null) {
-            String termStr = term.utf8ToString();
+            int termId = sink.registerTerm(
+                new org.opensearch.migrations.bulkload.lucene.sidecar.BytesRefLike(
+                    term.bytes, term.offset, term.length));
             PostingsEnum postings = termsEnum.postings(null, PostingsEnum.POSITIONS);
             int doc;
             while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
-                TreeMap<Integer, String> positions = docPositions.computeIfAbsent(doc, k -> new TreeMap<>());
                 int freq = postings.freq();
+                if (freq > positions.length) {
+                    positions = new int[Math.max(freq, positions.length * 2)];
+                }
+                int n = 0;
                 for (int i = 0; i < freq; i++) {
                     int pos = postings.nextPosition();
-                    positions.put(pos, termStr);
+                    // Lucene returns negative positions (e.g. -1) when the field was
+                    // indexed without positions. Such tuples are not position-meaningful;
+                    // skip them so the sidecar stays well-defined and downstream
+                    // falls back to the single-term / keyword path.
+                    if (pos < 0) continue;
+                    positions[n++] = pos;
                 }
+                if (n > 0) sink.accept(termId, doc, positions, n);
             }
         }
-        Map<Integer, List<String>> result = new HashMap<>(docPositions.size());
-        docPositions.forEach((docId, positions) -> result.put(docId, new ArrayList<>(positions.values())));
-        return result;
     }
 }

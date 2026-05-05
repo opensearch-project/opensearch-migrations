@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink;
+
 public interface LuceneLeafReader {
 
     public LuceneDocument document(int luceneDocId) throws IOException;
@@ -62,17 +64,26 @@ public interface LuceneLeafReader {
     default String getValueFromTerms(int docId, String fieldName) throws IOException { return null; }
 
     /**
-     * Version-specific hook: walk the terms dictionary for {@code fieldName} once and return a
-     * docId -> position-ordered term list map. This performs the raw Lucene iteration over
-     * shadow-relocated {@code Terms}/{@code TermsEnum}/{@code PostingsEnum}, which is why it
-     * can't be written in this shared interface.
+     * Streams the inverted index for {@code fieldName} into {@code sink} as
+     * {@code (termId, docId, positions[])} callbacks, one per (term, doc) pair that has
+     * at least one non-negative position.
      *
-     * Called at most once per (segment, field) via {@link SegmentTermIndex}. The returned map
-     * is owned by the caller and lives only as long as the {@link SegmentTermIndex} that holds
-     * it, which is scoped to a single segment's Flux in {@link LuceneReader#readDocsFromSegment}.
+     * <p>Ordering contract: terms are visited in ascending-bytes order (matches Lucene's
+     * {@code TermsEnum.next()}), and for each term docs are visited in ascending-docId order
+     * (matches Lucene's {@code PostingsEnum.nextDoc()}). Positions within each callback are
+     * already in ascending order as emitted by {@code PostingsEnum.nextPosition()}.
+     *
+     * <p>The default implementation is a no-op: versions that don't support source
+     * reconstruction from the inverted index (e.g. Lucene 10 / OS 3.x which always have
+     * stored fields or doc_values) leave this unimplemented and callers see an empty stream.
+     *
+     * <p>Callers must first invoke {@link PostingsSink#registerTerm} on each new term (as it
+     * appears in the walk) to get its assigned {@code termId}, then invoke
+     * {@link PostingsSink#accept(int, int, int[], int)} once per (term, doc). The reusable
+     * {@code int[]} passed to {@code accept} is only borrowed for the duration of the call.
      */
-    default Map<Integer, List<String>> buildTermPositionIndex(String fieldName) throws IOException {
-        return Collections.emptyMap();
+    default void streamFieldPostings(String fieldName, PostingsSink sink) throws IOException {
+        // no-op: default reader has no terms to stream.
     }
 
     /**
