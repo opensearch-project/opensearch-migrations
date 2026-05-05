@@ -1,4 +1,4 @@
-baseConfig: ../../../config-processor/scripts/samples/fullMigrationWithTraffic.wf.yaml
+baseConfig: ../fixtures/fullMigrationWithTraffic.skipApprovals.wf.yaml
 phaseCompletionTimeoutSeconds: 600
 
 # Safe variant of the noop spec. Runs the 4-run safe case sequence
@@ -14,11 +14,3 @@ matrix:
 lifecycle:
   setup: [create-basic-auth-secrets]
   teardown: []
-
-approvalGates:
-  - approvePattern: "*.evaluatemetadata"
-    validations: []
-  - approvePattern: "*.migratemetadata"
-    validations: []
-  - approvePattern: "*.documentbackfill"
-    validations: []

@@ -1,0 +1,9 @@
+baseConfig: ../fixtures/basicSnapshotMigration.local.wf.yaml
+phaseCompletionTimeoutSeconds: 900
+
+matrix:
+  subject: datasnapshot:source-snap1
+
+lifecycle:
+  setup: [create-basic-auth-secrets]
+  teardown: []

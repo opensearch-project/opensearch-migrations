@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { runNoopSlice, LiveRunnerDeps } from "../src/e2e-run";
+import { runNoopCase, LiveRunnerDeps } from "../src/e2e-run";
 import { buildTopology } from "../src/componentTopology";
 import { WorkflowCli } from "../src/workflowCli";
 import { WorkflowCliError } from "../src/workflowCli";
@@ -23,10 +23,9 @@ const COMPONENTS = [
 
 /**
  * Build a default dep bundle for tests. Overrides can replace any
- * field wholesale; actorOverrides/specOverrides make the two most
- * common replacements ergonomic.
+ * field wholesale.
  */
-function fakeDeps(overrides: Partial<LiveRunnerDeps> = {}): {
+function makeRunnerTestDeps(overrides: Partial<LiveRunnerDeps> = {}): {
     deps: LiveRunnerDeps;
     calls: { args: readonly string[]; input?: string }[];
     k8sCalls: { args: readonly string[]; input?: string }[];
@@ -98,11 +97,11 @@ function fakeDeps(overrides: Partial<LiveRunnerDeps> = {}): {
     return { deps, calls, k8sCalls, tmpDir, baselinePath };
 }
 
-describe("runNoopSlice — basic flow", () => {
+describe("runNoopCase — basic flow", () => {
     it("runs baseline + noop-pre and writes a snapshot", async () => {
-        const { deps, tmpDir } = fakeDeps();
+        const { deps, tmpDir } = makeRunnerTestDeps();
         try {
-            const outPath = await runNoopSlice(deps);
+            const outPath = await runNoopCase(deps);
             expect(outPath.startsWith(tmpDir)).toBe(true);
 
             const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
@@ -122,9 +121,9 @@ describe("runNoopSlice — basic flow", () => {
     });
 
     it("invokes configure+submit twice and approves each structural gate per run", async () => {
-        const { deps, calls, tmpDir } = fakeDeps();
+        const { deps, calls, tmpDir } = makeRunnerTestDeps();
         try {
-            await runNoopSlice(deps);
+            await runNoopCase(deps);
             const subcommands = calls.map((c) => c.args[0]);
             expect(subcommands).toEqual([
                 "configure",
@@ -151,9 +150,9 @@ describe("runNoopSlice — basic flow", () => {
     });
 
     it("deletes outer and inner workflow resources after each run", async () => {
-        const { deps, k8sCalls, tmpDir } = fakeDeps();
+        const { deps, k8sCalls, tmpDir } = makeRunnerTestDeps();
         try {
-            await runNoopSlice(deps);
+            await runNoopCase(deps);
             const deletes = k8sCalls.filter((c) => c.args[0] === "delete");
             expect(deletes.map((c) => c.args.slice(0, 3))).toEqual([
                 ["delete", "workflows.argoproj.io", "migration-workflow"],
@@ -180,11 +179,11 @@ describe("runNoopSlice — basic flow", () => {
     });
 });
 
-describe("runNoopSlice — unique workflow names", () => {
+describe("runNoopCase — unique workflow names", () => {
     it("uses distinct workflow names for baseline and noop-pre", async () => {
-        const { deps, calls, tmpDir } = fakeDeps();
+        const { deps, calls, tmpDir } = makeRunnerTestDeps();
         try {
-            await runNoopSlice(deps);
+            await runNoopCase(deps);
             const submits = calls.filter((c) => c.args[0] === "submit");
             expect(submits).toHaveLength(2);
 
@@ -202,7 +201,7 @@ describe("runNoopSlice — unique workflow names", () => {
             // can tell which submission produced which workflow.
             expect(names[0]).toMatch(/-baseline-/);
             expect(names[1]).toMatch(/-noop-pre-/);
-            // And with the deterministic suffixer injected in fakeDeps,
+            // And with the deterministic suffixer injected in makeRunnerTestDeps,
             // distinct suffixes were actually drawn.
             expect(names[0]).toMatch(/-s1$/);
             expect(names[1]).toMatch(/-s2$/);
@@ -216,9 +215,9 @@ describe("runNoopSlice — unique workflow names", () => {
         // run twice. Given a 3-byte random, collisions are one in 2^24;
         // we still check against the more robust property that the two
         // submissions within a single run are distinct.
-        const first = fakeDeps({ workflowNameSuffix: undefined });
+        const first = makeRunnerTestDeps({ workflowNameSuffix: undefined });
         try {
-            await runNoopSlice(first.deps);
+            await runNoopCase(first.deps);
             const submits = first.calls.filter((c) => c.args[0] === "submit");
             const names = submits.map((c) => {
                 const idx = c.args.indexOf("--workflow-name");
@@ -231,7 +230,7 @@ describe("runNoopSlice — unique workflow names", () => {
     });
 });
 
-describe("runNoopSlice — lifecycle actors", () => {
+describe("runNoopCase — lifecycle actors", () => {
     function recordingActor(name: string, log: string[]): Actor {
         return {
             name,
@@ -252,14 +251,14 @@ describe("runNoopSlice — lifecycle actors", () => {
 
     it("runs setup then teardown on success", async () => {
         const log: string[] = [];
-        const { deps, tmpDir } = fakeDeps();
+        const { deps, tmpDir } = makeRunnerTestDeps();
         deps.actorRegistry.register(recordingActor("setup-1", log));
         deps.actorRegistry.register(recordingActor("teardown-1", log));
         deps.spec.lifecycle.setup.push("setup-1");
         deps.spec.lifecycle.teardown.push("teardown-1");
 
         try {
-            const outPath = await runNoopSlice(deps);
+            const outPath = await runNoopCase(deps);
             const snap: CaseSnapshot = readDetailSnapshot(outPath);
             expect(log).toEqual(["setup-1:ok", "teardown-1:ok"]);
             expect(snap.outcome).toBe("passed");
@@ -270,7 +269,7 @@ describe("runNoopSlice — lifecycle actors", () => {
 
     it("runs teardown even when the main body errors", async () => {
         const log: string[] = [];
-        const { deps, tmpDir } = fakeDeps();
+        const { deps, tmpDir } = makeRunnerTestDeps();
         deps.actorRegistry.register(recordingActor("teardown-only", log));
         deps.spec.lifecycle.teardown.push("teardown-only");
 
@@ -281,7 +280,7 @@ describe("runNoopSlice — lifecycle actors", () => {
             };
 
         try {
-            const outPath = await runNoopSlice(deps);
+            const outPath = await runNoopCase(deps);
             const snap: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snap.outcome).toBe("error");
             expect(snap.diagnostics.join("\n")).toMatch(/kubectl exec failed/);
@@ -293,7 +292,7 @@ describe("runNoopSlice — lifecycle actors", () => {
     });
 
     it("records teardown-actor failures as diagnostics but does not mask the original error", async () => {
-        const { deps, tmpDir } = fakeDeps();
+        const { deps, tmpDir } = makeRunnerTestDeps();
         deps.actorRegistry.register(failingActor("cleanup-bad", "cleanup-bad boom"));
         deps.actorRegistry.register(failingActor("cleanup-other", "cleanup-other boom"));
         deps.spec.lifecycle.teardown.push("cleanup-bad", "cleanup-other");
@@ -304,7 +303,7 @@ describe("runNoopSlice — lifecycle actors", () => {
             };
 
         try {
-            const outPath = await runNoopSlice(deps);
+            const outPath = await runNoopCase(deps);
             const snap: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snap.outcome).toBe("error");
 
@@ -321,14 +320,14 @@ describe("runNoopSlice — lifecycle actors", () => {
 
     it("aborts before submission if a setup actor fails", async () => {
         const log: string[] = [];
-        const { deps, calls, tmpDir } = fakeDeps();
+        const { deps, calls, tmpDir } = makeRunnerTestDeps();
         deps.actorRegistry.register(failingActor("setup-bad", "setup-bad boom"));
         deps.actorRegistry.register(recordingActor("teardown-x", log));
         deps.spec.lifecycle.setup.push("setup-bad");
         deps.spec.lifecycle.teardown.push("teardown-x");
 
         try {
-            const outPath = await runNoopSlice(deps);
+            const outPath = await runNoopCase(deps);
             const snap: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snap.outcome).toBe("error");
             // No configure/submit calls happened.
@@ -342,13 +341,13 @@ describe("runNoopSlice — lifecycle actors", () => {
     });
 
     it("rejects unknown actor names in the spec at expansion time", async () => {
-        const { deps, tmpDir } = fakeDeps();
+        const { deps, tmpDir } = makeRunnerTestDeps();
         deps.spec.lifecycle.setup.push("does-not-exist");
         try {
-            // runNoopSlice catches thrown errors internally and writes
+            // runNoopCase catches thrown errors internally and writes
             // an 'error' snapshot, so we don't assert a throw here —
             // we assert the diagnostic makes the bad name obvious.
-            const outPath = await runNoopSlice(deps);
+            const outPath = await runNoopCase(deps);
             const snap: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snap.outcome).toBe("error");
             expect(snap.diagnostics.join("\n")).toMatch(/does-not-exist/);
@@ -358,9 +357,9 @@ describe("runNoopSlice — lifecycle actors", () => {
     });
 });
 
-describe("runNoopSlice — error paths", () => {
+describe("runNoopCase — error paths", () => {
     it("marks outcome as 'partial' with a phase-timeout diagnostic when wait fails", async () => {
-        const { deps, tmpDir } = fakeDeps({
+        const { deps, tmpDir } = makeRunnerTestDeps({
             spec: {
                 baseConfig: "./baseline.wf.yaml",
                 phaseCompletionTimeoutSeconds: 1,
@@ -376,7 +375,7 @@ describe("runNoopSlice — error paths", () => {
             }),
         });
         try {
-            const outPath = await runNoopSlice(deps);
+            const outPath = await runNoopCase(deps);
             const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snapshot.outcome).toBe("partial");
             expect(snapshot.diagnostics.join("\n")).toMatch(/phase-timeout/);
@@ -386,7 +385,7 @@ describe("runNoopSlice — error paths", () => {
     }, 20000);
 
     it("marks outcome 'error' when a CLI call throws", async () => {
-        const { deps, tmpDir } = fakeDeps();
+        const { deps, tmpDir } = makeRunnerTestDeps();
         (deps.workflowCli as unknown as { configureEditStdin: () => never }).configureEditStdin =
             () => {
                 throw new WorkflowCliError(
@@ -397,7 +396,7 @@ describe("runNoopSlice — error paths", () => {
                 );
             };
         try {
-            const outPath = await runNoopSlice(deps);
+            const outPath = await runNoopCase(deps);
             const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snapshot.outcome).toBe("error");
             expect(snapshot.diagnostics[0]).toMatch(/workflow configure edit/);
@@ -409,7 +408,7 @@ describe("runNoopSlice — error paths", () => {
     });
 
     it("still deletes workflow resources when a post-submit command fails", async () => {
-        const { deps, k8sCalls, tmpDir } = fakeDeps();
+        const { deps, k8sCalls, tmpDir } = makeRunnerTestDeps();
         (deps.workflowCli as unknown as { approve: () => never }).approve =
             () => {
                 throw new WorkflowCliError(
@@ -421,7 +420,7 @@ describe("runNoopSlice — error paths", () => {
             };
 
         try {
-            const outPath = await runNoopSlice(deps);
+            const outPath = await runNoopCase(deps);
             const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snapshot.outcome).toBe("error");
             const deletes = k8sCalls.filter((c) => c.args[0] === "delete");
@@ -436,7 +435,7 @@ describe("runNoopSlice — error paths", () => {
     });
 
     it("stops before noop-pre if baseline workflow cleanup fails", async () => {
-        const { deps, calls, tmpDir } = fakeDeps();
+        const { deps, calls, tmpDir } = makeRunnerTestDeps();
         let innerWorkflowDeletes = 0;
         const k8sClient = new K8sClient({
             namespace: "ma",
@@ -456,7 +455,7 @@ describe("runNoopSlice — error paths", () => {
         deps.k8sClient = k8sClient;
 
         try {
-            const outPath = await runNoopSlice(deps);
+            const outPath = await runNoopCase(deps);
             const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snapshot.outcome).toBe("error");
             expect(snapshot.diagnostics.join("\n")).toMatch(/workflow cleanup failed for baseline/);
@@ -468,9 +467,9 @@ describe("runNoopSlice — error paths", () => {
     });
 });
 
-describe("runNoopSlice — assertLogic integration", () => {
+describe("runNoopCase — assertLogic integration", () => {
     it("records 'noop-not-skipped' violations when noop-pre observations differ from baseline", async () => {
-        const { deps, tmpDir } = fakeDeps();
+        const { deps, tmpDir } = makeRunnerTestDeps();
         // Flip the readObservations implementation so the checksum
         // differs on the second read. deriveBehavior will see that as
         // 'reran' and assertNoViolations will flag it.
@@ -492,7 +491,7 @@ describe("runNoopSlice — assertLogic integration", () => {
         };
 
         try {
-            const outPath = await runNoopSlice(deps);
+            const outPath = await runNoopCase(deps);
             const snap: CaseSnapshot = readDetailSnapshot(outPath);
 
             // A violation per component on the noop checkpoint.
@@ -522,9 +521,9 @@ describe("runNoopSlice — assertLogic integration", () => {
     });
 
     it("populates behavior='ran' on baseline observations (no prior state)", async () => {
-        const { deps, tmpDir } = fakeDeps();
+        const { deps, tmpDir } = makeRunnerTestDeps();
         try {
-            const outPath = await runNoopSlice(deps);
+            const outPath = await runNoopCase(deps);
             const snap: CaseSnapshot = readDetailSnapshot(outPath);
             const baselineCp = snap.runs["baseline"].checkpoints[0];
             for (const id of Object.keys(baselineCp.components) as ComponentId[]) {

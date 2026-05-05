@@ -1,25 +1,19 @@
 /**
- * e2e-run — CLI entrypoint and testable core for the noop-only vertical
- * slice.
+ * e2e-run — CLI entrypoint and testable case-plan executor for live
+ * orchestration tests.
  *
- * Scope of this slice (per implementation-plan step 2):
- *   1. Parse spec and resolve topology.
- *   2. Submit baseline config.
- *   3. Approve structural gates.
- *   4. Wait for phase completion.
- *   5. Capture a raw observation snapshot.
- *   6. Re-submit the same config (noop-pre).
- *   7. Wait again, capture snapshot, write file.
- *
- * Assertions (assertLogic) and mutator handling are intentionally
- * deferred to later slices. This module exists to prove that the
- * wiring — spec → cli → k8s → snapshot — produces a useful artefact
- * against a real cluster.
+ * A case plan is an ordered list of workflow submissions. Each step
+ * supplies the config to submit and the checkpoint assertion to run
+ * after the workflow settles. The executor owns common lifecycle
+ * concerns: setup actors, workflow cleanup, submit/approve/wait,
+ * behavior derivation, violation surfacing, teardown actors, and
+ * snapshot writing.
  */
 
 import * as path from "node:path";
 import * as fs from "node:fs";
 import * as crypto from "node:crypto";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import { K8sClient, MIGRATION_CRD_PLURALS, extractCrdObservation } from "./k8sClient";
 import {
@@ -99,16 +93,100 @@ export interface LiveRunnerDeps {
     mutatorRegistry?: MutatorRegistry;
 }
 
-// ── Core logic (easy to unit-test with fake deps) ────────────────────
+export interface WorkflowCasePlanStep {
+    runName: string;
+    configYaml: string;
+    checkpoint: Checkpoint;
+    subject: ComponentId | null;
+    collectViolations: boolean;
+}
+
+export interface WorkflowCasePlan {
+    caseName: string;
+    steps: readonly WorkflowCasePlanStep[];
+}
+
+// ── Core logic (easy to unit-test with injected deps) ────────────────
 
 /**
- * Run the noop-only slice against the given dependencies. Writes one
+ * Run the baseline + noop-pre case against the given dependencies. Writes one
  * snapshot file under `outputDir` and returns the written path.
  */
-export async function runNoopSlice(deps: LiveRunnerDeps): Promise<string> {
+export async function runNoopCase(deps: LiveRunnerDeps): Promise<string> {
+    const baselineYaml = fs.readFileSync(deps.baselineConfigPath, "utf8");
+
+    return runWorkflowCasePlan(deps, {
+        caseName: buildNoopCaseName(deps.spec),
+        steps: [
+            {
+                runName: "baseline",
+                configYaml: baselineYaml,
+                checkpoint: "baseline-complete",
+                subject: null,
+                collectViolations: false,
+            },
+            {
+                runName: "noop-pre",
+                configYaml: baselineYaml,
+                checkpoint: "noop",
+                subject: null,
+                collectViolations: true,
+            },
+        ],
+    });
+}
+
+/**
+ * Run a safe mutation case: baseline → noop-pre → mutated → noop-post.
+ * Returns the path to the written snapshot file.
+ */
+export async function runSafeCase(deps: LiveRunnerDeps, expandedCase: ExpandedTestCase): Promise<string> {
+    const baselineYaml = fs.readFileSync(deps.baselineConfigPath, "utf8");
+    const mutatedConfig = expandedCase.mutator.apply(parseYaml(baselineYaml));
+    const mutatedYaml = stringifyYaml(mutatedConfig);
+
+    return runWorkflowCasePlan(deps, {
+        caseName: expandedCase.caseName,
+        steps: [
+            {
+                runName: "baseline",
+                configYaml: baselineYaml,
+                checkpoint: "baseline-complete",
+                subject: null,
+                collectViolations: false,
+            },
+            {
+                runName: "noop-pre",
+                configYaml: baselineYaml,
+                checkpoint: "noop",
+                subject: null,
+                collectViolations: true,
+            },
+            {
+                runName: "mutated",
+                configYaml: mutatedYaml,
+                checkpoint: "mutated-complete",
+                subject: expandedCase.subject,
+                collectViolations: true,
+            },
+            {
+                runName: "noop-post",
+                configYaml: mutatedYaml,
+                checkpoint: "noop",
+                subject: null,
+                collectViolations: true,
+            },
+        ],
+    });
+}
+
+export async function runWorkflowCasePlan(
+    deps: LiveRunnerDeps,
+    plan: WorkflowCasePlan,
+): Promise<string> {
     const clock = deps.clock ?? realClock;
     const startedAt = new Date(clock.now()).toISOString();
-    const caseName = buildCaseName(deps.spec);
+    const { caseName } = plan;
     const suffixer =
         deps.workflowNameSuffix ?? (() => crypto.randomBytes(3).toString("hex"));
     const diagnostics: string[] = [];
@@ -160,50 +238,29 @@ export async function runNoopSlice(deps: LiveRunnerDeps): Promise<string> {
             }));
         }
 
-        const baselineYaml = fs.readFileSync(deps.baselineConfigPath, "utf8");
-
-        const baselineWorkflowName = sanitizeWorkflowName(
-            `${caseName}-baseline-${suffixer()}`,
-        );
-        runs["baseline"] = await runSubmittedWorkflow({
-            deps,
-            runName: "baseline",
-            workflowName: baselineWorkflowName,
-            configYaml: baselineYaml,
-            checkpoint: "baseline-complete",
-            subject: null,
-            priorComponents: null,
-            diagnostics,
-            events,
-            clock,
-        });
-
-        // Hand baseline observations to noop-pre so behavior can be
-        // derived (skipped vs reran) at the noop checkpoint.
-        const baselineLast =
-            runs["baseline"].checkpoints[runs["baseline"].checkpoints.length - 1]?.components ??
-            null;
-
-        const noopWorkflowName = sanitizeWorkflowName(
-            `${caseName}-noop-pre-${suffixer()}`,
-        );
-        runs["noop-pre"] = await runSubmittedWorkflow({
-            deps,
-            runName: "noop-pre",
-            workflowName: noopWorkflowName,
-            configYaml: baselineYaml,
-            checkpoint: "noop",
-            subject: null,
-            priorComponents: baselineLast,
-            diagnostics,
-            events,
-            clock,
-        });
-
-        // Noop checkpoint violations bump outcome to partial; we never
-        // promote past 'partial' from within assertLogic output alone.
-        const noopViolations = collectViolations(runs["noop-pre"]);
-        violations.push(...noopViolations);
+        let priorComponents: Readonly<Record<ComponentId, ObservedComponent>> | null = null;
+        for (const step of plan.steps) {
+            const workflowName = sanitizeWorkflowName(
+                `${caseName}-${step.runName}-${suffixer()}`,
+            );
+            const run = await runSubmittedWorkflow({
+                deps,
+                runName: step.runName,
+                workflowName,
+                configYaml: step.configYaml,
+                checkpoint: step.checkpoint,
+                subject: step.subject,
+                priorComponents,
+                diagnostics,
+                events,
+                clock,
+            });
+            runs[step.runName] = run;
+            if (step.collectViolations) {
+                violations.push(...collectViolations(run));
+            }
+            priorComponents = lastComponents(run);
+        }
 
         outcome = diagnostics.length === 0 && violations.length === 0 ? "passed" : "partial";
     } catch (e) {
@@ -249,133 +306,6 @@ export async function runNoopSlice(deps: LiveRunnerDeps): Promise<string> {
         outputDir: deps.outputDir,
         // We allow writing a partial/error snapshot so operators can see
         // what went wrong even when the run aborted early.
-        validate: outcome !== "error",
-    });
-}
-
-/**
- * Run a 4-run safe mutation case: baseline → noop-pre → mutated → noop-post.
- * Returns the path to the written snapshot file.
- */
-export async function runSafeCase(deps: LiveRunnerDeps, expandedCase: ExpandedTestCase): Promise<string> {
-    const clock = deps.clock ?? realClock;
-    const startedAt = new Date(clock.now()).toISOString();
-    const caseName = expandedCase.caseName;
-    const suffixer =
-        deps.workflowNameSuffix ?? (() => crypto.randomBytes(3).toString("hex"));
-    const diagnostics: string[] = [];
-    const violations: Violation[] = [];
-    const runs: Record<string, RunRecord> = {};
-    const events: CaseEvent[] = [];
-    let outcome: CaseOutcome = "partial";
-
-    let setupActors: ReturnType<ActorRegistry["resolveAll"]> = [];
-    let teardownActors: ReturnType<ActorRegistry["resolveAll"]> = [];
-    const actorCtxFor = (phase: "setup" | "teardown"): ActorContext => ({
-        workflowCli: deps.workflowCli,
-        k8sClient: deps.k8sClient,
-        namespace: deps.namespace,
-        baselineConfigPath: deps.baselineConfigPath,
-        phase,
-    });
-
-    try {
-        setupActors = deps.actorRegistry.resolveAll(deps.spec.lifecycle.setup);
-        teardownActors = deps.actorRegistry.resolveAll(deps.spec.lifecycle.teardown);
-
-        if (setupActors.length > 0) {
-            events.push(event(clock, "setup", "run-actors", "ok", {
-                message: `running ${setupActors.length} setup actor(s)`,
-            }));
-            const res = await deps.actorRegistry.runAll(setupActors, actorCtxFor("setup"), { stopOnError: true });
-            diagnostics.push(...res.diagnostics);
-            if (res.diagnostics.length > 0) {
-                events.push(event(clock, "setup", "run-actors", "error", { message: res.diagnostics.join("; ") }));
-                throw new Error(`setup aborted: ${res.diagnostics.join("; ")}`);
-            }
-            events.push(event(clock, "setup", "run-actors", "ok", { message: "setup actors completed" }));
-        }
-
-        const baselineYaml = fs.readFileSync(deps.baselineConfigPath, "utf8");
-
-        // Run 1: baseline
-        const baselineWorkflowName = sanitizeWorkflowName(`${caseName}-baseline-${suffixer()}`);
-        runs["baseline"] = await runSubmittedWorkflow({
-            deps, runName: "baseline", workflowName: baselineWorkflowName,
-            configYaml: baselineYaml, checkpoint: "baseline-complete",
-            subject: null,
-            priorComponents: null, diagnostics, events, clock,
-        });
-        const baselineLast = lastComponents(runs["baseline"]);
-
-        // Run 2: noop-pre
-        const noopPreName = sanitizeWorkflowName(`${caseName}-noop-pre-${suffixer()}`);
-        runs["noop-pre"] = await runSubmittedWorkflow({
-            deps, runName: "noop-pre", workflowName: noopPreName,
-            configYaml: baselineYaml, checkpoint: "noop",
-            subject: null,
-            priorComponents: baselineLast, diagnostics, events, clock,
-        });
-        violations.push(...collectViolations(runs["noop-pre"]));
-        const noopPreLast = lastComponents(runs["noop-pre"]);
-
-        // Run 3: mutated submission
-        const mutatedConfig = expandedCase.mutator.apply(
-            (await import("yaml")).parse(baselineYaml),
-        );
-        const mutatedYaml = (await import("yaml")).stringify(mutatedConfig);
-        const mutatedWorkflowName = sanitizeWorkflowName(`${caseName}-mutated-${suffixer()}`);
-        runs["mutated"] = await runSubmittedWorkflow({
-            deps, runName: "mutated", workflowName: mutatedWorkflowName,
-            configYaml: mutatedYaml, checkpoint: "mutated-complete",
-            subject: expandedCase.subject,
-            priorComponents: noopPreLast, diagnostics, events, clock,
-        });
-        violations.push(...collectViolations(runs["mutated"]));
-        const mutatedLast = lastComponents(runs["mutated"]);
-
-        // Run 4: noop-post
-        const noopPostName = sanitizeWorkflowName(`${caseName}-noop-post-${suffixer()}`);
-        runs["noop-post"] = await runSubmittedWorkflow({
-            deps, runName: "noop-post", workflowName: noopPostName,
-            configYaml: mutatedYaml, checkpoint: "noop",
-            subject: null,
-            priorComponents: mutatedLast, diagnostics, events, clock,
-        });
-        violations.push(...collectViolations(runs["noop-post"]));
-
-        outcome = diagnostics.length === 0 && violations.length === 0 ? "passed" : "partial";
-    } catch (e) {
-        outcome = "error";
-        diagnostics.push(...formatFatalDiagnostics(e));
-    } finally {
-        if (teardownActors.length > 0) {
-            events.push(event(clock, "teardown", "run-actors", "ok", {
-                message: `running ${teardownActors.length} teardown actor(s)`,
-            }));
-            const res = await deps.actorRegistry.runAll(teardownActors, actorCtxFor("teardown"));
-            diagnostics.push(...res.diagnostics);
-            events.push(event(clock, "teardown", "run-actors", res.diagnostics.length > 0 ? "error" : "ok", {
-                message: res.diagnostics.length > 0 ? res.diagnostics.join("; ") : "teardown actors completed",
-            }));
-            if (outcome === "passed" && res.diagnostics.length > 0) outcome = "partial";
-        }
-    }
-
-    const snapshot: CaseSnapshot = {
-        case: caseName,
-        specPath: deps.specPath,
-        outcome,
-        startedAt,
-        finishedAt: new Date(clock.now()).toISOString(),
-        runs,
-        events,
-        checkers: [],
-        diagnostics,
-        violations,
-    };
-    return writeCaseSnapshot(snapshot, {
-        outputDir: deps.outputDir,
         validate: outcome !== "error",
     });
 }
@@ -655,8 +585,8 @@ async function waitAndCheckpoint(
     });
 }
 
-function buildCaseName(spec: ScenarioSpec): string {
-    // For the noop slice we only run one synthetic case per spec.
+function buildNoopCaseName(spec: ScenarioSpec): string {
+    // Noop-only mode runs one synthetic case per spec.
     return `${spec.matrix.subject.replace(/:/g, "-")}-noop`;
 }
 
@@ -673,7 +603,7 @@ export interface RunFromSpecOptions {
      * Optional additional actors to register. The CLI always starts
      * with the default built-in registry (see `builtinActors.ts`);
      * anything passed here is layered on top. Programmatic callers
-     * can replace the registry wholesale by calling `runNoopSlice`
+     * can replace the registry wholesale by calling `runNoopCase`
      * directly.
      */
     extraActors?: readonly Actor[];
@@ -685,7 +615,7 @@ export interface RunFromSpecOptions {
     /**
      * Optional mutator registry for safe/gated/impossible cases. When
      * provided and the spec expands to at least one safe case, the
-     * runner executes the first expanded case instead of the noop slice.
+     * runner expands the matrix and runs each matching case.
      */
     mutatorRegistry?: MutatorRegistry;
     /**
@@ -700,11 +630,9 @@ export interface RunFromSpecOptions {
      */
     omitBuiltinMutators?: boolean;
     /**
-     * When true, ignore the matrix and run the legacy noop slice
-     * (`runNoopSlice`). Preserves the original `baseline → noop-pre`
-     * behaviour for debugging and live-run bring-up. Defaults to false
-     * for CLI runs — normal execution expands the matrix and runs every
-     * case.
+     * When true, ignore the matrix and run only the baseline → noop-pre
+     * case. Defaults to false for CLI runs — normal execution expands
+     * the matrix and runs every case.
      */
     noopOnly?: boolean;
     /**
@@ -803,11 +731,10 @@ export async function runFromSpec(opts: RunFromSpecOptions): Promise<string[]> {
         mutatorRegistry,
     };
 
-    // Noop-only mode keeps the original baseline → noop-pre harness
-    // intact. Useful for bring-up and for debugging phase-completion
-    // issues before touching mutation flow.
+    // Noop-only mode is useful for bring-up and for debugging
+    // phase-completion issues before touching mutation flow.
     if (opts.noopOnly) {
-        return [await runNoopSlice(sharedDeps)];
+        return [await runNoopCase(sharedDeps)];
     }
 
     return runExpandedCases(sharedDeps, mutatorRegistry);
@@ -817,7 +744,7 @@ export async function runFromSpec(opts: RunFromSpecOptions): Promise<string[]> {
  * Expand the shared deps' spec into cases and run each one in order.
  *
  * Factored out of `runFromSpec` so tests can exercise the
- * expansion-and-run orchestration against fake deps without having
+ * expansion-and-run orchestration against injected deps without having
  * to build a real kubectl/workflow CLI stack.
  */
 export async function runExpandedCases(

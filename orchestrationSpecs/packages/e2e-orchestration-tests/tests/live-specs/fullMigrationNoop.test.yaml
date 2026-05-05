@@ -1,4 +1,4 @@
-baseConfig: ../../../config-processor/scripts/samples/fullMigrationWithTraffic.wf.yaml
+baseConfig: ../fixtures/fullMigrationWithTraffic.skipApprovals.wf.yaml
 phaseCompletionTimeoutSeconds: 600
 
 matrix:
@@ -7,11 +7,3 @@ matrix:
 lifecycle:
   setup: [create-basic-auth-secrets]
   teardown: []
-
-approvalGates:
-  - approvePattern: "*.evaluatemetadata"
-    validations: []
-  - approvePattern: "*.migratemetadata"
-    validations: []
-  - approvePattern: "*.documentbackfill"
-    validations: []

@@ -10,10 +10,9 @@
  *   upstreamOf(subject)    — all components subject transitively depends on
  *   independentOf(subject) — all components with no path to/from subject
  *
- * For the first implementation slice we build `ComponentTopology` from
- * hand-authored data for a specific baseline config (see
- * `componentTopologyResolver.ts`). Later slices can synthesise it from
- * a generated CRD graph.
+ * The current resolver builds `ComponentTopology` from hand-authored
+ * data for specific baseline configs (see `componentTopologyResolver.ts`).
+ * A later resolver can synthesize it from generated CRD output.
  */
 
 import { ComponentId } from "./types";

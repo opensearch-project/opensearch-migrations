@@ -1,8 +1,8 @@
 /**
  * Built-in actors.
  *
- * The first-slice runner includes one real setup actor for local live
- * runs (`create-basic-auth-secrets`) plus stubs for design-doc cleanup
+ * The runner includes one real setup actor for local live runs
+ * (`create-basic-auth-secrets`) plus stubs for design-doc cleanup
  * actors that are not implemented yet.
  *
  * The cleanup actors are intentionally stubs that:
@@ -12,8 +12,8 @@
  *
  * Making those stubs throw means a test that claims to have torn down
  * target indices does not silently succeed — the snapshot records
- * "teardown actor 'delete-target-indices' failed: not implemented in
- * first slice". That's honest signalling for the first live runs.
+ * "teardown actor 'delete-target-indices' failed: not implemented".
+ * That's honest signalling for live runs.
  *
  * When the real implementations land, replace each stub in this file
  * (or register a full-featured actor under the same name via
@@ -29,7 +29,7 @@ import { Actor, ActorContext } from "./actors";
 export class NotImplementedActorError extends Error {
     constructor(name: string) {
         super(
-            `actor '${name}' is a first-slice stub and has no implementation yet`,
+            `actor '${name}' is a placeholder and has no implementation yet`,
         );
         this.name = "NotImplementedActorError";
     }

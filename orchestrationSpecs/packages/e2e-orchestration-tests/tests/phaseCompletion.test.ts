@@ -34,7 +34,7 @@ describe("waitForPhaseCompletion", () => {
             clock,
             readObservations: async () => [
                 { componentId: "a:1" as ComponentId, phase: "Ready" },
-                { componentId: "b:1" as ComponentId, phase: "Skipped" },
+                { componentId: "b:1" as ComponentId, phase: "Completed" },
             ],
         });
         expect(result.kind).toBe("ready");

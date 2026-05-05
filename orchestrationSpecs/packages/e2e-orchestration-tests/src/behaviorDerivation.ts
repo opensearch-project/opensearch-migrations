@@ -7,9 +7,8 @@
  *
  *   - `ran`      : no prior successful observation for this resource
  *                  in the case (first time we see it reach a terminal
- *                  state). For the noop slice, we treat "no prior
- *                  observation of any kind" as ran-eligible, since the
- *                  baseline run is the first pass.
+ *                  state). The baseline run has no prior observation,
+ *                  so every completed component is `ran`.
  *   - `skipped`  : checksum and UID unchanged from the prior
  *                  observation, and the current phase is terminal but
  *                  not a held state like `Blocked`/`Suspended`.
@@ -33,7 +32,7 @@ import { Behavior, ObservedComponent } from "./types";
  * Phases the migration framework reports for a fully settled
  * component that completed without being held.
  */
-const COMPLETED_PHASES: ReadonlySet<string> = new Set(["Ready", "Skipped"]);
+const COMPLETED_PHASES: ReadonlySet<string> = new Set(["Ready", "Completed", "Skipped"]);
 
 const BLOCKED_PHASES: ReadonlySet<string> = new Set(["Blocked"]);
 
@@ -72,7 +71,7 @@ export function deriveBehavior({ prev, curr }: DeriveBehaviorInput): Behavior {
         return "unstarted";
     }
 
-    // Phase is Ready/Skipped — decide between ran / reran / skipped.
+    // Phase is Ready/Completed/Skipped — decide between ran / reran / skipped.
     if (prev === null) {
         return "ran";
     }

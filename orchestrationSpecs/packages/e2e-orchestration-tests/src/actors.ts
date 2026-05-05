@@ -2,9 +2,8 @@
  * Lifecycle actors — named side-effect callbacks the runner invokes at
  * spec-declared points (`lifecycle.setup`, `lifecycle.teardown`). This
  * is the minimum actor plumbing needed for teardown-on-failure in the
- * noop slice. It deliberately does not implement the full Observer /
- * Checker / Provider fixture taxonomy from the design doc — those
- * arrive with the assertion and mutation slices.
+ * live runner. It deliberately does not implement the full Observer /
+ * Checker / Provider fixture taxonomy from the design doc.
  *
  * Actors are looked up by name in an `ActorRegistry`. The runner passes
  * an `ActorContext` to each actor at invocation time. Failures during

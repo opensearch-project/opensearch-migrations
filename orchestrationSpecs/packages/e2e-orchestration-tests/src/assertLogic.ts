@@ -64,7 +64,7 @@ export function assertNoViolations(input: AssertNoViolationsInput): Violation[] 
                 {
                     type: "unimplemented-checkpoint",
                     checkpoint: input.checkpoint,
-                    message: `checkpoint '${input.checkpoint}' is not yet implemented in assertLogic — this is the noop slice`,
+                    message: `checkpoint '${input.checkpoint}' is not yet implemented in assertLogic`,
                 },
             ];
     }

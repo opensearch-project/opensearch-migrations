@@ -72,10 +72,10 @@ function expandedCase(): ExpandedTestCase {
 }
 
 /**
- * Build fake deps for safe-case tests. `observationFactory` controls
+ * Build injected deps for safe-case tests. `observationFactory` controls
  * what each readObservations call returns, keyed by call count.
  */
-function fakeDeps(opts: {
+function makeRunnerTestDeps(opts: {
     observationFactory?: (callCount: number) => Record<ComponentId, ObservedComponent>;
 } = {}): {
     deps: LiveRunnerDeps;
@@ -151,7 +151,7 @@ describe("runSafeCase — happy path", () => {
         // For noop-pre and noop-post to pass, checksums must be unchanged from prior.
         // For mutated to pass, subject+downstream must have changed checksums (reran),
         // and independent must be unchanged (skipped).
-        const { deps, calls, tmpDir } = fakeDeps({
+        const { deps, calls, tmpDir } = makeRunnerTestDeps({
             observationFactory: (n) => {
                 const components: Record<ComponentId, ObservedComponent> = {};
                 // Calls 1-2: baseline (phase-wait + final read)
@@ -199,7 +199,7 @@ describe("runSafeCase — happy path", () => {
 
 describe("runSafeCase — cascade violation", () => {
     it("flags cascade when subject reran but downstream stayed skipped", async () => {
-        const { deps, tmpDir } = fakeDeps({
+        const { deps, tmpDir } = makeRunnerTestDeps({
             observationFactory: (n) => {
                 const components: Record<ComponentId, ObservedComponent> = {};
                 const isMutatedOrAfter = n >= 5;
@@ -238,7 +238,7 @@ describe("runSafeCase — cascade violation", () => {
 
 describe("runSafeCase — independence violation", () => {
     it("flags independence when an independent component reran", async () => {
-        const { deps, tmpDir } = fakeDeps({
+        const { deps, tmpDir } = makeRunnerTestDeps({
             observationFactory: (n) => {
                 const components: Record<ComponentId, ObservedComponent> = {};
                 const isMutatedOrAfter = n >= 5;
@@ -277,7 +277,7 @@ describe("runSafeCase — independence violation", () => {
 
 describe("runSafeCase — noop-post catches residual state", () => {
     it("noop-post flags spurious reran even if mutated-complete passed", async () => {
-        const { deps, tmpDir } = fakeDeps({
+        const { deps, tmpDir } = makeRunnerTestDeps({
             observationFactory: (n) => {
                 const components: Record<ComponentId, ObservedComponent> = {};
                 const isMutatedOrAfter = n >= 5;
@@ -325,8 +325,8 @@ describe("runExpandedCases", () => {
     it("writes one snapshot per expanded case and returns every path", async () => {
         // Build deps whose spec triggers expansion to a single case
         // via a mutator registry we control. We use the existing
-        // fakeDeps happy-path observations so every case passes.
-        const { deps, tmpDir } = fakeDeps();
+        // makeRunnerTestDeps happy-path observations so every case passes.
+        const { deps, tmpDir } = makeRunnerTestDeps();
         try {
             const { runExpandedCases } = await import("../src/e2e-run");
             const { MutatorRegistry } = await import("../src/fixtures/mutators");
@@ -347,7 +347,7 @@ describe("runExpandedCases", () => {
     });
 
     it("writes one snapshot per case when the registry has multiple mutators for the subject", async () => {
-        const { deps, tmpDir } = fakeDeps();
+        const { deps, tmpDir } = makeRunnerTestDeps();
         try {
             const { runExpandedCases } = await import("../src/e2e-run");
             const { MutatorRegistry } = await import("../src/fixtures/mutators");

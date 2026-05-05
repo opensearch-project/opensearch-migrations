@@ -2,11 +2,10 @@
  * ComponentTopologyResolver — resolves a baseline config filename to a
  * ComponentTopology.
  *
- * First-slice strategy (per implementation plan step 4): hard-code
- * topologies for the small set of baseline configs the live runner
- * currently supports. This keeps the first slice honest about what is
- * and isn't supported while a proper graph extractor can be built
- * afterwards from generated CRD output.
+ * Current strategy: hard-code topologies for the small set of baseline
+ * configs the live runner supports. This keeps unsupported baselines
+ * explicit while a topology extractor from generated CRD output is
+ * still pending.
  *
  * Adding a new baseline means registering it in `TOPOLOGIES_BY_BASELINE`.
  */
@@ -94,21 +93,34 @@ const FULL_MIGRATION_WITH_TRAFFIC: ComponentTopology = buildTopology({
     ],
 });
 
+const BASIC_SNAPSHOT_MIGRATION: ComponentTopology = buildTopology({
+    components: [
+        "datasnapshot:source-snap1",
+        "snapshotmigration:source-target-snap1-migration-0",
+    ] as ComponentId[],
+    edges: [
+        // SnapshotMigration has no dependsOn; it waits for the snapshot through
+        // workflow logic rather than a CRD dependency edge.
+    ],
+});
+
 /**
  * Keyed by the baseline config filename (basename, case-insensitive).
  * The resolver does not read the file contents — only the filename is
- * consulted for the first slice.
+ * consulted for the current resolver.
  */
 const TOPOLOGIES_BY_BASELINE: ReadonlyMap<string, ComponentTopology> = new Map([
     ["fullmigrationwithtraffic.wf.yaml", FULL_MIGRATION_WITH_TRAFFIC],
+    ["fullmigrationwithtraffic.skipapprovals.wf.yaml", FULL_MIGRATION_WITH_TRAFFIC],
+    ["basicsnapshotmigration.local.wf.yaml", BASIC_SNAPSHOT_MIGRATION],
 ]);
 
 /**
  * Resolve a ComponentTopology from a baseline config path. Returns
  * `null` if no hardcoded topology is registered for the given file.
  *
- * Callers should treat a `null` result as "first slice does not yet
- * support this baseline" — not as an empty topology.
+ * Callers should treat a `null` result as "this baseline is not
+ * supported yet" — not as an empty topology.
  */
 export function resolveTopologyForBaseline(
     baselineConfigPath: string,

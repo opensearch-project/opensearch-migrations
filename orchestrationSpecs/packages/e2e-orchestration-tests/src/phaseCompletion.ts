@@ -33,6 +33,7 @@ import { ComponentId } from "./types";
  */
 export const TERMINAL_OR_HELD_PHASES: ReadonlySet<string> = new Set([
     "Ready",
+    "Completed",
     "Skipped",
     "Failed",
     "Blocked",

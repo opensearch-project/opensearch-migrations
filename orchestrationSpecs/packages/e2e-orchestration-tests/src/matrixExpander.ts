@@ -2,8 +2,8 @@
  * matrixExpander — expand a spec's matrix selectors into concrete test
  * cases by matching against registered mutators.
  *
- * This is the minimal slice needed for the safe mutation runner. Full
- * multi-selector, multi-response expansion arrives in plan step 7.
+ * This is the matrix expansion needed by the current safe mutation
+ * runner. Gated/impossible responses will add more case-plan shapes.
  */
 
 import { ComponentId, MatrixSelector, Response, ScenarioSpec } from "./types";
@@ -55,7 +55,7 @@ export function expandCases(
                     subject,
                     mutator,
                     // Safe selectors have no response; gated/impossible
-                    // will carry sel.response once those slices land.
+                    // case plans will use sel.response.
                     response: sel.response ?? null,
                 });
             }

@@ -14,12 +14,13 @@ function obs(overrides: Partial<ObservedComponent>): ObservedComponent {
 describe("deriveBehavior", () => {
     it("returns 'ran' when there is no prior observation and the current phase is terminal", () => {
         expect(deriveBehavior({ prev: null, curr: obs({ phase: "Ready" }) })).toBe("ran");
+        expect(deriveBehavior({ prev: null, curr: obs({ phase: "Completed" }) })).toBe("ran");
         expect(deriveBehavior({ prev: null, curr: obs({ phase: "Skipped" }) })).toBe("ran");
     });
 
     it("returns 'skipped' when uid+checksum+generation are unchanged and phase is terminal", () => {
         const prev = obs({ uid: "u1", configChecksum: "c1", generation: 3 });
-        const curr = obs({ uid: "u1", configChecksum: "c1", generation: 3 });
+        const curr = obs({ phase: "Completed", uid: "u1", configChecksum: "c1", generation: 3 });
         expect(deriveBehavior({ prev, curr })).toBe("skipped");
     });
 

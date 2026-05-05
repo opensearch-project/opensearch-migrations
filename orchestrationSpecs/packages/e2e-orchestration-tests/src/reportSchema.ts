@@ -32,8 +32,8 @@ export const CheckerVerdictSchema = z
 export type CheckerVerdict = z.infer<typeof CheckerVerdictSchema>;
 
 /**
- * A single checkpoint-level slice of a run: the observed components at
- * that point, plus any violations flagged by the assertion walk.
+ * A single checkpoint observation from a run: the observed components
+ * at that point, plus any violations flagged by the assertion walk.
  *
  * The components map is keyed by ComponentId, and a refinement checks
  * that each component's stored `componentId` matches its key — this
