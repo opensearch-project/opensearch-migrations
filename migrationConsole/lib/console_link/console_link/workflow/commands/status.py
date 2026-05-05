@@ -478,18 +478,35 @@ class LiveCheckProcessor:
               help='Show all workflows including completed ones (default: only running)')
 @click.option('--live-status', is_flag=True, default=False,
               help='Run a current status check for each snapshot and backfill still running')
+@click.option('--resources', is_flag=True, default=False,
+              help='Show resource-centric view of deployed migration resources')
 @click.pass_context
-def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, insecure, token, show_all, live_status):
+def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, insecure, token, show_all, live_status,
+                   resources):
     """Show detailed status of workflows.
 
     Displays workflow progress, completed steps, and approval status.
     By default, only shows running workflows. Use --all to see completed workflows too.
+    Use --resources to show a resource-centric view of deployed migration CRs.
 
     \b
     Example:
         workflow status
         workflow status --all
+        workflow status --resources
     """
+    if resources:
+        try:
+            from ..resource_tree import build_resource_tree, display_resource_tree
+            from ..models.utils import load_k8s_config
+            load_k8s_config()
+            groups = build_resource_tree(namespace)
+            display_resource_tree(groups)
+        except Exception as e:
+            click.echo(f"Error: {str(e)}", err=True)
+            ctx.exit(ExitCode.FAILURE.value)
+        return
+
     if all_workflows and ctx.get_parameter_source('workflow_name') != click.core.ParameterSource.DEFAULT:
         click.echo("Error: --workflow-name and --all-workflows are mutually exclusive", err=True)
         ctx.exit(ExitCode.FAILURE.value)
