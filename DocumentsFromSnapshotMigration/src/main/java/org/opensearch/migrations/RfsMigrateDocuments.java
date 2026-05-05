@@ -291,6 +291,13 @@ public class RfsMigrateDocuments {
         private ExperimentalArgs experimental = new ExperimentalArgs();
 
         @Parameter(required = false,
+            names = { "--work-item-separator" },
+            description = "Optional. The separator string used to delimit components in work item IDs. " +
+                "Change this if your index names contain the default separator ('__'). " +
+                "Must be consistent across all workers in a migration. Default: '__'")
+        public String workItemSeparator = IWorkCoordinator.WorkItemAndDuration.WorkItem.DEFAULT_SEPARATOR;
+
+        @Parameter(required = false,
             names = { "--allowed-doc-exception-types", "--allowedDocExceptionTypes" },
             description = "Optional. Comma-separated list of document-level exception types that should be " +
                 "treated as successful operations during bulk migration. This enables idempotent migrations by " +
@@ -482,6 +489,8 @@ public class RfsMigrateDocuments {
         }
 
         validateArgs(arguments);
+
+        IWorkCoordinator.WorkItemAndDuration.WorkItem.setSeparator(arguments.workItemSeparator);
 
         if (arguments.cleanLocalDirs) {
             FileSystemUtils.deleteDirectories(arguments.s3LocalDir, arguments.luceneDir);

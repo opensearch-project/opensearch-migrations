@@ -208,15 +208,32 @@ public interface IWorkCoordinator extends AutoCloseable {
         @EqualsAndHashCode
         @Getter
         public static class WorkItem implements Serializable {
-            private static final String SEPARATOR = "__";
+            public static final String DEFAULT_SEPARATOR = "__";
+            private static volatile String separator = DEFAULT_SEPARATOR;
+
             String indexName;
             Integer shardNumber;
             Long startingDocId;
 
+            /**
+             * Set the separator used to delimit components in work item strings.
+             * Must be called before any WorkItem instances are created or parsed.
+             */
+            public static void setSeparator(String newSeparator) {
+                if (newSeparator == null || newSeparator.isEmpty()) {
+                    throw new IllegalArgumentException("Separator must not be null or empty");
+                }
+                separator = newSeparator;
+            }
+
+            public static String getSeparator() {
+                return separator;
+            }
+
             public WorkItem(String indexName, Integer shardNumber, Long startingDocId) {
-                if (indexName.contains(SEPARATOR)) {
+                if (indexName.contains(separator)) {
                     throw new IllegalArgumentException(
-                            "Illegal work item name: '" + indexName + "'.  " + "Work item names cannot contain '" + SEPARATOR + "'"
+                            "Illegal work item name: '" + indexName + "'.  " + "Work item names cannot contain '" + separator + "'"
                     );
                 }
                 this.indexName = indexName;
@@ -228,10 +245,10 @@ public interface IWorkCoordinator extends AutoCloseable {
             public String toString() {
                 var name = indexName;
                 if (shardNumber != null) {
-                    name += SEPARATOR + shardNumber;
+                    name += separator + shardNumber;
                 }
                 if (startingDocId != null) {
-                    name += SEPARATOR + startingDocId;
+                    name += separator + startingDocId;
                 }
                 return name;
             }
@@ -240,7 +257,7 @@ public interface IWorkCoordinator extends AutoCloseable {
                 if ("shard_setup".equals(input)) {
                     return new WorkItem(input, null, null);
                 }
-                var components = input.split(SEPARATOR + "+");
+                var components = input.split(java.util.regex.Pattern.quote(separator) + "+");
                 if (components.length != 3) {
                     throw new IllegalArgumentException("Illegal work item: '" + input + "'");
                 }
