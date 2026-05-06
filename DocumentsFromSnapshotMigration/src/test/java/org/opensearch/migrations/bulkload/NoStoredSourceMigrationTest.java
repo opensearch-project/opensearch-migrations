@@ -1033,4 +1033,138 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             assertEquals(0, totalHits, "Document with unrecoverable fields should be skipped");
         }
     }
+
+    /**
+     * Sourceless reconstruction with {@code copy_to} mappings.
+     *
+     * Anchors two behaviors end-to-end through a real ES/OS source cluster + snapshot + sourceless
+     * migrate pipeline:
+     *
+     *   (1) Target fields declared via {@code copy_to} (e.g. {@code users.all}, {@code users.from})
+     *       must NOT appear in the reconstructed {@code _source} on the target. They are indexed-only
+     *       mirrors of the source's value and were never in the original document.
+     *
+     *   (2) When a source field has no stored/doc_values path of its own (text with no doc_values,
+     *       no store:true), its value must be reverse-derived from one of its copy_to targets —
+     *       preferring less-lossy targets (keyword) over lossy ones (text analyzed tokens).
+     *
+     * Index layout (Enron-style, mirrors the customer's mapping shape):
+     *   - from:   keyword, copy_to [users.from, users.all]    → recoverable via own doc_values
+     *   - sender: text   (no doc_values, no store), copy_to [users.sender, users.all]
+     *                   → NOT recoverable from its own chain; must reverse-derive from users.sender
+     *   - users.from:   keyword (copy_to target)
+     *   - users.sender: keyword (copy_to target)
+     *   - users.all:    text    (copy_to target, lossy)
+     */
+    @ParameterizedTest(name = "copy_to: {0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testCopyToFieldHandling(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
+        // copy_to requires typed text/keyword mappings which only exist as a clean combo from ES5+.
+        if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion())) {
+            return;
+        }
+
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "copy_to_test";
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+
+            // Mapping: `from` (keyword) and `sender` (text, no doc_values, no store) both copy_to
+            // container fields. The reconstructor must strip `users.*` targets but preserve the
+            // source fields — reverse-deriving `sender` from `users.sender` since `sender` has
+            // no recoverable own-field chain.
+            String propertiesJson =
+                "\"properties\":{"
+                + "\"from\":{\"type\":\"keyword\",\"copy_to\":[\"users.from\",\"users.all\"]},"
+                + "\"sender\":{\"type\":\"text\",\"store\":false,\"copy_to\":[\"users.sender\",\"users.all\"]},"
+                + "\"users\":{\"properties\":{"
+                +   "\"from\":{\"type\":\"keyword\"},"
+                +   "\"sender\":{\"type\":\"keyword\"},"
+                +   "\"all\":{\"type\":\"text\"}"
+                + "}}"
+                + "}";
+
+            String indexBody;
+            if (needsDocType(sourceVersion)) {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{\"%s\":{\"_source\":{\"enabled\":false},%s}}}",
+                    docType, propertiesJson);
+            } else {
+                indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{\"_source\":{\"enabled\":false},"
+                    + propertiesJson + "}}";
+            }
+
+            String doc = "{\"from\":\"joe@example.com\",\"sender\":\"joe smith\"}";
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc, null, docType);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            // Target mapping: same shape so the bulk migrate reindex step accepts the reconstructed
+            // doc. Notably we keep the copy_to declaration so the receiving cluster would re-derive
+            // the target fields on reindex — which is exactly the right behavior for a real migration.
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":" + "{" + propertiesJson + "}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            log.info("Target search response: {}", response);
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertFalse(hits.isEmpty(), "No documents migrated. Response: " + response);
+
+            JsonNode source = hits.get(0).path("_source");
+            log.info("Reconstructed _source: {}", source);
+
+            // (1) `from` must be present with its exact original value (recovered from its own
+            //     keyword doc_values chain — does not need copy_to reverse-derivation).
+            assertEquals("joe@example.com", source.path("from").asText(),
+                "source field `from` missing or wrong in reconstructed _source: " + source);
+
+            // (2) `sender` (text, no doc_values, no store) must be reverse-derived from
+            //     `users.sender` (keyword, doc_values default-on). Preference: keyword target
+            //     beats the text target `users.all` even though both were declared.
+            assertEquals("joe smith", source.path("sender").asText(),
+                "source field `sender` must be reverse-derived from copy_to keyword target: " + source);
+
+            // (3) copy_to TARGETS must NOT appear in the reconstructed _source. ES/OS never stores
+            //     them in _source on the origin cluster either — reconstruction must match that.
+            assertTrue(source.path("users").isMissingNode() || !source.path("users").has("from"),
+                "copy_to target `users.from` must NOT appear in reconstructed _source: " + source);
+            assertTrue(source.path("users").isMissingNode() || !source.path("users").has("sender"),
+                "copy_to target `users.sender` must NOT appear in reconstructed _source: " + source);
+            assertTrue(source.path("users").isMissingNode() || !source.path("users").has("all"),
+                "copy_to target `users.all` must NOT appear in reconstructed _source: " + source);
+        }
+    }
 }
