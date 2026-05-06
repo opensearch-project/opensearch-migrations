@@ -278,6 +278,12 @@ public class LeafReader5 implements LuceneLeafReader {
     public Map<Integer, List<String>> buildTermPositionIndex(String fieldName) throws IOException {
         Terms terms = wrapped.terms(fieldName);
         if (terms == null) return Collections.emptyMap();
+        // If positions weren't indexed (e.g. keyword/"not_analyzed" string, or text with
+        // index_options stripped below positions) there's nothing useful to collect here —
+        // return empty so the caller falls through to the single-term path. Requesting
+        // POSITIONS on a postings list that doesn't carry them is undefined behavior and
+        // can quietly yield bogus sentinel values.
+        if (!terms.hasPositions()) return Collections.emptyMap();
         // docId -> (position -> term)
         Map<Integer, TreeMap<Integer, String>> docPositions = new HashMap<>();
         TermsEnum termsEnum = terms.iterator();

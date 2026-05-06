@@ -294,4 +294,8 @@ public class LeafReader10 implements LuceneLeafReader {
         docPositions.forEach((docId, positions) -> result.put(docId, new ArrayList<>(positions.values())));
         return result;
     }
+
+    public String toString() {
+        return wrapped.toString();
+    }
 }
