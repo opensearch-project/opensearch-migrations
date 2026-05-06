@@ -16,6 +16,7 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import shadow.lucene5.org.apache.lucene.index.BinaryDocValues;
 import shadow.lucene5.org.apache.lucene.index.FieldInfo;
+import shadow.lucene5.org.apache.lucene.index.IndexOptions;
 import shadow.lucene5.org.apache.lucene.index.LeafReader;
 import shadow.lucene5.org.apache.lucene.index.NumericDocValues;
 import shadow.lucene5.org.apache.lucene.index.PostingsEnum;
@@ -279,13 +280,19 @@ public class LeafReader5 implements LuceneLeafReader {
         int[] positions    = new int[16];
         int[] startOffsets = new int[16];
         int[] endOffsets   = new int[16];
+        // Only request OFFSETS when the field was actually indexed with them.
+        // Requesting OFFSETS on a POSITIONS-only field causes Lucene 5's EverythingEnum
+        // to try reading the .pay file — but if no field in the segment has
+        // offsets/payloads, that file is never written and payIn == null, causing NPE.
+        FieldInfo fi = wrapped.getFieldInfos().fieldInfo(fieldName);
+        boolean fieldHasOffsets = fi != null
+            && fi.getIndexOptions().compareTo(IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS) >= 0;
+        int postingsFlags = fieldHasOffsets ? PostingsEnum.OFFSETS : PostingsEnum.POSITIONS;
         while ((term = termsEnum.next()) != null) {
             int termId = sink.registerTerm(
                 new org.opensearch.migrations.bulkload.lucene.sidecar.BytesRefLike(
                     term.bytes, term.offset, term.length));
-            // OFFSETS is a superset of POSITIONS; also returns character start/end offsets when
-            // the field was indexed with index_options:offsets, or -1 otherwise.
-            PostingsEnum postings = termsEnum.postings(null, PostingsEnum.OFFSETS);
+            PostingsEnum postings = termsEnum.postings(null, postingsFlags);
             int doc;
             while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
                 int freq = postings.freq();
@@ -300,8 +307,12 @@ public class LeafReader5 implements LuceneLeafReader {
                     int pos = postings.nextPosition();
                     if (pos < 0) continue;
                     positions[n]    = pos;
-                    startOffsets[n] = postings.startOffset();
-                    endOffsets[n]   = postings.endOffset();
+                    startOffsets[n] = fieldHasOffsets
+                        ? postings.startOffset()
+                        : org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink.NO_OFFSET;
+                    endOffsets[n]   = fieldHasOffsets
+                        ? postings.endOffset()
+                        : org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink.NO_OFFSET;
                     n++;
                 }
                 if (n > 0) sink.accept(termId, doc, positions, startOffsets, endOffsets, n);
