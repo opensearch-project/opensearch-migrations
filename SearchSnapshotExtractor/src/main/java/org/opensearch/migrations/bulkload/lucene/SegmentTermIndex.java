@@ -109,14 +109,13 @@ public class SegmentTermIndex implements AutoCloseable {
             throw new IOException("SegmentTermIndex has been closed");
         }
         try {
-            SidecarReader forField = byField.computeIfAbsent(fieldName, k -> {
+            return byField.computeIfAbsent(fieldName, k -> {
                 try {
                     return buildFieldIndex(reader, fieldName);
                 } catch (IOException e) {
                     throw new java.io.UncheckedIOException(e);
                 }
-            });
-            return forField.get(docId);
+            }).get(docId);
         } catch (java.io.UncheckedIOException e) {
             throw e.getCause();
         }
