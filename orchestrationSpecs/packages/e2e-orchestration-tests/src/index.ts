@@ -15,11 +15,22 @@ export * from "./assertLogic";
 export * from "./fixtures/mutators";
 export * from "./fixtures/builtinMutators";
 export * from "./matrixExpander";
-export { runNoopCase, runSafeCase, runExpandedCases, runFromSpec, summariseSnapshots } from "./e2e-run";
+export {
+    runNoopCase,
+    runSafeCase,
+    runExpandedCase,
+    runExpandedCases,
+    runFromSpec,
+    summariseSnapshots,
+} from "./e2e-run";
 export type {
     LiveRunnerDeps,
     WorkflowCasePlan,
+    WorkflowCasePlanOperation,
     WorkflowCasePlanStep,
+    WorkflowCheckpointOperation,
+    WorkflowApproveOperation,
+    WorkflowResetOperation,
     RunFromSpecOptions,
     CaseSummary,
     RunSummary,

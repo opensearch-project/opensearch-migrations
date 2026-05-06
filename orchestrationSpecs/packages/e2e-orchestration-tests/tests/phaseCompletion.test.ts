@@ -150,7 +150,7 @@ describe("waitForPhaseCompletion — Pending is not terminal for generic compone
             clock,
             readObservations: async () => [
                 { componentId: "a:1" as ComponentId, phase: "Ready" },
-                { componentId: "b:1" as ComponentId, phase: "Blocked" },
+                { componentId: "b:1" as ComponentId, phase: "Paused" },
             ],
         });
         expect(result.kind).toBe("ready");

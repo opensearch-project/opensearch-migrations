@@ -13,6 +13,14 @@ export interface ExpandedTestCase {
     caseName: string;
     subject: ComponentId;
     mutator: Mutator;
+    /**
+     * Materiality-aware expected rerun set for mutation checkpoints.
+     * Topology still classifies upstream/downstream/independent
+     * relationships, but this set controls which components should
+     * actually re-run for the changed paths.
+     */
+    expectedRerunComponents: readonly ComponentId[];
+    changedPaths: readonly string[];
     /** null for safe cases — no response action needed. */
     response: Response | null;
 }
@@ -54,6 +62,8 @@ export function expandCases(
                     caseName,
                     subject,
                     mutator,
+                    expectedRerunComponents: mutator.expectedRerunComponents ?? [mutator.subject],
+                    changedPaths: mutator.changedPaths,
                     // Safe selectors have no response; gated/impossible
                     // case plans will use sel.response.
                     response: sel.response ?? null,

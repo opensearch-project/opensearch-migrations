@@ -18,7 +18,7 @@ sourceClusters:
       repos:
         default:
           awsRegion: "us-east-2"
-          endpoint: "localstack://10.97.173.169:4566"
+          endpoint: "localstack://localstack:4566"
           s3RepoPathUri: "s3://migrations-default-123456789012-dev-us-east-2"
       snapshots:
         snap1:

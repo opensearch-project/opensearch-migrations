@@ -8,14 +8,17 @@
  */
 
 import { Mutator } from "./mutators";
-import { proxyNumThreadsMutator } from "./mutators";
+import { proxyNumThreadsMutator, snapshotMigrationMaxConnectionsMutator } from "./mutators";
 
 /**
  * Returns fresh mutator instances. Each call returns new objects so
  * callers can safely own them.
  */
 export function builtinMutators(): Mutator[] {
-    return [proxyNumThreadsMutator()];
+    return [
+        proxyNumThreadsMutator(),
+        snapshotMigrationMaxConnectionsMutator(),
+    ];
 }
 
 /**
@@ -24,4 +27,5 @@ export function builtinMutators(): Mutator[] {
  */
 export const BUILTIN_MUTATOR_NAMES: readonly string[] = [
     "proxy-numThreads",
+    "snapshotMigration-maxConnections",
 ] as const;

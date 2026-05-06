@@ -18,7 +18,7 @@ The migration workflow system takes a YAML config and deploys Kubernetes infrast
 This test framework verifies that orchestration logic against a live cluster:
 
 - Does a component skip when its config hasn't changed?
-- Does it rerun — and cascade to dependents — when it has?
+- Does it rerun — and cascade only to checksum-material dependents — when it has?
 - Does the workflow pause at the right approval gates?
 - For impossible changes: does the workflow require *both* a resource reset *and* an approval before proceeding — and refuse to advance on either action alone?
 - Does it recover correctly after a resource is deleted and resubmitted?
@@ -28,11 +28,11 @@ This test framework verifies that orchestration logic against a live cluster:
 
 ## Generating The Transition Trees
 
-Before writing any tests, run `transitionTreeGenerator` once against the migration framework's user config schema. It reads the `changeRestriction` annotation on every schema field and produces a per-component map from field path to allowed behavior. Any field without an explicit annotation defaults to `safe`, so the generator covers every field in the schema automatically — there is no prerequisite annotation pass before tests can be written.
+Before writing any tests, run `transitionTreeGenerator` once against the migration framework's user config schema. It reads the `changeRestriction` and checksum materiality annotations on every schema field and produces a per-component map from field path to allowed behavior. Any field without an explicit `changeRestriction` annotation defaults to `safe`, so the generator covers every field in the schema automatically — there is no prerequisite annotation pass before tests can be written.
 
 ```
 proxy:capture-proxy
-  captureConfig.numThreads     → safe      (rerun allowed; no gate expected)
+  captureConfig.numThreads     → safe      (proxy rerun allowed; downstream skip expected)
   captureConfig.enabled        → gated     (gate must appear before proceeding)
   captureConfig.storageClass   → impossible (resource must be deleted and recreated)
 
@@ -190,7 +190,7 @@ The framework intentionally uses double-entry bookkeeping. The migration framewo
 
 The test oracle has two independent inputs:
 
-- **Transition trees** — ground truth for field-level change class: `safe`, `gated`, or `impossible`.
+- **Transition trees** — ground truth for field-level change class (`safe`, `gated`, or `impossible`) and checksum materiality, i.e. which downstream components should re-evaluate for a changed path.
 - **`ComponentTopology`** — ground truth for the expected Kubernetes resource dependency graph for the scenario: which observed CRD components exist, which CRD components depend on which other CRD components, which are downstream of the subject, and which are independent.
 
 `ComponentTopology` is not the user config tree and not the Argo workflow execution order. It is keyed by observed resource identity (`kind:name`) and should correspond to the CRD resources and `spec.dependsOn` relationships the migration framework is expected to create for a given baseline. If the workflow has sequencing that is not represented as CRD resource dependency, that belongs in a separate execution-order model and must not be smuggled into `ComponentTopology`.
@@ -306,8 +306,8 @@ For the `proxy-numThreads` mutator matched by the `safe + subject-change` select
     },
     "subjectChange-numThreads": {
       "proxy:capture-proxy":            { "phase": "Ready", "behavior": "reran",   "startedAtSeconds": 0,  "durationSeconds": 40 },
-      "kafka:msk-kafka":                { "phase": "Ready", "behavior": "reran",   "startedAtSeconds": 42, "durationSeconds": 37 },
-      "replay:traffic-replayer":        { "phase": "Ready", "behavior": "reran",   "startedAtSeconds": 81, "durationSeconds": 11 },
+      "kafka:msk-kafka":                { "phase": "Ready", "behavior": "skipped", "startedAtSeconds": 0,  "durationSeconds": 1 },
+      "replay:traffic-replayer":        { "phase": "Ready", "behavior": "skipped", "startedAtSeconds": 0,  "durationSeconds": 1 },
       "metadata:migrate-metadata":      { "phase": "Ready", "behavior": "skipped", "startedAtSeconds": 0,  "durationSeconds": 1 },
       "backfill:reindex-from-snapshot": { "phase": "Ready", "behavior": "skipped", "startedAtSeconds": 0,  "durationSeconds": 1 }
     },
@@ -352,7 +352,7 @@ Before the walk runs, the framework verifies a **phase-completion predicate**: e
 
 - **Constraint 1 — Change class:** for the subject component, the observed behavior must match what the transition tree says is allowed for the fields that changed. A `safe` field change allows `reran`; a `gated` field change requires `Paused` before approval and `reran` after; an `impossible` field change requires `Blocked` until both reset and approval have occurred.
 
-- **Constraint 2 — Cascade:** for each component downstream of the subject in the `ComponentTopology`, valid behavior depends on what the subject did. If the subject `reran`, every dependent must have `reran` — a reran upstream must cascade. The only way a dependent can legitimately avoid `reran` at this checkpoint is by being gated or blocked in its own right. If the subject was `Blocked`, dependents must be `Unstarted` or `Blocked`.
+- **Constraint 2 — Material cascade:** for each component downstream of the subject in the `ComponentTopology`, valid behavior depends on per-dependency checksum materiality for the changed paths. If a changed field is material to a downstream component's waiter, that dependent must `reran`. If it is not material, that dependent must `skipped`; a non-material downstream rerun is a scope leak. If the subject was `Blocked`, dependents must be `Unstarted` or `Blocked`.
 
 - **Constraint 3 — Upstream stability:** for each component upstream of the subject in the `ComponentTopology`, behavior must be `skipped`. A subject mutation should not force its prerequisites to rerun. If an upstream component reruns, that's a reverse-cascade failure.
 
@@ -364,7 +364,7 @@ Before the walk runs, the framework verifies a **phase-completion predicate**: e
 
 **Example — safe case:**
 
-For `proxy-numThreads` (changes `captureConfig.numThreads`, a `safe` field): once the proxy reaches `Ready`, the framework sweeps. The tree says `safe` → `reran` is consistent. `replayer` and other dependents also `reran` — consistent with constraint 2. Kafka and any other prerequisites `skipped` — consistent with constraint 3. `metadata` and `backfill` (independent) `skipped` — consistent with constraint 4. All pass.
+For `proxy-numThreads` (changes `captureConfig.numThreads`, a `safe` field): once the proxy reaches `Ready`, the framework sweeps. The tree says `safe` → subject `reran` is consistent. Because `numThreads` is not material to snapshot or replayer checksums, downstream snapshots/replayers must `skipped` — consistent with constraint 2. Kafka and any other prerequisites `skipped` — consistent with constraint 3. `metadata` and `backfill` (independent) `skipped` — consistent with constraint 4. All pass.
 
 If proxy had gated on a `safe` field change:
 
@@ -753,7 +753,8 @@ If a test needs to reason about ordering that is real in the workflow but not re
 1. Resolves a `ComponentTopology` for the baseline scenario.
 2. For each selector, queries the fixture registry for mutators matching `changeClass` + `dependencyPattern`.
 3. Applies each mutator to the baseline config (validates output against `WorkflowConfigSchema`).
-4. Packages an `ExpandedTestCase`: case name, baseline config, mutated config, response action.
+4. Uses transition-tree materiality to calculate the expected rerun set for the changed paths.
+5. Packages an `ExpandedTestCase`: case name, baseline config, mutated config, changed paths, expected rerun set, response action.
 
 ### snapshotStore
 
@@ -793,6 +794,7 @@ function assertNoViolations(
   checkpoint: Checkpoint,
   subject: ComponentId | null,   // null on 'baseline-complete' and 'noop' checkpoints
   topology: ComponentTopology,
+  expectedReruns: Set<ComponentId>, // subject plus checksum-material downstream components
 ): Violation[] {
 
   // Baseline runs: no subject, no mutation assertions.
@@ -839,14 +841,18 @@ function assertAtCheckpoint(
   checkpoint: Checkpoint,
   observed: ObservedSnapshot,
   subject: ComponentId,
-  dependents: ComponentId[]
+  dependents: ComponentId[],
+  expectedReruns: Set<ComponentId>,
 ): Violation[] {
 
   if (changeClass === 'safe') {
-    // One checkpoint only: subject reran, every dependent must have reran (cascade)
+    // One checkpoint only: subject reran; downstream components rerun only
+    // when the changed paths are material to their per-dependency checksum.
     return [
       ...assertBehavior(observed, subject, ['reran']),
-      ...dependents.flatMap(d => assertBehavior(observed, d, ['reran'])),
+      ...dependents.flatMap(d =>
+        assertBehavior(observed, d, expectedReruns.has(d) ? ['reran'] : ['skipped'])
+      ),
     ];
   }
 
@@ -860,7 +866,9 @@ function assertAtCheckpoint(
       case 'after-approval':
         return [
           ...assertBehavior(observed, subject, ['reran']),
-          ...dependents.flatMap(d => assertBehavior(observed, d, ['reran'])),
+          ...dependents.flatMap(d =>
+            assertBehavior(observed, d, expectedReruns.has(d) ? ['reran'] : ['skipped'])
+          ),
         ];
     }
   }
@@ -887,7 +895,9 @@ function assertAtCheckpoint(
       case 'after-approve':
         return [
           ...assertBehavior(observed, subject, ['reran']),
-          ...dependents.flatMap(d => assertBehavior(observed, d, ['reran'])),
+          ...dependents.flatMap(d =>
+            assertBehavior(observed, d, expectedReruns.has(d) ? ['reran'] : ['skipped'])
+          ),
         ];
     }
   }
@@ -921,16 +931,16 @@ Any behavioral difference between them is a bug.
 ## Current Gaps
 
 **Not yet implemented:**
-- Multi-case execution (live runner runs only the first expanded case per spec).
 - `transitionTreeGenerator` (schema `changeRestriction` → per-component transition trees).
-- Snapshot write-to-disk.
-- Tree-based pass/fail in `assertLogic`.
 - Timing capture from Argo node status.
-- Impossible flow: all four sub-cases. The `approve-only` and `reset-only` cases require actively verifying non-advancement after each action.
-- `leave-blocked` for both gated and impossible flows.
+- Real-cluster validation for gated and impossible response plans. The case-plan executor can construct the responses, but gate-state assertions and non-advancement checks still need live proof.
+- Component-level correlation from Argo nodes to behavior labels.
 
 **Implemented but incomplete:**
-- Gated flow: pause and approval work; gate-time fixture validations reported as `partial`.
+- Multi-case execution: expanded cases run sequentially, but failure in one case currently stops later cases.
+- Snapshot write-to-disk: compact and detailed snapshots exist, but timing and component-correlated Argo evidence are incomplete.
+- Tree-based pass/fail in `assertLogic`: pure checkpoint assertions exist; generated transition-tree mapping is still pending.
+- Gated/impossible flow: response case plans exist in the live runner; gate-time fixture validations and real-cluster gate assertions are still pending.
 - Outer workflow parity: safe flows work; approval-time validation semantics not yet equivalent to live runner.
 
 ---

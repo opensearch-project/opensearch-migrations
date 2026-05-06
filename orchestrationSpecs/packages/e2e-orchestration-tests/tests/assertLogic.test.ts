@@ -1,6 +1,6 @@
 import { assertNoViolations } from "../src/assertLogic";
 import { buildTopology, ComponentTopology } from "../src/componentTopology";
-import { Checkpoint, ComponentId, ObservedComponent } from "../src/types";
+import { ComponentId, ObservedComponent } from "../src/types";
 
 const A = "a:1" as ComponentId;
 const B = "b:1" as ComponentId;
@@ -148,33 +148,6 @@ describe("assertNoViolations — noop checkpoint", () => {
     });
 });
 
-describe("assertNoViolations — other checkpoints are unimplemented stubs", () => {
-    const others: Checkpoint[] = [
-        "before-approval",
-        "after-approval",
-        "on-blocked",
-        "after-approve-without-reset",
-        "after-reset",
-        "after-approve",
-    ];
-
-    it.each(others)("returns a single unimplemented-checkpoint violation for %s", (checkpoint) => {
-        const violations = assertNoViolations({
-            checkpoint,
-            subject: A,
-            topology: smallTopology(),
-            observations: { [A]: skipped(A), [B]: skipped(B), [C]: skipped(C) },
-        });
-        expect(violations).toEqual([
-            {
-                type: "unimplemented-checkpoint",
-                checkpoint,
-                message: expect.stringContaining(checkpoint),
-            },
-        ]);
-    });
-});
-
 // ── mutated-complete checkpoint tests ────────────────────────────────
 
 /**
@@ -203,14 +176,39 @@ function obs(id: ComponentId, behavior: string): ObservedComponent {
     return { componentId: id, phase: "Ready", behavior: behavior as any };
 }
 
+function phaseObs(id: ComponentId, phase: string, behavior?: string): ObservedComponent {
+    return {
+        componentId: id,
+        phase,
+        ...(behavior ? { behavior: behavior as any } : {}),
+    };
+}
+
 describe("assertNoViolations — mutated-complete checkpoint", () => {
-    it("returns no violations when subject and downstream reran, independents skipped", () => {
+    it("returns no violations when only the subject reran for a non-material safe change", () => {
         const violations = assertNoViolations({
             checkpoint: "mutated-complete",
             subject: C,
             topology: chainTopology(),
             observations: {
-                [A]: obs(A, "reran"),
+                [A]: obs(A, "skipped"),
+                [B]: obs(B, "skipped"),
+                [C]: obs(C, "reran"),
+                [D]: obs(D, "skipped"),
+            },
+        });
+        expect(violations).toEqual([]);
+    });
+
+    it("returns no violations when material downstream components reran", () => {
+        const violations = assertNoViolations({
+            checkpoint: "mutated-complete",
+            subject: C,
+            expectedRerunComponents: [C, B],
+            changedPaths: ["traffic.proxies.capture-proxy.proxyConfig.setHeader"],
+            topology: chainTopology(),
+            observations: {
+                [A]: obs(A, "skipped"),
                 [B]: obs(B, "reran"),
                 [C]: obs(C, "reran"),
                 [D]: obs(D, "skipped"),
@@ -225,7 +223,7 @@ describe("assertNoViolations — mutated-complete checkpoint", () => {
             subject: B,
             topology: chainTopology(),
             observations: {
-                [A]: obs(A, "reran"),    // downstream of B
+                [A]: obs(A, "skipped"),  // downstream of B, not material
                 [B]: obs(B, "reran"),    // subject
                 [C]: obs(C, "reran"),    // upstream of B, should be skipped
                 [D]: obs(D, "skipped"),  // independent
@@ -251,8 +249,8 @@ describe("assertNoViolations — mutated-complete checkpoint", () => {
             subject: C,
             topology: chainTopology(),
             observations: {
-                [A]: obs(A, "reran"),
-                [B]: obs(B, "reran"),
+                [A]: obs(A, "skipped"),
+                [B]: obs(B, "skipped"),
                 [C]: obs(C, "skipped"),
                 [D]: obs(D, "skipped"),
             },
@@ -269,13 +267,15 @@ describe("assertNoViolations — mutated-complete checkpoint", () => {
         });
     });
 
-    it("flags downstream dependent that stayed skipped as cascade violation", () => {
+    it("flags material downstream dependent that stayed skipped as cascade violation", () => {
         const violations = assertNoViolations({
             checkpoint: "mutated-complete",
             subject: C,
+            expectedRerunComponents: [C, B],
+            changedPaths: ["traffic.proxies.capture-proxy.proxyConfig.setHeader"],
             topology: chainTopology(),
             observations: {
-                [A]: obs(A, "reran"),
+                [A]: obs(A, "skipped"),
                 [B]: obs(B, "skipped"),  // downstream of C, should reran
                 [C]: obs(C, "reran"),
                 [D]: obs(D, "skipped"),
@@ -292,6 +292,36 @@ describe("assertNoViolations — mutated-complete checkpoint", () => {
             observedBehavior: "skipped",
             expectedBehavior: "reran",
             cascadeFrom: C,
+            materialToChangedPaths: true,
+        });
+    });
+
+    it("flags non-material downstream dependent that reran as cascade violation", () => {
+        const violations = assertNoViolations({
+            checkpoint: "mutated-complete",
+            subject: C,
+            changedPaths: ["traffic.proxies.capture-proxy.proxyConfig.numThreads"],
+            topology: chainTopology(),
+            observations: {
+                [A]: obs(A, "skipped"),
+                [B]: obs(B, "reran"),  // downstream of C, but not material
+                [C]: obs(C, "reran"),
+                [D]: obs(D, "skipped"),
+            },
+        });
+        const cascadeViolations = violations.filter(v => v.type === "cascade");
+        expect(cascadeViolations).toHaveLength(1);
+        expect(cascadeViolations[0]).toMatchObject({
+            type: "cascade",
+            componentId: B,
+            checkpoint: "mutated-complete",
+        });
+        expect(cascadeViolations[0].details).toMatchObject({
+            observedBehavior: "reran",
+            expectedBehavior: "skipped",
+            cascadeFrom: C,
+            materialToChangedPaths: false,
+            changedPaths: ["traffic.proxies.capture-proxy.proxyConfig.numThreads"],
         });
     });
 
@@ -301,8 +331,8 @@ describe("assertNoViolations — mutated-complete checkpoint", () => {
             subject: C,
             topology: chainTopology(),
             observations: {
-                [A]: obs(A, "reran"),
-                [B]: obs(B, "reran"),
+                [A]: obs(A, "skipped"),
+                [B]: obs(B, "skipped"),
                 [C]: obs(C, "reran"),
                 [D]: obs(D, "reran"),  // independent, should be skipped
             },
@@ -327,8 +357,8 @@ describe("assertNoViolations — mutated-complete checkpoint", () => {
             subject: C,
             topology: chainTopology(),
             observations: {
-                [A]: obs(A, "reran"),
-                [B]: obs(B, "reran"),
+                [A]: obs(A, "skipped"),
+                [B]: obs(B, "skipped"),
                 // C missing
                 [D]: obs(D, "skipped"),
             },
@@ -342,10 +372,11 @@ describe("assertNoViolations — mutated-complete checkpoint", () => {
         const violations = assertNoViolations({
             checkpoint: "mutated-complete",
             subject: C,
+            expectedRerunComponents: [C, A],
             topology: chainTopology(),
             observations: {
                 // A missing — downstream of C
-                [B]: obs(B, "reran"),
+                [B]: obs(B, "skipped"),
                 [C]: obs(C, "reran"),
                 [D]: obs(D, "skipped"),
             },
@@ -360,8 +391,8 @@ describe("assertNoViolations — mutated-complete checkpoint", () => {
             subject: C,
             topology: chainTopology(),
             observations: {
-                [A]: obs(A, "reran"),
-                [B]: obs(B, "reran"),
+                [A]: obs(A, "skipped"),
+                [B]: obs(B, "skipped"),
                 [C]: obs(C, "reran"),
                 // D missing — independent
             },
@@ -377,8 +408,8 @@ describe("assertNoViolations — mutated-complete checkpoint", () => {
             subject: C,
             topology: chainTopology(),
             observations: {
-                [A]: obs(A, "reran"),
-                [B]: obs(B, "reran"),
+                [A]: obs(A, "skipped"),
+                [B]: obs(B, "skipped"),
                 [C]: { componentId: C, phase: "Ready" },  // no behavior
                 [D]: obs(D, "skipped"),
             },
@@ -394,8 +425,8 @@ describe("assertNoViolations — mutated-complete checkpoint", () => {
             subject: null,
             topology: chainTopology(),
             observations: {
-                [A]: obs(A, "reran"),
-                [B]: obs(B, "reran"),
+                [A]: obs(A, "skipped"),
+                [B]: obs(B, "skipped"),
                 [C]: obs(C, "reran"),
                 [D]: obs(D, "skipped"),
             },
@@ -412,9 +443,10 @@ describe("assertNoViolations — mutated-complete checkpoint", () => {
         const violations = assertNoViolations({
             checkpoint: "mutated-complete",
             subject: C,
+            expectedRerunComponents: [C, B],
             topology: chainTopology(),
             observations: {
-                [A]: obs(A, "reran"),
+                [A]: obs(A, "skipped"),
                 [B]: obs(B, "skipped"),  // cascade violation
                 [C]: obs(C, "skipped"),  // change-class violation
                 [D]: obs(D, "reran"),    // independence violation
@@ -437,5 +469,233 @@ describe("assertNoViolations — mutated-complete checkpoint", () => {
             },
         });
         expect(violations).toEqual([]);
+    });
+});
+
+describe("assertNoViolations — gated checkpoints", () => {
+    it("before-approval passes when subject is gated, downstream is unstarted, and stable branches skipped", () => {
+        const violations = assertNoViolations({
+            checkpoint: "before-approval",
+            subject: C,
+            topology: chainTopology(),
+            observations: {
+                [A]: phaseObs(A, "Initialized", "unstarted"),
+                [B]: phaseObs(B, "Initialized", "unstarted"),
+                [C]: phaseObs(C, "Paused", "gated"),
+                [D]: skipped(D),
+            },
+        });
+        expect(violations).toEqual([]);
+    });
+
+    it("before-approval flags a subject that did not pause for approval", () => {
+        const violations = assertNoViolations({
+            checkpoint: "before-approval",
+            subject: C,
+            topology: chainTopology(),
+            observations: {
+                [A]: phaseObs(A, "Initialized", "unstarted"),
+                [B]: phaseObs(B, "Initialized", "unstarted"),
+                [C]: obs(C, "reran"),
+                [D]: skipped(D),
+            },
+        });
+        expect(violations).toHaveLength(1);
+        expect(violations[0]).toMatchObject({
+            type: "change-class",
+            checkpoint: "before-approval",
+            componentId: C,
+        });
+        expect(violations[0].details).toMatchObject({
+            observedBehavior: "reran",
+            expectedBehavior: "gated",
+        });
+    });
+
+    it("before-approval flags downstream components that advanced too early", () => {
+        const violations = assertNoViolations({
+            checkpoint: "before-approval",
+            subject: C,
+            topology: chainTopology(),
+            observations: {
+                [A]: phaseObs(A, "Initialized", "unstarted"),
+                [B]: obs(B, "reran"),
+                [C]: phaseObs(C, "Paused", "gated"),
+                [D]: skipped(D),
+            },
+        });
+        const cascade = violations.filter((v) => v.type === "cascade");
+        expect(cascade).toHaveLength(1);
+        expect(cascade[0]).toMatchObject({
+            checkpoint: "before-approval",
+            componentId: B,
+        });
+        expect(cascade[0].details).toMatchObject({
+            observedBehavior: "reran",
+            expectedBehavior: "unstarted | skipped",
+            cascadeFrom: C,
+        });
+    });
+
+    it("after-approval passes when subject and material downstream reran", () => {
+        const violations = assertNoViolations({
+            checkpoint: "after-approval",
+            subject: C,
+            expectedRerunComponents: [C, A, B],
+            topology: chainTopology(),
+            observations: {
+                [A]: obs(A, "reran"),
+                [B]: obs(B, "reran"),
+                [C]: obs(C, "reran"),
+                [D]: skipped(D),
+            },
+        });
+        expect(violations).toEqual([]);
+    });
+
+    it("after-approval still enforces upstream stability", () => {
+        const violations = assertNoViolations({
+            checkpoint: "after-approval",
+            subject: B,
+            expectedRerunComponents: [B, A],
+            topology: chainTopology(),
+            observations: {
+                [A]: obs(A, "reran"),
+                [B]: obs(B, "reran"),
+                [C]: obs(C, "reran"),
+                [D]: skipped(D),
+            },
+        });
+        const upstream = violations.filter((v) => v.type === "upstream-reran");
+        expect(upstream).toHaveLength(1);
+        expect(upstream[0]).toMatchObject({
+            checkpoint: "after-approval",
+            componentId: C,
+        });
+    });
+});
+
+describe("assertNoViolations — impossible checkpoints", () => {
+    it("on-blocked passes when subject is blocked and downstream has not advanced", () => {
+        const violations = assertNoViolations({
+            checkpoint: "on-blocked",
+            subject: C,
+            topology: chainTopology(),
+            observations: {
+                [A]: phaseObs(A, "Initialized", "unstarted"),
+                [B]: phaseObs(B, "Blocked", "blocked"),
+                [C]: phaseObs(C, "Blocked", "blocked"),
+                // Independents are intentionally unchecked at this checkpoint.
+                [D]: obs(D, "reran"),
+            },
+        });
+        expect(violations).toEqual([]);
+    });
+
+    it("after-approve-without-reset proves approval alone did not advance the blocked subject", () => {
+        const violations = assertNoViolations({
+            checkpoint: "after-approve-without-reset",
+            subject: C,
+            topology: chainTopology(),
+            observations: {
+                [A]: phaseObs(A, "Initialized", "unstarted"),
+                [B]: phaseObs(B, "Initialized", "unstarted"),
+                [C]: phaseObs(C, "Blocked", "blocked"),
+                // Independents are still unchecked for this non-advancement check.
+                [D]: obs(D, "reran"),
+            },
+        });
+        expect(violations).toEqual([]);
+    });
+
+    it("after-approve-without-reset flags a subject that advanced after approval alone", () => {
+        const violations = assertNoViolations({
+            checkpoint: "after-approve-without-reset",
+            subject: C,
+            topology: chainTopology(),
+            observations: {
+                [A]: phaseObs(A, "Initialized", "unstarted"),
+                [B]: phaseObs(B, "Initialized", "unstarted"),
+                [C]: obs(C, "reran"),
+                [D]: obs(D, "reran"),
+            },
+        });
+        expect(violations).toHaveLength(1);
+        expect(violations[0]).toMatchObject({
+            type: "change-class",
+            checkpoint: "after-approve-without-reset",
+            componentId: C,
+        });
+    });
+
+    it("after-reset passes when the subject is deleted and downstream has not advanced", () => {
+        const violations = assertNoViolations({
+            checkpoint: "after-reset",
+            subject: C,
+            topology: chainTopology(),
+            observations: {
+                [A]: phaseObs(A, "Initialized", "unstarted"),
+                [B]: phaseObs(B, "Initialized", "unstarted"),
+                [C]: phaseObs(C, "Deleted"),
+                [D]: skipped(D),
+            },
+        });
+        expect(violations).toEqual([]);
+    });
+
+    it("after-reset enforces independent stability again", () => {
+        const violations = assertNoViolations({
+            checkpoint: "after-reset",
+            subject: C,
+            topology: chainTopology(),
+            observations: {
+                [A]: phaseObs(A, "Initialized", "unstarted"),
+                [B]: phaseObs(B, "Initialized", "unstarted"),
+                [C]: phaseObs(C, "Deleted"),
+                [D]: obs(D, "reran"),
+            },
+        });
+        const independence = violations.filter((v) => v.type === "independence");
+        expect(independence).toHaveLength(1);
+        expect(independence[0]).toMatchObject({
+            checkpoint: "after-reset",
+            componentId: D,
+        });
+    });
+
+    it("after-approve passes when reset plus approval lets subject and material downstream rerun", () => {
+        const violations = assertNoViolations({
+            checkpoint: "after-approve",
+            subject: C,
+            expectedRerunComponents: [C, A, B],
+            topology: chainTopology(),
+            observations: {
+                [A]: obs(A, "reran"),
+                [B]: obs(B, "reran"),
+                [C]: obs(C, "reran"),
+                [D]: skipped(D),
+            },
+        });
+        expect(violations).toEqual([]);
+    });
+
+    it("mutation checkpoints report null subject as a programmer error", () => {
+        const violations = assertNoViolations({
+            checkpoint: "on-blocked",
+            subject: null,
+            topology: chainTopology(),
+            observations: {
+                [A]: phaseObs(A, "Initialized", "unstarted"),
+                [B]: phaseObs(B, "Initialized", "unstarted"),
+                [C]: phaseObs(C, "Blocked", "blocked"),
+                [D]: skipped(D),
+            },
+        });
+        expect(violations).toHaveLength(1);
+        expect(violations[0]).toMatchObject({
+            type: "change-class",
+            checkpoint: "on-blocked",
+        });
+        expect(violations[0].message).toMatch(/programmer error/);
     });
 });

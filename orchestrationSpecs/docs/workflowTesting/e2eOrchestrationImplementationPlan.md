@@ -103,8 +103,8 @@ Current branch status:
 - `[x]` Snapshots include an ordered event history for setup, configure, submit, approve, wait, observe, cleanup, and teardown.
 - `[x]` Workflow CLI failures include stderr/stdout diagnostics in error snapshots.
 - `[x]` Each submitted run deletes and waits for both the outer submitted Argo workflow and the fixed inner `migration-workflow`; failure to confirm baseline cleanup stops the noop run before it can collide.
-- `[~]` Workflow names are unique but not yet sanitized or length-limited for Kubernetes/Argo naming constraints.
-- `[~]` The first live run has reached subject-under-test behavior issues, but expected pass/fail assertions are not wired yet.
+- `[x]` Workflow names are unique, sanitized, and length-limited for Kubernetes/Argo naming constraints.
+- `[x]` Noop and safe pass/fail assertions are wired into runner snapshots; gated and impossible case-plan assertions are wired in unit tests, with live validation still pending.
 
 Get a real cluster-backed test running as early as possible, even if it covers only one safe/noop path and uses hardcoded scenario data. This is intentionally a vertical slice from the design document's "How A Test Case Runs" section, not the full framework.
 
@@ -127,7 +127,7 @@ Exit criteria:
 - `[x]` A non-gate component in `Pending` does not satisfy phase completion.
 - `[x]` Failures still run teardown actors if configured.
 - `[x]` The snapshot shape matches the design document enough that later assertions can read it.
-- `[ ]` Workflow names are sanitized/length-limited before broader matrix expansion.
+- `[x]` Workflow names are sanitized/length-limited before broader matrix expansion.
 
 ### 3. Minimal Observation And Snapshot Model `[~]`
 
@@ -137,7 +137,9 @@ Current branch status:
 - `[x]` Snapshot storage/report schema validate snapshots and reject duplicate observation keys.
 - `[x]` CRD observation captures resource state including kind/name/phase/generation/UID/raw resource data.
 - `[x]` Case snapshots include operational event history and fatal command stderr/stdout.
-- `[~]` Raw Argo workflow phase and node diagnostics are not yet captured.
+- `[x]` Raw Argo workflow phase and compact node diagnostics are captured on each checkpoint in the detail snapshot.
+- `[x]` Missing inner Argo workflow evidence uses a short appearance grace and records `workflow-missing`; it no longer consumes the full phase timeout before CRD checks can proceed.
+- `[x]` CLI live runs emit lightweight progress lines for setup, configure, submit, checkpoints, approvals, resets, and cleanup.
 
 Stabilize the data captured by the thin live test.
 
@@ -153,7 +155,7 @@ Exit criteria:
 - `[x]` Snapshots are valid JSON and validate against `reportSchema`.
 - `[x]` Duplicate observation keys are rejected.
 - `[x]` A failed live run still writes enough diagnostic data to debug command/setup/cleanup failures.
-- `[ ]` Raw Argo workflow phase and node diagnostics are captured for failed component execution.
+- `[x]` Raw Argo workflow phase and compact node diagnostics are captured for checkpoint diagnostics.
 
 ### 4. Temporary Expected CRD ComponentTopology For The First Scenario `[~]`
 
@@ -204,8 +206,10 @@ Current branch status:
 - `[x]` Pure `assertLogic` exists for `baseline-complete`, `noop`, and safe `mutated-complete`.
 - `[x]` `baseline-complete` is observation-only and does not require a subject.
 - `[x]` Noop checks every component is `skipped`.
-- `[x]` Safe `mutated-complete` checks subject/downstream `reran` and upstream/independent `skipped`.
-- `[ ]` Gated and impossible checkpoints still return explicit unimplemented-checkpoint violations.
+- `[x]` Safe `mutated-complete` is materiality-aware: subject and checksum-material downstream components must `reran`; non-material downstream, upstream, and independent components must `skipped`.
+- `[x]` Gated checkpoints (`before-approval`, `after-approval`) have pure assertion coverage.
+- `[x]` Impossible checkpoints (`on-blocked`, `after-approve-without-reset`, `after-reset`, `after-approve`) have pure assertion coverage.
+- `[x]` Mutation violations include changed user-config paths when the runner has them.
 
 Build `assertLogic` as a pure library, then wire it into the thin live E2E slice.
 
@@ -221,13 +225,13 @@ Behavior:
 
 - Noop checkpoint: every component must have behavior `skipped`.
 - `baseline-complete`: observation anchor only; no pass/fail assertions.
-- Safe `mutated-complete`: subject and downstream components must `reran`; upstream and independent components must `skipped`.
-- Gated `before-approval`: subject `Paused`; downstream `Unstarted` or equivalent not-started state.
-- Gated `after-approval`: subject and downstream `reran`; independent `skipped`.
-- Impossible `on-blocked`: subject `Blocked`; downstream `Unstarted` or `Blocked`; independents unchecked.
+- Safe `mutated-complete`: subject and checksum-material downstream components must `reran`; non-material downstream, upstream, and independent components must `skipped`.
+- Gated `before-approval`: subject `Paused`; downstream has not advanced (`Unstarted` or `skipped`).
+- Gated `after-approval`: subject and checksum-material downstream components must `reran`; non-material downstream, upstream, and independent components must `skipped`.
+- Impossible `on-blocked`: subject `Blocked`; downstream not advanced (`Unstarted`, `Blocked`, or `skipped`); independents unchecked.
 - Impossible `after-approve-without-reset`: subject still `Blocked`; downstream not advanced; independents unchecked.
 - Impossible `after-reset`: subject `Deleted`; downstream not advanced; independents checked.
-- Impossible `after-approve`: subject and downstream `reran`; independent `skipped`.
+- Impossible `after-approve`: subject and checksum-material downstream components must `reran`; non-material downstream, upstream, and independent components must `skipped`.
 
 Keep observed phase and observed behavior separate. CRD status phases like `Ready`, `Initialized`, `Deleting`, or `Blocked` are not always the same thing as behavior labels like `ran`, `reran`, and `skipped`.
 
@@ -235,21 +239,29 @@ Exit criteria:
 
 - `[x]` Unit tests cover noop and safe mutation checkpoints, including upstream stability.
 - `[x]` Violation messages include component ID, constraint, checkpoint, expected states, and observed state for implemented checkpoints.
-- `[ ]` Violation messages include relevant changed paths.
-- `[ ]` Unit tests cover gated and impossible checkpoints.
+- `[x]` Violation details include relevant changed paths when supplied by the runner.
+- `[x]` Unit tests cover gated and impossible checkpoints.
 
 ### 6. Live Runner Safe Mutation Slice `[~]`
 
 Current branch status:
 
-- `[x]` Safe-case runner scaffold exists as `runSafeCase`: baseline -> noop-pre -> mutated -> noop-post.
+- `[x]` Safe-case execution is represented as a `WorkflowCasePlan`: baseline -> noop-pre -> mutated -> noop-post.
 - `[x]` `proxyNumThreadsMutator` exists as the first safe mutator candidate.
 - `[x]` Behavior derivation exists from CRD observation deltas.
 - `[x]` Matrix expansion and mutator registry scaffolding exist.
-- `[ ]` CLI still needs to run expanded cases by default.
-- `[ ]` Noop-only mode should become explicit opt-in, e.g. `--noop-only`.
-- `[ ]` Live CRD checksum/fingerprint extraction has not been verified against actual CRD shape.
-- `[ ]` Argo workflow/node execution status is not yet captured or cross-checked.
+- `[x]` CLI runs expanded cases by default.
+- `[x]` Noop-only mode is explicit opt-in via `--noop-only`.
+- `[x]` Case-plan steps can now include multiple checkpoints and response actions before workflow cleanup.
+- `[~]` Live CRD checksum/fingerprint extraction reads `status.configChecksum` with an annotation fallback; Argo cross-checking is still pending.
+- `[~]` Argo workflow/node execution status is captured on each checkpoint, and missing Argo evidence is diagnostic-only; node execution is not yet correlated into per-component behavior.
+- `[x]` Configure events record a SHA-256 and byte length for the submitted config so snapshots can prove the runner sent different baseline vs mutated YAML.
+- `[x]` CLI safe-case runs validate mutated configs against `OVERALL_MIGRATION_CONFIG` before submission.
+- `[x]` Safe assertions now use expected rerun components from mutator metadata, reflecting the reconfiguring workflow design's per-dependency checksum materiality.
+- Live validation note: `basicSnapshotNoop.test.yaml` passes on `kind-ma-workflow-baseline`; latest run wrote `/tmp/e2e-orchestration-snapshots-basic-noop-after-argo-grace/datasnapshot-source-snap1-noop.json` with outcome `passed`.
+- Live validation note: `fullMigrationProxySafe.test.yaml` completes the four-run safe sequence and writes snapshots. With the corrected materiality model, `proxy-numThreads` should rerun only `CaptureProxy`; downstream `DataSnapshot` and `TrafficReplay` are expected to skip because the changed field is not checksum-material to them. If `CaptureProxy` itself stays at the baseline checksum/UID, treat that as SUT signal while framework work continues.
+- Live validation note: a cold `fullMigrationProxySafe.test.yaml` run on the current cluster was stopped after the workflow stayed `Running` with `SnapshotMigration/source-target-snap1-migration-0` still `Initialized`; treat that as SUT/live-environment signal, not an oracle failure.
+- Live validation note: `basicSnapshotSafe.test.yaml` was removed/replaced. Reconfiguring workflow semantics say completed terminal resources are sealed, so changing terminal resource specs after baseline is an impossible mutation, not a safe mutation.
 
 Extend the thin live harness from noop-only to one safe mutator.
 
@@ -292,12 +304,12 @@ The first live safe run must inspect the actual CRD shape and teach `extractCrdO
 
 Exit criteria:
 
-- `[ ]` CLI expands and runs all selected safe cases by default.
-- `[ ]` `--noop-only` or equivalent preserves the current noop harness as an opt-in developer mode.
-- `[ ]` One safe proxy or replay spec runs end-to-end locally.
-- `[ ]` Snapshot is written per expanded case.
-- `[ ]` `assertLogic` is the pass/fail oracle, not a direct snapshot comparison.
-- `[ ]` CRD checksum/fingerprint and Argo node execution evidence are both captured when available.
+- `[x]` CLI expands and runs all selected safe cases by default.
+- `[x]` `--noop-only` or equivalent preserves the current noop harness as an opt-in developer mode.
+- `[~]` One safe proxy or replay spec runs end-to-end locally with the corrected materiality oracle; warm/pre-existing full-flow runs reached snapshot writing with zero oracle violations, but cold full-flow validation is currently blocked by SUT/live workflow progress.
+- `[x]` Snapshot is written per expanded case.
+- `[x]` `assertLogic` is the pass/fail oracle, not a direct snapshot comparison.
+- `[~]` CRD checksum/fingerprint is captured when available; Argo node execution evidence is captured and missing-Argo cases are diagnostic-only, but node execution is not yet correlated to components.
 - `[ ]` Snapshot diagnostics call out any disagreement between checksum-derived and Argo-derived behavior.
 
 ### 7. Matrix Expander And Mutator Registry `[~]`
@@ -308,8 +320,10 @@ Current branch status:
 - `[x]` Minimal `matrixExpander` exists.
 - `[x]` Default safe `subject-change` expansion exists when `matrix.select` is absent.
 - `[x]` First safe proxy mutator exists.
-- `[ ]` Mutated configs are not yet validated against `OVERALL_MIGRATION_CONFIG` before submission.
-- `[ ]` Gated/impossible response expansion is not implemented.
+- `[x]` A smaller reliable noop snapshot spec exists at `basicSnapshotNoop.test.yaml`.
+- `[x]` The built-in basic impossible mutator targets `SnapshotMigration/source-target-snap1-migration-0`, because that resource is terminal and already uses the workflow's ApprovalGate retry wrapper. The earlier DataSnapshot target is not the first live impossible candidate because `reconcileDataSnapshotResource` currently has no retry gate wrapper.
+- `[x]` Mutated configs are validated against `OVERALL_MIGRATION_CONFIG` before CLI submission.
+- `[x]` Gated/impossible response expansion exists at the matrix level; the live runner now has case-plan wiring for gated approve/leave-blocked and impossible leave-blocked/approve-only/reset-only/reset-then-approve.
 
 Expand cases with straightforward nested-loop code; it does not need a complex topology resolver.
 
@@ -328,8 +342,9 @@ for (const selector of spec.matrix.select ?? defaultSelectorsFor(subject)) {
 Start with a small fixture set tied to actual sample config paths:
 
 - Safe proxy mutator: change a scalar in `traffic.proxies.<name>.proxyConfig` that already exists in the schema.
+- Impossible snapshot-migration mutator: change a scalar under `snapshotMigrationConfigs[0].perSnapshotConfig.<snapshot>[0].documentBackfillConfig` for the basic snapshot workflow.
 - Safe replay mutator: change a scalar under `traffic.replayers.<name>`.
-- Add gated/impossible mutators only after the thin live path and one safe mutation are stable.
+- Add broader gated/impossible mutators only after the thin live path and first impossible mutation are stable.
 
 Each mutator should declare:
 
@@ -342,8 +357,8 @@ Each mutator should declare:
 Exit criteria:
 
 - `[x]` A spec with `select` expands to the expected safe cases.
-- `[ ]` Mutated configs validate against `OVERALL_MIGRATION_CONFIG`.
-- `[ ]` The CLI runner executes all expanded safe cases by default.
+- `[x]` Mutated configs validate against `OVERALL_MIGRATION_CONFIG`.
+- `[x]` The CLI runner executes all expanded safe cases by default.
 - `[ ]` Optional exact-case selection exists only as a developer convenience, not as required behavior.
 
 ### 8. Transition Tree Generator `[ ]`
@@ -390,6 +405,7 @@ Current branch status:
 
 - `[x]` Basic polling predicate exists and returns structured timeout diagnostics.
 - `[x]` `Pending` is not terminal for generic topology components; approval-gate held phases are modeled separately.
+- `[x]` `Paused` is treated as a held topology phase for gated checkpoints.
 - `[ ]` Phase names still need validation against the first live runs.
 
 After the safe slice works, harden waiting semantics.
@@ -406,7 +422,15 @@ Exit criteria:
 - Timeout produces a distinct `phase-timeout` result in the snapshot and process exit.
 - `assertNoViolations` is never called with non-terminal components unless the test is explicitly checking non-advancement.
 
-### 10. Gated Flow `[ ]`
+### 10. Gated Flow `[~]`
+
+Current branch status:
+
+- `[x]` Pure `before-approval` and `after-approval` assertions exist.
+- `[x]` The case-plan executor can keep one workflow submission alive across checkpoint -> approve action -> checkpoint.
+- `[x]` Expanded non-safe cases dispatch to their own case-plan builders instead of the safe runner.
+- `[~]` Gated mutator metadata is supported through `mutator.approvalPattern`; no built-in gated mutator is registered yet.
+- `[x]` Live gated execution is wired into `runExpandedCase` and unit-tested for the approve response.
 
 Implement `response: approve` and `response: leave-blocked` after safe flow is stable.
 
@@ -418,11 +442,21 @@ Use `ApprovalGate` CRD observation:
 
 Exit criteria:
 
-- `before-approval` and `after-approval` checkpoints are populated from real CRD observations.
+- `[x]` `before-approval` and `after-approval` checkpoints are populated by the case-plan executor in unit tests.
+- `[ ]` `before-approval` and `after-approval` checkpoints are validated against real CRD observations.
 - `leave-blocked` ends after verifying the gate is still pending/paused and writes a complete snapshot.
 - Gate-time validations use split observer/checker fixtures.
 
-### 11. Impossible Flow `[ ]`
+### 11. Impossible Flow `[~]`
+
+Current branch status:
+
+- `[x]` Pure impossible checkpoint assertions exist for `on-blocked`, `after-approve-without-reset`, `after-reset`, and `after-approve`.
+- `[x]` The case-plan executor can run reset actions between checkpoints.
+- `[x]` Expanded non-safe cases dispatch to their own case-plan builders instead of the safe runner.
+- `[x]` One impossible mutator and reset/approval metadata are defined for `SnapshotMigration/source-target-snap1-migration-0`.
+- `[x]` Live impossible execution is wired into `runExpandedCase` and unit-tested for `leave-blocked`; response operations for `approve-only`, `reset-only`, and `reset-then-approve` are also encoded in the case plan.
+- `[ ]` Live impossible execution still needs real-cluster validation and gate-state assertions.
 
 Implement only after reset behavior is understood per component kind.
 
@@ -443,10 +477,18 @@ For `approve-only` and `reset-only`, verify non-advancement by comparing a befor
 
 Exit criteria:
 
-- All four responses produce snapshots.
+- `[~]` All four response plans can be constructed by the runner; real-cluster snapshots are still pending.
 - The AND condition is proven: approval alone does not advance, reset alone does not advance, reset plus approval does advance.
 
-### 12. Multi-Case Execution `[ ]`
+### 12. Multi-Case Execution `[~]`
+
+Current branch status:
+
+- `[x]` Expanded cases run sequentially in one namespace.
+- `[x]` Safe-case snapshots are written per expanded case.
+- `[x]` Process exit is nonzero if any case errors or produces violations.
+- `[ ]` Failure in one case currently stops the remaining cases; continue-after-failure behavior is not implemented.
+- `[~]` Gated/impossible cases are runnable through the case-plan executor in unit tests; live validation is pending.
 
 Run all expanded cases in a spec. For the next slice, this starts with all expanded safe cases; gated/impossible cases join after their single-case semantics are reliable.
 
@@ -501,11 +543,11 @@ Status for the original concrete slice:
 3. `[x]` Implement `k8sClient.ts`, `snapshotStore.ts`, and `reportSchema.ts` for raw observation capture.
 4. `[x]` Implement `e2e-run.ts` with one exact noop case: baseline submission, structural approval, wait, observe, resubmit unchanged, observe, write snapshot.
 5. `[x]` Add a temporary `ComponentTopologyResolver` path for the chosen baseline.
-6. `[ ]` Add noop assertions, then add one safe mutator and the safe mutation sequence.
+6. `[x]` Add noop assertions, then add one safe mutator and the safe mutation sequence.
 
 This gets a real E2E test into the repo early. The fuller transition tree generator, matrix expansion, and generalized topology handling should grow around that live slice instead of blocking it.
 
-The next delegatable work should start at step 5, `Assertion Logic`, with a narrow noop assertion slice. Keep it pure and unit-tested first, then wire it into the existing noop runner before starting step 6's safe mutation sequence.
+The next delegatable work should start by stabilizing the live safe case, then add Argo execution evidence and gated/impossible checkpoint assertions.
 
 ## Follow-Up Quality Work
 

@@ -91,6 +91,83 @@ describe("writeCaseSnapshot", () => {
         expect(details.runs.baseline).toBeDefined();
     });
 
+    it("adds case, run, and checkpoint durations to the short report", () => {
+        const snap: CaseSnapshot = {
+            ...MIN_SNAPSHOT,
+            startedAt: "2025-01-01T00:00:00.000Z",
+            finishedAt: "2025-01-01T00:00:05.000Z",
+            runs: {
+                baseline: {
+                    name: "baseline",
+                    checkpoints: [
+                        {
+                            checkpoint: "baseline-complete",
+                            observedAt: "2025-01-01T00:00:04.000Z",
+                            components: {},
+                            violations: [],
+                            argoWorkflow: {
+                                name: "migration-workflow",
+                                phase: "Succeeded",
+                                nodes: [],
+                            },
+                        },
+                    ],
+                },
+            },
+            events: [
+                {
+                    at: "2025-01-01T00:00:01.000Z",
+                    phase: "baseline",
+                    action: "configure",
+                    result: "ok",
+                },
+                {
+                    at: "2025-01-01T00:00:02.000Z",
+                    phase: "baseline-complete",
+                    action: "wait-workflow-completion",
+                    result: "ok",
+                    message: "waiting for migration-workflow",
+                },
+                {
+                    at: "2025-01-01T00:00:03.500Z",
+                    phase: "baseline-complete",
+                    action: "wait-workflow-completion",
+                    result: "ok",
+                    message: "migration-workflow Succeeded after 1500ms",
+                },
+                {
+                    at: "2025-01-01T00:00:03.700Z",
+                    phase: "baseline-complete",
+                    action: "wait-phase-completion",
+                    result: "ok",
+                    message: "ready after 200ms",
+                },
+                {
+                    at: "2025-01-01T00:00:04.500Z",
+                    phase: "baseline",
+                    action: "delete-workflow",
+                    result: "ok",
+                },
+            ],
+        };
+
+        const out = writeCaseSnapshot(snap, { outputDir: tmpDir });
+        const report = JSON.parse(fs.readFileSync(out, "utf8"));
+
+        expect(report.durationMs).toBe(5000);
+        expect(report.duration).toBe("5s");
+        expect(report.runs[0].durationMs).toBe(3500);
+        expect(report.runs[0].duration).toBe("3.5s");
+        expect(report.runs[0].checkpoints[0]).toMatchObject({
+            durationMs: 2000,
+            duration: "2s",
+            workflowWaitDurationMs: 1500,
+            workflowWaitDuration: "1.5s",
+            componentReadyWaitDurationMs: 200,
+            componentReadyWaitDuration: "200ms",
+        });
+    });
+
     it("creates the output directory if needed", () => {
         const nested = path.join(tmpDir, "a", "b", "c");
         const out = writeCaseSnapshot(MIN_SNAPSHOT, { outputDir: nested });

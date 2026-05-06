@@ -38,6 +38,7 @@ export const TERMINAL_OR_HELD_PHASES: ReadonlySet<string> = new Set([
     "Failed",
     "Blocked",
     "Suspended",
+    "Paused",
     "Deleted",
 ]);
 

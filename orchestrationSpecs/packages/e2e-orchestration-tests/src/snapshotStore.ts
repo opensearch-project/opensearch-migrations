@@ -95,16 +95,28 @@ export interface CaseReport {
     outcome: CaseSnapshot["outcome"];
     startedAt: string;
     finishedAt?: string;
+    durationMs?: number;
+    duration?: string;
     detailPath: string;
     runCount: number;
     violationCount: number;
     diagnosticCount: number;
     runs: Array<{
         name: string;
+        durationMs?: number;
+        duration?: string;
         checkpoints: Array<{
             checkpoint: string;
+            durationMs?: number;
+            duration?: string;
+            workflowWaitDurationMs?: number;
+            workflowWaitDuration?: string;
+            componentReadyWaitDurationMs?: number;
+            componentReadyWaitDuration?: string;
             componentCount: number;
             violationCount: number;
+            argoPhase?: string;
+            argoNodeCount?: number;
         }>;
     }>;
     workflowSteps: string[];
@@ -173,13 +185,32 @@ export function writeCaseSnapshot(
 }
 
 export function buildCaseReport(snapshot: CaseSnapshot, detailPath: string): CaseReport {
+    const nextCheckpointEvents = checkpointEventReader(snapshot.events);
     const runs = Object.values(snapshot.runs).map((run) => ({
         name: run.name,
-        checkpoints: run.checkpoints.map((cp) => ({
-            checkpoint: cp.checkpoint,
-            componentCount: Object.keys(cp.components).length,
-            violationCount: (cp.violations ?? []).length,
-        })),
+        ...durationFromTimes(runBoundaryTimes(snapshot, run.name, run.checkpoints)),
+        checkpoints: run.checkpoints.map((cp) => {
+            const events = nextCheckpointEvents(cp.checkpoint, cp.observedAt);
+            return {
+                checkpoint: cp.checkpoint,
+                ...durationFromTimes([
+                    ...events.map((e) => parseTimeMs(e.at)),
+                    parseTimeMs(cp.observedAt),
+                ]),
+                ...prefixedDuration(
+                    "workflowWait",
+                    waitDurationFromEvents(events, "wait-workflow-completion"),
+                ),
+                ...prefixedDuration(
+                    "componentReadyWait",
+                    waitDurationFromEvents(events, "wait-phase-completion"),
+                ),
+                componentCount: Object.keys(cp.components).length,
+                violationCount: (cp.violations ?? []).length,
+                argoPhase: cp.argoWorkflow?.phase,
+                argoNodeCount: cp.argoWorkflow?.nodes.length,
+            };
+        }),
     }));
     const violations: CaseReport["violations"] = (snapshot.violations ?? []).map((v) => ({
         type: v.type,
@@ -193,6 +224,7 @@ export function buildCaseReport(snapshot: CaseSnapshot, detailPath: string): Cas
         outcome: snapshot.outcome,
         startedAt: snapshot.startedAt,
         finishedAt: snapshot.finishedAt,
+        ...durationBetween(snapshot.startedAt, snapshot.finishedAt),
         detailPath,
         runCount: runs.length,
         violationCount: (snapshot.violations ?? []).length,
@@ -202,6 +234,130 @@ export function buildCaseReport(snapshot: CaseSnapshot, detailPath: string): Cas
         diagnostics: snapshot.diagnostics ?? [],
         violations,
     };
+}
+
+type CaseEvent = CaseSnapshot["events"][number];
+type RunCheckpoint = CaseSnapshot["runs"][string]["checkpoints"][number];
+
+function runBoundaryTimes(
+    snapshot: CaseSnapshot,
+    runName: string,
+    checkpoints: readonly RunCheckpoint[],
+): Array<number | undefined> {
+    return [
+        ...snapshot.events
+            .filter((e) => e.phase === runName)
+            .map((e) => parseTimeMs(e.at)),
+        ...checkpoints.map((cp) => parseTimeMs(cp.observedAt)),
+    ];
+}
+
+function checkpointEventReader(events: readonly CaseEvent[]) {
+    const byPhase = new Map<string, CaseEvent[]>();
+    for (const e of events) {
+        const current = byPhase.get(e.phase) ?? [];
+        current.push(e);
+        byPhase.set(e.phase, current);
+    }
+
+    const cursors = new Map<string, number>();
+    return (checkpoint: string, observedAt: string): CaseEvent[] => {
+        const phaseEvents = byPhase.get(checkpoint) ?? [];
+        const observedMs = parseTimeMs(observedAt);
+        const start = cursors.get(checkpoint) ?? 0;
+        if (observedMs === undefined) {
+            cursors.set(checkpoint, phaseEvents.length);
+            return phaseEvents.slice(start);
+        }
+
+        let end = start;
+        while (end < phaseEvents.length) {
+            const eventMs = parseTimeMs(phaseEvents[end]?.at);
+            if (eventMs === undefined || eventMs > observedMs) break;
+            end += 1;
+        }
+        cursors.set(checkpoint, end);
+        return phaseEvents.slice(start, end);
+    };
+}
+
+function durationBetween(
+    startedAt: string | undefined,
+    finishedAt: string | undefined,
+): { durationMs?: number; duration?: string } {
+    const start = parseTimeMs(startedAt);
+    const end = parseTimeMs(finishedAt);
+    if (start === undefined || end === undefined || end < start) return {};
+    return durationFields(end - start);
+}
+
+function durationFromTimes(
+    times: ReadonlyArray<number | undefined>,
+): { durationMs?: number; duration?: string } {
+    const valid = times.filter((t): t is number => t !== undefined);
+    if (valid.length < 2) return {};
+    const start = Math.min(...valid);
+    const end = Math.max(...valid);
+    if (end < start) return {};
+    return durationFields(end - start);
+}
+
+function waitDurationFromEvents(
+    events: readonly CaseEvent[],
+    action: string,
+): { durationMs?: number; duration?: string } {
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+        const e = events[i];
+        if (e?.action !== action) continue;
+        const match = e.message?.match(/\bafter (\d+)ms\b/);
+        if (!match) continue;
+        return durationFields(Number(match[1]));
+    }
+    return {};
+}
+
+function prefixedDuration(
+    prefix: "workflowWait" | "componentReadyWait",
+    duration: { durationMs?: number; duration?: string },
+): Record<string, string | number> {
+    if (duration.durationMs === undefined || duration.duration === undefined) return {};
+    return {
+        [`${prefix}DurationMs`]: duration.durationMs,
+        [`${prefix}Duration`]: duration.duration,
+    };
+}
+
+function durationFields(durationMs: number): { durationMs: number; duration: string } {
+    const roundedMs = Math.max(0, Math.round(durationMs));
+    return {
+        durationMs: roundedMs,
+        duration: formatDuration(roundedMs),
+    };
+}
+
+function parseTimeMs(value: string | undefined): number | undefined {
+    if (!value) return undefined;
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) ? ms : undefined;
+}
+
+function formatDuration(ms: number): string {
+    if (ms < 1000) return `${ms}ms`;
+
+    const totalSeconds = Math.floor(ms / 1000);
+    const remainingMs = ms % 1000;
+    if (totalSeconds < 60) {
+        if (remainingMs === 0) return `${totalSeconds}s`;
+        return `${(ms / 1000).toFixed(3).replace(/\.?0+$/, "")}s`;
+    }
+
+    const totalMinutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (totalMinutes < 60) return `${totalMinutes}m ${seconds}s`;
+
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${hours}h ${minutes}m ${seconds}s`;
 }
 
 function summarizeWorkflowSteps(snapshot: CaseSnapshot): string[] {

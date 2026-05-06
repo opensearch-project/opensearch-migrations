@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { runSafeCase, LiveRunnerDeps } from "../src/e2e-run";
+import { runSafeCase, runExpandedCases, LiveRunnerDeps } from "../src/e2e-run";
 import { buildTopology } from "../src/componentTopology";
 import { WorkflowCli } from "../src/workflowCli";
 import { K8sClient } from "../src/k8sClient";
@@ -52,6 +52,7 @@ function safeMutator(): Mutator {
         changeClass: "safe",
         dependencyPattern: "subject-change",
         subject: SUBJECT,
+        expectedRerunComponents: [SUBJECT],
         changedPaths: ["traffic.proxies.capture-proxy.proxyConfig.numThreads"],
         apply(config: unknown): unknown {
             const c = structuredClone(config) as Record<string, unknown>;
@@ -62,12 +63,16 @@ function safeMutator(): Mutator {
     };
 }
 
-function expandedCase(): ExpandedTestCase {
+function expandedCase(overrides: Partial<ExpandedTestCase> = {}): ExpandedTestCase {
+    const mutator = safeMutator();
     return {
         caseName: "captureproxy-capture-proxy-subject-change-proxy-numThreads",
         subject: SUBJECT,
-        mutator: safeMutator(),
+        mutator,
+        expectedRerunComponents: mutator.expectedRerunComponents ?? [SUBJECT],
+        changedPaths: mutator.changedPaths,
         response: null,
+        ...overrides,
     };
 }
 
@@ -147,10 +152,10 @@ function makeRunnerTestDeps(opts: {
 
 describe("runSafeCase — happy path", () => {
     it("runs 4 submissions and writes a passed snapshot with all runs", async () => {
-        // Observations: baseline (calls 1-2), noop-pre (3-4), mutated (5-6), noop-post (7-8)
+        // Observations: baseline (calls 1-2), noop-pre (3-4), mutated (5-6), noop-post (7-8).
         // For noop-pre and noop-post to pass, checksums must be unchanged from prior.
-        // For mutated to pass, subject+downstream must have changed checksums (reran),
-        // and independent must be unchanged (skipped).
+        // `proxy-numThreads` is operational: only the proxy's self-checksum is material.
+        // Downstream snapshots/replays should stay skipped.
         const { deps, calls, tmpDir } = makeRunnerTestDeps({
             observationFactory: (n) => {
                 const components: Record<ComponentId, ObservedComponent> = {};
@@ -160,9 +165,7 @@ describe("runSafeCase — happy path", () => {
                 // Calls 7-8: noop-post — same as mutated → skipped
                 const isMutatedOrAfter = n >= 5;
                 for (const c of ALL) {
-                    const isSubjectOrDownstream =
-                        c === SUBJECT || c === SNAP || c === REPLAY;
-                    const cs = isMutatedOrAfter && isSubjectOrDownstream
+                    const cs = isMutatedOrAfter && c === SUBJECT
                         ? `mutated-cs-${c}`
                         : `baseline-cs-${c}`;
                     components[c] = {
@@ -191,6 +194,26 @@ describe("runSafeCase — happy path", () => {
             const submits = calls.filter(c => c.args[0] === "submit");
             expect(configures).toHaveLength(4);
             expect(submits).toHaveLength(4);
+
+            const configureEvents = snap.events.filter((e) => e.action === "configure");
+            expect(configureEvents).toHaveLength(4);
+            expect(configureEvents.every((e) => e.configSha256?.length === 64)).toBe(true);
+            expect(configureEvents[0].configSha256).toBe(configureEvents[1].configSha256);
+            expect(configureEvents[2].configSha256).toBe(configureEvents[3].configSha256);
+            expect(configureEvents[2].configSha256).not.toBe(configureEvents[0].configSha256);
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it("rejects a schema-invalid mutated config when validation is enabled", async () => {
+        const { deps, tmpDir } = makeRunnerTestDeps();
+        deps.validateMutatedConfig = true;
+
+        try {
+            await expect(runSafeCase(deps, expandedCase())).rejects.toThrow(
+                /failed OVERALL_MIGRATION_CONFIG validation/,
+            );
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }
@@ -198,7 +221,7 @@ describe("runSafeCase — happy path", () => {
 });
 
 describe("runSafeCase — cascade violation", () => {
-    it("flags cascade when subject reran but downstream stayed skipped", async () => {
+    it("flags cascade when a material downstream component stayed skipped", async () => {
         const { deps, tmpDir } = makeRunnerTestDeps({
             observationFactory: (n) => {
                 const components: Record<ComponentId, ObservedComponent> = {};
@@ -221,13 +244,15 @@ describe("runSafeCase — cascade violation", () => {
         });
 
         try {
-            const outPath = await runSafeCase(deps, expandedCase());
+            const outPath = await runSafeCase(deps, expandedCase({
+                expectedRerunComponents: [SUBJECT, SNAP],
+            }));
             const snap: CaseSnapshot = readDetailSnapshot(outPath);
 
             expect(snap.outcome).toBe("partial");
             const cascadeViolations = snap.violations.filter(v => v.type === "cascade");
             expect(cascadeViolations.length).toBeGreaterThanOrEqual(1);
-            // SNAP and REPLAY are downstream of SUBJECT
+            // SNAP was declared material to this changed path.
             const cascadeIds = cascadeViolations.map(v => v.componentId);
             expect(cascadeIds).toEqual(expect.arrayContaining([SNAP]));
         } finally {
@@ -243,11 +268,9 @@ describe("runSafeCase — independence violation", () => {
                 const components: Record<ComponentId, ObservedComponent> = {};
                 const isMutatedOrAfter = n >= 5;
                 for (const c of ALL) {
-                    const isSubjectOrDownstream =
-                        c === SUBJECT || c === SNAP || c === REPLAY;
                     const isIndependent = c === SNAPMIG;
-                    // Subject+downstream change (correct), but independent also changes (wrong)
-                    const cs = isMutatedOrAfter && (isSubjectOrDownstream || isIndependent)
+                    // Subject changes correctly, but independent also changes (wrong).
+                    const cs = isMutatedOrAfter && (c === SUBJECT || isIndependent)
                         ? `mutated-cs-${c}`
                         : `baseline-cs-${c}`;
                     components[c] = {
@@ -284,13 +307,11 @@ describe("runSafeCase — noop-post catches residual state", () => {
                 // noop-post reads are calls 7-8; make checksums change again
                 const isNoopPost = n >= 7;
                 for (const c of ALL) {
-                    const isSubjectOrDownstream =
-                        c === SUBJECT || c === SNAP || c === REPLAY;
                     let cs: string;
-                    if (isNoopPost && isSubjectOrDownstream) {
+                    if (isNoopPost && c === SUBJECT) {
                         // Checksums change again at noop-post → reran → violation
                         cs = `post-cs-${c}`;
-                    } else if (isMutatedOrAfter && isSubjectOrDownstream) {
+                    } else if (isMutatedOrAfter && c === SUBJECT) {
                         cs = `mutated-cs-${c}`;
                     } else {
                         cs = `baseline-cs-${c}`;
@@ -349,7 +370,6 @@ describe("runExpandedCases", () => {
     it("writes one snapshot per case when the registry has multiple mutators for the subject", async () => {
         const { deps, tmpDir } = makeRunnerTestDeps();
         try {
-            const { runExpandedCases } = await import("../src/e2e-run");
             const { MutatorRegistry } = await import("../src/fixtures/mutators");
 
             const secondMutator: Mutator = {
@@ -368,6 +388,144 @@ describe("runExpandedCases", () => {
             expect(names.sort()).toEqual([
                 "captureproxy-capture-proxy-subject-change-proxy-numThreads",
                 "captureproxy-capture-proxy-subject-change-proxy-otherKnob",
+            ]);
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it("runs a gated approve case through before-approval and after-approval checkpoints", async () => {
+        const { deps, calls, tmpDir } = makeRunnerTestDeps({
+            observationFactory: (n) => {
+                const components: Record<ComponentId, ObservedComponent> = {};
+                const beforeApproval = n >= 5 && n <= 6;
+                const afterApproval = n >= 7;
+                for (const c of ALL) {
+                    components[c] = {
+                        componentId: c,
+                        phase: beforeApproval && c === SUBJECT
+                            ? "Paused"
+                            : c === SNAP || c === REPLAY
+                                ? "Skipped"
+                                : "Ready",
+                        configChecksum: afterApproval && c === SUBJECT
+                            ? `approved-cs-${c}`
+                            : `baseline-cs-${c}`,
+                        uid: `uid-${c}`,
+                    };
+                }
+                return components;
+            },
+        });
+        deps.spec.matrix.select = [
+            {
+                changeClass: "gated",
+                patterns: ["subject-gated-change"],
+                response: "approve",
+            },
+        ];
+
+        const gatedMutator: Mutator = {
+            ...safeMutator(),
+            name: "proxy-gated-toggle",
+            changeClass: "gated",
+            dependencyPattern: "subject-gated-change",
+            changedPaths: ["traffic.proxies.capture-proxy.proxyConfig.enabled"],
+            approvalPattern: "capture-proxy.captureproxy.vapretry",
+        };
+
+        try {
+            const { MutatorRegistry } = await import("../src/fixtures/mutators");
+            const registry = new MutatorRegistry();
+            registry.register(gatedMutator);
+
+            const paths = await runExpandedCases(deps, registry);
+            const snap = readDetailSnapshot(paths[0]);
+
+            expect(snap.outcome).toBe("passed");
+            expect(snap.runs["mutated"].checkpoints.map((cp) => cp.checkpoint)).toEqual([
+                "before-approval",
+                "after-approval",
+            ]);
+            expect(calls.map((c) => c.args[0])).toEqual([
+                "configure",
+                "submit",
+                "configure",
+                "submit",
+                "configure",
+                "submit",
+                "approve",
+                "configure",
+                "submit",
+            ]);
+            expect(calls.find((c) => c.args[0] === "approve")?.args).toEqual([
+                "approve",
+                "capture-proxy.captureproxy.vapretry",
+                "--namespace",
+                "ma",
+            ]);
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it("runs an impossible leave-blocked case through the on-blocked checkpoint", async () => {
+        const { deps, calls, tmpDir } = makeRunnerTestDeps({
+            observationFactory: (n) => {
+                const components: Record<ComponentId, ObservedComponent> = {};
+                const mutated = n >= 5;
+                for (const c of ALL) {
+                    components[c] = {
+                        componentId: c,
+                        phase: mutated && c === SNAPMIG ? "Blocked" : "Ready",
+                        configChecksum: `baseline-cs-${c}`,
+                        uid: `uid-${c}`,
+                    };
+                }
+                return components;
+            },
+        });
+        deps.spec.matrix.subject = SNAPMIG;
+        deps.spec.matrix.select = [
+            {
+                changeClass: "impossible",
+                patterns: ["subject-impossible-change"],
+                response: "leave-blocked",
+            },
+        ];
+
+        const impossibleMutator: Mutator = {
+            ...safeMutator(),
+            name: "snapshotMigration-maxConnections",
+            changeClass: "impossible",
+            dependencyPattern: "subject-impossible-change",
+            subject: SNAPMIG,
+            expectedRerunComponents: [SNAPMIG],
+            changedPaths: [
+                "snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig.maxConnections",
+            ],
+        };
+
+        try {
+            const { MutatorRegistry } = await import("../src/fixtures/mutators");
+            const registry = new MutatorRegistry();
+            registry.register(impossibleMutator);
+
+            const paths = await runExpandedCases(deps, registry);
+            const snap = readDetailSnapshot(paths[0]);
+
+            expect(snap.outcome).toBe("passed");
+            expect(Object.keys(snap.runs)).toEqual(["baseline", "noop-pre", "mutated"]);
+            expect(snap.runs["mutated"].checkpoints.map((cp) => cp.checkpoint)).toEqual([
+                "on-blocked",
+            ]);
+            expect(calls.map((c) => c.args[0])).toEqual([
+                "configure",
+                "submit",
+                "configure",
+                "submit",
+                "configure",
+                "submit",
             ]);
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });

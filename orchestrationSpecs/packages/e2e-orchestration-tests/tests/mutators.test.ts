@@ -3,6 +3,7 @@ import {
     Mutator,
     MutatorRegistry,
     proxyNumThreadsMutator,
+    snapshotMigrationMaxConnectionsMutator,
 } from "../src/fixtures/mutators";
 
 function fakeMutator(overrides: Partial<Mutator> = {}): Mutator {
@@ -96,6 +97,9 @@ describe("proxyNumThreadsMutator", () => {
         expect(mutator.changeClass).toBe("safe");
         expect(mutator.dependencyPattern).toBe("subject-change");
         expect(mutator.subject).toBe("captureproxy:capture-proxy");
+        expect(mutator.expectedRerunComponents).toEqual([
+            "captureproxy:capture-proxy",
+        ]);
         expect(mutator.changedPaths).toEqual([
             "traffic.proxies.capture-proxy.proxyConfig.numThreads",
         ]);
@@ -111,7 +115,7 @@ describe("proxyNumThreadsMutator", () => {
                 },
             },
         };
-        const result = mutator.apply(input) as typeof input;
+        const result = mutator.apply(input) as any;
         // Input unchanged
         expect(input.traffic.proxies["capture-proxy"].proxyConfig.numThreads).toBe(1);
         // Result mutated
@@ -130,11 +134,88 @@ describe("proxyNumThreadsMutator", () => {
                 },
             },
         };
-        const result = mutator.apply(input) as typeof input;
+        const result = mutator.apply(input) as any;
         expect(result.traffic.proxies["capture-proxy"].proxyConfig.numThreads).toBe(3);
     });
 
     it("apply() throws on missing traffic key", () => {
         expect(() => mutator.apply({})).toThrow(/missing 'traffic'/);
+    });
+});
+
+describe("snapshotMigrationMaxConnectionsMutator", () => {
+    const mutator = snapshotMigrationMaxConnectionsMutator();
+
+    it("has the expected metadata", () => {
+        expect(mutator.name).toBe("snapshotMigration-maxConnections");
+        expect(mutator.changeClass).toBe("impossible");
+        expect(mutator.dependencyPattern).toBe("subject-impossible-change");
+        expect(mutator.subject).toBe("snapshotmigration:source-target-snap1-migration-0");
+        expect(mutator.expectedRerunComponents).toEqual([
+            "snapshotmigration:source-target-snap1-migration-0",
+        ]);
+        expect(mutator.changedPaths).toEqual([
+            "snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig.maxConnections",
+        ]);
+    });
+
+    it("apply() returns a cloned config that differs from the input", () => {
+        const input = {
+            snapshotMigrationConfigs: [
+                {
+                    perSnapshotConfig: {
+                        snap1: [
+                            {
+                                documentBackfillConfig: {
+                                    maxConnections: 4,
+                                    documentsPerBulkRequest: 1000,
+                                },
+                            },
+                        ],
+                    },
+                },
+            ],
+        };
+        const result = mutator.apply(input) as any;
+
+        expect(
+            input.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0]
+                .documentBackfillConfig.maxConnections,
+        ).toBe(4);
+        expect(
+            result.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0]
+                .documentBackfillConfig.maxConnections,
+        ).toBe(5);
+        expect(
+            result.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0]
+                .documentBackfillConfig.documentsPerBulkRequest,
+        ).toBe(1000);
+    });
+
+    it("apply() toggles away from 5 if already 5", () => {
+        const input = {
+            snapshotMigrationConfigs: [
+                {
+                    perSnapshotConfig: {
+                        snap1: [
+                            {
+                                documentBackfillConfig: {
+                                    maxConnections: 5,
+                                },
+                            },
+                        ],
+                    },
+                },
+            ],
+        };
+        const result = mutator.apply(input) as typeof input;
+        expect(
+            result.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0]
+                .documentBackfillConfig.maxConnections,
+        ).toBe(6);
+    });
+
+    it("apply() throws on missing snapshotMigrationConfigs key", () => {
+        expect(() => mutator.apply({})).toThrow(/missing 'snapshotMigrationConfigs'/);
     });
 });

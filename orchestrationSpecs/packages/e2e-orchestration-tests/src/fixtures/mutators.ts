@@ -19,10 +19,32 @@ export interface Mutator {
     dependencyPattern: DependencyPattern;
     /** The component this mutation targets. */
     subject: ComponentId;
+    /**
+     * Components expected to re-run when this mutation is submitted.
+     *
+     * This is deliberately separate from ComponentTopology. Topology
+     * tells us who depends on whom; reconfiguringWorkflows.md says
+     * downstream re-execution is driven by checksum materiality. Until
+     * transition-tree mapping is generated, mutators carry the small
+     * amount of materiality metadata needed by the live runner.
+     *
+     * If omitted, the runner assumes only `subject` should re-run.
+     */
+    expectedRerunComponents?: readonly ComponentId[];
     /** Takes raw user-config YAML-parsed object, returns mutated copy. */
     apply(config: unknown): unknown;
     /** User-config paths this mutator touches. */
     changedPaths: readonly string[];
+    /** Mutation ApprovalGate pattern used by gated/impossible response actions. */
+    approvalPattern?: string;
+    /** Reset command metadata for impossible response actions. */
+    reset?: {
+        all?: boolean;
+        cascade?: boolean;
+        includeProxies?: boolean;
+        deleteStorage?: boolean;
+        path?: string;
+    };
 }
 
 export interface MutatorSelectorFilter {
@@ -82,6 +104,7 @@ export function proxyNumThreadsMutator(): Mutator {
         changeClass: "safe",
         dependencyPattern: "subject-change",
         subject: "captureproxy:capture-proxy" as ComponentId,
+        expectedRerunComponents: ["captureproxy:capture-proxy" as ComponentId],
         changedPaths: ["traffic.proxies.capture-proxy.proxyConfig.numThreads"],
         apply(config: unknown): unknown {
             const cloned = structuredClone(config);
@@ -96,6 +119,73 @@ export function proxyNumThreadsMutator(): Mutator {
             if (!proxyConfig) throw new Error("proxy-numThreads mutator: missing 'traffic.proxies.capture-proxy.proxyConfig' key");
             const current = typeof proxyConfig["numThreads"] === "number" ? proxyConfig["numThreads"] : 1;
             proxyConfig["numThreads"] = current === 2 ? 3 : 2;
+            return cloned;
+        },
+    };
+}
+
+/**
+ * snapshotMigrationMaxConnectionsMutator — minimal impossible mutator
+ * for the reliable basic snapshot workflow.
+ *
+ * Mutates
+ * `snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig.maxConnections`.
+ * The field is operationally simple, but SnapshotMigration is a
+ * terminal resource; once it reaches `Completed`, lock-on-complete
+ * semantics make any spec change impossible without reset. Unlike
+ * DataSnapshot, SnapshotMigration is already wrapped by the workflow's
+ * ApprovalGate retry loop, so it is the right first live impossible
+ * target for this test framework.
+ */
+export function snapshotMigrationMaxConnectionsMutator(): Mutator {
+    return {
+        name: "snapshotMigration-maxConnections",
+        changeClass: "impossible",
+        dependencyPattern: "subject-impossible-change",
+        subject: "snapshotmigration:source-target-snap1-migration-0" as ComponentId,
+        expectedRerunComponents: [
+            "snapshotmigration:source-target-snap1-migration-0" as ComponentId,
+        ],
+        changedPaths: [
+            "snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig.maxConnections",
+        ],
+        approvalPattern: "source-target-snap1-migration-0.vapretry",
+        reset: {
+            path: "source-target-snap1-migration-0",
+            cascade: true,
+        },
+        apply(config: unknown): unknown {
+            const cloned = structuredClone(config);
+            const root = cloned as Record<string, unknown>;
+            const configs = root["snapshotMigrationConfigs"];
+            if (!Array.isArray(configs)) {
+                throw new Error("snapshotMigration-maxConnections mutator: missing 'snapshotMigrationConfigs' array");
+            }
+            const firstConfig = configs[0] as Record<string, unknown> | undefined;
+            if (!firstConfig) {
+                throw new Error("snapshotMigration-maxConnections mutator: missing 'snapshotMigrationConfigs.0'");
+            }
+            const perSnapshotConfig = firstConfig["perSnapshotConfig"] as Record<string, unknown> | undefined;
+            if (!perSnapshotConfig) {
+                throw new Error("snapshotMigration-maxConnections mutator: missing 'snapshotMigrationConfigs.0.perSnapshotConfig'");
+            }
+            const snap1Configs = perSnapshotConfig["snap1"];
+            if (!Array.isArray(snap1Configs)) {
+                throw new Error("snapshotMigration-maxConnections mutator: missing 'snapshotMigrationConfigs.0.perSnapshotConfig.snap1' array");
+            }
+            const snap1 = snap1Configs[0] as Record<string, unknown> | undefined;
+            if (!snap1) {
+                throw new Error("snapshotMigration-maxConnections mutator: missing 'snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0'");
+            }
+            const documentBackfillConfig = snap1["documentBackfillConfig"] as Record<string, unknown> | undefined;
+            if (!documentBackfillConfig) {
+                throw new Error("snapshotMigration-maxConnections mutator: missing 'snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig'");
+            }
+            const current =
+                typeof documentBackfillConfig["maxConnections"] === "number"
+                    ? documentBackfillConfig["maxConnections"]
+                    : 4;
+            documentBackfillConfig["maxConnections"] = current === 5 ? 6 : 5;
             return cloned;
         },
     };

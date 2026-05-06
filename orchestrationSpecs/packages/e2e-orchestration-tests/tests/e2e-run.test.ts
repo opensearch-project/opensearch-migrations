@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { runNoopCase, LiveRunnerDeps } from "../src/e2e-run";
+import { runNoopCase, runWorkflowCasePlan, LiveRunnerDeps } from "../src/e2e-run";
 import { buildTopology } from "../src/componentTopology";
 import { WorkflowCli } from "../src/workflowCli";
 import { WorkflowCliError } from "../src/workflowCli";
@@ -173,6 +173,188 @@ describe("runNoopCase — basic flow", () => {
                     ]),
                 );
             }
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it("captures inner Argo workflow evidence at checkpoints", async () => {
+        const { deps, tmpDir } = makeRunnerTestDeps();
+        deps.k8sClient = new K8sClient({
+            namespace: "ma",
+            runner: (args) => {
+                if (args[0] === "delete") {
+                    return { stdout: "", stderr: "", exitCode: 0 };
+                }
+                if (
+                    args[0] === "get" &&
+                    args[1] === "workflows.argoproj.io" &&
+                    args[2] === "migration-workflow"
+                ) {
+                    return {
+                        stdout: JSON.stringify({
+                            metadata: { name: "migration-workflow" },
+                            status: {
+                                phase: "Succeeded",
+                                startedAt: "2026-05-05T00:00:00Z",
+                                finishedAt: "2026-05-05T00:01:00Z",
+                                nodes: {
+                                    "node-1": {
+                                        displayName: "createSnapshot",
+                                        templateName: "runcreatesnapshot",
+                                        phase: "Succeeded",
+                                        startedAt: "2026-05-05T00:00:10Z",
+                                        finishedAt: "2026-05-05T00:00:20Z",
+                                    },
+                                    "node-2": {
+                                        displayName: "waitForDataSnapshot",
+                                        phase: "Running",
+                                        message: "waiting for DataSnapshot",
+                                    },
+                                },
+                            },
+                        }),
+                        stderr: "",
+                        exitCode: 0,
+                    };
+                }
+                return { stdout: "", stderr: "unexpected kubectl call", exitCode: 99 };
+            },
+        });
+
+        try {
+            const outPath = await runNoopCase(deps);
+            const report = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
+            const baselineCp = snapshot.runs["baseline"].checkpoints[0];
+
+            expect(baselineCp.argoWorkflow).toMatchObject({
+                name: "migration-workflow",
+                phase: "Succeeded",
+                nodes: expect.arrayContaining([
+                    expect.objectContaining({
+                        id: "node-1",
+                        templateName: "runcreatesnapshot",
+                        phase: "Succeeded",
+                    }),
+                    expect.objectContaining({
+                        id: "node-2",
+                        displayName: "waitForDataSnapshot",
+                        phase: "Running",
+                    }),
+                ]),
+            });
+            expect(report.runs[0].checkpoints[0]).toMatchObject({
+                argoPhase: "Succeeded",
+                argoNodeCount: 2,
+            });
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it("waits for the inner workflow to complete before checkpointing live runs", async () => {
+        const { deps, tmpDir } = makeRunnerTestDeps();
+        let now = 0;
+        deps.clock = {
+            now: () => now,
+            sleep: (ms: number) => {
+                now += ms;
+                return Promise.resolve();
+            },
+        };
+        deps.waitForInnerWorkflowCompletion = true;
+
+        let getWorkflowCalls = 0;
+        deps.k8sClient = new K8sClient({
+            namespace: "ma",
+            runner: (args) => {
+                if (args[0] === "delete") {
+                    return { stdout: "", stderr: "", exitCode: 0 };
+                }
+                if (
+                    args[0] === "get" &&
+                    args[1] === "workflows.argoproj.io" &&
+                    args[2] === "migration-workflow"
+                ) {
+                    getWorkflowCalls += 1;
+                    const phase = getWorkflowCalls === 1 || getWorkflowCalls === 4
+                        ? "Running"
+                        : "Succeeded";
+                    return {
+                        stdout: JSON.stringify({
+                            metadata: { name: "migration-workflow" },
+                            status: { phase, nodes: {} },
+                        }),
+                        stderr: "",
+                        exitCode: 0,
+                    };
+                }
+                return { stdout: "", stderr: "unexpected kubectl call", exitCode: 99 };
+            },
+        });
+
+        try {
+            const outPath = await runNoopCase(deps);
+            const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
+            const waitEvents = snapshot.events.filter(
+                (e) => e.action === "wait-workflow-completion",
+            );
+
+            expect(waitEvents.map((e) => e.result)).toEqual([
+                "ok",
+                "ok",
+                "ok",
+                "ok",
+            ]);
+            expect(waitEvents.filter((e) => /Succeeded after 2000ms/.test(e.message ?? ""))).toHaveLength(2);
+            expect(snapshot.runs["baseline"].checkpoints[0].argoWorkflow?.phase).toBe("Succeeded");
+            expect(snapshot.runs["noop-pre"].checkpoints[0].argoWorkflow?.phase).toBe("Succeeded");
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it("does not spend the full phase timeout when inner workflow evidence is missing", async () => {
+        const { deps, tmpDir } = makeRunnerTestDeps();
+        let now = 0;
+        deps.clock = {
+            now: () => now,
+            sleep: (ms: number) => {
+                now += ms;
+                return Promise.resolve();
+            },
+        };
+        deps.waitForInnerWorkflowCompletion = true;
+        deps.innerWorkflowMissingGraceSeconds = 4;
+        deps.spec.phaseCompletionTimeoutSeconds = 60;
+        deps.k8sClient = new K8sClient({
+            namespace: "ma",
+            runner: (args) => {
+                if (args[0] === "delete") {
+                    return { stdout: "", stderr: "", exitCode: 0 };
+                }
+                if (
+                    args[0] === "get" &&
+                    args[1] === "workflows.argoproj.io" &&
+                    args[2] === "migration-workflow"
+                ) {
+                    return { stdout: "", stderr: "not found", exitCode: 1 };
+                }
+                return { stdout: "", stderr: "unexpected kubectl call", exitCode: 99 };
+            },
+        });
+
+        try {
+            const outPath = await runNoopCase(deps);
+            const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
+
+            expect(snapshot.outcome).toBe("partial");
+            expect(snapshot.diagnostics.join("\n")).toContain("workflow-missing");
+            expect(snapshot.diagnostics.join("\n")).not.toContain("workflow-timeout");
+            expect(now).toBe(8000);
+            expect(snapshot.runs["baseline"].checkpoints[0].violations).toHaveLength(0);
+            expect(snapshot.runs["noop-pre"].checkpoints[0].violations).toHaveLength(0);
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }
@@ -529,6 +711,118 @@ describe("runNoopCase — assertLogic integration", () => {
             for (const id of Object.keys(baselineCp.components) as ComponentId[]) {
                 expect(baselineCp.components[id].behavior).toBe("ran");
             }
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+});
+
+describe("runWorkflowCasePlan — multi-checkpoint run steps", () => {
+    it("keeps a submitted workflow alive across checkpoint, approval action, and follow-up checkpoint", async () => {
+        const { deps, calls, k8sCalls, tmpDir, baselinePath } = makeRunnerTestDeps({
+            spec: {
+                baseConfig: "./baseline.wf.yaml",
+                phaseCompletionTimeoutSeconds: 5,
+                matrix: { subject: COMPONENTS[0] },
+                lifecycle: { setup: [], teardown: [] },
+                approvalGates: [],
+            },
+        });
+
+        let callCount = 0;
+        deps.readObservations = async () => {
+            callCount += 1;
+            const beforeApproval = callCount >= 3 && callCount <= 4;
+            const afterApproval = callCount >= 5;
+            return {
+                components: {
+                    [COMPONENTS[0]]: beforeApproval
+                        ? {
+                              componentId: COMPONENTS[0],
+                              phase: "Paused",
+                              configChecksum: "mutated-subject",
+                              uid: "subject-uid",
+                          }
+                        : {
+                              componentId: COMPONENTS[0],
+                              phase: "Ready",
+                              configChecksum: afterApproval ? "mutated-subject" : "baseline-subject",
+                              uid: "subject-uid",
+                          },
+                    [COMPONENTS[1]]: {
+                        componentId: COMPONENTS[1],
+                        phase: "Ready",
+                        configChecksum: "baseline-upstream",
+                        uid: "upstream-uid",
+                    },
+                },
+            };
+        };
+
+        try {
+            const baselineYaml = fs.readFileSync(baselinePath, "utf8");
+            const outPath = await runWorkflowCasePlan(deps, {
+                caseName: "captureproxy-capture-proxy-gated-action",
+                steps: [
+                    {
+                        runName: "baseline",
+                        configYaml: baselineYaml,
+                        operations: [
+                            {
+                                kind: "checkpoint",
+                                checkpoint: "baseline-complete",
+                                subject: null,
+                            },
+                        ],
+                    },
+                    {
+                        runName: "mutated",
+                        configYaml: baselineYaml,
+                        operations: [
+                            {
+                                kind: "checkpoint",
+                                checkpoint: "before-approval",
+                                subject: COMPONENTS[0],
+                            },
+                            {
+                                kind: "approve",
+                                pattern: "capture-proxy.vapretry",
+                            },
+                            {
+                                kind: "checkpoint",
+                                checkpoint: "after-approval",
+                                subject: COMPONENTS[0],
+                            },
+                        ],
+                    },
+                ],
+            });
+
+            const snapshot = readDetailSnapshot(outPath);
+            expect(snapshot.outcome).toBe("passed");
+            expect(snapshot.runs["mutated"].checkpoints.map((cp) => cp.checkpoint)).toEqual([
+                "before-approval",
+                "after-approval",
+            ]);
+            expect(calls.map((c) => c.args[0])).toEqual([
+                "configure",
+                "submit",
+                "configure",
+                "submit",
+                "approve",
+            ]);
+            expect(calls[calls.length - 1].args).toEqual([
+                "approve",
+                "capture-proxy.vapretry",
+                "--namespace",
+                "ma",
+            ]);
+
+            const deletes = k8sCalls.filter((c) => c.args[0] === "delete");
+            const mutatedOuterDeletes = deletes.filter((c) =>
+                c.args[2].startsWith("captureproxy-capture-proxy-gated-action-mutated-"),
+            );
+            expect(mutatedOuterDeletes).toHaveLength(1);
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }

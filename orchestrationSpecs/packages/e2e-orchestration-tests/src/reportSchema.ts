@@ -16,6 +16,39 @@ import {
 } from "./types";
 
 /**
+ * Compact Argo workflow node evidence captured at a checkpoint. This is
+ * diagnostic evidence, not an oracle: assertions still come from CRD
+ * observations plus assertLogic. Keeping node evidence in the snapshot
+ * makes SUT defects visible when CRD checksums and workflow execution
+ * disagree.
+ */
+export const ArgoWorkflowNodeSchema = z
+    .object({
+        id: z.string(),
+        name: z.string().optional(),
+        displayName: z.string().optional(),
+        templateName: z.string().optional(),
+        phase: z.string().optional(),
+        message: z.string().optional(),
+        startedAt: z.string().optional(),
+        finishedAt: z.string().optional(),
+    })
+    .strict();
+export type ArgoWorkflowNode = z.infer<typeof ArgoWorkflowNodeSchema>;
+
+export const ArgoWorkflowObservationSchema = z
+    .object({
+        name: z.string(),
+        phase: z.string().optional(),
+        message: z.string().optional(),
+        startedAt: z.string().optional(),
+        finishedAt: z.string().optional(),
+        nodes: z.array(ArgoWorkflowNodeSchema).default([]),
+    })
+    .strict();
+export type ArgoWorkflowObservation = z.infer<typeof ArgoWorkflowObservationSchema>;
+
+/**
  * A checker result captured at a specific observation key (base name
  * plus lifecycle phase, matching the ObservationBag key format).
  */
@@ -45,6 +78,8 @@ export const RunCheckpointSchema = z
         checkpoint: CheckpointSchema,
         /** Wall-clock time when this checkpoint was captured. */
         observedAt: z.string(),
+        /** Diagnostic-only snapshot of the inner Argo workflow. */
+        argoWorkflow: ArgoWorkflowObservationSchema.optional(),
         components: z.record(ComponentIdSchema, ObservedComponentSchema),
         violations: z.array(ViolationSchema).default([]),
     })
@@ -94,6 +129,8 @@ export const CaseEventSchema = z
         result: z.enum(["ok", "error"]),
         command: z.string().optional(),
         message: z.string().optional(),
+        configSha256: z.string().optional(),
+        configBytes: z.number().int().nonnegative().optional(),
         stdout: z.string().optional(),
         stderr: z.string().optional(),
     })
