@@ -41,9 +41,10 @@ public class SourceReconstructor {
         if (fieldName.startsWith("_")) {
             return true;
         }
-        // copy_to targets are index-time-only in ES/OS — they never appear in _source even
-        // though they have stored/doc_values/points data in the segment. Strip them.
-        if (mappingContext != null && mappingContext.isCopyToTarget(fieldName)) {
+        // Unified source-exclusion gate: strips copy_to targets (index-time-only, never in
+        // _source) AND honours index-level _source.includes / _source.excludes. Cheap no-op
+        // when the mapping declared neither directive.
+        if (mappingContext != null && mappingContext.isSourceExcluded(fieldName)) {
             return true;
         }
         if (!fieldName.contains(".")) {
@@ -285,6 +286,13 @@ public class SourceReconstructor {
         if (mappingContext != null) {
             for (String sourceField : mappingContext.getFieldNames()) {
                 if (hasNested(target, sourceField)) {
+                    continue;
+                }
+                // Respect _source.excludes / .includes for the SOURCE field itself. If the
+                // user told ES not to store "secret" in _source, we must not resurrect it
+                // via its copy_to target. shouldSkipField covers the leading-underscore and
+                // copy_to-target cases too, so the same gate is reusable here.
+                if (shouldSkipField(sourceField, mappingContext)) {
                     continue;
                 }
                 List<String> rankedTargets = mappingContext.getCopyToTargets(sourceField);

@@ -1167,4 +1167,119 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                 "copy_to target `users.all` must NOT appear in reconstructed _source: " + source);
         }
     }
+
+    @ParameterizedTest(name = "source_excludes: {0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testSourceExcludesFieldHandling(ContainerVersion sourceVersion, ContainerVersion targetVersion) throws Exception {
+        // _source.excludes is expressed at mapping time. In a sourceless migration there is no
+        // stored _source to filter on the origin, but the mapping's intent is still authoritative:
+        // a field listed under _source.excludes must NOT be resurrected by reconstruction even if
+        // its value is recoverable from stored fields / doc_values / points / terms on the indexed
+        // side. This test also exercises the trailing-".*" glob form for nested paths.
+        //
+        // Typed-mappings versions (pre-7) declare _source inside the type body; 7+ declares it at
+        // the mappings root. The harness handles both shapes.
+        if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion())) {
+            // _source.excludes semantics on ES 1.x/2.x predate a lot of the codec surface the
+            // reconstructor relies on; not in scope for this fix.
+            return;
+        }
+
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "source_excludes_test";
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+
+            // Mapping: `title` stays, `secret` is excluded via literal path, everything under
+            // `meta.` is excluded via glob. All three are indexed with doc_values so the
+            // reconstructor CAN recover them — the test asserts it DOES NOT because the mapping
+            // declares otherwise.
+            String propertiesJson =
+                "\"properties\":{"
+                + "\"title\":{\"type\":\"keyword\"},"
+                + "\"secret\":{\"type\":\"keyword\"},"
+                + "\"meta\":{\"properties\":{"
+                +   "\"created_at\":{\"type\":\"date\"},"
+                +   "\"updated_by\":{\"type\":\"keyword\"}"
+                + "}}"
+                + "}";
+
+            String sourceFilterJson =
+                "\"_source\":{\"enabled\":false,\"excludes\":[\"secret\",\"meta.*\"]}";
+
+            String indexBody;
+            if (needsDocType(sourceVersion)) {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{\"%s\":{%s,%s}}}",
+                    docType, sourceFilterJson, propertiesJson);
+            } else {
+                indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{" + sourceFilterJson + "," + propertiesJson + "}}";
+            }
+
+            String doc = "{\"title\":\"hello world\",\"secret\":\"s3cr3t\","
+                + "\"meta\":{\"created_at\":\"2024-01-15T12:00:00Z\",\"updated_by\":\"alice\"}}";
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc, null, docType);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            // Target mapping carries the same _source filter so a re-indexed doc would be shaped
+            // identically — matches a real customer's migration posture.
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + sourceFilterJson + "," + propertiesJson + "}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            log.info("Target search response: {}", response);
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertFalse(hits.isEmpty(), "No documents migrated. Response: " + response);
+
+            JsonNode source = hits.get(0).path("_source");
+            log.info("Reconstructed _source: {}", source);
+
+            // (1) `title` is NOT in any excludes rule, so it must survive reconstruction.
+            assertEquals("hello world", source.path("title").asText(),
+                "non-excluded field `title` must be present: " + source);
+
+            // (2) `secret` matches the literal-path exclude and must NOT appear.
+            assertTrue(source.path("secret").isMissingNode(),
+                "_source.excludes=[\"secret\"] must suppress `secret`: " + source);
+
+            // (3) Both `meta.*` children match the trailing-".*" glob and must NOT appear.
+            assertTrue(source.path("meta").isMissingNode() || source.path("meta").size() == 0,
+                "_source.excludes=[\"meta.*\"] must suppress all nested meta fields: " + source);
+        }
+    }
+
 }

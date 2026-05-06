@@ -7,6 +7,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
@@ -14,56 +15,83 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Parses index mappings once and provides field type info for doc_value conversion.
  *
- * Also captures the {@code copy_to} graph (source field -> list of target fields). Target fields
+ * <p>Also captures the {@code copy_to} graph (source field -&gt; list of target fields). Target fields
  * are index-time-only in OpenSearch: they NEVER appear in the document's
  * {@code _source}. For sourceless reconstruction this means two things:
  *
- *   (1) Target fields must be STRIPPED from the reconstructed _source even though they have
- *       doc_values / stored fields in the segment. See {@link #isCopyToTarget(String)}.
- *   (2) When a source field's own stored/doc_values/points chain returns nothing, the value can
+ * <ol>
+ *   <li>Target fields must be STRIPPED from the reconstructed _source even though they have
+ *       doc_values / stored fields in the segment. See {@link #isCopyToTarget(String)}.</li>
+ *   <li>When a source field's own stored/doc_values/points chain returns nothing, the value can
  *       be reverse-derived from one of its copy_to targets (ranked by lossiness — keyword-class
- *       before text). See {@link #getCopyToTargets(String)}.
+ *       before text). See {@link #getCopyToTargets(String)}.</li>
+ * </ol>
+ *
+ * <p>Finally, the index-level {@code _source.includes} / {@code _source.excludes} filter is parsed
+ * so callers can suppress paths the origin mapping never materialized into {@code _source}.
+ * See {@link #isSourceExcluded(String)}, which combines the copy_to-target check with the glob
+ * filter as a single decision point for the reconstructor.
  */
 @Slf4j
 public class FieldMappingContext {
     private static final String PROPERTIES = "properties";
+    private static final String SOURCE = "_source";
     private static final String COPY_TO = "copy_to";
     private final Map<String, FieldMappingInfo> fieldMappings = new HashMap<>();
     /** source field -> ordered list of declared copy_to targets (raw order from mapping). */
     private final Map<String, List<String>> copyToBySource = new HashMap<>();
     /** target field -> set of sources that copy into it (inverse index). */
     private final Map<String, Set<String>> sourcesByTarget = new HashMap<>();
+    // _source.includes / _source.excludes glob patterns. Pragmatic subset of ES source-filter
+    // glob semantics sufficient for the common cases:
+    //   "*"              -> matches every path
+    //   "<prefix>.*"     -> matches any path starting with "<prefix>."
+    //   "<prefix>.**"    -> same as "<prefix>.*" for our purposes
+    //   "<literal.path>" -> exact match
+    // Mid-string '*' / '?' fall back to literal match with a debug log so they do not silently
+    // drop matching paths.
+    private final List<String> sourceIncludes = new ArrayList<>();
+    private final List<String> sourceExcludes = new ArrayList<>();
 
     public FieldMappingContext(JsonNode mappingsNode) {
         if (mappingsNode == null) {
             log.debug("Mappings node is null, no field mappings available");
             return;
         }
-        
+
         log.debug("Parsing mappings node of type: {}", mappingsNode.getNodeType());
-        JsonNode properties = extractProperties(mappingsNode);
-        
-        if (properties != null && !properties.isMissingNode()) {
+        JsonNode container = extractMappingContainer(mappingsNode);
+        if (container == null || !container.isObject()) {
+            log.debug("No mapping container found");
+            return;
+        }
+
+        parseSourceFilter(container.path(SOURCE));
+
+        JsonNode properties = container.path(PROPERTIES);
+        if (!properties.isMissingNode() && properties.isObject()) {
             log.debug("Found {} top-level properties", properties.size());
             parseProperties(properties, "");
         } else {
             log.debug("No properties found in mappings");
         }
-        
-        log.debug("Parsed {} field mappings total", fieldMappings.size());
+
+        log.debug("Parsed {} field mappings, {} copy_to edges, {} include/exclude rules",
+            fieldMappings.size(), copyToBySource.size(),
+            sourceIncludes.size() + sourceExcludes.size());
     }
 
-    private JsonNode extractProperties(JsonNode mappingsNode) {
+    private JsonNode extractMappingContainer(JsonNode mappingsNode) {
         if (mappingsNode.isArray()) {
-            return extractPropertiesFromArray(mappingsNode);
+            return extractContainerFromArray(mappingsNode);
         }
         if (mappingsNode.isObject()) {
-            return extractPropertiesFromObject(mappingsNode);
+            return extractContainerFromObject(mappingsNode);
         }
         return null;
     }
 
-    private JsonNode extractPropertiesFromArray(JsonNode mappingsNode) {
+    private JsonNode extractContainerFromArray(JsonNode mappingsNode) {
         // Multi-type mappings (ES 1.x-5.x) - take first type
         if (mappingsNode.size() == 0) {
             return null;
@@ -78,16 +106,15 @@ public class FieldMappingContext {
         }
         var typeEntry = fields.next();
         log.debug("Using first mapping type: {}", typeEntry.getKey());
-        return typeEntry.getValue().path(PROPERTIES);
+        return typeEntry.getValue();
     }
 
-    private JsonNode extractPropertiesFromObject(JsonNode mappingsNode) {
-        // Check for direct properties
-        JsonNode properties = mappingsNode.path(PROPERTIES);
-        if (!properties.isMissingNode()) {
-            return properties;
+    private JsonNode extractContainerFromObject(JsonNode mappingsNode) {
+        // Direct style (ES 7+): root has "properties" as a direct child.
+        if (!mappingsNode.path(PROPERTIES).isMissingNode()) {
+            return mappingsNode;
         }
-        // Check for typed mappings (ES 6.x style: {"_doc": {"properties": {...}}})
+        // Typed mappings (ES 6.x style: {"_doc": {"properties": {...}}})
         var fields = mappingsNode.fields();
         if (!fields.hasNext()) {
             return null;
@@ -98,7 +125,32 @@ public class FieldMappingContext {
             return null;
         }
         log.debug("Using mapping type: {}", typeName);
-        return typeEntry.getValue().path(PROPERTIES);
+        return typeEntry.getValue();
+    }
+
+    private void parseSourceFilter(JsonNode sourceNode) {
+        if (sourceNode.isMissingNode() || !sourceNode.isObject()) {
+            return;
+        }
+        collectStrings(sourceNode.path("includes"), sourceIncludes::add);
+        collectStrings(sourceNode.path("excludes"), sourceExcludes::add);
+    }
+
+    private static void collectStrings(JsonNode node, Consumer<String> sink) {
+        if (node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        if (node.isTextual()) {
+            sink.accept(node.asText());
+            return;
+        }
+        if (node.isArray()) {
+            node.forEach(n -> {
+                if (n != null && n.isTextual()) {
+                    sink.accept(n.asText());
+                }
+            });
+        }
     }
 
     private void parseProperties(JsonNode properties, String prefix) {
@@ -245,5 +297,62 @@ public class FieldMappingContext {
         }
         int dvPenalty = info.docValues() ? 0 : 1;
         return tier * 10 + dvPenalty;
+    }
+
+    /**
+     * Returns {@code true} if {@code fieldPath} should be suppressed from the reconstructed
+     * {@code _source}. The path is excluded when ANY of the following holds:
+     *
+     * <ul>
+     *   <li>it is a {@code copy_to} target (ES never writes copy_to output back into
+     *       {@code _source}); equivalent to {@link #isCopyToTarget(String)};</li>
+     *   <li>it matches a {@code _source.excludes} glob;</li>
+     *   <li>{@code _source.includes} is set and the path matches no include glob.</li>
+     * </ul>
+     *
+     * <p>Excludes take precedence over includes (ES semantics). Cheap no-op when the mapping
+     * declared neither {@code copy_to} nor a {@code _source} filter.
+     *
+     * <p>This is the single decision point the reconstructor's skip gate should call — it keeps
+     * copy_to-target stripping and source-filter stripping behind one method so callers don't
+     * need to know which rule fired.
+     */
+    public boolean isSourceExcluded(String fieldPath) {
+        if (sourcesByTarget.isEmpty() && sourceIncludes.isEmpty() && sourceExcludes.isEmpty()) {
+            return false;
+        }
+        if (isCopyToTarget(fieldPath)) {
+            return true;
+        }
+        for (String glob : sourceExcludes) {
+            if (matchesGlob(glob, fieldPath)) {
+                return true;
+            }
+        }
+        if (!sourceIncludes.isEmpty()) {
+            for (String glob : sourceIncludes) {
+                if (matchesGlob(glob, fieldPath)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+
+    private static boolean matchesGlob(String glob, String path) {
+        if ("*".equals(glob)) {
+            return true;
+        }
+        if (glob.endsWith(".**")) {
+            return path.startsWith(glob.substring(0, glob.length() - 2));
+        }
+        if (glob.endsWith(".*")) {
+            return path.startsWith(glob.substring(0, glob.length() - 1));
+        }
+        if (glob.indexOf('*') >= 0 || glob.indexOf('?') >= 0) {
+            log.debug("Unsupported source-filter glob '{}', treating as literal", glob);
+        }
+        return path.equals(glob);
     }
 }
