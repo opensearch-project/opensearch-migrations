@@ -13,14 +13,18 @@ from .tree_utils import (
 )
 
 
-# Display order and human-readable names for resource groups
-# Tuples of (list of plurals, display name)
-RESOURCE_GROUP_ORDER = [
-    (['datasnapshots'], 'Source Snapshot'),
-    (['snapshotmigrations'], 'Backfill From Snapshot'),
-    (['captureproxies'], 'Traffic Capture'),
-    (['kafkaclusters', 'capturedtraffics'], 'Traffic Buffer'),
-    (['trafficreplays'], 'Traffic Replay'),
+# Sections and their resource groups
+# Each section contains (list of plurals, display name) tuples
+RESOURCE_SECTIONS = [
+    ('Snapshot Migration', [
+        (['datasnapshots'], 'Snapshot'),
+        (['snapshotmigrations'], 'Backfill'),
+    ]),
+    ('Live Traffic Migration', [
+        (['captureproxies'], 'Capture'),
+        (['kafkaclusters', 'capturedtraffics'], 'Buffer'),
+        (['trafficreplays'], 'Replay'),
+    ]),
 ]
 
 PHASE_SYMBOLS = {
@@ -53,6 +57,7 @@ class ResourceNode:
     spec: Dict[str, Any]
     status: Dict[str, Any]
     created_at: Optional[str] = None
+    children: List['ResourceNode'] = field(default_factory=list)
 
     # Future phases
     config_diff: Optional[Dict[str, Any]] = None
@@ -69,30 +74,56 @@ class ResourceGroup:
     not_configured: bool = False
 
 
-def build_resource_tree(namespace: str) -> List[ResourceGroup]:
+@dataclass
+class ResourceSection:
+    """A top-level section grouping related resource groups."""
+    name: str
+    groups: List[ResourceGroup] = field(default_factory=list)
+
+
+def build_resource_tree(namespace: str) -> List[ResourceSection]:
     """Query all migration CRs and build a resource tree grouped by type."""
     raw = list_migration_resources_full(namespace)
     return _build_tree_from_raw(raw)
 
 
-def _build_tree_from_raw(raw: Dict[str, List[Dict[str, Any]]]) -> List[ResourceGroup]:
+def _build_tree_from_raw(raw: Dict[str, List[Dict[str, Any]]]) -> List[ResourceSection]:
     """Build resource tree from raw CR data (testable without K8s)."""
-    groups = []
-    for plurals, display_name in RESOURCE_GROUP_ORDER:
-        resources = []
-        for plural in plurals:
-            for item in raw.get(plural, []):
-                resources.append(ResourceNode(
-                    name=item['metadata']['name'],
-                    plural=plural,
-                    phase=item.get('status', {}).get('phase', 'Unknown'),
-                    depends_on=item.get('spec', {}).get('dependsOn', []) or [],
-                    spec=item.get('spec', {}),
-                    status=item.get('status', {}),
-                    created_at=item.get('metadata', {}).get('creationTimestamp'),
-                ))
-        groups.append(ResourceGroup(plural=plurals[0], display_name=display_name, resources=resources))
-    return groups
+    sections = []
+    for section_name, group_defs in RESOURCE_SECTIONS:
+        groups = []
+        for plurals, display_name in group_defs:
+            resources = []
+            for plural in plurals:
+                for item in raw.get(plural, []):
+                    resources.append(ResourceNode(
+                        name=item['metadata']['name'],
+                        plural=plural,
+                        phase=item.get('status', {}).get('phase', 'Unknown'),
+                        depends_on=item.get('spec', {}).get('dependsOn', []) or [],
+                        spec=item.get('spec', {}),
+                        status=item.get('status', {}),
+                        created_at=item.get('metadata', {}).get('creationTimestamp'),
+                    ))
+            # Nest captured traffics under their parent kafka cluster
+            _nest_topics_under_kafka(resources)
+            groups.append(ResourceGroup(plural=plurals[0], display_name=display_name, resources=resources))
+        sections.append(ResourceSection(name=section_name, groups=groups))
+    return sections
+
+
+def _nest_topics_under_kafka(resources: List[ResourceNode]) -> None:
+    """Move CapturedTraffic resources under their parent KafkaCluster."""
+    kafka_by_name = {r.name: r for r in resources if r.plural == 'kafkaclusters'}
+    topics_to_remove = []
+    for resource in resources:
+        if resource.plural == 'capturedtraffics':
+            parent_name = resource.spec.get('kafkaClusterName') or ''
+            if parent_name in kafka_by_name:
+                kafka_by_name[parent_name].children.append(resource)
+                topics_to_remove.append(resource)
+    for topic in topics_to_remove:
+        resources.remove(topic)
 
 
 def extract_workflow_steps_by_resource(workflow_data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -234,17 +265,17 @@ def _iter_nodes(nodes: List[Dict[str, Any]]):
         yield from _iter_nodes(node.get('children', []))
 
 
-def mark_not_configured_groups(groups: List[ResourceGroup], workflow_data: Dict[str, Any]) -> None:
+def mark_not_configured_groups(sections: List[ResourceSection], workflow_data: Dict[str, Any]) -> None:
     """Mark groups as 'not configured' if they have no CRs but the workflow skipped them."""
     if not workflow_data or not workflow_data.get('status', {}).get('nodes'):
         return
 
     tree = build_nested_workflow_tree(workflow_data)
     filtered = filter_tree_nodes(tree)
-    _mark_not_configured_from_filtered(groups, filtered)
+    _mark_not_configured_from_filtered(sections, filtered)
 
 
-def _mark_not_configured_from_filtered(groups: List[ResourceGroup], filtered: List[Dict[str, Any]]) -> None:
+def _mark_not_configured_from_filtered(sections: List[ResourceSection], filtered: List[Dict[str, Any]]) -> None:
     """Mark groups using a pre-built filtered tree."""
     # Find skipped top-level nodes
     skipped_groups = set()
@@ -265,38 +296,54 @@ def _mark_not_configured_from_filtered(groups: List[ResourceGroup], filtered: Li
         if plural:
             skipped_plurals.add(plural)
 
-    for group in groups:
-        if not group.resources and group.plural in skipped_plurals:
-            group.not_configured = True
+    for section in sections:
+        for group in section.groups:
+            if not group.resources and group.plural in skipped_plurals:
+                group.not_configured = True
 
 
-def display_resource_tree(groups: List[ResourceGroup], workflow_unavailable: bool = False) -> None:
+def display_resource_tree(sections: List[ResourceSection], workflow_unavailable: bool = False) -> None:
     """Render the resource tree using Rich."""
     console = Console()
-    has_any = any(g.resources or g.not_configured for g in groups)
+    has_any = any(
+        g.resources or g.not_configured
+        for s in sections for g in s.groups
+    )
     if not has_any:
         console.print("[dim]No migration resources found.[/dim]")
         return
 
-    for group in groups:
-        if not group.resources and not group.not_configured:
+    for section in sections:
+        section_has_content = any(g.resources or g.not_configured for g in section.groups)
+        if not section_has_content:
             continue
-        group_tree = Tree(f"[bold]{group.display_name}[/bold]")
-        if group.not_configured:
-            group_tree.add("[dim](not configured)[/dim]")
-        else:
-            # Find the plural ordering for this group
-            group_plurals = next(
-                (plurals for plurals, _ in RESOURCE_GROUP_ORDER if group.plural == plurals[0]),
-                [group.plural]
-            )
-            plural_order = {p: i for i, p in enumerate(group_plurals)}
-            for resource in sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name)):
-                symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
-                label = f"[{color}]{symbol} {resource.name} ({resource.phase})[/{color}]"
-                node = group_tree.add(label)
-                _add_resource_details(node, resource)
-        console.print(group_tree)
+        section_tree = Tree(f"[bold]{section.name}[/bold]")
+        for group in section.groups:
+            if not group.resources and not group.not_configured:
+                continue
+            group_node = section_tree.add(f"[bold]{group.display_name}[/bold]")
+            if group.not_configured:
+                group_node.add("[dim](not configured)[/dim]")
+            else:
+                # Find the plural ordering for this group
+                group_plurals = next(
+                    (plurals for _, grps in RESOURCE_SECTIONS
+                     for plurals, _ in grps if plurals[0] == group.plural),
+                    [group.plural]
+                )
+                plural_order = {p: i for i, p in enumerate(group_plurals)}
+                for resource in sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name)):
+                    symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
+                    label = f"[{color}]{symbol} {resource.name} ({resource.phase})[/{color}]"
+                    node = group_node.add(label)
+                    _add_resource_details(node, resource)
+                    # Render children (e.g., topics under kafka)
+                    for child in resource.children:
+                        csymbol, ccolor = PHASE_SYMBOLS.get(child.phase, ('?', 'white'))
+                        clabel = f"[{ccolor}]{csymbol} {child.name} ({child.phase})[/{ccolor}]"
+                        child_node = node.add(clabel)
+                        _add_resource_details(child_node, child)
+        console.print(section_tree)
 
     if workflow_unavailable:
         console.print("\n[dim](Workflow progress unavailable)[/dim]")
