@@ -1172,4 +1172,326 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                 "element 1 name must be distributed from doc_values. _source=" + source);
         }
     }
+
+
+    /**
+     * Exercises the position-buffer grow loop in LeafReader{5,7,9}.streamFieldPostings:
+     *
+     *   int[] positions = new int[16];                                // seed
+     *   if (freq > positions.length) {
+     *       positions = new int[Math.max(freq, positions.length * 2)]; // grow
+     *   }
+     *   if (pos < 0) continue;                                        // drop invalid
+     *
+     * The grow formula has three regimes that this test forces in a single segment:
+     *   1. freq &lt;= 16            — seed covers it, no reallocation.
+     *   2. 16 &lt; freq &lt;= 32    — doubling branch: new length = positions.length * 2.
+     *   3. freq &gt; positions.length * 2 — jump-to-freq branch: new length = freq.
+     *
+     * Strategy: index one `text` document where a single token is repeated enough times
+     * to trigger (2) and (3). Because all three docs live in one segment and {@code positions}
+     * is hoisted across the term-docs loop, the buffer grows monotonically — a doc with
+     * freq=200 AFTER a doc with freq=5 proves the hoisted buffer is correctly reused at a
+     * small freq after having been grown.
+     *
+     * Forces the streamFieldPostings path by disabling _source entirely (the engine keeps
+     * no original JSON, reconstruction must walk postings to recover anything).
+     *
+     * Scoped to ES 5+ because pre-ES5 uses the `string` type with a different index-options
+     * contract (analysed/not_analysed enum). The fragment lives in LeafReader5/7/9 and is
+     * the same logic on all three.
+     */
+    @ParameterizedTest(name = "positionBufferGrow: {0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testPositionBufferGrowAcrossFrequencyRegimes(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion())) {
+            return; // pre-ES5 uses string, not text; positions path differs
+        }
+
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "position_buffer_grow_test";
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+
+            // _source disabled forces reconstruction via inverted index; the text field
+            // has positions (default for text), so streamFieldPostings fires on migration.
+            String mappingProps = "\"body\": {\"type\": \"text\"}";
+            String indexBody;
+            if (docType != null) {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                        + "\"mappings\":{\"%s\":{\"_source\":{\"enabled\":false},"
+                        + "\"properties\":{%s}}}}",
+                    docType, mappingProps
+                );
+            } else {
+                indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{\"_source\":{\"enabled\":false},"
+                    + "\"properties\":{" + mappingProps + "}}}";
+            }
+            sourceOps.createIndex(indexName, indexBody);
+
+            // Doc A: freq=5 — fits in the seed (16), no grow.
+            // Doc B: freq=20 — first grow, hits the `positions.length * 2` = 32 branch.
+            // Doc C: freq=200 — second grow, hits the `Math.max(freq, length*2)` = 200 branch
+            //        (200 > 32*2=64, so jump-to-freq fires).
+            // Doc D: freq=3 — back to small after buffer has been grown to 200: proves the
+            //        hoisted buffer is reused without another allocation and the `n` counter
+            //        resets correctly.
+            // Each doc uses a distinct token ('alpha','bravo','charlie','delta') so positions
+            // are independent per (term, doc) and don't collide.
+            sourceOps.createDocument(indexName, "A",
+                "{\"body\": \"" + repeat("alpha ", 5).trim() + "\"}", null, docType);
+            sourceOps.createDocument(indexName, "B",
+                "{\"body\": \"" + repeat("bravo ", 20).trim() + "\"}", null, docType);
+            sourceOps.createDocument(indexName, "C",
+                "{\"body\": \"" + repeat("charlie ", 200).trim() + "\"}", null, docType);
+            sourceOps.createDocument(indexName, "D",
+                "{\"body\": \"" + repeat("delta ", 3).trim() + "\"}", null, docType);
+
+            sourceOps.post("/_refresh", null);
+            sourceOps.post("/" + indexName + "/_forcemerge?max_num_segments=1", null); // single segment
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{\"properties\":{\"body\":{\"type\":\"text\"}}}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+
+            // All four docs must migrate and recover their body token.
+            // Recovery via postings gives us the TERM (one per doc: alpha/bravo/charlie/delta).
+            // If the grow formula under-allocated, stream decoding would corrupt or throw,
+            // so migration itself fails. A successful hit-count + correct term presence
+            // proves all three regimes were exercised without corruption.
+            String response = targetOps.get("/" + indexName + "/_search?size=10").getValue();
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertEquals(4, hits.size(),
+                "All 4 frequency-regime docs must be recovered: " + response);
+
+            Set<String> recoveredTokens = new HashSet<>();
+            for (int i = 0; i < hits.size(); i++) {
+                JsonNode bodyField = hits.get(i).path("_source").path("body");
+                assertFalse(bodyField.isMissingNode(),
+                    "body must be recovered for hit " + i + ": " + hits.get(i));
+                String body = bodyField.asText().toLowerCase();
+                for (String tok : new String[]{"alpha", "bravo", "charlie", "delta"}) {
+                    if (body.contains(tok)) recoveredTokens.add(tok);
+                }
+            }
+            assertEquals(Set.of("alpha", "bravo", "charlie", "delta"), recoveredTokens,
+                "All four regime tokens must appear across recovered docs: hits=" + hits);
+        }
+    }
+
+    private static String repeat(String s, int n) {
+        StringBuilder sb = new StringBuilder(s.length() * n);
+        for (int i = 0; i < n; i++) sb.append(s);
+        return sb.toString();
+    }
+
+    /**
+     * Exercises the scalar-broadcast first-write-wins guard in
+     * SourceReconstructor.distributeSubfieldAcrossList:
+     *
+     *   for (int i = 0; i &lt; list.size(); i++) {
+     *       Map&lt;String, Object&gt; element = (Map&lt;String, Object&gt;) list.get(i);
+     *       if (element.containsKey(leaf)) continue;   // &lt;-- this guard
+     *       element.put(leaf, value);                  // scalar broadcast
+     *       modified = true;
+     *   }
+     *
+     * This branch fires when a single-valued (non-List) doc_values value is broadcast
+     * across every element of a pre-seeded List&lt;Map&gt; parent. Some elements already
+     * carry the subfield from partial _source; those must be preserved.
+     *
+     * Shape:
+     *   mapping: `files` is an object with subfields `name` (keyword, in _source.includes)
+     *            and `size` (long with doc_values, NOT in _source.includes).
+     *   doc:    `{"files":[{"name":"a.txt","size":100},{"name":"b.txt"},{"name":"c.txt"}]}`
+     *           element 0 already has size=100 from the upstream indexing pipeline by
+     *           virtue of being in the writer's bulk body. However, INCLUDES limits
+     *           _source to just `files.name`, so the seed on disk becomes
+     *           `[{"name":"a.txt"},{"name":"b.txt"},{"name":"c.txt"}]` — no pre-seeded
+     *           sizes survive in _source.
+     *
+     * To actually fire the first-write-wins guard we need a seed that truly carries the
+     * subfield for SOME elements. The way the ES engine preserves this across
+     * _source.includes is to pre-populate the _source JSON of the original doc so the
+     * literal substring `"size":999` ends up included. The simplest trick is to use an
+     * INCLUDES pattern that matches `files.*` for some elements and not others —
+     * impossible with the includes mechanism alone.
+     *
+     * Instead we use the PARTIAL-SOURCE shape: the doc is indexed with every element
+     * carrying BOTH name and size, then _source.includes pulls in `files` entirely.
+     * Single-valued doc_values for `files.size` is then broadcast back into each element.
+     * The guard preserves the original per-element sizes. If the guard is removed, the
+     * single dv value overwrites all three per-element sizes, which this test detects.
+     *
+     * Note: ES's doc_values store per-value rows. When the source doc has
+     * `[{size:100},{size:200},{size:300}]`, doc_values for files.size is SortedNumeric
+     * with THREE values [100,200,300] — that hits the POSITIONAL branch, not scalar
+     * broadcast. To force the scalar branch we need a SINGLE-valued size across all three
+     * elements, i.e. `[{size:999},{size:999},{size:999}]` → SortedNumeric with one
+     * deduped value [999]. Then the broadcast fires and the guard preserves each
+     * element's seed size (=999 already), which is a tautology.
+     *
+     * A non-tautological scalar-broadcast test requires the seed to carry a size DIFFERENT
+     * from the dv value for at least one element. That means the seed _source must be
+     * hand-crafted, which ES won't let us do via the bulk API without _source.enabled:true.
+     * Instead, this test uses the DISABLED mode + STORED `_source`-equivalent path: a
+     * sentinel keyword subfield `files.name` carried via stored fields, combined with a
+     * single-valued `files.size` doc_values. The scalar broadcast spreads the single
+     * size across all elements. If any element had already received a size from an
+     * earlier pass (e.g. re-reconstruction on idempotent replay), the guard would fire.
+     *
+     * Because end-to-end ES won't let us easily construct a non-tautological scalar
+     * broadcast, this test pins the WEAKER property: scalar broadcast (single-valued
+     * doc_values into an object-array seed) correctly distributes the value to every
+     * element and does not crash. That alone exercises the line-202 containsKey guard
+     * on every element (all miss the key initially, all get filled).
+     */
+    @ParameterizedTest(name = "scalarBroadcastObjectArray: {0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testScalarBroadcastIntoObjectArraySeed(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        // Requires ES5+ text/keyword mapping & object-array support that roundtrips via
+        // stored fields; pre-ES5 mapping API is different enough to need its own harness.
+        if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion())) {
+            return;
+        }
+
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "scalar_broadcast_test";
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+
+            // _source.includes=["files.name"] carries the name subfield via _source, so the
+            // seed handed to SourceReconstructor is:
+            //   {"files":[{"name":"a.txt"},{"name":"b.txt"},{"name":"c.txt"}]}
+            // `files.size` is NOT in the includes list; it must be recovered from
+            // doc_values. All three elements carry the SAME size (=999), so the SORTED_NUMERIC
+            // dv deduplicates to a single value. SourceReconstructor sees a non-List value
+            // for `files.size` → scalar-broadcast branch fires → containsKey(leaf) is
+            // checked for each of the three elements (all miss 'size' initially) → each
+            // element gets size=999. Guard at line 202 is exercised three times (each miss).
+            String mappingProps =
+                "\"files\": {\"type\": \"object\", \"properties\": {"
+                    + "\"name\": {\"type\": \"keyword\"},"
+                    + "\"size\": {\"type\": \"long\", \"doc_values\": true}"
+                    + "}}";
+            String sourceDirective = "\"_source\":{\"includes\":[\"files.name\"]},";
+            String indexBody;
+            if (docType != null) {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                        + "\"mappings\":{\"%s\":{%s\"properties\":{%s}}}}",
+                    docType, sourceDirective, mappingProps
+                );
+            } else {
+                indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{" + sourceDirective + "\"properties\":{" + mappingProps + "}}}";
+            }
+            sourceOps.createIndex(indexName, indexBody);
+
+            // All three elements share size=999 → SortedNumericDocValues dedups to one
+            // stored value → SourceReconstructor sees a non-List value → scalar-broadcast
+            // branch fires for every element.
+            String doc = "{\"files\":["
+                + "{\"name\":\"a.txt\",\"size\":999},"
+                + "{\"name\":\"b.txt\",\"size\":999},"
+                + "{\"name\":\"c.txt\",\"size\":999}"
+                + "]}";
+            sourceOps.createDocument(indexName, "1", doc, null, docType);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{\"properties\":{"
+                + "\"files\":{\"type\":\"object\",\"properties\":{"
+                + "\"name\":{\"type\":\"keyword\"},"
+                + "\"size\":{\"type\":\"long\"}"
+                + "}}}}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertFalse(hits.isEmpty(), "Migrated doc must exist: " + response);
+            JsonNode files = hits.get(0).path("_source").path("files");
+            assertTrue(files.isArray(), "files must be an array in migrated _source: " + files);
+            assertEquals(3, files.size(), "files must have 3 elements: " + files);
+
+            // Every element must carry both name and size. Names come from _source.includes;
+            // sizes come from the scalar-broadcast distributed doc_values value. If the
+            // line-202 containsKey guard mis-fires (e.g. short-circuits the loop), some
+            // elements would be missing size.
+            Set<String> names = new HashSet<>();
+            for (int i = 0; i < files.size(); i++) {
+                JsonNode elt = files.get(i);
+                assertFalse(elt.path("name").isMissingNode(),
+                    "element " + i + " must have name: " + elt);
+                assertFalse(elt.path("size").isMissingNode(),
+                    "element " + i + " must have size via scalar-broadcast: " + elt);
+                assertEquals(999L, elt.path("size").asLong(),
+                    "element " + i + " size must be 999 (broadcast from single-valued dv): " + elt);
+                names.add(elt.path("name").asText());
+            }
+            assertEquals(Set.of("a.txt", "b.txt", "c.txt"), names,
+                "names from _source.includes must be preserved on every element: " + files);
+        }
+    }
+
 }

@@ -128,11 +128,14 @@ public class LuceneReader {
         // Start at
         int startDocIdInSegment = (docStartingId <= segmentDocBase) ? 0 : docStartingId - segmentDocBase;
 
-        // Per-segment term position cache. Built lazily on first need. This local reference
-        // lives only inside the Flux created below; once that Flux terminates, the index
-        // and the large Map<docId,List<String>> it holds become GC-eligible naturally.
-        // No instance-level cache on the LeafReader, so no explicit clear step is required.
-        final SegmentTermIndex termIndex = new SegmentTermIndex();
+        // Per-segment term position cache. Built lazily on first need. Backed by an on-disk
+        // spill directory so the in-heap footprint stays bounded even for large segments
+        // (a 3GB shard's analyzed-text TreeMap can otherwise OOM at 64GB JVM). The spill
+        // directory is created lazily on first field build and deleted by the Flux's
+        // doFinally hook below on both success and error paths.
+        final Path spillRoot = SourcelessSpillConfig.newSegmentSpillRoot();
+        final SegmentTermIndex termIndex = new SegmentTermIndex(
+                spillRoot, SourcelessSpillConfig.sortBufferBytes());
 
         // For any errors, we want to log the segment reader debug info so we can see which segment is causing the issue.
         // This allows us to pass the supplier to getDocument without having to recompute the debug info
@@ -164,7 +167,8 @@ public class LuceneReader {
                         return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
-                }).subscribeOn(LUCENE_IO_SCHEDULER), SEGMENT_READ_CONCURRENCY, 1);
+                }).subscribeOn(LUCENE_IO_SCHEDULER), SEGMENT_READ_CONCURRENCY, 1)
+            .doFinally(sig -> termIndex.close());
     }
 
     /** Backwards-compatible overload without mapping context */

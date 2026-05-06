@@ -1248,4 +1248,295 @@ class SourceReconstructorTest {
         assertEquals("alice@example.com", tree.path("user").path("email").asText(),
             "dotted subfield from doc_values path must nest: " + json);
     }
+
+    // ==========================================================================================
+    // 11. OBJECT-ARRAY SUBFIELD DISTRIBUTION (mergeWithDocValues into seeded List<Map>)
+    // ==========================================================================================
+    // Real-world case: an index mapping has `files` as `type: object` with subfields
+    // `files.cksum`, `files.size`, `files.name`, ... Some subfields are in `_source.excludes`, so
+    // the snapshot's seed _source holds `files` as an ArrayList<Map> with only the non-excluded
+    // subfields; the excluded ones must be recovered from doc_values. Prior to object-array
+    // distribution, putNested refused to write under the List parent and logged a warn, silently
+    // dropping the recovered value. These tests exercise the new distribution branch.
+    //
+    // Ordering caveat: doc_values return subfield values in traversal order (SortedNumeric:
+    // ascending numeric; SortedSet: ascending term), not original array insertion order.
+    // Element-to-element binding across subfields recovered from doc_values is therefore
+    // approximate — useful for presence/search/aggregation, not display-accurate tuples.
+
+    /** Multi-field docvalues reader: seed N fields at once with per-field return values. */
+    private static LuceneLeafReader multiDocValueReader(java.util.Map<String, DocValueFieldSpec> fields) {
+        var reader = mock(LuceneLeafReader.class);
+        java.util.List<DocValueFieldInfo> infos = new java.util.ArrayList<>();
+        fields.forEach((name, spec) -> {
+            var info = new DocValueFieldInfo.Simple(name, spec.type, spec.isBoolean);
+            infos.add(info);
+            try {
+                when(reader.getDocValue(org.mockito.ArgumentMatchers.eq(0),
+                        org.mockito.ArgumentMatchers.eq(info))).thenReturn(spec.value);
+            } catch (IOException e) { throw new RuntimeException(e); }
+        });
+        when(reader.getDocValueFields()).thenReturn(infos);
+        try {
+            when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.anyInt(),
+                    org.mockito.ArgumentMatchers.anyString(),
+                    org.mockito.ArgumentMatchers.any(),
+                    org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Optional.empty());
+        } catch (IOException e) { throw new RuntimeException(e); }
+        return reader;
+    }
+
+    /** Spec for a doc-value field used by {@link #multiDocValueReader}. */
+    private record DocValueFieldSpec(DocValueFieldInfo.DocValueType type, boolean isBoolean, Object value) {}
+
+    @Test
+    void mergeWithDocValues_distributesSubfield_intoSeededObjectArray() throws IOException {
+        // Reproduces the enron2_archive.av5 case: seed _source carries `files` as List<Map> with
+        // the non-excluded subfield `cksum`, and `files.size` arrives via multi-valued doc_values.
+        // Expected: `size` distributes positionally into each array element.
+        var reader = multiDocValueReader(java.util.Map.of(
+            "files.size", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.SORTED_NUMERIC, false,
+                java.util.List.of(100L, 500L))
+        ));
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.size", mapping(EsFieldType.NUMERIC, "long"),
+            "files.cksum", mapping(EsFieldType.STRING, "keyword")
+        ));
+        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+
+        JsonNode tree = MAPPER.readTree(merged);
+        JsonNode files = tree.path("files");
+        assertTrue(files.isArray(), "files must remain an array: " + merged);
+        assertEquals(2, files.size(), "array size preserved: " + merged);
+        assertEquals("h1", files.get(0).path("cksum").asText(), "element 0 cksum preserved: " + merged);
+        assertEquals(100L, files.get(0).path("size").asLong(), "element 0 size distributed: " + merged);
+        assertEquals("h2", files.get(1).path("cksum").asText(), "element 1 cksum preserved: " + merged);
+        assertEquals(500L, files.get(1).path("size").asLong(), "element 1 size distributed: " + merged);
+    }
+
+    @Test
+    void mergeWithDocValues_distributesMultipleSubfields_intoSeededObjectArray() throws IOException {
+        // Two excluded subfields (size, name) recovered from doc_values, seeded cksum in _source.
+        // Locks in that repeated putNested calls against the same List<Map> parent compose
+        // correctly — each subfield distributes independently without clobbering prior writes.
+        var reader = multiDocValueReader(java.util.Map.of(
+            "files.size", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.SORTED_NUMERIC, false,
+                java.util.List.of(100L, 500L, 2000L)),
+            "files.name", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.SORTED_SET, false,
+                java.util.List.of("a.txt", "b.txt", "c.txt"))
+        ));
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.size", mapping(EsFieldType.NUMERIC, "long"),
+            "files.name", mapping(EsFieldType.STRING, "keyword"),
+            "files.cksum", mapping(EsFieldType.STRING, "keyword")
+        ));
+        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"},{\"cksum\":\"h3\"}]}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+
+        JsonNode files = MAPPER.readTree(merged).path("files");
+        assertEquals(3, files.size());
+        assertEquals(100L, files.get(0).path("size").asLong());
+        assertEquals("a.txt", files.get(0).path("name").asText());
+        assertEquals("h1", files.get(0).path("cksum").asText());
+        assertEquals(2000L, files.get(2).path("size").asLong());
+        assertEquals("c.txt", files.get(2).path("name").asText());
+        assertEquals("h3", files.get(2).path("cksum").asText());
+    }
+
+    @Test
+    void mergeWithDocValues_sizeMismatch_dropsValueAndPreservesSeed() throws IOException {
+        // Positional distribution requires equal lengths. A size mismatch cannot safely distribute
+        // (no ordinal→element binding), so the branch warns and drops — seed stays intact.
+        var reader = multiDocValueReader(java.util.Map.of(
+            "files.size", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.SORTED_NUMERIC, false,
+                java.util.List.of(100L, 500L, 2000L))  // 3 values
+        ));
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.size", mapping(EsFieldType.NUMERIC, "long"),
+            "files.cksum", mapping(EsFieldType.STRING, "keyword")
+        ));
+        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}";  // 2 elements
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+
+        JsonNode files = MAPPER.readTree(merged).path("files");
+        assertEquals(2, files.size(), "seed array length preserved: " + merged);
+        assertTrue(!files.get(0).has("size") && !files.get(1).has("size"),
+            "size must NOT be partially distributed on length mismatch: " + merged);
+        assertEquals("h1", files.get(0).path("cksum").asText());
+        assertEquals("h2", files.get(1).path("cksum").asText());
+    }
+
+    @Test
+    void mergeWithDocValues_scalarBroadcast_appliesToEveryElement() throws IOException {
+        // A single-valued doc_value (NUMERIC, not SORTED_NUMERIC) against a multi-element
+        // object-array seed broadcasts to every element. Real-world case: every file in the
+        // array shares the same attribute (e.g. document-level tag stored under a subfield).
+        var reader = multiDocValueReader(java.util.Map.of(
+            "files.tstatus", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.NUMERIC, false, 1L)
+        ));
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.tstatus", mapping(EsFieldType.NUMERIC, "long"),
+            "files.cksum", mapping(EsFieldType.STRING, "keyword")
+        ));
+        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+
+        JsonNode files = MAPPER.readTree(merged).path("files");
+        assertEquals(1L, files.get(0).path("tstatus").asLong(), "element 0 gets broadcast: " + merged);
+        assertEquals(1L, files.get(1).path("tstatus").asLong(), "element 1 gets broadcast: " + merged);
+    }
+
+    @Test
+    void mergeWithDocValues_distribution_preservesExistingElementSubfield() throws IOException {
+        // First-write-wins: if an element already has the subfield (e.g. partial _source
+        // retained it for some elements but not others), distribution must NOT overwrite.
+        // Existing non-null values take precedence; null in the seed is treated as absent and
+        // would be overwritten — but this test pins the positive guarantee for present values.
+        var reader = multiDocValueReader(java.util.Map.of(
+            "files.size", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.SORTED_NUMERIC, false,
+                java.util.List.of(100L, 500L))
+        ));
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.size", mapping(EsFieldType.NUMERIC, "long"),
+            "files.cksum", mapping(EsFieldType.STRING, "keyword")
+        ));
+        // Element 0 already carries size=999 from a hypothetical upstream pipeline — must survive.
+        String seed = "{\"files\":[{\"cksum\":\"h1\",\"size\":999},{\"cksum\":\"h2\"}]}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+
+        JsonNode files = MAPPER.readTree(merged).path("files");
+        assertEquals(999L, files.get(0).path("size").asLong(),
+            "existing element subfield must be preserved: " + merged);
+        assertEquals(500L, files.get(1).path("size").asLong(),
+            "missing element subfield gets distributed value: " + merged);
+    }
+
+    @Test
+    void mergeWithDocValues_reMergeIsIdempotent() throws IOException {
+        // Guards against double-distribution on a second merge pass. hasNested must recognise
+        // that EVERY list element already carries the subfield and short-circuit. If this test
+        // fails, populateFromSegment would silently double-write (second write is ignored by
+        // element.containsKey(leaf) check, but modified=true would force a re-serialization
+        // that differs from the input — a subtle mutation bug).
+        var reader = multiDocValueReader(java.util.Map.of(
+            "files.size", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.SORTED_NUMERIC, false,
+                java.util.List.of(100L, 500L))
+        ));
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.size", mapping(EsFieldType.NUMERIC, "long"),
+            "files.cksum", mapping(EsFieldType.STRING, "keyword")
+        ));
+        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}";
+        String firstPass = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        String secondPass = SourceReconstructor.mergeWithDocValues(firstPass, reader, 0, document(), ctx);
+
+        assertEquals(firstPass, secondPass,
+            "re-merge against same seed+docvalues must be a fixed point: first=" + firstPass
+                + " second=" + secondPass);
+    }
+
+    @Test
+    void mergeWithDocValues_partialElementCoverage_fillsGaps() throws IOException {
+        // Some elements already have `size`, others do not. hasNested returns false (not every
+        // element carries it), distribution proceeds. The length check uses docvalues.size vs
+        // list.size — NOT list-elements-missing-the-subfield — so when partial pre-population is
+        // present, distribution still requires the docvalues array to match the full array. The
+        // gap-fill happens only inside distributeSubfieldAcrossList via element.containsKey.
+        var reader = multiDocValueReader(java.util.Map.of(
+            "files.size", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.SORTED_NUMERIC, false,
+                java.util.List.of(100L, 500L, 2000L))
+        ));
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.size", mapping(EsFieldType.NUMERIC, "long"),
+            "files.cksum", mapping(EsFieldType.STRING, "keyword")
+        ));
+        // Middle element already has size=999 — must be preserved; others get distributed.
+        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\",\"size\":999},{\"cksum\":\"h3\"}]}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+
+        JsonNode files = MAPPER.readTree(merged).path("files");
+        assertEquals(100L, files.get(0).path("size").asLong());
+        assertEquals(999L, files.get(1).path("size").asLong(), "middle element preserved: " + merged);
+        assertEquals(2000L, files.get(2).path("size").asLong());
+    }
+
+    @Test
+    void mergeWithDocValues_listOfNonMaps_preservesWarnAndDropContract() throws IOException {
+        // `files` is a List of scalars (true scalar array, e.g. `"files":["a.txt","b.txt"]`),
+        // NOT a List<Map>. The distribute branch must NOT fire — isListOfMaps returns false,
+        // control falls through to the existing warn-and-drop branch, seed is returned unchanged.
+        var reader = multiDocValueReader(java.util.Map.of(
+            "files.size", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.SORTED_NUMERIC, false,
+                java.util.List.of(100L, 500L))
+        ));
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.size", mapping(EsFieldType.NUMERIC, "long")
+        ));
+        String seed = "{\"files\":[\"a.txt\",\"b.txt\"]}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+
+        assertEquals(seed, merged, "scalar-array parent preserves warn-and-drop contract: " + merged);
+    }
+
+    @Test
+    void mergeWithDocValues_emptyObjectArray_fallsThroughToWarnAndDrop() throws IOException {
+        // An empty `files:[]` is ambiguous (could be either scalar-array or object-array). The
+        // distribute branch deliberately does NOT fire for empty lists — no elements to distribute
+        // into anyway — so the existing warn-and-drop contract is preserved. Seed returned as-is.
+        var reader = multiDocValueReader(java.util.Map.of(
+            "files.size", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.SORTED_NUMERIC, false,
+                java.util.List.of(100L))
+        ));
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.size", mapping(EsFieldType.NUMERIC, "long")
+        ));
+        String seed = "{\"files\":[]}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+
+        assertEquals(seed, merged, "empty array is not distributed into: " + merged);
+    }
+
+    @Test
+    void mergeWithDocValues_deepNestingUnderObjectArray_warnsAndDrops() throws IOException {
+        // `files[i].meta.size` requires building a nested object inside each List<Map> element
+        // from doc_values alone — outside the guarantees the distribute branch makes. The
+        // recovered value is dropped with a distinct warn message, seed preserved.
+        var reader = multiDocValueReader(java.util.Map.of(
+            "files.meta.size", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.SORTED_NUMERIC, false,
+                java.util.List.of(100L, 500L))
+        ));
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.meta.size", mapping(EsFieldType.NUMERIC, "long")
+        ));
+        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+
+        assertEquals(seed, merged,
+            "deep-nesting under a List<Map> parent is unsupported; seed must be unchanged: " + merged);
+    }
+
+    @Test
+    void mergeWithDocValues_storedFieldSubfield_distributesAcrossObjectArray() throws IOException {
+        // Stored-fields path into a List<Map> seed: when a subfield appears as a stored field
+        // (not doc_values), it is emitted as a single scalar (LuceneDocument exposes per-doc
+        // stored fields). For a multi-element array this is scalar broadcast — each element
+        // gets the same stored value. Documents the stored-fields codepath through putNested's
+        // new List<Map> branch, separate from the doc_values path.
+        var reader = storedOnlyReader();
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.tstatus", mapping(EsFieldType.NUMERIC, "long"),
+            "files.cksum", mapping(EsFieldType.STRING, "keyword")
+        ));
+        var doc = document(storedNumber("files.tstatus", 1L));
+        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, doc, ctx);
+
+        JsonNode files = MAPPER.readTree(merged).path("files");
+        assertEquals(1L, files.get(0).path("tstatus").asLong(), "element 0 broadcast: " + merged);
+        assertEquals(1L, files.get(1).path("tstatus").asLong(), "element 1 broadcast: " + merged);
+        assertEquals("h1", files.get(0).path("cksum").asText());
+        assertEquals("h2", files.get(1).path("cksum").asText());
+    }
 }
