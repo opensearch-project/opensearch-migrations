@@ -4,7 +4,10 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
@@ -258,5 +261,37 @@ public class LeafReader10 implements LuceneLeafReader {
             }
         }
         return null;
+    }
+
+    /** See {@link LuceneLeafReader#buildTermPositionIndex}. */
+    @Override
+    public Map<Integer, List<String>> buildTermPositionIndex(String fieldName) throws IOException {
+        Terms terms = wrapped.terms(fieldName);
+        if (terms == null) return Collections.emptyMap();
+        // If positions weren't indexed (e.g. keyword/"not_analyzed" string, or text with
+        // index_options stripped below positions) there's nothing useful to collect here —
+        // return empty so the caller falls through to the single-term path. Requesting
+        // POSITIONS on a postings list that doesn't carry them is undefined behavior and
+        // can quietly yield bogus sentinel values.
+        if (!terms.hasPositions()) return Collections.emptyMap();
+        Map<Integer, TreeMap<Integer, String>> docPositions = new HashMap<>();
+        TermsEnum termsEnum = terms.iterator();
+        BytesRef term;
+        while ((term = termsEnum.next()) != null) {
+            String termStr = term.utf8ToString();
+            PostingsEnum postings = termsEnum.postings(null, PostingsEnum.POSITIONS);
+            int doc;
+            while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
+                TreeMap<Integer, String> positions = docPositions.computeIfAbsent(doc, k -> new TreeMap<>());
+                int freq = postings.freq();
+                for (int i = 0; i < freq; i++) {
+                    int pos = postings.nextPosition();
+                    positions.put(pos, termStr);
+                }
+            }
+        }
+        Map<Integer, List<String>> result = new HashMap<>(docPositions.size());
+        docPositions.forEach((docId, positions) -> result.put(docId, new ArrayList<>(positions.values())));
+        return result;
     }
 }
