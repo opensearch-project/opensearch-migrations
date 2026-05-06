@@ -40,11 +40,15 @@ public class SourceReconstructor {
         if (fieldName.startsWith("_")) {
             return true;
         }
-        if (!fieldName.contains(".")) {
-            return false;
+        if (fieldName.contains(".")
+            && (mappingContext == null || mappingContext.getFieldInfo(fieldName) == null)) {
+            // Dotted field the mapping does not recognize as an object subfield (i.e., a
+            // multi-field sub-field like title.keyword).
+            return true;
         }
-        // Dotted field: keep it only if the mapping recognizes it as an object subfield.
-        return mappingContext == null || mappingContext.getFieldInfo(fieldName) == null;
+        // Final gate: respect the origin mapping's copy_to destinations and _source
+        // includes/excludes. Cheap no-op when none are declared.
+        return mappingContext != null && mappingContext.isSourceExcluded(fieldName);
     }
 
     /**

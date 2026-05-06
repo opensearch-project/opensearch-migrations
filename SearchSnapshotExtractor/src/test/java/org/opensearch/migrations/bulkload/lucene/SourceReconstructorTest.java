@@ -1248,4 +1248,47 @@ class SourceReconstructorTest {
         assertEquals("alice@example.com", tree.path("user").path("email").asText(),
             "dotted subfield from doc_values path must nest: " + json);
     }
+
+    @Test
+    void reconstructSource_respectsCopyToAndSourceExcludes() throws IOException {
+        // REGRESSION: reconstructor used to emit every field it could recover from stored fields /
+        // doc_values / points — including copy_to destinations (which ES never writes to _source)
+        // and fields the origin mapping filtered out via _source.excludes. Stand-in mapping:
+        //   title, body  -> origin _source fields, both copy_to "all_text"
+        //   all_text     -> mapped field, but pure copy_to sink (not in origin _source)
+        //   secret       -> mapped field, but filtered via _source.excludes
+        // The reconstructed _source must contain exactly {title, body}.
+        String mappingJson = """
+            {
+                "_source": {"excludes": ["secret"]},
+                "properties": {
+                    "title":    {"type": "text", "copy_to": "all_text"},
+                    "body":     {"type": "text", "copy_to": "all_text"},
+                    "all_text": {"type": "text"},
+                    "secret":   {"type": "keyword"}
+                }
+            }
+            """;
+        var ctx = new FieldMappingContext(MAPPER.readTree(mappingJson));
+
+        var reader = storedOnlyReader();
+        // Simulate a segment that has stored values for every indexed field — i.e. the path
+        // the reconstructor would otherwise happily serialize for all four.
+        var doc = document(
+            storedString("title", "hello"),
+            storedString("body", "world"),
+            storedString("all_text", "hello world"),
+            storedString("secret", "do-not-emit")
+        );
+
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        JsonNode tree = MAPPER.readTree(json);
+
+        assertEquals("hello", tree.path("title").asText(), "title preserved: " + json);
+        assertEquals("world", tree.path("body").asText(), "body preserved: " + json);
+        assertTrue(tree.path("all_text").isMissingNode(),
+            "copy_to destination must not appear in _source: " + json);
+        assertTrue(tree.path("secret").isMissingNode(),
+            "_source.excludes field must not appear in _source: " + json);
+    }
 }
