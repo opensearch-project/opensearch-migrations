@@ -357,6 +357,8 @@ def _add_resource_details(node, resource: ResourceNode) -> None:
     if resource.depends_on:
         deps = ", ".join(resource.depends_on)
         node.add(f"[dim]Depends on: {deps}[/dim]")
+    if resource.live_status:
+        _add_live_status(node, resource.live_status)
     if resource.workflow_step:
         step = resource.workflow_step
         # Don't show "completed" if the CR phase already indicates completion
@@ -386,6 +388,15 @@ def _add_workflow_step(node, step: Dict[str, Any]) -> None:
     node.add(label)
 
 
+def _add_live_status(node, live_status: Dict[str, Any]) -> None:
+    """Render live status data under a resource."""
+    if live_status.get('type') == 'backfill':
+        message = live_status.get('message', '')
+        for line in message.strip().split('\n'):
+            if line.strip():
+                node.add(f"[cyan]{line.strip()}[/cyan]")
+
+
 def _format_spec_fields(resource: ResourceNode) -> str:
     """Extract key spec fields for display."""
     fields = SPEC_DISPLAY_FIELDS.get(resource.plural, [])
@@ -412,3 +423,72 @@ def _get_nested(d: Dict[str, Any], path: str) -> Any:
         if d is None:
             return None
     return d
+
+
+def extract_backfill_config(workflow_data: Dict[str, Any]) -> Optional[str]:
+    """Extract configContents from a backfill status check node in the workflow.
+
+    Returns the raw JSON config string that can be converted to services.yaml via jq.
+    """
+    if not workflow_data or not workflow_data.get('status', {}).get('nodes'):
+        return None
+
+    nodes = workflow_data.get('status', {}).get('nodes', {})
+    for node in nodes.values():
+        if 'checkBackfillStatus' in node.get('displayName', ''):
+            for p in node.get('inputs', {}).get('parameters', []):
+                if p.get('name') == 'configContents':
+                    return p.get('value')
+    return None
+
+
+def enrich_with_backfill_status(sections: List[ResourceSection], workflow_data: Dict[str, Any]) -> None:
+    """Fetch live backfill status and attach to the SnapshotMigration resource."""
+    import logging
+    import subprocess
+    import os
+    import yaml
+
+    logger = logging.getLogger(__name__)
+
+    config_json = extract_backfill_config(workflow_data)
+    if not config_json:
+        return
+
+    # Find the snapshot migration resource
+    migration_resource = None
+    for section in sections:
+        for group in section.groups:
+            for resource in group.resources:
+                if resource.plural == 'snapshotmigrations' and resource.phase not in ('Completed',):
+                    migration_resource = resource
+                    break
+
+    if not migration_resource:
+        return
+
+    # Convert config to services.yaml format
+    jq_script = os.environ.get('WORKFLOW_CONFIG_JQ_SCRIPT',
+                               '/root/workflowConfigToServicesConfig.jq')
+    try:
+        result = subprocess.run(['jq', '-f', jq_script],
+                                input=config_json, text=True, capture_output=True)
+        if result.returncode != 0:
+            logger.debug(f"jq conversion failed: {result.stderr}")
+            return
+
+        from console_link.environment import Environment
+        env = Environment(config=yaml.safe_load(result.stdout))
+        if not env.backfill:
+            return
+
+        status_result = env.backfill.get_status(deep_check=True)
+        if status_result.success:
+            backfill_status, message = status_result.value
+            migration_resource.live_status = {
+                'type': 'backfill',
+                'status': str(backfill_status),
+                'message': message,
+            }
+    except Exception as e:
+        logger.debug(f"Failed to get backfill status: {e}")

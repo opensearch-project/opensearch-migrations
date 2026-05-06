@@ -500,6 +500,7 @@ def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, in
             from ..resource_tree import (
                 build_resource_tree, display_resource_tree,
                 extract_workflow_steps_by_resource, mark_not_configured_groups,
+                enrich_with_backfill_status,
             )
             from ..models.utils import load_k8s_config
             load_k8s_config()
@@ -523,6 +524,7 @@ def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, in
                                     if child.name in steps:
                                         child.workflow_step = steps[child.name]
                     mark_not_configured_groups(groups, workflow_data)
+                    enrich_with_backfill_status(groups, workflow_data)
                 elif not workflow_data:
                     workflow_unavailable = True
             except Exception:
