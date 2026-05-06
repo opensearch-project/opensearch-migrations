@@ -497,11 +497,34 @@ def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, in
     """
     if resources:
         try:
-            from ..resource_tree import build_resource_tree, display_resource_tree
+            from ..resource_tree import (
+                build_resource_tree, display_resource_tree,
+                extract_workflow_steps_by_resource, mark_not_configured_groups,
+            )
             from ..models.utils import load_k8s_config
             load_k8s_config()
             groups = build_resource_tree(namespace)
-            display_resource_tree(groups)
+
+            # Try to fetch Argo workflow data for progress info
+            workflow_unavailable = False
+            try:
+                service = WorkflowService()
+                fetcher = WorkflowDataFetcher(service, token)
+                workflow_data = fetcher.get_workflow_data(
+                    workflow_name, argo_server, namespace, insecure)
+                if workflow_data and workflow_data.get('status', {}).get('nodes'):
+                    steps = extract_workflow_steps_by_resource(workflow_data)
+                    for group in groups:
+                        for resource in group.resources:
+                            if resource.name in steps:
+                                resource.workflow_step = steps[resource.name]
+                    mark_not_configured_groups(groups, workflow_data)
+                elif not workflow_data:
+                    workflow_unavailable = True
+            except Exception:
+                workflow_unavailable = True
+
+            display_resource_tree(groups, workflow_unavailable=workflow_unavailable)
         except Exception as e:
             click.echo(f"Error: {str(e)}", err=True)
             ctx.exit(ExitCode.FAILURE.value)
