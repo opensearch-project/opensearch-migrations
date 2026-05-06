@@ -19,6 +19,15 @@ import shadow.lucene10.org.apache.lucene.util.IOUtils;
  */
 public final class SidecarReader implements AutoCloseable {
 
+    /**
+     * A single token with its character-offset span in the original field value.
+     *
+     * <p>{@code startOffset} and {@code endOffset} are {@link PostingsSink#NO_OFFSET} (-1) when
+     * the field was not indexed with {@code index_options: offsets}. Callers must check for -1
+     * before using offsets for gap-preserving reconstruction.
+     */
+    public record TermEntry(String term, int startOffset, int endOffset) {}
+
     private final Path spillDir;
     private final int maxDoc;
     private final int numTerms;
@@ -69,7 +78,18 @@ public final class SidecarReader implements AutoCloseable {
         }
     }
 
-    public List<String> get(int docId) throws IOException {
+    /**
+     * Returns the tokens for {@code docId}, deduplicated by Lucene position.
+     *
+     * <p>When a token filter (e.g. {@code word_delimiter_graph}) emits multiple tokens at the
+     * same position — a compound form and its sub-tokens — all share the same position in the
+     * sidecar. We keep only the <em>longest</em> token per position, which is always the
+     * unsplit original. For example, given {@code ("2000 09", pos=4)}, {@code ("2000", pos=4)},
+     * and {@code ("09", pos=4)}, only {@code "2000 09"} is returned.
+     *
+     * <p>The returned list is in position-ascending order, matching original token order.
+     */
+    public List<TermEntry> get(int docId) throws IOException {
         if (closed) throw new IOException("SidecarReader closed");
         if (docId < 0 || docId >= maxDoc) return Collections.emptyList();
         long offset = docIndexRA.readLong(docId * 8L);
@@ -79,12 +99,58 @@ public final class SidecarReader implements AutoCloseable {
         IndexInput in = sidecarInput.clone();
         in.seek(offset);
         int numEntries = in.readVInt();
-        List<String> result = new ArrayList<>(numEntries);
+
+        // First pass: read all raw entries, then dedup by position keeping longest.
+        // We accumulate into a list of raw (pos, termId, startOff, endOff) tuples and
+        // resolve term strings only after dedup to avoid redundant disk reads.
+        int[] rawPos      = new int[numEntries];
+        int[] rawTermId   = new int[numEntries];
+        int[] rawStartOff = new int[numEntries];
+        int[] rawEndOff   = new int[numEntries];
+        int prevPos = 0;
         for (int i = 0; i < numEntries; i++) {
-            in.readVInt(); // pos delta — list order preserves positional order
-            result.add(readTerm(in.readVInt()));
+            prevPos          += in.readVInt();  // delta-encoded position
+            rawPos[i]         = prevPos;
+            rawTermId[i]      = in.readVInt();
+            rawStartOff[i]    = in.readZInt();
+            rawEndOff[i]      = in.readZInt();
+        }
+
+        // Dedup: for each position group, keep the entry whose term is longest.
+        // The sidecar is sorted (docId, pos, termId) ASC so same-position entries are adjacent.
+        // Resolve all term strings up front so the inner loop is a simple length comparison.
+        String[] resolvedTerms = new String[numEntries];
+        for (int k = 0; k < numEntries; k++) {
+            resolvedTerms[k] = readTerm(rawTermId[k]);
+        }
+
+        List<TermEntry> result = new ArrayList<>(numEntries);
+        int i = 0;
+        while (i < numEntries) {
+            int groupPos = rawPos[i];
+            int best     = i;
+            int j = i + 1;
+            while (j < numEntries && rawPos[j] == groupPos) {
+                if (resolvedTerms[j].length() > resolvedTerms[best].length()) {
+                    best = j;
+                }
+                j++;
+            }
+            result.add(new TermEntry(resolvedTerms[best], rawStartOff[best], rawEndOff[best]));
+            i = j;
         }
         return result;
+    }
+
+    /**
+     * Convenience method — returns only the term strings, for callers that do not need
+     * character offsets (e.g. existing callers prior to offset support).
+     */
+    public List<String> getTermStrings(int docId) throws IOException {
+        List<TermEntry> entries = get(docId);
+        List<String> strings = new ArrayList<>(entries.size());
+        for (TermEntry e : entries) strings.add(e.term());
+        return strings;
     }
 
     private String readTerm(int termId) throws IOException {

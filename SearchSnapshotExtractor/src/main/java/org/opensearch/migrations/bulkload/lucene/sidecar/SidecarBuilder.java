@@ -23,8 +23,20 @@ import shadow.lucene10.org.apache.lucene.util.OfflineSorter.BufferSize;
 @Slf4j
 public final class SidecarBuilder implements PostingsSink, AutoCloseable {
 
-    /** docId(4) + pos(4) + termId(4), big-endian so unsigned bytewise sort = (doc, pos, term) ASC. */
-    public static final int RECORD_BYTES = 12;
+    /**
+     * docId(4) + pos(4) + termId(4) + startOff(4) + endOff(4) = 20 bytes, big-endian.
+     *
+     * <p>Sort key is the first 12 bytes {@code (docId, pos, termId)} so unsigned bytewise
+     * comparison gives the correct {@code (doc, pos, term) ASC} ordering. The trailing
+     * {@code (startOff, endOff)} carry character offset metadata and do not affect sort
+     * order because {@code (docId, pos, termId)} is already unique per record.
+     *
+     * <p>{@code startOff} and {@code endOff} are stored as raw signed ints. The sentinel
+     * value {@link PostingsSink#NO_OFFSET} ({@code -1} = {@code 0xFFFFFFFF}) sorts after
+     * all real non-negative offsets, but since offsets are not part of the sort key this
+     * is harmless.
+     */
+    public static final int RECORD_BYTES = 20;
     static final long DOC_INDEX_NO_TOKENS = -1L;
 
     static final String TERMS_FILE        = "terms.dat";
@@ -77,7 +89,7 @@ public final class SidecarBuilder implements PostingsSink, AutoCloseable {
     }
 
     @Override
-    public void accept(int termId, int docId, int[] positions, int positionCount) throws IOException {
+    public void accept(int termId, int docId, int[] positions, int[] startOffsets, int[] endOffsets, int positionCount) throws IOException {
         if (positionCount <= 0 || docId < 0 || docId >= maxDoc) return;
         byte[] rec = recordScratch;
         VH_BE_INT.set(rec, 0, docId);
@@ -85,6 +97,8 @@ public final class SidecarBuilder implements PostingsSink, AutoCloseable {
         BytesRef br = new BytesRef(rec, 0, RECORD_BYTES);
         for (int i = 0; i < positionCount; i++) {
             VH_BE_INT.set(rec, 4, positions[i]);
+            VH_BE_INT.set(rec, 12, startOffsets[i]);
+            VH_BE_INT.set(rec, 16, endOffsets[i]);
             sortInputWriter.write(br);
         }
     }
@@ -123,10 +137,12 @@ public final class SidecarBuilder implements PostingsSink, AutoCloseable {
             BytesRef rec;
             while ((rec = reader.next()) != null) {
                 if (rec.length != RECORD_BYTES) throw new IOException("bad record length " + rec.length);
-                int docId  = (int) VH_BE_INT.get(rec.bytes, rec.offset);
-                int pos    = (int) VH_BE_INT.get(rec.bytes, rec.offset + 4);
-                int termId = (int) VH_BE_INT.get(rec.bytes, rec.offset + 8);
-                emitter.accept(docId, pos, termId);
+                int docId    = (int) VH_BE_INT.get(rec.bytes, rec.offset);
+                int pos      = (int) VH_BE_INT.get(rec.bytes, rec.offset + 4);
+                int termId   = (int) VH_BE_INT.get(rec.bytes, rec.offset + 8);
+                int startOff = (int) VH_BE_INT.get(rec.bytes, rec.offset + 12);
+                int endOff   = (int) VH_BE_INT.get(rec.bytes, rec.offset + 16);
+                emitter.accept(docId, pos, termId, startOff, endOff);
             }
             emitter.finish(maxDoc);
         }
@@ -147,7 +163,7 @@ public final class SidecarBuilder implements PostingsSink, AutoCloseable {
             this.docIndexOut = docIndexOut;
         }
 
-        void accept(int docId, int pos, int termId) throws IOException {
+        void accept(int docId, int pos, int termId, int startOff, int endOff) throws IOException {
             if (docId != currentDoc) {
                 if (currentDoc >= 0) flushDoc();
                 currentDoc = docId;
@@ -157,6 +173,8 @@ public final class SidecarBuilder implements PostingsSink, AutoCloseable {
             }
             staging.writeVInt(pos - prevPos);
             staging.writeVInt(termId);
+            staging.writeZInt(startOff);   // ZInt: sign-encodes -1 sentinel compactly
+            staging.writeZInt(endOff);
             prevPos = pos;
             pairCount++;
         }

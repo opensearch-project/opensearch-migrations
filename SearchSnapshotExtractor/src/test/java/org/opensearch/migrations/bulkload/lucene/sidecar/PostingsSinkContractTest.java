@@ -87,7 +87,7 @@ class PostingsSinkContractTest {
         }
 
         @Override
-        public void accept(int termId, int docId, int[] positions, int positionCount) {
+        public void accept(int termId, int docId, int[] positions, int[] startOffsets, int[] endOffsets, int positionCount) {
             StringBuilder sb = new StringBuilder();
             sb.append(registered.get(termId)).append(':').append(docId).append("@[");
             for (int i = 0; i < positionCount; i++) {

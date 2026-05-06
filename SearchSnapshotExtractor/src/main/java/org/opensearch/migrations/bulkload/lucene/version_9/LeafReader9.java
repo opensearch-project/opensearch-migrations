@@ -266,17 +266,24 @@ public class LeafReader9 implements LuceneLeafReader {
         if (terms == null) return;
         TermsEnum termsEnum = terms.iterator();
         BytesRef term;
-        int[] positions = new int[16];
+        int[] positions    = new int[16];
+        int[] startOffsets = new int[16];
+        int[] endOffsets   = new int[16];
         while ((term = termsEnum.next()) != null) {
             int termId = sink.registerTerm(
                 new org.opensearch.migrations.bulkload.lucene.sidecar.BytesRefLike(
                     term.bytes, term.offset, term.length));
-            PostingsEnum postings = termsEnum.postings(null, PostingsEnum.POSITIONS);
+            // OFFSETS is a superset of POSITIONS; also returns character start/end offsets when
+            // the field was indexed with index_options:offsets, or -1 otherwise.
+            PostingsEnum postings = termsEnum.postings(null, PostingsEnum.OFFSETS);
             int doc;
             while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
                 int freq = postings.freq();
                 if (freq > positions.length) {
-                    positions = new int[Math.max(freq, positions.length * 2)];
+                    int newLen = Math.max(freq, positions.length * 2);
+                    positions    = new int[newLen];
+                    startOffsets = new int[newLen];
+                    endOffsets   = new int[newLen];
                 }
                 int n = 0;
                 for (int i = 0; i < freq; i++) {
@@ -286,9 +293,12 @@ public class LeafReader9 implements LuceneLeafReader {
                     // skip them so the sidecar stays well-defined and downstream
                     // falls back to the single-term / keyword path.
                     if (pos < 0) continue;
-                    positions[n++] = pos;
+                    positions[n]    = pos;
+                    startOffsets[n] = postings.startOffset();
+                    endOffsets[n]   = postings.endOffset();
+                    n++;
                 }
-                if (n > 0) sink.accept(termId, doc, positions, n);
+                if (n > 0) sink.accept(termId, doc, positions, startOffsets, endOffsets, n);
             }
         }
     }

@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink;
+import org.opensearch.migrations.bulkload.lucene.sidecar.SidecarReader;
 
 public interface LuceneLeafReader {
 
@@ -129,9 +130,10 @@ public interface LuceneLeafReader {
                 // single-term recovery which preserves the exact original value.
                 if (termIndex != null) {
                     try {
-                        List<String> terms = termIndex.getTermsForDocument(this, docId, fieldName);
-                        if (terms != null && !terms.isEmpty()) {
-                            yield Optional.of(String.join(" ", terms));
+                        List<SidecarReader.TermEntry> entries =
+                                termIndex.getTermEntriesForDocument(this, docId, fieldName);
+                        if (entries != null && !entries.isEmpty()) {
+                            yield Optional.of(joinWithOffsets(entries));
                         }
                     } catch (UnsupportedOperationException e) {
                         // Field indexed without positions; fall through to single-term path.
@@ -158,6 +160,56 @@ public interface LuceneLeafReader {
                 yield (points != null && !points.isEmpty()) ? Optional.of(points) : Optional.empty();
             }
         };
+    }
+
+    /**
+     * Joins a list of {@link SidecarReader.TermEntry} tokens into a single string.
+     *
+     * <p>When every entry carries valid character offsets (i.e. none equals
+     * {@link org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink#NO_OFFSET}),
+     * the gap between consecutive tokens is preserved exactly: the number of space characters
+     * inserted equals {@code entry[i].startOffset() - entry[i-1].endOffset()}. This round-trips
+     * the inter-token spacing that the original analyzer saw, including double-spaces.
+     *
+     * <p>When any entry lacks valid offsets (sentinel -1), the method falls back to a single
+     * space between every token — the original behaviour before offset support was added.
+     */
+    static String joinWithOffsets(List<SidecarReader.TermEntry> entries) {
+        if (entries.isEmpty()) return "";
+
+        // Check whether all entries carry valid offsets.
+        boolean hasOffsets = true;
+        for (SidecarReader.TermEntry e : entries) {
+            if (e.startOffset() < 0 || e.endOffset() < 0) {
+                hasOffsets = false;
+                break;
+            }
+        }
+
+        if (!hasOffsets) {
+            // Fall back: single space between tokens (original behaviour).
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < entries.size(); i++) {
+                if (i > 0) sb.append(' ');
+                sb.append(entries.get(i).term());
+            }
+            return sb.toString();
+        }
+
+        // Offset-gap reconstruction: fill inter-token spans with spaces.
+        StringBuilder sb = new StringBuilder();
+        int prevEnd = 0;
+        for (SidecarReader.TermEntry e : entries) {
+            int gap = e.startOffset() - prevEnd;
+            // gap < 0 can happen only if tokens overlap (e.g. synonym at same position with
+            // different lengths after dedup) — clamp to 0 so we never insert negative spaces.
+            if (gap > 0) {
+                for (int s = 0; s < gap; s++) sb.append(' ');
+            }
+            sb.append(e.term());
+            prevEnd = e.endOffset();
+        }
+        return sb.toString();
     }
 
 }

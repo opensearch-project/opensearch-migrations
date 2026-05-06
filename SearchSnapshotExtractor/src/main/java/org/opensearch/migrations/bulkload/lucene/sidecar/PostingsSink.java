@@ -25,6 +25,14 @@ import java.io.IOException;
 public interface PostingsSink {
 
     /**
+     * Sentinel value for start/end character offsets when the field was not indexed with
+     * {@code index_options: offsets} (i.e., Lucene's {@code PostingsEnum.startOffset()} /
+     * {@code endOffset()} return -1). Stored as-is in the sidecar; callers check for -1
+     * before attempting offset-based gap reconstruction.
+     */
+    int NO_OFFSET = -1;
+
+    /**
      * Registers a distinct term. Called exactly once per term, in ascending sorted-bytes
      * order. The returned int is the small, dense termId the sink will accept on subsequent
      * {@link #accept} calls.
@@ -32,10 +40,26 @@ public interface PostingsSink {
     int registerTerm(BytesRefLike term) throws IOException;
 
     /**
-     * Records {@code positionCount} positions at which {@code termId} occurs in {@code docId}.
-     * The {@code positions} array is owned by the caller and may be reused across calls —
-     * sinks MUST consume the valid prefix {@code [0, positionCount)} during this call and
-     * not retain the array reference.
+     * Records {@code positionCount} positions at which {@code termId} occurs in {@code docId},
+     * with per-occurrence character start/end offsets.
+     *
+     * <p>The {@code positions}, {@code startOffsets}, and {@code endOffsets} arrays are owned by
+     * the caller and may be reused across calls — sinks MUST consume the valid prefix
+     * {@code [0, positionCount)} during this call and not retain any array reference.
+     *
+     * <p>When the field was not indexed with character offsets, pass {@link #NO_OFFSET} (-1)
+     * for every element of {@code startOffsets} and {@code endOffsets}.
      */
-    void accept(int termId, int docId, int[] positions, int positionCount) throws IOException;
+    void accept(int termId, int docId, int[] positions, int[] startOffsets, int[] endOffsets, int positionCount) throws IOException;
+
+    /**
+     * Convenience overload for callers that do not have character-offset information.
+     * Delegates to {@link #accept(int, int, int[], int[], int[], int)} with {@link #NO_OFFSET}
+     * filled for every offset slot.
+     */
+    default void accept(int termId, int docId, int[] positions, int positionCount) throws IOException {
+        int[] noOffsets = new int[positionCount];
+        java.util.Arrays.fill(noOffsets, NO_OFFSET);
+        accept(termId, docId, positions, noOffsets, noOffsets, positionCount);
+    }
 }

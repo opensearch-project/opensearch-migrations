@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.lucene;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -91,6 +92,19 @@ public class SegmentTermIndex implements AutoCloseable {
      */
     public synchronized List<String> getTermsForDocument(LuceneLeafReader reader, int docId, String fieldName)
             throws IOException {
+        List<SidecarReader.TermEntry> entries = getTermEntriesForDocument(reader, docId, fieldName);
+        List<String> strings = new ArrayList<>(entries.size());
+        for (SidecarReader.TermEntry e : entries) strings.add(e.term());
+        return strings;
+    }
+
+    /**
+     * Returns the {@link SidecarReader.TermEntry} list for {@code docId} in {@code fieldName},
+     * including character start/end offsets when the field was indexed with
+     * {@code index_options: offsets}. Building the per-field sidecar on first access.
+     */
+    public synchronized List<SidecarReader.TermEntry> getTermEntriesForDocument(
+            LuceneLeafReader reader, int docId, String fieldName) throws IOException {
         if (closed) {
             throw new IOException("SegmentTermIndex has been closed");
         }

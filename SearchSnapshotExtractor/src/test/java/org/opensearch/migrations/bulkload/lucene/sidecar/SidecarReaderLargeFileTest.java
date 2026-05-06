@@ -42,8 +42,10 @@ class SidecarReaderLargeFileTest {
         Path spillDir = Files.createDirectory(tempDir.resolve("spill"));
 
         // Sparse sidecar.dat: ~2.2 GiB file, two tiny payloads at known offsets.
-        // One encoded entry: uvint(1) uvint(0) uvint(0) = [0x01, 0x00, 0x00].
-        byte[] payload = {0x01, 0x00, 0x00};
+        // One encoded entry in new format: uvint(numEntries=1) uvint(pos_delta=0) uvint(termId=0)
+        // zint(startOff=-1) zint(endOff=-1).
+        // ZInt encoding of -1: zigzag = ((-1)<<1)^((-1)>>31) = 1, encodes as single byte 0x01.
+        byte[] payload = {0x01, 0x00, 0x00, 0x01, 0x01};
         Path sidecarFile = spillDir.resolve(SidecarBuilder.SIDECAR_FILE);
         writeSparseSidecar(sidecarFile, payload);
 
@@ -83,8 +85,8 @@ class SidecarReaderLargeFileTest {
         }
 
         try (SidecarReader reader = SidecarReader.open(spillDir, /*maxDoc=*/2, /*numTerms=*/1)) {
-            assertEquals(List.of("alpha"), reader.get(0), "payload at offset 0 should decode");
-            assertEquals(List.of("alpha"), reader.get(1),
+            assertEquals(List.of("alpha"), reader.getTermStrings(0), "payload at offset 0 should decode");
+            assertEquals(List.of("alpha"), reader.getTermStrings(1),
                 "payload at offset " + OFFSET_BEYOND_INT + " (past Integer.MAX_VALUE) should decode");
         }
     }
