@@ -143,6 +143,52 @@ export class WorkflowCli {
         );
     }
 
+    /**
+     * Create workflow-managed HTTP Basic credentials. `workflow
+     * configure edit --stdin` and `workflow submit` only count
+     * credentials created through this managed Secret path.
+     */
+    createCredentialsStdin(
+        name: string,
+        creds: { username: string; password: string },
+    ): WorkflowCliRunResult {
+        return this.must(
+            ["configure", "credentials", "create", "--stdin", name],
+            { input: formatBasicAuthCredentials(creds), timeoutMs: this.defaultTimeoutMs },
+        );
+    }
+
+    /** Update an existing workflow-managed HTTP Basic credential. */
+    updateCredentialsStdin(
+        name: string,
+        creds: { username: string; password: string },
+    ): WorkflowCliRunResult {
+        return this.must(
+            ["configure", "credentials", "update", "--stdin", name],
+            { input: formatBasicAuthCredentials(creds), timeoutMs: this.defaultTimeoutMs },
+        );
+    }
+
+    /**
+     * Idempotent credential setup for e2e fixtures: create first, then
+     * update if the managed credential already exists.
+     */
+    createOrUpdateCredentialsStdin(
+        name: string,
+        creds: { username: string; password: string },
+    ): WorkflowCliRunResult {
+        try {
+            return this.createCredentialsStdin(name, creds);
+        } catch (e) {
+            const err = e as Partial<WorkflowCliError>;
+            const output = `${err.message ?? ""}\n${err.stdout ?? ""}\n${err.stderr ?? ""}`;
+            if (/Managed HTTP Basic credentials already exist/i.test(output)) {
+                return this.updateCredentialsStdin(name, creds);
+            }
+            throw e;
+        }
+    }
+
     /** `workflow submit --namespace <ns> [--wait --timeout <t>]`. */
     submit(opts: { wait?: boolean; timeoutSeconds?: number; workflowName?: string } = {}): WorkflowCliRunResult {
         const args = ["submit", "--namespace", this.namespace];
@@ -212,4 +258,8 @@ export class WorkflowCli {
         }
         return res;
     }
+}
+
+function formatBasicAuthCredentials(creds: { username: string; password: string }): string {
+    return `${creds.username}:${creds.password}\n`;
 }

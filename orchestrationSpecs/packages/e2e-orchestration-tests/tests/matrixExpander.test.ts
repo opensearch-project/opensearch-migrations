@@ -9,6 +9,7 @@ function fakeSpec(overrides: Partial<ScenarioSpec> = {}): ScenarioSpec {
         matrix: { subject: "captureproxy:capture-proxy" },
         lifecycle: { setup: [], teardown: [] },
         approvalGates: [],
+        fixtures: {},
         ...overrides,
     };
 }

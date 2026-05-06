@@ -228,6 +228,29 @@ export const ApprovalGateSpecSchema = z
     .strict();
 export type ApprovalGateSpec = z.infer<typeof ApprovalGateSpecSchema>;
 
+export const EnvCredentialSourceSchema = z
+    .object({
+        usernameEnv: z.string().min(1),
+        passwordEnv: z.string().min(1),
+    })
+    .strict();
+export type EnvCredentialSource = z.infer<typeof EnvCredentialSourceSchema>;
+
+export const BasicAuthCredentialsFixtureSchema = z
+    .object({
+        bySecretName: z.record(z.string().min(1), EnvCredentialSourceSchema),
+    })
+    .strict();
+export type BasicAuthCredentialsFixture = z.infer<typeof BasicAuthCredentialsFixtureSchema>;
+
+export const FixturesSpecSchema = z
+    .object({
+        basicAuthCredentials: BasicAuthCredentialsFixtureSchema.optional(),
+    })
+    .strict()
+    .default({});
+export type FixturesSpec = z.infer<typeof FixturesSpecSchema>;
+
 /**
  * Full test spec. This is what `src/specLoader.ts` parses from YAML on
  * disk. The baseline config path is resolved relative to the spec file.
@@ -240,6 +263,7 @@ export const ScenarioSpecSchema = z
         matrix: MatrixSpecSchema,
         lifecycle: LifecycleActorsSchema.default({ setup: [], teardown: [] }),
         approvalGates: z.array(ApprovalGateSpecSchema).default([]),
+        fixtures: FixturesSpecSchema,
     })
     .strict();
 export type ScenarioSpec = z.infer<typeof ScenarioSpecSchema>;

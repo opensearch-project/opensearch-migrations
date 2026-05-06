@@ -158,6 +158,17 @@ approvalGates:
     validations: [compare-indices]
   - approvePattern: "*.documentbackfill"
     validations: [compare-indices]
+
+# Test fixture configuration. These are env var names, not secret values.
+fixtures:
+  basicAuthCredentials:
+    bySecretName:
+      source-creds:
+        usernameEnv: E2E_SOURCE_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_SOURCE_BASIC_AUTH_PASSWORD
+      target-creds:
+        usernameEnv: E2E_TARGET_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_TARGET_BASIC_AUTH_PASSWORD
 ```
 
 ---

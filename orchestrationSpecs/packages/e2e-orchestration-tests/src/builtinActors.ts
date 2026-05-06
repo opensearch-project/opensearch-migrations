@@ -44,21 +44,14 @@ function stub(name: string): Actor {
     };
 }
 
-export interface BasicAuthSecretDefaults {
+export interface BasicAuthCredentials {
     username: string;
     password: string;
 }
 
-export const DEFAULT_BASIC_AUTH_SECRET_CREDS: BasicAuthSecretDefaults = {
-    username: "admin",
-    password: "admin",
-};
-
 export const CREATE_BASIC_AUTH_SECRETS_ACTOR = "create-basic-auth-secrets";
 
-function createBasicAuthSecretsActor(
-    creds: BasicAuthSecretDefaults = DEFAULT_BASIC_AUTH_SECRET_CREDS,
-): Actor {
+function createBasicAuthSecretsActor(): Actor {
     return {
         name: CREATE_BASIC_AUTH_SECRETS_ACTOR,
         run: async (ctx: ActorContext) => {
@@ -66,10 +59,46 @@ function createBasicAuthSecretsActor(
                 fs.readFileSync(ctx.baselineConfigPath, "utf8"),
             ) as unknown;
             for (const secretName of scrapeBasicAuthSecretNames(rawConfig)) {
-                ctx.k8sClient.applyBasicAuthSecret(secretName, creds);
+                ctx.workflowCli.createOrUpdateCredentialsStdin(
+                    secretName,
+                    credentialsForSecret(ctx, secretName),
+                );
             }
         },
     };
+}
+
+function credentialsForSecret(
+    ctx: ActorContext,
+    secretName: string,
+): BasicAuthCredentials {
+    const fixture = ctx.spec.fixtures.basicAuthCredentials;
+    if (!fixture) {
+        throw new Error(
+            `${CREATE_BASIC_AUTH_SECRETS_ACTOR} requires fixtures.basicAuthCredentials in the scenario spec`,
+        );
+    }
+    const source = fixture.bySecretName[secretName];
+    if (!source) {
+        throw new Error(
+            `${CREATE_BASIC_AUTH_SECRETS_ACTOR} has no env mapping for '${secretName}'; ` +
+                "set fixtures.basicAuthCredentials.bySecretName",
+        );
+    }
+    return {
+        username: requireEnv(source.usernameEnv, secretName, "username"),
+        password: requireEnv(source.passwordEnv, secretName, "password"),
+    };
+}
+
+function requireEnv(envName: string, secretName: string, field: "username" | "password"): string {
+    const value = process.env[envName];
+    if (!value) {
+        throw new Error(
+            `${CREATE_BASIC_AUTH_SECRETS_ACTOR} expected ${field} for '${secretName}' in env var ${envName}`,
+        );
+    }
+    return value;
 }
 
 function scrapeBasicAuthSecretNames(rawConfig: unknown): string[] {

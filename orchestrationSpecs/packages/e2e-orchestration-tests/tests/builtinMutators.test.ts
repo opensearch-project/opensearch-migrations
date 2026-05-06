@@ -39,6 +39,7 @@ describe("builtinMutators", () => {
             },
             lifecycle: { setup: [], teardown: [] },
             approvalGates: [],
+            fixtures: {},
         };
         const cases = expandCases(spec, reg);
         expect(cases).toHaveLength(1);
@@ -64,6 +65,7 @@ describe("builtinMutators", () => {
             },
             lifecycle: { setup: [], teardown: [] },
             approvalGates: [],
+            fixtures: {},
         };
         const cases = expandCases(spec, reg);
         expect(cases).toHaveLength(1);

@@ -97,7 +97,7 @@ Current branch status:
 - `[x]` Baseline and noop submissions use distinct workflow names, with tests covering deterministic and production suffix paths.
 - `[x]` CLI runs with the built-in actor registry by default, and programmatic callers can add or omit actors.
 - `[x]` Minimal lifecycle actor registry exists; setup actors run before submission, teardown actors run from `finally`, and teardown failures are recorded as diagnostics.
-- `[x]` `create-basic-auth-secrets` setup actor reads basic-auth secret names from the baseline config and applies idempotent local test secrets before configure/submit.
+- `[x]` `create-basic-auth-secrets` setup actor reads basic-auth secret names from the baseline config and creates workflow-managed credentials from per-secret env vars declared in the scenario spec before configure/submit.
 - `[x]` Generic phase-completion no longer treats `Pending` as terminal for topology components.
 - `[x]` A live noop spec exists at `packages/e2e-orchestration-tests/tests/live-specs/fullMigrationNoop.test.yaml`.
 - `[x]` Snapshots include an ordered event history for setup, configure, submit, approve, wait, observe, cleanup, and teardown.

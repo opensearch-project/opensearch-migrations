@@ -535,6 +535,7 @@ export async function runWorkflowCasePlan(
         k8sClient: deps.k8sClient,
         namespace: deps.namespace,
         baselineConfigPath: deps.baselineConfigPath,
+        spec: deps.spec,
         phase,
     });
 
@@ -730,6 +731,7 @@ async function runSubmittedWorkflow(args: {
                 await waitAndCheckpoint(
                     deps,
                     checkpoints,
+                    workflowName,
                     operation.checkpoint,
                     operation.subject,
                     operation.expectedRerunComponents,
@@ -896,6 +898,7 @@ function workflowEvent(
 async function waitAndCheckpoint(
     deps: LiveRunnerDeps,
     into: RunCheckpoint[],
+    workflowName: string,
     checkpoint: Checkpoint,
     subject: ComponentId | null,
     expectedRerunComponents: readonly ComponentId[] | undefined,
@@ -919,6 +922,10 @@ async function waitAndCheckpoint(
                 `waiting for ${INNER_MIGRATION_WORKFLOW_NAME} to appear up to ${missingGraceSeconds}s ` +
                 `and complete up to ${deps.spec.phaseCompletionTimeoutSeconds}s`,
         }));
+        progress(
+            deps,
+            `[${workflowName}] checkpoint ${checkpoint}: wait for ${INNER_MIGRATION_WORKFLOW_NAME} up to ${deps.spec.phaseCompletionTimeoutSeconds}s`,
+        );
         const workflowOutcome = await waitForInnerWorkflowCompletion({
             k8sClient: deps.k8sClient,
             timeoutSeconds: deps.spec.phaseCompletionTimeoutSeconds,
@@ -934,6 +941,10 @@ async function waitAndCheckpoint(
             diagnostics.push(
                 `workflow-missing at ${checkpoint}: ${INNER_MIGRATION_WORKFLOW_NAME} was not observed within ${workflowOutcome.waitedMs}ms`,
             );
+            progress(
+                deps,
+                `[${workflowName}] checkpoint ${checkpoint}: ${INNER_MIGRATION_WORKFLOW_NAME} missing after ${workflowOutcome.waitedMs}ms; continuing with CRD phases`,
+            );
         } else if (workflowOutcome.kind === "timeout") {
             workflowWaitTimedOut = true;
             events.push(event(clock, checkpoint, "wait-workflow-completion", "error", {
@@ -941,6 +952,10 @@ async function waitAndCheckpoint(
             }));
             diagnostics.push(
                 `workflow-timeout at ${checkpoint}: ${INNER_MIGRATION_WORKFLOW_NAME}=${workflowOutcome.phase}`,
+            );
+            progress(
+                deps,
+                `[${workflowName}] checkpoint ${checkpoint}: ${INNER_MIGRATION_WORKFLOW_NAME} still ${workflowOutcome.phase} after ${workflowOutcome.waitedMs}ms`,
             );
         } else {
             const result = ARGO_WORKFLOW_FAILURE_PHASES.has(workflowOutcome.phase)
@@ -955,8 +970,16 @@ async function waitAndCheckpoint(
                         (workflowOutcome.message ? ` (${workflowOutcome.message})` : ""),
                 );
             }
+            progress(
+                deps,
+                `[${workflowName}] checkpoint ${checkpoint}: ${INNER_MIGRATION_WORKFLOW_NAME} ${workflowOutcome.phase} after ${workflowOutcome.waitedMs}ms`,
+            );
         }
     }
+    progress(
+        deps,
+        `[${workflowName}] checkpoint ${checkpoint}: wait for ${deps.topology.components.length} component phase(s)`,
+    );
     const outcome: PhaseCompletionOutcome = await waitForPhaseCompletion({
         components: deps.topology.components,
         timeoutSeconds: workflowWaitTimedOut ? 1 : deps.spec.phaseCompletionTimeoutSeconds,
@@ -989,10 +1012,18 @@ async function waitAndCheckpoint(
         if (workflowSummary) {
             diagnostics.push(`argo: ${workflowSummary}`);
         }
+        progress(
+            deps,
+            `[${workflowName}] checkpoint ${checkpoint}: component phase wait timed out after ${outcome.waitedMs}ms`,
+        );
     } else {
         events.push(event(clock, checkpoint, "wait-phase-completion", "ok", {
             message: `ready after ${outcome.waitedMs}ms`,
         }));
+        progress(
+            deps,
+            `[${workflowName}] checkpoint ${checkpoint}: component phases ready after ${outcome.waitedMs}ms`,
+        );
     }
     const argoWorkflow = readArgoWorkflowObservation(deps.k8sClient);
     events.push(event(clock, checkpoint, "observe", "ok", {

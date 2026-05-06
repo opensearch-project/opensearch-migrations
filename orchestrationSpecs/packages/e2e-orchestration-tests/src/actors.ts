@@ -13,6 +13,7 @@
 
 import { WorkflowCli } from "./workflowCli";
 import { K8sClient } from "./k8sClient";
+import { ScenarioSpec } from "./types";
 
 /**
  * Context handed to every actor call. More fields can be added as
@@ -25,6 +26,8 @@ export interface ActorContext {
     namespace: string;
     /** Absolute path to the baseline config file for this run. */
     baselineConfigPath: string;
+    /** Parsed scenario spec, including fixture configuration. */
+    spec: ScenarioSpec;
     /** Human-readable label of the phase this actor was invoked for. */
     phase: "setup" | "teardown";
 }

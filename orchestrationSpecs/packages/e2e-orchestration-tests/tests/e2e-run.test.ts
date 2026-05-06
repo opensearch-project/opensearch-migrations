@@ -73,6 +73,7 @@ function makeRunnerTestDeps(overrides: Partial<LiveRunnerDeps> = {}): {
             { approvePattern: "*.evaluateMetadata", validations: [] },
             { approvePattern: "*.migrateMetadata", validations: [] },
         ],
+        fixtures: {},
     };
 
     // Deterministic name suffix so assertions can pin the full
@@ -548,6 +549,7 @@ describe("runNoopCase — error paths", () => {
                 matrix: { subject: COMPONENTS[0] },
                 lifecycle: { setup: [], teardown: [] },
                 approvalGates: [],
+                fixtures: {},
             },
             readObservations: async () => ({
                 components: {
@@ -726,6 +728,7 @@ describe("runWorkflowCasePlan — multi-checkpoint run steps", () => {
                 matrix: { subject: COMPONENTS[0] },
                 lifecycle: { setup: [], teardown: [] },
                 approvalGates: [],
+                fixtures: {},
             },
         });
 

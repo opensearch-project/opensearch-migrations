@@ -93,45 +93,6 @@ describe("K8sClient.getOne", () => {
     });
 });
 
-describe("K8sClient.applyBasicAuthSecret", () => {
-    it("applies an opaque secret manifest through stdin", () => {
-        const calls: { args: readonly string[]; input?: string }[] = [];
-        const client = new K8sClient({
-            namespace: "ma",
-            runner: (args, opts) => {
-                calls.push({ args, input: opts?.input });
-                return { stdout: "secret/source-creds configured", stderr: "", exitCode: 0 };
-            },
-        });
-
-        client.applyBasicAuthSecret("source-creds", {
-            username: "admin",
-            password: "secret",
-        });
-
-        expect(calls).toHaveLength(1);
-        expect(calls[0].args).toEqual(["apply", "-f", "-"]);
-        expect(calls[0].input).toContain("kind: Secret");
-        expect(calls[0].input).toContain("name: source-creds");
-        expect(calls[0].input).toContain("namespace: ma");
-        expect(calls[0].input).toContain("username: admin");
-        expect(calls[0].input).toContain("password: secret");
-    });
-
-    it("throws KubectlError when apply fails", () => {
-        const client = new K8sClient({
-            namespace: "ma",
-            runner: () => ({ stdout: "", stderr: "apply failed", exitCode: 1 }),
-        });
-        expect(() =>
-            client.applyBasicAuthSecret("source-creds", {
-                username: "admin",
-                password: "secret",
-            }),
-        ).toThrow(KubectlError);
-    });
-});
-
 describe("K8sClient.deleteResourceAndWait", () => {
     it("deletes a named resource with wait and ignore-not-found", () => {
         const calls: { args: readonly string[] }[] = [];

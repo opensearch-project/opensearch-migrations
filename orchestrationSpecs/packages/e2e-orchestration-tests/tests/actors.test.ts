@@ -1,12 +1,23 @@
 import { ActorContext, ActorRegistry, Actor } from "../src/actors";
 import { K8sClient } from "../src/k8sClient";
 import { WorkflowCli } from "../src/workflowCli";
+import { ScenarioSpec } from "../src/types";
+
+const SPEC: ScenarioSpec = {
+    baseConfig: "/tmp/baseline.wf.yaml",
+    phaseCompletionTimeoutSeconds: 5,
+    matrix: { subject: "datasnapshot:source-snap1" },
+    lifecycle: { setup: [], teardown: [] },
+    approvalGates: [],
+    fixtures: {},
+};
 
 function stubCtx(phase: "setup" | "teardown"): ActorContext {
     return {
         namespace: "ma",
         phase,
         baselineConfigPath: "/tmp/baseline.wf.yaml",
+        spec: SPEC,
         workflowCli: new WorkflowCli({
             runner: () => ({ stdout: "", stderr: "", exitCode: 0 }),
             namespace: "ma",

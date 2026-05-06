@@ -16,7 +16,6 @@
  */
 
 import { spawnSync, SpawnSyncReturns } from "node:child_process";
-import { stringify as stringifyYaml } from "yaml";
 
 import { ComponentId } from "./types";
 
@@ -120,39 +119,6 @@ export class K8sClient {
             );
         }
         return JSON.parse(res.stdout) as Record<string, unknown>;
-    }
-
-    /**
-     * Create or update an Opaque Secret with basic-auth keys. Uses
-     * `kubectl apply -f -` so repeated setup runs are idempotent.
-     */
-    applyBasicAuthSecret(
-        name: string,
-        creds: { username: string; password: string },
-    ): void {
-        const manifest = stringifyYaml({
-            apiVersion: "v1",
-            kind: "Secret",
-            metadata: {
-                name,
-                namespace: this.namespace,
-            },
-            type: "Opaque",
-            stringData: {
-                username: creds.username,
-                password: creds.password,
-            },
-        });
-        const res = this.runner(["apply", "-f", "-", ...this.extraArgs], {
-            input: manifest,
-        });
-        if (res.exitCode !== 0) {
-            throw new KubectlError(
-                `kubectl apply secret/${name} failed`,
-                res.exitCode,
-                res.stderr,
-            );
-        }
     }
 
     /**

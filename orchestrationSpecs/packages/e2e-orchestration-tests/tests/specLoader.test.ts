@@ -31,6 +31,15 @@ approvalGates:
   - approvePattern: "*.evaluateMetadata"
   - approvePattern: "*.migrateMetadata"
     validations: [compare-indices]
+fixtures:
+  basicAuthCredentials:
+    bySecretName:
+      source-creds:
+        usernameEnv: E2E_SOURCE_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_SOURCE_BASIC_AUTH_PASSWORD
+      target-creds:
+        usernameEnv: E2E_TARGET_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_TARGET_BASIC_AUTH_PASSWORD
 `;
 
 describe("parseScenarioSpec", () => {
@@ -45,6 +54,7 @@ describe("parseScenarioSpec", () => {
         expect(spec.matrix.select).toBeUndefined();
         expect(spec.lifecycle).toEqual({ setup: [], teardown: [] });
         expect(spec.approvalGates).toEqual([]);
+        expect(spec.fixtures).toEqual({});
         expect(resolvedBaseConfigPath).toBe(path.resolve("/tmp/specs/baseline.wf.yaml"));
     });
 
@@ -63,6 +73,14 @@ describe("parseScenarioSpec", () => {
         ]);
         expect(spec.approvalGates[0].validations).toEqual([]);
         expect(spec.approvalGates[1].validations).toEqual(["compare-indices"]);
+        expect(spec.fixtures.basicAuthCredentials?.bySecretName["source-creds"]).toEqual({
+            usernameEnv: "E2E_SOURCE_BASIC_AUTH_USERNAME",
+            passwordEnv: "E2E_SOURCE_BASIC_AUTH_PASSWORD",
+        });
+        expect(spec.fixtures.basicAuthCredentials?.bySecretName["target-creds"]).toEqual({
+            usernameEnv: "E2E_TARGET_BASIC_AUTH_USERNAME",
+            passwordEnv: "E2E_TARGET_BASIC_AUTH_PASSWORD",
+        });
     });
 
     it("rejects unknown top-level keys (strict schema)", () => {

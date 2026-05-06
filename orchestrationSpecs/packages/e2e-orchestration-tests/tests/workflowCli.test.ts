@@ -52,6 +52,52 @@ describe("WorkflowCli subcommands", () => {
         expect(r.calls[0].input).toBe("foo: bar\n");
     });
 
+    it("creates HTTP Basic credentials with stdin", () => {
+        const r = recordingRunner();
+        const cli = new WorkflowCli({ runner: r.runner, namespace: "ma" });
+        cli.createCredentialsStdin("source-creds", {
+            username: "admin",
+            password: "secret",
+        });
+        expect(r.calls[0].args).toEqual([
+            "configure",
+            "credentials",
+            "create",
+            "--stdin",
+            "source-creds",
+        ]);
+        expect(r.calls[0].input).toBe("admin:secret\n");
+    });
+
+    it("updates HTTP Basic credentials when create reports an existing managed credential", () => {
+        const calls: { args: readonly string[]; input?: string }[] = [];
+        const cli = new WorkflowCli({
+            namespace: "ma",
+            runner: (args, opts) => {
+                calls.push({ args: [...args], input: opts?.input });
+                if (calls.length === 1) {
+                    return {
+                        stdout: "",
+                        stderr: "Error: Managed HTTP Basic credentials already exist: source-creds",
+                        exitCode: 1,
+                    };
+                }
+                return { stdout: "", stderr: "", exitCode: 0 };
+            },
+        });
+
+        cli.createOrUpdateCredentialsStdin("source-creds", {
+            username: "admin",
+            password: "secret",
+        });
+
+        expect(calls.map((c) => c.args)).toEqual([
+            ["configure", "credentials", "create", "--stdin", "source-creds"],
+            ["configure", "credentials", "update", "--stdin", "source-creds"],
+        ]);
+        expect(calls[1].input).toBe("admin:secret\n");
+    });
+
     it("builds 'submit' with namespace and optional wait", () => {
         const r = recordingRunner();
         const cli = new WorkflowCli({ runner: r.runner, namespace: "ma" });

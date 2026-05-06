@@ -141,6 +141,7 @@ function makeRunnerTestDeps(opts: {
             matrix: { subject: SUBJECT },
             lifecycle: { setup: [], teardown: [] },
             approvalGates: [],
+            fixtures: {},
         },
         specPath: path.join(tmpDir, "test.yaml"),
         baselineConfigPath: baselinePath,
