@@ -51,13 +51,28 @@ public class SourceReconstructor {
      * Insert a value at a possibly-dotted path, creating intermediate maps for object subfields.
      * A flat name like {@code "title"} becomes {@code target["title"] = value}; a dotted name
      * like {@code "address.city"} becomes {@code target["address"]["city"] = value}. If an
-     * intermediate path collides with a non-map value already present, the non-map wins
-     * (best-effort — stored/doc_values loops prefer earlier writes).
+     * intermediate path collides with a non-map, non-list-of-maps value already present, the
+     * existing value wins and the recovered value is dropped with a warn log (best-effort —
+     * stored/doc_values loops prefer earlier writes).
+     * <p>
+     * <b>Object-array distribution.</b> When an intermediate path already holds a non-empty
+     * {@code List<Map>} (an object-array seed from a partial {@code _source}, e.g.
+     * {@code {"files":[{cksum:h1},{cksum:h2}]}}) and the remaining path is a single leaf
+     * segment, the recovered value is distributed across the list elements:
+     * <ul>
+     *   <li>If {@code value} is a List of the same size, positionally:
+     *       {@code list[i][leaf] = value[i]}.</li>
+     *   <li>If {@code value} is a scalar, broadcast: {@code list[i][leaf] = value} for each i.</li>
+     *   <li>If {@code value} is a List of different size, warn and drop.</li>
+     * </ul>
+     * See {@link #distributeSubfieldAcrossList} for the ordering caveat on doc_values-sourced
+     * subfields (doc_values traversal order, not original insertion order).
      * <p>
      * Returns {@code true} iff the target map was modified (a new entry was written at any
-     * level). Callers use this to decide whether a partial-source re-serialization is needed
-     * after {@link #populateFromSegment} runs — raw {@code target.size()} is not a sound
-     * dirty proxy because nested inserts do not change the top-level map size.
+     * level, including into a list element). Callers use this to decide whether a
+     * partial-source re-serialization is needed after {@link #populateFromSegment} runs — raw
+     * {@code target.size()} is not a sound dirty proxy because nested inserts do not change
+     * the top-level map size.
      */
     @SuppressWarnings("unchecked")
     private static boolean putNested(Map<String, Object> target, String fieldName, Object value) {
@@ -84,6 +99,23 @@ public class SourceReconstructor {
                 Map<String, Object> child = new LinkedHashMap<>();
                 cursor.put(parts[i], child);
                 cursor = child;
+            } else if (next instanceof java.util.List<?> list && isListOfMaps(list)) {
+                // Array-of-objects at this path (e.g. seeded _source has `files`: [{cksum:h1}, {cksum:h2}]).
+                // The remaining suffix names the subfield to distribute across the list elements.
+                // Only the LAST path segment is handled here; deeper nesting under a List<Map> parent
+                // (e.g. `files.meta.size` where `files[i].meta` would itself be an object) falls through
+                // to the warn branch below since per-element object construction from doc_values is
+                // outside the guarantees doc_values can provide.
+                if (i != parts.length - 2) {
+                    log.atWarn()
+                        .setMessage("Cannot write deeply-nested field '{}' under List<Map> at '{}'; dropping recovered value")
+                        .addArgument(fieldName)
+                        .addArgument(parts[i])
+                        .log();
+                    return false;
+                }
+                String leafForList = parts[parts.length - 1];
+                return distributeSubfieldAcrossList((java.util.List<Object>) list, leafForList, value, fieldName);
             } else {
                 // Non-map already sits at this path — cannot nest under a scalar. Warn once so
                 // operators notice the dropped subfield instead of it disappearing silently.
@@ -104,6 +136,78 @@ public class SourceReconstructor {
         return true;
     }
 
+    /** True iff {@code list} is non-empty and every element is a Map. A non-empty List<Map>
+     *  is how a partial _source represents an object array (e.g. ES {@code type: object} or
+     *  {@code type: nested} after flattening). Empty lists are ambiguous and are NOT treated
+     *  as object arrays — falling through to the scalar-collision branch preserves the existing
+     *  drop-and-warn contract for those. */
+    private static boolean isListOfMaps(java.util.List<?> list) {
+        if (list.isEmpty()) {
+            return false;
+        }
+        for (Object element : list) {
+            if (!(element instanceof Map<?, ?>)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Distributes a recovered subfield value across the elements of an object-array seed.
+     * <p>
+     * Positional distribution ({@code list[i][leaf] = value[i]}) is used when {@code value} is a
+     * List whose size matches the object array; scalar broadcast ({@code list[i][leaf] = value})
+     * is used when {@code value} is not a List. Any element that already has {@code leaf} set is
+     * preserved (first-write-wins, matching the rest of the reconstructor).
+     * <p>
+     * <b>Ordering caveat.</b> When {@code value} comes from doc_values, List order is the
+     * doc_values traversal order (SortedNumeric: ascending numeric; SortedSet: ascending term),
+     * <em>not</em> the original array insertion order. Element-to-element binding across
+     * subfields recovered from doc_values is therefore approximate — useful for presence,
+     * search, and aggregation, but not for display-accurate per-element tuples. Subfields
+     * sourced from stored-fields (which preserve insertion order per document) are distributed
+     * in their stored order.
+     * <p>
+     * Returns {@code true} iff at least one element was written.
+     */
+    @SuppressWarnings("unchecked")
+    private static boolean distributeSubfieldAcrossList(java.util.List<Object> list, String leaf,
+                                                        Object value, String fieldName) {
+        if (value instanceof java.util.List<?> valueList) {
+            if (valueList.size() != list.size()) {
+                log.atWarn()
+                    .setMessage("Cannot distribute '{}' across object array: got {} values for {} elements; dropping recovered value")
+                    .addArgument(fieldName)
+                    .addArgument(valueList.size())
+                    .addArgument(list.size())
+                    .log();
+                return false;
+            }
+            boolean modified = false;
+            for (int i = 0; i < list.size(); i++) {
+                Map<String, Object> element = (Map<String, Object>) list.get(i);
+                if (element.containsKey(leaf)) {
+                    continue;
+                }
+                element.put(leaf, valueList.get(i));
+                modified = true;
+            }
+            return modified;
+        }
+        // Scalar broadcast: apply to every element that does not already have the subfield.
+        boolean modified = false;
+        for (Object elementObj : list) {
+            Map<String, Object> element = (Map<String, Object>) elementObj;
+            if (element.containsKey(leaf)) {
+                continue;
+            }
+            element.put(leaf, value);
+            modified = true;
+        }
+        return modified;
+    }
+
     /**
      * True iff the (possibly-dotted) field path already has a value in {@code target}.
      * Walks intermediate maps for dotted names; non-dotted names fall back to {@code containsKey}.
@@ -122,10 +226,25 @@ public class SourceReconstructor {
         Map<String, Object> cursor = target;
         for (int i = 0; i < parts.length - 1; i++) {
             Object next = cursor.get(parts[i]);
-            if (!(next instanceof Map<?, ?>)) {
-                return false;
+            if (next instanceof Map<?, ?>) {
+                cursor = (Map<String, Object>) next;
+                continue;
             }
-            cursor = (Map<String, Object>) next;
+            // Array-of-objects ancestor (e.g. `files` is List<Map>): the leaf is considered present
+            // iff the suffix is the immediate leaf AND every element already carries it. This keeps
+            // mergeWithDocValues idempotent — a second pass over the same doc won't re-distribute,
+            // and it correctly reports "not present" when only some elements have the subfield so
+            // the distribute path can fill the gaps.
+            if (next instanceof java.util.List<?> list && i == parts.length - 2 && !list.isEmpty()) {
+                String leafForList = parts[parts.length - 1];
+                for (Object element : list) {
+                    if (!(element instanceof Map<?, ?> m) || !m.containsKey(leafForList)) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            return false;
         }
         return cursor.containsKey(parts[parts.length - 1]);
     }

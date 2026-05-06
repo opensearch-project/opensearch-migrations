@@ -1033,4 +1033,143 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             assertEquals(0, totalHits, "Document with unrecoverable fields should be skipped");
         }
     }
+
+    /**
+     * Object-array subfield distribution into a partial-source seed.
+     * <p>
+     * Scenario: mapping declares {@code files} as {@code type: object} with three subfields
+     * (cksum, size, name). {@code _source.excludes} removes {@code files.size} and
+     * {@code files.name}, leaving {@code files.cksum} in the seed. After migration the
+     * reconstructor must:
+     * <ul>
+     *   <li>preserve the {@code files} array shape (two elements), not flatten it into
+     *       a columnar {@code {files: {cksum: [...], size: [...]}}} object,</li>
+     *   <li>preserve the seeded {@code cksum} on each element (partial {@code _source}), and</li>
+     *   <li>distribute the recovered {@code size} and {@code name} into the matching array
+     *       elements positionally (from SortedNumeric / SortedSet doc_values).</li>
+     * </ul>
+     * <p>
+     * Deterministic ordering: the test values are chosen so sorted-by-value equals
+     * insertion order ({@code [100, 500]} stays {@code [100, 500]};
+     * {@code ["a.txt", "b.txt"]} stays {@code ["a.txt", "b.txt"]}). This makes the assertion
+     * exact. The broader ordering caveat — doc_values traversal order may differ from
+     * original array insertion order — is documented on
+     * {@code SourceReconstructor.distributeSubfieldAcrossList}; test values that do not
+     * preserve sorted-equals-insertion order would surface that caveat as a visible
+     * reordering of subfield values against cksum.
+     * <p>
+     * Gated to ES 2.x+ because pre-ES 5.x doc_values behaviour for dotted subfields of
+     * {@code type:object} is finicky under {@code _source.excludes}; the fix and its
+     * regression guarantee target contemporary snapshot formats.
+     */
+    @ParameterizedTest(name = "objectArrayDistribution: {0} -> {1}")
+    @MethodSource("versionPairs")
+    public void testObjectArraySubfieldDistribution(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        if (UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion())) {
+            return;
+        }
+
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "object_array_distribution_test";
+            String docType = needsDocType(sourceVersion) ? "doc" : null;
+
+            String propsBody = "\"properties\":{"
+                + "\"files\":{\"type\":\"object\",\"properties\":{"
+                + "\"cksum\":{\"type\":\"keyword\"},"
+                + "\"size\":{\"type\":\"long\"},"
+                + "\"name\":{\"type\":\"keyword\"}"
+                + "}}}";
+            String sourceDirective = "\"_source\":{\"excludes\":[\"files.size\",\"files.name\"]},";
+
+            String indexBody;
+            if (needsDocType(sourceVersion)) {
+                indexBody = String.format(
+                    "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                        + "\"mappings\":{\"%s\":{%s%s}}}",
+                    docType, sourceDirective, propsBody
+                );
+            } else {
+                indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                    + "\"mappings\":{" + sourceDirective + propsBody + "}}";
+            }
+
+            // Insertion-order values chosen so SortedNumeric / SortedSet doc_values
+            // traversal order equals insertion order (no ordering caveat visible here).
+            String doc = "{\"files\":["
+                + "{\"cksum\":\"h1\",\"size\":100,\"name\":\"a.txt\"},"
+                + "{\"cksum\":\"h2\",\"size\":500,\"name\":\"b.txt\"}"
+                + "]}";
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+            log.info("Document: {}", doc);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc, null, docType);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + propsBody + "}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertFalse(hits.isEmpty(), "Migrated document missing. Response: " + response);
+            JsonNode source = hits.get(0).path("_source");
+            log.info("Migrated _source: {}", source);
+
+            JsonNode files = source.path("files");
+            assertTrue(files.isArray(),
+                "files must remain an object-array, not collapse to columnar. _source=" + source);
+            assertEquals(2, files.size(),
+                "files array length must be preserved (2 elements). _source=" + source);
+
+            // Element 0: cksum from seed _source, size & name distributed from doc_values.
+            JsonNode e0 = files.get(0);
+            assertEquals("h1", e0.path("cksum").asText(),
+                "element 0 cksum must survive from partial _source. _source=" + source);
+            assertEquals(100L, e0.path("size").asLong(),
+                "element 0 size must be distributed from doc_values. _source=" + source);
+            assertEquals("a.txt", e0.path("name").asText(),
+                "element 0 name must be distributed from doc_values. _source=" + source);
+
+            // Element 1: same expectations.
+            JsonNode e1 = files.get(1);
+            assertEquals("h2", e1.path("cksum").asText(),
+                "element 1 cksum must survive from partial _source. _source=" + source);
+            assertEquals(500L, e1.path("size").asLong(),
+                "element 1 size must be distributed from doc_values. _source=" + source);
+            assertEquals("b.txt", e1.path("name").asText(),
+                "element 1 name must be distributed from doc_values. _source=" + source);
+        }
+    }
 }
