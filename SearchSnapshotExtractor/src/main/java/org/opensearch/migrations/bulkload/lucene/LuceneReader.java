@@ -230,9 +230,10 @@ public class LuceneReader {
                         break;
                     }
                     case "_recovery_source": {
-                        // ES 7+ / OpenSearch soft-deletes field. When opted in, treat as _source
-                        // for documents where _source is absent (disabled or filtered).
-                        if (useRecoverySource && sourceBytes == null) {
+                        // ES 7+ / OpenSearch soft-deletes field holds the original JSON.
+                        // When _source is absent (disabled or filtered), treat _recovery_source
+                        // as the authoritative source — no reconstruction needed.
+                        if (sourceBytes == null) {
                             sourceBytes = field.utf8Value();
                         }
                         break;
