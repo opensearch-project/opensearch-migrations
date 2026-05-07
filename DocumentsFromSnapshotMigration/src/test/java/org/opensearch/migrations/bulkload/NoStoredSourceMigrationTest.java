@@ -1253,10 +1253,14 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             createSnapshot(sourceCluster, "snap", snapshotCtx);
             sourceCluster.copySnapshotData(localDirectory.toString());
 
-            // Target mapping carries the same _source filter so a re-indexed doc would be shaped
-            // identically — matches a real customer's migration posture.
+            // Target mapping OMITS the _source filter so the target stores _source by default —
+            // that lets the test assert on exactly what RFS wrote. Carrying _source.enabled:false
+            // onto the target would make OS discard _source on index and the read-back would be
+            // empty, so there'd be nothing to assert against. The reconstructor already honored
+            // the SOURCE mapping's excludes at reconstruction time; the target shape doesn't
+            // affect that decision.
             String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
-                + "\"mappings\":{" + sourceFilterJson + "," + propertiesJson + "}}";
+                + "\"mappings\":{" + propertiesJson + "}}";
             targetOps.createIndex(indexName, targetIndexBody);
 
             var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
