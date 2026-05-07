@@ -138,3 +138,46 @@ class TestVersionCombinations:
         combos = get_version_combinations("all", "OS_2.19", TargetType.AOSS)
         assert all(t == "AOSS" for _, t in combos)
         assert len(combos) == len(VALID_SOURCE_VERSIONS)
+
+
+class TestGroovyVersionConsistency:
+    """Ensure pipeline groovy files only reference versions that test_runner accepts."""
+
+    @staticmethod
+    def _find_repo_root():
+        path = os.path.dirname(__file__)
+        while path != '/':
+            if os.path.isdir(os.path.join(path, '.git')) or os.path.isfile(os.path.join(path, '.git')):
+                return path
+            path = os.path.dirname(path)
+        return None
+
+    def _read_groovy_versions(self, filename):
+        """Extract version strings from a groovy file."""
+        import re
+        repo_root = self._find_repo_root()
+        if not repo_root:
+            pytest.skip("Cannot find repo root")
+        filepath = os.path.join(repo_root, 'vars', filename)
+        if not os.path.exists(filepath):
+            pytest.skip(f"{filepath} not found")
+        content = open(filepath).read()
+        # Match sourceVersion: 'XXX' or sourceVersions: ['XXX', 'YYY']
+        singles = re.findall(r"sourceVersion:\s*'([^']+)'", content)
+        lists = re.findall(r"sourceVersions:\s*\[([^\]]+)\]", content)
+        versions = list(singles)
+        for lst in lists:
+            versions.extend(re.findall(r"'([^']+)'", lst))
+        return versions
+
+    def test_elasticsearch8x_version_in_valid_list(self):
+        versions = self._read_groovy_versions('elasticsearch8xK8sLocalTest.groovy')
+        for v in versions:
+            assert v in VALID_SOURCE_VERSIONS, \
+                f"'{v}' in elasticsearch8xK8sLocalTest.groovy is not in VALID_SOURCE_VERSIONS: {VALID_SOURCE_VERSIONS}"
+
+    def test_migration_versions_in_valid_list(self):
+        versions = self._read_groovy_versions('migrationVersions.groovy')
+        for v in versions:
+            assert v in VALID_SOURCE_VERSIONS, \
+                f"'{v}' in migrationVersions.groovy is not in VALID_SOURCE_VERSIONS: {VALID_SOURCE_VERSIONS}"
