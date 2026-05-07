@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from rich.console import Console
 from rich.tree import Tree
 
-from .commands.crd_utils import RESETTABLE_PLURALS, list_migration_resources_full
+from .commands.crd_utils import list_migration_resources_full
 from .tree_utils import (
     build_nested_workflow_tree, filter_tree_nodes, get_node_input_parameter,
     is_approval_node,
@@ -149,39 +149,28 @@ def _extract_steps_recursive(node: Dict[str, Any], result: Dict[str, Dict[str, A
     """Walk the tree and extract steps for the innermost resource-tagged nodes."""
     cr_name = _resolve_cr_name(node)
     if cr_name:
-        # If we resolved via resourceName or name param, this is authoritative
         has_explicit_name = (
             get_node_input_parameter(node, 'resourceName') or
             get_node_input_parameter(node, 'name')
         )
-        if has_explicit_name:
-            # If the resource node itself succeeded, report completed
-            if node.get('phase') == 'Succeeded':
-                result[cr_name] = {'display_name': 'completed', 'phase': 'Succeeded',
-                                   'is_approval': False, 'denial_reason': None}
-            else:
-                step = _find_active_step(node.get('children', []))
-                if step:
-                    result[cr_name] = step
-            return
-
-        # Fallback: using groupName_view as CR name — skip if children have their own tags
         has_inner_tagged = any(
             child.get('group_name') for child in node.get('children', [])
         )
-        if not has_inner_tagged:
-            if node.get('phase') == 'Succeeded':
-                result[cr_name] = {'display_name': 'completed', 'phase': 'Succeeded',
-                                   'is_approval': False, 'denial_reason': None}
-            else:
-                step = _find_active_step(node.get('children', []))
-                if step:
-                    result[cr_name] = step
+        # Extract step if this is the authoritative node for the CR
+        if has_explicit_name or not has_inner_tagged:
+            result[cr_name] = _step_for_node(node)
             return
 
-    # Recurse into children
     for child in node.get('children', []):
         _extract_steps_recursive(child, result)
+
+
+def _step_for_node(node: Dict[str, Any]) -> Dict[str, Any]:
+    """Get the step info for a resource node."""
+    completed = {'display_name': 'completed', 'phase': 'Succeeded', 'is_approval': False, 'denial_reason': None}
+    if node.get('phase') == 'Succeeded':
+        return completed
+    return _find_active_step(node.get('children', [])) or completed
 
 
 def _resolve_cr_name(node: Dict[str, Any]) -> Optional[str]:
@@ -199,7 +188,6 @@ def _resolve_cr_name(node: Dict[str, Any]) -> Optional[str]:
 
 def _find_active_step(children: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Find the most relevant step to display from a resource's subtree."""
-    # Priority: running approval > running leaf > failed leaf > all succeeded
     running_approval = None
     running_leaf = None
     failed_leaf = None
@@ -207,47 +195,44 @@ def _find_active_step(children: List[Dict[str, Any]]) -> Optional[Dict[str, Any]
 
     for node in _iter_nodes(children):
         phase = node.get('phase', '')
-        if phase == 'Running' and is_approval_node(node):
-            running_approval = {
-                'display_name': _clean_step_name(node.get('display_name', '')),
-                'phase': 'Running',
-                'is_approval': True,
-                'denial_reason': node.get('denial_reason'),
-            }
-        elif phase == 'Running' and not node.get('children'):
-            running_leaf = {
-                'display_name': _clean_step_name(node.get('display_name', '')),
-                'phase': 'Running',
-                'is_approval': False,
-                'denial_reason': None,
-            }
-        elif phase == 'Pending' and not node.get('children'):
-            if not running_leaf:
-                running_leaf = {
-                    'display_name': _clean_step_name(node.get('display_name', '')),
-                    'phase': 'Pending',
-                    'is_approval': False,
-                    'denial_reason': None,
-                }
-        elif phase in ('Failed', 'Error') and not node.get('children'):
-            failed_leaf = {
-                'display_name': _clean_step_name(node.get('display_name', '')),
-                'phase': phase,
-                'is_approval': False,
-                'denial_reason': None,
-            }
-        if phase not in ('Succeeded', 'Skipped') and not node.get('children'):
-            all_succeeded = False
+        is_leaf = not node.get('children')
 
-    if running_approval:
-        return running_approval
-    if running_leaf:
-        return running_leaf
-    if failed_leaf:
-        return failed_leaf
-    if all_succeeded and children:
-        return {'display_name': 'completed', 'phase': 'Succeeded', 'is_approval': False, 'denial_reason': None}
-    return None
+        if phase == 'Running' and is_approval_node(node):
+            running_approval = _make_step(node, is_approval=True)
+        elif is_leaf:
+            running_leaf, failed_leaf, all_succeeded = _classify_leaf(
+                node, phase, running_leaf, failed_leaf, all_succeeded)
+
+    return running_approval or running_leaf or failed_leaf or (
+        _make_completed_step() if all_succeeded and children else None
+    )
+
+
+def _classify_leaf(node, phase, running_leaf, failed_leaf, all_succeeded):
+    """Classify a leaf node and update tracking variables."""
+    if phase == 'Running':
+        running_leaf = _make_step(node)
+    elif phase == 'Pending' and not running_leaf:
+        running_leaf = _make_step(node)
+    elif phase in ('Failed', 'Error'):
+        failed_leaf = _make_step(node)
+    if phase not in ('Succeeded', 'Skipped'):
+        all_succeeded = False
+    return running_leaf, failed_leaf, all_succeeded
+
+
+def _make_step(node: Dict[str, Any], is_approval: bool = False) -> Dict[str, Any]:
+    """Create a step info dict from a node."""
+    return {
+        'display_name': _clean_step_name(node.get('display_name', '')),
+        'phase': node.get('phase', ''),
+        'is_approval': is_approval,
+        'denial_reason': node.get('denial_reason') if is_approval else None,
+    }
+
+
+def _make_completed_step() -> Dict[str, Any]:
+    return {'display_name': 'completed', 'phase': 'Succeeded', 'is_approval': False, 'denial_reason': None}
 
 
 def _clean_step_name(name: str) -> str:
@@ -319,34 +304,39 @@ def display_resource_tree(sections: List[ResourceSection], workflow_unavailable:
             continue
         section_tree = Tree(f"[bold]{section.name}[/bold]")
         for group in section.groups:
-            if not group.resources and not group.not_configured:
-                continue
-            group_node = section_tree.add(f"[bold]{group.display_name}[/bold]")
-            if group.not_configured:
-                group_node.add("[dim](not configured)[/dim]")
-            else:
-                # Find the plural ordering for this group
-                group_plurals = next(
-                    (plurals for _, grps in RESOURCE_SECTIONS
-                     for plurals, _ in grps if plurals[0] == group.plural),
-                    [group.plural]
-                )
-                plural_order = {p: i for i, p in enumerate(group_plurals)}
-                for resource in sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name)):
-                    symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
-                    label = f"[{color}]{symbol} {resource.name} ({resource.phase})[/{color}]"
-                    node = group_node.add(label)
-                    _add_resource_details(node, resource)
-                    # Render children (e.g., topics under kafka)
-                    for child in resource.children:
-                        csymbol, ccolor = PHASE_SYMBOLS.get(child.phase, ('?', 'white'))
-                        clabel = f"[{ccolor}]{csymbol} {child.name} ({child.phase})[/{ccolor}]"
-                        child_node = node.add(clabel)
-                        _add_resource_details(child_node, child)
+            _render_group(section_tree, group)
         console.print(section_tree)
 
     if workflow_unavailable:
         console.print("\n[dim](Workflow progress unavailable)[/dim]")
+
+
+def _render_group(parent_tree, group: ResourceGroup) -> None:
+    """Render a resource group as a subtree."""
+    if not group.resources and not group.not_configured:
+        return
+    group_node = parent_tree.add(f"[bold]{group.display_name}[/bold]")
+    if group.not_configured:
+        group_node.add("[dim](not configured)[/dim]")
+        return
+
+    group_plurals = next(
+        (plurals for _, grps in RESOURCE_SECTIONS for plurals, _ in grps if plurals[0] == group.plural),
+        [group.plural]
+    )
+    plural_order = {p: i for i, p in enumerate(group_plurals)}
+    for resource in sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name)):
+        _render_resource(group_node, resource)
+
+
+def _render_resource(parent_node, resource: ResourceNode) -> None:
+    """Render a single resource node with its children."""
+    symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
+    label = f"[{color}]{symbol} {resource.name} ({resource.phase})[/{color}]"
+    node = parent_node.add(label)
+    _add_resource_details(node, resource)
+    for child in resource.children:
+        _render_resource(node, child)
 
 
 def _add_resource_details(node, resource: ResourceNode) -> None:
@@ -444,37 +434,42 @@ def extract_backfill_config(workflow_data: Dict[str, Any]) -> Optional[str]:
 
 def enrich_with_backfill_status(sections: List[ResourceSection], workflow_data: Dict[str, Any]) -> None:
     """Fetch live backfill status and attach to the SnapshotMigration resource."""
+    config_json = extract_backfill_config(workflow_data)
+    if not config_json:
+        return
+
+    migration_resource = _find_active_migration(sections)
+    if not migration_resource:
+        return
+
+    live_status = _fetch_backfill_live_status(config_json)
+    if live_status:
+        migration_resource.live_status = live_status
+
+
+def _find_active_migration(sections: List[ResourceSection]) -> Optional[ResourceNode]:
+    """Find the first non-completed SnapshotMigration resource."""
+    for section in sections:
+        for group in section.groups:
+            for resource in group.resources:
+                if resource.plural == 'snapshotmigrations' and resource.phase != 'Completed':
+                    return resource
+    return None
+
+
+def _fetch_backfill_live_status(config_json: str) -> Optional[Dict[str, Any]]:
+    """Convert workflow config and fetch backfill status. Returns None on any failure."""
     import logging
     import subprocess
     import os
     import yaml
 
-    logger = logging.getLogger(__name__)
-
-    config_json = extract_backfill_config(workflow_data)
-    if not config_json:
-        return
-
-    # Find the snapshot migration resource
-    migration_resource = None
-    for section in sections:
-        for group in section.groups:
-            for resource in group.resources:
-                if resource.plural == 'snapshotmigrations' and resource.phase not in ('Completed',):
-                    migration_resource = resource
-                    break
-
-    if not migration_resource:
-        return
-
-    # Convert config to services.yaml format
     jq_script = os.environ.get('WORKFLOW_CONFIG_JQ_SCRIPT',
                                '/root/workflowConfigToServicesConfig.jq')
     try:
         result = subprocess.run(['jq', '-f', jq_script],
                                 input=config_json, text=True, capture_output=True)
         if result.returncode != 0:
-            logger.debug(f"jq conversion failed: {result.stderr}")
             return
 
         from console_link.environment import Environment
@@ -482,13 +477,21 @@ def enrich_with_backfill_status(sections: List[ResourceSection], workflow_data: 
         if not env.backfill:
             return
 
-        status_result = env.backfill.get_status(deep_check=True)
+        # Temporarily suppress noisy error logs from backfill internals
+        backfill_logger = logging.getLogger('console_link.models.backfill_rfs')
+        prev_level = backfill_logger.level
+        backfill_logger.setLevel(logging.CRITICAL)
+        try:
+            status_result = env.backfill.get_status(deep_check=True)
+        finally:
+            backfill_logger.setLevel(prev_level)
+
         if status_result.success:
             backfill_status, message = status_result.value
-            migration_resource.live_status = {
+            return {
                 'type': 'backfill',
                 'status': str(backfill_status),
                 'message': message,
             }
-    except Exception as e:
-        logger.debug(f"Failed to get backfill status: {e}")
+    except Exception:
+        pass
