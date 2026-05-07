@@ -224,14 +224,76 @@ class TestRunner:
             logger.warning(f"Failed to cleanup labeled Kubernetes resources: {e}")
 
     def cleanup_deployment(self) -> None:
+        """Tear down the Migration Assistant deployment.
+
+        Mirrors the sequence a customer would run, with test-only extras
+        clearly separated. Every step is resilient — no single step aborts
+        the ones that follow it.
+
+        Customer-parity sequence (steps 1-3):
+
+          1. Delete CloudWatch Dashboard CRs while the ACK controller is
+             alive so it can finalise the AWS-side dashboards. 'helm
+             uninstall' in step 4 kills the controller; stuck finalizers
+             after that are unrecoverable without a manual kubectl patch.
+
+          2. Run 'workflow reset --all --include-proxies --delete-storage'
+             inside the migration-console pod. This is the CUSTOMER-FACING
+             cleanup command. It deletes every MA CRD (kafkaclusters,
+             captureproxies, trafficreplays, snapshotmigrations,
+             datasnapshots, capturedtraffics) in dependency order, along
+             with their child resources in the correct per-CRD order
+             (e.g. kafkatopics → kafkausers → kafkas → kafkanodepools for
+             each kafkacluster). It also strips stuck finalizers after a
+             120s wait per child and deletes Kafka PVCs + orphaned PVs
+             when --delete-storage is set.
+
+          3. 'helm uninstall ma' tears down the umbrella chart (10m
+             timeout — large deployments' pre-delete hooks can take
+             minutes). After this point, Strimzi/Kyverno/ArgoCD/
+             cert-manager operators are gone.
+
+        Test-scaffolding extras (steps 0, 4-7):
+
+          0. delete_argo_workflows: Argo Workflow instances are NOT
+             touched by 'workflow reset' or 'helm uninstall'. Delete them
+             BEFORE helm uninstall so the argo-workflow-controller can
+             process their finalisers.
+
+          4. cleanup_clusters: uninstall source/target test cluster helm
+             releases + their migration-config ConfigMaps.
+
+          5. delete_all_pvcs: belt-and-suspenders for any non-Kafka PVCs
+             (logs etc.) whose finalisers might block namespace deletion.
+             300s timeout — covers BYOS 'large' (24 RFS worker PVCs).
+
+          6. delete_namespace: webhook cleanup + kubectl delete namespace
+             with pods-terminated wait.
+
+          7. wait_for_namespace_deleted(..., raise_on_timeout=False):
+             poll the namespace until gone, or time out quietly. Raising
+             here used to abort the whole Jenkins post block and leak MA
+             + OpenSearch CFN stacks on every CDC run. The stuck
+             namespace is already on its way out by this point — EKS
+             cluster delete (Jenkins) or 'minikube delete' (local dev)
+             finishes the job.
+
+        Finally, re-raise HelmCommandFailed only if step 3 itself failed —
+        that's a real error (webhook misconfig, hung pre-delete hook, etc.).
+        Namespace-delete timeout is NOT treated as a hard failure.
+        """
         helm_uninstall_error = None
+
+        # Step 1: dashboards while ACK controller is alive
         self.k8s_service.cleanup_ack_dashboard_crs()
-        self.k8s_service.cleanup_strimzi_crs()
-        # Run 'workflow reset --all --include-proxies --delete-storage' inside the
-        # migration-console pod BEFORE helm uninstall so the CLI can find and delete
-        # Kafka PVCs while the pod and Strimzi operator are still alive. Without this
-        # step, Kafka PVCs leak between consecutive test runs and cause cluster-ID
-        # conflicts on redeployment.
+
+        # Step 0 (test-only, ordered here so argo-workflow-controller is alive):
+        # Argo Workflow instances — NOT covered by 'workflow reset' or helm
+        # uninstall. Delete now so their finalisers are processed cleanly.
+        self.k8s_service.delete_argo_workflows()
+
+        # Step 2: customer-facing reset — ordered CRD teardown + Kafka PVCs +
+        # finalizer stripping.
         try:
             self.k8s_service.exec_migration_console_cmd(
                 ["/bin/bash", "-lc",
@@ -240,22 +302,34 @@ class TestRunner:
             )
         except Exception as e:
             logger.warning(f"workflow reset --delete-storage failed (continuing): {e}")
+
+        # Step 3: tear down the umbrella chart (explicit 10m timeout for large
+        # deployments; helm default is 5m which is sometimes tight).
         try:
             self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
         except Exception as e:
             logger.error(f"Helm uninstall of '{MA_RELEASE_NAME}' release failed: {e}")
             helm_uninstall_error = e
+
+        # Step 4: test-only source/target clusters
         self.cleanup_clusters()
-        # Belt-and-suspenders: nuke any remaining PVCs before namespace deletion so a
-        # stuck PVC finalizer doesn't block namespace teardown.
+
+        # Step 5: residual PVCs
         try:
             self.k8s_service.delete_all_pvcs()
         except Exception as e:
             logger.warning(f"delete_all_pvcs failed (continuing): {e}")
+
+        # Step 6: namespace + webhooks
         self.k8s_service.delete_namespace()
-        # Assert both namespaces are actually gone
-        self.k8s_service.wait_for_namespace_deleted("kyverno-ma", timeout_seconds=60)
-        self.k8s_service.wait_for_namespace_deleted(self.k8s_service.namespace, timeout_seconds=120)
+
+        # Step 7: confirm namespaces are gone — warn, don't abort, on timeout.
+        # Infrastructure teardown handles residue.
+        self.k8s_service.wait_for_namespace_deleted(
+            "kyverno-ma", timeout_seconds=60, raise_on_timeout=False)
+        self.k8s_service.wait_for_namespace_deleted(
+            self.k8s_service.namespace, timeout_seconds=120, raise_on_timeout=False)
+
         if helm_uninstall_error:
             raise HelmCommandFailed(
                 f"Helm uninstall of '{MA_RELEASE_NAME}' release failed cleanly. "

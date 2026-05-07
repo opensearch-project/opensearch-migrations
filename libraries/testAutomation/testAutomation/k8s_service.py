@@ -241,7 +241,14 @@ class K8sService:
         self.run_command(command=command_list, ignore_errors=True)
 
     def delete_all_pvcs(self) -> None:
-        """Deletes all PersistentVolumeClaims (PVCs) in the namespace."""
+        """Deletes all PersistentVolumeClaims (PVCs) in the namespace.
+
+        Timeout is 300s to cover the BYOS 'large' preset (24 RFS worker pods,
+        each with its own PVC) and CDC pipelines with multiple Kafka broker
+        PVCs. The previous 120s budget was tight for those cases — deletion
+        of each PVC is O(seconds) but serial PV finaliser processing + EBS
+        detach calls can push total wall time past 2 min on large clusters.
+        """
         logger.info(f"Removing all PVCs in '{self.namespace}' namespace")
         pvcs = self.k8s_client.list_namespaced_persistent_volume_claim(self.namespace).items
 
@@ -253,7 +260,7 @@ class K8sService:
             logger.debug(f"Deleted PVC: {pvc.metadata.name}")
 
         # Wait for PVCs to finish terminating
-        timeout_seconds = 120
+        timeout_seconds = 300
         poll_interval = 5  # check every 5 seconds
         start_time = time.time()
 
@@ -325,8 +332,24 @@ class K8sService:
             time.sleep(2)
         logger.warning(f"Timeout waiting for pods to terminate in {self.namespace}")
 
-    def wait_for_namespace_deleted(self, namespace: str, timeout_seconds: int = 120) -> None:
-        """Poll until namespace is fully deleted, raise TimeoutError if not."""
+    def wait_for_namespace_deleted(self, namespace: str, timeout_seconds: int = 120,
+                                   raise_on_timeout: bool = True) -> bool:
+        """Poll until a namespace is fully deleted.
+
+        Returns True if the namespace is gone before the deadline, False if the
+        poll timed out with the namespace still present.
+
+        When raise_on_timeout is True (default — preserves historical behaviour)
+        the function also raises TimeoutError on timeout. Callers that treat the
+        timeout as recoverable — the EKS post-cleanup path, where the pipeline's
+        CloudFormation stack delete eventually removes every resource anyway —
+        should pass raise_on_timeout=False and check the return value instead.
+        The reason: when the namespace is stuck on finalizers that can no longer
+        be processed (because their controllers were uninstalled by 'helm
+        uninstall ma'), raising used to abort the whole post block and leak the
+        MA / OpenSearch CloudFormation stacks. Downstream teardown handles the
+        residue correctly — this wait is purely informational at that point.
+        """
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
             result = self.run_command(
@@ -335,9 +358,17 @@ class K8sService:
             )
             if not result or not result.stdout.strip():
                 logger.info(f"Namespace '{namespace}' deleted successfully")
-                return
+                return True
             time.sleep(3)
-        raise TimeoutError(f"Namespace '{namespace}' still exists after {timeout_seconds}s")
+        msg = f"Namespace '{namespace}' still exists after {timeout_seconds}s"
+        if raise_on_timeout:
+            raise TimeoutError(msg)
+        logger.warning(
+            f"{msg} — continuing; downstream infrastructure teardown "
+            "(EKS cluster delete / minikube delete) will clean up any "
+            "residual resources with stuck finalizers."
+        )
+        return False
 
     def delete_namespace(self) -> None:
         logger.info(f"Deleting namespace '{self.namespace}'")
@@ -477,7 +508,14 @@ class K8sService:
             return True
 
         logger.info(f"Uninstalling {release_name}...")
-        return self.run_command(self._helm_base() + ["uninstall", release_name, "-n", self.namespace])
+        # Explicit 10m timeout covers large deployments whose pre-delete hooks
+        # (Kyverno webhook cleanup, Strimzi PVC reclamation on 3-6 brokers,
+        # Argo controller shutdown) can take several minutes. Helm's default
+        # is 5m which is sometimes tight for the BYOS 'large' preset (24
+        # RFS workers + dedicated masters + gp3 ebs volumes).
+        return self.run_command(self._helm_base() + [
+            "uninstall", release_name, "-n", self.namespace, "--timeout", "10m0s"
+        ])
 
     def cleanup_ack_dashboard_crs(self) -> None:
         """Delete Dashboard CRs and wait for ACK controller to process them before helm uninstall."""
@@ -487,16 +525,28 @@ class K8sService:
             ignore_errors=True
         )
 
-    def cleanup_strimzi_crs(self) -> None:
-        """Delete Strimzi CRs while the operator is still running to process finalizers."""
-        for cr_type in ["kafkatopics.kafka.strimzi.io",
-                        "kafkanodepools.kafka.strimzi.io",
-                        "kafkas.kafka.strimzi.io"]:
-            self.run_command(
-                self._kubectl_base() + ["delete", cr_type, "--all",
-                                        "-n", self.namespace, "--timeout=60s"],
-                ignore_errors=True
-            )
+    def delete_argo_workflows(self, timeout: str = "60s") -> None:
+        """Delete all Argo Workflow instances in the namespace.
+
+        Argo Workflows are instances (not definitions) spawned when migration
+        workflows are submitted. They are NOT touched by 'workflow reset'
+        (which manages only Migration Assistant CRDs) nor by 'helm uninstall'
+        (which removes WorkflowTemplates but leaves in-flight Workflows).
+
+        Call this BEFORE helm uninstall so the argo-workflow-controller is
+        still alive to process the workflow finalisers. Otherwise Workflow CRs
+        can get stuck in Terminating and block namespace deletion.
+
+        This is a test-only step — a real customer wouldn't reset their Argo
+        state as part of MA teardown.
+        """
+        self.run_command(
+            self._kubectl_base() + [
+                "delete", "workflows.argoproj.io", "--all",
+                "-n", self.namespace, f"--timeout={timeout}"
+            ],
+            ignore_errors=True
+        )
 
     def get_helm_installations(self) -> List[str]:
         target_namespace = self.namespace
