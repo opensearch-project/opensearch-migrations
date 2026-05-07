@@ -165,60 +165,25 @@ def call(Map config = [:]) {
 
         post {
             always {
-                timeout(time: 60, unit: 'MINUTES') {
-                    script {
-                        def eksClusterName = "migration-eks-cluster-${maStageName}-${params.REGION}"
-                        def eksKubeContext = eksClusterName
+                script {
+                    def eksClusterName = "migration-eks-cluster-${env.maStageName}-${params.REGION}"
+                    def testVpcExtras = (isImportVpc && env.TEST_VPC_STACK_NAME)
+                        ? [[type: 'cfn-destroy', stackName: env.TEST_VPC_STACK_NAME,
+                            reason: 'test VPC stack (import-vpc mode) — deleted after MA stack releases ENIs']]
+                        : []
+                    def extraVerify = (isImportVpc && env.TEST_VPC_STACK_NAME) ? [env.TEST_VPC_STACK_NAME] : []
 
-                        withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 3600, roleSessionName: 'jenkins-session') {
-                                eksCleanupStep(
-                                    stackName: env.STACK_NAME,
-                                    eksClusterName: eksClusterName,
-                                    kubeContext: eksKubeContext
-                                )
-
-                                echo "CLEANUP: Deleting MA stack ${env.STACK_NAME}"
-                                sh """
-                                    aws cloudformation delete-stack \
-                                        --stack-name "${env.STACK_NAME}" \
-                                        --region "${params.REGION}" || true
-
-                                    aws cloudformation wait stack-delete-complete \
-                                        --stack-name "${env.STACK_NAME}" \
-                                        --region "${params.REGION}" || true
-
-                                    echo "CloudFormation stack ${env.STACK_NAME} deleted."
-                                """
-
-                                // Cleanup test VPC if import-vpc mode
-                                if (isImportVpc) {
-                                    echo "CLEANUP: Deleting test VPC stack ${env.TEST_VPC_STACK_NAME}"
-                                    sh """
-                                        aws cloudformation delete-stack \
-                                            --stack-name "${env.TEST_VPC_STACK_NAME}" \
-                                            --region "${params.REGION}" || true
-
-                                        aws cloudformation wait stack-delete-complete \
-                                            --stack-name "${env.TEST_VPC_STACK_NAME}" \
-                                            --region "${params.REGION}" || true
-
-                                        echo "Test VPC stack ${env.TEST_VPC_STACK_NAME} deleted."
-                                    """
-                                }
-                            }
-                        }
-                        echo "CloudFormation cleanup completed"
-
-                        // Clean up the kubeconfig context entry created by aws-bootstrap.sh
-                        sh """
-                            if command -v kubectl >/dev/null 2>&1; then
-                                kubectl config delete-context ${eksKubeContext} 2>/dev/null || echo "No kubectl context to clean up"
-                            else
-                                echo "kubectl not found on agent; skipping context cleanup"
-                            fi
-                        """
-                    }
+                    eksPostCleanup(
+                        maStackName: env.STACK_NAME,
+                        // Smoke pipeline doesn't call bootstrapMA, so env.eksClusterName
+                        // isn't populated — feed the helper the conventional name.
+                        eksClusterName: eksClusterName,
+                        eksKubeContext: eksClusterName,
+                        stepsAfterMaDelete: testVpcExtras,
+                        extraVerifyStacks: extraVerify,
+                        timeoutMinutes: 60,
+                        sessionSeconds: 3600,
+                    )
                 }
             }
         }
