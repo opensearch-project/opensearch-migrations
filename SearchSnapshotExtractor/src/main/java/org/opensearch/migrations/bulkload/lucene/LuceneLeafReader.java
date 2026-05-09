@@ -6,6 +6,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink;
+import org.opensearch.migrations.bulkload.lucene.sidecar.TermEntry;
+
 public interface LuceneLeafReader {
 
     public LuceneDocument document(int luceneDocId) throws IOException;
@@ -62,17 +65,26 @@ public interface LuceneLeafReader {
     default String getValueFromTerms(int docId, String fieldName) throws IOException { return null; }
 
     /**
-     * Version-specific hook: walk the terms dictionary for {@code fieldName} once and return a
-     * docId -> position-ordered term list map. This performs the raw Lucene iteration over
-     * shadow-relocated {@code Terms}/{@code TermsEnum}/{@code PostingsEnum}, which is why it
-     * can't be written in this shared interface.
+     * Streams the inverted index for {@code fieldName} into {@code sink} as
+     * {@code (termId, docId, positions[])} callbacks, one per (term, doc) pair that has
+     * at least one non-negative position.
      *
-     * Called at most once per (segment, field) via {@link SegmentTermIndex}. The returned map
-     * is owned by the caller and lives only as long as the {@link SegmentTermIndex} that holds
-     * it, which is scoped to a single segment's Flux in {@link LuceneReader#readDocsFromSegment}.
+     * <p>Ordering contract: terms are visited in ascending-bytes order (matches Lucene's
+     * {@code TermsEnum.next()}), and for each term docs are visited in ascending-docId order
+     * (matches Lucene's {@code PostingsEnum.nextDoc()}). Positions within each callback are
+     * already in ascending order as emitted by {@code PostingsEnum.nextPosition()}.
+     *
+     * <p>The default implementation is a no-op: versions that don't support source
+     * reconstruction from the inverted index (e.g. Lucene 10 / OS 3.x which always have
+     * stored fields or doc_values) leave this unimplemented and callers see an empty stream.
+     *
+     * <p>Callers must first invoke {@link PostingsSink#registerTerm} on each new term (as it
+     * appears in the walk) to get its assigned {@code termId}, then invoke
+     * {@link PostingsSink#accept(int, int, int[], int)} once per (term, doc). The reusable
+     * {@code int[]} passed to {@code accept} is only borrowed for the duration of the call.
      */
-    default Map<Integer, List<String>> buildTermPositionIndex(String fieldName) throws IOException {
-        return Collections.emptyMap();
+    default void streamFieldPostings(String fieldName, PostingsSink sink) throws IOException {
+        // no-op: default reader has no terms to stream.
     }
 
     /**
@@ -118,9 +130,10 @@ public interface LuceneLeafReader {
                 // single-term recovery which preserves the exact original value.
                 if (termIndex != null) {
                     try {
-                        List<String> terms = termIndex.getTermsForDocument(this, docId, fieldName);
-                        if (terms != null && !terms.isEmpty()) {
-                            yield Optional.of(String.join(" ", terms));
+                        List<TermEntry> entries =
+                                termIndex.getTermEntriesForDocument(this, docId, fieldName);
+                        if (entries != null && !entries.isEmpty()) {
+                            yield Optional.of(joinWithOffsets(entries));
                         }
                     } catch (UnsupportedOperationException e) {
                         // Field indexed without positions; fall through to single-term path.
@@ -147,6 +160,56 @@ public interface LuceneLeafReader {
                 yield (points != null && !points.isEmpty()) ? Optional.of(points) : Optional.empty();
             }
         };
+    }
+
+    /**
+     * Joins a list of {@link TermEntry} tokens into a single string.
+     *
+     * <p>When every entry carries valid character offsets (i.e. none equals
+     * {@link org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink#NO_OFFSET}),
+     * the gap between consecutive tokens is preserved exactly: the number of space characters
+     * inserted equals {@code entry[i].startOffset() - entry[i-1].endOffset()}. This round-trips
+     * the inter-token spacing that the original analyzer saw, including double-spaces.
+     *
+     * <p>When any entry lacks valid offsets (sentinel -1), the method falls back to a single
+     * space between every token — the original behaviour before offset support was added.
+     */
+    static String joinWithOffsets(List<TermEntry> entries) {
+        if (entries.isEmpty()) return "";
+
+        // Check whether all entries carry valid offsets.
+        boolean hasOffsets = true;
+        for (TermEntry e : entries) {
+            if (e.startOffset() < 0 || e.endOffset() < 0) {
+                hasOffsets = false;
+                break;
+            }
+        }
+
+        if (!hasOffsets) {
+            // Fall back: single space between tokens (original behaviour).
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < entries.size(); i++) {
+                if (i > 0) sb.append(' ');
+                sb.append(entries.get(i).term());
+            }
+            return sb.toString();
+        }
+
+        // Offset-gap reconstruction: fill inter-token spans with spaces.
+        StringBuilder sb = new StringBuilder();
+        int prevEnd = 0;
+        for (TermEntry e : entries) {
+            int gap = e.startOffset() - prevEnd;
+            // gap < 0 can happen only if tokens overlap (e.g. synonym at same position with
+            // different lengths after dedup) — clamp to 0 so we never insert negative spaces.
+            if (gap > 0) {
+                for (int s = 0; s < gap; s++) sb.append(' ');
+            }
+            sb.append(e.term());
+            prevEnd = e.endOffset();
+        }
+        return sb.toString();
     }
 
 }

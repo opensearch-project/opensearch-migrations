@@ -168,6 +168,15 @@
             }
           }
         ],
+        "retryStrategy": {
+          "limit": "3",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": [],
           "artifacts": [

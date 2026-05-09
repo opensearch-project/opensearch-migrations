@@ -243,6 +243,16 @@ public class FieldMappingContext {
     }
 
     /**
+     * Returns just the source fields that have at least one {@code copy_to} edge declared.
+     * Callers performing reverse-derivation should iterate this rather than the full mapping —
+     * for indices with thousands of fields, that's an O(fields-with-copy_to) walk instead of
+     * O(all-fields), and avoids running hasNested/shouldSkipField for every leaf.
+     */
+    public Set<String> getCopyToSourceFields() {
+        return copyToBySource.keySet();
+    }
+
+    /**
      * Returns the copy_to targets for {@code sourceFieldName}, ordered by ascending lossiness —
      * less-lossy (keyword-class) targets first, text targets last. Used during reverse-derivation
      * when the source's own stored/doc_values/points chain returned nothing.
@@ -349,6 +359,16 @@ public class FieldMappingContext {
         }
         if (glob.endsWith(".*")) {
             return path.startsWith(glob.substring(0, glob.length() - 1));
+        }
+        // Bare `*` wildcards (no dot delimiter): support common single-`*` patterns
+        // matching ES _source.includes/excludes semantics — `prefix*`, `*suffix`,
+        // `prefix*suffix`. Multi-`*` patterns (or `?`) fall through to literal match.
+        int firstStar = glob.indexOf('*');
+        if (firstStar >= 0 && glob.indexOf('*', firstStar + 1) < 0 && glob.indexOf('?') < 0) {
+            String prefix = glob.substring(0, firstStar);
+            String suffix = glob.substring(firstStar + 1);
+            return path.length() >= prefix.length() + suffix.length()
+                && path.startsWith(prefix) && path.endsWith(suffix);
         }
         if (glob.indexOf('*') >= 0 || glob.indexOf('?') >= 0) {
             log.debug("Unsupported source-filter glob '{}', treating as literal", glob);

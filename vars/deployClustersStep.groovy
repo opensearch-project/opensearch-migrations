@@ -9,6 +9,7 @@ def call(Map config = [:]) {
         if (config.sourceVer) {
             def cluster = [
                     clusterId               : "source",
+                    clusterName             : "${config.stage}-source",
                     clusterVersion          : "${config.sourceVer}",
                     clusterType             : "${config.sourceClusterType}",
                     domainRemovalPolicy     : "DESTROY",
@@ -27,6 +28,7 @@ def call(Map config = [:]) {
         if (config.targetVer) {
             def cluster = [
                     clusterId               : "target",
+                    clusterName             : "${config.stage}-target",
                     clusterVersion          : "${config.targetVer}",
                     clusterType             : "${config.targetClusterType}",
                     domainRemovalPolicy     : "DESTROY",
