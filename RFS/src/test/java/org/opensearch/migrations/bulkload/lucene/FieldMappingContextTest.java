@@ -282,22 +282,42 @@ class FieldMappingContextTest {
     }
 
     @Test
-    void testUnsupportedMidStringGlobFallsBackToLiteral() throws Exception {
-        // Mid-string '*' is not a supported shape in this pragmatic subset; we log and treat the
-        // pattern as a literal rather than silently dropping or silently matching everything.
+    void testBareStarPrefixSuffixGlobs() throws Exception {
+        // ES _source.includes/excludes treats a bare `*` (no dot delimiter) as a wildcard:
+        // `prefix*`, `*suffix`, and `prefix*suffix` all match anything that begins/ends with
+        // the literal segments. We honour those three single-`*` shapes; multi-`*` and `?`
+        // patterns still fall through to literal match (logged as unsupported).
         String json = """
             {
-                "_source": {"excludes": ["pre*fix"]},
+                "_source": {"excludes": ["pre*fix", "foo*", "*bar", "a*b*c"]},
                 "properties": {
-                    "pre*fix": {"type": "keyword"},
-                    "prefix":  {"type": "keyword"}
+                    "prefix":      {"type": "keyword"},
+                    "preXYZfix":   {"type": "keyword"},
+                    "foo":         {"type": "keyword"},
+                    "foobar":      {"type": "keyword"},
+                    "bazbar":      {"type": "keyword"},
+                    "unrelated":   {"type": "keyword"},
+                    "a*b*c":       {"type": "keyword"},
+                    "axxbyyc":     {"type": "keyword"}
                 }
             }
             """;
         FieldMappingContext context = new FieldMappingContext(MAPPER.readTree(json));
 
-        assertTrue(context.isSourceExcluded("pre*fix"), "literal match on the exact pattern");
-        assertFalse(context.isSourceExcluded("prefix"), "NOT a wildcard expansion");
+        // `pre*fix` matches `prefix` (empty middle) and `preXYZfix` (non-empty middle).
+        assertTrue(context.isSourceExcluded("prefix"), "pre*fix matches empty middle");
+        assertTrue(context.isSourceExcluded("preXYZfix"), "pre*fix matches non-empty middle");
+        // `foo*` matches anything starting with `foo`.
+        assertTrue(context.isSourceExcluded("foo"), "foo* matches exact prefix (empty tail)");
+        assertTrue(context.isSourceExcluded("foobar"), "foo* matches longer prefix");
+        // `*bar` matches anything ending in `bar`.
+        assertTrue(context.isSourceExcluded("bazbar"), "*bar matches suffix");
+        assertTrue(context.isSourceExcluded("foobar"), "*bar matches suffix even when also caught by foo*");
+        // No glob matches `unrelated`.
+        assertFalse(context.isSourceExcluded("unrelated"), "no glob matches unrelated");
+        // Multi-`*` patterns are NOT supported as globs — they fall through to literal match.
+        assertTrue(context.isSourceExcluded("a*b*c"), "multi-star pattern matches itself literally");
+        assertFalse(context.isSourceExcluded("axxbyyc"), "multi-star pattern does NOT wildcard-expand");
     }
 
     @Test

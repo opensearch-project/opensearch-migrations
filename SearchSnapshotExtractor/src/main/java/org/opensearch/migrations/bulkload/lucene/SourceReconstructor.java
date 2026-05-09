@@ -58,6 +58,40 @@ public class SourceReconstructor {
     }
 
     /**
+     * Returns {@code true} when {@code fieldName} is a dotted path whose ancestor segment already
+     * resolves to a non-empty {@code List<Map>} in {@code target} — i.e. the seed's object-array
+     * structure is already in place and we're filling subfields into it. This is the legitimate
+     * carve-out from a {@code _source.includes}/{@code _source.excludes} suppression: when the
+     * customer's mapping declared {@code _source.includes=["files.name"]}, the {@code files}
+     * object-array IS in scope (the parent path is included). Subsequent reverse-derivation of
+     * sibling subfields (e.g. {@code files.size}) is filling out the kept structural element, not
+     * resurrecting an excluded top-level field. The caller still consults {@link #shouldSkipField}
+     * for top-level paths and for paths whose ancestor isn't an existing object-array seed.
+     */
+    @SuppressWarnings("unchecked")
+    private static boolean descendsIntoExistingObjectArray(Map<String, Object> target, String fieldName) {
+        if (!fieldName.contains(".")) {
+            return false;
+        }
+        String[] parts = fieldName.split("\\.");
+        Map<String, Object> cursor = target;
+        for (int i = 0; i < parts.length - 1; i++) {
+            Object next = cursor.get(parts[i]);
+            if (next instanceof java.util.List<?> list && isListOfMaps(list)) {
+                // Only treat as an object-array carve-out when the remainder is a SINGLE leaf
+                // segment — distributeSubfieldAcrossList only handles single-leaf distribution.
+                return i == parts.length - 2;
+            }
+            if (next instanceof Map<?, ?>) {
+                cursor = (Map<String, Object>) next;
+                continue;
+            }
+            return false;
+        }
+        return false;
+    }
+
+    /**
      * Insert a value at a possibly-dotted path, creating intermediate maps for object subfields.
      * A flat name like {@code "title"} becomes {@code target["title"] = value}; a dotted name
      * like {@code "address.city"} becomes {@code target["address"]["city"] = value}. If an
@@ -333,7 +367,9 @@ public class SourceReconstructor {
         // 1. Stored fields (exact values when present)
         for (var field : document.getFields()) {
             String fieldName = field.name();
-            if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+            if ((shouldSkipField(fieldName, mappingContext)
+                    && !descendsIntoExistingObjectArray(target, fieldName))
+                    || hasNested(target, fieldName)) {
                 continue;
             }
             FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
@@ -346,7 +382,9 @@ public class SourceReconstructor {
         // 2. Doc values (fast, lossless for typed fields)
         for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
             String fieldName = fieldInfo.name();
-            if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+            if ((shouldSkipField(fieldName, mappingContext)
+                    && !descendsIntoExistingObjectArray(target, fieldName))
+                    || hasNested(target, fieldName)) {
                 continue;
             }
             FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
@@ -366,7 +404,9 @@ public class SourceReconstructor {
         // 3. Points / indexed terms fallback (recovers indexed-only numeric/boolean/keyword)
         if (mappingContext != null) {
             for (String fieldName : mappingContext.getFieldNames()) {
-                if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+                if ((shouldSkipField(fieldName, mappingContext)
+                        && !descendsIntoExistingObjectArray(target, fieldName))
+                        || hasNested(target, fieldName)) {
                     continue;
                 }
                 FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
@@ -385,7 +425,9 @@ public class SourceReconstructor {
         // 4. Mapping-level constant values (constant_keyword stores its value in the mapping, not the segment)
         if (mappingContext != null) {
             for (String fieldName : mappingContext.getFieldNames()) {
-                if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+                if ((shouldSkipField(fieldName, mappingContext)
+                        && !descendsIntoExistingObjectArray(target, fieldName))
+                        || hasNested(target, fieldName)) {
                     continue;
                 }
                 FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
