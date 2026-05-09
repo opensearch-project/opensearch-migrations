@@ -10,6 +10,31 @@ from console_link.middleware.clusters import cat_indices, connection_check, clea
 
 logger = logging.getLogger(__name__)
 
+# Maps wildcard ClusterVersion (e.g. ES_7.x) to the concrete template name that exists in clusterWorkflows.yaml.
+# When minor_version is 'x', we pick the canonical representative minor version for that major.
+_WILDCARD_TEMPLATE_MAP = {
+    ("elasticsearch", 1): 5,
+    ("elasticsearch", 2): 4,
+    ("elasticsearch", 5): 6,
+    ("elasticsearch", 6): 8,
+    ("elasticsearch", 7): 10,
+    ("elasticsearch", 8): 19,
+    ("opensearch", 1): 3,
+    ("opensearch", 2): 19,
+    ("opensearch", 3): 1,
+}
+
+
+def get_template_name(version: ClusterVersion) -> str:
+    minor = version.minor_version
+    if minor == 'x':
+        minor = _WILDCARD_TEMPLATE_MAP.get((version.full_cluster_type, version.major_version))
+        if minor is None:
+            raise ValueError(f"No template mapping for wildcard version {version}. "
+                             f"Add an entry to _WILDCARD_TEMPLATE_MAP.")
+    return f"{version.full_cluster_type}-{version.major_version}-{minor}-single-node"
+
+
 MigrationType = Enum("MigrationType", ["METADATA", "BACKFILL", "CAPTURE_AND_REPLAY"])
 
 
@@ -69,14 +94,8 @@ class MATestBase:
             if not supported_combo:
                 raise ClusterVersionCombinationUnsupported(self.source_version, self.target_version)
 
-        self.source_argo_cluster_template = (f"{self.source_version.full_cluster_type}-"
-                                             f"{self.source_version.major_version}-"
-                                             f"{self.source_version.minor_version}-single-node")
-        self.target_argo_cluster_template = None if self.is_aoss else (
-            f"{self.target_version.full_cluster_type}-"
-            f"{self.target_version.major_version}-"
-            f"{self.target_version.minor_version}-single-node"
-        )
+        self.source_argo_cluster_template = get_template_name(self.source_version)
+        self.target_argo_cluster_template = None if self.is_aoss else get_template_name(self.target_version)
 
         self.parameters = {}
         self.image_registry_prefix = user_args.image_registry_prefix

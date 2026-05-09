@@ -130,10 +130,10 @@ public class LuceneReader {
 
         // Per-segment term position cache. Built lazily on first need. Backed by an on-disk
         // spill directory so the in-heap footprint stays bounded even for large segments
-        // (a 3GB shard's analyzed-text TreeMap can otherwise OOM at 64GB JVM). The spill
-        // directory is created lazily on first field build and deleted by the Flux's
-        // doFinally hook below on both success and error paths.
-        final Path spillRoot = SourcelessSpillConfig.newSegmentSpillRoot();
+        // (a 3GB shard's analyzed-text TreeMap can otherwise OOM at 64GB JVM). Spill data
+        // lives under the same Lucene scratch dir as the unpacked segment, so cleanup
+        // follows the worker's existing --lucene-dir lifecycle.
+        final Path spillRoot = SourcelessSpillConfig.newSegmentSpillRoot(indexDirectoryPath);
         final SegmentTermIndex termIndex = new SegmentTermIndex(
                 spillRoot, SourcelessSpillConfig.sortBufferBytes());
 

@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink;
-import org.opensearch.migrations.bulkload.lucene.sidecar.SidecarReader;
+import org.opensearch.migrations.bulkload.lucene.sidecar.TermEntry;
 
 public interface LuceneLeafReader {
 
@@ -130,7 +130,7 @@ public interface LuceneLeafReader {
                 // single-term recovery which preserves the exact original value.
                 if (termIndex != null) {
                     try {
-                        List<SidecarReader.TermEntry> entries =
+                        List<TermEntry> entries =
                                 termIndex.getTermEntriesForDocument(this, docId, fieldName);
                         if (entries != null && !entries.isEmpty()) {
                             yield Optional.of(joinWithOffsets(entries));
@@ -163,7 +163,7 @@ public interface LuceneLeafReader {
     }
 
     /**
-     * Joins a list of {@link SidecarReader.TermEntry} tokens into a single string.
+     * Joins a list of {@link TermEntry} tokens into a single string.
      *
      * <p>When every entry carries valid character offsets (i.e. none equals
      * {@link org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink#NO_OFFSET}),
@@ -174,12 +174,12 @@ public interface LuceneLeafReader {
      * <p>When any entry lacks valid offsets (sentinel -1), the method falls back to a single
      * space between every token — the original behaviour before offset support was added.
      */
-    static String joinWithOffsets(List<SidecarReader.TermEntry> entries) {
+    static String joinWithOffsets(List<TermEntry> entries) {
         if (entries.isEmpty()) return "";
 
         // Check whether all entries carry valid offsets.
         boolean hasOffsets = true;
-        for (SidecarReader.TermEntry e : entries) {
+        for (TermEntry e : entries) {
             if (e.startOffset() < 0 || e.endOffset() < 0) {
                 hasOffsets = false;
                 break;
@@ -199,7 +199,7 @@ public interface LuceneLeafReader {
         // Offset-gap reconstruction: fill inter-token spans with spaces.
         StringBuilder sb = new StringBuilder();
         int prevEnd = 0;
-        for (SidecarReader.TermEntry e : entries) {
+        for (TermEntry e : entries) {
             int gap = e.startOffset() - prevEnd;
             // gap < 0 can happen only if tokens overlap (e.g. synonym at same position with
             // different lengths after dedup) — clamp to 0 so we never insert negative spaces.

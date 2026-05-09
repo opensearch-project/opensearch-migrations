@@ -117,7 +117,7 @@ def call(Map config = [:]) {
     }
 
     // 5. Add security group rules: EKS → AOS on port 443
-    // Domain names follow the pattern: cluster-<stage>-<clusterId>
+    // Domain names follow the pattern: <stage>-<clusterId> (clusterName overridden in deployClustersStep)
     withMigrationsTestAccount(region: region) { accountId ->
         def eksSg = sh(script: """
             aws eks describe-cluster --name ${eksClusterName} --region ${region} \
@@ -125,7 +125,7 @@ def call(Map config = [:]) {
         """, returnStdout: true).trim()
 
         for (clusterId in ['source', 'target']) {
-            def domainName = "cluster-${stage}-${clusterId}"
+            def domainName = "${stage}-${clusterId}"
             def sg = sh(script: """
                 aws opensearch describe-domain --domain-name ${domainName} --region ${region} \
                   --query 'DomainStatus.VPCOptions.SecurityGroupIds[0]' --output text 2>/dev/null || echo ''

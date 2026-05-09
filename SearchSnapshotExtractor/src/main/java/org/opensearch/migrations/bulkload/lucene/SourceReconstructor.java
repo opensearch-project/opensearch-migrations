@@ -8,6 +8,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 
@@ -24,6 +25,8 @@ public class SourceReconstructor {
     private static final BigInteger UNSIGNED_LONG_MASK = BigInteger.ONE.shiftLeft(64).subtract(BigInteger.ONE);
 
     private SourceReconstructor() {}
+
+    private static final AtomicBoolean NEST_COLLISION_WARNED = new AtomicBoolean();
 
     /**
      * Skip internal fields (e.g., _id) and multi-field sub-fields (e.g., title.keyword).
@@ -117,14 +120,16 @@ public class SourceReconstructor {
                 String leafForList = parts[parts.length - 1];
                 return distributeSubfieldAcrossList((java.util.List<Object>) list, leafForList, value, fieldName);
             } else {
-                // Non-map already sits at this path — cannot nest under a scalar. Warn once so
-                // operators notice the dropped subfield instead of it disappearing silently.
-                log.atWarn()
-                    .setMessage("Cannot write nested field '{}' under scalar at '{}' (type {}); dropping recovered value")
-                    .addArgument(fieldName)
-                    .addArgument(parts[i])
-                    .addArgument(next.getClass().getSimpleName())
-                    .log();
+                // Non-map already sits at this path — cannot nest under a scalar. Warn once
+                // per JVM so operators notice the class of problem without log floods.
+                if (NEST_COLLISION_WARNED.compareAndSet(false, true)) {
+                    log.atWarn()
+                        .setMessage("Cannot write nested field '{}' under scalar at '{}' (type {}); dropping recovered value (further occurrences silenced)")
+                        .addArgument(fieldName)
+                        .addArgument(parts[i])
+                        .addArgument(next.getClass().getSimpleName())
+                        .log();
+                }
                 return false;
             }
         }

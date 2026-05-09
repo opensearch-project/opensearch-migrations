@@ -1,20 +1,19 @@
 package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.lucene.sidecar.SidecarBuilder;
 import org.opensearch.migrations.bulkload.lucene.sidecar.SidecarReader;
+import org.opensearch.migrations.bulkload.lucene.sidecar.TermEntry;
 
 import lombok.extern.slf4j.Slf4j;
+import shadow.lucene10.org.apache.lucene.util.IOUtils;
 
 /**
  * Per-segment cache of per-field term indexes.
@@ -92,18 +91,18 @@ public class SegmentTermIndex implements AutoCloseable {
      */
     public synchronized List<String> getTermsForDocument(LuceneLeafReader reader, int docId, String fieldName)
             throws IOException {
-        List<SidecarReader.TermEntry> entries = getTermEntriesForDocument(reader, docId, fieldName);
+        List<TermEntry> entries = getTermEntriesForDocument(reader, docId, fieldName);
         List<String> strings = new ArrayList<>(entries.size());
-        for (SidecarReader.TermEntry e : entries) strings.add(e.term());
+        for (TermEntry e : entries) strings.add(e.term());
         return strings;
     }
 
     /**
-     * Returns the {@link SidecarReader.TermEntry} list for {@code docId} in {@code fieldName},
+     * Returns the {@link TermEntry} list for {@code docId} in {@code fieldName},
      * including character start/end offsets when the field was indexed with
      * {@code index_options: offsets}. Building the per-field sidecar on first access.
      */
-    public synchronized List<SidecarReader.TermEntry> getTermEntriesForDocument(
+    public synchronized List<TermEntry> getTermEntriesForDocument(
             LuceneLeafReader reader, int docId, String fieldName) throws IOException {
         if (closed) {
             throw new IOException("SegmentTermIndex has been closed");
@@ -203,19 +202,10 @@ public class SegmentTermIndex implements AutoCloseable {
         }
         byField.clear();
         numericByField.clear();
-        deleteRecursively(spillRoot);
-    }
-
-    private static void deleteRecursively(Path root) {
-        if (!Files.exists(root)) return;
-        try (Stream<Path> walk = Files.walk(root)) {
-            walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                try { Files.deleteIfExists(p); } catch (IOException ignored) {
-                    // Best-effort cleanup; ignore per-file failures during teardown.
-                }
-            });
+        try {
+            IOUtils.rm(spillRoot);
         } catch (IOException e) {
-            log.warn("Failed to delete spill root {}: {}", root, e.toString());
+            log.warn("Failed to delete spill root {}: {}", spillRoot, e.toString());
         }
     }
 }

@@ -933,6 +933,185 @@ spec:
             valueFrom:
               path: /tmp/cluster-config.json
 
+    # Elasticsearch 8.19 Single Node Template - Inline Manifest
+    - name: elasticsearch-8-19-single-node
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+          - name: image-registry-prefix
+            default: ""
+      container:
+        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
+            NAMESPACE='{{inputs.parameters.namespace}}'
+
+            cat > /tmp/elasticsearch.yml <<'ESCFG'
+            cluster.name: __CLUSTER_NAME__
+            network.host: 0.0.0.0
+            discovery.type: single-node
+            xpack.security.enabled: false
+            xpack.security.enrollment.enabled: false
+            xpack.security.http.ssl.enabled: false
+            xpack.security.transport.ssl.enabled: false
+            xpack.ml.enabled: false
+            ESCFG
+            sed -i "s/__CLUSTER_NAME__/${CLUSTER_NAME}/g" /tmp/elasticsearch.yml
+
+            kubectl create configmap "${CLUSTER_NAME}-config" \
+              --from-file=elasticsearch.yml=/tmp/elasticsearch.yml \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
+
+            cat <<EOF | kubectl apply -f -
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              replicas: 1
+              selector:
+                matchLabels:
+                  app: ${CLUSTER_NAME}
+              template:
+                metadata:
+                  labels:
+                    app: ${CLUSTER_NAME}
+                    migration-test: "true"
+                    cluster-name: ${CLUSTER_NAME}
+                spec:
+                  serviceAccountName: migration-console-access-role
+                  securityContext:
+                    runAsUser: 1000
+                    runAsGroup: 1000
+                    fsGroup: 1000
+                  initContainers:
+                    - name: install-s3-plugin
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:8.19.14
+                      command: ["sh", "-c", "bin/elasticsearch-plugin install --batch repository-s3"]
+                      volumeMounts:
+                        - name: plugins
+                          mountPath: /usr/share/elasticsearch/plugins
+                    - name: inject-aws-creds
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:8.19.14
+                      command:
+                        - sh
+                        - -c
+                        - |
+                          set -e
+                          echo 'y' | bin/elasticsearch-keystore create
+                          echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.access_key --force
+                          echo "test" | bin/elasticsearch-keystore add --stdin s3.client.default.secret_key --force
+                          cp /usr/share/elasticsearch/config/elasticsearch.keystore /shared/elasticsearch.keystore
+                      volumeMounts:
+                        - name: elasticsearch-keystore
+                          mountPath: /shared
+                  containers:
+                    - name: elasticsearch
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-elasticsearch:8.19.14
+                      imagePullPolicy: IfNotPresent
+                      env:
+                        - name: ES_JAVA_OPTS
+                          value: "-Xms2g -Xmx2g"
+                      ports:
+                        - containerPort: 9200
+                          name: http
+                        - containerPort: 9300
+                          name: transport
+                      readinessProbe:
+                        httpGet:
+                          path: /
+                          port: 9200
+                        initialDelaySeconds: 5
+                        periodSeconds: 3
+                        failureThreshold: 20
+                      resources:
+                        requests:
+                          cpu: "2"
+                          memory: "4Gi"
+                        limits:
+                          cpu: "2"
+                          memory: "4Gi"
+                      volumeMounts:
+                        - name: elasticsearch-config
+                          mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
+                          subPath: elasticsearch.yml
+                        - name: elasticsearch-data
+                          mountPath: /usr/share/elasticsearch/data
+                        - name: elasticsearch-logs
+                          mountPath: /usr/share/elasticsearch/logs
+                        - name: plugins
+                          mountPath: /usr/share/elasticsearch/plugins
+                        - name: elasticsearch-keystore
+                          mountPath: /usr/share/elasticsearch/config/elasticsearch.keystore
+                          subPath: elasticsearch.keystore
+                  volumes:
+                    - name: elasticsearch-config
+                      configMap:
+                        name: ${CLUSTER_NAME}-config
+                    - name: elasticsearch-data
+                      emptyDir: {}
+                    - name: elasticsearch-logs
+                      emptyDir: {}
+                    - name: plugins
+                      emptyDir: {}
+                    - name: elasticsearch-keystore
+                      emptyDir: {}
+            ---
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              selector:
+                app: ${CLUSTER_NAME}
+              ports:
+                - name: http
+                  port: 9200
+                  targetPort: 9200
+                - name: transport
+                  port: 9300
+                  targetPort: 9300
+            EOF
+
+            cat > /tmp/cluster-config.json <<EOF
+            {
+              "endpoint": "http://${CLUSTER_NAME}:9200",
+              "allowInsecure": true,
+              "version": "ES 8.19"
+            }
+            EOF
+
+            kubectl create configmap ${CLUSTER_NAME}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              -n ${NAMESPACE} \
+              --dry-run=client -o yaml | kubectl apply -f -
+
+            echo "Elasticsearch 8.19 cluster created successfully."
+            echo "Cluster config:"
+            cat /tmp/cluster-config.json
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              path: /tmp/cluster-config.json
+
     # OpenSearch 1.3 Single Node Template
     - name: opensearch-1-3-single-node
       inputs:

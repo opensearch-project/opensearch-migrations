@@ -10,8 +10,8 @@
 def call(String jobName) {
     if (jobName == null) return ''
 
-    // Release canaries: all every 6h, spread across 24 hours
-    if (jobName.startsWith('release-')) return 'H H(0-5)/6 * * *'
+    // Release canaries: every 6h, staggered across the full day
+    if (jobName.startsWith('release-')) return 'H H(0-23)/6 * * *'
 
     // Main-branch periodic jobs (per-job cadence)
     switch (jobName) {
@@ -19,19 +19,18 @@ def call(String jobName) {
         case 'main-deploy-eks-cfn-import-vpc':        return 'H H/12 * * *'
         case 'main-eks-integ-test':                   return 'H */2 * * *'
         case 'main-elasticsearch-5x-k8s-local-test':  return '@hourly'
+        case 'main-elasticsearch-8x-k8s-local-test':  return '@hourly'
         case 'main-full-es68source-e2e-test':         return '@hourly'
         case 'main-k8s-matrix-test':                  return 'H 22 * * *'
         case 'main-rfs-default-e2e-test':             return '@hourly'
-        case 'main-solr-8x-k8s-local-test':           return 'H H(0-5)/6 * * *'
+        case 'main-solr-8x-k8s-local-test':           return 'H H(0-23)/6 * * *'
         case 'main-solutions-cfn-create-vpc-test':    return '@hourly'
-        case 'main-eks-byos-integ-test':              return 'H H(0-5)/6 * * *'
-        case 'main-eks-aoss-search-integ-test':       return 'H H(0-5)/6 * * *'
-        case 'main-eks-aoss-timeseries-integ-test':   return 'H H(0-5)/6 * * *'
-        case 'main-eks-aoss-vector-integ-test':       return 'H H(0-5)/6 * * *'
-        case 'main-eks-cdc-only-integ-test':          return 'H H(0-5)/6 * * *'
-        case 'main-eks-cdc-full-e2e-test':            return 'H H(0-5)/6 * * *'
-        case 'main-eks-cdc-only-aoss-test':           return 'H H(0-5)/6 * * *'
-        case 'main-eks-cdc-aoss-e2e-test':            return 'H H(0-5)/6 * * *'
+        case 'main-eks-byos-integ-test':              return 'H H(0-23)/6 * * *'
+        case 'main-eks-aoss-search-integ-test':       return 'H H(0-23)/6 * * *'
+        case 'main-eks-aoss-timeseries-integ-test':   return 'H H(0-23)/6 * * *'
+        case 'main-eks-aoss-vector-integ-test':       return 'H H(0-23)/6 * * *'
+        case 'main-eks-cdc-full-e2e-test':            return 'H H(0-23)/6 * * *'
+        case 'main-eks-cdc-aoss-e2e-test':            return 'H H(0-23)/6 * * *'
     }
     return ''
 }

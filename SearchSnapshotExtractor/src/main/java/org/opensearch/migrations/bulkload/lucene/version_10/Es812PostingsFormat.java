@@ -12,7 +12,7 @@ import shadow.lucene10.org.apache.lucene.index.SegmentWriteState;
  * PostingsFormat fallback for Elasticsearch 8.12+ / 9.x segment formats on the
  * Lucene 10 shadow classpath.
  *
- * <p>Mirrors the version_9 {@code IgnorePsmPostings} pattern: when an ES 9.x
+ * <p>Mirrors the version_9 {@code Es812PostingsFormat} pattern: when an ES 9.x
  * snapshot's segment metadata references the Elasticsearch-internal
  * {@code ES812Postings} postings format, Lucene's SPI needs a class of that
  * name to instantiate. Document reads only require stored fields
@@ -24,9 +24,9 @@ import shadow.lucene10.org.apache.lucene.index.SegmentWriteState;
  * <p>Registered via Lucene's SPI to allow dynamic loading based on
  * PostingsFormat name stored in segment metadata.</p>
  */
-public class IgnorePsmPostings extends PostingsFormat {
+public class Es812PostingsFormat extends PostingsFormat {
 
-    public IgnorePsmPostings() {
+    public Es812PostingsFormat() {
         super("ES812Postings");
     }
 

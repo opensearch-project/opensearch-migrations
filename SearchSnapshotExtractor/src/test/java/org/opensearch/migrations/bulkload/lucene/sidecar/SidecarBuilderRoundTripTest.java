@@ -13,7 +13,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.TreeMap;
-import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -52,16 +51,7 @@ class SidecarBuilderRoundTripTest {
 
     @AfterEach
     void tearDown() throws IOException {
-        if (spillDir != null) deleteRecursive(spillDir);
-    }
-
-    private static void deleteRecursive(Path root) throws IOException {
-        if (!Files.exists(root)) return;
-        try (Stream<Path> walk = Files.walk(root)) {
-            walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                try { Files.deleteIfExists(p); } catch (IOException ignored) {}
-            });
-        }
+        SidecarTestSupport.rm(spillDir);
     }
 
     @Test
@@ -169,11 +159,11 @@ class SidecarBuilderRoundTripTest {
         );
         SidecarReader reader = buildAndOpenWithOffsets(stream, 1, 1024);
         try {
-            List<SidecarReader.TermEntry> entries = reader.get(0);
+            List<TermEntry> entries = reader.get(0);
             assertEquals(3, entries.size());
-            assertEquals(new SidecarReader.TermEntry("date",  0,  4), entries.get(0));
-            assertEquals(new SidecarReader.TermEntry("tue",   6,  9), entries.get(1));
-            assertEquals(new SidecarReader.TermEntry("26",   11, 13), entries.get(2));
+            assertEquals(new TermEntry("date",  0,  4), entries.get(0));
+            assertEquals(new TermEntry("tue",   6,  9), entries.get(1));
+            assertEquals(new TermEntry("26",   11, 13), entries.get(2));
 
             // LuceneLeafReader.joinWithOffsets should produce "date  tue  26"
             String joined = org.opensearch.migrations.bulkload.lucene.LuceneLeafReader
@@ -190,9 +180,9 @@ class SidecarBuilderRoundTripTest {
      */
     @Test
     void noOffset_fallsBackToSingleSpaceJoin() throws IOException {
-        List<SidecarReader.TermEntry> entries = List.of(
-            new SidecarReader.TermEntry("hello", PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET),
-            new SidecarReader.TermEntry("world", PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET)
+        List<TermEntry> entries = List.of(
+            new TermEntry("hello", PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET),
+            new TermEntry("world", PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET)
         );
         String joined = org.opensearch.migrations.bulkload.lucene.LuceneLeafReader
                 .joinWithOffsets(entries);

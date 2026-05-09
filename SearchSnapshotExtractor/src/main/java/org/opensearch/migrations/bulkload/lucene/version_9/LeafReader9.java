@@ -264,7 +264,9 @@ public class LeafReader9 implements LuceneLeafReader {
     public void streamFieldPostings(String fieldName,
             org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink sink) throws IOException {
         Terms terms = wrapped.terms(fieldName);
-        if (terms == null) return;
+        if (terms == null) {
+            return;
+        }
         TermsEnum termsEnum = terms.iterator();
         BytesRef term;
         int[] positions    = new int[16];
@@ -309,4 +311,5 @@ public class LeafReader9 implements LuceneLeafReader {
             }
         }
     }
+
 }

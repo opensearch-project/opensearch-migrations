@@ -112,7 +112,7 @@ if [[ -z "$PROVIDED_CONTEXT_FILE_PATH" ]]; then
 fi
 
 SAMPLE_CDK_REPO="https://github.com/aws-samples/amazon-opensearch-service-sample-cdk.git"
-SAMPLE_CDK_VERSION="v0.3.10"
+SAMPLE_CDK_VERSION="v0.4.0"
 echo "Using sample CDK version: $SAMPLE_CDK_VERSION"
 if [ ! -d "amazon-opensearch-service-sample-cdk" ]; then
   git clone "$SAMPLE_CDK_REPO"
@@ -129,9 +129,16 @@ cp -f "$PROVIDED_CONTEXT_FILE_PATH" "$CLUSTER_CDK_CONTEXT_FILE_PATH"
 # Wait for any leftover OpenSearch domains from a previous run to finish deleting.
 # The CDK VPC-validation Lambda will reject deployment if a domain with the same name
 # still exists in a different VPC (e.g. from a prior run whose cleanup is still in progress).
-cluster_ids=$(jq -r '.clusters[].clusterId' "$PROVIDED_CONTEXT_FILE_PATH")
-for cid in $cluster_ids; do
-  domain_name="cluster-${STAGE}-${cid}"
+# Every cluster entry must set `clusterName` explicitly. This keeps the script
+# independent of sample-cdk's internal default naming pattern, which is an
+# implementation detail of the sample-cdk and not part of this script's contract.
+while read -r entry; do
+  cid=$(echo "$entry" | jq -r '.clusterId')
+  domain_name=$(echo "$entry" | jq -r '.clusterName // empty')
+  if [[ -z "$domain_name" ]]; then
+    echo "ERROR: cluster '$cid' is missing 'clusterName' in the context file. Set 'clusterName' explicitly for each cluster entry."
+    exit 1
+  fi
   if aws opensearch describe-domain --domain-name "$domain_name" >/dev/null 2>&1; then
     if aws opensearch describe-domain --domain-name "$domain_name" \
          --query 'DomainStatus.Deleted' --output text 2>/dev/null | grep -qi true; then
@@ -152,7 +159,7 @@ for cid in $cluster_ids; do
       echo "WARNING: Domain '$domain_name' exists and is NOT being deleted. CDK deploy may fail if VPC differs."
     fi
   fi
-done
+done < <(jq -c '.clusters[]' "$PROVIDED_CONTEXT_FILE_PATH")
 
 # Delete any ROLLBACK_COMPLETE stacks from a prior failed deploy — CDK cannot update these.
 rollback_stacks=$(aws cloudformation list-stacks \
