@@ -138,49 +138,32 @@ chart". Every piece of the stack comes from this one tarball.
 Implication: a 5-pod MA install isn't a thing. Expect ~30 pods
 across ~5 namespaces after `helm install` settles.
 
-## P17. `valuesForLocalK8s.yaml` assumes a localhost:5000 build
+## P17. The chart ships THREE values overlays — pick the right one
 
-The repo's `valuesForLocalK8s.yaml` (under
-`deployment/k8s/charts/aggregates/migrationAssistantWithArgo/`)
-overrides image refs to `localhost:5000/migrations/<name>` —
-because the MA dev workflow Gradle-builds and pushes to a local
-registry. If you `helm install` with only this values file you'll
-get `ImagePullBackOff` on every MA pod.
+`deployment/k8s/charts/aggregates/migrationAssistantWithArgo/`
+contains three values files:
 
-When pointing a user at the helm chart for an install that doesn't
-involve a local Gradle build (i.e. most users), they need to either:
+  - `values.yaml` — chart defaults. Image refs are bare paths like
+    `migrations/capture_proxy:latest` (no registry prefix), which
+    resolves to `docker.io/migrations/...` and won't pull. **Don't
+    `helm install` with only this file.** The defaults exist to be
+    overlaid.
+  - `valuesForLocalK8s.yaml` — overrides image refs to
+    `localhost:5000/migrations/<name>`. Use this only when you've
+    Gradle-built the images and pushed them to a local registry
+    (the MA dev loop). If you use this without that build step,
+    every pod is `ImagePullBackOff`.
+  - `valuesEks.yaml` (and `aws-bootstrap.sh`) — points all five
+    images at `public.ecr.aws/opensearchproject/opensearch-migrations-*`
+    with `--set images.<role>.repository=...` flags.
 
-  - Use the chart's default `values.yaml` (which references whatever
-    registry the release line publishes to), or
-  - Layer their own image overlay on top of `valuesForLocalK8s.yaml`
-    pointing at a registry they can pull from.
+For a normal user who isn't iterating on MA source, the path is
+either (a) run `aws-bootstrap.sh` which sets the public-ECR overrides
+for you, or (b) write a small overlay that hard-codes the public-ECR
+repos. See `steering/04-execute.md` "Local-build vs released-image
+testing" for the explicit commands.
 
-Confirm the image-publication policy of the current release by
-checking the chart's `README.md` and `Chart.yaml` before assuming
-`public.ecr.aws/opensearchproject/...` resolves.
-
-## P18. Only 3 of 5 logical MA roles have published public ECR images
-
-The MA chart references 5 image roles: `migrationConsole`,
-`installer`, `reindexFromSnapshot`, `trafficReplayer`, `captureProxy`.
-Three are published to `public.ecr.aws/opensearchproject/`:
-
-  - `opensearch-migrations-console`
-  - `opensearch-migrations-reindex-from-snapshot`
-  - `opensearch-migrations-traffic-replayer`
-
-The other two:
-
-  - **installer**: the chart's default already maps `installer` to
-    the `migration_console` image (the installer Job is just the
-    console image running a helm-install script). No separate image
-    is published; rebinding the console image is enough.
-  - **capture-proxy**: not published anywhere public. There's no
-    workaround. capture-and-replay is unavailable on a public-ECR-only
-    install. RFS-only POCs are fine; disable the capture-proxy and
-    traffic-replayer Argo-workflow steps in values.
-
-## P19. MA snapshot path needs cross-pod shared storage
+## P18. MA snapshot path needs cross-pod shared storage
 
 RFS reads documents from a snapshot repo path that BOTH source ES
 and the migration-console pod can see. With S3 this is trivial.

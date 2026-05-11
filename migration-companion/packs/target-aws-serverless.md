@@ -38,22 +38,31 @@ and re-running RFS.
 
 ## Migration path (always RFS)
 
-Because there is no snapshot API:
+Because there is no snapshot API, RFS is the only path. Don't try to
+hand-roll a `docker run` of the RFS image — RFS reads documents from
+a snapshot stored somewhere both the source ES and the RFS pod can
+see (S3 typically), and it expects orchestration via the Migration
+Assistant helm chart, not standalone invocation.
 
-```
-docker run --rm \
-  -e SOURCE_HOST=https://source:9200 \
-  -e SOURCE_USER=... -e SOURCE_PASSWORD=... \
-  -e TARGET_HOST=https://<collection-id>.<region>.aoss.amazonaws.com \
-  -e TARGET_AUTH_TYPE=sigv4 \
-  -e AWS_REGION=<region> \
-  opensearchproject/opensearch-migrations-rfs:latest \
-  --index-allowlist '...'
-```
+The flow:
 
-The RFS image must be on a host that has AWS credentials (env vars,
-instance role, or container task role). SigV4-sign every request to
-the AOSS endpoint.
+  1. Take a snapshot of the source ES into S3 (AOS source: SigV4 +
+     IAM passrole; self-managed source: `repository-s3` plugin or
+     a shared FS repo).
+  2. Deploy MA via the helm chart (or via `aws-bootstrap.sh` for an
+     EKS install pointing at public ECR).
+  3. Configure the AOSS target in `/etc/migration_services.yaml`
+     inside the migration-console pod with `auth.type: sigv4` and
+     `auth.region: <region>`.
+  4. Drive the migration from the console pod:
+     `console metadata migrate` then `console backfill start`.
+     RFS workers spin up as Argo workflow pods; they read from the
+     S3 snapshot and bulk-write to the AOSS endpoint.
+
+The published image (used by the helm chart) is
+`public.ecr.aws/opensearchproject/opensearch-migrations-reindex-from-snapshot`.
+The chart wires its env vars and IAM correctly; standalone
+`docker run` of this image is not a documented use pattern.
 
 ## Data access policy
 

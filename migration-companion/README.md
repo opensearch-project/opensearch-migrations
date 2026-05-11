@@ -23,7 +23,7 @@ reads `SKILL.md` and follows its phase map.
 migration-companion/
 ├── SKILL.md                          # Entry point. Start here.
 ├── README.md                         # This file.
-├── pitfalls.md                       # Non-discoverable facts (P1..P19).
+├── pitfalls.md                       # Non-discoverable facts (P1..P18).
 ├── steering/
 │   ├── 00-intent.md                  # Pick path: LEARN / POC / ANALYZE / MIGRATE.
 │   ├── 01-interview.md               # Persona + source/target pair.

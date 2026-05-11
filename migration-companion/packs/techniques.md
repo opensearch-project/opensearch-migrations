@@ -184,7 +184,7 @@ source snapshot  →  RFS worker  →  transform pipeline  →  target /_bulk
 - Doc-level rewrite cost. Unlike snapshot/restore, every document
   goes through `_bulk`, so target indexing CPU is the bottleneck.
 - Snapshot must reach the workers. Cross-account / cross-region /
-  cross-VPC snapshots need wiring (see pitfalls P19).
+  cross-VPC snapshots need wiring (see pitfalls P18).
 
 **Use when.** This is the default for any non-trivial migration. ES
 or OS source, any OS target, transforms needed, dataset large enough

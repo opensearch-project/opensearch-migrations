@@ -67,24 +67,34 @@ overwrites your target's templates and cluster settings.
 
 ## RFS (when snapshot/restore won't work)
 
-The `opensearch-migrations-rfs` image reads from a source over HTTP
-and writes docs to the target. Minimal invocation:
+For self-managed OpenSearch targets, RFS is delivered via the
+Migration Assistant helm chart, not as a standalone `docker run`.
+The chart deploys the migration-console pod plus Argo workflows that
+spin up RFS workers as needed. The published image (used by the
+chart) is
+`public.ecr.aws/opensearchproject/opensearch-migrations-reindex-from-snapshot`.
+
+For a kind / minikube / on-prem k8s install, see
+`steering/04-execute.md` "Local-build vs released-image testing"
+for the full helm-install command and image overlay. Once installed,
+drive the migration with:
 
 ```
-docker run --rm \
-  -e SOURCE_HOST=https://source:9200 \
-  -e SOURCE_USER=admin -e SOURCE_PASSWORD=admin \
-  -e TARGET_HOST=https://target:9200 \
-  -e TARGET_USER=admin -e TARGET_PASSWORD=admin \
-  -e SOURCE_INSECURE=true -e TARGET_INSECURE=true \
-  opensearchproject/opensearch-migrations-rfs:latest \
-  --index-allowlist 'logs-*,products'
+kubectl -n ma exec -it migration-console-0 -- /bin/bash
+console snapshot create
+console metadata migrate
+console backfill start
+console backfill scale 1     # then bump as workers prove out
 ```
+
+Self-managed-to-self-managed sources where you don't already run
+k8s and the dataset is modest are usually better served by
+`_reindex` from remote (no MA install needed).
 
 ## Pitfalls
 
-- Default heap on the docker image is 1g. For anything beyond a POC,
-  set `-e OPENSEARCH_JAVA_OPTS="-Xms4g -Xmx4g"` and ensure
-  `vm.max_map_count >= 262144` on the host.
+- Default heap on the OS / ES container is 1g. For anything beyond
+  a POC, set `-e OPENSEARCH_JAVA_OPTS="-Xms4g -Xmx4g"` and ensure
+  `vm.max_map_count >= 262144` on the host (P1, P10).
 - Demo certs: `OPENSEARCH_INITIAL_ADMIN_PASSWORD` is required since
-  2.12. POC compose files in this repo set it.
+  2.12. POC compose files in this repo set it (P9).

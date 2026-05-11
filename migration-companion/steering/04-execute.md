@@ -26,10 +26,9 @@ This is the "real" Migration Assistant on a kind/minikube/k3d cluster.
   1. Create a local k8s cluster (kind is fine for ~16 GB hosts).
   2. Install the chart from
      `deployment/k8s/charts/aggregates/migrationAssistantWithArgo/`.
-     For local installs the repo ships `valuesForLocalK8s.yaml`
-     alongside `values.yaml`. Review the chart's `README.md` and
-     `DEVELOPER_GUIDE.md` first — image-publication policy varies
-     across releases.
+     **Always pass an image overlay** — the chart's bare `values.yaml`
+     uses unprefixed image refs that don't resolve. See "Local-build
+     vs released-image testing" below.
   3. Drive the migration from the `migration-console` pod:
 
      ```
@@ -45,6 +44,63 @@ This is the "real" Migration Assistant on a kind/minikube/k3d cluster.
 If a step takes more than ~30s, tell the user what you're waiting on
 ("waiting for MA helm release to be ready", "polling backfill
 status") instead of going silent.
+
+## Local-build vs released-image testing
+
+The helm chart can be driven from two very different image sources.
+Pick deliberately — they're not interchangeable.
+
+**Released images (public ECR).** Use this when iterating on the
+*skill* or running a POC against a real release. All five MA
+images are published to `public.ecr.aws/opensearchproject/`:
+`opensearch-migrations-{console, traffic-replayer,
+reindex-from-snapshot, traffic-capture-proxy, transformation-shim}`.
+For a kind POC pinned to a release tag, layer this overlay on top
+of the chart's `values.yaml`:
+
+```yaml
+# public-ecr-overlay.yaml
+images:
+  migrationConsole:
+    repository: public.ecr.aws/opensearchproject/opensearch-migrations-console
+    tag: <release-version>      # e.g. 2.5.0; "latest" tracks main.
+  installer:
+    repository: public.ecr.aws/opensearchproject/opensearch-migrations-console
+    tag: <release-version>
+  reindexFromSnapshot:
+    repository: public.ecr.aws/opensearchproject/opensearch-migrations-reindex-from-snapshot
+    tag: <release-version>
+  trafficReplayer:
+    repository: public.ecr.aws/opensearchproject/opensearch-migrations-traffic-replayer
+    tag: <release-version>
+  captureProxy:
+    repository: public.ecr.aws/opensearchproject/opensearch-migrations-traffic-capture-proxy
+    tag: <release-version>
+```
+
+Install: `helm install ma <chart> -f public-ecr-overlay.yaml`.
+On EKS, `deployment/k8s/aws/aws-bootstrap.sh` does the same overrides
+inline via `--set images.<role>.repository=...` flags.
+
+**Locally-built images (this repo's branch).** Use this when iterating
+on MA *source* — when you've changed code in `TrafficCapture/`,
+`migrationConsole/`, etc. and need to test that change end-to-end.
+The repo-supplied path is:
+
+  1. `./gradlew buildImagesToRegistry` — Gradle builds each image
+     (Jib) and pushes to `localhost:5001` (default registry) plus
+     `localhost:5000` (the in-cluster `docker-registry`).
+  2. `helm install ma <chart> -f valuesForLocalK8s.yaml` — that
+     overlay points all five image refs at `localhost:5000/migrations/<name>`,
+     which the kind cluster pulls from the in-cluster registry.
+
+If you `helm install` with `valuesForLocalK8s.yaml` *without* the
+Gradle build first, every pod is `ImagePullBackOff`. If you
+`helm install` with neither overlay, every pod is `ErrImagePull`
+because `migrations/<name>:latest` resolves to docker.io.
+
+When walking a user through a POC: pick the released-image path
+unless they've explicitly said they're iterating on MA source.
 
 ## POC path — TrafficCapture docker-compose dev sandbox
 
