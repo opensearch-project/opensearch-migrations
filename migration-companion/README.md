@@ -32,12 +32,13 @@ migration-companion/
 │   ├── 04-execute.md                 # Run via the in-repo MA tooling.
 │   ├── 05-validate.md                # Doc count + sample query parity.
 │   └── 06-report.md                  # Write report.md.
-└── packs/                            # Loaded on demand by phases 2-5.
+└── packs/                            # Loaded on demand by phases 2-5
     ├── source-elasticsearch.md
     ├── source-opensearch.md
     ├── target-self-managed.md
     ├── target-aws-managed.md
-    └── target-aws-serverless.md
+    ├── target-aws-serverless.md
+    └── techniques.md                 # 7 migration approaches reference
 ```
 
 ## Four user paths

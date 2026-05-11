@@ -93,6 +93,14 @@ Source packs (`packs/source-elasticsearch.md`,
 `packs/target-aws-serverless.md`) are pulled by phases 2-5 once the
 source/target pair is known. Don't load them in Phase 0 or 1.
 
+`packs/techniques.md` is a standalone reference for the seven
+migration approaches (snapshot/restore, RFS, `_reindex` from remote,
+capture-and-replay, Logstash, CCR, app dual-write) — pros, cons, when
+to use, and common combinations. Phase 3 is where the agent narrows
+to one; load `techniques.md` if the user wants to compare options
+outside the interview flow (LEARN path) or is asking "what are my
+options" before Phase 2 has run.
+
 ## Pitfalls
 
 `pitfalls.md` is a single flat file of non-discoverable facts (things

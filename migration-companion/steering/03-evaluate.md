@@ -15,6 +15,10 @@ Each row: **what it is**, **fits when**, **breaks when**, **complexity**.
 Mention all that apply to the source/target pair. Don't pretend an
 inapplicable option exists.
 
+For a longer-form reference (full pros/cons, common combinations,
+quick decision matrix), see `packs/techniques.md`. This phase is the
+abbreviated decision-time form; the pack is the browse-time form.
+
 ### 1. Snapshot + restore (no transformation)
 
   - What: take a snapshot on source, restore it on target. Native to
