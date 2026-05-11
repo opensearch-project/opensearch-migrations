@@ -489,7 +489,7 @@ class SourceReconstructorTest {
                 org.mockito.ArgumentMatchers.eq(name),
                 org.mockito.ArgumentMatchers.eq(esType),
                 org.mockito.ArgumentMatchers.any()))
-            .thenReturn(Optional.of(List.of(packed)));
+            .thenReturn(Optional.of(new RecoveredValue.PointBytes(List.of(packed))));
         return reader;
     }
 
@@ -571,7 +571,7 @@ class SourceReconstructorTest {
                 org.mockito.ArgumentMatchers.eq(name),
                 org.mockito.ArgumentMatchers.eq(esType),
                 org.mockito.ArgumentMatchers.any()))
-            .thenReturn(Optional.of(decoded));
+            .thenReturn(Optional.of(new RecoveredValue.NumericTerm(decoded)));
         return reader;
     }
 
@@ -658,7 +658,7 @@ class SourceReconstructorTest {
                 org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
                 org.mockito.ArgumentMatchers.any()))
             // SourceReconstructor receives the already-joined String from LuceneLeafReader.
-            .thenReturn(Optional.of("quick brown fox"));
+            .thenReturn(Optional.of(new RecoveredValue.TextTerm("quick brown fox")));
         var ctx = contextOf("body", mapping(EsFieldType.STRING, "text"));
         String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals("quick brown fox", parseField(json, "body").asText());
@@ -672,7 +672,7 @@ class SourceReconstructorTest {
                 org.mockito.ArgumentMatchers.eq("enabled"),
                 org.mockito.ArgumentMatchers.eq(EsFieldType.BOOLEAN),
                 org.mockito.ArgumentMatchers.any()))
-            .thenReturn(Optional.of("T"));
+            .thenReturn(Optional.of(new RecoveredValue.TextTerm("T")));
         var ctx = contextOf("enabled", mapping(EsFieldType.BOOLEAN, "boolean"));
         String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(true, parseField(json, "enabled").asBoolean());
@@ -712,7 +712,7 @@ class SourceReconstructorTest {
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any()))
-            .thenReturn(Optional.of(List.of(packLong(999L))));
+            .thenReturn(Optional.of(new RecoveredValue.PointBytes(List.of(packLong(999L)))));
         var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
         String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(77L, parseField(json, "count").asLong());
@@ -1487,6 +1487,52 @@ class SourceReconstructorTest {
         String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertEquals("original@source.com", parseField(json, "from").asText(),
             "source's own stored value must win over copy_to target: " + json);
+    }
+
+    @Test
+    void reverseDerive_recoversSourceFromSortedSetDocValuesTarget_noClassCast() throws IOException {
+        // Regression for ClassCastException at SourceReconstructor.decodePointValue:
+        //   "class java.lang.String cannot be cast to class [B"
+        //
+        // Reproduces the original failure shape: the copy_to source `from` has no stored field;
+        // its target `users.from` is recovered via SORTED_SET doc_values (multi-valued keyword),
+        // which returns a List<String>. The previous code treated any List<?> in convertFallbackValue
+        // as a List<byte[]> from the points fallback and crashed when decoding point bytes.
+        //
+        // Expected: the keyword target's first doc_values entry is written verbatim into `from`,
+        // and no exception is thrown.
+        var reader = mock(LuceneLeafReader.class);
+        var info = new DocValueFieldInfo.Simple(
+                "users.from", DocValueFieldInfo.DocValueType.SORTED_SET, false);
+        when(reader.getDocValueFields()).thenReturn(List.of(info));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.eq(info)))
+            .thenReturn(List.of("joe@example.com", "mary@example.com"));
+        when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":\"users.from\"},"
+            + "\"users\":{\"properties\":{\"from\":{\"type\":\"keyword\"}}}}"
+        );
+
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+
+        assertNotNull(json, "reconstruction must not silently drop the doc with a CCE");
+        JsonNode from = parseField(json, "from");
+        assertNotNull(from, "source `from` must be reverse-derived from SORTED_SET target: " + json);
+        // SORTED_SET returns a List of values; when copy_to-recovered into the source, we keep
+        // the verbatim shape from the target's mapping pass — a list of strings here.
+        assertTrue(from.isArray() || from.isTextual(),
+            "expected array or string for keyword from SORTED_SET target, got: " + from);
+        if (from.isArray()) {
+            assertEquals("joe@example.com", from.get(0).asText());
+        } else {
+            assertEquals("joe@example.com", from.asText());
+        }
     }
 
     // ==========================================================================================

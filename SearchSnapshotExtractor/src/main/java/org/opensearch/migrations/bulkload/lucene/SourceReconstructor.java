@@ -487,17 +487,22 @@ public class SourceReconstructor {
                 }
                 FieldMappingInfo sourceMapping = mappingContext.getFieldInfo(sourceField);
                 for (String targetField : rankedTargets) {
-                    Object recovered = probeFieldValue(reader, docId, document, targetField,
+                    ProbeResult recovered = probeFieldValue(reader, docId, document, targetField,
                             mappingContext, termIndex);
                     if (recovered == null) {
                         continue;
                     }
-                    // Route through the SOURCE's mapping for final JSON shape (date formatting,
-                    // scaled_float conversion, IP rendering, etc.). If the source mapping is
-                    // missing, the raw recovered value is used verbatim.
-                    Object converted = sourceMapping != null
-                            ? convertFallbackValue(recovered, sourceMapping)
-                            : recovered;
+                    // Tiers 1/2/4 already shaped the value through the TARGET's mapping —
+                    // write it verbatim. Only the points/terms tier (Raw) still needs decoding,
+                    // and that decode runs through the SOURCE mapping so the JSON shape matches
+                    // the source field's declared type (date formatting, scaled_float division,
+                    // IP rendering, etc.).
+                    Object converted = switch (recovered) {
+                        case ProbeResult.Final f -> f.value();
+                        case ProbeResult.Raw r -> sourceMapping != null
+                                ? convertFallbackValue(r.raw(), sourceMapping)
+                                : null;
+                    };
                     if (converted != null) {
                         modified |= putNested(target, sourceField, converted);
                         break; // first-hit wins; stop iterating targets.
@@ -510,16 +515,20 @@ public class SourceReconstructor {
     }
 
     /**
-     * Replays the stored -> doc_values -> points/terms chain for a single field name and returns
-     * the first non-null value found, or {@code null} if nothing matches. Used by the copy_to
-     * reverse-derivation path (pass 5) to probe a TARGET field without mutating the reconstructed
-     * source map — the caller decides how to route and convert the value.
+     * Replays the stored → doc_values → points/terms → constant chain for a single field
+     * and returns a {@link ProbeResult} tagged with whether the value is already shaped
+     * ({@link ProbeResult.Final}) or still a raw points/terms recovery
+     * ({@link ProbeResult.Raw}) that needs decoding through the source field's mapping.
+     * Returns {@code null} if no tier produced a value.
      *
-     * Unlike the primary passes, this does NOT apply type conversion — it returns the raw value
-     * from whichever tier hit. The caller runs it through the SOURCE field's mapping for final
-     * JSON shaping.
+     * <p>Used by the copy_to reverse-derivation pass: tiers 1/2/4 produce
+     * already-target-mapped Java values (the target's stored field, the target's doc_values
+     * after {@link #convertDocValue}, the target's mapping-level constant), all of which the
+     * caller writes verbatim into the source field's slot. Only tier 3 returns raw bytes/longs
+     * that need a fresh round of source-mapping conversion — keeping the two passes separate
+     * is what prevents the previous double-conversion bug.
      */
-    private static Object probeFieldValue(LuceneLeafReader reader, int docId, LuceneDocument document,
+    private static ProbeResult probeFieldValue(LuceneLeafReader reader, int docId, LuceneDocument document,
             String fieldName, FieldMappingContext mappingContext, SegmentTermIndex termIndex) throws IOException {
         FieldMappingInfo targetMapping = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
 
@@ -528,7 +537,7 @@ public class SourceReconstructor {
             if (fieldName.equals(field.name())) {
                 Object value = getStoredFieldValue(field, targetMapping);
                 if (value != null) {
-                    return value;
+                    return new ProbeResult.Final(value);
                 }
             }
         }
@@ -545,28 +554,26 @@ public class SourceReconstructor {
             if (value != null) {
                 Object converted = convertDocValue(value, fieldInfo, targetMapping);
                 if (converted != null) {
-                    return converted;
+                    return new ProbeResult.Final(converted);
                 }
             }
             break;
         }
 
         // Tier 3: points / indexed-terms fallback. Use the target's type if known so STRING
-        // targets go through the token-stream concatenation path (see LuceneLeafReader.getValueFromPointsOrTerms
-        // STRING branch) — that's what delivers the "joe smith joe x com" best-effort text recovery.
+        // targets go through the token-stream concatenation path (see
+        // LuceneLeafReader.getValueFromPointsOrTerms STRING branch) — that's what delivers the
+        // "joe smith joe x com" best-effort text recovery.
         if (targetMapping != null) {
             var fallback = reader.getValueFromPointsOrTerms(docId, fieldName, targetMapping.type(), termIndex);
             if (fallback.isPresent()) {
-                Object converted = convertFallbackValue(fallback.get(), targetMapping);
-                if (converted != null) {
-                    return converted;
-                }
+                return new ProbeResult.Raw(fallback.get());
             }
         }
 
         // Tier 4: mapping-level constant (constant_keyword target).
         if (targetMapping != null && targetMapping.constantValue() != null) {
-            return targetMapping.constantValue();
+            return new ProbeResult.Final(targetMapping.constantValue());
         }
 
         return null;
@@ -871,26 +878,20 @@ public class SourceReconstructor {
         return b;
     }
 
-    /** Convert fallback value from Points (List&lt;byte[]&gt;), Terms (String), or NumericTerms (Long) */
-    @SuppressWarnings("unchecked")
-    private static Object convertFallbackValue(Object value, FieldMappingInfo mappingInfo) {
-        // Terms fallback returns String (for boolean - stored as "T"/"F" in Lucene)
-        if (value instanceof String termValue) {
-            if (mappingInfo.type() == EsFieldType.BOOLEAN) {
-                return "T".equals(termValue);
-            }
-            return termValue;
-        }
-        // Points fallback returns List<byte[]>
-        if (value instanceof java.util.List<?> pointValues) {
-            return decodePointValue((java.util.List<byte[]>) pointValues, mappingInfo);
-        }
-        // Numeric terms fallback returns a raw Long decoded from shift==0 trie term
-        // (Lucene 4-5 / ES 1.x-2.x indexes numerics/ip/date as prefix-coded longs or ints).
-        if (value instanceof Long numericVal) {
-            return decodeNumericTerm(numericVal, mappingInfo);
-        }
-        return null;
+    /**
+     * Routes a {@link RecoveredValue} from the points/terms recovery tier through the per-mapping
+     * decoder. The sealed dispatch replaces an earlier {@code instanceof}-on-{@code Object} branch
+     * whose unchecked {@code (List<byte[]>)} cast crashed when copy_to reverse-derivation handed
+     * in a {@code List<String>} from SORTED_SET doc_values.
+     */
+    private static Object convertFallbackValue(RecoveredValue value, FieldMappingInfo mappingInfo) {
+        return switch (value) {
+            case RecoveredValue.TextTerm t -> mappingInfo.type() == EsFieldType.BOOLEAN
+                    ? "T".equals(t.text())
+                    : t.text();
+            case RecoveredValue.PointBytes p -> decodePointValue(p.packed(), mappingInfo);
+            case RecoveredValue.NumericTerm n -> decodeNumericTerm(n.encoded(), mappingInfo);
+        };
     }
 
     /** Decode a raw Long harvested from a shift==0 numeric term into the mapped JSON type. */
