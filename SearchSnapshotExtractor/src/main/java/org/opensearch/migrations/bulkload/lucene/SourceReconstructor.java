@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+import org.opensearch.migrations.bulkload.lucene.EsFieldType.MappingTypes;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -31,110 +32,95 @@ public class SourceReconstructor {
     private static final AtomicBoolean DEEP_NEST_UNDER_LIST_WARNED = new AtomicBoolean();
 
     /**
-     * Skip internal fields (e.g., _id) and multi-field sub-fields (e.g., title.keyword).
-     * <p>
-     * Dotted names are ambiguous in Lucene: {@code title.keyword} is a multi-field
-     * (indexed-only, recoverable via the parent), while {@code address.city} is an
-     * object subfield that IS a legitimate mapped field and must be emitted nested
-     * in the reconstructed {@code _source}. The mapping context distinguishes them —
-     * object subfields appear under {@code properties} (tracked by FieldMappingContext),
-     * multi-field sub-fields appear under {@code fields} (not tracked). So we keep any
-     * dotted name the mapping knows about, and skip the rest.
+     * Dotted-name disambiguation: {@code title.keyword} is a multi-field (indexed-only,
+     * recoverable via the parent) while {@code address.city} is a legitimate object
+     * subfield that must appear nested in {@code _source}. Object subfields appear under
+     * {@code properties} (tracked) and multi-fields appear under {@code fields} (not).
      */
     private static boolean shouldSkipField(String fieldName, FieldMappingContext mappingContext) {
         if (fieldName.startsWith("_")) {
             return true;
         }
-        // Unified source-exclusion gate: strips copy_to targets (index-time-only, never in
-        // _source) AND honours index-level _source.includes / _source.excludes. Cheap no-op
-        // when the mapping declared neither directive.
         if (mappingContext != null && mappingContext.isSourceExcluded(fieldName)) {
             return true;
         }
         if (!fieldName.contains(".")) {
             return false;
         }
-        // Dotted field: keep it only if the mapping recognizes it as an object subfield.
         return mappingContext == null || mappingContext.getFieldInfo(fieldName) == null;
     }
 
-    /**
-     * Returns {@code true} when {@code fieldName} is a dotted path whose ancestor segment already
-     * resolves to a non-empty {@code List<Map>} in {@code target} — i.e. the seed's object-array
-     * structure is already in place and we're filling subfields into it. This is the legitimate
-     * carve-out from a {@code _source.includes}/{@code _source.excludes} suppression: when the
-     * customer's mapping declared {@code _source.includes=["files.name"]}, the {@code files}
-     * object-array IS in scope (the parent path is included). Subsequent reverse-derivation of
-     * sibling subfields (e.g. {@code files.size}) is filling out the kept structural element, not
-     * resurrecting an excluded top-level field. The caller still consults {@link #shouldSkipField}
-     * for top-level paths and for paths whose ancestor isn't an existing object-array seed.
-     */
-    @SuppressWarnings("unchecked")
-    private static boolean descendsIntoExistingObjectArray(Map<String, Object> target, String fieldName) {
-        if (!fieldName.contains(".")) {
-            return false;
+    /** Unified skip-gate: already populated, or mapping says skip and not filling an object-array seed. */
+    private static boolean shouldSkipForReconstruction(Map<String, Object> target, String fieldName,
+            FieldMappingContext mappingContext) {
+        if (hasNested(target, fieldName, mappingContext)) {
+            return true;
         }
-        String[] parts = fieldName.split("\\.");
-        Map<String, Object> cursor = target;
-        for (int i = 0; i < parts.length - 1; i++) {
-            Object next = cursor.get(parts[i]);
-            if (next instanceof java.util.List<?> list && isListOfMaps(list)) {
-                // Only treat as an object-array carve-out when the remainder is a SINGLE leaf
-                // segment — distributeSubfieldAcrossList only handles single-leaf distribution.
-                return i == parts.length - 2;
-            }
-            if (next instanceof Map<?, ?>) {
-                cursor = (Map<String, Object>) next;
-                continue;
-            }
-            return false;
-        }
-        return false;
+        return shouldSkipField(fieldName, mappingContext)
+                && !descendsIntoExistingObjectArray(target, fieldName, mappingContext);
     }
 
     /**
-     * Insert a value at a possibly-dotted path, creating intermediate maps for object subfields.
-     * A flat name like {@code "title"} becomes {@code target["title"] = value}; a dotted name
-     * like {@code "address.city"} becomes {@code target["address"]["city"] = value}. If an
-     * intermediate path collides with a non-map, non-list-of-maps value already present, the
-     * existing value wins and the recovered value is dropped with a warn log (best-effort —
-     * stored/doc_values loops prefer earlier writes).
-     * <p>
-     * <b>Object-array distribution.</b> When an intermediate path already holds a non-empty
-     * {@code List<Map>} (an object-array seed from a partial {@code _source}, e.g.
-     * {@code {"files":[{cksum:h1},{cksum:h2}]}}) and the remaining path is a single leaf
-     * segment, the recovered value is distributed across the list elements:
-     * <ul>
-     *   <li>If {@code value} is a List of the same size, positionally:
-     *       {@code list[i][leaf] = value[i]}.</li>
-     *   <li>If {@code value} is a scalar, broadcast: {@code list[i][leaf] = value} for each i.</li>
-     *   <li>If {@code value} is a List of different size, warn and drop.</li>
-     * </ul>
-     * See {@link #distributeSubfieldAcrossList} for the ordering caveat on doc_values-sourced
-     * subfields (doc_values traversal order, not original insertion order).
-     * <p>
-     * Returns {@code true} iff the target map was modified (a new entry was written at any
-     * level, including into a list element). Callers use this to decide whether a
-     * partial-source re-serialization is needed after {@link #populateFromSegment} runs — raw
-     * {@code target.size()} is not a sound dirty proxy because nested inserts do not change
-     * the top-level map size.
+     * Walks {@code root[parts[0]][parts[1]]...} up to and including {@code parts[targetIdx]},
+     * traversing only Map ancestors. Returns {@code null} if any ancestor isn't a Map.
      */
     @SuppressWarnings("unchecked")
-    private static boolean putNested(Map<String, Object> target, String fieldName, Object value) {
-        if (!fieldName.contains(".")) {
+    private static Object walkMapAncestors(Map<String, Object> root, String[] parts, int targetIdx) {
+        Map<String, Object> cursor = root;
+        for (int i = 0; i < targetIdx; i++) {
+            Object next = cursor.get(parts[i]);
+            if (!(next instanceof Map<?, ?>)) {
+                return null;
+            }
+            cursor = (Map<String, Object>) next;
+        }
+        return cursor.get(parts[targetIdx]);
+    }
+
+    /**
+     * Carve-out for source-filter suppression: when an object-array (e.g. {@code files}) is in
+     * scope, sibling subfields like {@code files.size} fill out the kept structural element
+     * rather than resurrecting an excluded top-level field. Only single-leaf distributions are
+     * recognised — {@link #distributeSubfieldAcrossList} does not nest deeper.
+     */
+    private static boolean descendsIntoExistingObjectArray(Map<String, Object> target, String fieldName,
+            FieldMappingContext mappingContext) {
+        if (fieldName.indexOf('.') < 0) {
+            return false;
+        }
+        String[] parts = mappingContext != null ? mappingContext.getPathSegments(fieldName)
+                                                : FieldMappingContext.splitPath(fieldName);
+        Object parentValue = walkMapAncestors(target, parts, parts.length - 2);
+        return parentValue instanceof java.util.List<?> list && isListOfMaps(list);
+    }
+
+    /**
+     * Insert {@code value} at {@code fieldName}, creating intermediate maps for dotted paths.
+     * First-write-wins: existing values at the destination are preserved.
+     * <p>When an ancestor already holds a non-empty {@code List<Map>} (object-array seed from a
+     * partial {@code _source}) and the suffix is a single leaf, distributes the value across
+     * elements via {@link #distributeSubfieldAcrossList}. Deeper nesting under such a parent
+     * cannot be reconstructed from columnar doc_values and is dropped with a one-shot warn.
+     * <p>Returns {@code true} iff the map was modified at any depth — top-level
+     * {@code target.size()} is not a sound dirty proxy because nested inserts don't change it.
+     */
+    @SuppressWarnings("unchecked")
+    private static boolean putNested(Map<String, Object> target, String fieldName, Object value,
+            FieldMappingContext mappingContext) {
+        if (fieldName.indexOf('.') < 0) {
             if (target.containsKey(fieldName)) {
                 return false;
             }
             target.put(fieldName, value);
             return true;
         }
-        // Honour a literal dotted key already present in the map (some ingest pipelines preserve
-        // dotted names verbatim in _source rather than nesting them). Treat it as present so we
-        // don't emit both {"address.city":...} and {"address":{"city":...}}.
+        // Some ingest pipelines preserve dotted names verbatim — treat as already-present so
+        // we don't emit both {"address.city":...} and {"address":{"city":...}}.
         if (target.containsKey(fieldName)) {
             return false;
         }
-        String[] parts = fieldName.split("\\.");
+        String[] parts = mappingContext != null ? mappingContext.getPathSegments(fieldName)
+                                                : FieldMappingContext.splitPath(fieldName);
         Map<String, Object> cursor = target;
         for (int i = 0; i < parts.length - 1; i++) {
             Object next = cursor.get(parts[i]);
@@ -145,18 +131,7 @@ public class SourceReconstructor {
                 cursor.put(parts[i], child);
                 cursor = child;
             } else if (next instanceof java.util.List<?> list && isListOfMaps(list)) {
-                // Array-of-objects at this path (e.g. seeded _source has `files`: [{cksum:h1}, {cksum:h2}]).
-                // The remaining suffix names the subfield to distribute across the list elements.
-                // Only the LAST path segment is handled here; deeper nesting under a List<Map> parent
-                // (e.g. `files.meta.size` where `files[i].meta` would itself be an object) falls through
-                // to the warn branch below since per-element object construction from doc_values is
-                // outside the guarantees doc_values can provide.
                 if (i != parts.length - 2) {
-                    // Distribution supports only immediate-leaf subfields (one segment past the
-                    // List<Map> parent, e.g. `files.size`). Deeper paths like `files.meta.size`
-                    // would require synthesising per-element `meta` objects from columnar
-                    // doc_values, which has no positional guarantee. Warn once per JVM so the
-                    // class of problem is visible without flooding logs.
                     if (DEEP_NEST_UNDER_LIST_WARNED.compareAndSet(false, true)) {
                         log.atWarn()
                             .setMessage("Cannot distribute deeply-nested field '{}' under List<Map> at '{}'; "
@@ -171,8 +146,6 @@ public class SourceReconstructor {
                 String leafForList = parts[parts.length - 1];
                 return distributeSubfieldAcrossList((java.util.List<Object>) list, leafForList, value, fieldName);
             } else {
-                // Non-map already sits at this path — cannot nest under a scalar. Warn once
-                // per JVM so operators notice the class of problem without log floods.
                 if (NEST_COLLISION_WARNED.compareAndSet(false, true)) {
                     log.atWarn()
                         .setMessage("Cannot write nested field '{}' under scalar at '{}' (type {}); dropping recovered value (further occurrences silenced)")
@@ -192,11 +165,8 @@ public class SourceReconstructor {
         return true;
     }
 
-    /** True iff {@code list} is non-empty and every element is a Map. A non-empty List<Map>
-     *  is how a partial _source represents an object array (e.g. ES {@code type: object} or
-     *  {@code type: nested} after flattening). Empty lists are ambiguous and are NOT treated
-     *  as object arrays — falling through to the scalar-collision branch preserves the existing
-     *  drop-and-warn contract for those. */
+    /** Empty lists are ambiguous and are NOT treated as object arrays, preserving the
+     *  drop-and-warn contract for scalar collisions. */
     private static boolean isListOfMaps(java.util.List<?> list) {
         if (list.isEmpty()) {
             return false;
@@ -210,22 +180,11 @@ public class SourceReconstructor {
     }
 
     /**
-     * Distributes a recovered subfield value across the elements of an object-array seed.
-     * <p>
-     * Positional distribution ({@code list[i][leaf] = value[i]}) is used when {@code value} is a
-     * List whose size matches the object array; scalar broadcast ({@code list[i][leaf] = value})
-     * is used when {@code value} is not a List. Any element that already has {@code leaf} set is
-     * preserved (first-write-wins, matching the rest of the reconstructor).
-     * <p>
-     * <b>Ordering caveat.</b> When {@code value} comes from doc_values, List order is the
-     * doc_values traversal order (SortedNumeric: ascending numeric; SortedSet: ascending term),
-     * <em>not</em> the original array insertion order. Element-to-element binding across
-     * subfields recovered from doc_values is therefore approximate — useful for presence,
-     * search, and aggregation, but not for display-accurate per-element tuples. Subfields
-     * sourced from stored-fields (which preserve insertion order per document) are distributed
-     * in their stored order.
-     * <p>
-     * Returns {@code true} iff at least one element was written.
+     * Distributes a recovered subfield across object-array elements. List values map positionally
+     * (sizes must match); scalars broadcast. First-write-wins per element.
+     * <p><b>Ordering caveat.</b> doc_values lists are in traversal order (SortedNumeric ascending
+     * numeric, SortedSet ascending term), <em>not</em> original insertion order, so cross-subfield
+     * tuples recovered this way are approximate. Stored-fields preserve insertion order.
      */
     @SuppressWarnings("unchecked")
     private static boolean distributeSubfieldAcrossList(java.util.List<Object> list, String leaf,
@@ -277,14 +236,16 @@ public class SourceReconstructor {
      * ingest pipelines preserve dotted names verbatim).
      */
     @SuppressWarnings("unchecked")
-    private static boolean hasNested(Map<String, Object> target, String fieldName) {
+    private static boolean hasNested(Map<String, Object> target, String fieldName,
+            FieldMappingContext mappingContext) {
         if (target.containsKey(fieldName)) {
             return true;
         }
-        if (!fieldName.contains(".")) {
+        if (fieldName.indexOf('.') < 0) {
             return false;
         }
-        String[] parts = fieldName.split("\\.");
+        String[] parts = mappingContext != null ? mappingContext.getPathSegments(fieldName)
+                                                : FieldMappingContext.splitPath(fieldName);
         Map<String, Object> cursor = target;
         for (int i = 0; i < parts.length - 1; i++) {
             Object next = cursor.get(parts[i]);
@@ -293,10 +254,8 @@ public class SourceReconstructor {
                 continue;
             }
             // Array-of-objects ancestor (e.g. `files` is List<Map>): the leaf is considered present
-            // iff the suffix is the immediate leaf AND every element already carries it. This keeps
-            // mergeWithDocValues idempotent — a second pass over the same doc won't re-distribute,
-            // and it correctly reports "not present" when only some elements have the subfield so
-            // the distribute path can fill the gaps.
+            // iff the suffix is the immediate leaf AND every element already carries it. Keeps
+            // mergeWithDocValues idempotent — a second pass over the same doc won't re-distribute.
             if (next instanceof java.util.List<?> list && i == parts.length - 2 && !list.isEmpty()) {
                 String leafForList = parts[parts.length - 1];
                 for (Object element : list) {
@@ -313,11 +272,9 @@ public class SourceReconstructor {
 
     /**
      * Reconstructs _source JSON from stored fields and doc_values for a document.
-     * Uses mapping context for type-aware conversion when available.
      *
-     * @param termIndex per-segment term position cache, scoped to the current
-     *                  segment's Flux; may be null if caller does not need
-     *                  analyzed-text fallback (treated as empty).
+     * @param termIndex per-segment term position cache (Flux-scoped); may be null when the caller
+     *                  doesn't need analyzed-text fallback (treated as empty).
      */
     public static String reconstructSource(LuceneLeafReader reader, int docId, LuceneDocument document,
             FieldMappingContext mappingContext, SegmentTermIndex termIndex) {
@@ -344,11 +301,8 @@ public class SourceReconstructor {
     }
 
     /**
-     * Merges reconstructed fields into existing source JSON. Used when the snapshot still
-     * holds a (possibly partial) _source — e.g. _source.includes/_source.excludes indices.
-     * Applies the same stored → doc_values → points/terms recovery chain as
-     * {@link #reconstructSource}, but only for fields missing from the existing source,
-     * so existing values are preserved verbatim.
+     * Merges reconstructed fields into an existing _source JSON, only filling fields the source
+     * doesn't already have. Used for partial sources (e.g. {@code _source.includes/excludes}).
      */
     public static String mergeWithDocValues(String existingSource, LuceneLeafReader reader, int docId,
             LuceneDocument document, FieldMappingContext mappingContext) {
@@ -358,6 +312,14 @@ public class SourceReconstructor {
     @SuppressWarnings("unchecked")
     public static String mergeWithDocValues(String existingSource, LuceneLeafReader reader, int docId,
             LuceneDocument document, FieldMappingContext mappingContext, SegmentTermIndex termIndex) {
+        // Fast path: when the mapping itself declares no fields/copy_to/constants/source filter
+        // AND the document has no stored fields, no recovery tier could contribute. Skip the
+        // JSON round-trip entirely.
+        if (mappingContext != null && !mappingContext.couldContributeToMerge()
+                && (document == null || document.getFields().isEmpty())
+                && reader.getDocValueFields().isEmpty()) {
+            return existingSource;
+        }
         try {
             Map<String, Object> existing = OBJECT_MAPPER.readValue(existingSource, Map.class);
             boolean modified = populateFromSegment(existing, reader, docId, document, mappingContext, termIndex);
@@ -369,209 +331,215 @@ public class SourceReconstructor {
     }
 
     /**
-     * Populates {@code target} with fields recovered from a Lucene segment, skipping any
-     * field already present. Shared by {@link #reconstructSource} (empty seed) and
-     * {@link #mergeWithDocValues} (existing _source as seed) so both paths exercise the
-     * same stored → doc_values → points/terms recovery chain. Returns {@code true} iff any
-     * new value was written into {@code target} (including into a nested child map, which
-     * would not change the top-level {@code target.size()}); callers use this to decide
-     * whether a re-serialization is needed.
+     * Populates {@code target} (empty seed for fresh reconstruction, existing source for merge),
+     * applying stored → doc_values → points/terms → constant → copy_to-reverse-derivation. Returns
+     * {@code true} iff any value was written at any depth; callers use this to gate re-serialization.
      */
     private static boolean populateFromSegment(Map<String, Object> target, LuceneLeafReader reader, int docId,
             LuceneDocument document, FieldMappingContext mappingContext, SegmentTermIndex termIndex) throws IOException {
-        boolean modified = false;
-        // 1. Stored fields (exact values when present)
-        for (var field : document.getFields()) {
-            String fieldName = field.name();
-            if ((shouldSkipField(fieldName, mappingContext)
-                    && !descendsIntoExistingObjectArray(target, fieldName))
-                    || hasNested(target, fieldName)) {
-                continue;
-            }
-            FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
-            Object value = getStoredFieldValue(field, mappingInfo);
-            if (value != null) {
-                modified |= putNested(target, fieldName, value);
-            }
+        var ctx = new RecoveryContext(target, reader, docId, document, mappingContext, termIndex);
+        boolean modified = applyStoredFields(ctx);
+        modified |= applyDocValues(ctx);
+        modified |= applyPointsAndTerms(ctx);
+        modified |= applyConstantValues(ctx);
+        modified |= applyCopyToReverseDerivation(ctx);
+        return modified;
+    }
+
+    /** Per-document recovery context: holds the target map plus name→field/info lookup tables built once per call. */
+    private static final class RecoveryContext {
+        final Map<String, Object> target;
+        final LuceneLeafReader reader;
+        final int docId;
+        final LuceneDocument document;
+        final FieldMappingContext mappingContext;
+        final SegmentTermIndex termIndex;
+        private Map<String, LuceneField> storedByName;
+        private Map<String, DocValueFieldInfo> docValuesByName;
+
+        RecoveryContext(Map<String, Object> target, LuceneLeafReader reader, int docId,
+                LuceneDocument document, FieldMappingContext mappingContext, SegmentTermIndex termIndex) {
+            this.target = target;
+            this.reader = reader;
+            this.docId = docId;
+            this.document = document;
+            this.mappingContext = mappingContext;
+            this.termIndex = termIndex;
         }
 
-        // 2. Doc values (fast, lossless for typed fields)
-        for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
-            String fieldName = fieldInfo.name();
-            if ((shouldSkipField(fieldName, mappingContext)
-                    && !descendsIntoExistingObjectArray(target, fieldName))
-                    || hasNested(target, fieldName)) {
+        Map<String, LuceneField> storedByName() {
+            if (storedByName == null) {
+                Map<String, LuceneField> map = new LinkedHashMap<>();
+                for (LuceneField f : document.getFields()) {
+                    map.putIfAbsent(f.name(), f);
+                }
+                storedByName = map;
+            }
+            return storedByName;
+        }
+
+        Map<String, DocValueFieldInfo> docValuesByName() {
+            if (docValuesByName == null) {
+                List<DocValueFieldInfo> dvFields = reader.getDocValueFields();
+                Map<String, DocValueFieldInfo> map = new LinkedHashMap<>(dvFields.size() * 2);
+                for (DocValueFieldInfo fi : dvFields) {
+                    map.putIfAbsent(fi.name(), fi);
+                }
+                docValuesByName = map;
+            }
+            return docValuesByName;
+        }
+
+        FieldMappingInfo mappingInfo(String fieldName) {
+            return mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
+        }
+    }
+
+    private static boolean applyStoredFields(RecoveryContext ctx) {
+        boolean modified = false;
+        for (LuceneField field : ctx.document.getFields()) {
+            String fieldName = field.name();
+            if (shouldSkipForReconstruction(ctx.target, fieldName, ctx.mappingContext)) {
                 continue;
             }
-            FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
+            Object value = getStoredFieldValue(field, ctx.mappingInfo(fieldName));
+            if (value != null) {
+                modified |= putNested(ctx.target, fieldName, value, ctx.mappingContext);
+            }
+        }
+        return modified;
+    }
+
+    private static boolean applyDocValues(RecoveryContext ctx) throws IOException {
+        boolean modified = false;
+        for (DocValueFieldInfo fieldInfo : ctx.reader.getDocValueFields()) {
+            String fieldName = fieldInfo.name();
+            if (shouldSkipForReconstruction(ctx.target, fieldName, ctx.mappingContext)) {
+                continue;
+            }
+            FieldMappingInfo mappingInfo = ctx.mappingInfo(fieldName);
             // Skip if mapping says doc_values is disabled (ES 2.x may still have them internally)
             if (mappingInfo != null && !mappingInfo.docValues()) {
                 continue;
             }
-            Object value = reader.getDocValue(docId, fieldInfo);
+            Object value = ctx.reader.getDocValue(ctx.docId, fieldInfo);
             if (value != null) {
                 Object converted = convertDocValue(value, fieldInfo, mappingInfo);
                 if (converted != null) {
-                    modified |= putNested(target, fieldName, converted);
+                    modified |= putNested(ctx.target, fieldName, converted, ctx.mappingContext);
                 }
             }
         }
+        return modified;
+    }
 
-        // 3. Points / indexed terms fallback (recovers indexed-only numeric/boolean/keyword)
-        if (mappingContext != null) {
-            for (String fieldName : mappingContext.getFieldNames()) {
-                if ((shouldSkipField(fieldName, mappingContext)
-                        && !descendsIntoExistingObjectArray(target, fieldName))
-                        || hasNested(target, fieldName)) {
-                    continue;
-                }
-                FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
-                if (mappingInfo != null) {
-                    var fallbackValue = reader.getValueFromPointsOrTerms(docId, fieldName, mappingInfo.type(), termIndex);
-                    if (fallbackValue.isPresent()) {
-                        Object converted = convertFallbackValue(fallbackValue.get(), mappingInfo);
-                        if (converted != null) {
-                            modified |= putNested(target, fieldName, converted);
-                        }
-                    }
+    private static boolean applyPointsAndTerms(RecoveryContext ctx) throws IOException {
+        if (ctx.mappingContext == null) return false;
+        boolean modified = false;
+        for (String fieldName : ctx.mappingContext.getFieldNames()) {
+            if (shouldSkipForReconstruction(ctx.target, fieldName, ctx.mappingContext)) {
+                continue;
+            }
+            FieldMappingInfo mappingInfo = ctx.mappingContext.getFieldInfo(fieldName);
+            if (mappingInfo == null) continue;
+            var fallbackValue = ctx.reader.getValueFromPointsOrTerms(ctx.docId, fieldName,
+                    mappingInfo.type(), ctx.termIndex);
+            if (fallbackValue.isPresent()) {
+                Object converted = convertFallbackValue(fallbackValue.get(), mappingInfo);
+                if (converted != null) {
+                    modified |= putNested(ctx.target, fieldName, converted, ctx.mappingContext);
                 }
             }
         }
+        return modified;
+    }
 
-        // 4. Mapping-level constant values (constant_keyword stores its value in the mapping, not the segment)
-        if (mappingContext != null) {
-            for (String fieldName : mappingContext.getFieldNames()) {
-                if ((shouldSkipField(fieldName, mappingContext)
-                        && !descendsIntoExistingObjectArray(target, fieldName))
-                        || hasNested(target, fieldName)) {
-                    continue;
-                }
-                FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
-                if (mappingInfo != null && mappingInfo.constantValue() != null) {
-                    modified |= putNested(target, fieldName, mappingInfo.constantValue());
-                }
+    private static boolean applyConstantValues(RecoveryContext ctx) {
+        if (ctx.mappingContext == null) return false;
+        boolean modified = false;
+        for (Map.Entry<String, FieldMappingInfo> entry : ctx.mappingContext.getConstantValueFields()) {
+            String fieldName = entry.getKey();
+            if (shouldSkipForReconstruction(ctx.target, fieldName, ctx.mappingContext)) {
+                continue;
             }
+            modified |= putNested(ctx.target, fieldName, entry.getValue().constantValue(), ctx.mappingContext);
         }
-
-        // 5. Reverse-derive from copy_to targets (last-resort fallback).
-        //
-        // copy_to makes target fields indexed-only mirrors of the source's value. When the source
-        // field's own stored/doc_values/points chain returned nothing (e.g. source had index:true
-        // but store:false and no doc_values), we can still recover its value by reading any of its
-        // copy_to TARGETS — which ARE indexed with real data. Targets are ranked by lossiness:
-        // keyword-class (exact) before text (tokenized/analyzed recovery only).
-        //
-        // Value extraction replays the same stored -> doc_values -> points/terms chain used for
-        // primary-source recovery, but keyed on the TARGET's field name. The first non-null hit
-        // wins and is routed into the SOURCE's path via putNested. The target itself is already
-        // filtered by shouldSkipField in passes 1-4 so it never appears in _source.
-        //
-        // We iterate only fields with declared copy_to edges, not the full mapping — for indices
-        // with thousands of leaves, this skips the hasNested/shouldSkipField overhead on every
-        // field that has nothing to reverse-derive from anyway.
-        if (mappingContext != null) {
-            for (String sourceField : mappingContext.getCopyToSourceFields()) {
-                if (hasNested(target, sourceField)) {
-                    continue;
-                }
-                // Respect _source.excludes / .includes for the SOURCE field itself. If the
-                // user told ES not to store "secret" in _source, we must not resurrect it
-                // via its copy_to target. shouldSkipField covers the leading-underscore and
-                // copy_to-target cases too, so the same gate is reusable here.
-                if (shouldSkipField(sourceField, mappingContext)) {
-                    continue;
-                }
-                List<String> rankedTargets = mappingContext.getCopyToTargets(sourceField);
-                if (rankedTargets.isEmpty()) {
-                    continue;
-                }
-                FieldMappingInfo sourceMapping = mappingContext.getFieldInfo(sourceField);
-                for (String targetField : rankedTargets) {
-                    ProbeResult recovered = probeFieldValue(reader, docId, document, targetField,
-                            mappingContext, termIndex);
-                    if (recovered == null) {
-                        continue;
-                    }
-                    // Tiers 1/2/4 already shaped the value through the TARGET's mapping —
-                    // write it verbatim. Only the points/terms tier (Raw) still needs decoding,
-                    // and that decode runs through the SOURCE mapping so the JSON shape matches
-                    // the source field's declared type (date formatting, scaled_float division,
-                    // IP rendering, etc.).
-                    Object converted = switch (recovered) {
-                        case ProbeResult.Final f -> f.value();
-                        case ProbeResult.Raw r -> sourceMapping != null
-                                ? convertFallbackValue(r.raw(), sourceMapping)
-                                : null;
-                    };
-                    if (converted != null) {
-                        modified |= putNested(target, sourceField, converted);
-                        break; // first-hit wins; stop iterating targets.
-                    }
-                }
-            }
-        }
-
         return modified;
     }
 
     /**
-     * Replays the stored → doc_values → points/terms → constant chain for a single field
-     * and returns a {@link ProbeResult} tagged with whether the value is already shaped
-     * ({@link ProbeResult.Final}) or still a raw points/terms recovery
-     * ({@link ProbeResult.Raw}) that needs decoding through the source field's mapping.
-     * Returns {@code null} if no tier produced a value.
-     *
-     * <p>Used by the copy_to reverse-derivation pass: tiers 1/2/4 produce
-     * already-target-mapped Java values (the target's stored field, the target's doc_values
-     * after {@link #convertDocValue}, the target's mapping-level constant), all of which the
-     * caller writes verbatim into the source field's slot. Only tier 3 returns raw bytes/longs
-     * that need a fresh round of source-mapping conversion — keeping the two passes separate
-     * is what prevents the previous double-conversion bug.
+     * Reverse-derive source fields from their copy_to targets. Targets are indexed-only
+     * mirrors of the source value, so when the source's own recovery chain returned nothing
+     * we can read any target. Targets are ranked by lossiness (less-lossy first).
      */
-    private static ProbeResult probeFieldValue(LuceneLeafReader reader, int docId, LuceneDocument document,
-            String fieldName, FieldMappingContext mappingContext, SegmentTermIndex termIndex) throws IOException {
-        FieldMappingInfo targetMapping = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
-
-        // Tier 1: stored field lookup.
-        for (var field : document.getFields()) {
-            if (fieldName.equals(field.name())) {
-                Object value = getStoredFieldValue(field, targetMapping);
-                if (value != null) {
-                    return new ProbeResult.Final(value);
+    private static boolean applyCopyToReverseDerivation(RecoveryContext ctx) throws IOException {
+        if (ctx.mappingContext == null) return false;
+        boolean modified = false;
+        for (String sourceField : ctx.mappingContext.getCopyToSourceFields()) {
+            if (hasNested(ctx.target, sourceField, ctx.mappingContext)
+                    || shouldSkipField(sourceField, ctx.mappingContext)) {
+                continue;
+            }
+            List<String> rankedTargets = ctx.mappingContext.getCopyToTargets(sourceField);
+            if (rankedTargets.isEmpty()) continue;
+            FieldMappingInfo sourceMapping = ctx.mappingContext.getFieldInfo(sourceField);
+            for (String targetField : rankedTargets) {
+                ProbeResult recovered = probeFieldValue(ctx, targetField);
+                if (recovered == null) continue;
+                // Raw values still need decoding through the SOURCE mapping so the JSON shape
+                // matches the source's declared type; Final values were already target-shaped.
+                Object converted = switch (recovered) {
+                    case ProbeResult.Final f -> f.value();
+                    case ProbeResult.Raw r -> sourceMapping != null
+                            ? convertFallbackValue(r.raw(), sourceMapping)
+                            : null;
+                };
+                if (converted != null) {
+                    modified |= putNested(ctx.target, sourceField, converted, ctx.mappingContext);
+                    break;
                 }
             }
         }
+        return modified;
+    }
 
-        // Tier 2: doc_values lookup.
-        for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
-            if (!fieldName.equals(fieldInfo.name())) {
-                continue;
-            }
-            if (targetMapping != null && !targetMapping.docValues()) {
-                break;
-            }
-            Object value = reader.getDocValue(docId, fieldInfo);
+    /**
+     * Replays stored → doc_values → points/terms → constant for a single field via O(1)
+     * map lookups against {@link RecoveryContext}. Final values are already shaped through
+     * the target's mapping; Raw values still need decoding through the source's mapping.
+     */
+    private static ProbeResult probeFieldValue(RecoveryContext ctx, String fieldName) throws IOException {
+        FieldMappingInfo targetMapping = ctx.mappingInfo(fieldName);
+
+        LuceneField stored = ctx.storedByName().get(fieldName);
+        if (stored != null) {
+            Object value = getStoredFieldValue(stored, targetMapping);
             if (value != null) {
-                Object converted = convertDocValue(value, fieldInfo, targetMapping);
+                return new ProbeResult.Final(value);
+            }
+        }
+
+        DocValueFieldInfo dvInfo = ctx.docValuesByName().get(fieldName);
+        if (dvInfo != null && (targetMapping == null || targetMapping.docValues())) {
+            Object value = ctx.reader.getDocValue(ctx.docId, dvInfo);
+            if (value != null) {
+                Object converted = convertDocValue(value, dvInfo, targetMapping);
                 if (converted != null) {
                     return new ProbeResult.Final(converted);
                 }
             }
-            break;
         }
 
-        // Tier 3: points / indexed-terms fallback. Use the target's type if known so STRING
-        // targets go through the token-stream concatenation path (see
-        // LuceneLeafReader.getValueFromPointsOrTerms STRING branch) — that's what delivers the
-        // "joe smith joe x com" best-effort text recovery.
+        // Use the target's type when known so STRING targets get the token-stream concatenation
+        // path that delivers best-effort text recovery.
         if (targetMapping != null) {
-            var fallback = reader.getValueFromPointsOrTerms(docId, fieldName, targetMapping.type(), termIndex);
+            var fallback = ctx.reader.getValueFromPointsOrTerms(ctx.docId, fieldName,
+                    targetMapping.type(), ctx.termIndex);
             if (fallback.isPresent()) {
                 return new ProbeResult.Raw(fallback.get());
             }
         }
 
-        // Tier 4: mapping-level constant (constant_keyword target).
         if (targetMapping != null && targetMapping.constantValue() != null) {
             return new ProbeResult.Final(targetMapping.constantValue());
         }
@@ -697,18 +665,18 @@ public class SourceReconstructor {
             case NUMERIC -> {
                 // Float/double doc_values are stored as sortable int/long
                 String mappingType = mappingInfo.mappingType();
-                if ("half_float".equals(mappingType)) {
+                if (MappingTypes.HALF_FLOAT.equals(mappingType)) {
                     if (value instanceof Long longVal) {
                         // half_float uses 16-bit encoding - convert sortable short back to half float
                         yield sortableShortToHalfFloat(longVal.shortValue());
                     }
                 }
-                if ("float".equals(mappingType)) {
+                if (MappingTypes.FLOAT.equals(mappingType)) {
                     if (value instanceof Long longVal) {
                         yield Float.intBitsToFloat(longVal.intValue());
                     }
                 }
-                if ("double".equals(mappingType)) {
+                if (MappingTypes.DOUBLE.equals(mappingType)) {
                     if (value instanceof Long longVal) {
                         yield Double.longBitsToDouble(longVal);
                     }
@@ -797,7 +765,7 @@ public class SourceReconstructor {
             case STRING -> {
                 // Wildcard type stores values as binary doc_values (base64 encoded)
                 String mappingType = mappingInfo.mappingType();
-                if ("wildcard".equals(mappingType) && value instanceof String strVal) {
+                if (MappingTypes.WILDCARD.equals(mappingType) && value instanceof String strVal) {
                     try {
                         byte[] bytes = Base64.getDecoder().decode(strVal);
                         yield new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
@@ -914,16 +882,18 @@ public class SourceReconstructor {
                 // sortableLongToDouble(l) = Double.longBitsToDouble(l ^ ((l >> 63) & 0x7FFFFFFFFFFFFFFFL))
                 // sortableIntToFloat(i)   = Float.intBitsToFloat(i ^ ((i >> 31) & 0x7FFFFFFF))
                 String mappingType = mappingInfo.mappingType();
-                if ("double".equals(mappingType)) {
+                if (MappingTypes.DOUBLE.equals(mappingType)) {
                     long bits = raw ^ ((raw >> 63) & 0x7FFFFFFFFFFFFFFFL);
                     yield Double.longBitsToDouble(bits);
                 }
-                if ("float".equals(mappingType) || "half_float".equals(mappingType)) {
+                if (MappingTypes.FLOAT.equals(mappingType) || MappingTypes.HALF_FLOAT.equals(mappingType)) {
                     int iraw = (int) raw;
                     int bits = iraw ^ ((iraw >> 31) & 0x7FFFFFFF);
                     yield Float.intBitsToFloat(bits);
                 }
-                if ("integer".equals(mappingType) || "short".equals(mappingType) || "byte".equals(mappingType)) {
+                if (MappingTypes.INTEGER.equals(mappingType)
+                        || MappingTypes.SHORT.equals(mappingType)
+                        || MappingTypes.BYTE.equals(mappingType)) {
                     yield (int) raw;
                 }
                 yield raw; // long, token_count, etc.
@@ -951,19 +921,19 @@ public class SourceReconstructor {
             case IP -> packed.length == 16 ? convertIpBytes(packed) : null;
             case NUMERIC -> {
                 String mappingType = mappingInfo.mappingType();
-                if ("half_float".equals(mappingType) && packed.length == 2) {
+                if (MappingTypes.HALF_FLOAT.equals(mappingType) && packed.length == 2) {
                     // half_float Points: read big-endian short, flip sign bit, then decode
                     short s = (short) (((packed[0] & 0xFF) << 8) | (packed[1] & 0xFF));
                     s ^= 0x8000; // flip sign bit (sortableBytesToShort)
                     yield sortableShortToHalfFloat(s);
                 }
-                if ("float".equals(mappingType) && packed.length == 4) {
+                if (MappingTypes.FLOAT.equals(mappingType) && packed.length == 4) {
                     int sortable = decodeIntPoint(packed);
                     // Undo Lucene's sortableInt→float transform for negative values
                     int bits = sortable ^ ((sortable >> 31) & 0x7FFFFFFF);
                     yield Float.intBitsToFloat(bits);
                 }
-                if ("double".equals(mappingType) && packed.length == 8) {
+                if (MappingTypes.DOUBLE.equals(mappingType) && packed.length == 8) {
                     long sortable = decodeLongPoint(packed);
                     // Undo Lucene's sortableLong→double transform for negative values
                     long bits = sortable ^ ((sortable >> 63) & 0x7FFFFFFFFFFFFFFFL);

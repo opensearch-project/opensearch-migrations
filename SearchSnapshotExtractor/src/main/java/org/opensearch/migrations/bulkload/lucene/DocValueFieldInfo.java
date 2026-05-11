@@ -23,6 +23,10 @@ public interface DocValueFieldInfo {
         }
         return hasTerms;
     }
+
+    /** Single byte 'T' / 'F' — used for short-circuit boolean detection on raw term bytes. */
+    byte BOOLEAN_TERM_T = (byte) 'T';
+    byte BOOLEAN_TERM_F = (byte) 'F';
     
     enum DocValueType {
         NONE,

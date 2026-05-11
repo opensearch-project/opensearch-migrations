@@ -3,7 +3,6 @@ package org.opensearch.migrations.bulkload.lucene.version_7;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
@@ -36,6 +35,7 @@ public class LeafReader7 implements LuceneLeafReader {
     private final LeafReader wrapped;
     @Getter
     private final BitSetConverter.FixedLengthBitSet liveDocs;
+    private volatile List<DocValueFieldInfo> docValueFieldsCache;
 
     public LeafReader7(LeafReader wrapped) {
         this.wrapped = wrapped;
@@ -104,35 +104,41 @@ public class LeafReader7 implements LuceneLeafReader {
     }
 
     @Override
-    public Iterable<DocValueFieldInfo> getDocValueFields() {
+    public List<DocValueFieldInfo> getDocValueFields() {
+        List<DocValueFieldInfo> cached = docValueFieldsCache;
+        if (cached != null) return cached;
         List<DocValueFieldInfo> fields = new ArrayList<>();
         for (FieldInfo fieldInfo : wrapped.getFieldInfos()) {
             DocValueFieldInfo.DocValueType dvType = convertDocValuesType(fieldInfo.getDocValuesType());
             if (dvType != DocValueFieldInfo.DocValueType.NONE) {
-                boolean isBoolean = dvType == DocValueFieldInfo.DocValueType.SORTED_NUMERIC 
-                    && DocValueFieldInfo.hasOnlyBooleanTerms(getFieldTermsInternal(fieldInfo.name));
+                boolean isBoolean = dvType == DocValueFieldInfo.DocValueType.SORTED_NUMERIC
+                    && fieldHasOnlyBooleanTerms(fieldInfo.name);
                 fields.add(new DocValueFieldInfo.Simple(fieldInfo.name, dvType, isBoolean));
             }
         }
+        docValueFieldsCache = fields;
         return fields;
     }
 
-    private List<String> getFieldTermsInternal(String fieldName) {
+    /** Short-circuiting T/F-only check: bails on the first non-boolean term without materializing the list. */
+    private boolean fieldHasOnlyBooleanTerms(String fieldName) {
         try {
             Terms terms = wrapped.terms(fieldName);
-            if (terms == null) return Collections.emptyList();
-            List<String> result = new ArrayList<>();
+            if (terms == null) return false;
             TermsEnum termsEnum = terms.iterator();
             BytesRef term;
+            boolean hasTerms = false;
             while ((term = termsEnum.next()) != null) {
-                String termStr = bytesRefToString(term);
-                if (termStr != null) {
-                    result.add(termStr);
+                hasTerms = true;
+                if (term.length != 1
+                        || (term.bytes[term.offset] != DocValueFieldInfo.BOOLEAN_TERM_T
+                            && term.bytes[term.offset] != DocValueFieldInfo.BOOLEAN_TERM_F)) {
+                    return false;
                 }
             }
-            return result;
+            return hasTerms;
         } catch (IOException e) {
-            return Collections.emptyList();
+            return false;
         }
     }
 

@@ -1393,7 +1393,6 @@ class SourceReconstructorTest {
             + "\"users\":{\"properties\":{\"all\":{\"type\":\"text\"}}}}"
         );
         String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
-        JsonNode tree = parseField(json, "from") == null ? null : MAPPER.valueToTree(json);
         assertEquals("joe@example.com", parseField(json, "from").asText());
         try {
             JsonNode full = MAPPER.readTree(json);
