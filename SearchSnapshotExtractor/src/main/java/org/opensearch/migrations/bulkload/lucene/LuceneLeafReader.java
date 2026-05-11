@@ -74,18 +74,16 @@ public interface LuceneLeafReader {
      * (matches Lucene's {@code PostingsEnum.nextDoc()}). Positions within each callback are
      * already in ascending order as emitted by {@code PostingsEnum.nextPosition()}.
      *
-     * <p>The default implementation is a no-op: versions that don't support source
-     * reconstruction from the inverted index (e.g. Lucene 10 / OS 3.x which always have
-     * stored fields or doc_values) leave this unimplemented and callers see an empty stream.
+     * <p>Required on every implementation: position-aware text recovery is the only path that
+     * preserves multi-token analyzed text. Implementors with no terms to stream (e.g. a
+     * synthetic test reader) must explicitly return without calling the sink.
      *
      * <p>Callers must first invoke {@link PostingsSink#registerTerm} on each new term (as it
      * appears in the walk) to get its assigned {@code termId}, then invoke
      * {@link PostingsSink#accept(int, int, int[], int)} once per (term, doc). The reusable
      * {@code int[]} passed to {@code accept} is only borrowed for the duration of the call.
      */
-    default void streamFieldPostings(String fieldName, PostingsSink sink) throws IOException {
-        // no-op: default reader has no terms to stream.
-    }
+    void streamFieldPostings(String fieldName, PostingsSink sink) throws IOException;
 
     /**
      * Version-specific hook: walk the terms dictionary for a trie-encoded numeric field (ES 1.x /
