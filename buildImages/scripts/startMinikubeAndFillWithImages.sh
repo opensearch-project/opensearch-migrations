@@ -3,7 +3,17 @@
 set -eo pipefail
 
 INSECURE_REGISTRY_CIDR="${INSECURE_REGISTRY_CIDR:-0.0.0.0/0}"
-minikube start --insecure-registry="${INSECURE_REGISTRY_CIDR}"
+minikube start \
+    --extra-config=kubelet.authentication-token-webhook=true \
+    --extra-config=kubelet.authorization-mode=Webhook \
+    --extra-config=scheduler.bind-address=0.0.0.0 \
+    --extra-config=controller-manager.bind-address=0.0.0.0 \
+    --insecure-registry="${INSECURE_REGISTRY_CIDR}" \
+    --insecure-registry="localhost:5000" \
+    --insecure-registry="host.docker.internal:5000" \
+    --cpus=6 \
+    --memory=15958 \
+    --disk-size=60000mb
 
 helm install buildkit ../deployment/k8s/charts/components/buildImages \
   --create-namespace \
@@ -47,6 +57,14 @@ docker buildx use builder-minikube
 echo "Bootstrap and verify connection"
 docker buildx inspect --bootstrap
 
-../gradlew buildImagesToRegistry_arm64
+# see build.gradle. The buildKitTestAll_* carries the testBuildKitProjects to load the needed repos
+PLATFORM=$(uname -m)
+../gradlew "buildImagesToRegistry_${PLATFORM}" "buildKitTestAll_${PLATFORM}"
 
 curl http://localhost:5001/v2/_catalog
+
+# Installing helm resources
+echo "Installing the needed helm charts"
+# installs kyverno, argo, argo-workflowßcontroller, cert-manager, fluent, jaeger, localhost, ma-helm-installer, strimzi-cluster-operator
+# kube-prometheus, kube-grafana, otel service manager, s3 bucket (simulated with localstack)
+helm install ma ../deployment/k8s/charts/aggregates/migrationAssistantWithArgo -n ma --create-namespace --wait --timeout 20m -f ../deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8s.yaml
