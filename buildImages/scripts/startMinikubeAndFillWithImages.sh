@@ -3,6 +3,8 @@
 set -eo pipefail
 
 INSECURE_REGISTRY_CIDR="${INSECURE_REGISTRY_CIDR:-0.0.0.0/0}"
+# NOTE: the disk-size is set high since one of the the
+# workflow steps asks for 200GB
 minikube start \
     --extra-config=kubelet.authentication-token-webhook=true \
     --extra-config=kubelet.authorization-mode=Webhook \
@@ -12,8 +14,11 @@ minikube start \
     --insecure-registry="localhost:5000" \
     --insecure-registry="host.docker.internal:5000" \
     --cpus=6 \
-    --memory=15958 \
-    --disk-size=60000mb
+    --memory=18gb \
+    --disk-size=300gb
+
+echo "Enabling metrics-server addon"
+minikube addons enable metrics-server
 
 helm install buildkit ../deployment/k8s/charts/components/buildImages \
   --create-namespace \
@@ -27,8 +32,8 @@ kubectl apply -f docker-registry.yaml -n buildkit
 kubectl get pods -n buildkit
 
 echo "Wait for both pods to be Running"
-kubectl wait --for=condition=ready pod -l app=buildkitd -n buildkit --timeout=120s
-kubectl wait --for=condition=ready pod -l app=docker-registry -n buildkit --timeout=60s
+kubectl wait --for=condition=ready pod -l app=buildkitd -n buildkit --timeout=180s
+kubectl wait --for=condition=ready pod -l app=docker-registry -n buildkit --timeout=120s
 
 echo "Port forward BuildKit & Docker Registry (run in background)"
 nohup kubectl port-forward -n buildkit svc/buildkitd 1234:1234 > /tmp/buildkit-forward.log 2>&1 &
