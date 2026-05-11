@@ -19,17 +19,67 @@ drive it from there.
 | `_reindex` from remote          | Hand-rolled — no infra needed; see below                  |
 | Snapshot/restore (no MA needed) | `awscurl` / `aws cli`, source/target tools directly       |
 
+## POC: pick the stack first
+
+Two POC stacks ship in this repo. Pick deliberately — they teach
+different things, and they have different resource costs.
+
+| Stack                                  | What it teaches                              | Time-to-up | Disk + RAM budget       | When to use                                                                 |
+| -------------------------------------- | -------------------------------------------- | ---------- | ----------------------- | --------------------------------------------------------------------------- |
+| `TrafficCapture/dockerSolution/`       | RFS end-to-end + console CLI ergonomics      | ~3 min     | ~6 GB RAM, ~10 GB disk  | **Default for "show me how it works"**. Laptop-friendly. No k8s required.  |
+| `deployment/k8s/charts/.../migrationAssistantWithArgo/` (kind) | Real MA shape (helm + Argo + console pod)    | ~10 min    | **~16 GB RAM**, ~30 GB disk | User wants to see the production deployment shape; has the headroom.        |
+
+If unsure which the user wants, ask once: "fast end-to-end demo
+(docker compose) or production-shape (kind + helm)?" Default to
+docker compose if they don't pick.
+
+If the host has < 16 GB RAM free, refuse the kind path and route to
+docker compose. Don't pretend a kind+helm POC will work on an 8 GB
+machine — it'll OOM mid-install.
+
+## POC path — TrafficCapture docker-compose dev sandbox (default)
+
+The fastest way to see RFS move data end-to-end. See
+`TrafficCapture/dockerSolution/README.md` for the canonical
+walkthrough. You'll get a source ES container, a target OS
+container, and a `migration-console` container with the same
+`console …` CLI as the helm install.
+
+Steps the agent should narrate:
+
+  1. `cd TrafficCapture/dockerSolution && ./gradlew :composeUp`
+     (or follow the README's current invocation — it changes).
+  2. Tell the user the seeded endpoints: source on
+     `http://localhost:9200` (or whatever the compose file maps),
+     target on `http://localhost:9201`, console at
+     `docker compose exec migration-console bash`.
+  3. From inside the console container, run the same
+     `console clusters connection-check / snapshot create /
+     metadata migrate / backfill start / backfill status`
+     sequence as the helm path.
+
+**Tear-down (record this for Phase 6):**
+`./gradlew :composeDown` (or `docker compose down -v` from the
+sandbox dir, which also removes volumes).
+
 ## POC path — Migration Assistant helm chart on a local k8s
 
-This is the "real" Migration Assistant on a kind/minikube/k3d cluster.
+Use this only when the user has explicitly asked for the
+production shape and has ≥16 GB RAM free.
 
-  1. Create a local k8s cluster (kind is fine for ~16 GB hosts).
+  1. Create a local k8s cluster (kind is fine for ~16 GB hosts;
+     k3d / minikube also work). Confirm `docker stats` shows
+     headroom before installing the chart.
   2. Install the chart from
      `deployment/k8s/charts/aggregates/migrationAssistantWithArgo/`.
      **Always pass an image overlay** — the chart's bare `values.yaml`
      uses unprefixed image refs that don't resolve. See "Local-build
      vs released-image testing" below.
-  3. Drive the migration from the `migration-console` pod:
+  3. Tell the user the seeded endpoints: source/target services
+     resolve in-cluster as `<release>-source` / `<release>-target`;
+     the console pod is `migration-console-0` in the install
+     namespace.
+  4. Drive the migration from the `migration-console` pod:
 
      ```
      kubectl -n ma exec -it migration-console-0 -- /bin/bash
@@ -44,6 +94,10 @@ This is the "real" Migration Assistant on a kind/minikube/k3d cluster.
 If a step takes more than ~30s, tell the user what you're waiting on
 ("waiting for MA helm release to be ready", "polling backfill
 status") instead of going silent.
+
+**Tear-down (record this for Phase 6):**
+`helm -n ma uninstall ma && kind delete cluster` (or your local
+cluster's equivalent: `k3d cluster delete`, `minikube delete`).
 
 ## Local-build vs released-image testing
 
@@ -102,17 +156,6 @@ because `migrations/<name>:latest` resolves to docker.io.
 When walking a user through a POC: pick the released-image path
 unless they've explicitly said they're iterating on MA source.
 
-## POC path — TrafficCapture docker-compose dev sandbox
-
-The fastest way to see RFS move data end-to-end without standing up
-k8s. See `TrafficCapture/dockerSolution/README.md` for the canonical
-walkthrough — bring up the source/target/console containers, seed
-data, and the `migration-console` container exposes the same
-`console …` CLI as the helm install.
-
-This is the right POC if the user just wants to *see* data move from
-one cluster to another in a few minutes.
-
 ## POC path — `_reindex` from remote (lightweight alternative)
 
 If the user can't run kind or compose and just wants the simplest
@@ -120,6 +163,25 @@ possible demo, they can drive `_reindex` from-remote against any two
 clusters they already have — no MA, no helm, no compose. This skill
 doesn't supply a stack for it, but the steps are well-defined; see
 the MIGRATE path below for the curl shape.
+
+## MIGRATE: deploying MA for production
+
+Phase 4 for MIGRATE assumes the user is *not* on a laptop. If they
+don't already have MA running, point them at the right deployment
+artifact for their environment — don't reuse the kind path, which is
+explicitly POC-shaped.
+
+| Environment                 | Deploy via                                          |
+| --------------------------- | --------------------------------------------------- |
+| Existing EKS cluster        | `deployment/k8s/charts/.../migrationAssistantWithArgo/` with the public-ECR overlay above |
+| Greenfield AWS account      | `deployment/k8s/aws/aws-bootstrap.sh` (CDK + EKS bring-up + chart install in one) |
+| Self-hosted on-prem k8s     | Same chart, with whatever image registry the cluster can pull from (use `generatePrivateEcrValues` pattern from P17 in `pitfalls.md`, or mirror the public images into the org registry) |
+| Existing OpenShift / GKE    | Same chart; verify SCC / pod-security-admission compatibility before installing |
+
+If the user wants to *try* MA before committing to deploying it for
+real, route them back to the POC path (compose stack) and explicitly
+say so — don't let a MIGRATE user stand up a kind cluster and call
+it production.
 
 ## MIGRATE path — snapshot + restore
 
@@ -176,6 +238,35 @@ curl -X POST "$TARGET/_reindex?wait_for_completion=false" \
   }'
 # 3. Poll GET /_tasks/<task_id> until "completed": true.
 ```
+
+## When a step fails
+
+Migrations fail mid-flight. Don't retry blindly — capture state
+first, then retry the smallest unit that failed.
+
+  - **`console snapshot create` hung or errored**: read
+    `console snapshot status` (and `--json` for the raw response).
+    On k8s, also `kubectl logs <snapshot-pod>`. Check the source's
+    `_snapshot/_status` directly. Common causes: snapshot repo not
+    registered on source, S3 IAM passrole missing, source disk full.
+  - **`console metadata migrate` errored**: rerun with
+    `--detailed` or read the migration-console log
+    (`kubectl logs migration-console-0 -c migration-console`).
+    Mapping conflicts on the target are the usual cause; surface
+    them and ask the user how to resolve before retrying.
+  - **`console backfill status` shows workers `Failed`**:
+    `kubectl logs <rfs-worker-pod>` for the worker, plus
+    `argo get <workflow>` if Argo is driving the run. Look for
+    target `_bulk` rejections (queue full → scale target;
+    mapping mismatch → fix mapping, requeue the failed shard).
+  - **`_reindex` from remote task hung**:
+    `GET /_tasks/<task_id>` on target, then
+    `POST /_tasks/<task_id>/_cancel` if needed. Restart by
+    re-issuing reindex with a `query` filter that excludes the
+    docs already in target.
+
+Tell the user *what* you captured before suggesting *what* to try
+next. Don't roll up errors into "something went wrong, retrying".
 
 ## Logging + artifacts
 

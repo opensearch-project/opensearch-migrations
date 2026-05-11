@@ -17,11 +17,25 @@ Use it to tune depth, not to gate content:
 
 ## Source engine
 
-If `intent_path == POC`: skip — we'll seed the source for them in
-Phase 4. Tell them which source we'll seed (default ES 7.17, see
-Phase 3 to override) and move on.
+Path-specific defaults:
 
-Otherwise:
+- `intent_path == POC`: skip the version question. The POC stack
+  seeds the source for them (default ES 7.17 in
+  `TrafficCapture/dockerSolution/`; the helm-chart POC defaults
+  to OS 2.x). Tell them what will be seeded and move on. Phase 3
+  is where they can override.
+- `intent_path == LEARN`: don't require a specific version. Ask
+  for a rough engine + era only ("ES 7-ish", "OS 2", "I'm not
+  sure yet"). LEARN's job is to read `packs/techniques.md` and
+  produce a planning report. A precise version isn't needed.
+- `intent_path == ANALYZE`: if the user only has a snapshot in
+  hand and doesn't know the source version, accept "I'll show
+  you in Phase 2" — Phase 2 reads version off the snapshot
+  metadata. Don't block on a version they don't have.
+- `intent_path == MIGRATE`: ask for the version. Migrations need
+  it pinned before any technique can be picked.
+
+When you ask:
 
 > What are you migrating from — **Elasticsearch** or **OpenSearch**?
 > And which version? (e.g. ES 7.17, OS 2.11)
@@ -45,6 +59,16 @@ the user to clarify. Solr → point them at
 
 If they say "AWS" without specifying, ask. The difference matters:
 AOSS doesn't support snapshot restore, AOS does.
+
+For `intent_path == LEARN`, accept "I haven't decided yet" — that
+*is* the question they're trying to answer. Note it and move on;
+Phase 6 will lay out the trade-offs.
+
+For `intent_path == POC`, default to **self-managed OpenSearch** in
+the same compose / kind stack as the source. POCs that target a
+real AOS domain or AOSS collection are valid but no longer "POC" —
+push back to the user if they pick AOS/AOSS for a POC and check
+they meant it.
 
 ## Confirm
 

@@ -71,7 +71,10 @@ mid-run.
 
 ```
 LEARN     "What's involved in migrating?"
-          → 0 → 1 → 6 (planning report only, no clusters touched)
+          → 0 → 1 → techniques.md → 6
+          (planning report only, no clusters touched.
+           Phase 1 is lightweight — see 01-interview.md for the
+           LEARN-specific prompts.)
 
 POC       "Show me how it works locally"
           → 0 → 1 → 3 → 4 → 5 → 6

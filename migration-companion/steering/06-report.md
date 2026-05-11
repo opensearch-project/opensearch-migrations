@@ -17,6 +17,27 @@ If you're past 2 pages on any path, you're padding.
 
 ## Sections (use these names verbatim)
 
+For **LEARN** the report is planning-only — no migration ran. Use
+these sections instead of the default set:
+
+1. **Verdict** — One sentence: where they're starting from, what
+   the most likely path is, whether anything is a hard blocker.
+   Example: "ES 7.17-ish source to AOS 2.x target: RFS via
+   Migration Assistant is the default; no hard blockers."
+2. **What we covered** — bullets, what *concepts* you walked
+   through (which approaches from `techniques.md`, what trade-offs
+   matter most for their pair).
+3. **Trade-offs that matter for them** — the 2-4 rows from the
+   techniques matrix that are decision-relevant given what they
+   told you in Phase 1. Don't dump the whole matrix.
+4. **Open questions** — what they need to find out before they
+   can commit (snapshot access, AOS vs AOSS, source impact
+   tolerance, downtime budget).
+5. **Suggested next step** — usually "come back on the ANALYZE or
+   POC path once you've decided X, Y." Cite the sibling paths.
+
+For **POC**, **ANALYZE**, **MIGRATE** use the default sections:
+
 1. **Verdict** — One sentence at the top. Examples:
    - "ES 7.17 → AOS 2.13 migrated cleanly, 12.4M docs, 100% count
      parity, top-10 query parity on 5/5 sample queries."

@@ -20,7 +20,16 @@ don't make up placeholders.
 
 ## What you probe (live cluster)
 
-Run these in order, narrate each one:
+Prefer the console CLI when MA is already deployed (MIGRATE path,
+sometimes ANALYZE):
+
+```
+console clusters connection-check       # source + target reachability
+console clusters cat-indices             # canonical index summary
+```
+
+Falls through to raw HTTP otherwise. Run these in order, narrate
+each one:
 
 ```
 GET /                                 # version, cluster name, lucene
@@ -31,8 +40,15 @@ GET /_cluster/settings?include_defaults=false
 GET /_template, /_index_template      # legacy + composable
 ```
 
-For each user-data index (skip dot-prefixed system indices unless the
-user calls them out):
+If `_cat/indices` returns more than ~200 indices, **don't dump the
+whole list into context.** Summarize: total index count, total doc
+count, top 10 by `store.size`, count of dot-prefixed system
+indices. Then ask the user "which index patterns matter for the
+migration?" before walking per-index mappings. A 10K-index cluster
+hand-walked via `_mapping` will eat the agent's context for nothing.
+
+For each user-data index *the user has flagged* (skip dot-prefixed
+system indices unless the user calls them out):
 
 ```
 GET /<index>/_mapping
@@ -42,13 +58,29 @@ GET /<index>/_count
 
 ## What you probe (snapshot)
 
-Open the snapshot's `index.latest` / `index-N` blob and read:
-- Snapshot UUID, version, indices list.
-- Per-index `meta-<uuid>.dat` for mappings + settings.
+Don't try to hand-parse Lucene snapshot blobs. Use the MA tooling
+that already exists:
 
-If the snapshot was taken on a major version >2 ahead of the target,
-flag it as a hard incompatibility (e.g. ES 8 snapshot → OS 2.x is
-**not** directly restorable; RFS is required).
+  - If MA is deployed: `console snapshot status` and
+    `console metadata evaluate` read the snapshot's index
+    list, mappings, and per-index settings via the same code path
+    the migration uses. `evaluate` is the dry-run that previews
+    what `migrate` would do without writing to the target.
+    This is the source of truth.
+  - If MA isn't deployed yet but you have S3 access: register the
+    snapshot repo on a throwaway OS instance (or the future target,
+    if the version pair allows) and run
+    `GET /_snapshot/<repo>/<snapshot>` for metadata.
+  - If you only have S3 paths: read `index-N` and the per-index
+    `meta-<uuid>.dat` blobs as JSON / SMILE — but this is the path
+    of last resort. Lucene format details aren't part of this
+    skill.
+
+Cross-major incompatibility flag: if the source major is more than
+`target major + 1`, **or** the source is ES 8.x against any
+OpenSearch target, snapshot/restore is blocked. RFS is required.
+(See `packs/techniques.md` "Version compatibility — quick
+reference" for the full table.)
 
 ## Pack loading
 

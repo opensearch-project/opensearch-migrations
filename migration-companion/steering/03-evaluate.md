@@ -121,10 +121,11 @@ Walk it interactively. Order matters:
      `_reindex` is the simplest live option.
   5. Otherwise default to #2 RFS via MA.
 
-For the LOCAL POC path: default to #2 RFS via MA on kind. The POC's
-job is to teach the *real* tool, not the simplest tool. (See
-`TrafficCapture/dockerSolution/`.) Drop to #3 `_reindex` only if the user is on a
-machine that can't run kind + 12 GB of MA infra.
+For the LOCAL POC path: **default to #2 RFS** but let Phase 4 pick
+the *stack* (compose vs kind+helm). Don't pick the stack here —
+Phase 4 has the selector with resource budgets. Phase 3's job for a
+POC is just to confirm the technique. Drop to #3 `_reindex` only if
+the user is on a machine that can't run docker compose.
 
 ## What to propose to the user
 
