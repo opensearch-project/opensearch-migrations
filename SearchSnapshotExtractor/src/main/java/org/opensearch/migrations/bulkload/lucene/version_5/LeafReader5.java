@@ -275,6 +275,11 @@ public class LeafReader5 implements LuceneLeafReader {
             org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink sink) throws IOException {
         Terms terms = wrapped.terms(fieldName);
         if (terms == null) return;
+        // If positions weren't indexed (e.g. keyword/"not_analyzed" string, or text with
+        // index_options stripped below positions) there's nothing useful to stream — drop out
+        // so the caller falls through to the single-term path. Requesting POSITIONS on a
+        // postings list that doesn't carry them is undefined and can yield bogus sentinels.
+        if (!terms.hasPositions()) return;
         TermsEnum termsEnum = terms.iterator();
         BytesRef term;
         int[] positions    = new int[16];

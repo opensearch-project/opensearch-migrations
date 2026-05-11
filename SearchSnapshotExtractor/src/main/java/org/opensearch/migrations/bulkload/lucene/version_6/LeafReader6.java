@@ -19,6 +19,7 @@ import shadow.lucene6.org.apache.lucene.index.NumericDocValues;
 import shadow.lucene6.org.apache.lucene.index.PointValues;
 import shadow.lucene6.org.apache.lucene.index.PostingsEnum;
 import shadow.lucene6.org.apache.lucene.index.SegmentReader;
+import shadow.lucene6.org.apache.lucene.index.SortedDocValues;
 import shadow.lucene6.org.apache.lucene.index.SortedNumericDocValues;
 import shadow.lucene6.org.apache.lucene.index.SortedSetDocValues;
 import shadow.lucene6.org.apache.lucene.index.Terms;
@@ -136,10 +137,28 @@ public class LeafReader6 implements LuceneLeafReader {
         return switch (luceneType) {
             case NUMERIC -> DocValueFieldInfo.DocValueType.NUMERIC;
             case BINARY -> DocValueFieldInfo.DocValueType.BINARY;
+            // SORTED: single-valued keyword/string field — Lucene 6 stores it as SortedDocValues.
+            // Surfacing it lets keyword reverse-derivation (e.g. copy_to keyword target) hit the
+            // doc_values tier and return the full original term, instead of falling through to
+            // the points/terms tokenization path which would lossily split "joe smith" into "joe".
+            case SORTED -> DocValueFieldInfo.DocValueType.SORTED;
             case SORTED_NUMERIC -> DocValueFieldInfo.DocValueType.SORTED_NUMERIC;
             case SORTED_SET -> DocValueFieldInfo.DocValueType.SORTED_SET;
-            case SORTED, NONE -> DocValueFieldInfo.DocValueType.NONE;
+            case NONE -> DocValueFieldInfo.DocValueType.NONE;
         };
+    }
+
+    @Override
+    public Object getSortedValue(int docId, String fieldName) throws IOException {
+        SortedDocValues dv = wrapped.getSortedDocValues(fieldName);
+        if (dv != null) {
+            // Lucene 6 SortedDocValues uses random-access get(docId); ord -1 means no value.
+            int ord = dv.getOrd(docId);
+            if (ord >= 0) {
+                return bytesRefToString(dv.lookupOrd(ord));
+            }
+        }
+        return null;
     }
 
     @Override
@@ -272,4 +291,5 @@ public class LeafReader6 implements LuceneLeafReader {
         }
         return null;
     }
+
 }

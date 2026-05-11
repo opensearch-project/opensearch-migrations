@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -44,11 +45,51 @@ public class SourceReconstructor {
         if (fieldName.startsWith("_")) {
             return true;
         }
+        // Unified source-exclusion gate: strips copy_to targets (index-time-only, never in
+        // _source) AND honours index-level _source.includes / _source.excludes. Cheap no-op
+        // when the mapping declared neither directive.
+        if (mappingContext != null && mappingContext.isSourceExcluded(fieldName)) {
+            return true;
+        }
         if (!fieldName.contains(".")) {
             return false;
         }
         // Dotted field: keep it only if the mapping recognizes it as an object subfield.
         return mappingContext == null || mappingContext.getFieldInfo(fieldName) == null;
+    }
+
+    /**
+     * Returns {@code true} when {@code fieldName} is a dotted path whose ancestor segment already
+     * resolves to a non-empty {@code List<Map>} in {@code target} — i.e. the seed's object-array
+     * structure is already in place and we're filling subfields into it. This is the legitimate
+     * carve-out from a {@code _source.includes}/{@code _source.excludes} suppression: when the
+     * customer's mapping declared {@code _source.includes=["files.name"]}, the {@code files}
+     * object-array IS in scope (the parent path is included). Subsequent reverse-derivation of
+     * sibling subfields (e.g. {@code files.size}) is filling out the kept structural element, not
+     * resurrecting an excluded top-level field. The caller still consults {@link #shouldSkipField}
+     * for top-level paths and for paths whose ancestor isn't an existing object-array seed.
+     */
+    @SuppressWarnings("unchecked")
+    private static boolean descendsIntoExistingObjectArray(Map<String, Object> target, String fieldName) {
+        if (!fieldName.contains(".")) {
+            return false;
+        }
+        String[] parts = fieldName.split("\\.");
+        Map<String, Object> cursor = target;
+        for (int i = 0; i < parts.length - 1; i++) {
+            Object next = cursor.get(parts[i]);
+            if (next instanceof java.util.List<?> list && isListOfMaps(list)) {
+                // Only treat as an object-array carve-out when the remainder is a SINGLE leaf
+                // segment — distributeSubfieldAcrossList only handles single-leaf distribution.
+                return i == parts.length - 2;
+            }
+            if (next instanceof Map<?, ?>) {
+                cursor = (Map<String, Object>) next;
+                continue;
+            }
+            return false;
+        }
+        return false;
     }
 
     /**
@@ -342,7 +383,9 @@ public class SourceReconstructor {
         // 1. Stored fields (exact values when present)
         for (var field : document.getFields()) {
             String fieldName = field.name();
-            if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+            if ((shouldSkipField(fieldName, mappingContext)
+                    && !descendsIntoExistingObjectArray(target, fieldName))
+                    || hasNested(target, fieldName)) {
                 continue;
             }
             FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
@@ -355,7 +398,9 @@ public class SourceReconstructor {
         // 2. Doc values (fast, lossless for typed fields)
         for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
             String fieldName = fieldInfo.name();
-            if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+            if ((shouldSkipField(fieldName, mappingContext)
+                    && !descendsIntoExistingObjectArray(target, fieldName))
+                    || hasNested(target, fieldName)) {
                 continue;
             }
             FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
@@ -375,7 +420,9 @@ public class SourceReconstructor {
         // 3. Points / indexed terms fallback (recovers indexed-only numeric/boolean/keyword)
         if (mappingContext != null) {
             for (String fieldName : mappingContext.getFieldNames()) {
-                if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+                if ((shouldSkipField(fieldName, mappingContext)
+                        && !descendsIntoExistingObjectArray(target, fieldName))
+                        || hasNested(target, fieldName)) {
                     continue;
                 }
                 FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
@@ -394,7 +441,9 @@ public class SourceReconstructor {
         // 4. Mapping-level constant values (constant_keyword stores its value in the mapping, not the segment)
         if (mappingContext != null) {
             for (String fieldName : mappingContext.getFieldNames()) {
-                if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+                if ((shouldSkipField(fieldName, mappingContext)
+                        && !descendsIntoExistingObjectArray(target, fieldName))
+                        || hasNested(target, fieldName)) {
                     continue;
                 }
                 FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
@@ -403,7 +452,124 @@ public class SourceReconstructor {
                 }
             }
         }
+
+        // 5. Reverse-derive from copy_to targets (last-resort fallback).
+        //
+        // copy_to makes target fields indexed-only mirrors of the source's value. When the source
+        // field's own stored/doc_values/points chain returned nothing (e.g. source had index:true
+        // but store:false and no doc_values), we can still recover its value by reading any of its
+        // copy_to TARGETS — which ARE indexed with real data. Targets are ranked by lossiness:
+        // keyword-class (exact) before text (tokenized/analyzed recovery only).
+        //
+        // Value extraction replays the same stored -> doc_values -> points/terms chain used for
+        // primary-source recovery, but keyed on the TARGET's field name. The first non-null hit
+        // wins and is routed into the SOURCE's path via putNested. The target itself is already
+        // filtered by shouldSkipField in passes 1-4 so it never appears in _source.
+        //
+        // We iterate only fields with declared copy_to edges, not the full mapping — for indices
+        // with thousands of leaves, this skips the hasNested/shouldSkipField overhead on every
+        // field that has nothing to reverse-derive from anyway.
+        if (mappingContext != null) {
+            for (String sourceField : mappingContext.getCopyToSourceFields()) {
+                if (hasNested(target, sourceField)) {
+                    continue;
+                }
+                // Respect _source.excludes / .includes for the SOURCE field itself. If the
+                // user told ES not to store "secret" in _source, we must not resurrect it
+                // via its copy_to target. shouldSkipField covers the leading-underscore and
+                // copy_to-target cases too, so the same gate is reusable here.
+                if (shouldSkipField(sourceField, mappingContext)) {
+                    continue;
+                }
+                List<String> rankedTargets = mappingContext.getCopyToTargets(sourceField);
+                if (rankedTargets.isEmpty()) {
+                    continue;
+                }
+                FieldMappingInfo sourceMapping = mappingContext.getFieldInfo(sourceField);
+                for (String targetField : rankedTargets) {
+                    Object recovered = probeFieldValue(reader, docId, document, targetField,
+                            mappingContext, termIndex);
+                    if (recovered == null) {
+                        continue;
+                    }
+                    // Route through the SOURCE's mapping for final JSON shape (date formatting,
+                    // scaled_float conversion, IP rendering, etc.). If the source mapping is
+                    // missing, the raw recovered value is used verbatim.
+                    Object converted = sourceMapping != null
+                            ? convertFallbackValue(recovered, sourceMapping)
+                            : recovered;
+                    if (converted != null) {
+                        modified |= putNested(target, sourceField, converted);
+                        break; // first-hit wins; stop iterating targets.
+                    }
+                }
+            }
+        }
+
         return modified;
+    }
+
+    /**
+     * Replays the stored -> doc_values -> points/terms chain for a single field name and returns
+     * the first non-null value found, or {@code null} if nothing matches. Used by the copy_to
+     * reverse-derivation path (pass 5) to probe a TARGET field without mutating the reconstructed
+     * source map — the caller decides how to route and convert the value.
+     *
+     * Unlike the primary passes, this does NOT apply type conversion — it returns the raw value
+     * from whichever tier hit. The caller runs it through the SOURCE field's mapping for final
+     * JSON shaping.
+     */
+    private static Object probeFieldValue(LuceneLeafReader reader, int docId, LuceneDocument document,
+            String fieldName, FieldMappingContext mappingContext, SegmentTermIndex termIndex) throws IOException {
+        FieldMappingInfo targetMapping = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
+
+        // Tier 1: stored field lookup.
+        for (var field : document.getFields()) {
+            if (fieldName.equals(field.name())) {
+                Object value = getStoredFieldValue(field, targetMapping);
+                if (value != null) {
+                    return value;
+                }
+            }
+        }
+
+        // Tier 2: doc_values lookup.
+        for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
+            if (!fieldName.equals(fieldInfo.name())) {
+                continue;
+            }
+            if (targetMapping != null && !targetMapping.docValues()) {
+                break;
+            }
+            Object value = reader.getDocValue(docId, fieldInfo);
+            if (value != null) {
+                Object converted = convertDocValue(value, fieldInfo, targetMapping);
+                if (converted != null) {
+                    return converted;
+                }
+            }
+            break;
+        }
+
+        // Tier 3: points / indexed-terms fallback. Use the target's type if known so STRING
+        // targets go through the token-stream concatenation path (see LuceneLeafReader.getValueFromPointsOrTerms
+        // STRING branch) — that's what delivers the "joe smith joe x com" best-effort text recovery.
+        if (targetMapping != null) {
+            var fallback = reader.getValueFromPointsOrTerms(docId, fieldName, targetMapping.type(), termIndex);
+            if (fallback.isPresent()) {
+                Object converted = convertFallbackValue(fallback.get(), targetMapping);
+                if (converted != null) {
+                    return converted;
+                }
+            }
+        }
+
+        // Tier 4: mapping-level constant (constant_keyword target).
+        if (targetMapping != null && targetMapping.constantValue() != null) {
+            return targetMapping.constantValue();
+        }
+
+        return null;
     }
 
     /** Extracts value from stored field, converting booleans stored as T/F and binary as base64 */

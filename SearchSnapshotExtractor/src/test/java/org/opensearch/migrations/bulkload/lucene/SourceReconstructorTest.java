@@ -16,6 +16,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -26,8 +27,7 @@ import static org.mockito.Mockito.when;
  * Comprehensive unit tests for {@link SourceReconstructor} covering every supported
  * field type across every reconstruction pathway the class supports.
  *
- * The reconstructor has four pathways, each corresponding to different Lucene /
- * Elasticsearch eras:
+ * The reconstructor has four pathways, each corresponding to different Lucene eras:
  *
  *   1. Stored fields (all versions) — {@link #reconstructFromStoredFields}
  *      Number / byte[] / String leaf values harvested from {@code _source}-less
@@ -914,7 +914,7 @@ class SourceReconstructorTest {
     }
 
     // ==========================================================================================
-    // 9. shouldSkipField — internal Elasticsearch fields (_id, _source, _type, etc) never appear.
+    // 9. shouldSkipField — internal fields (_id, _source, _type, etc) never appear.
     // ==========================================================================================
 
     @Test
@@ -1247,6 +1247,246 @@ class SourceReconstructorTest {
         JsonNode tree = MAPPER.readTree(json);
         assertEquals("alice@example.com", tree.path("user").path("email").asText(),
             "dotted subfield from doc_values path must nest: " + json);
+    }
+
+    // ==========================================================================================
+    // 7. COPY_TO HANDLING
+    //
+    // ES's `copy_to: ["target1", "target2"]` mapping directive makes target1/target2 indexed
+    // copies of the source field's value. Targets are index-time only — they NEVER appear in
+    // the document's `_source`. Before this fix, the sourceless reconstructor treated every
+    // mapping leaf as a recoverable source field and emitted `users.to`, `users.all` etc. in
+    // the reconstructed _source even though they were never in the original doc.
+    //
+    // Two behaviors locked in here:
+    //   (a) copy_to TARGETS are filtered from output regardless of recovery path.
+    //   (b) when a source field has no retrievable value from its own stored/docvalues/points
+    //       chain, the reconstructor reverse-derives from its copy_to targets, preferring
+    //       less-lossy targets (keyword before text).
+    // ==========================================================================================
+
+    /** Build a FieldMappingContext by parsing a JSON mapping snippet (exercises the real copy_to parse path). */
+    private static FieldMappingContext contextFromJson(String propertiesJson) {
+        try {
+            JsonNode root = MAPPER.readTree("{\"properties\":" + propertiesJson + "}");
+            return new FieldMappingContext(root);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Build a FieldMappingContext with an explicit _source filter alongside the properties. */
+    private static FieldMappingContext contextFromJsonWithSourceFilter(
+            String propertiesJson, String sourceFilterJson) {
+        try {
+            JsonNode root = MAPPER.readTree(
+                "{\"_source\":" + sourceFilterJson + ",\"properties\":" + propertiesJson + "}");
+            return new FieldMappingContext(root);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void isSourceExcluded_supportsBareStarPrefixSuffixGlobs() {
+        // Jugal review: matchesGlob handled `*`, `.*`, `.**` but plain bare-`*` patterns
+        // (e.g. `prefix*`, `*suffix`, `prefix*suffix`) fell through to literal match. ES
+        // _source filtering supports those, so they must match here too.
+        var ctx = contextFromJsonWithSourceFilter(
+            "{\"a\":{\"type\":\"keyword\"}}",
+            "{\"excludes\":[\"secret*\",\"*_internal\",\"tmp*data\"]}"
+        );
+        // prefix* — `secret*`
+        assertTrue(ctx.isSourceExcluded("secret"), "prefix glob must match exact stem");
+        assertTrue(ctx.isSourceExcluded("secret_token"), "prefix glob must match suffix-extended path");
+        assertFalse(ctx.isSourceExcluded("public_secret"), "prefix glob must not match in-middle stem");
+        // *suffix — `*_internal`
+        assertTrue(ctx.isSourceExcluded("config_internal"), "suffix glob must match prefix-extended path");
+        assertTrue(ctx.isSourceExcluded("_internal"), "suffix glob must match exact suffix");
+        assertFalse(ctx.isSourceExcluded("internal_config"), "suffix glob must not match prefix-positioned stem");
+        // prefix*suffix — `tmp*data`
+        assertTrue(ctx.isSourceExcluded("tmpdata"), "prefix*suffix with empty middle must match");
+        assertTrue(ctx.isSourceExcluded("tmp_user_data"), "prefix*suffix must span middle content");
+        assertFalse(ctx.isSourceExcluded("tmp_user"), "prefix*suffix requires the suffix");
+        assertFalse(ctx.isSourceExcluded("user_data"), "prefix*suffix requires the prefix");
+    }
+
+    @Test
+    void getCopyToSourceFields_returnsOnlyFieldsWithCopyToEdges() {
+        // Jugal review: pass-5 reverse-derivation should iterate only fields that declare
+        // copy_to, not the whole mapping. Verify the new accessor returns exactly that set.
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":\"users.from\"},"
+            + "\"sender\":{\"type\":\"text\",\"copy_to\":[\"users.sender\",\"users.all\"]},"
+            + "\"subject\":{\"type\":\"keyword\"}," // NO copy_to
+            + "\"body\":{\"type\":\"text\"}," // NO copy_to
+            + "\"users\":{\"properties\":{"
+            + "\"from\":{\"type\":\"keyword\"},"
+            + "\"sender\":{\"type\":\"keyword\"},"
+            + "\"all\":{\"type\":\"text\"}"
+            + "}}}"
+        );
+        var sources = ctx.getCopyToSourceFields();
+        assertEquals(java.util.Set.of("from", "sender"), java.util.Set.copyOf(sources),
+            "only fields with copy_to edges should appear: " + sources);
+        // Sanity: total mapping has more fields than copy_to sources.
+        assertTrue(ctx.getFieldNames().size() > sources.size(),
+            "copy_to source set should be a strict subset of all mapped fields");
+    }
+
+    @Test
+    void fieldMappingContext_parsesCopyToString() {
+        // copy_to value can be a single string per ES docs.
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":\"users_all\"},"
+            + "\"users_all\":{\"type\":\"keyword\"}}"
+        );
+        assertTrue(ctx.isCopyToTarget("users_all"), "single-string copy_to target must register");
+        List<String> targets = ctx.getCopyToTargets("from");
+        assertEquals(List.of("users_all"), targets);
+        assertEquals(List.of("from"), ctx.getCopyToSources("users_all"));
+    }
+
+    @Test
+    void fieldMappingContext_parsesCopyToArray() {
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":[\"users.from\",\"users.all\"]},"
+            + "\"users\":{\"properties\":{"
+            + "\"from\":{\"type\":\"keyword\"},"
+            + "\"all\":{\"type\":\"text\"}"
+            + "}}}"
+        );
+        assertTrue(ctx.isCopyToTarget("users.from"));
+        assertTrue(ctx.isCopyToTarget("users.all"));
+        // Ranking: keyword target should come BEFORE text target (lossiness).
+        List<String> ranked = ctx.getCopyToTargets("from");
+        assertEquals(List.of("users.from", "users.all"), ranked,
+            "keyword target must rank before text target: " + ranked);
+    }
+
+    @Test
+    void fieldMappingContext_copyToRankingPrefersKeywordOverText() {
+        // Mapping declares targets in text-first order; ranking must still place keyword first.
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":[\"users.all\",\"users.from\"]},"
+            + "\"users\":{\"properties\":{"
+            + "\"all\":{\"type\":\"text\"},"
+            + "\"from\":{\"type\":\"keyword\"}"
+            + "}}}"
+        );
+        List<String> ranked = ctx.getCopyToTargets("from");
+        assertEquals(List.of("users.from", "users.all"), ranked,
+            "keyword target must outrank text target regardless of declaration order: " + ranked);
+    }
+
+    @Test
+    void shouldSkipField_copyToTargets_strippedFromOutput() {
+        // Source field `from` has copy_to ["users.all"]. Both are present in the segment as
+        // stored fields. The reconstruction must emit `from` but NOT `users.all`.
+        var reader = storedOnlyReader();
+        var doc = document(
+            storedString("from", "joe@example.com"),
+            storedString("users.all", "joe@example.com")
+        );
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":\"users.all\"},"
+            + "\"users\":{\"properties\":{\"all\":{\"type\":\"text\"}}}}"
+        );
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        JsonNode tree = parseField(json, "from") == null ? null : MAPPER.valueToTree(json);
+        assertEquals("joe@example.com", parseField(json, "from").asText());
+        try {
+            JsonNode full = MAPPER.readTree(json);
+            assertTrue(full.path("users").isMissingNode() || !full.path("users").has("all"),
+                "copy_to target `users.all` must NOT appear in reconstructed _source: " + json);
+        } catch (IOException e) { throw new RuntimeException(e); }
+    }
+
+    @Test
+    void reverseDerive_sourceRecoveredFromCopyToTarget_whenSourceHasNoData() {
+        // Source field `from` has neither stored nor doc_values (indexed-only with no recovery).
+        // Target `users.from` (keyword) has stored field with the verbatim value.
+        // Reconstruction must pull the value from the target and emit it under the source's path.
+        var reader = storedOnlyReader();
+        var doc = document(
+            storedString("users.from", "joe@example.com")
+            // NOTE: no stored field for `from`.
+        );
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":\"users.from\"},"
+            + "\"users\":{\"properties\":{\"from\":{\"type\":\"keyword\"}}}}"
+        );
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertNotNull(json, "reconstruction produced null output");
+        assertEquals("joe@example.com", parseField(json, "from").asText(),
+            "source `from` must be reverse-derived from copy_to target `users.from`: " + json);
+        try {
+            JsonNode full = MAPPER.readTree(json);
+            assertTrue(full.path("users").isMissingNode() || !full.path("users").has("from"),
+                "copy_to target `users.from` must still be stripped from output: " + json);
+        } catch (IOException e) { throw new RuntimeException(e); }
+    }
+
+    @Test
+    void reverseDerive_prefersLessLossyTarget_keywordBeforeText() {
+        // Two targets: `users.from` (keyword, exact) and `users.all` (text, tokenized).
+        // Both carry data for this doc. Reconstruction must pick the keyword target.
+        var reader = storedOnlyReader();
+        var doc = document(
+            storedString("users.from", "joe@example.com"),
+            storedString("users.all", "joe@example.com mary@example.com")
+        );
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":[\"users.all\",\"users.from\"]},"
+            + "\"users\":{\"properties\":{"
+            + "\"from\":{\"type\":\"keyword\"},"
+            + "\"all\":{\"type\":\"text\"}"
+            + "}}}"
+        );
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertEquals("joe@example.com", parseField(json, "from").asText(),
+            "less-lossy keyword target must win over text target: " + json);
+    }
+
+    @Test
+    void reverseDerive_fallsBackToTextTarget_whenKeywordHasNothing() {
+        // Only `users.all` (text) has data. Reverse-derive must still fire and emit the
+        // tokenized best-effort value rather than dropping the source field silently.
+        // (Per Andre: "Probe anything including text, accept tokenized-garbage".)
+        var reader = storedOnlyReader();
+        var doc = document(
+            storedString("users.all", "joe@example.com mary@example.com")
+        );
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":[\"users.from\",\"users.all\"]},"
+            + "\"users\":{\"properties\":{"
+            + "\"from\":{\"type\":\"keyword\"},"
+            + "\"all\":{\"type\":\"text\"}"
+            + "}}}"
+        );
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertNotNull(parseField(json, "from"),
+            "text target must be used as last-resort fallback: " + json);
+        assertEquals("joe@example.com mary@example.com", parseField(json, "from").asText(),
+            "text-target recovery preserves full analyzed token stream: " + json);
+    }
+
+    @Test
+    void reverseDerive_skippedWhenSourceAlreadyRecovered() {
+        // Source has its own stored value. Even if targets also have data, the source's own
+        // value wins (copy_to probe is LAST in the fallback chain).
+        var reader = storedOnlyReader();
+        var doc = document(
+            storedString("from", "original@source.com"),
+            storedString("users.from", "wrong@target.com")
+        );
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":\"users.from\"},"
+            + "\"users\":{\"properties\":{\"from\":{\"type\":\"keyword\"}}}}"
+        );
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertEquals("original@source.com", parseField(json, "from").asText(),
+            "source's own stored value must win over copy_to target: " + json);
     }
 
     // ==========================================================================================
