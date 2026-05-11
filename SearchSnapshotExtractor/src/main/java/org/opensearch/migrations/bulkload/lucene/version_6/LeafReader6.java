@@ -293,12 +293,7 @@ public class LeafReader6 implements LuceneLeafReader {
         return null;
     }
 
-    /** See {@link LuceneLeafReader#streamFieldPostings}. Lucene 6 ports the Lucene 7 path 1:1
-     * — same Terms/TermsEnum/PostingsEnum API. Without this override, analyzed-text
-     * reverse-derivation on ES 5.x indices skipped the position-aware path and fell back to
-     * single-term recovery, returning the first alphabetical token (e.g. "joe" instead of
-     * "joe smith") for any text-typed copy_to source whose own field had no stored / doc_values
-     * chain. */
+    /** See {@link LuceneLeafReader#streamFieldPostings}. */
     @Override
     public void streamFieldPostings(String fieldName,
             org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink sink) throws IOException {
