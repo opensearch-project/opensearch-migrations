@@ -1141,6 +1141,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                     },
+                    "transformsSource": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                      "description": "Name of an entry in top-level transformsSources to mount into the metadata-migration container. The image is mounted read-only at /transforms; pair with transformsEntrypoint to point the tool at a config file inside it."
+                    },
+                    "transformsEntrypoint": {
+                      "type": "string",
+                      "default": "/transforms/metadata-transformer.json"
+                    },
                     "enableSourcelessMigrations": {
                       "type": "boolean",
                       "default": false
@@ -1262,6 +1271,19 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "replayer"
                       ],
                       "changeRestriction": "impossible"
+                    },
+                    "transformsSource": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                      "description": "Name of an entry in top-level transformsSources to mount into the RFS document-backfill container. The image is mounted read-only at /transforms; pair with transformsEntrypoint to point RFS at a doc transformer config file inside it.",
+                      "checksumFor": [
+                        "replayer"
+                      ],
+                      "changeRestriction": "impossible"
+                    },
+                    "transformsEntrypoint": {
+                      "type": "string",
+                      "default": "/transforms/doc-transformer.json"
                     },
                     "documentsPerBulkRequest": {
                       "type": "number",
@@ -1802,6 +1824,16 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
                       "changeRestriction": "gated"
+                    },
+                    "transformsSource": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                      "description": "Name of an entry in top-level transformsSources to mount into the replayer container. The image is mounted read-only at /transforms; pair with transformsEntrypoint to point the replayer at a config file inside it.",
+                      "changeRestriction": "gated"
+                    },
+                    "transformsEntrypoint": {
+                      "type": "string",
+                      "default": "/transforms/request-transformer.json"
                     },
                     "tupleTransformerConfig": {
                       "type": "string",
@@ -2594,6 +2626,16 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "string",
                         "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
                       },
+                      "transformsSource": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                        "description": "Name of an entry in top-level transformsSources to mount into the metadata-migration container. The image is mounted read-only at /transforms; pair with transformsEntrypoint to point the tool at a config file inside it."
+                      },
+                      "transformsEntrypoint": {
+                        "type": "string",
+                        "default": "/transforms/metadata-transformer.json",
+                        "description": "Path inside the mounted transforms image (default mount point /transforms) for the metadata transformer config file. Only meaningful when transformsSource is set."
+                      },
                       "enableSourcelessMigrations": {
                         "type": "boolean",
                         "default": false,
@@ -2737,6 +2779,24 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "docTransformerConfigFile": {
                         "type": "string",
                         "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
+                      },
+                      "transformsSource": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                        "description": "Name of an entry in top-level transformsSources to mount into the RFS document-backfill container. The image is mounted read-only at /transforms; pair with transformsEntrypoint to point RFS at a doc transformer config file inside it.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
+                      },
+                      "transformsEntrypoint": {
+                        "type": "string",
+                        "default": "/transforms/doc-transformer.json",
+                        "description": "Path inside the mounted transforms image (default mount point /transforms) for the document transformer config file. Only meaningful when transformsSource is set.",
                         "checksumFor": [
                           "replayer"
                         ],
@@ -3392,6 +3452,18 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
                     "changeRestriction": "gated"
                   },
+                  "transformsSource": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                    "description": "Name of an entry in top-level transformsSources to mount into the replayer container. The image is mounted read-only at /transforms; pair with transformsEntrypoint to point the replayer at a config file inside it.",
+                    "changeRestriction": "gated"
+                  },
+                  "transformsEntrypoint": {
+                    "type": "string",
+                    "default": "/transforms/request-transformer.json",
+                    "description": "Path inside the mounted transforms image (default mount point /transforms) for the request transformer config file. Only meaningful when transformsSource is set.",
+                    "changeRestriction": "gated"
+                  },
                   "tupleTransformerConfig": {
                     "type": "string",
                     "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
@@ -3441,6 +3513,35 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         "replayers"
       ],
       "description": "Traffic capture and replay configuration. Proxies capture live traffic from source clusters to Kafka, and replayers consume from Kafka to replay against target clusters. All top-level items are independent, but replayers can declare dependencies on snapshot migrations to ensure data consistency."
+    },
+    "transformsSources": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "image": {
+            "type": "string",
+            "minLength": 1,
+            "description": "OCI image reference holding transformer artifacts (jars + an optional config file). Pulled by the kubelet and mounted read-only at /transforms in the consuming container. Format is the standard image reference (e.g. 'ghcr.io/acme/my-transforms:1.2.3')."
+          },
+          "pullPolicy": {
+            "type": "string",
+            "enum": [
+              "Always",
+              "IfNotPresent",
+              "Never"
+            ],
+            "default": "IfNotPresent",
+            "description": "Pull policy applied to the image volume. Mirrors the kubelet imagePullPolicy semantics."
+          }
+        },
+        "required": [
+          "image"
+        ],
+        "description": "OCI artifact reference describing a transformer bundle to mount into a migration tool's container."
+      },
+      "default": {},
+      "description": "Named registry of OCI artifacts that hold transformer JARs and configuration. Tools (replayer, RFS, metadata) reference an entry here by name via their transformsSource field, and the workflow mounts the image read-only at /transforms inside the relevant container. Requires Kubernetes >= 1.35 (image volume source GA)."
     }
   },
   "required": [

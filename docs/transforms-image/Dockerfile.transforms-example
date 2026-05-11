@@ -1,0 +1,45 @@
+# Example transforms image — produces an OCI artifact that can be mounted as
+# an `image` volume on the replayer / RFS / metadata-migration pods (Kubernetes 1.35+).
+#
+# Build:
+#   docker build -f docker/Dockerfile.transforms-example -t my-registry/my-transforms:0.1.0 .
+#
+# Push to a registry the cluster nodes can pull from:
+#   docker push my-registry/my-transforms:0.1.0
+#
+# Reference from a migration spec under `transformsSources`:
+#
+#   transformsSources:
+#     myTransforms:
+#       image: my-registry/my-transforms:0.1.0
+#       imagePullPolicy: IfNotPresent
+#       entrypoint: /transforms/replayer-config.yaml
+#
+#   traffic:
+#     replayers:
+#       primary:
+#         replayerConfig:
+#           transformsSource: myTransforms
+#
+# At runtime the orchestration mounts the image read-only at `/transforms` and
+# exposes `TRANSFORMS_ENTRYPOINT=/transforms/replayer-config.yaml` to the pod.
+#
+# The image only needs to contain your config + JARs at well-known paths under
+# `/transforms`. `scratch` is ideal because OCI image volumes don't execute the
+# image — they just expose its rootfs as a read-only filesystem.
+
+FROM scratch
+
+# Copy your transformer JARs and config files into the image.
+# Example layout:
+#
+#   /transforms/replayer-config.yaml      <- top-level entrypoint, picked up via TRANSFORMS_ENTRYPOINT
+#   /transforms/lib/my-transformer.jar    <- referenced from the YAML
+#   /transforms/lib/another-transform.jar
+#
+# Adjust the COPY sources below to match your build output.
+
+COPY transforms/ /transforms/
+
+# OCI image volume sources require no CMD / ENTRYPOINT — the image is never
+# executed, its filesystem is just bind-mounted into the consuming pod.

@@ -85,11 +85,27 @@
             {
               "name": "taskK8sLabel",
               "value": "{{=((inputs.parameters.commandMode == 'evaluate') ? ('metadataEvaluate') : ('metadataMigrate'))}}"
+            },
+            {
+              "name": "transformsImage",
+              "value": "registry.k8s.io/pause:3.10"
+            },
+            {
+              "name": "transformsImagePullPolicy",
+              "value": "IfNotPresent"
+            },
+            {
+              "name": "transformsEntrypoint",
+              "value": ""
             }
           ]
         },
         "container": {
           "env": [
+            {
+              "name": "TRANSFORMS_ENTRYPOINT",
+              "value": "{{inputs.parameters.transformsEntrypoint}}"
+            },
             {
               "name": "AWS_SHARED_CREDENTIALS_FILE",
               "value": "{{=((sprig.dig('repoConfig', 'useLocalStack', false, fromJSON(inputs.parameters.snapshotConfig))) ? ('/config/credentials/configuration') : (''))}}"
@@ -144,6 +160,11 @@
               "name": "test-creds",
               "mountPath": "/config/credentials",
               "readOnly": true
+            },
+            {
+              "name": "transforms-artifacts",
+              "mountPath": "/transforms",
+              "readOnly": true
             }
           ]
         },
@@ -165,6 +186,13 @@
             "configMap": {
               "name": "localstack-test-creds",
               "optional": true
+            }
+          },
+          {
+            "name": "transforms-artifacts",
+            "image": {
+              "reference": "{{inputs.parameters.transformsImage}}",
+              "pullPolicy": "{{inputs.parameters.transformsImagePullPolicy}}"
             }
           }
         ],

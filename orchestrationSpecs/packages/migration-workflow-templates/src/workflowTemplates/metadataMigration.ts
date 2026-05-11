@@ -203,6 +203,9 @@ export const MetadataMigration = WorkflowBuilder.create({
             expr.literal("metadataEvaluate"),
             expr.literal("metadataMigrate")
         ))
+        .addOptionalInput("transformsImage", c => "registry.k8s.io/pause:3.10")
+        .addOptionalInput("transformsImagePullPolicy", c => "IfNotPresent" as const)
+        .addOptionalInput("transformsEntrypoint", c => "")
 
         .addContainer(b => b
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
@@ -214,8 +217,17 @@ export const MetadataMigration = WorkflowBuilder.create({
                     },
                     mountPath: "/config/credentials",
                     readOnly: true
+                },
+                'transforms-artifacts': {
+                    image: {
+                        reference: b.inputs.transformsImage,
+                        pullPolicy: b.inputs.transformsImagePullPolicy
+                    },
+                    mountPath: "/transforms",
+                    readOnly: true
                 }
             })
+            .addEnvVar("TRANSFORMS_ENTRYPOINT", b.inputs.transformsEntrypoint)
             .addEnvVar("AWS_SHARED_CREDENTIALS_FILE",
                 expr.ternary(
                     expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),

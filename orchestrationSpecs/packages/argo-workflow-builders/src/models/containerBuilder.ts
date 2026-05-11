@@ -232,12 +232,20 @@ export class ContainerBuilder<
     }
 
     getBody() {
-        const volumes = Object.entries(this.volumeScope).map(([name, config]) => ({
-            name,
-            configMap: config.configMap
-        }));
+        const volumes = Object.entries(this.volumeScope).map(([name, config]) => {
+            // Pick whichever volume source the caller supplied. Today we
+            // support `configMap`, `secret`, and `image` (Kubernetes 1.35+
+            // OCI artifact volumes). The renderer skips `undefined`
+            // properties via the spread, so unused source keys are dropped
+            // before reaching transformExpressionsDeep.
+            const source: Record<string, unknown> = {};
+            if (config.configMap !== undefined) source.configMap = config.configMap;
+            if (config.secret !== undefined)    source.secret    = config.secret;
+            if (config.image !== undefined)     source.image     = config.image;
+            return { name, ...source };
+        });
         const volumeMounts = Object.entries(this.volumeScope).map(([name, config]) => ({
-        name,
+            name,
             mountPath: config.mountPath,
             readOnly: config.readOnly
         }));

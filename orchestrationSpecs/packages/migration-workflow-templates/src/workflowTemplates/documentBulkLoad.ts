@@ -28,6 +28,7 @@ import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {makeRepoParamDict} from "./metadataMigration";
 import {
     setupLog4jConfigForContainer,
+    setupTransformsForContainer,
     setupTestCredsForContainer
 } from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
@@ -113,6 +114,11 @@ function getRfsDeploymentManifest
 
     rfsImageName: BaseExpression<string>,
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
+
+    transformsImage: BaseExpression<string>,
+    transformsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
+    transformsEntrypoint: BaseExpression<string>,
+
     resources: BaseExpression<ResourceRequirementsType>,
     crdName: BaseExpression<string>,
     crdUid: BaseExpression<string>,
@@ -158,13 +164,18 @@ function getRfsDeploymentManifest
         resources: makeDirectTypeProxy(args.resources)
     };
 
-    const finalContainerDefinition = setupTestCredsForContainer(
-        args.useLocalstackAwsCreds,
-        setupLog4jConfigForContainer(
-            useCustomLogging,
-            args.loggingConfigMap,
-            {container: baseContainerDefinition, volumes: []},
-            args.jvmArgs
+    const finalContainerDefinition = setupTransformsForContainer(
+        args.transformsImage,
+        args.transformsImagePullPolicy,
+        args.transformsEntrypoint,
+        setupTestCredsForContainer(
+            args.useLocalstackAwsCreds,
+            setupLog4jConfigForContainer(
+                useCustomLogging,
+                args.loggingConfigMap,
+                {container: baseContainerDefinition, volumes: []},
+                args.jvmArgs
+            )
         )
     );
     const deploymentName = getRfsDeploymentName(args.sessionName);
@@ -347,6 +358,9 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("snapshotK8sLabel", typeToken<string>())
         .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
         .addOptionalInput("taskK8sLabel", c => "reindexFromSnapshot")
+        .addOptionalInput("transformsImage", c => "registry.k8s.io/pause:3.10")
+        .addOptionalInput("transformsImagePullPolicy", c => "IfNotPresent" as IMAGE_PULL_POLICY)
+        .addOptionalInput("transformsEntrypoint", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addResourceTask(b => b
@@ -363,6 +377,9 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     coordinatorBasicCredsSecretNameOrEmpty: b.inputs.coordinatorBasicCredsSecretNameOrEmpty,
                     rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
                     rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
+                    transformsImage: b.inputs.transformsImage,
+                    transformsImagePullPolicy: b.inputs.transformsImagePullPolicy,
+                    transformsEntrypoint: b.inputs.transformsEntrypoint,
                     workflowName: expr.getWorkflowValue("name"),
                     jsonConfig: expr.toBase64(b.inputs.rfsJsonConfig),
                     resources: expr.deserializeRecord(b.inputs.resources),

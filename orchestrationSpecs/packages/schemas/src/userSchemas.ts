@@ -157,6 +157,33 @@ export const OPTIONAL_HTTP_ENDPOINT_PATTERN = `^(?:https?:\\/\\/${HOSTNAME_PATTE
 export const GENERIC_JSON_OBJECT = z.record(z.string(), z.any());
 export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
 
+// ---------------------------------------------------------------------------
+// Mountable transformer artifacts (OCI image flow)
+//
+// Users build a small OCI image whose root filesystem holds JAR(s) and an
+// optional manifest. They register that image under a friendly name in
+// `transformsSources` at the top level, then reference that name from a
+// per-tool `transformsSource` field on the replayer / RFS / metadata
+// process options. At workflow execution time the image is mounted at
+// `/transforms` (read-only, kubelet image-volume) on the relevant
+// container, and `transformsEntrypoint` points the tool at a config file
+// inside that mount. Requires Kubernetes >= 1.35 (image volume source GA).
+// ---------------------------------------------------------------------------
+export const TRANSFORMS_IMAGE_SOURCE = z.object({
+    image: z.string().min(1)
+        .describe("OCI image reference holding transformer artifacts (jars + an optional config file). " +
+            "Pulled by the kubelet and mounted read-only at /transforms in the consuming container. " +
+            "Format is the standard image reference (e.g. 'ghcr.io/acme/my-transforms:1.2.3')."),
+    pullPolicy: z.enum(["Always", "IfNotPresent", "Never"]).default("IfNotPresent").optional()
+        .describe("Pull policy applied to the image volume. Mirrors the kubelet imagePullPolicy semantics."),
+}).describe("OCI artifact reference describing a transformer bundle to mount into a migration tool's container.");
+
+export const TRANSFORMS_SOURCES_MAP = z.record(
+    z.string().regex(K8S_NAMING_PATTERN),
+    TRANSFORMS_IMAGE_SOURCE
+).describe("Named, reusable transformer bundles. Each entry maps a friendly identifier (used by " +
+    "transformsSource on a tool) to the OCI image that holds the transformer JARs and config.");
+
 const OTEL_COLLECTOR_ENDPOINT = z.string().default("http://otel-collector:4317").optional()
     .describe("URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317').");
 
@@ -503,6 +530,14 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
     transformerConfigFile: z.string().optional()
         .describe("Path to a JSON file containing request transformer configuration." + REQUEST_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX)
         .changeRestriction('gated'),
+    transformsSource: z.string().regex(K8S_NAMING_PATTERN).optional()
+        .describe("Name of an entry in top-level transformsSources to mount into the replayer container. " +
+            "The image is mounted read-only at /transforms; pair with transformsEntrypoint to point the replayer at a config file inside it.")
+        .changeRestriction('gated'),
+    transformsEntrypoint: z.string().default("/transforms/request-transformer.json").optional()
+        .describe("Path inside the mounted transforms image (default mount point /transforms) for the request transformer config file. " +
+            "Only meaningful when transformsSource is set.")
+        .changeRestriction('gated'),
     tupleTransformerConfig: z.string().optional()
         .describe("Inline tuple transformer configuration as a JSON string." + TUPLE_TRANSFORMER_SUFFIX)
         .changeRestriction('gated'),
@@ -622,6 +657,12 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
         .describe("Inline JSON transformer configuration. Keys are transformer names and values are their configuration." + METADATA_TRANSFORMER_SUFFIX),
     transformerConfigFile: z.string().optional()
         .describe("Path to a JSON file containing transformer configuration." + METADATA_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX),
+    transformsSource: z.string().regex(K8S_NAMING_PATTERN).optional()
+        .describe("Name of an entry in top-level transformsSources to mount into the metadata-migration container. " +
+            "The image is mounted read-only at /transforms; pair with transformsEntrypoint to point the tool at a config file inside it."),
+    transformsEntrypoint: z.string().default("/transforms/metadata-transformer.json").optional()
+        .describe("Path inside the mounted transforms image (default mount point /transforms) for the metadata transformer config file. " +
+            "Only meaningful when transformsSource is set."),
     enableSourcelessMigrations: z.boolean().default(false).optional()
         .describe("Enable migration of indices that have _source disabled or partially filtered (includes/excludes). " +
             "When enabled, document backfill will reconstruct documents from stored fields and doc_values. " +
@@ -693,6 +734,16 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .changeRestriction('impossible'),
     docTransformerConfigFile: z.string().optional()
         .describe("Path to a JSON file containing transformer configuration." + DOC_TRANSFORMER_SUFFIX + EXPERT_FILE_SUFFIX)
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
+    transformsSource: z.string().regex(K8S_NAMING_PATTERN).optional()
+        .describe("Name of an entry in top-level transformsSources to mount into the RFS document-backfill container. " +
+            "The image is mounted read-only at /transforms; pair with transformsEntrypoint to point RFS at a doc transformer config file inside it.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
+    transformsEntrypoint: z.string().default("/transforms/doc-transformer.json").optional()
+        .describe("Path inside the mounted transforms image (default mount point /transforms) for the document transformer config file. " +
+            "Only meaningful when transformsSource is set.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
     documentsPerBulkRequest: z.number().default(0x7fffffff).optional()
@@ -1097,7 +1148,12 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
         traffic: TRAFFIC_CONFIG
             .describe("Traffic capture and replay configuration. Proxies capture live traffic from source clusters to Kafka, and replayers consume from Kafka to replay against target clusters. " +
                 "All top-level items are independent, but replayers can declare dependencies on snapshot migrations to ensure data consistency.")
-            .optional()
+            .optional(),
+        transformsSources: TRANSFORMS_SOURCES_MAP.default({}).optional()
+            .describe("Named registry of OCI artifacts that hold transformer JARs and configuration. " +
+                "Tools (replayer, RFS, metadata) reference an entry here by name via their transformsSource field, " +
+                "and the workflow mounts the image read-only at /transforms inside the relevant container. " +
+                "Requires Kubernetes >= 1.35 (image volume source GA).")
     }).describe("Top-level migration configuration defining source clusters, target clusters, snapshot migrations, and optional traffic capture/replay.").superRefine((data, ctx) => {
         for (let i = 0; i < data.snapshotMigrationConfigs.length; i++) {
             const mc = data.snapshotMigrationConfigs[i];
@@ -1188,6 +1244,53 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                             path: ['traffic', 'replayers', replayerName, 'replayerConfig', 'removeAuthHeader']
                         });
                     }
+                }
+            }
+        }
+
+        // Validate that any transformsSource referenced by a tool actually exists in transformsSources.
+        // The data plumbing for these refs lives on per-tool process options, but they are discovered here
+        // because the registry lives at the top level. Replayers/RFS/metadata fields are buried inside
+        // their containing collections — we walk just the places where they appear.
+        const knownTransformSources = new Set(Object.keys(data.transformsSources ?? {}));
+        const reportUnknownTransform = (path: (string | number)[], ref: string) => {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `transformsSource references unknown entry '${ref}'. ` +
+                    `Available: ${Array.from(knownTransformSources).join(', ') || '(none — define one under top-level transformsSources)'}`,
+                path
+            });
+        };
+        for (let i = 0; i < data.snapshotMigrationConfigs.length; i++) {
+            const mc = data.snapshotMigrationConfigs[i];
+            const perSnapshot = (mc as { perSnapshotConfig?: Record<string, unknown[]> }).perSnapshotConfig;
+            if (!perSnapshot) continue;
+            for (const [snapName, migrations] of Object.entries(perSnapshot)) {
+                for (let j = 0; j < migrations.length; j++) {
+                    const item = migrations[j] as {
+                        metadataMigrationConfig?: { transformsSource?: string },
+                        documentBackfillConfig?: { transformsSource?: string },
+                    };
+                    const metadataRef = item.metadataMigrationConfig?.transformsSource;
+                    if (metadataRef && !knownTransformSources.has(metadataRef)) {
+                        reportUnknownTransform(
+                            ['snapshotMigrationConfigs', i, 'perSnapshotConfig', snapName, j, 'metadataMigrationConfig', 'transformsSource'],
+                            metadataRef);
+                    }
+                    const documentRef = item.documentBackfillConfig?.transformsSource;
+                    if (documentRef && !knownTransformSources.has(documentRef)) {
+                        reportUnknownTransform(
+                            ['snapshotMigrationConfigs', i, 'perSnapshotConfig', snapName, j, 'documentBackfillConfig', 'transformsSource'],
+                            documentRef);
+                    }
+                }
+            }
+        }
+        if (data.traffic) {
+            for (const [replayerName, rc] of Object.entries(data.traffic.replayers)) {
+                const ref = (rc.replayerConfig as { transformsSource?: string } | undefined)?.transformsSource;
+                if (ref && !knownTransformSources.has(ref)) {
+                    reportUnknownTransform(['traffic', 'replayers', replayerName, 'replayerConfig', 'transformsSource'], ref);
                 }
             }
         }

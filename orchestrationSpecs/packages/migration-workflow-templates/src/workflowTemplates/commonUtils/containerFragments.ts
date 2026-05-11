@@ -2,6 +2,7 @@ import {
     BaseExpression,
     Container,
     expr,
+    IMAGE_PULL_POLICY,
     makeDirectTypeProxy,
     makeStringTypeProxy,
     Volume
@@ -124,6 +125,60 @@ export function setupLog4jConfigForContainer(
                 {
                     name: LOG4J_CONFIG_VOLUME_NAME,
                     mountPath: LOG4J_CONFIG_MOUNT_PATH,
+                    readOnly: true
+                }
+            ]
+        }
+    } as const;
+}
+
+const TRANSFORMS_VOLUME_NAME = "transforms-artifacts";
+export const TRANSFORMS_MOUNT_PATH = "/transforms";
+
+/**
+ * Mount an OCI artifact (a "transforms" image) as a read-only image volume on a container.
+ * Requires Kubernetes >= 1.35 (image volume source GA).
+ *
+ * The `transformsImage` reference must be non-empty. When the workflow has no user-supplied
+ * transforms configured, the upstream config-processor substitutes a tiny sentinel pause image
+ * so the volume entry is always valid; downstream tools key off of `transformsEntrypoint`
+ * being non-empty to decide whether to actually read from /transforms.
+ *
+ * The `transformsEntrypoint` string is also exposed as the env var TRANSFORMS_ENTRYPOINT inside
+ * the container so the tool can locate the file (e.g. /transforms/replayer-config.yaml) without
+ * the orchestration spec needing to know per-tool layout.
+ */
+export function setupTransformsForContainer(
+    transformsImage: BaseExpression<string>,
+    transformsPullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
+    transformsEntrypoint: BaseExpression<string>,
+    def: ContainerVolumePair): ContainerVolumePair {
+    const {volumeMounts, env, ...restOfContainer} = def.container;
+    return {
+        volumes: [
+            ...def.volumes,
+            {
+                name: TRANSFORMS_VOLUME_NAME,
+                image: {
+                    reference: makeStringTypeProxy(transformsImage),
+                    pullPolicy: makeStringTypeProxy(transformsPullPolicy)
+                }
+            }
+        ],
+        container: {
+            ...restOfContainer,
+            env: [
+                ...(env === undefined ? [] : env),
+                {
+                    name: "TRANSFORMS_ENTRYPOINT",
+                    value: makeStringTypeProxy(transformsEntrypoint)
+                }
+            ],
+            volumeMounts: [
+                ...(volumeMounts === undefined ? [] : volumeMounts),
+                {
+                    name: TRANSFORMS_VOLUME_NAME,
+                    mountPath: TRANSFORMS_MOUNT_PATH,
                     readOnly: true
                 }
             ]

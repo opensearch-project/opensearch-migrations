@@ -14,7 +14,7 @@ import {
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
-import {setupLog4jConfigForContainer} from "./commonUtils/containerFragments";
+import {setupLog4jConfigForContainer, setupTransformsForContainer} from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
@@ -148,6 +148,10 @@ function getReplayerDeploymentManifest
     loggingConfigMap: BaseExpression<string>,
     jvmArgs: BaseExpression<string>,
 
+    transformsImage: BaseExpression<string>,
+    transformsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
+    transformsEntrypoint: BaseExpression<string>,
+
     basicAuthSecretName: BaseExpression<string>,
 
     podReplicas: BaseExpression<number>,
@@ -204,6 +208,7 @@ function getReplayerDeploymentManifest
         ]
     };
     const finalContainerDefinition =
+        setupTransformsForContainer(args.transformsImage, args.transformsImagePullPolicy, args.transformsEntrypoint,
         setupLog4jConfigForContainer(args.useCustomLogging, args.loggingConfigMap,
             {container: baseContainerDefinition, volumes: [
                 {
@@ -222,7 +227,7 @@ function getReplayerDeploymentManifest
                     }
                 }
             ]},
-            args.jvmArgs);
+            args.jvmArgs));
     return {
         apiVersion: "apps/v1",
         kind: "Deployment",
@@ -286,6 +291,9 @@ export const Replayer = WorkflowBuilder.create({
       .addRequiredInput("ownerUid", typeToken<string>())
       .addRequiredInput("podReplicas", typeToken<number>())
       .addRequiredInput("jvmArgs", typeToken<string>())
+      .addOptionalInput("transformsImage", c => "registry.k8s.io/pause:3.10")
+      .addOptionalInput("transformsImagePullPolicy", c => "IfNotPresent" as IMAGE_PULL_POLICY)
+      .addOptionalInput("transformsEntrypoint", c => "")
       .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
       .addRequiredInput("basicAuthSecretName", typeToken<string>())
       .addRequiredInput("sourceK8sLabel", typeToken<string>())
@@ -304,6 +312,9 @@ export const Replayer = WorkflowBuilder.create({
                     useCustomLogging: expr.not(expr.isEmpty(b.inputs.loggingConfigurationOverrideConfigMap)),
                     loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
                     jvmArgs: b.inputs.jvmArgs,
+                    transformsImage: b.inputs.transformsImage,
+                    transformsImagePullPolicy: b.inputs.transformsImagePullPolicy,
+                    transformsEntrypoint: b.inputs.transformsEntrypoint,
                     basicAuthSecretName: b.inputs.basicAuthSecretName,
                     name: b.inputs.name,
                     replayerImageName: b.inputs.imageTrafficReplayerLocation,
