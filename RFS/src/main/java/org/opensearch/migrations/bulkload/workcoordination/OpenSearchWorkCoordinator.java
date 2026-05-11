@@ -585,6 +585,88 @@ public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
+    @Override
+    public void releaseWorkItem(
+        String workItemId,
+        Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> contextSupplier
+    ) throws InterruptedException {
+        try (var ctx = contextSupplier.get()) {
+            // Clearing the lease is best-effort: completion is the only durable state, so we
+            // retry transient failures but do not propagate the underlying exception if every
+            // retry fails — the lease will still expire naturally.  Using the same retry shape
+            // as completeWorkItem keeps behavior consistent under coordinator-side load.
+            retryWithExponentialBackoff(
+                () -> releaseWorkItemWithoutRetry(workItemId),
+                completionRetryConfig.maxRetries(),
+                completionRetryConfig.initialDelayMs(),
+                completionRetryConfig.maxDelayMs(),
+                "releaseWorkItem[" + workItemId + "]",
+                e -> ctx.addTraceException(e, true)
+            );
+        } catch (IllegalStateException e) {
+            log.atWarn().setCause(e)
+                .setMessage("Failed to release work item {}; falling back to natural lease expiration")
+                .addArgument(workItemId)
+                .log();
+        }
+    }
+
+    private void releaseWorkItemWithoutRetry(String workItemId) throws IOException {
+        // Painless script:
+        //   - throws on scriptVersion mismatch (matches the rest of the coordinator contract)
+        //   - no-op when the work is already completed (don't clobber a completion)
+        //   - no-op when the lease has rolled to another worker (don't clobber the new owner)
+        //   - otherwise: clear expiration to 0 and leaseHolderId to null so the next
+        //     acquireNextWorkItem call can pick this item up immediately.  We intentionally
+        //     leave nextAcquisitionLeaseExponent as-is — releasing the lease means the work
+        //     hasn't been done, so any prior bump in the exponent is still meaningful.
+        final var releaseLeaseBodyTemplate = "{\n"
+            + "  \"script\": {\n"
+            + "    \"lang\": \"painless\",\n"
+            + "    \"params\": { \n"
+            + "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\"\n"
+            + "    },\n"
+            + "    \"source\": \""
+            + "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {"
+            + "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx._source.scriptVersion);"
+            + "      }"
+            + "      if (ctx._source." + COMPLETED_AT_FIELD_NAME + " != null) {"
+            + "        ctx.op = \\\"noop\\\";"
+            + "      } else if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " != params.workerId) {"
+            + "        ctx.op = \\\"noop\\\";"
+            + "      } else {"
+            + "        ctx._source." + EXPIRATION_FIELD_NAME + " = 0;"
+            + "        ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = null;"
+            + "      }"
+            + "\"\n"
+            + "  }\n"
+            + "}";
+
+        var body = releaseLeaseBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, SCRIPT_VERSION)
+            .replace(WORKER_ID_TEMPLATE, workerId);
+
+        var response = httpClient.makeJsonRequest(
+            AbstractedHttpClient.POST_METHOD,
+            getPathForUpdates(workItemId),
+            null,
+            body
+        );
+
+        var result = getResult(response);
+        // Both UPDATED (we cleared the lease) and IGNORED (already completed or owned elsewhere)
+        // are acceptable terminal outcomes; only an unexpected response shape is an error.
+        if (result != DocumentModificationResult.UPDATED && result != DocumentModificationResult.IGNORED) {
+            throw new IllegalStateException(
+                "Unexpected response releasing workItemId: " + workItemId
+                    + ".  Response: " + response.toDiagnosticString()
+            );
+        }
+        log.atInfo().setMessage("Released lease for work item {} (result={})")
+            .addArgument(workItemId)
+            .addArgument(result)
+            .log();
+    }
+
     private int numWorkItemsNotYetCompleteInternal(
         Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException {

@@ -15,7 +15,7 @@ pytest = ">=7.3.1"
 pytest-xdist = ">=3.3.1"
 requests = ">=2.32.3"
 # urllib3 is a transitive dependency, pinned here for CVE management (CVE-2025-66471, CVE-2025-66418)
-urllib3 = ">=2.6.0"
+urllib3 = ">=2.7.0"
 requests-aws4auth = "*"
 boto3 = "*"
 pytest-sugar = "*"
