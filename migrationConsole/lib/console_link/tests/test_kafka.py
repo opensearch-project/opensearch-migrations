@@ -385,10 +385,10 @@ from console_link.models.command_result import CommandResult
 
 _DESCRIBE_OUTPUT_BASIC = """\
 
-GROUP            TOPIC               PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG  CONSUMER-ID                                       HOST            CLIENT-ID
-my-group         logging-topic       0          100             150             50   consumer-1-abc /172.18.0.5     consumer-1
-my-group         logging-topic       1          200             200             0    consumer-1-def /172.18.0.5     consumer-1
-my-group         logging-topic       2          0               0               0    -                                                 -               -
+GROUP     TOPIC          PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG  CONSUMER-ID  HOST  CLIENT-ID
+my-group  logging-topic  0          100             150             50   c1           h1    c
+my-group  logging-topic  1          200             200             0    c1           h1    c
+my-group  logging-topic  2          0               0               0    -            -     -
 """
 
 

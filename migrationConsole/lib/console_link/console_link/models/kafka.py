@@ -202,37 +202,46 @@ def parse_consumer_group_describe(text: str) -> List[dict]:
     rows: List[dict] = []
     header_indices: Optional[dict] = None
     for raw_line in text.splitlines():
-        line = raw_line.rstrip()
-        if not line.strip():
+        tokens = raw_line.split()
+        if not tokens:
             continue
-        tokens = line.split()
         if header_indices is None:
-            # Header row: at minimum must contain the columns we depend on.
-            if all(h in tokens for h in _DESCRIBE_HEADER_TOKENS):
-                header_indices = {h: tokens.index(h) for h in _DESCRIBE_HEADER_TOKENS}
+            header_indices = _detect_describe_header(tokens)
             continue
-        # Data row. Accept rows shorter than the full header (CONSUMER-ID etc
-        # may be missing for inactive groups) as long as the LAG column exists.
-        if len(tokens) <= header_indices['LAG']:
-            continue
-        try:
-            topic = tokens[header_indices['TOPIC']]
-            partition = int(tokens[header_indices['PARTITION']])
-            current_offset = _parse_offset(tokens[header_indices['CURRENT-OFFSET']])
-            log_end_offset = _parse_offset(tokens[header_indices['LOG-END-OFFSET']])
-            lag = _parse_offset(tokens[header_indices['LAG']])
-        except (ValueError, IndexError):
-            continue
-        if current_offset is None or log_end_offset is None:
-            continue
-        rows.append({
-            'topic': topic,
-            'partition': partition,
-            'current_offset': current_offset,
-            'log_end_offset': log_end_offset,
-            'lag': lag if lag is not None else log_end_offset - current_offset,
-        })
+        row = _parse_describe_row(tokens, header_indices)
+        if row is not None:
+            rows.append(row)
     return rows
+
+
+def _detect_describe_header(tokens: List[str]) -> Optional[dict]:
+    """Return a column->index map if `tokens` is the describe header row."""
+    if all(h in tokens for h in _DESCRIBE_HEADER_TOKENS):
+        return {h: tokens.index(h) for h in _DESCRIBE_HEADER_TOKENS}
+    return None
+
+
+def _parse_describe_row(tokens: List[str], header_indices: dict) -> Optional[dict]:
+    """Extract one data row, or None if the row is malformed/incomplete."""
+    if len(tokens) <= header_indices['LAG']:
+        return None
+    try:
+        topic = tokens[header_indices['TOPIC']]
+        partition = int(tokens[header_indices['PARTITION']])
+        current_offset = _parse_offset(tokens[header_indices['CURRENT-OFFSET']])
+        log_end_offset = _parse_offset(tokens[header_indices['LOG-END-OFFSET']])
+        lag = _parse_offset(tokens[header_indices['LAG']])
+    except (ValueError, IndexError):
+        return None
+    if current_offset is None or log_end_offset is None:
+        return None
+    return {
+        'topic': topic,
+        'partition': partition,
+        'current_offset': current_offset,
+        'log_end_offset': log_end_offset,
+        'lag': lag if lag is not None else log_end_offset - current_offset,
+    }
 
 
 def _parse_offset(token: str) -> Optional[int]:
@@ -345,58 +354,16 @@ def _build_time_lag_section(
 
     headers = ['TOPIC', 'PARTITION', 'PROBED-OFFSET', 'TIMESTAMP (UTC)',
                'TIME-LAG', 'NOTE']
-    formatted_rows: List[List[str]] = []
-
     # Probe each partition. We deliberately keep this serial: typical groups
     # have a handful of partitions and serializing avoids surprising fan-out
     # of subprocess invocations from a console command.
-    for row in rows:
-        topic = row['topic']
-        partition = row['partition']
-        current_offset = row['current_offset']
-        log_end_offset = row['log_end_offset']
-
-        if log_end_offset == 0:
-            formatted_rows.append([
-                topic, str(partition), '-', '-', '-', 'partition empty',
-            ])
-            continue
-
-        # Pick which offset to probe.
-        caught_up = current_offset >= log_end_offset
-        probed_offset = (log_end_offset - 1) if caught_up else current_offset
-        note = 'caught up; showing last record' if caught_up else ''
-
-        command = [
-            consumer_script,
-            '--bootstrap-server', brokers,
-            '--topic', topic,
-            '--partition', str(partition),
-            '--offset', str(probed_offset),
-            '--max-messages', '1',
-            '--timeout-ms', str(probe_timeout_ms),
-            '--property', 'print.timestamp=true',
-            '--property', 'print.value=false',
-            '--property', 'print.key=false',
-        ] + extra_console_consumer_args
-        logger.info(f"Probing record timestamp: {command}")
-
-        # Allow a small buffer over Kafka's --timeout-ms so the JVM can exit cleanly.
-        wall_timeout = (probe_timeout_ms / 1000.0) + 5.0
-        ts_ms, err = _probe_record_timestamp_ms(command, timeout_seconds=wall_timeout)
-        if ts_ms is None:
-            formatted_rows.append([
-                topic, str(partition), str(probed_offset), '-', '-',
-                (note + '; ' if note else '') + (err or 'unknown error'),
-            ])
-            continue
-
-        timestamp_str = _format_iso_utc(ts_ms)
-        delta_seconds = (now_ms - ts_ms) / 1000.0
-        formatted_rows.append([
-            topic, str(partition), str(probed_offset),
-            timestamp_str, _format_duration(delta_seconds), note,
-        ])
+    formatted_rows: List[List[str]] = [
+        _format_partition_row(
+            row, now_ms, consumer_script, brokers,
+            extra_console_consumer_args, probe_timeout_ms,
+        )
+        for row in rows
+    ]
 
     # Width-aligned table render. Width = max(header, all cells) per column.
     widths = [len(h) for h in headers]
@@ -411,6 +378,60 @@ def _build_time_lag_section(
     lines.extend(_render(r) for r in formatted_rows)
     lines.append('')  # trailing newline-friendly
     return '\n'.join(lines) + '\n'
+
+
+def _format_partition_row(
+    row: dict,
+    now_ms: int,
+    consumer_script: str,
+    brokers: str,
+    extra_console_consumer_args: List[str],
+    probe_timeout_ms: int,
+) -> List[str]:
+    """Compute a single TIME LAG table row for one partition.
+
+    Empty partitions (LOG-END-OFFSET == 0) skip the probe. Caught-up
+    partitions probe LOG-END-OFFSET-1 to surface last-record age.
+    """
+    topic = row['topic']
+    partition = row['partition']
+    current_offset = row['current_offset']
+    log_end_offset = row['log_end_offset']
+
+    if log_end_offset == 0:
+        return [topic, str(partition), '-', '-', '-', 'partition empty']
+
+    caught_up = current_offset >= log_end_offset
+    probed_offset = (log_end_offset - 1) if caught_up else current_offset
+    note = 'caught up; showing last record' if caught_up else ''
+
+    command = [
+        consumer_script,
+        '--bootstrap-server', brokers,
+        '--topic', topic,
+        '--partition', str(partition),
+        '--offset', str(probed_offset),
+        '--max-messages', '1',
+        '--timeout-ms', str(probe_timeout_ms),
+        '--property', 'print.timestamp=true',
+        '--property', 'print.value=false',
+        '--property', 'print.key=false',
+    ] + extra_console_consumer_args
+    logger.info(f"Probing record timestamp: {command}")
+
+    # Allow a small buffer over Kafka's --timeout-ms so the JVM can exit cleanly.
+    wall_timeout = (probe_timeout_ms / 1000.0) + 5.0
+    ts_ms, err = _probe_record_timestamp_ms(command, timeout_seconds=wall_timeout)
+    if ts_ms is None:
+        err_note = (note + '; ' if note else '') + (err or 'unknown error')
+        return [topic, str(partition), str(probed_offset), '-', '-', err_note]
+
+    timestamp_str = _format_iso_utc(ts_ms)
+    delta_seconds = (now_ms - ts_ms) / 1000.0
+    return [
+        topic, str(partition), str(probed_offset),
+        timestamp_str, _format_duration(delta_seconds), note,
+    ]
 
 
 def _augment_describe_output_with_time_lag(
