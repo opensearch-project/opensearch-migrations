@@ -110,15 +110,20 @@ public interface LuceneLeafReader {
      * or full term collection (for analyzed strings without stored fields).
      * Used when doc_values and stored fields are not available.
      *
+     * <p>The {@link RecoveredValue} variants make the recovery channel explicit so the caller
+     * cannot conflate doc_values output (a {@link List} of typed scalars) with point bytes
+     * (a {@code List<byte[]>}) — a confusion that previously caused a {@code ClassCastException}
+     * on the copy_to reverse-derivation path.
+     *
      * @param termIndex per-segment term cache; may be null if the caller does not need
      *                  analyzed-string or numeric-term reconstruction.
      */
-    default Optional<Object> getValueFromPointsOrTerms(int docId, String fieldName, EsFieldType fieldType,
-                                                      SegmentTermIndex termIndex) throws IOException {
+    default Optional<RecoveredValue> getValueFromPointsOrTerms(int docId, String fieldName, EsFieldType fieldType,
+                                                               SegmentTermIndex termIndex) throws IOException {
         return switch (fieldType) {
             case BOOLEAN -> {
                 String term = getValueFromTerms(docId, fieldName);
-                yield term != null ? Optional.of(term) : Optional.empty();
+                yield term != null ? Optional.of(new RecoveredValue.TextTerm(term)) : Optional.empty();
             }
             case STRING -> {
                 // For analyzed string fields without stored fields or doc_values,
@@ -131,31 +136,37 @@ public interface LuceneLeafReader {
                         List<TermEntry> entries =
                                 termIndex.getTermEntriesForDocument(this, docId, fieldName);
                         if (entries != null && !entries.isEmpty()) {
-                            yield Optional.of(joinWithOffsets(entries));
+                            yield Optional.of(new RecoveredValue.TextTerm(joinWithOffsets(entries)));
                         }
                     } catch (UnsupportedOperationException e) {
                         // Field indexed without positions; fall through to single-term path.
                     }
                 }
                 String singleTerm = getValueFromTerms(docId, fieldName);
-                yield singleTerm != null ? Optional.of(singleTerm) : Optional.empty();
+                yield singleTerm != null
+                        ? Optional.of(new RecoveredValue.TextTerm(singleTerm))
+                        : Optional.empty();
             }
             case NUMERIC, UNSIGNED_LONG, SCALED_FLOAT, DATE, DATE_NANOS, IP -> {
                 // First try Points (Lucene 6+ stores numerics as BKD-tree points).
                 List<byte[]> points = getPointValues(docId, fieldName);
                 if (points != null && !points.isEmpty()) {
-                    yield Optional.of(points);
+                    yield Optional.of(new RecoveredValue.PointBytes(points));
                 }
                 // Fall back to trie-encoded terms (Lucene 4-5 / ES 1.x-2.x).
                 if (termIndex == null) {
                     yield Optional.empty();
                 }
                 Long numericVal = termIndex.getNumericForDocument(this, docId, fieldName);
-                yield numericVal != null ? Optional.of(numericVal) : Optional.empty();
+                yield numericVal != null
+                        ? Optional.of(new RecoveredValue.NumericTerm(numericVal))
+                        : Optional.empty();
             }
             default -> {
                 List<byte[]> points = getPointValues(docId, fieldName);
-                yield (points != null && !points.isEmpty()) ? Optional.of(points) : Optional.empty();
+                yield (points != null && !points.isEmpty())
+                        ? Optional.of(new RecoveredValue.PointBytes(points))
+                        : Optional.empty();
             }
         };
     }
