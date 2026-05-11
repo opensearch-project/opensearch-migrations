@@ -260,6 +260,105 @@ public class WorkCoordinatorTest {
 
     @ParameterizedTest
     @MethodSource("containerVersions")
+    public void testReleaseWorkItemAllowsImmediateReacquisition(SearchClusterContainer.ContainerVersion version) throws Exception {
+        // Models the "shutdown before any docs migrated" scenario: worker A acquires the
+        // lease, makes no progress (no cursor / no successor possible), and releases the lease
+        // on shutdown.  Worker B should then be able to pick the same work item up immediately
+        // rather than waiting for the original lease to expire.
+        setupOpenSearchContainer(version);
+        var testContext = WorkCoordinationTestContext.factory().withAllTracking();
+        var workItemId = workId("R", 0, 0L);
+
+        try (var creator = factory.get(httpClientSupplier.get(), 3600, "creator")) {
+            creator.createUnassignedWorkItem(workItemId, testContext::createUnassignedWorkContext);
+        }
+
+        // Long lease so that "expires naturally" is clearly not what's letting reacquisition succeed.
+        var longLease = Duration.ofSeconds(600);
+
+        try (var workerA = factory.get(httpClientSupplier.get(), 3600, "workerA")) {
+            var outcome = workerA.acquireNextWorkItem(longLease, testContext::createAcquireNextItemContext);
+            var acquired = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, outcome);
+            Assertions.assertEquals(workItemId, acquired.getWorkItem().toString());
+
+            // Sanity: another worker cannot grab this work item while workerA holds the lease.
+            try (var blocked = factory.get(httpClientSupplier.get(), 3600, "blocked")) {
+                var blockedOutcome = blocked.acquireNextWorkItem(longLease, testContext::createAcquireNextItemContext);
+                Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, blockedOutcome);
+            }
+
+            workerA.releaseWorkItem(workItemId, testContext::createReleaseWorkItemContext);
+        }
+
+        // workerB should now be able to immediately re-acquire the same work item.
+        try (var workerB = factory.get(httpClientSupplier.get(), 3600, "workerB")) {
+            var outcome = workerB.acquireNextWorkItem(longLease, testContext::createAcquireNextItemContext);
+            var acquired = Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, outcome);
+            Assertions.assertEquals(workItemId, acquired.getWorkItem().toString());
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testReleaseWorkItemIsNoopIfLeaseRolledOver(SearchClusterContainer.ContainerVersion version) throws Exception {
+        // If workerA's lease has already expired and workerB has picked the item up, a late
+        // releaseWorkItem call from workerA must NOT clobber workerB's lease — otherwise we
+        // could hand the same item to a third worker while workerB is still working on it.
+        setupOpenSearchContainer(version);
+        var testContext = WorkCoordinationTestContext.factory().withAllTracking();
+        var workItemId = workId("R", 0, 0L);
+
+        try (var creator = factory.get(httpClientSupplier.get(), 3600, "creator")) {
+            creator.createUnassignedWorkItem(workItemId, testContext::createUnassignedWorkContext);
+        }
+
+        var shortLease = Duration.ofSeconds(2);
+
+        try (var workerA = factory.get(httpClientSupplier.get(), 3600, "workerA")) {
+            workerA.acquireNextWorkItem(shortLease, testContext::createAcquireNextItemContext);
+            // Wait out the lease so workerB can take over.
+            Thread.sleep(shortLease.plusSeconds(1).toMillis());
+
+            try (var workerB = factory.get(httpClientSupplier.get(), 3600, "workerB")) {
+                var bOutcome = workerB.acquireNextWorkItem(Duration.ofSeconds(600), testContext::createAcquireNextItemContext);
+                Assertions.assertInstanceOf(IWorkCoordinator.WorkItemAndDuration.class, bOutcome);
+
+                // workerA finally tries to release the item it had; should be a no-op.
+                workerA.releaseWorkItem(workItemId, testContext::createReleaseWorkItemContext);
+
+                // A third worker must not be able to acquire — workerB still owns it.
+                try (var workerC = factory.get(httpClientSupplier.get(), 3600, "workerC")) {
+                    var cOutcome = workerC.acquireNextWorkItem(Duration.ofSeconds(600), testContext::createAcquireNextItemContext);
+                    Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, cOutcome);
+                }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("containerVersions")
+    public void testReleaseWorkItemIsNoopIfAlreadyCompleted(SearchClusterContainer.ContainerVersion version) throws Exception {
+        // Defensive: if a release call races against (or follows) completion, it must not
+        // resurrect a completed work item by clearing fields the script doesn't gate on.
+        setupOpenSearchContainer(version);
+        var testContext = WorkCoordinationTestContext.factory().withAllTracking();
+        var workItemId = workId("R", 0, 0L);
+
+        try (var creator = factory.get(httpClientSupplier.get(), 3600, "creator")) {
+            creator.createUnassignedWorkItem(workItemId, testContext::createUnassignedWorkContext);
+        }
+
+        try (var worker = factory.get(httpClientSupplier.get(), 3600, "worker")) {
+            worker.acquireNextWorkItem(Duration.ofSeconds(600), testContext::createAcquireNextItemContext);
+            worker.completeWorkItem(workItemId, testContext::createCompleteWorkContext);
+            // Release after completion — should be a no-op.
+            worker.releaseWorkItem(workItemId, testContext::createReleaseWorkItemContext);
+            Assertions.assertFalse(worker.workItemsNotYetComplete(testContext::createItemsPendingContext));
+        }
+    }
+
+    @ParameterizedTest
+    @MethodSource("containerVersions")
     public void testAddSuccessorWorkItems(SearchClusterContainer.ContainerVersion version) throws Exception {
         setupOpenSearchContainer(version);
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();

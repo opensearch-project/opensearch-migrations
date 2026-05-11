@@ -28,6 +28,7 @@ public class SourceReconstructor {
     private SourceReconstructor() {}
 
     private static final AtomicBoolean NEST_COLLISION_WARNED = new AtomicBoolean();
+    private static final AtomicBoolean DEEP_NEST_UNDER_LIST_WARNED = new AtomicBoolean();
 
     /**
      * Skip internal fields (e.g., _id) and multi-field sub-fields (e.g., title.keyword).
@@ -151,11 +152,20 @@ public class SourceReconstructor {
                 // to the warn branch below since per-element object construction from doc_values is
                 // outside the guarantees doc_values can provide.
                 if (i != parts.length - 2) {
-                    log.atWarn()
-                        .setMessage("Cannot write deeply-nested field '{}' under List<Map> at '{}'; dropping recovered value")
-                        .addArgument(fieldName)
-                        .addArgument(parts[i])
-                        .log();
+                    // Distribution supports only immediate-leaf subfields (one segment past the
+                    // List<Map> parent, e.g. `files.size`). Deeper paths like `files.meta.size`
+                    // would require synthesising per-element `meta` objects from columnar
+                    // doc_values, which has no positional guarantee. Warn once per JVM so the
+                    // class of problem is visible without flooding logs.
+                    if (DEEP_NEST_UNDER_LIST_WARNED.compareAndSet(false, true)) {
+                        log.atWarn()
+                            .setMessage("Cannot distribute deeply-nested field '{}' under List<Map> at '{}'; "
+                                + "only immediate-leaf subfields (parent.leaf) are supported. "
+                                + "Dropping recovered value (further occurrences silenced)")
+                            .addArgument(fieldName)
+                            .addArgument(parts[i])
+                            .log();
+                    }
                     return false;
                 }
                 String leafForList = parts[parts.length - 1];
@@ -230,6 +240,12 @@ public class SourceReconstructor {
                     .log();
                 return false;
             }
+            log.atDebug()
+                .setMessage("Distributing {} values for '{}' across {}-element object array")
+                .addArgument(valueList.size())
+                .addArgument(fieldName)
+                .addArgument(list.size())
+                .log();
             boolean modified = false;
             for (int i = 0; i < list.size(); i++) {
                 Map<String, Object> element = (Map<String, Object>) list.get(i);

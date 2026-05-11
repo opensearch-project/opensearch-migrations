@@ -373,6 +373,43 @@ public interface WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     @Getter
+    class ReleaseWorkItemContext extends BaseSpanContext<RootWorkCoordinationContext>
+        implements
+            IReleaseWorkItemContext,
+            RetryableActivityContextMetricMixin<ReleaseWorkItemContext.MetricInstruments> {
+        final IScopedInstrumentationAttributes enclosingScope;
+
+        ReleaseWorkItemContext(
+            RootWorkCoordinationContext rootScope,
+            IScopedInstrumentationAttributes enclosingScope
+        ) {
+            super(rootScope);
+            this.enclosingScope = enclosingScope;
+            initializeSpan(rootScope);
+        }
+
+        @Override
+        public String getActivityName() {
+            return ACTIVITY_NAME;
+        }
+
+        public static class MetricInstruments extends RetryMetricInstruments {
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, autoLabels(activityName));
+            }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
+        }
+
+        @Override
+        public MetricInstruments getRetryMetrics() {
+            return getRootInstrumentationScope().releaseWorkItemMetrics;
+        }
+    }
+
+    @Getter
     class CreateSuccessorWorkItemsContext extends BaseSpanContext<RootWorkCoordinationContext>
             implements
             ICreateSuccessorWorkItemsContext,

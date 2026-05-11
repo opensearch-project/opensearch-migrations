@@ -1,4 +1,5 @@
 # pyright: ignore[reportCallIssue]
+import signal
 from contextlib import contextmanager
 import json
 from pprint import pprint
@@ -6,6 +7,12 @@ import sys
 import time
 from typing import Dict
 import click
+
+# Restore default SIGPIPE handling so piped commands (e.g. `| head`) exit cleanly.
+try:
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+except (AttributeError, ValueError):
+    pass
 
 import console_link.middleware.clusters as clusters_
 import console_link.middleware.metrics as metrics_
