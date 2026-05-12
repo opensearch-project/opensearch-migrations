@@ -360,6 +360,20 @@ charts:
           enabled: true
           maxRestarts: 3
 
+        # Default spec applied to every Workflow this controller schedules.
+        # podGC.OnPodCompletion deletes pods immediately after they finish, which keeps the
+        # Workflow CR's status.nodes tree from accumulating per-pod context and crossing the
+        # kube-apiserver max-request-bytes limit (default 3 MiB). Without this, FullMigration
+        # workflows with many fan-out children (≥ ~25 collections × multi-stage approval gates)
+        # have been observed to hit:
+        #   "Error updating workflow ... Request entity too large: limit is 3145728"
+        # which the controller logs as a terminal WorkflowFailed even while RFS workers continue.
+        # Pod logs themselves are preserved by fluent-bit and (when enabled) by archiveLogs: true.
+        workflowDefaults:
+          spec:
+            podGC:
+              strategy: OnPodCompletion
+
         replicas: 2
         affinity:
           podAntiAffinity:
