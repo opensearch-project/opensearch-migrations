@@ -551,7 +551,8 @@ public class RfsMigrateDocuments {
                         arguments.initialLeaseDuration,
                         () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
                         cleanShutdownCompleted,
-                        context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
+                        context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
+                        context.getWorkCoordinationContext()::createReleaseWorkItemContext),
                 Clock.systemUTC());) {
             // Set up a hook to attempt to shut down cleanly (to mark progress in the worker coordination system) in the
             // event of a SIGTERM signal.
@@ -560,7 +561,8 @@ public class RfsMigrateDocuments {
                 log.atWarn().setMessage("Received shutdown signal. Trying to mark progress and shutdown cleanly.").log();
                 try {
                     executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
-                            context.getWorkCoordinationContext()::createSuccessorWorkItemsContext);
+                            context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
+                            context.getWorkCoordinationContext()::createReleaseWorkItemContext);
                     log.atInfo().setMessage("Clean shutdown completed.").log();
                 } catch (InterruptedException e) {
                     log.atError().setMessage("Clean exit process was interrupted: {}").addArgument(e).log();
@@ -723,17 +725,27 @@ public class RfsMigrateDocuments {
             AtomicReference<WorkItemCursor> progressCursor,
             IWorkCoordinator coordinator,
             AtomicBoolean cleanShutdownCompleted,
-            Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+            Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier,
+            Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier
     ) throws IOException, InterruptedException {
         if (cleanShutdownCompleted.get())  {
             log.atInfo().setMessage("Clean shutdown already completed").log();
             return;
         }
-        if (workItemRef.get() == null || progressCursor.get() == null) {
-            log.atInfo().setMessage("No work item or progress cursor found. This may indicate that the task is exiting too early to have progress to mark.").log();
+        if (workItemRef.get() == null) {
+            log.atInfo().setMessage("No work item found. This may indicate that the task is exiting too early to have progress to mark.").log();
             return;
         }
         var workItemAndDuration = workItemRef.get();
+        if (progressCursor.get() == null) {
+            // No documents have been migrated yet (the cursor is only populated after the first
+            // successful bulk batch — see DocumentMigrationBootstrap), so there is nothing to
+            // checkpoint and we can't seed a successor.  Releasing the lease here lets another
+            // worker retry the same item immediately instead of waiting for natural expiration.
+            releaseLeaseWithoutProgress(workItemAndDuration, coordinator, releaseContextSupplier);
+            cleanShutdownCompleted.set(true);
+            return;
+        }
         log.atInfo().setMessage("Marking progress: " + workItemAndDuration.getWorkItem().toString() + ", at doc " + progressCursor.get().getProgressCheckpointNum()).log();
         var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, progressCursor.get());
 
@@ -741,6 +753,24 @@ public class RfsMigrateDocuments {
                 workItemAndDuration.getWorkItem().toString(), successorWorkItem, 1, contextSupplier
         );
         cleanShutdownCompleted.set(true);
+    }
+
+    /**
+     * Release the lease for a work item that we acquired but made no progress on — the doc
+     * cursor is still null, so there is nothing to checkpoint and no meaningful successor to
+     * create.  Without this, the work item stays leased for the full expiration window and
+     * blocks any other worker from picking it up.
+     */
+    private static void releaseLeaseWithoutProgress(
+            IWorkCoordinator.WorkItemAndDuration workItemAndDuration,
+            IWorkCoordinator coordinator,
+            Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier
+    ) throws IOException, InterruptedException {
+        var workItemId = workItemAndDuration.getWorkItem().toString();
+        log.atWarn().setMessage("Releasing lease for work item {} because no progress was made before shutdown — letting another worker retry immediately rather than waiting for natural lease expiration.")
+                .addArgument(workItemId)
+                .log();
+        coordinator.releaseWorkItem(workItemId, releaseContextSupplier);
     }
 
     @SneakyThrows
@@ -753,7 +783,8 @@ public class RfsMigrateDocuments {
             Duration initialLeaseDuration,
             Runnable cancellationRunnable,
             AtomicBoolean cleanShutdownCompleted,
-            Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier) {
+            Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier,
+            Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier) {
         log.atWarn().setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
                 .addArgument(workItemId)
                 .log();
@@ -790,10 +821,19 @@ public class RfsMigrateDocuments {
                     );
                 }
             } else {
-                log.atWarn().setMessage("No progress cursor to create successor work items from. This can happen when" +
-                        "downloading and unpacking shard takes longer than the lease").log();
-                log.atWarn().setMessage("Skipping creation of successor work item to retry the existing one with more time")
-                        .log();
+                // We held the lease but never produced a checkpoint — the most common cause is
+                // shard download/unpack outliving the lease window before any docs were migrated.
+                // Release the lease so another worker can immediately retry instead of waiting
+                // for natural expiration.  workItemRef may be null if the trigger fired before
+                // acquisition completed; in that case there's nothing to release.
+                log.atWarn().setMessage("No progress cursor to create successor work items from. This can happen when " +
+                        "downloading and unpacking shard takes longer than the lease.").log();
+                var workItemAndDuration = workItemRef.get();
+                if (workItemAndDuration != null) {
+                    releaseLeaseWithoutProgress(workItemAndDuration, coordinator, releaseContextSupplier);
+                } else {
+                    log.atWarn().setMessage("No work item reference available; skipping lease release.").log();
+                }
             }
         } catch (Exception e) {
             if (e instanceof InterruptedException) {
@@ -932,7 +972,8 @@ public class RfsMigrateDocuments {
                             arguments.initialLeaseDuration,
                             () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
                             cleanShutdownCompleted,
-                            context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
+                            context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
+                            context.getWorkCoordinationContext()::createReleaseWorkItemContext),
                     Clock.systemUTC())) {
 
                 // Work coordination will naturally short-circuit via ShardWorkPreparer.onAlreadyCompleted
@@ -1038,8 +1079,9 @@ public class RfsMigrateDocuments {
                     }
                 } : null;
 
-                var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, collectionPreparer);
-                var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer, shardPreparer);
+                var solrMajor = arguments.sourceVersion.getMajor();
+                var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, collectionPreparer, solrMajor);
+                var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer, shardPreparer, solrMajor);
 
                 // Set up a hook to attempt to shut down cleanly (to mark progress in the worker coordination system) in the
                 // event of a SIGTERM signal.
@@ -1048,7 +1090,8 @@ public class RfsMigrateDocuments {
                     log.atWarn().setMessage("Received shutdown signal. Trying to mark progress and shutdown cleanly.").log();
                     try {
                         executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
-                                context.getWorkCoordinationContext()::createSuccessorWorkItemsContext);
+                                context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
+                                context.getWorkCoordinationContext()::createReleaseWorkItemContext);
                         log.atInfo().setMessage("Clean shutdown completed.").log();
                     } catch (InterruptedException e) {
                         log.atError().setMessage("Clean exit process was interrupted: {}").addArgument(e).log();

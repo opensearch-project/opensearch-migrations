@@ -17,6 +17,7 @@ public class RootWorkCoordinationContext extends RootOtelContext {
     public final WorkCoordinationContexts.PendingItems.MetricInstruments pendingItemsMetrics;
     public final WorkCoordinationContexts.AcquireSpecificWorkContext.MetricInstruments acquireSpecificWorkMetrics;
     public final WorkCoordinationContexts.CompleteWorkItemContext.MetricInstruments completeWorkMetrics;
+    public final WorkCoordinationContexts.ReleaseWorkItemContext.MetricInstruments releaseWorkItemMetrics;
     public final WorkCoordinationContexts.AcquireNextWorkItemContext.MetricInstruments acquireNextWorkMetrics;
     public final WorkCoordinationContexts.CreateSuccessorWorkItemsContext.MetricInstruments createSuccessorWorkItemsMetrics;
 
@@ -38,6 +39,7 @@ public class RootWorkCoordinationContext extends RootOtelContext {
         pendingItemsMetrics = WorkCoordinationContexts.PendingItems.makeMetrics(meter);
         acquireSpecificWorkMetrics = WorkCoordinationContexts.AcquireSpecificWorkContext.makeMetrics(meter);
         completeWorkMetrics = WorkCoordinationContexts.CompleteWorkItemContext.makeMetrics(meter);
+        releaseWorkItemMetrics = WorkCoordinationContexts.ReleaseWorkItemContext.makeMetrics(meter);
         acquireNextWorkMetrics = WorkCoordinationContexts.AcquireNextWorkItemContext.makeMetrics(meter);
         createSuccessorWorkItemsMetrics = WorkCoordinationContexts.CreateSuccessorWorkItemsContext.makeMetrics(meter);
     }
@@ -88,6 +90,16 @@ public class RootWorkCoordinationContext extends RootOtelContext {
         IScopedInstrumentationAttributes enclosingScope
     ) {
         return new WorkCoordinationContexts.CompleteWorkItemContext(this, enclosingScope);
+    }
+
+    public IWorkCoordinationContexts.IReleaseWorkItemContext createReleaseWorkItemContext() {
+        return createReleaseWorkItemContext(null);
+    }
+
+    public IWorkCoordinationContexts.IReleaseWorkItemContext createReleaseWorkItemContext(
+        IScopedInstrumentationAttributes enclosingScope
+    ) {
+        return new WorkCoordinationContexts.ReleaseWorkItemContext(this, enclosingScope);
     }
 
     public IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext createSuccessorWorkItemsContext() {

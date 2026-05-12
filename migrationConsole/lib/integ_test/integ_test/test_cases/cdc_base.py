@@ -1,6 +1,6 @@
 """CDC test base: shared constants, K8s helpers, and proxy utilities.
 
-Test IDs 0030-0039 are reserved for CDC variants.
+Test IDs 0031-0039 are reserved for CDC variants.
 """
 import logging
 import subprocess
@@ -10,10 +10,7 @@ from kubernetes import client, config as k8s_config, watch
 
 from console_link.models.cluster import Cluster
 
-from ..cluster_version import (
-    ElasticsearchV7_X,
-    OpensearchV1_X, OpensearchV2_X, OpensearchV3_X,
-)
+from ..cluster_version import CDC_MIGRATION_COMBINATIONS
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments  # noqa: F401 (re-exported)
 
 logger = logging.getLogger(__name__)
@@ -23,11 +20,7 @@ PROXY_DEPLOYMENT_NAME = "capture-proxy"
 REPLAYER_LABEL_SELECTOR = "app=replayer"
 PROXY_LABEL_SELECTOR = "migrations/proxy=capture-proxy"
 PROXY_ENDPOINT = "https://capture-proxy:9201"
-CDC_SOURCE_TARGET_COMBINATIONS = [
-    (ElasticsearchV7_X, OpensearchV1_X),
-    (ElasticsearchV7_X, OpensearchV2_X),
-    (ElasticsearchV7_X, OpensearchV3_X),
-]
+CDC_SOURCE_TARGET_COMBINATIONS = CDC_MIGRATION_COMBINATIONS
 
 
 # --- Shared helpers ---

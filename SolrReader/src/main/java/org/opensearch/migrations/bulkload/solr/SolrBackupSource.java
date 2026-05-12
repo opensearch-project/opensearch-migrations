@@ -13,8 +13,11 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
+import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReaderContext;
 import org.opensearch.migrations.bulkload.lucene.SegmentNameSorter;
+import org.opensearch.migrations.bulkload.lucene.version_6.IndexReader6;
+import org.opensearch.migrations.bulkload.lucene.version_7.IndexReader7;
 import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
 import org.opensearch.migrations.bulkload.lucene.version_9.MappedDirectory;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
@@ -54,11 +57,27 @@ public class SolrBackupSource implements DocumentSource {
     private final Path backupDir;
     private final String collectionName;
     private final JsonNode solrSchema;
+    private final int solrMajorVersion;
 
-    public SolrBackupSource(Path backupDir, String collectionName, JsonNode solrSchema) {
+    public SolrBackupSource(Path backupDir, String collectionName, JsonNode solrSchema, int solrMajorVersion) {
         this.backupDir = backupDir;
         this.collectionName = collectionName;
         this.solrSchema = solrSchema;
+        this.solrMajorVersion = solrMajorVersion;
+    }
+
+    /**
+     * Selects the Lucene reader matching the Solr source version:
+     * Solr 6 → Lucene 6, Solr 7 → Lucene 7, Solr 8/9 → Lucene 9 (8 via backward-codecs).
+     */
+    private LuceneIndexReader newLuceneReader(Path indexDir) {
+        return switch (solrMajorVersion) {
+            case 6 -> new IndexReader6(indexDir);
+            case 7 -> new IndexReader7(indexDir, false, null);
+            case 8, 9 -> new IndexReader9(indexDir, false, null);
+            default -> throw new IllegalArgumentException(
+                "Unsupported Solr major version: " + solrMajorVersion + " (supported: 6, 7, 8, 9)");
+        };
     }
 
     @Override
@@ -203,6 +222,11 @@ public class SolrBackupSource implements DocumentSource {
      * Read a Lucene index using a MappedDirectory (for SolrCloud UUID backups).
      */
     private Flux<Document> readLuceneIndexMapped(Path indexDir, Map<String, String> fileNameMapping, long startingDocOffset) {
+        if (solrMajorVersion < 8) {
+            return Flux.error(new IllegalStateException(
+                "SolrCloud UUID-mapped (incremental) backups are not supported for Solr "
+                    + solrMajorVersion + ".x; SIP-12 was introduced in Solr 8.9. Use a non-incremental backup."));
+        }
         try {
             var fsDir = FSDirectory.open(indexDir);
             var mappedDir = new MappedDirectory(fsDir, fileNameMapping);
@@ -230,7 +254,7 @@ public class SolrBackupSource implements DocumentSource {
      */
     private Flux<Document> readLuceneIndex(Path indexDir, long startingDocOffset) {
         try {
-            var reader = new IndexReader9(indexDir, false, null);
+            var reader = newLuceneReader(indexDir);
             var segmentsFile = findSegmentsFile(indexDir);
             var directoryReader = reader.getReader(segmentsFile);
 

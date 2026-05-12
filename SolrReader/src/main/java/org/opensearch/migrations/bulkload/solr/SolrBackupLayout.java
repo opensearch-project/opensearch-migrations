@@ -71,6 +71,13 @@ public final class SolrBackupLayout {
         } catch (IOException e) {
             log.warn("Failed to list directories in {}", dataDir, e);
         }
+        // Solr 6/7 non-incremental SolrCloud BACKUP writes a bare `zk_backup/` directory
+        // (no numeric suffix). Fall back to that if no numbered revisions exist.
+        var bareZkBackup = dataDir.resolve("zk_backup");
+        if (Files.isDirectory(bareZkBackup)) {
+            log.info("Found bare zk_backup directory (Solr 6/7 layout): {}", bareZkBackup);
+            return bareZkBackup;
+        }
         return null;
     }
 
@@ -214,8 +221,10 @@ public final class SolrBackupLayout {
                 var name = p.getFileName().toString();
                 return name.equals("shard_backup_metadata")
                     || name.equals("index")
+                    || name.equals("zk_backup")             // Solr 6/7 non-incremental layout
                     || ZK_BACKUP_PATTERN.matcher(name).matches()
-                    || name.startsWith("backup_");
+                    || name.startsWith("backup_")
+                    || name.equals("backup.properties");    // Solr 6/7 marker file
             });
         } catch (IOException e) {
             return false;

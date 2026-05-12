@@ -4,6 +4,7 @@ import java.io.File;
 import java.nio.file.Files;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
@@ -13,9 +14,11 @@ import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -34,11 +37,31 @@ class SolrMetadataMigrationTest {
     @TempDir
     File tempDir;
 
-    @Test
+    static Stream<Arguments> solrVersions() {
+        return Stream.of(
+            Arguments.of(SolrClusterContainer.SOLR_6),
+            Arguments.of(SolrClusterContainer.SOLR_7),
+            Arguments.of(SolrClusterContainer.SOLR_8),
+            Arguments.of(SolrClusterContainer.SOLR_9)
+        );
+    }
+
+    /** Solr 7 introduced Point-based numeric/date types as the default; Solr 6 used Trie* types. */
+    private static String numericIntType(int major) { return major <= 6 ? "tint" : "pint"; }
+    private static String dateType(int major)       { return major <= 6 ? "tdate" : "pdate"; }
+
+    /** Solr 6/7 Docker images use /opt/solr/server/solr as SOLR_HOME; 8+ switched to /var/solr/data. */
+    private static String solrDataDir(int major)    { return major <= 7 ? "/opt/solr/server/solr" : "/var/solr/data"; }
+
+    /** Solr 9+ renamed managed-schema (no extension) to managed-schema.xml. */
+    private static String schemaFileName(int major) { return major >= 9 ? "managed-schema.xml" : "managed-schema"; }
+
+    @ParameterizedTest(name = "Solr {0} → OS")
+    @MethodSource("solrVersions")
     @Timeout(value = 5, unit = TimeUnit.MINUTES)
-    void solrBackupProducesCorrectOpenSearchMappings() throws Exception {
+    void solrBackupProducesCorrectOpenSearchMappings(SolrClusterContainer.SolrVersion solrVersion) throws Exception {
         try (
-            var solr = new SolrClusterContainer(SolrClusterContainer.SOLR_8);
+            var solr = new SolrClusterContainer(solrVersion);
             var target = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
         ) {
             CompletableFuture.allOf(
@@ -48,11 +71,12 @@ class SolrMetadataMigrationTest {
 
             var targetOps = new ClusterOperations(target);
 
-            // Create core and add schema fields
+            // Create core and add schema fields. Solr 6 lacks Point-based types; use Trie equivalents.
+            int major = solrVersion.major();
             exec(solr, "solr", "create_core", "-c", COLLECTION);
             addField(solr, COLLECTION, "title", "string");
-            addField(solr, COLLECTION, "count", "pint");
-            addField(solr, COLLECTION, "created", "pdate");
+            addField(solr, COLLECTION, "count", numericIntType(major));
+            addField(solr, COLLECTION, "created", dateType(major));
             addField(solr, COLLECTION, "description", "text_general");
             addField(solr, COLLECTION, "active", "boolean");
 
@@ -63,9 +87,13 @@ class SolrMetadataMigrationTest {
                 "-d", "[{\"id\":\"1\",\"title\":\"test\",\"count\":42,\"created\":\"2024-01-01T00:00:00Z\",\"description\":\"hello world\",\"active\":true}]"
             );
 
+            // Solr 6: SOLR_HOME=/opt/solr/server/solr (parent already exists, snapshot dir must not pre-exist).
+            // Solr 8+: SOLR_HOME=/var/solr/data (Solr creates the snapshot dir automatically).
+            var dataDir = solrDataDir(major);
+
             // Create replication backup
             solr.execInContainer("curl", "-s",
-                "http://localhost:8983/solr/" + COLLECTION + "/replication?command=backup&location=/var/solr/data&name=meta_bak"
+                "http://localhost:8983/solr/" + COLLECTION + "/replication?command=backup&location=" + dataDir + "&name=meta_bak"
             );
             waitForBackup(solr, COLLECTION, 30);
 
@@ -77,7 +105,7 @@ class SolrMetadataMigrationTest {
             Files.createDirectories(collectionDir);
 
             // Copy snapshot files so discoverCollections finds the collection
-            var snapshotDir = "/var/solr/data/snapshot.meta_bak";
+            var snapshotDir = dataDir + "/snapshot.meta_bak";
             var listResult = solr.execInContainer("ls", snapshotDir);
             for (var fileName : listResult.getStdout().trim().split("\n")) {
                 if (fileName.isEmpty()) continue;
@@ -91,14 +119,14 @@ class SolrMetadataMigrationTest {
             var configDir = collectionDir.resolve("zk_backup_0").resolve("configs").resolve("_default");
             Files.createDirectories(configDir);
             solr.copyFileFromContainer(
-                "/var/solr/data/" + COLLECTION + "/conf/managed-schema",
+                dataDir + "/" + COLLECTION + "/conf/" + schemaFileName(major),
                 configDir.resolve("managed-schema.xml").toString()
             );
 
             // Run MetadataMigration
             var args = new MigrateOrEvaluateArgs();
             args.fileSystemRepoPath = backupRoot.toString();
-            args.sourceVersion = Version.fromString("SOLR 8.11.4");
+            args.sourceVersion = Version.fromString("SOLR " + solrVersion.tag());
             args.targetArgs.host = target.getUrl();
 
             var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();

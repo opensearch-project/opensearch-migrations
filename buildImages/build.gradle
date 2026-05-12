@@ -199,6 +199,21 @@ def testBuildKitProjects = [
                         TARBALL_URL: "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.10.2-linux-ARCH.tar.gz"
                 ]
         ],
+        [
+                serviceName: "customElasticsearch81914",
+                contextDir: "custom-es-images/dockerfiles",
+                imageName:  "custom-elasticsearch",
+                imageTag:   "8.19.14",
+                buildArgs: [
+                        CORRETTO_VERSION: "17",
+                        BASE_IMAGE: ptc.rewrite("docker.io/library/amazoncorretto:17-al2023-headless"),
+                        DOWNLOADER_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
+                        CONFIG_BUILDER_IMAGE: ptc.rewrite("docker.io/library/amazonlinux:2023"),
+                        JAVA_HOME_PATH: "/usr/lib/jvm/java-17-amazon-corretto",
+                        ES_VERSION: "8.19.14",
+                        TARBALL_URL: "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-8.19.14-linux-ARCH.tar.gz"
+                ]
+        ],
 ]
 
 // Test-only images: not required for main MA operations, excluded with -PskipTestImages=true

@@ -1,8 +1,8 @@
 def call(Map config = [:]) {
-    def defaultStageId = config.defaultStageId ?: "cdc-only"
+    def defaultStageId = config.defaultStageId ?: "esoscdc"
     def gitBranchDefault = config.gitBranchDefault ?: 'main'
     def jobName = config.jobName ?: "eks-cdc-integ-test"
-    def defaultTestIds = config.defaultTestIds ?: "0030"
+    def defaultTestIds = config.defaultTestIds ?: "0031"
     def tlsMode = config.tlsMode ?: "none"
     def lockLabel = config.lockLabel ?: (jobName.startsWith("pr-") ? "aws-pr-slot" : "aws-main-slot")
     def sourceVersion = config.sourceVersion ?: ""
@@ -17,7 +17,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: gitBranchDefault, description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
-            string(name: 'TEST_IDS', defaultValue: "${defaultTestIds}", description: 'Comma-separated test IDs to run (e.g. 0030)')
+            string(name: 'TEST_IDS', defaultValue: "${defaultTestIds}", description: 'Comma-separated test IDs to run (e.g. 0031)')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             choice(
                     name: 'SOURCE_VERSION',
@@ -144,7 +144,7 @@ def call(Map config = [:]) {
                                     }
                                 },
                                 'Bootstrap MA': {
-                                    withMigrationsTestAccount(region: params.REGION) { accountId ->
+                                    withMigrationsTestAccount(region: params.REGION, duration: 14400) { accountId ->
                                         bootstrapMA(
                                             stackName: env.MA_STACK_NAME,
                                             stage: maStageName,
@@ -219,7 +219,7 @@ def call(Map config = [:]) {
                         dir('libraries/testAutomation') {
                             script {
                                 sh "pipenv install --deploy"
-                                withMigrationsTestAccount(region: params.REGION) { accountId ->
+                                withMigrationsTestAccount(region: params.REGION, duration: 14400) { accountId ->
                                     sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
                                 }
                             }

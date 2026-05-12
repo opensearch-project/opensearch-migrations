@@ -153,12 +153,21 @@
             "-lc"
           ],
           "args": [
-            "\nselector='migrations.opensearch.org/workflow={{workflow.name}}'\npatch='{\"metadata\":{\"ownerReferences\":[{\"apiVersion\":\"argoproj.io/v1alpha1\",\"kind\":\"Workflow\",\"name\":\"{{workflow.name}}\",\"uid\":\"{{workflow.uid}}\"}]}}'\nkubectl get approvalgates.migrations.opensearch.org -l \"$selector\" -o name \\\n  | xargs -r -n 1 kubectl patch --type merge -p \"$patch\" \\\n  || echo \"WARN: failed to patch one or more approvalgate ownerReferences\" >&2\n"
+            "\nset -euo pipefail\n\nselector='migrations.opensearch.org/workflow={{workflow.name}}'\npatch='{\"metadata\":{\"ownerReferences\":[{\"apiVersion\":\"argoproj.io/v1alpha1\",\"kind\":\"Workflow\",\"name\":\"{{workflow.name}}\",\"uid\":\"{{workflow.uid}}\"}]}}'\n\nkubectl get approvalgates.migrations.opensearch.org -l \"$selector\" -o name \\\n  | xargs -r -n 1 kubectl patch --type merge -p \"$patch\" \\\n  || { echo \"ERROR: failed to patch one or more approvalgate ownerReferences\" >&2; exit 1; }\n"
           ]
         },
         "metadata": {
           "annotations": {
             "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "retryStrategy": {
+          "limit": "3",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
           }
         },
         "outputs": {
@@ -280,12 +289,21 @@
             "-lc"
           ],
           "args": [
-            "\nkubectl delete approvalgates.migrations.opensearch.org \\\n  -l \"migrations.opensearch.org/workflow={{workflow.name}}\" \\\n  --ignore-not-found || true\n"
+            "\nkubectl delete approvalgates.migrations.opensearch.org \\\n  -l \"migrations.opensearch.org/workflow={{workflow.name}}\" \\\n  --ignore-not-found\n"
           ]
         },
         "metadata": {
           "annotations": {
             "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "retryStrategy": {
+          "limit": "3",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
           }
         },
         "outputs": {

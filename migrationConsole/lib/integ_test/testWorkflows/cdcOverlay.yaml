@@ -1,0 +1,80 @@
+# Shared CDC traffic overlay template.
+#
+# Provides a single add-traffic-config step that other CDC workflow templates
+# reference via templateRef. It takes a base migration config (produced by
+# generate-migration-configs in either full-migration-with-clusters or
+# full-migration-imported-clusters) and jq-merges a CDC traffic block onto
+# it — Kafka cluster config, capture-proxy, and replayer.
+#
+# By centralizing this logic, any change to the CDC traffic shape (e.g. new
+# replayer config fields, Kafka auth changes) is made in one place and picked
+# up by every caller.
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cdc-overlay
+spec:
+  serviceAccountName: argo-test-workflow-executor
+
+  templates:
+    # Overlay step: jq-merge CDC traffic config onto the base migration config.
+    # speedup-factor and observed-packet-timeout are passed in as parameters
+    # so each caller can expose them as top-level workflow parameters.
+    - name: add-traffic-config
+      inputs:
+        parameters:
+          - name: baseConfigBase64
+          - name: speedupFactor
+          - name: observedPacketTimeout
+          - name: imageMigrationConsoleLocation
+          - name: imageMigrationConsolePullPolicy
+      container:
+        image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+        imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+            BASE_CONFIG=$(echo "{{inputs.parameters.baseConfigBase64}}" | base64 -d)
+
+            # Overlay CDC traffic config with capture enabled from start.
+            CDC_CONFIG=$(echo "$BASE_CONFIG" | jq '. + {
+              "kafkaClusterConfiguration": {
+                "default": {
+                  "autoCreate": {}
+                }
+              },
+              "traffic": {
+                "proxies": {
+                  "capture-proxy": {
+                    "source": "source1",
+                    "proxyConfig": {
+                      "listenPort": 9201,
+                      "noCapture": false
+                    }
+                  }
+                },
+                "replayers": {
+                  "replay1": {
+                    "fromProxy": "capture-proxy",
+                    "toTarget": "target1",
+                    "dependsOnSnapshotMigrations": [
+                      {"source": "source1", "snapshot": "testsnapshot"}
+                    ],
+                    "replayerConfig": {
+                      "observedPacketConnectionTimeout": {{inputs.parameters.observedPacketTimeout}},
+                      "speedupFactor": {{inputs.parameters.speedupFactor}}
+                    }
+                  }
+                }
+              }
+            }')
+
+            echo "CDC traffic overlay applied to migration config:"
+            echo "$CDC_CONFIG" | jq .
+            echo "$CDC_CONFIG" | base64 | tr -d '\n' > /tmp/migration-config-base64
+      outputs:
+        parameters:
+          - name: migrationConfigBase64
+            valueFrom:
+              path: /tmp/migration-config-base64

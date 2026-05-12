@@ -98,48 +98,6 @@ class RegistryImageBuildUtils {
     }
 
     /**
-     * Query a v2 registry for the digest of an image reference like "host:port/repo:tag"
-     * and return "host:port/repo@sha256:...". Throws if the digest cannot be resolved.
-     */
-    static String resolveDigest(String imageReference) {
-        def atIdx = imageReference.indexOf('@')
-        if (atIdx >= 0) return imageReference // already has a digest
-
-        def colonIdx = imageReference.lastIndexOf(':')
-        def slashIdx = imageReference.lastIndexOf('/')
-        String tag = (colonIdx > slashIdx && colonIdx >= 0) ? imageReference.substring(colonIdx + 1) : "latest"
-        String repoWithHost = (colonIdx > slashIdx && colonIdx >= 0) ? imageReference.substring(0, colonIdx) : imageReference
-
-        def firstSlash = repoWithHost.indexOf('/')
-        if (firstSlash < 0) throw new GradleException("Cannot parse registry host from image reference: ${imageReference}")
-        def registryHost = repoWithHost.substring(0, firstSlash)
-        def repository = repoWithHost.substring(firstSlash + 1)
-
-        def scheme = registryScheme(registryHost)
-        def url = new URL("${scheme}://${registryHost}/v2/${repository}/manifests/${tag}")
-        def conn = (HttpURLConnection) url.openConnection()
-        conn.setRequestMethod("HEAD")
-        conn.setRequestProperty("Accept",
-                "application/vnd.docker.distribution.manifest.list.v2+json, " +
-                "application/vnd.docker.distribution.manifest.v2+json, " +
-                "application/vnd.oci.image.index.v1+json, " +
-                "application/vnd.oci.image.manifest.v1+json")
-        def authHeader = registryAuthHeader(registryHost)
-        if (authHeader) conn.setRequestProperty("Authorization", authHeader)
-        conn.setConnectTimeout(5000)
-        conn.setReadTimeout(5000)
-
-        if (conn.responseCode != 200) {
-            throw new GradleException("Failed to resolve digest for ${imageReference}: registry returned HTTP ${conn.responseCode}")
-        }
-        def digest = conn.getHeaderField("Docker-Content-Digest")
-        if (!digest) {
-            throw new GradleException("Failed to resolve digest for ${imageReference}: registry did not return Docker-Content-Digest header")
-        }
-        return "${repoWithHost}@${digest}"
-    }
-
-    /**
      * Return the path where a BuildKit task should write its --metadata-file output.
      * Convention: {buildDir}/buildkit-metadata/{serviceName}{archSuffix}.json
      */
@@ -712,6 +670,17 @@ class RegistryImageBuildUtils {
             group = "docker"
             description = "Build BuildKit images in dependency-ordered parallel phases using buildx bake (${architecture})"
 
+            // phaseName -> bake --metadata-file output path. Populated in doFirst, consumed
+            // in doLast to derive per-service metadata files without re-probing the registry.
+            def bakePhaseMetadataFiles = [:] as LinkedHashMap<String, File>
+            // serviceName -> phaseName. Populated in doFirst so doLast can find which bake
+            // invocation's metadata JSON contains each target.
+            def serviceToPhase = [:] as Map<String, String>
+            // serviceName -> hostVisibleRef. Captured in doFirst (same ref the bake tag uses,
+            // normalized to the host-visible form) so doLast can record it in the per-service
+            // metadata file without re-computing via the registry formatter.
+            def serviceToHostVisibleRef = [:] as Map<String, String>
+
             doFirst {
                 if (!builderWasExplicit) {
                     throw new GradleException("No -Pbuilder specified and no kube context set. Use -Pbuilder=<name> or set a kube context.")
@@ -749,6 +718,16 @@ class RegistryImageBuildUtils {
 
                         def targetName = cfg.serviceName.toString()
                         targetsForPhase << targetName
+                        serviceToPhase[targetName] = phaseName
+                        // Capture the host-visible tag (same formatter, same registry endpoint)
+                        // for recording in the per-service metadata file.
+                        def hostFormatter = ImageRegistryFormatterFactory.getFormatter(targetRegistry.hostUrl)
+                        serviceToHostVisibleRef[targetName] = hostFormatter.getFullTargetImageIdentifier(
+                                targetRegistry.hostUrl,
+                                imageName,
+                                imageTag,
+                                repoName
+                        )[0].toString()
                         bakeDefinition.target[targetName] = [
                                 context     : project.file(cfg.get("contextDir", ".")).absolutePath,
                                 dockerfile  : "Dockerfile",
@@ -766,12 +745,23 @@ class RegistryImageBuildUtils {
                 outputFile.parentFile.mkdirs()
                 outputFile.text = JsonOutput.prettyPrint(JsonOutput.toJson(bakeDefinition))
 
+                // Allocate one metadata file per phase so consecutive bake invocations don't
+                // overwrite each other's output. Parent dir is created here; bake creates the file.
+                def bakeMetadataDir = project.file("${project.buildDir}/buildkit-metadata/bake/${taskName}")
+                bakeMetadataDir.mkdirs()
+                phaseNames.each { phaseName ->
+                    def pf = new File(bakeMetadataDir, "${phaseName}.json")
+                    if (pf.exists()) pf.delete()
+                    bakePhaseMetadataFiles[phaseName] = pf
+                }
+
                 def commands = phaseNames.collect { phaseName ->
                     def args = [
                             "docker buildx bake",
                             "--progress=plain",
                             "-f \"${outputFile.absolutePath}\"",
                             "--builder ${builder}",
+                            "--metadata-file \"${bakePhaseMetadataFiles[phaseName].absolutePath}\"",
                             "--push",
                             phaseName
                     ]
@@ -781,28 +771,50 @@ class RegistryImageBuildUtils {
             }
 
             doLast {
+                // Bake writes one JSON per phase, keyed by target name. Split that into
+                // per-service metadata files so downstream consumers (jib base-image resolution
+                // in applyJibConfigurations, intermediate-arg resolution in resolveIntermediateArgs)
+                // can read ${serviceName}${archSuffix}.json as they do for the non-bake path.
+                // No outbound HTTP — bake already made the synchronous call to the registry
+                // when it pushed; we're just relaying the digest it recorded.
                 def archSuffix = architecture == "multi" ? "" : "_${architecture}"
+                def jsonSlurper = new groovy.json.JsonSlurper()
+                def phaseJsonCache = [:] as Map<String, Map>
                 includedProjects.each { cfg ->
-                    def repoName = cfg.get("repoName")?.toString()
-                    Registry targetRegistry = repoName ? finalRegistry : intermediateRegistry
-                    def hostFormatter = ImageRegistryFormatterFactory.getFormatter(targetRegistry.hostUrl)
-                    def imageName = cfg.get("imageName").toString()
-                    def imageTag = cfg.get("imageTag", "latest").toString()
-                    def hostVisibleRef = hostFormatter.getFullTargetImageIdentifier(
-                            targetRegistry.hostUrl,
-                            imageName,
-                            imageTag,
-                            repoName
-                    )[0].toString()
-                    def digest = architecture == "multi"
-                            ? resolveDigest(hostVisibleRef)?.split('@')?.last()
-                            : resolvePlatformDigest(hostVisibleRef, architecture)
-                    def metadataFile = RegistryImageBuildUtils.metadataFileFor(project, cfg.serviceName.toString(), archSuffix)
-                    metadataFile.parentFile.mkdirs()
-                    metadataFile.text = JsonOutput.prettyPrint(JsonOutput.toJson([
-                            "image.name"           : hostVisibleRef,
+                    def serviceName = cfg.serviceName.toString()
+                    def phaseName = serviceToPhase[serviceName]
+                    if (!phaseName) {
+                        throw new GradleException("No phase recorded for service ${serviceName}; doFirst did not run?")
+                    }
+                    def bakeMetadataFile = bakePhaseMetadataFiles[phaseName]
+                    if (!bakeMetadataFile?.exists()) {
+                        throw new GradleException("BuildKit bake did not write metadata file ${bakeMetadataFile} " +
+                                "for phase ${phaseName}. Verify the bake command includes --metadata-file.")
+                    }
+                    def phaseJson = phaseJsonCache.computeIfAbsent(phaseName) {
+                        (Map) jsonSlurper.parse(bakeMetadataFile)
+                    }
+                    def targetMeta = phaseJson[serviceName]
+                    if (!(targetMeta instanceof Map)) {
+                        throw new GradleException("Bake metadata file ${bakeMetadataFile} is missing target '${serviceName}'. " +
+                                "Keys present: ${phaseJson.keySet()}")
+                    }
+                    def digest = targetMeta["containerimage.digest"]?.toString()
+                    if (!digest) {
+                        throw new GradleException("No containerimage.digest for target '${serviceName}' in ${bakeMetadataFile}")
+                    }
+                    // Preserve bake's descriptor so readDigestFromMetadataFile can detect
+                    // OCI-index output and resolve per-platform digests when a consumer asks for one.
+                    def perServiceJson = [
+                            "image.name"           : serviceToHostVisibleRef[serviceName] ?: targetMeta["image.name"]?.toString(),
                             "containerimage.digest": digest
-                    ]))
+                    ]
+                    if (targetMeta["containerimage.descriptor"] != null) {
+                        perServiceJson["containerimage.descriptor"] = targetMeta["containerimage.descriptor"]
+                    }
+                    def metadataFile = RegistryImageBuildUtils.metadataFileFor(project, serviceName, archSuffix)
+                    metadataFile.parentFile.mkdirs()
+                    metadataFile.text = JsonOutput.prettyPrint(JsonOutput.toJson(perServiceJson))
                 }
             }
 

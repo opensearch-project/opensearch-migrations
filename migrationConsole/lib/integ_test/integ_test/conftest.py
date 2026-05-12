@@ -6,7 +6,7 @@
 #   0006       Benchmark backfill (OpenSearch Benchmark)
 #   0010-0019  Snapshot-only tests (BYOS / externally managed snapshots)
 #   0021-0029  AOSS collection tests (search, time-series, vector)
-#   0030-0039  CDC tests (capture proxy + replayer + live traffic)
+#   0031-0039  CDC tests (capture proxy + replayer + live traffic)
 #   0040-0049  CDC full E2E tests (capture proxy + replayer + backfill + generate-data)
 #
 import json

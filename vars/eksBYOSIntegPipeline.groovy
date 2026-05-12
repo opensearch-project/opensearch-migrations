@@ -407,6 +407,7 @@ def deployTargetClusterOnly(Map config) {
         vpcId: "${config.vpcId}",
         clusters: [[
             clusterId: "target",
+            clusterName: "${config.stage}-target",
             clusterVersion: "${config.targetVer}",
             clusterType: "OPENSEARCH_MANAGED_SERVICE",
             openAccessPolicyEnabled: true,

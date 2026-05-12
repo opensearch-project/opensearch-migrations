@@ -1,7 +1,7 @@
 import logging
 from ..cluster_version import (
-    ElasticsearchV5_X, ElasticsearchV7_X, ElasticsearchV6_X, ElasticsearchV8_X,
-    OpensearchV1_X, OpensearchV2_X, OpensearchV3_X
+    ElasticsearchV1_X, ElasticsearchV2_X,
+    RFS_MIGRATION_COMBINATIONS,
 )
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
@@ -22,19 +22,11 @@ full_indices = {
 
 class Test0006OpenSearchBenchmarkBackfill(MATestBase):
     def __init__(self, user_args: MATestUserArguments):
+        # OSB doesn't support ES 1.x/2.x or OS→OS paths, so exclude those from the full RFS matrix.
         allow_combinations = [
-            (ElasticsearchV5_X, OpensearchV1_X),
-            (ElasticsearchV5_X, OpensearchV2_X),
-            (ElasticsearchV5_X, OpensearchV3_X),
-            (ElasticsearchV6_X, OpensearchV1_X),
-            (ElasticsearchV6_X, OpensearchV2_X),
-            (ElasticsearchV6_X, OpensearchV3_X),
-            (ElasticsearchV7_X, OpensearchV1_X),
-            (ElasticsearchV7_X, OpensearchV2_X),
-            (ElasticsearchV7_X, OpensearchV3_X),
-            (ElasticsearchV8_X, OpensearchV1_X),
-            (ElasticsearchV8_X, OpensearchV2_X),
-            (ElasticsearchV8_X, OpensearchV3_X),
+            combo for combo in RFS_MIGRATION_COMBINATIONS
+            if combo[0] not in (ElasticsearchV1_X, ElasticsearchV2_X) and
+            combo[0].cluster_type != "OS"
         ]
         description = "Run OpenSearch Benchmark tests and then runs metadata and backfill."
         super().__init__(user_args=user_args,

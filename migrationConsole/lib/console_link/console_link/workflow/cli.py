@@ -1,9 +1,16 @@
 """Main CLI entry point for the workflow tool."""
 
+import signal
 import sys
 import logging
 import click
 from click.shell_completion import get_completion_class
+
+# Restore default SIGPIPE handling so piped commands (e.g. `| head`) exit cleanly.
+try:
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+except (AttributeError, ValueError):
+    pass
 
 from .models.utils import ExitCode
 from .models.utils import get_current_namespace

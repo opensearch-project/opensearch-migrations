@@ -182,6 +182,15 @@ function makeProxyDeploymentManifest(args: {
         ],
         ports: [{containerPort: makeDirectTypeProxy(args.listenPort)}],
         resources: makeDirectTypeProxy(args.resources),
+        readinessProbe: {
+            tcpSocket: {
+                port: makeDirectTypeProxy(args.listenPort)
+            },
+            initialDelaySeconds: 5,
+            periodSeconds: 5,
+            timeoutSeconds: 3,
+            failureThreshold: 3
+        },
         env: [
             {
                 name: "CAPTURE_PROXY_KAFKA_PASSWORD",
@@ -253,6 +262,7 @@ function makeProxyDeploymentManifest(args: {
         },
         spec: {
             replicas: makeDirectTypeProxy(args.podReplicas),
+            minReadySeconds: 2,
             strategy: {
                 type: "Recreate"
             },

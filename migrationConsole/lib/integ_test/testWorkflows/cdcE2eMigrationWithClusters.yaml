@@ -1,0 +1,234 @@
+# Full E2E CDC test with cluster provisioning.
+#
+# This template is the "with-clusters" counterpart to cdc-full-e2e-imported-clusters:
+# it provisions source + target clusters inline (via cluster-templates) AND wires up
+# the capture proxy + replayer for CDC traffic capture — all in a single workflow.
+#
+# Use this template for local (minikube / kind) CDC tests where no external CDK
+# deployment supplies cluster endpoints. Use cdc-full-e2e-imported-clusters when
+# clusters are pre-provisioned and their configs are supplied as inputs.
+#
+# The CDC traffic overlay (Kafka config, capture-proxy, replayer) is provided by
+# the shared cdc-overlay.add-traffic-config template so that the imported-clusters
+# variant stays in sync.
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: cdc-e2e-migration-with-clusters
+spec:
+  serviceAccountName: argo-test-workflow-executor
+  onExit: conditional-cleanup
+  entrypoint: main
+  parallelism: 100
+
+  arguments:
+    parameters:
+      - name: cluster-namespace
+        value: "ma"
+      - name: source-cluster-template
+        value: "elasticsearch-7-10-single-node"
+      - name: target-cluster-template
+        value: "opensearch-2-19-single-node"
+      - name: snapshot-and-migration-configs
+        value: |
+          [{
+            "migrations": [{
+              "metadataMigrationConfig": {},
+              "documentBackfillConfig": {
+                "maxShardSizeBytes": 16000000,
+                "resources": {
+                  requests: { cpu: "25m",   memory: "1Gi", ephemeral-storage: "5Gi" },
+                  limits:   { cpu: "1000m", memory: "2Gi", ephemeral-storage: "5Gi" }
+                }
+              }
+            }]
+          }]
+      - name: replayer-config
+        value: |
+          {"batchSize": 1000, "concurrency": 4}
+      - name: skip-cleanup
+        value: "false"
+      # Registry prefix for custom ES images (e.g. "localhost:5000/" for minikube)
+      - name: image-registry-prefix
+        value: ""
+      - name: s3-snapshot-configmap
+        value: "migrations-default-s3-config"
+      - name: migration-image-configmap
+        value: "migration-image-config"
+      - name: monitor-retry-limit
+        value: "120"
+      - name: otel-collector-endpoint
+        value: "http://otel-collector:4317"
+      - name: speedup-factor
+        value: "20"
+      - name: observed-packet-timeout
+        value: "30"
+
+  templates:
+    # Main workflow: provision clusters, pause for test data, run CDC+backfill.
+    - name: main
+      steps:
+        - - name: generate-cluster-names
+            templateRef:
+              name: full-migration-with-clusters
+              template: generate-cluster-names
+            arguments:
+              parameters:
+                - name: imageMigrationConsoleLocation
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
+                - name: imageMigrationConsolePullPolicy
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
+
+        - - name: create-source-cluster
+            templateRef:
+              name: cluster-templates
+              template: "{{workflow.parameters.source-cluster-template}}"
+            arguments:
+              parameters:
+                - name: cluster-name
+                  value: "{{steps.generate-cluster-names.outputs.parameters.source-cluster-name}}"
+                - name: namespace
+                  value: "{{workflow.parameters.cluster-namespace}}"
+                - name: image-registry-prefix
+                  value: "{{workflow.parameters.image-registry-prefix}}"
+
+          - name: create-target-cluster
+            templateRef:
+              name: cluster-templates
+              template: "{{workflow.parameters.target-cluster-template}}"
+            arguments:
+              parameters:
+                - name: cluster-name
+                  value: "{{steps.generate-cluster-names.outputs.parameters.target-cluster-name}}"
+                - name: namespace
+                  value: "{{workflow.parameters.cluster-namespace}}"
+                - name: image-registry-prefix
+                  value: "{{workflow.parameters.image-registry-prefix}}"
+
+        - - name: wait-for-source-cluster
+            templateRef:
+              name: full-migration-with-clusters
+              template: wait-for-cluster
+            arguments:
+              parameters:
+                - name: cluster-name
+                  value: "{{steps.generate-cluster-names.outputs.parameters.source-cluster-name}}"
+                - name: cluster-type
+                  value: "source"
+                - name: namespace
+                  value: "{{workflow.parameters.cluster-namespace}}"
+
+          - name: wait-for-target-cluster
+            templateRef:
+              name: full-migration-with-clusters
+              template: wait-for-cluster
+            arguments:
+              parameters:
+                - name: cluster-name
+                  value: "{{steps.generate-cluster-names.outputs.parameters.target-cluster-name}}"
+                - name: cluster-type
+                  value: "target"
+                - name: namespace
+                  value: "{{workflow.parameters.cluster-namespace}}"
+
+        # Pause so the integration test can set up pre-snapshot data via the capture proxy.
+        - - name: pause-for-test-data
+            templateRef:
+              name: full-migration-with-clusters
+              template: suspend-step
+
+        # Build the base migration config from the freshly-provisioned cluster configs.
+        - - name: generate-base-config
+            templateRef:
+              name: full-migration-with-clusters
+              template: generate-migration-configs
+            arguments:
+              parameters:
+                - name: source-config
+                  value: "{{steps.create-source-cluster.outputs.parameters.cluster-config}}"
+                - name: target-config
+                  value: "{{steps.create-target-cluster.outputs.parameters.cluster-config}}"
+                - name: snapshot-and-migration-configs
+                  value: "{{workflow.parameters.snapshot-and-migration-configs}}"
+                - name: replayer-config
+                  value: "{{workflow.parameters.replayer-config}}"
+                - name: imageMigrationConsoleLocation
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
+                - name: imageMigrationConsolePullPolicy
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
+
+        # Overlay CDC traffic config (Kafka, capture-proxy, replayer) onto the base config.
+        # Delegates to the shared cdc-overlay template so that changes to the CDC
+        # traffic shape are picked up by both the with-clusters and imported-clusters variants.
+        - - name: add-traffic-config
+            templateRef:
+              name: cdc-overlay
+              template: add-traffic-config
+            arguments:
+              parameters:
+                - name: baseConfigBase64
+                  value: "{{steps.generate-base-config.outputs.parameters.migrationConfigBase64}}"
+                - name: speedupFactor
+                  value: "{{workflow.parameters.speedup-factor}}"
+                - name: observedPacketTimeout
+                  value: "{{workflow.parameters.observed-packet-timeout}}"
+                - name: imageMigrationConsoleLocation
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
+                - name: imageMigrationConsolePullPolicy
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
+
+        # Run the full migration using the CDC-enabled config.
+        - - name: run-full-migration-with-workflow-cli
+            templateRef:
+              name: full-migration-with-workflow-cli
+              template: main
+            arguments:
+              parameters:
+                - name: migrationConfigBase64
+                  value: "{{steps.add-traffic-config.outputs.parameters.migrationConfigBase64}}"
+                - name: imageMigrationConsoleLocation
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
+                - name: imageMigrationConsolePullPolicy
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
+                - name: keepMigrationWorkflow
+                  value: "true"
+
+        # Pause to let the test verify doc counts on both clusters before teardown.
+        - - name: pause-for-migration-verification
+            templateRef:
+              name: full-migration-with-clusters
+              template: suspend-step
+
+    # Reuse the conditional-cleanup flow from full-migration-with-clusters so that
+    # source + target clusters (and their configmaps) are torn down on workflow exit.
+    - name: conditional-cleanup
+      steps:
+        - - name: run-cleanup
+            templateRef:
+              name: full-migration-with-clusters
+              template: cleanup-all-clusters
+            when: "{{workflow.parameters.skip-cleanup}} != true"

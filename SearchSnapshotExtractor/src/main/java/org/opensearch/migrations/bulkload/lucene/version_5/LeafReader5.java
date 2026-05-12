@@ -7,7 +7,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
@@ -17,6 +16,7 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import shadow.lucene5.org.apache.lucene.index.BinaryDocValues;
 import shadow.lucene5.org.apache.lucene.index.FieldInfo;
+import shadow.lucene5.org.apache.lucene.index.IndexOptions;
 import shadow.lucene5.org.apache.lucene.index.LeafReader;
 import shadow.lucene5.org.apache.lucene.index.NumericDocValues;
 import shadow.lucene5.org.apache.lucene.index.PostingsEnum;
@@ -265,39 +265,59 @@ public class LeafReader5 implements LuceneLeafReader {
     }
 
     /**
-     * Single-pass walk of the terms dictionary for {@code fieldName}. Produces a
-     * docId -> position-ordered term list map used by {@link SegmentTermIndex}
-     * to reconstruct analyzed-text fields when neither stored fields nor
-     * doc_values are available.
-     *
-     * No caching here: the surrounding {@link SegmentTermIndex} owns the
-     * returned map, and that index lives only as long as the per-segment Flux
-     * created in {@link org.opensearch.migrations.bulkload.lucene.LuceneReader#readDocsFromSegment}.
+     * See {@link LuceneLeafReader#streamFieldPostings}. Single-pass walk of the terms
+     * dictionary for {@code fieldName}, streaming {@code (termId, docId, positions[])}
+     * callbacks to the sink. Used by {@link SegmentTermIndex} to reconstruct
+     * analyzed-text fields when neither stored fields nor doc_values are available.
      */
     @Override
-    public Map<Integer, List<String>> buildTermPositionIndex(String fieldName) throws IOException {
+    public void streamFieldPostings(String fieldName,
+            org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink sink) throws IOException {
         Terms terms = wrapped.terms(fieldName);
-        if (terms == null) return Collections.emptyMap();
-        // docId -> (position -> term)
-        Map<Integer, TreeMap<Integer, String>> docPositions = new HashMap<>();
+        if (terms == null) return;
         TermsEnum termsEnum = terms.iterator();
         BytesRef term;
+        int[] positions    = new int[16];
+        int[] startOffsets = new int[16];
+        int[] endOffsets   = new int[16];
+        // Only request OFFSETS when the field was actually indexed with them.
+        // Requesting OFFSETS on a POSITIONS-only field causes Lucene 5's EverythingEnum
+        // to try reading the .pay file — but if no field in the segment has
+        // offsets/payloads, that file is never written and payIn == null, causing NPE.
+        FieldInfo fi = wrapped.getFieldInfos().fieldInfo(fieldName);
+        boolean fieldHasOffsets = fi != null
+            && fi.getIndexOptions().compareTo(IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS) >= 0;
+        int postingsFlags = fieldHasOffsets ? PostingsEnum.OFFSETS : PostingsEnum.POSITIONS;
         while ((term = termsEnum.next()) != null) {
-            String termStr = term.utf8ToString();
-            PostingsEnum postings = termsEnum.postings(null, PostingsEnum.POSITIONS);
+            int termId = sink.registerTerm(
+                new org.opensearch.migrations.bulkload.lucene.sidecar.BytesRefLike(
+                    term.bytes, term.offset, term.length));
+            PostingsEnum postings = termsEnum.postings(null, postingsFlags);
             int doc;
             while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
-                TreeMap<Integer, String> positions = docPositions.computeIfAbsent(doc, k -> new TreeMap<>());
                 int freq = postings.freq();
+                if (freq > positions.length) {
+                    int newLen = Math.max(freq, positions.length * 2);
+                    positions    = new int[newLen];
+                    startOffsets = new int[newLen];
+                    endOffsets   = new int[newLen];
+                }
+                int n = 0;
                 for (int i = 0; i < freq; i++) {
                     int pos = postings.nextPosition();
-                    positions.put(pos, termStr);
+                    if (pos < 0) continue;
+                    positions[n]    = pos;
+                    startOffsets[n] = fieldHasOffsets
+                        ? postings.startOffset()
+                        : org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink.NO_OFFSET;
+                    endOffsets[n]   = fieldHasOffsets
+                        ? postings.endOffset()
+                        : org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink.NO_OFFSET;
+                    n++;
                 }
+                if (n > 0) sink.accept(termId, doc, positions, startOffsets, endOffsets, n);
             }
         }
-        Map<Integer, List<String>> result = new HashMap<>(docPositions.size());
-        docPositions.forEach((docId, positions) -> result.put(docId, new ArrayList<>(positions.values())));
-        return result;
     }
 
     /**

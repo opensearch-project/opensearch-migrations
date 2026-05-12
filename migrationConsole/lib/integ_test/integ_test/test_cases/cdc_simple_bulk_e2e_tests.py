@@ -35,8 +35,15 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
         self.idx_post = f"cdc0040-post-snapshot-{uid}"
 
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
+        # Use the "with-clusters" CDC variant so the workflow provisions source + target
+        # clusters inline (same as backfill tests 0001/0002) and also wires up the capture
+        # proxy + replayer. The base class's prepare_workflow_parameters() already supplies
+        # the parameters this template expects (snapshot-and-migration-configs,
+        # source-cluster-template, target-cluster-template, image-registry-prefix,
+        # skip-cleanup) when imported_clusters is False, so we only need to swap the
+        # template name.
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
-        self.workflow_template = "cdc-full-e2e-imported-clusters"
+        self.workflow_template = "cdc-e2e-migration-with-clusters"
 
     def prepare_clusters(self):
         pass
@@ -45,6 +52,13 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
         if not self.workflow_name:
             raise ValueError("Workflow name is not available")
         ns = self.argo_service.namespace
+
+        # The cdc-e2e-migration-with-clusters template suspends after provisioning
+        # source + target clusters (so the framework can grab cluster configs) and
+        # again after the migration completes (for verification). Resume the first
+        # suspend so capture-proxy and replayer actually get deployed.
+        logger.info("Resuming workflow past pause-for-test-data to start migration...")
+        self.argo_service.resume_workflow(workflow_name=self.workflow_name)
 
         # --- Pre-snapshot: generate-data via proxy ---
         logger.info("Waiting for capture-proxy to be ready...")
@@ -73,6 +87,13 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
             max_attempts=10, delay=3.0,
         )
 
+        # Wait for the outer workflow to reach the pause-for-migration-verification
+        # suspend. Without this, workflow_finish() in the base class may race —
+        # calling resume_workflow() before the second suspend is active is a no-op,
+        # leaving the workflow stuck in Running state until test teardown aborts it.
+        logger.info("Waiting for workflow to reach pause-for-migration-verification suspend...")
+        self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=600)
+
     def post_migration_actions(self):
         pass
 
@@ -93,5 +114,8 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
             max_attempts=120, delay=10.0,
         )
 
-    def test_after(self):
-        pass
+    # Intentionally do NOT override test_after(): the base class asserts the outer
+    # workflow reached phase=Succeeded, which is the end-to-end safety net for the
+    # new cdc-e2e-migration-with-clusters template. If the workflow fails to finish
+    # cleanly (e.g. a suspend/resume race, or a template step erroring), we want the
+    # test to fail loudly rather than silently pass based on doc counts alone.

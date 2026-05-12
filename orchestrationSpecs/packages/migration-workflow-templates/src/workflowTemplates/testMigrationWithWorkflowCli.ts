@@ -12,7 +12,7 @@ import {
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
-import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {K8S_RESOURCE_RETRY_STRATEGY, CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {configureAndSubmitScript, monitorScript} from "../testResourceLoader";
 
 export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
@@ -43,6 +43,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             .addEnvVar("MIGRATION_CONFIG_BASE64", cb.inputs.migrationConfigBase64)
             .addArgs([configureAndSubmitScript])
         )
+        .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )
 
     .addTemplate("monitorWorkflow", t => t
@@ -98,6 +99,7 @@ else
 fi
             `])
         )
+        .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )
 
     .addTemplate("deleteMigrationWorkflow", t => t

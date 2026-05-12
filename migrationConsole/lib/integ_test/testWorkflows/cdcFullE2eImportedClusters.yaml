@@ -1,6 +1,10 @@
 # Full E2E CDC test: snapshot migration + capture proxy (capturing from start) + replayer.
 # Proxy starts with noCapture=false so traffic is captured throughout the entire
 # migration lifecycle (before, during, and after backfill).
+#
+# The CDC traffic overlay (Kafka config, capture-proxy, replayer) is provided by
+# the shared cdc-overlay.add-traffic-config template so that the with-clusters
+# variant (cdc-e2e-migration-with-clusters) stays in sync.
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
@@ -20,6 +24,8 @@ spec:
         value: "120"
       - name: speedup-factor
         value: "20"
+      - name: observed-packet-timeout
+        value: "30"
 
   templates:
     - name: main
@@ -54,11 +60,17 @@ spec:
                   value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
 
         - - name: add-traffic-config
-            template: add-traffic-config
+            templateRef:
+              name: cdc-overlay
+              template: add-traffic-config
             arguments:
               parameters:
                 - name: baseConfigBase64
                   value: "{{steps.generate-base-config.outputs.parameters.migrationConfigBase64}}"
+                - name: speedupFactor
+                  value: "{{workflow.parameters.speedup-factor}}"
+                - name: observedPacketTimeout
+                  value: "{{workflow.parameters.observed-packet-timeout}}"
                 - name: imageMigrationConsoleLocation
                   value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
                 - name: imageMigrationConsolePullPolicy
@@ -78,60 +90,3 @@ spec:
                   value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                 - name: keepMigrationWorkflow
                   value: "true"
-
-    - name: add-traffic-config
-      inputs:
-        parameters:
-          - name: baseConfigBase64
-          - name: imageMigrationConsoleLocation
-          - name: imageMigrationConsolePullPolicy
-      container:
-        image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
-        imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-        command: [sh, -c]
-        args:
-          - |
-            set -e
-            BASE_CONFIG=$(echo "{{inputs.parameters.baseConfigBase64}}" | base64 -d)
-
-            # Overlay CDC traffic config with capture enabled from start
-            CDC_CONFIG=$(echo "$BASE_CONFIG" | jq '. + {
-              "kafkaClusterConfiguration": {
-                "default": {
-                  "autoCreate": {}
-                }
-              },
-              "traffic": {
-                "proxies": {
-                  "capture-proxy": {
-                    "source": "source1",
-                    "proxyConfig": {
-                      "listenPort": 9201,
-                      "noCapture": false
-                    }
-                  }
-                },
-                "replayers": {
-                  "replay1": {
-                    "fromProxy": "capture-proxy",
-                    "toTarget": "target1",
-                    "dependsOnSnapshotMigrations": [
-                      {"source": "source1", "snapshot": "testsnapshot"}
-                    ],
-                    "replayerConfig": {
-                      "observedPacketConnectionTimeout": 30,
-                      "speedupFactor": {{workflow.parameters.speedup-factor}}
-                    }
-                  }
-                }
-              }
-            }')
-
-            echo "CDC full E2E migration config:"
-            echo "$CDC_CONFIG" | jq .
-            echo "$CDC_CONFIG" | base64 | tr -d '\n' > /tmp/migration-config-base64
-      outputs:
-        parameters:
-          - name: migrationConfigBase64
-            valueFrom:
-              path: /tmp/migration-config-base64

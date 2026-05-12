@@ -23,7 +23,7 @@ class WorkflowEndedBeforeSuspend(Exception):
 
 
 class ArgoService:
-    def __init__(self, namespace: str = "ma", argo_image: str = "quay.io/argoproj/argocli:v3.6.5",
+    def __init__(self, namespace: str = "ma", argo_image: str = "quay.io/argoproj/argocli:v4.0.3",
                  service_account: str = "argo-workflow-executor"):
         self.namespace = namespace
         self.argo_image = argo_image
