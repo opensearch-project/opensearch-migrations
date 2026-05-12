@@ -20,6 +20,16 @@ class SolrOperationsLibrary(DefaultOperationsLibrary):
         except Exception:
             return False
 
+    def _get_solr_major_version(self, cluster: Cluster) -> int:
+        """Return the Solr major version integer (e.g. 6, 7, 8, 9). Defaults to 8 on failure."""
+        try:
+            r = requests.get(
+                f"{cluster.endpoint}/solr/admin/info/system?wt=json", timeout=10)
+            version_str = r.json()["lucene"]["solr-spec-version"]
+            return int(version_str.split(".")[0])
+        except Exception:
+            return 8
+
     def create_document(self, index_name: str, doc_id: str, cluster: Cluster, data: dict = None,
                         doc_type="_doc", **kwargs):
         if data is None:
@@ -85,18 +95,31 @@ class SolrOperationsLibrary(DefaultOperationsLibrary):
         In standalone mode, creates a core by copying the 'dummy' core config.
         """
         if self._is_solr_cloud(cluster):
-            # SolrCloud: create a collection with specified topology.
-            # Uses the _default configset that ships with Solr.
-            # maxShardsPerNode must be >= num_shards/num_nodes in Solr 8.x, otherwise
-            # creation fails on single-node clusters when num_shards > 1.
-            url = (
-                f"{cluster.endpoint}/solr/admin/collections?action=CREATE"
+            solr_major = self._get_solr_major_version(cluster)
+
+            # Build the collection-creation URL with version-appropriate parameters.
+            #
+            # maxShardsPerNode: required on single-node clusters in 6.x–8.x to allow
+            # num_shards > 1; the parameter was removed entirely in Solr 9.0 and
+            # passing it causes a 400 error on 9.x+.
+            #
+            # collection.configName: the _default configset was introduced in Solr 7.0.
+            # In Solr 6.x the equivalent is data_driven_schema_configs, which the
+            # Docker image bootstraps into ZooKeeper on first start.
+            params = (
+                f"action=CREATE"
                 f"&name={index_name}"
                 f"&numShards={num_shards}"
                 f"&replicationFactor={replication_factor}"
-                f"&maxShardsPerNode={max(num_shards, replication_factor)}"
                 f"&wt=json"
             )
+            if solr_major < 9:
+                params += f"&maxShardsPerNode={max(num_shards, replication_factor)}"
+            if solr_major < 7:
+                params += "&collection.configName=data_driven_schema_configs"
+
+            url = f"{cluster.endpoint}/solr/admin/collections?{params}"
+
             # Retry loop — collection creation is occasionally flaky while ZK settles.
             last_err = None
             for attempt in range(1, 11):
@@ -104,7 +127,8 @@ class SolrOperationsLibrary(DefaultOperationsLibrary):
                     r = requests.get(url, timeout=60)
                     if r.status_code == 200 and r.json().get("responseHeader", {}).get("status") == 0:
                         logger.info(f"Created SolrCloud collection '{index_name}' "
-                                    f"({num_shards} shards, rf={replication_factor})")
+                                    f"({num_shards} shards, rf={replication_factor}, "
+                                    f"solr_major={solr_major})")
                         return r
                     last_err = f"status={r.status_code} body={r.text[:300]}"
                 except Exception as e:
