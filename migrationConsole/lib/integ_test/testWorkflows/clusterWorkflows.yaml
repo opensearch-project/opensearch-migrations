@@ -2232,8 +2232,8 @@ spec:
                       args:
                         - |
                           # Copy S3 repository jars to dist dir and start SolrCloud with embedded ZooKeeper
-                          cp /opt/solr/modules/s3-repository/lib/*.jar /opt/solr/dist/
-                          /opt/docker-solr/scripts/init-var-solr
+                          SOLR_MODULES=s3-repository
+                          /opt/solr/docker/scripts/init-var-solr
                           exec solr -f -force -cloud -DzkRun
                       readinessProbe:
                         httpGet:
