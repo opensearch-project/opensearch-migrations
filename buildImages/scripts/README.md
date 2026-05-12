@@ -26,9 +26,11 @@ Tests be started by:
 - see complete installation notes from all subcharts: `kubectl get configmap ma-installation-notes -n ma -o jsonpath='{.data.all-notes\.txt}' | less`
 - open bash in migration console: `kubectl -n ma exec --stdin --tty $(kubectl get pods -n ma -l app=migration-console --sort-by=.metadata.creationTimestamp -o jsonpath="{.items[-1].metadata.name}") -- /bin/bash`
   - can run tests directly from here via test_runner.py: `pipenv run pytest /root/lib/integ_test/integ_test/ma_workflow_test.py --unique_id 12345 --config_file_path "/config/migration_services.yaml" --test_ids "0001" --source_version "ES_7.10" --target_version "OS_2.19" --image_registry_prefix "localhost:30500/"`
-- from libraries/testAutomation/testAutomation/test_runner.py: `pipenv run app --test-ids=0001 --source-version=ES_7.10 --target-version=OS_2.19 --registry-prefix localhost:30500/`
+- from libraries/testAutomation/testAutomation folder (calling test_runner.py): 
+  - ElasticSearch example: `pipenv run app --dev --test-ids=0001 --source-version=ES_7.10 --target-version=OS_2.19 --registry-prefix localhost:30500/ --copy-logs`
+  - Solr example: `pipenv run app --dev --test-ids=0001 --source-version=SOLR_8.11 --target-version=OS_2.19 --registry-prefix localhost:30500/ --copy-logs`
 - to delete the deployment corresponding to above tests use `--delete-only` flag:
-  - `pipenv run app --test-ids=0001 --source-version=ES_7.10 --target-version=OS_2.19 --registry-prefix localhost:30500/ --delete-only`
+  - `pipenv run app --delete-only`
 - ssh into minikube runtime: `minikube ssh`
 - get migration assistant related services with labels: `kubectl get services -n ma --show-labels`
 - describe specific workload pod (e.g to identify issues): `kubectl -n ma describe pod/migration-workflow-3847500648-rfs-64465d8588-k5zd2`

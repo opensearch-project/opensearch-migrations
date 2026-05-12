@@ -1562,7 +1562,7 @@ spec:
 
               <solrcloud>
                 <str name="host">${host:}</str>
-                <int name="hostPort">${solr.port.advertise:0}</int>
+                <int name="hostPort">${jetty.port:8983}</int>
                 <str name="hostContext">${hostContext:solr}</str>
                 <bool name="genericCoreNodeNames">${genericCoreNodeNames:true}</bool>
                 <int name="zkClientTimeout">${zkClientTimeout:30000}</int>
@@ -1628,6 +1628,12 @@ spec:
                         - containerPort: 8983
                           name: http
                       env:
+                        - name: SOLR_PORT
+                          value: "8983"                                                                                                                              
+                        - name: SOLR_HOST
+                          valueFrom:
+                            fieldRef:
+                              fieldPath: status.podIP
                         - name: SOLR_JAVA_MEM
                           value: "-Xms512m -Xmx512m"
                         - name: SOLR_SECURITY_MANAGER_ENABLED
@@ -1764,11 +1770,9 @@ spec:
             cat > /tmp/solr.xml <<'SOLRXML'
             <?xml version="1.0" encoding="UTF-8" ?>
             <solr>
-              <int name="maxBooleanClauses">${solr.max.booleanClauses:1024}</int>
-
               <solrcloud>
                 <str name="host">${host:}</str>
-                <int name="hostPort">${solr.port.advertise:0}</int>
+                <int name="hostPort">${jetty.port:8983}</int>
                 <str name="hostContext">${hostContext:solr}</str>
                 <bool name="genericCoreNodeNames">${genericCoreNodeNames:true}</bool>
                 <int name="zkClientTimeout">${zkClientTimeout:30000}</int>
@@ -1824,6 +1828,12 @@ spec:
                         - containerPort: 8983
                           name: http
                       env:
+                        - name: SOLR_PORT
+                          value: "8983"                                                                                                                              
+                        - name: SOLR_HOST
+                          valueFrom:
+                            fieldRef:
+                              fieldPath: status.podIP
                         - name: SOLR_JAVA_MEM
                           value: "-Xms512m -Xmx512m"
                         - name: SOLR_SECURITY_MANAGER_ENABLED
@@ -1936,11 +1946,9 @@ spec:
             cat > /tmp/solr.xml <<'SOLRXML'
             <?xml version="1.0" encoding="UTF-8" ?>
             <solr>
-              <int name="maxBooleanClauses">${solr.max.booleanClauses:1024}</int>
-
               <solrcloud>
                 <str name="host">${host:}</str>
-                <int name="hostPort">${solr.port.advertise:0}</int>
+                <int name="hostPort">${jetty.port:8983}</int>
                 <str name="hostContext">${hostContext:solr}</str>
                 <bool name="genericCoreNodeNames">${genericCoreNodeNames:true}</bool>
                 <int name="zkClientTimeout">${zkClientTimeout:30000}</int>
@@ -1998,6 +2006,12 @@ spec:
                         - containerPort: 8983
                           name: http
                       env:
+                        - name: SOLR_PORT
+                          value: "8983"                                                                                                                              
+                        - name: SOLR_HOST
+                          valueFrom:
+                            fieldRef:
+                              fieldPath: status.podIP
                         - name: SOLR_JAVA_MEM
                           value: "-Xms512m -Xmx512m"
                         - name: SOLR_SECURITY_MANAGER_ENABLED
@@ -2116,7 +2130,7 @@ spec:
 
               <solrcloud>
                 <str name="host">${host:}</str>
-                <int name="hostPort">${solr.port.advertise:0}</int>
+                <int name="hostPort">${jetty.port:8983}</int>
                 <str name="hostContext">${hostContext:solr}</str>
                 <bool name="genericCoreNodeNames">${genericCoreNodeNames:true}</bool>
                 <int name="zkClientTimeout">${zkClientTimeout:30000}</int>
@@ -2182,6 +2196,12 @@ spec:
                         - containerPort: 8983
                           name: http
                       env:
+                        - name: SOLR_PORT
+                          value: "8983"                                                                                                                              
+                        - name: SOLR_HOST
+                          valueFrom:
+                            fieldRef:
+                              fieldPath: status.podIP
                         - name: SOLR_JAVA_MEM
                           value: "-Xms512m -Xmx512m"
                         - name: SOLR_SECURITY_MANAGER_ENABLED
