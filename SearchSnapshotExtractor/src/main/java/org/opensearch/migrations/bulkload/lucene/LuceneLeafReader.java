@@ -25,9 +25,10 @@ public interface LuceneLeafReader {
 
     /**
      * Returns field information for all fields with doc_values.
-     * Default implementation returns empty iterable for backward compatibility.
+     * <p>Implementations should cache the result: this is called once per document on the
+     * reconstruction hot path, but the underlying {@code FieldInfos} is segment-immutable.
      */
-    default Iterable<DocValueFieldInfo> getDocValueFields() {
+    default List<DocValueFieldInfo> getDocValueFields() {
         return Collections.emptyList();
     }
 

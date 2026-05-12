@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.extern.slf4j.Slf4j;
@@ -38,20 +39,19 @@ public class FieldMappingContext {
     private static final String SOURCE = "_source";
     private static final String COPY_TO = "copy_to";
     private final Map<String, FieldMappingInfo> fieldMappings = new HashMap<>();
-    /** source field -> ordered list of declared copy_to targets (raw order from mapping). */
+    /** source field -> declared copy_to targets, pre-sorted by ascending lossiness. */
     private final Map<String, List<String>> copyToBySource = new HashMap<>();
-    /** target field -> set of sources that copy into it (inverse index). */
+    /** target field -> set of sources that copy into it (inverse index, mutable during parse). */
     private final Map<String, Set<String>> sourcesByTarget = new HashMap<>();
-    // _source.includes / _source.excludes glob patterns. Pragmatic subset of ES source-filter
-    // glob semantics sufficient for the common cases:
-    //   "*"              -> matches every path
-    //   "<prefix>.*"     -> matches any path starting with "<prefix>."
-    //   "<prefix>.**"    -> same as "<prefix>.*" for our purposes
-    //   "<literal.path>" -> exact match
-    // Mid-string '*' / '?' fall back to literal match with a debug log so they do not silently
-    // drop matching paths.
-    private final List<String> sourceIncludes = new ArrayList<>();
-    private final List<String> sourceExcludes = new ArrayList<>();
+    /** target field -> immutable list view of sources, computed once at construction. */
+    private Map<String, List<String>> sourcesByTargetList = Collections.emptyMap();
+    /** Pre-filtered (fieldName, mappingInfo) entries with non-null constantValue, computed once. */
+    private final List<Map.Entry<String, FieldMappingInfo>> constantValueFields = new ArrayList<>();
+    /** Cached dotted-path segments for every mapped field. Populated alongside fieldMappings. */
+    private final Map<String, String[]> pathSegmentsCache = new HashMap<>();
+    /** Compiled {@code _source.includes}/{@code _source.excludes} predicates — see {@link #compileGlob}. */
+    private final List<Predicate<String>> sourceIncludes = new ArrayList<>();
+    private final List<Predicate<String>> sourceExcludes = new ArrayList<>();
 
     public FieldMappingContext(JsonNode mappingsNode) {
         if (mappingsNode == null) {
@@ -74,6 +74,31 @@ public class FieldMappingContext {
             parseProperties(properties, "");
         } else {
             log.debug("No properties found in mappings");
+        }
+
+        // Sort copy_to targets once at construction (lossinessRank is mapping-only, doc-independent).
+        copyToBySource.replaceAll((source, targets) -> {
+            if (targets.size() <= 1) {
+                return targets;
+            }
+            List<String> sorted = new ArrayList<>(targets);
+            sorted.sort((a, b) -> Integer.compare(lossinessRank(a), lossinessRank(b)));
+            return sorted;
+        });
+        // Pre-filter constant-value fields (constant_keyword) — pass 4 of source reconstruction
+        // walks this list directly instead of every mapped field.
+        for (Map.Entry<String, FieldMappingInfo> entry : fieldMappings.entrySet()) {
+            if (entry.getValue().constantValue() != null) {
+                constantValueFields.add(Map.entry(entry.getKey(), entry.getValue()));
+            }
+        }
+        // Freeze sourcesByTarget as immutable List views so accessors don't allocate per call.
+        if (!sourcesByTarget.isEmpty()) {
+            Map<String, List<String>> frozen = new HashMap<>(sourcesByTarget.size() * 2);
+            for (Map.Entry<String, Set<String>> entry : sourcesByTarget.entrySet()) {
+                frozen.put(entry.getKey(), List.copyOf(entry.getValue()));
+            }
+            sourcesByTargetList = Collections.unmodifiableMap(frozen);
         }
 
         log.debug("Parsed {} field mappings, {} copy_to edges, {} include/exclude rules",
@@ -132,8 +157,8 @@ public class FieldMappingContext {
         if (sourceNode.isMissingNode() || !sourceNode.isObject()) {
             return;
         }
-        collectStrings(sourceNode.path("includes"), sourceIncludes::add);
-        collectStrings(sourceNode.path("excludes"), sourceExcludes::add);
+        collectStrings(sourceNode.path("includes"), g -> sourceIncludes.add(compileGlob(g)));
+        collectStrings(sourceNode.path("excludes"), g -> sourceExcludes.add(compileGlob(g)));
     }
 
     private static void collectStrings(JsonNode node, Consumer<String> sink) {
@@ -176,6 +201,9 @@ public class FieldMappingContext {
         String type = fieldDef.get("type").asText();
         FieldMappingInfo info = FieldMappingInfo.from(fieldDef);
         fieldMappings.put(fullPath, info);
+        if (fullPath.indexOf('.') >= 0) {
+            pathSegmentsCache.put(fullPath, splitPath(fullPath));
+        }
         log.debug("Field '{}' -> type={}, esType={}", fullPath, type, info.type());
     }
 
@@ -215,73 +243,58 @@ public class FieldMappingContext {
         return fieldMappings.get(fieldName);
     }
 
-    /**
-     * Returns all field names in the mapping.
-     */
-    public java.util.Set<String> getFieldNames() {
+    public Set<String> getFieldNames() {
         return fieldMappings.keySet();
     }
 
-    /**
-     * True iff {@code fieldName} is declared as a copy_to target by at least one source field.
-     * Callers (the reconstructor) use this to STRIP target fields from reconstructed output since
-     * copy_to targets are indexed-only and never appear in ES/OS {@code _source}.
-     */
+    /** copy_to targets are indexed-only and never appear in ES/OS {@code _source}, so the
+     *  reconstructor uses this to strip them from reconstructed output. */
     public boolean isCopyToTarget(String fieldName) {
         return sourcesByTarget.containsKey(fieldName);
     }
 
-    /**
-     * Returns the source fields that copy into {@code targetFieldName}, or empty list if none.
-     */
+    /** Sources that copy into {@code targetFieldName}, immutable view computed at construction. */
     public List<String> getCopyToSources(String targetFieldName) {
-        Set<String> sources = sourcesByTarget.get(targetFieldName);
-        if (sources == null || sources.isEmpty()) {
-            return Collections.emptyList();
-        }
-        return new ArrayList<>(sources);
+        return sourcesByTargetList.getOrDefault(targetFieldName, Collections.emptyList());
     }
 
-    /**
-     * Returns just the source fields that have at least one {@code copy_to} edge declared.
-     * Callers performing reverse-derivation should iterate this rather than the full mapping —
-     * for indices with thousands of fields, that's an O(fields-with-copy_to) walk instead of
-     * O(all-fields), and avoids running hasNested/shouldSkipField for every leaf.
-     */
+    /** Source fields with at least one {@code copy_to} edge — reverse-derivation iterates this
+     *  rather than the full mapping. */
     public Set<String> getCopyToSourceFields() {
         return copyToBySource.keySet();
     }
 
-    /**
-     * Returns the copy_to targets for {@code sourceFieldName}, ordered by ascending lossiness —
-     * less-lossy (keyword-class) targets first, text targets last. Used during reverse-derivation
-     * when the source's own stored/doc_values/points chain returned nothing.
-     *
-     * Tie-break between equal-tier targets favors {@code doc_values:true} before false (faster
-     * recovery, less IO). Input declaration order is preserved within equivalent cost buckets.
-     */
+    /** Fast pre-check for partial-source merge: returns false when no recovery tier could
+     *  possibly contribute, so callers can skip the JSON round-trip. */
+    public boolean couldContributeToMerge() {
+        return !fieldMappings.isEmpty()
+                || !copyToBySource.isEmpty()
+                || !constantValueFields.isEmpty()
+                || !sourceIncludes.isEmpty()
+                || !sourceExcludes.isEmpty();
+    }
+
+    /** Pre-sorted copy_to targets for {@code sourceFieldName} (ascending lossiness, doc_values
+     *  preferred within a tier, declaration order preserved within ties). O(1) per call. */
     public List<String> getCopyToTargets(String sourceFieldName) {
-        List<String> raw = copyToBySource.get(sourceFieldName);
-        if (raw == null || raw.isEmpty()) {
-            return Collections.emptyList();
-        }
-        // Stable sort: Collections.sort is stable, so equal-rank targets keep declaration order.
-        List<String> sorted = new ArrayList<>(raw);
-        sorted.sort((a, b) -> Integer.compare(lossinessRank(a), lossinessRank(b)));
-        return sorted;
+        List<String> sorted = copyToBySource.get(sourceFieldName);
+        return sorted != null ? sorted : Collections.emptyList();
+    }
+
+    /** Pre-filtered entries for fields declaring a {@code constant_value}, computed once. */
+    public List<Map.Entry<String, FieldMappingInfo>> getConstantValueFields() {
+        return constantValueFields;
     }
 
     /**
-     * Lower = less lossy (prefer this target for reverse-derivation).
+     * Lower = less lossy (prefer this target for reverse-derivation). Result is
+     * {@code tier * 10 + (docValues ? 0 : 1)}, so within a tier doc-valued targets rank ahead.
      *
      *   0 = constant_keyword          (mapping-level value, zero IO)
      *   1 = keyword-class             (keyword, wildcard, version, ip, boolean, numerics, dates — exact)
      *   2 = match_only_text           (text-ish but preserves terms for positional recovery)
      *   3 = text                      (analyzed; original value lost, only tokenized recovery possible)
      *  10 = unknown / no mapping info (last resort)
-     *
-     * Tie-break: doc_values=true subtracts a fractional rank so the comparator still ranks
-     * doc-valued targets slightly ahead. We keep it as integer math by combining tier*10 + hasDV flag.
      */
     private int lossinessRank(String targetFieldName) {
         FieldMappingInfo info = fieldMappings.get(targetFieldName);
@@ -294,11 +307,11 @@ public class FieldMappingContext {
             tier = 10;
         } else {
             switch (mappingType) {
-                case "constant_keyword":
+                case EsFieldType.MappingTypes.CONSTANT_KEYWORD:
                     tier = 0; break;
-                case "text":
+                case EsFieldType.MappingTypes.TEXT:
                     tier = 3; break;
-                case "match_only_text":
+                case EsFieldType.MappingTypes.MATCH_ONLY_TEXT:
                     tier = 2; break;
                 default:
                     // keyword, wildcard, version, ip, boolean, numeric types, date, date_nanos, etc.
@@ -310,22 +323,9 @@ public class FieldMappingContext {
     }
 
     /**
-     * Returns {@code true} if {@code fieldPath} should be suppressed from the reconstructed
-     * {@code _source}. The path is excluded when ANY of the following holds:
-     *
-     * <ul>
-     *   <li>it is a {@code copy_to} target (ES never writes copy_to output back into
-     *       {@code _source}); equivalent to {@link #isCopyToTarget(String)};</li>
-     *   <li>it matches a {@code _source.excludes} glob;</li>
-     *   <li>{@code _source.includes} is set and the path matches no include glob.</li>
-     * </ul>
-     *
-     * <p>Excludes take precedence over includes (ES semantics). Cheap no-op when the mapping
-     * declared neither {@code copy_to} nor a {@code _source} filter.
-     *
-     * <p>This is the single decision point the reconstructor's skip gate should call — it keeps
-     * copy_to-target stripping and source-filter stripping behind one method so callers don't
-     * need to know which rule fired.
+     * Single decision point combining copy_to-target stripping and {@code _source.includes/excludes}
+     * filtering. Excludes take precedence over includes (ES semantics). Cheap no-op when the
+     * mapping declared none of these.
      */
     public boolean isSourceExcluded(String fieldPath) {
         if (sourcesByTarget.isEmpty() && sourceIncludes.isEmpty() && sourceExcludes.isEmpty()) {
@@ -334,14 +334,14 @@ public class FieldMappingContext {
         if (isCopyToTarget(fieldPath)) {
             return true;
         }
-        for (String glob : sourceExcludes) {
-            if (matchesGlob(glob, fieldPath)) {
+        for (Predicate<String> excl : sourceExcludes) {
+            if (excl.test(fieldPath)) {
                 return true;
             }
         }
         if (!sourceIncludes.isEmpty()) {
-            for (String glob : sourceIncludes) {
-                if (matchesGlob(glob, fieldPath)) {
+            for (Predicate<String> incl : sourceIncludes) {
+                if (incl.test(fieldPath)) {
                     return false;
                 }
             }
@@ -350,29 +350,62 @@ public class FieldMappingContext {
         return false;
     }
 
-    private static boolean matchesGlob(String glob, String path) {
+    /** Cached at construction for mapped fields; manual split otherwise (no {@code Pattern}). */
+    public String[] getPathSegments(String fieldName) {
+        String[] cached = pathSegmentsCache.get(fieldName);
+        return cached != null ? cached : splitPath(fieldName);
+    }
+
+    /** Equivalent to {@code fieldName.split("\\.")} but without the {@code Pattern} overhead. */
+    public static String[] splitPath(String fieldName) {
+        int len = fieldName.length();
+        int count = 1;
+        for (int i = 0; i < len; i++) {
+            if (fieldName.charAt(i) == '.') count++;
+        }
+        if (count == 1) {
+            return new String[] { fieldName };
+        }
+        String[] parts = new String[count];
+        int p = 0;
+        int start = 0;
+        for (int i = 0; i < len; i++) {
+            if (fieldName.charAt(i) == '.') {
+                parts[p++] = fieldName.substring(start, i);
+                start = i + 1;
+            }
+        }
+        parts[p] = fieldName.substring(start);
+        return parts;
+    }
+
+    /**
+     * ES-compatible subset: {@code *}, {@code prefix.**} / {@code prefix.*} (path-prefix),
+     * bare-{@code *} patterns ({@code prefix*}, {@code *suffix}, {@code prefix*suffix}).
+     * Multi-{@code *} or {@code ?} patterns fall back to literal match with a debug log.
+     */
+    private static Predicate<String> compileGlob(String glob) {
         if ("*".equals(glob)) {
-            return true;
+            return path -> true;
         }
         if (glob.endsWith(".**")) {
-            return path.startsWith(glob.substring(0, glob.length() - 2));
+            String pathPrefix = glob.substring(0, glob.length() - 2);
+            return path -> path.startsWith(pathPrefix);
         }
         if (glob.endsWith(".*")) {
-            return path.startsWith(glob.substring(0, glob.length() - 1));
+            String pathPrefix = glob.substring(0, glob.length() - 1);
+            return path -> path.startsWith(pathPrefix);
         }
-        // Bare `*` wildcards (no dot delimiter): support common single-`*` patterns
-        // matching ES _source.includes/excludes semantics — `prefix*`, `*suffix`,
-        // `prefix*suffix`. Multi-`*` patterns (or `?`) fall through to literal match.
         int firstStar = glob.indexOf('*');
         if (firstStar >= 0 && glob.indexOf('*', firstStar + 1) < 0 && glob.indexOf('?') < 0) {
             String prefix = glob.substring(0, firstStar);
             String suffix = glob.substring(firstStar + 1);
-            return path.length() >= prefix.length() + suffix.length()
-                && path.startsWith(prefix) && path.endsWith(suffix);
+            int minLen = prefix.length() + suffix.length();
+            return path -> path.length() >= minLen && path.startsWith(prefix) && path.endsWith(suffix);
         }
         if (glob.indexOf('*') >= 0 || glob.indexOf('?') >= 0) {
             log.debug("Unsupported source-filter glob '{}', treating as literal", glob);
         }
-        return path.equals(glob);
+        return glob::equals;
     }
 }
