@@ -61,8 +61,18 @@ public class SolrToOpenSearchEndToEndTest {
 
     static Stream<Arguments> solrToOpenSearch() {
         return Stream.of(
+            Arguments.of(SolrClusterContainer.SOLR_6, SearchClusterContainer.OS_V2_19_4),
+            Arguments.of(SolrClusterContainer.SOLR_7, SearchClusterContainer.OS_V2_19_4),
             Arguments.of(SolrClusterContainer.SOLR_8, SearchClusterContainer.OS_V2_19_4),
             Arguments.of(SolrClusterContainer.SOLR_9, SearchClusterContainer.OS_V2_19_4)
+        );
+    }
+
+    /** Solr 6 and 7 only — Trie* numeric/date types are pre-Solr-7-Point-defaults legacy. */
+    static Stream<Arguments> solr6And7ToOpenSearch() {
+        return Stream.of(
+            Arguments.of(SolrClusterContainer.SOLR_6, SearchClusterContainer.OS_V2_19_4),
+            Arguments.of(SolrClusterContainer.SOLR_7, SearchClusterContainer.OS_V2_19_4)
         );
     }
 
@@ -85,7 +95,7 @@ public class SolrToOpenSearchEndToEndTest {
             var schema = fetchSolrSchema(solr, COLLECTION_NAME);
             var backupDir = createAndCopyBackup(solr, COLLECTION_NAME);
 
-            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
+            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema, solrVersion.major());
             var targetClient = createOpenSearchClient(target);
             var sink = new OpenSearchDocumentSink(
                 targetClient, null, false, DocumentExceptionAllowlist.empty(), null
@@ -123,7 +133,7 @@ public class SolrToOpenSearchEndToEndTest {
             var schema = fetchSolrSchema(solr, COLLECTION_NAME);
             var backupDir = createAndCopyBackup(solr, COLLECTION_NAME);
 
-            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
+            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema, solrVersion.major());
             var targetClient = createOpenSearchClient(target);
             var sink = new OpenSearchDocumentSink(
                 targetClient, null, false, DocumentExceptionAllowlist.empty(), null
@@ -193,7 +203,7 @@ public class SolrToOpenSearchEndToEndTest {
      * all shards are discovered and documents from each shard are migrated.
      */
     @ParameterizedTest(name = "multi-shard: {0} → {1}")
-    @MethodSource("solr8ToOpenSearch")
+    @MethodSource("solrToOpenSearch")
     void multiShardBackupMigration(
         SolrClusterContainer.SolrVersion solrVersion,
         SearchClusterContainer.ContainerVersion targetVersion
@@ -226,7 +236,7 @@ public class SolrToOpenSearchEndToEndTest {
             copyDirectory(backup2, shard2Dir);
 
             var schema = fetchSolrSchema(solr, core1);
-            var source = new SolrBackupSource(multiShardDir, COLLECTION_NAME, schema);
+            var source = new SolrBackupSource(multiShardDir, COLLECTION_NAME, schema, solrVersion.major());
 
             // Verify shard discovery
             var partitions = source.listPartitions(COLLECTION_NAME);
@@ -251,7 +261,7 @@ public class SolrToOpenSearchEndToEndTest {
      * verifies documents using dynamic field names are indexed correctly.
      */
     @ParameterizedTest(name = "dynamic fields: {0} → {1}")
-    @MethodSource("solr8ToOpenSearch")
+    @MethodSource("solrToOpenSearch")
     void dynamicFieldsAndCopyFieldsMigration(
         SolrClusterContainer.SolrVersion solrVersion,
         SearchClusterContainer.ContainerVersion targetVersion
@@ -288,7 +298,7 @@ public class SolrToOpenSearchEndToEndTest {
             var schema = fetchSolrSchema(solr, COLLECTION_NAME);
             var backupDir = createAndCopyBackup(solr, COLLECTION_NAME);
 
-            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
+            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema, solrVersion.major());
             var targetClient = createOpenSearchClient(target);
             var sink = new OpenSearchDocumentSink(
                 targetClient, null, false, DocumentExceptionAllowlist.empty(), null
@@ -321,6 +331,29 @@ public class SolrToOpenSearchEndToEndTest {
             var properties = mappingRoot.path("properties");
             // The explicit 'title' field should be in properties
             assertThat("title mapped", properties.has("title"), equalTo(true));
+
+            // AC12: Solr's dynamic field patterns (*_s, *_i, *_dt, etc.) must produce
+            // OpenSearch dynamic_templates so further indexing infers types from field-name suffix.
+            var dynamicTemplates = mappingRoot.path("dynamic_templates");
+            assertTrue(dynamicTemplates.isArray(),
+                "dynamic_templates must be an array in OS mapping");
+            assertThat("dynamic_templates must be non-empty (Solr default schema has *_s, *_i, *_dt, ...)",
+                dynamicTemplates.size(), greaterThan(0));
+            // Each entry should be a single-key object: { "<name>": { "match": "...", "mapping": { "type": "..." } } }
+            var foundStringSuffix = false;
+            for (var template : dynamicTemplates) {
+                var entry = template.fields().next();
+                var spec = entry.getValue();
+                assertTrue(spec.has("match") || spec.has("match_mapping_type"),
+                    "Dynamic template '" + entry.getKey() + "' must have a match clause");
+                assertTrue(spec.path("mapping").has("type"),
+                    "Dynamic template '" + entry.getKey() + "' must specify a mapping type");
+                if (spec.path("match").asText().equals("*_s")) {
+                    foundStringSuffix = true;
+                }
+            }
+            assertTrue(foundStringSuffix,
+                "Expected a dynamic_template matching '*_s' (Solr default string suffix)");
         }
     }
 
@@ -368,7 +401,7 @@ public class SolrToOpenSearchEndToEndTest {
             var schema = fetchSolrSchema(solr, COLLECTION_NAME);
             var backupDir = createAndCopyBackup(solr, COLLECTION_NAME);
 
-            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
+            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema, solrVersion.major());
             var targetClient = createOpenSearchClient(target);
             var sink = new OpenSearchDocumentSink(
                 targetClient, null, false, DocumentExceptionAllowlist.empty(), null
@@ -441,7 +474,7 @@ public class SolrToOpenSearchEndToEndTest {
             var schema = fetchSolrSchema(solr, COLLECTION_NAME);
             var backupDir = createAndCopyBackup(solr, COLLECTION_NAME);
 
-            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema);
+            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema, solrVersion.major());
             var targetClient = createOpenSearchClient(target);
             var sink = new OpenSearchDocumentSink(
                 targetClient, null, false, DocumentExceptionAllowlist.empty(), null
@@ -517,7 +550,7 @@ public class SolrToOpenSearchEndToEndTest {
             }
 
             var schema = fetchSolrSchema(solr, COLLECTION_NAME);
-            var source = new SolrBackupSource(localBackupDir, COLLECTION_NAME, schema);
+            var source = new SolrBackupSource(localBackupDir, COLLECTION_NAME, schema, solrVersion.major());
             var targetClient = createOpenSearchClient(target);
             var sink = new OpenSearchDocumentSink(
                 targetClient, null, false, DocumentExceptionAllowlist.empty(), null
@@ -536,7 +569,7 @@ public class SolrToOpenSearchEndToEndTest {
      * Migrates all shards and verifies total doc count.
      */
     @ParameterizedTest(name = "solrcloud multi-shard: {0} → {1}")
-    @MethodSource("solr8ToOpenSearch")
+    @MethodSource("solrToOpenSearch")
     void solrCloudMultiShardBackupMigration(
         SolrClusterContainer.SolrVersion solrVersion,
         SearchClusterContainer.ContainerVersion targetVersion
@@ -551,22 +584,65 @@ public class SolrToOpenSearchEndToEndTest {
             var collection = "cloud_test";
             var numShards = 2;
 
-            // Create SolrCloud collection with 2 shards
+            // Solr 6 SolrCloud does NOT auto-upload a configset to ZK; CREATE will fail with
+            // "No config set found" unless we upconfig first. Solr 7+ auto-uploads _default.
+            if (solrVersion.major() == 6) {
+                var up = solr.execInContainer(
+                    "/opt/solr/bin/solr", "zk", "upconfig",
+                    "-n", "_default",
+                    "-d", "/opt/solr/server/solr/configsets/data_driven_schema_configs",
+                    "-z", "localhost:9983"
+                );
+                log.atInfo().setMessage("Solr 6 upconfig: exit={}, out={}, err={}")
+                    .addArgument(up.getExitCode())
+                    .addArgument(up.getStdout())
+                    .addArgument(up.getStderr()).log();
+                if (up.getExitCode() != 0) {
+                    throw new RuntimeException("Solr 6 upconfig failed: " + up.getStderr());
+                }
+            }
+
+            // Create SolrCloud collection with 2 shards. maxShardsPerNode was removed in Solr 9.
+            // Solr 6 needs explicit collection.configName since it doesn't auto-upload _default.
             var createResult = solr.execInContainer("curl", "-s",
                 "http://localhost:8983/solr/admin/collections?action=CREATE"
                     + "&name=" + collection
                     + "&numShards=" + numShards
                     + "&replicationFactor=1"
-                    + "&maxShardsPerNode=" + numShards
+                    + (solrVersion.major() < 9 ? "&maxShardsPerNode=" + numShards : "")
+                    + (solrVersion.major() == 6 ? "&collection.configName=_default" : "")
                     + "&wt=json");
             log.atInfo().setMessage("Create collection response: {}").addArgument(createResult.getStdout()).log();
+
+            // Wait for the collection to be active. Solr 6's CREATE returns before the
+            // collection is ready to serve queries, so a subsequent BACKUP can race and fail
+            // with "Collection 'X' does not exist".
+            waitForCollectionActive(solr, collection, numShards, 60);
 
             // Index 20 documents (distributed across shards by Solr's hash routing)
             populateSolrDocuments(solr, collection, 20);
 
-            // Backup via Collections API
-            var backupLocation = "/var/solr/data/backups";
-            solr.execInContainer("mkdir", "-p", backupLocation);
+            // Probe for an actually-writable Solr data directory. The SOLR_HOME env var is
+            // set to /var/solr/data in newer images but the directory doesn't always exist
+            // (Solr 7 docker uses /opt/solr/server/solr). Solr 9's solr.allowPaths also
+            // restricts BACKUP locations to SOLR_HOME and below by default, so picking a
+            // dir under the actual Solr home is necessary for cross-version compatibility.
+            var probe = solr.execInContainer("sh", "-c",
+                "for d in /var/solr/data /opt/solr/server/solr; do "
+                + "  if [ -d \"$d\" ] && [ -w \"$d\" ]; then echo \"$d\"; break; fi; "
+                + "done");
+            var solrDataDir = probe.getStdout().trim();
+            if (solrDataDir.isEmpty()) {
+                throw new RuntimeException("No writable Solr data directory found in container");
+            }
+            log.atInfo().setMessage("Solr {} writable data dir: {}").addArgument(solrVersion).addArgument(solrDataDir).log();
+            var backupLocation = solrDataDir + "/backups";
+            var mkdirResult = solr.execInContainer("mkdir", "-p", backupLocation);
+            if (mkdirResult.getExitCode() != 0) {
+                throw new RuntimeException("Failed to mkdir " + backupLocation + ": " + mkdirResult.getStderr());
+            }
+            var lsCheck = solr.execInContainer("sh", "-c", "ls -ld " + backupLocation + " 2>&1");
+            log.atInfo().setMessage("Backup dir status: {}").addArgument(lsCheck.getStdout().trim()).log();
 
             var backupResult = solr.execInContainer("curl", "-s",
                 "http://localhost:8983/solr/admin/collections?action=BACKUP"
@@ -575,18 +651,33 @@ public class SolrToOpenSearchEndToEndTest {
                     + "&location=" + backupLocation
                     + "&wt=json");
             log.atInfo().setMessage("Backup response: {}").addArgument(backupResult.getStdout()).log();
+            if (backupResult.getStdout().contains("\"status\":500") || backupResult.getStdout().contains("\"status\":400")) {
+                throw new IllegalStateException("BACKUP failed for " + solrVersion + ": " + backupResult.getStdout());
+            }
 
-            // Copy the backup directory tree from container to local
-            var localBackupRoot = tempDir.toPath().resolve("cloud_backup");
-            var containerBackupDir = backupLocation + "/cloud_backup/" + collection;
-            copyDirectoryFromContainer(solr, containerBackupDir, localBackupRoot.resolve(collection));
+            // Copy the entire backup tree from the container. Solr versions differ on layout:
+            //   - Solr 8.9+ / Solr 9 (incremental, default): <backup_name>/<collection>/zk_backup_0/...
+            //   - Solr 6 / 7 (non-incremental, only option): <backup_name>/snapshot.shardN/... (no <collection>)
+            // We mirror <backup_location>/<backup_name>/ verbatim and let resolveCollectionDataDir
+            // descend the right amount.
+            var localBackupRoot = tempDir.toPath().resolve("cloud_backup_local");
+            var containerBackupDir = backupLocation + "/cloud_backup";
+            copyDirectoryFromContainer(solr, containerBackupDir, localBackupRoot);
+            // Diagnostic: log the local copy structure so layout differences across versions are visible.
+            try (var walk = java.nio.file.Files.walk(localBackupRoot, 3)) {
+                walk.forEach(p -> log.atInfo().setMessage("Local backup tree: {}").addArgument(p).log());
+            }
 
-            // Parse schema from the backup's latest zk_backup_N directory
-            var schema = SolrSchemaXmlParser.findAndParse(localBackupRoot.resolve(collection));
+            var collectionDataDir = SolrBackupLayout.resolveCollectionDataDir(localBackupRoot);
+            log.atInfo().setMessage("Resolved collection data dir for {} backup: {}")
+                .addArgument(solrVersion).addArgument(collectionDataDir).log();
+
+            // Parse schema from the backup's zk_backup directory (numbered or bare).
+            var schema = SolrSchemaXmlParser.findAndParse(collectionDataDir);
 
             // Verify shard discovery — should find 2 shards
             var schemaNode = schema.path("schema");
-            var source = new SolrBackupSource(localBackupRoot.resolve(collection), collection, schemaNode);
+            var source = new SolrBackupSource(collectionDataDir, collection, schemaNode, solrVersion.major());
             var partitions = source.listPartitions(collection);
             assertThat("Should discover " + numShards + " shards from SolrCloud backup",
                 partitions.size(), equalTo(numShards));
@@ -679,7 +770,7 @@ public class SolrToOpenSearchEndToEndTest {
             assertThat("active → boolean", properties.path("active").path("type").asText(), equalTo("boolean"));
 
             // Also migrate the doc to verify end-to-end
-            var source = new SolrBackupSource(localBackupRoot.resolve(collection), collection, schemaNode);
+            var source = new SolrBackupSource(localBackupRoot.resolve(collection), collection, schemaNode, solrVersion.major());
             var targetClient = createOpenSearchClient(target);
             var sink = new OpenSearchDocumentSink(
                 targetClient, null, false, DocumentExceptionAllowlist.empty(), null
@@ -691,7 +782,152 @@ public class SolrToOpenSearchEndToEndTest {
         }
     }
 
+    /**
+     * E2E (Solr 6 / 7 only): Trie* numeric and date fields are stored, read with the matching
+     * Lucene reader, and mapped to integer/long/float/double/date in OpenSearch (AC1, AC5).
+     * Trie* types were the default numeric types in Solr 6 and most of 7 before Point-based
+     * types replaced them; Solr 9 removes them entirely, so this test is gated to 6/7.
+     */
+    @ParameterizedTest(name = "Trie* fields: {0} → {1}")
+    @MethodSource("solr6And7ToOpenSearch")
+    void trieFieldTypesMigrateCorrectly(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = new SolrClusterContainer(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            createSolrCollection(solr, COLLECTION_NAME);
+
+            solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+                "http://localhost:8983/solr/" + COLLECTION_NAME + "/schema",
+                "-d", "{\"add-field\":["
+                    + "{\"name\":\"trie_int\",   \"type\":\"tint\",    \"stored\":true},"
+                    + "{\"name\":\"trie_long\",  \"type\":\"tlong\",   \"stored\":true},"
+                    + "{\"name\":\"trie_float\", \"type\":\"tfloat\",  \"stored\":true},"
+                    + "{\"name\":\"trie_double\",\"type\":\"tdouble\", \"stored\":true},"
+                    + "{\"name\":\"trie_date\",  \"type\":\"tdate\",   \"stored\":true},"
+                    // AC11: multi-valued strings field — must round-trip as JSON array in _source
+                    + "{\"name\":\"tags\",       \"type\":\"strings\", \"stored\":true,\"docValues\":true,\"multiValued\":true}"
+                    + "]}");
+
+            var doc = "[{"
+                + "\"id\":\"trie1\","
+                + "\"trie_int\":42,"
+                + "\"trie_long\":1234567890,"
+                + "\"trie_float\":3.14,"
+                + "\"trie_double\":2.718281828,"
+                + "\"trie_date\":\"2024-01-15T10:30:00Z\","
+                + "\"tags\":[\"alpha\",\"beta\",\"gamma\"]"
+                + "}]";
+            solr.execInContainer("curl", "-s", "-H", "Content-Type: application/json",
+                "http://localhost:8983/solr/" + COLLECTION_NAME + "/update?commit=true",
+                "-d", doc);
+
+            var schema = fetchSolrSchema(solr, COLLECTION_NAME);
+            var backupDir = createAndCopyBackup(solr, COLLECTION_NAME);
+
+            var source = new SolrBackupSource(backupDir, COLLECTION_NAME, schema, solrVersion.major());
+            var targetClient = createOpenSearchClient(target);
+            var sink = new OpenSearchDocumentSink(
+                targetClient, null, false, DocumentExceptionAllowlist.empty(), null
+            );
+            new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE)
+                .migrateAll().collectList().block();
+
+            var restClient = createRestClient(target);
+            var ctx = DocumentMigrationTestContext.factory().noOtelTracking();
+            restClient.get("_refresh", ctx.createUnboundRequestContext());
+
+            // AC5: Trie* mapping types resolve to integer/long/float/double/date
+            var mappingResp = restClient.get(
+                COLLECTION_NAME + "/_mapping", ctx.createUnboundRequestContext()
+            );
+            var properties = MAPPER.readTree(mappingResp.body)
+                .path(COLLECTION_NAME).path("mappings").path("properties");
+
+            // AC5: Trie* mapping types resolve to OpenSearch types.
+            // Solr 7's managed-schema promotes tint→tlong and tfloat→tdouble, so integer/float
+            // only round-trips on Solr 6; on Solr 7 the schema reports long/double.
+            boolean isSolr7 = solrVersion.major() == 7;
+            assertThat("trie_int type",
+                properties.path("trie_int").path("type").asText(),
+                equalTo(isSolr7 ? "long" : "integer"));
+            assertThat("trie_long → long", properties.path("trie_long").path("type").asText(), equalTo("long"));
+            assertThat("trie_float type",
+                properties.path("trie_float").path("type").asText(),
+                equalTo(isSolr7 ? "double" : "float"));
+            assertThat("trie_double → double", properties.path("trie_double").path("type").asText(), equalTo("double"));
+            assertThat("trie_date → date", properties.path("trie_date").path("type").asText(), equalTo("date"));
+            // AC5: date format — OpenSearch 2.x omits format in _mapping when it equals the default
+            // (strict_date_optional_time||epoch_millis). We verify it is either that value or absent.
+            var dateFormat = properties.path("trie_date").path("format").asText();
+            assertTrue(
+                dateFormat.isEmpty() || dateFormat.equals("strict_date_optional_time||epoch_millis"),
+                "trie_date format should be default or explicit, got: " + dateFormat
+            );
+
+            // AC1: doc values land with correct types in _source
+            var searchResp = restClient.get(
+                COLLECTION_NAME + "/_search?q=id:trie1&size=1", ctx.createUnboundRequestContext()
+            );
+            var hits = MAPPER.readTree(searchResp.body).path("hits").path("hits");
+            assertThat("Should find trie1", hits.size(), equalTo(1));
+            var migrated = hits.get(0).path("_source");
+            assertThat("trie_int value", migrated.path("trie_int").asInt(), equalTo(42));
+            assertThat("trie_long value", migrated.path("trie_long").asLong(), equalTo(1234567890L));
+
+            // AC11: multi-valued field round-trips as JSON array, not concatenated string
+            assertTrue(migrated.path("tags").isArray(), "tags should be a JSON array in _source");
+            assertThat("tags array size", migrated.path("tags").size(), equalTo(3));
+            var tagValues = new HashSet<String>();
+            migrated.path("tags").forEach(v -> tagValues.add(v.asText()));
+            assertTrue(tagValues.contains("alpha"), "tags should contain alpha");
+            assertTrue(tagValues.contains("beta"), "tags should contain beta");
+            assertTrue(tagValues.contains("gamma"), "tags should contain gamma");
+        }
+    }
+
     // --- Helpers ---
+
+    /**
+     * Polls /solr/admin/collections?action=CLUSTERSTATUS until the collection has the
+     * expected number of active shards. Solr 6's CREATE returns before the collection is
+     * fully ready, so a subsequent action (BACKUP, etc.) can race and fail.
+     */
+    private static void waitForCollectionActive(
+        SolrClusterContainer solr, String collection, int expectedShards, int maxSeconds
+    ) throws Exception {
+        for (int i = 0; i < maxSeconds; i++) {
+            var status = solr.execInContainer("curl", "-s",
+                "http://localhost:8983/solr/admin/collections?action=CLUSTERSTATUS&collection="
+                    + collection + "&wt=json");
+            var body = status.getStdout();
+            // Count occurrences of "state":"active" — one per active replica.
+            int activeCount = 0;
+            int idx = 0;
+            while ((idx = body.indexOf("\"state\":\"active\"", idx)) != -1) {
+                activeCount++;
+                idx++;
+            }
+            if (activeCount >= expectedShards) {
+                log.atInfo().setMessage("Collection {} ready with {} active replica(s) after {}s")
+                    .addArgument(collection).addArgument(activeCount).addArgument(i).log();
+                return;
+            }
+            Thread.sleep(1000);
+        }
+        var finalStatus = solr.execInContainer("curl", "-s",
+            "http://localhost:8983/solr/admin/collections?action=CLUSTERSTATUS&collection="
+                + collection + "&wt=json");
+        throw new IllegalStateException(
+            "Collection " + collection + " did not become active within " + maxSeconds
+                + "s. Last CLUSTERSTATUS:\n" + finalStatus.getStdout());
+    }
 
     /**
      * Recursively copies a directory tree from a container to a local path.
@@ -815,31 +1051,64 @@ public class SolrToOpenSearchEndToEndTest {
 
     private Path createAndCopyBackup(SolrClusterContainer solr, String collection, String backupName)
         throws Exception {
-        solr.execInContainer(
+        var probe = solr.execInContainer("sh", "-c",
+            "for d in /var/solr/data /opt/solr/server/solr; do "
+            + "  if [ -d \"$d\" ] && [ -w \"$d\" ]; then echo \"$d\"; break; fi; "
+            + "done");
+        var solrDataDir = probe.getStdout().trim();
+        if (solrDataDir.isEmpty()) {
+            throw new RuntimeException("No writable Solr data directory found in container");
+        }
+        log.atInfo().setMessage("Solr writable data dir: {}").addArgument(solrDataDir).log();
+
+        var trigger = solr.execInContainer(
             "curl", "-s",
             "http://localhost:8983/solr/" + collection
-                + "/replication?command=backup&location=/var/solr/data&name=" + backupName
+                + "/replication?command=backup&location=" + solrDataDir + "&name=" + backupName
         );
-        // Poll for backup completion instead of fixed sleep
-        for (int i = 0; i < 30; i++) {
-            var detailsResult = solr.execInContainer("curl", "-s",
-                "http://localhost:8983/solr/" + collection + "/replication?command=details&wt=json");
-            if (detailsResult.getStdout().contains("success")) break;
+        log.atInfo().setMessage("Backup trigger response: {}").addArgument(trigger.getStdout()).log();
+
+        var snapshotDir = solrDataDir + "/snapshot." + backupName;
+        // Poll directly on the filesystem signal that backup is complete: a segments_* file
+        // landed in the snapshot directory. This works across Solr 6/7/8/9 regardless of
+        // the JSON response format of /replication?command=details.
+        boolean ready = false;
+        for (int i = 0; i < 60; i++) {
+            var find = solr.execInContainer("sh", "-c",
+                "find " + snapshotDir + " -name 'segments_*' -type f 2>/dev/null | head -1");
+            if (!find.getStdout().trim().isEmpty()) {
+                ready = true;
+                break;
+            }
             Thread.sleep(1000);
         }
+        if (!ready) {
+            var listing = solr.execInContainer("sh", "-c",
+                "ls -laR " + solrDataDir + " 2>&1 | head -200");
+            throw new IllegalStateException(
+                "Backup did not produce a segments_* file under " + snapshotDir + " within 60s.\n"
+                + "Trigger response: " + trigger.getStdout() + "\n"
+                + "Container " + solrDataDir + " listing:\n" + listing.getStdout());
+        }
 
-        var snapshotDir = "/var/solr/data/snapshot." + backupName;
         var localBackupDir = tempDir.toPath().resolve("solr_backup_" + backupName);
         Files.createDirectories(localBackupDir);
 
-        var listResult = solr.execInContainer("ls", snapshotDir);
-        for (var fileName : listResult.getStdout().trim().split("\n")) {
-            if (fileName.isEmpty()) continue;
-            solr.copyFileFromContainer(
-                snapshotDir + "/" + fileName,
-                localBackupDir.resolve(fileName).toString()
-            );
+        // Recursive copy. Standalone replication backup is normally flat, but copying
+        // recursively makes the helper robust to layout differences across Solr versions.
+        var findResult = solr.execInContainer("find", snapshotDir, "-type", "f");
+        int filesCopied = 0;
+        for (var line : findResult.getStdout().trim().split("\n")) {
+            if (line.isEmpty()) continue;
+            var rel = line.substring(snapshotDir.length()).replaceFirst("^/", "");
+            var localFile = localBackupDir.resolve(rel);
+            var parent = localFile.getParent();
+            if (parent != null) Files.createDirectories(parent);
+            solr.copyFileFromContainer(line, localFile.toString());
+            filesCopied++;
         }
+        log.atInfo().setMessage("Copied {} backup files from {} to {}")
+            .addArgument(filesCopied).addArgument(snapshotDir).addArgument(localBackupDir).log();
         return localBackupDir;
     }
 
