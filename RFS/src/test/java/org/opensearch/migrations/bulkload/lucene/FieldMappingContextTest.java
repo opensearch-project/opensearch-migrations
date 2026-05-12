@@ -205,6 +205,62 @@ class FieldMappingContextTest {
     }
 
     @Test
+    void testSourceExcludesBareNameSuppressesDescendants() throws Exception {
+        // ES semantics: {"excludes": ["meta"]} drops the whole meta object — every meta.<child>
+        // path must be suppressed. Equals-only matching would leak descendants.
+        String json = """
+            {
+                "_source": {"excludes": ["meta"]},
+                "properties": {
+                    "title": {"type": "text"},
+                    "meta": {
+                        "properties": {
+                            "created_at": {"type": "date"},
+                            "updated_by": {"type": "keyword"}
+                        }
+                    }
+                }
+            }
+            """;
+        FieldMappingContext context = new FieldMappingContext(MAPPER.readTree(json));
+
+        assertTrue(context.isSourceExcluded("meta"),             "bare-name literal must drop the path itself");
+        assertTrue(context.isSourceExcluded("meta.created_at"),  "bare-name literal must drop direct child");
+        assertTrue(context.isSourceExcluded("meta.updated_by"),  "bare-name literal must drop direct child");
+        assertFalse(context.isSourceExcluded("title"),           "unrelated path stays");
+        assertFalse(context.isSourceExcluded("metadata"),        "prefix-only collision must NOT match (no trailing dot)");
+    }
+
+    @Test
+    void testSourceExcludesDottedLiteralSuppressesDescendants() throws Exception {
+        // {"excludes": ["meta.audit"]} drops meta.audit AND meta.audit.user, meta.audit.ts, etc.
+        String json = """
+            {
+                "_source": {"excludes": ["meta.audit"]},
+                "properties": {
+                    "meta": {
+                        "properties": {
+                            "audit": {
+                                "properties": {
+                                    "user": {"type": "keyword"},
+                                    "ts":   {"type": "date"}
+                                }
+                            },
+                            "title": {"type": "keyword"}
+                        }
+                    }
+                }
+            }
+            """;
+        FieldMappingContext context = new FieldMappingContext(MAPPER.readTree(json));
+
+        assertTrue(context.isSourceExcluded("meta.audit"),       "literal exact match");
+        assertTrue(context.isSourceExcluded("meta.audit.user"),  "literal must drop nested descendant");
+        assertTrue(context.isSourceExcluded("meta.audit.ts"),    "literal must drop nested descendant");
+        assertFalse(context.isSourceExcluded("meta.title"),      "sibling path is unaffected");
+    }
+
+    @Test
     void testSourceExcludesDoubleStarGlob() throws Exception {
         // Trailing .** is accepted as equivalent to .* (ES treats both as "everything below").
         String json = """

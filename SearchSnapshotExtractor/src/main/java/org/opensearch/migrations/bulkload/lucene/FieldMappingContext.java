@@ -383,6 +383,11 @@ public class FieldMappingContext {
      * ES-compatible subset: {@code *}, {@code prefix.**} / {@code prefix.*} (path-prefix),
      * bare-{@code *} patterns ({@code prefix*}, {@code *suffix}, {@code prefix*suffix}).
      * Multi-{@code *} or {@code ?} patterns fall back to literal match with a debug log.
+     *
+     * <p>Literal patterns match the path itself AND any descendant path. This mirrors ES's
+     * recursive-descent filtering: {@code _source.excludes:["meta"]} drops the {@code meta}
+     * object as a whole, which transitively drops {@code meta.created_at},
+     * {@code meta.updated_by}, etc. Treating the literal as equals-only would leak descendants.
      */
     private static Predicate<String> compileGlob(String glob) {
         if ("*".equals(glob)) {
@@ -406,6 +411,7 @@ public class FieldMappingContext {
         if (glob.indexOf('*') >= 0 || glob.indexOf('?') >= 0) {
             log.debug("Unsupported source-filter glob '{}', treating as literal", glob);
         }
-        return glob::equals;
+        String descendantPrefix = glob + ".";
+        return path -> path.equals(glob) || path.startsWith(descendantPrefix);
     }
 }
