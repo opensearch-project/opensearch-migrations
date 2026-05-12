@@ -86,8 +86,91 @@ class SolrSchemaXmlParserTest {
     }
 
     @Test
+    void findAndParseFallsBackToSchemaXml(@TempDir Path tmp) throws IOException {
+        // Solr 6/7 configs upgraded from Solr 5 with ClassicIndexSchemaFactory
+        // ship only schema.xml — neither managed-schema.xml nor managed-schema is present.
+        var configDir = tmp.resolve("zk_backup_0/configs/myconfig");
+        Files.createDirectories(configDir);
+        Files.writeString(configDir.resolve("schema.xml"), SCHEMA_XML);
+
+        var result = SolrSchemaXmlParser.findAndParse(tmp);
+        assertThat(result.get("schema").get("fields").size(), equalTo(2));
+    }
+
+    @Test
+    void findAndParsePrefersManagedSchemaXmlOverFallbacks(@TempDir Path tmp) throws IOException {
+        // When all three exist, managed-schema.xml wins.
+        var configDir = tmp.resolve("zk_backup_0/configs/myconfig");
+        Files.createDirectories(configDir);
+        var preferredSchema = SCHEMA_XML; // 2 fields
+        var legacySchema = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <schema name="legacy" version="1.5">
+              <field name="only_one" type="string" stored="true"/>
+              <fieldType name="string" class="solr.StrField"/>
+            </schema>
+            """;
+        Files.writeString(configDir.resolve("managed-schema.xml"), preferredSchema);
+        Files.writeString(configDir.resolve("managed-schema"), legacySchema);
+        Files.writeString(configDir.resolve("schema.xml"), legacySchema);
+
+        var result = SolrSchemaXmlParser.findAndParse(tmp);
+        assertThat(result.get("schema").get("fields").size(), equalTo(2));
+    }
+
+    @Test
     void findAndParseReturnsEmptyWhenNoSchema(@TempDir Path tmp) {
         var result = SolrSchemaXmlParser.findAndParse(tmp);
         assertThat(result.size(), equalTo(0));
+    }
+
+    @Test
+    void findAndParseReturnsEmptyWhenZkBackupHasNoConfigsDir(@TempDir Path tmp) throws IOException {
+        // zk_backup_0/ exists but no configs/ subdirectory inside it.
+        Files.createDirectories(tmp.resolve("zk_backup_0"));
+
+        var result = SolrSchemaXmlParser.findAndParse(tmp);
+        assertThat(result.size(), equalTo(0));
+    }
+
+    @Test
+    void findAndParseReturnsEmptyWhenConfigsDirIsEmpty(@TempDir Path tmp) throws IOException {
+        // zk_backup_0/configs/ exists but contains no config subdirectory.
+        Files.createDirectories(tmp.resolve("zk_backup_0/configs"));
+
+        var result = SolrSchemaXmlParser.findAndParse(tmp);
+        assertThat(result.size(), equalTo(0));
+    }
+
+    @Test
+    void findAndParseReturnsEmptyWhenConfigDirHasNoSchemaFiles(@TempDir Path tmp) throws IOException {
+        // zk_backup_0/configs/myconfig/ exists but has no schema files of any kind.
+        var configDir = tmp.resolve("zk_backup_0/configs/myconfig");
+        Files.createDirectories(configDir);
+        Files.writeString(configDir.resolve("solrconfig.xml"), "<config/>");
+
+        var result = SolrSchemaXmlParser.findAndParse(tmp);
+        assertThat(result.size(), equalTo(0));
+    }
+
+    @Test
+    void findAndParsePrefersBareManagedSchemaOverSchemaXml(@TempDir Path tmp) throws IOException {
+        // managed-schema (no .xml) should win over schema.xml when both exist
+        // (no managed-schema.xml present).
+        var configDir = tmp.resolve("zk_backup_0/configs/myconfig");
+        Files.createDirectories(configDir);
+        var preferredSchema = SCHEMA_XML; // 2 fields
+        var legacySchema = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <schema name="legacy" version="1.5">
+              <field name="only_one" type="string" stored="true"/>
+              <fieldType name="string" class="solr.StrField"/>
+            </schema>
+            """;
+        Files.writeString(configDir.resolve("managed-schema"), preferredSchema);
+        Files.writeString(configDir.resolve("schema.xml"), legacySchema);
+
+        var result = SolrSchemaXmlParser.findAndParse(tmp);
+        assertThat(result.get("schema").get("fields").size(), equalTo(2));
     }
 }
