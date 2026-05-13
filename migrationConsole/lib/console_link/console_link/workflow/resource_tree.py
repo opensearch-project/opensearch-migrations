@@ -68,7 +68,7 @@ class ResourceNode:
 
     # Future phases
     config_diff: Optional[Dict[str, Any]] = None
-    workflow_step: Optional[List[Dict[str, Any]]] = None
+    workflow_progress: Optional[List[Dict[str, Any]]] = None
     live_status: Optional[Dict[str, Any]] = None
 
 
@@ -276,8 +276,8 @@ def _add_resource_details(node, resource: ResourceNode) -> None:
     if resource.depends_on:
         deps = ", ".join(resource.depends_on)
         node.add(f"[dim]Depends on: {deps}[/dim]")
-    if resource.workflow_step:
-        _add_workflow_subtree(node, resource.workflow_step)
+    if resource.workflow_progress:
+        _add_workflow_subtree(node, resource.workflow_progress)
 
 
 def _add_workflow_subtree(parent_node, steps: List[Dict[str, Any]]) -> None:

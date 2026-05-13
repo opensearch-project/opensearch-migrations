@@ -523,10 +523,10 @@ def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, in
                         for group in section.groups:
                             for resource in group.resources:
                                 if resource.name in steps:
-                                    resource.workflow_step = steps[resource.name]
+                                    resource.workflow_progress = steps[resource.name]
                                 for child in resource.children:
                                     if child.name in steps:
-                                        child.workflow_step = steps[child.name]
+                                        child.workflow_progress = steps[child.name]
                     mark_not_configured_groups(groups, filtered_tree)
                 elif not workflow_data:
                     workflow_unavailable = True

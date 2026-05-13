@@ -94,10 +94,10 @@ class ResourceTreeStateManager:
                 for group in section.groups:
                     for resource in group.resources:
                         if resource.name in steps:
-                            resource.workflow_step = steps[resource.name]
+                            resource.workflow_progress = steps[resource.name]
                         for child in resource.children:
                             if child.name in steps:
-                                child.workflow_step = steps[child.name]
+                                child.workflow_progress = steps[child.name]
             mark_not_configured_groups(sections, filtered_tree)
 
         return sections
@@ -146,11 +146,11 @@ class ResourceTreeStateManager:
             resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
 
         # Workflow subtree (nodes carry Argo dict data for interactions)
-        if resource.workflow_step:
+        if resource.workflow_progress:
             wf_node = resource_node.add(
                 "[bold]Workflow progress:[/bold]",
                 data={'id': f'workflow:{resource.name}'})
-            for step in resource.workflow_step:
+            for step in resource.workflow_progress:
                 self._add_workflow_step(wf_node, step)
 
         # Children (e.g., topics under kafka)
