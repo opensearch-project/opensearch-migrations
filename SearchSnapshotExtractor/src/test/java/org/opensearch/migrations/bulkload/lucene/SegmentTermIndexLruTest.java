@@ -29,7 +29,9 @@ import org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink;
  *
  * <p>Each test pins one independently-checkable contract:
  * <ul>
- *   <li>{@link #defaultIsUnbounded()}: the no-knob default keeps every field resident.</li>
+ *   <li>{@link #defaultHoldsTypicalFieldCount()}: the no-knob default keeps every field of a
+ *       small segment resident (the auto-sized cap derives from the JVM's open-file limit and
+ *       on any realistic worker is several hundred — well above the per-doc working set).</li>
  *   <li>{@link #lruEvictsLeastRecentlyUsedField()}: with cap = N, the (N+1)-th distinct
  *       field evicts the eldest; recently-touched fields stay.</li>
  *   <li>{@link #evictionClosesEvictedReader()}: eviction closes the evicted reader so its
@@ -69,20 +71,21 @@ class SegmentTermIndexLruTest {
     }
 
     @Test
-    void defaultIsUnbounded(@TempDir Path tmp) throws Exception {
+    void defaultHoldsTypicalFieldCount(@TempDir Path tmp) throws Exception {
         AtomicInteger walks = new AtomicInteger();
         LuceneLeafReader reader = recordingReader(1, walks);
 
-        // Two-arg ctor reads the JVM property; in this JVM it is unset (= MAX_VALUE).
+        // Two-arg ctor reads the JVM property; unset → auto-size from soft fd limit.
+        // The auto cap is (soft_nofile / 4) on Unix or 1024 fallback, both well above 32.
         try (SegmentTermIndex idx = new SegmentTermIndex(tmp.resolve("seg"),
                 32L * 1024 * 1024)) {
             for (int i = 0; i < 32; i++) {
                 idx.getTermsForDocument(reader, 0, "f" + i);
             }
             assertEquals(32, idx.residentFieldCount(),
-                    "default cache must hold every distinct field");
+                    "auto-sized default must hold every field of a small (32-field) segment");
             assertEquals(0L, idx.evictionCount(),
-                    "default cache must not evict");
+                    "auto-sized default must not evict at this scale");
         }
     }
 

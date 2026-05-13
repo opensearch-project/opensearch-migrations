@@ -63,6 +63,15 @@ import shadow.lucene10.org.apache.lucene.util.IOUtils;
 @Slf4j
 public class SegmentTermIndex implements AutoCloseable {
 
+    /**
+     * Internal hard floor on the LRU cap. Below 2 the LinkedHashMap eviction interleaves
+     * pathologically with the synchronized read path. The user-facing recommended floor
+     * is {@link SourcelessSpillConfig#MIN_MAX_OPEN_FIELD_SIDECARS}, applied at config-layer
+     * resolution; this constant just keeps the data structure self-consistent for tests
+     * that exercise eviction at small caps.
+     */
+    static final int ABSOLUTE_MIN_OPEN_FIELD_SIDECARS = 2;
+
     private final Path spillRoot;
     private final long sortBufferBytes;
     private final int maxOpenFieldSidecars;
@@ -94,8 +103,7 @@ public class SegmentTermIndex implements AutoCloseable {
     public SegmentTermIndex(Path spillRoot, long sortBufferBytes, int maxOpenFieldSidecars) {
         this.spillRoot = spillRoot;
         this.sortBufferBytes = Math.min(sortBufferBytes, Integer.MAX_VALUE);
-        this.maxOpenFieldSidecars =
-                Math.max(SourcelessSpillConfig.MIN_MAX_OPEN_FIELD_SIDECARS, maxOpenFieldSidecars);
+        this.maxOpenFieldSidecars = Math.max(ABSOLUTE_MIN_OPEN_FIELD_SIDECARS, maxOpenFieldSidecars);
         // initialCapacity, loadFactor=0.75, accessOrder=true so get() updates the LRU position.
         // removeEldestEntry trips after a successful put when size exceeds the cap.
         this.byField = new LinkedHashMap<String, SidecarReader>(16, 0.75f, true) {
