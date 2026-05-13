@@ -135,6 +135,68 @@ public class SolrSnapshotToOpenSearchTest {
     }
 
     /**
+     * Regression test for the RFS busy-restart loop on idle Solr-source workers.
+     *
+     * Before the fix, the Solr branch of RfsMigrateDocuments swallowed
+     * NoWorkLeftException and let main() return normally, so the JVM exited 0
+     * even when all work for the snapshot was already complete. The Docker
+     * wrapper script (runJavaWithClasspathWithRepeat.sh) treats exit 0 as
+     * "did some work, restart for the next item", which produced an infinite
+     * cold-start loop on the (very common) case of a worker re-attaching to
+     * a fully-completed migration.
+     *
+     * After the fix, a second invocation against an already-migrated dataset
+     * must exit with NO_WORK_LEFT_EXIT_CODE (3) so that the Docker wrapper
+     * propagates a non-zero status to the orchestrator (kubelet), letting
+     * its CrashLoopBackOff timer pace restarts while the control plane
+     * scales replicas to zero — instead of the JVM busy-restarting on the
+     * coordinator with no backoff.
+     */
+    @org.junit.jupiter.api.Test
+    @Tag("isolatedTest")
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    void secondInvocationExitsWithNoWorkLeftCode() throws Exception {
+        try (
+            var solr = createSolr(SolrClusterContainer.SOLR_8, false);
+            var target = new SearchClusterContainer(SearchClusterContainer.OS_V3_5_0)
+        ) {
+            solr.start();
+            target.start();
+
+            createCollection(solr, COLLECTION_NAME);
+            indexMovieDocuments(solr, COLLECTION_NAME);
+            var backupDir = createBackup(solr, COLLECTION_NAME);
+
+            String[] args = new String[]{
+                "--source-version", "SOLR_" + SolrClusterContainer.SOLR_8.tag(),
+                "--snapshot-local-dir", backupDir.toString(),
+                "--snapshot-name", "solr-migration",
+                "--target-host", target.getUrl(),
+                "--coordinator-host", target.getUrl(),
+                "--index-allowlist", COLLECTION_NAME
+            };
+
+            // First run actually migrates the shard and exits 0 (work completed).
+            int firstExit = SourceTestBase.runProcessAgainstTarget(args);
+            assertEquals(0, firstExit, "First invocation should migrate the shard and exit 0");
+            verifyDocCount(target, COLLECTION_NAME, 5);
+
+            // Second run finds work coordination already complete and must exit 3
+            // After the fix, the second invocation MUST exit with code 3
+            // (NO_WORK_LEFT) so the Docker wrapper propagates non-zero to
+            // the orchestrator and the kubelet's CrashLoopBackOff paces
+            // subsequent restarts instead of busy-spinning on cold-start.
+            int secondExit = SourceTestBase.runProcessAgainstTarget(args);
+            assertEquals(
+                org.opensearch.migrations.RfsMigrateDocuments.NO_WORK_LEFT_EXIT_CODE,
+                secondExit,
+                "Second invocation against a fully-migrated snapshot must exit with NO_WORK_LEFT_EXIT_CODE "
+                    + "so runJavaWithClasspathWithRepeat.sh propagates non-zero and the orchestrator backs off"
+            );
+        }
+    }
+
+    /**
      * Tests the pipeline-level integration directly (no CLI).
      */
     @ParameterizedTest(name = "pipeline: {0} → {1} (cloud={2})")

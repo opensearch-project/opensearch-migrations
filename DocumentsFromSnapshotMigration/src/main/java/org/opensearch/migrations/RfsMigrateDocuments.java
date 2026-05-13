@@ -941,6 +941,7 @@ public class RfsMigrateDocuments {
         boolean useServerGeneratedIds,
         RootDocumentMigrationContext context
     ) {
+        var cleanShutdownCompleted = new AtomicBoolean(false);
         try {
             // Check the coordinator for pending work BEFORE downloading anything from S3.
             // This avoids wasting time/bandwidth downloading schema metadata on every pod restart
@@ -957,7 +958,6 @@ public class RfsMigrateDocuments {
             var completionRetryConfig = buildCompletionRetryConfig(arguments);
             var coordinatorFactory = new WorkCoordinatorFactory(
                 coordinatorInfo.version(), arguments.indexNameSuffix, completionRetryConfig);
-            var cleanShutdownCompleted = new AtomicBoolean(false);
             var allowlist = buildDocumentExceptionAllowlist(arguments);
 
             try (var workCoordinator = coordinatorFactory.get(
@@ -1124,12 +1124,19 @@ public class RfsMigrateDocuments {
                     .cancellationTriggerConsumer(cancellationRunnableRef::set)
                     .build();
 
-                runner.migrateOneShard(context::createReindexContext);
+                var status = runner.migrateOneShard(context::createReindexContext);
                 cleanShutdownCompleted.set(true);
+                if (status == CompletionStatus.NOTHING_DONE) {
+                    log.atInfo().setMessage("Work exists but none available to this worker. Exiting with exit code "
+                            + NO_WORK_AVAILABLE_EXIT_CODE).log();
+                    System.exit(NO_WORK_AVAILABLE_EXIT_CODE);
+                }
             }
             log.atInfo().setMessage("Solr backup document migration completed successfully").log();
         } catch (NoWorkLeftException e) {
             log.atInfo().setMessage("No more Solr work items to process: {}").addArgument(e.getMessage()).log();
+            cleanShutdownCompleted.set(true);
+            System.exit(NO_WORK_LEFT_EXIT_CODE);
         } catch (Exception e) {
             throw new RuntimeException("Failed to migrate Solr backup", e);
         }
