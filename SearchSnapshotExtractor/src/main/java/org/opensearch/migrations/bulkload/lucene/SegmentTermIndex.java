@@ -3,10 +3,15 @@ package org.opensearch.migrations.bulkload.lucene;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.opensearch.migrations.bulkload.lucene.sidecar.SidecarBuilder;
 import org.opensearch.migrations.bulkload.lucene.sidecar.SidecarReader;
@@ -47,20 +52,26 @@ import shadow.lucene10.org.apache.lucene.util.IOUtils;
  * readers and deletes the spill root.
  *
  * <p>Thread-safety: Lucene TermsEnum / PostingsEnum instances are not safe for
- * concurrent access. Access to the underlying maps and build phase is serialized
- * via {@code synchronized} to protect against the per-document concurrent reads
- * within a segment's Flux (see {@link LuceneReader#SEGMENT_READ_CONCURRENCY}).
- * Once a field's {@link SidecarReader} has been built, its {@link SidecarReader#get(int)}
- * is lock-free and safe for concurrent readers — the {@code synchronized} is
- * only needed to protect the build.
+ * concurrent access. The build phase for each field is serialized via a per-field
+ * {@link java.util.concurrent.locks.ReentrantReadWriteLock} so only one thread
+ * builds a given field's sidecar while others wait. Once a field's
+ * {@link SidecarReader} has been placed into the {@link java.util.concurrent.ConcurrentHashMap},
+ * subsequent reads are completely lock-free — just a CHM {@code get()} plus the
+ * mmap-backed {@link SidecarReader#get(int)}.
+ *
+ * <p>The {@link #preloadFields} method builds all requested sidecars in parallel
+ * before any documents stream, eliminating the repeated stalls that occur when
+ * lazy builds are triggered one field at a time under concurrent document reads.
  */
 @Slf4j
 public class SegmentTermIndex implements AutoCloseable {
 
     private final Path spillRoot;
     private final long sortBufferBytes;
-    private final Map<String, SidecarReader> byField = new HashMap<>();
+    private final ConcurrentHashMap<String, SidecarReader> byField = new ConcurrentHashMap<>();
     private final Map<String, Map<Integer, Long>> numericByField = new HashMap<>();
+    private final ConcurrentHashMap<String, ReentrantReadWriteLock> fieldLocks = new ConcurrentHashMap<>();
+    private final AtomicInteger fieldSeq = new AtomicInteger();
     private volatile boolean closed;
 
     /**
@@ -89,7 +100,7 @@ public class SegmentTermIndex implements AutoCloseable {
      * Subsequent calls are {@code O(1)} mmap lookups into the long[] doc index
      * plus a short varint decode.
      */
-    public synchronized List<String> getTermsForDocument(LuceneLeafReader reader, int docId, String fieldName)
+    public List<String> getTermsForDocument(LuceneLeafReader reader, int docId, String fieldName)
             throws IOException {
         List<TermEntry> entries = getTermEntriesForDocument(reader, docId, fieldName);
         List<String> strings = new ArrayList<>(entries.size());
@@ -101,22 +112,61 @@ public class SegmentTermIndex implements AutoCloseable {
      * Returns the {@link TermEntry} list for {@code docId} in {@code fieldName},
      * including character start/end offsets when the field was indexed with
      * {@code index_options: offsets}. Building the per-field sidecar on first access.
+     *
+     * <p>Fast path: if the sidecar is already built (present in {@code byField}), the
+     * lookup is completely lock-free — {@link ConcurrentHashMap#get} plus the mmap-backed
+     * {@link SidecarReader#get(int)}. Only the first access for a field takes a write lock
+     * to serialize the build phase.
      */
-    public synchronized List<TermEntry> getTermEntriesForDocument(
+    public List<TermEntry> getTermEntriesForDocument(
             LuceneLeafReader reader, int docId, String fieldName) throws IOException {
         if (closed) {
             throw new IOException("SegmentTermIndex has been closed");
         }
+        // Fast path: sidecar already built — completely lock-free
+        SidecarReader existing = byField.get(fieldName);
+        if (existing != null) {
+            return existing.get(docId);
+        }
+        // Slow path: need to build the sidecar under write lock
+        return getOrBuildSidecar(reader, fieldName).get(docId);
+    }
+
+    /**
+     * Ensures the sidecar for {@code fieldName} is built, using a per-field
+     * {@link ReentrantReadWriteLock} so only one thread builds while others wait,
+     * and concurrent reads after the build are lock-free.
+     */
+    private SidecarReader getOrBuildSidecar(LuceneLeafReader reader, String fieldName) throws IOException {
+        ReentrantReadWriteLock rwLock = fieldLocks.computeIfAbsent(fieldName, k -> new ReentrantReadWriteLock());
+        // Double-check under read lock first
+        rwLock.readLock().lock();
         try {
-            return byField.computeIfAbsent(fieldName, k -> {
-                try {
-                    return buildFieldIndex(reader, fieldName);
-                } catch (IOException e) {
-                    throw new java.io.UncheckedIOException(e);
-                }
-            }).get(docId);
+            SidecarReader cached = byField.get(fieldName);
+            if (cached != null) {
+                return cached;
+            }
+        } finally {
+            rwLock.readLock().unlock();
+        }
+        // Upgrade to write lock for the build
+        rwLock.writeLock().lock();
+        try {
+            // Re-check after acquiring write lock — another thread may have built it
+            SidecarReader cached = byField.get(fieldName);
+            if (cached != null) {
+                return cached;
+            }
+            if (closed) {
+                throw new IOException("SegmentTermIndex has been closed");
+            }
+            SidecarReader built = buildFieldIndex(reader, fieldName);
+            byField.put(fieldName, built);
+            return built;
         } catch (java.io.UncheckedIOException e) {
             throw e.getCause();
+        } finally {
+            rwLock.writeLock().unlock();
         }
     }
 
@@ -140,6 +190,60 @@ public class SegmentTermIndex implements AutoCloseable {
             numericByField.put(fieldName, forField);
         }
         return forField.get(docId);
+    }
+
+    /**
+     * Pre-builds sidecar indexes for the given fields in parallel, so that subsequent
+     * per-document reads are completely lock-free. This should be called once per segment
+     * BEFORE any documents start streaming.
+     *
+     * <p>Fields that are already built are skipped. Building is performed in a dedicated
+     * {@link ForkJoinPool} with the specified parallelism so the caller's thread is not
+     * blocked beyond the aggregate wall-clock time.
+     *
+     * @param reader      the segment reader to stream postings from
+     * @param fieldNames  field names to pre-build (typically the analyzed-text fields)
+     * @param parallelism number of concurrent build threads
+     */
+    public void preloadFields(LuceneLeafReader reader, Collection<String> fieldNames, int parallelism) {
+        if (fieldNames == null || fieldNames.isEmpty() || closed) {
+            return;
+        }
+        // Filter out fields already built
+        List<String> toBuild = new ArrayList<>();
+        for (String f : fieldNames) {
+            if (!byField.containsKey(f)) {
+                toBuild.add(f);
+            }
+        }
+        if (toBuild.isEmpty()) {
+            return;
+        }
+        log.info("Pre-building {} field sidecars with parallelism={}", toBuild.size(), parallelism);
+        long startNanos = System.nanoTime();
+        AtomicInteger failures = new AtomicInteger();
+
+        ForkJoinPool pool = new ForkJoinPool(parallelism);
+        try {
+            pool.submit(() -> toBuild.parallelStream().forEach(fieldName -> {
+                try {
+                    getOrBuildSidecar(reader, fieldName);
+                } catch (IOException e) {
+                    failures.incrementAndGet();
+                    log.warn("Failed to pre-build sidecar for field '{}': {}", fieldName, e.toString());
+                }
+            })).join();
+        } finally {
+            pool.shutdown();
+        }
+
+        long elapsedMs = (System.nanoTime() - startNanos) / 1_000_000;
+        if (failures.get() > 0) {
+            log.warn("Pre-built {} field sidecars in {}ms ({} failures)",
+                toBuild.size() - failures.get(), elapsedMs, failures.get());
+        } else {
+            log.info("Pre-built {} field sidecars in {}ms", toBuild.size(), elapsedMs);
+        }
     }
 
     /**
@@ -179,8 +283,8 @@ public class SegmentTermIndex implements AutoCloseable {
                 sb.append('_');
             }
         }
-        // append the insertion order so two sanitized-equal names don't collide
-        sb.append('-').append(byField.size());
+        // append a unique sequence so two sanitized-equal names don't collide
+        sb.append('-').append(fieldSeq.getAndIncrement());
         return sb.toString();
     }
 
@@ -202,6 +306,7 @@ public class SegmentTermIndex implements AutoCloseable {
         }
         byField.clear();
         numericByField.clear();
+        fieldLocks.clear();
         try {
             IOUtils.rm(spillRoot);
         } catch (IOException e) {

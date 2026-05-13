@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
@@ -26,8 +27,15 @@ public class LuceneReader {
         100, Integer.MAX_VALUE, "lucene-io", 60, true
     );
 
-    /** Concurrency for flatMapSequential within a segment — matches the scheduler thread count. */
+    /** Concurrency for flatMapSequential within a segment when reading stored _source (I/O-bound). */
     private static final int SEGMENT_READ_CONCURRENCY = 100;
+
+    /**
+     * Concurrency for sourceless/Solr reconstruction (CPU-bound: mmap reads + JSON serialization).
+     * Single-threaded is faster here because there's no I/O to overlap — sequential access
+     * maximizes cache locality and avoids context-switch + GC overhead from concurrent allocations.
+     */
+    private static final int RECONSTRUCTION_READ_CONCURRENCY = 1;
 
     private LuceneReader() {}
 
@@ -145,11 +153,33 @@ public class LuceneReader {
             s == null ? segmentReader.toString() : s
         );
 
+        // Eagerly pre-build sidecar indexes for analyzed-text fields that need term
+        // reconstruction. This runs all field builds in parallel BEFORE any documents
+        // start streaming, eliminating the repeated stalls that occur when 100 concurrent
+        // document readers trigger lazy builds one field at a time.
+        if (mappingContext != null) {
+            Set<String> textFields = mappingContext.getAnalyzedTextFieldNames();
+            if (!textFields.isEmpty()) {
+                int numCpus = Runtime.getRuntime().availableProcessors();
+                long preloadStart = System.nanoTime();
+                termIndex.preloadFields(segmentReader, textFields, numCpus);
+                long preloadMs = (System.nanoTime() - preloadStart) / 1_000_000;
+                log.info("Pre-built {} field sidecars in {}ms", textFields.size(), preloadMs);
+            }
+        }
+
         log.atDebug().setMessage("For segment: {}, migrating from doc: {}. Will process {} docs in segment.")
                 .addArgument(readerAndBase.getReader())
                 .addArgument(startDocIdInSegment)
                 .addArgument(() -> segmentReader.maxDoc() - startDocIdInSegment)
                 .log();
+
+        // Use single-threaded concurrency for sourceless reconstruction (CPU-bound: mmap + JSON
+        // serialization) where sequential access maximizes cache locality. Use higher concurrency
+        // for normal _source reads where I/O overlap is beneficial.
+        final int readConcurrency = (mappingContext != null)
+            ? RECONSTRUCTION_READ_CONCURRENCY
+            : SEGMENT_READ_CONCURRENCY;
 
         var idxStream = (liveDocs != null) ? liveDocs.stream().filter(idx -> idx >= startDocIdInSegment) :
             IntStream.range(startDocIdInSegment, segmentReader.maxDoc());
@@ -167,7 +197,7 @@ public class LuceneReader {
                         return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
-                }).subscribeOn(LUCENE_IO_SCHEDULER), SEGMENT_READ_CONCURRENCY, 1)
+                }).subscribeOn(LUCENE_IO_SCHEDULER), readConcurrency, 1)
             .doFinally(sig -> termIndex.close());
     }
 

@@ -268,6 +268,13 @@ public class FieldMappingContext {
         // Stable sort: Collections.sort is stable, so equal-rank targets keep declaration order.
         List<String> sorted = new ArrayList<>(raw);
         sorted.sort((a, b) -> Integer.compare(lossinessRank(a), lossinessRank(b)));
+        // Drop text-type targets (lossinessRank >= 30). These are analyzed fields whose
+        // reconstruction via the sidecar index is both extremely expensive (requires building
+        // a per-segment sidecar for the entire segment) and doubly-lossy (the original value
+        // was already analyzed/tokenized, and concatenating the recovered terms produces a
+        // degraded approximation). If keyword-class targets exist they will already be ranked
+        // first and used; if they don't, the text recovery is not worth the sidecar cost.
+        sorted.removeIf(target -> lossinessRank(target) >= 30);
         return sorted;
     }
 
@@ -334,6 +341,73 @@ public class FieldMappingContext {
         if (isCopyToTarget(fieldPath)) {
             return true;
         }
+        for (String glob : sourceExcludes) {
+            if (matchesGlob(glob, fieldPath)) {
+                return true;
+            }
+        }
+        if (!sourceIncludes.isEmpty()) {
+            for (String glob : sourceIncludes) {
+                if (matchesGlob(glob, fieldPath)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Returns the set of field names that are analyzed text fields (mapping type {@code text},
+     * {@code match_only_text}, or legacy {@code string}) whose values are excluded from
+     * {@code _source} and therefore need sidecar-based term reconstruction.
+     *
+     * <p>A field is included when:
+     * <ul>
+     *   <li>its {@link EsFieldType} is {@code STRING};</li>
+     *   <li>its mapping type is one of the analyzed variants ({@code text},
+     *       {@code match_only_text}, {@code string}) rather than an exact-match
+     *       type like {@code keyword};</li>
+     *   <li>it is source-excluded per the {@code _source.excludes} / includes rules,
+     *       but NOT solely because it is a {@code copy_to} target (copy_to targets
+     *       are never in _source by design and do not need reconstruction).</li>
+     * </ul>
+     *
+     * <p>This is the exact set of fields that {@link SegmentTermIndex#preloadFields}
+     * should pre-build sidecars for before documents start streaming.
+     */
+    public Set<String> getAnalyzedTextFieldNames() {
+        Set<String> result = new HashSet<>();
+        for (Map.Entry<String, FieldMappingInfo> entry : fieldMappings.entrySet()) {
+            String fieldName = entry.getKey();
+            FieldMappingInfo info = entry.getValue();
+            if (info.type() != EsFieldType.STRING) {
+                continue;
+            }
+            // Only analyzed text types, not keyword-class exact types
+            String mt = info.mappingType();
+            if (mt == null || (!"text".equals(mt) && !"match_only_text".equals(mt) && !"string".equals(mt))) {
+                continue;
+            }
+            // Must be source-excluded, but not solely because it is a copy_to target
+            if (isCopyToTarget(fieldName)) {
+                continue;
+            }
+            if (!isSourceExcludedByFilter(fieldName)) {
+                continue;
+            }
+            result.add(fieldName);
+        }
+        return result;
+    }
+
+    /**
+     * Returns {@code true} if the field is excluded from {@code _source} by the
+     * {@code _source.includes}/{@code _source.excludes} filter rules alone,
+     * ignoring the copy_to-target check. Used by {@link #getAnalyzedTextFieldNames()}
+     * to distinguish "excluded because of source filter" from "excluded because copy_to target".
+     */
+    private boolean isSourceExcludedByFilter(String fieldPath) {
         for (String glob : sourceExcludes) {
             if (matchesGlob(glob, fieldPath)) {
                 return true;
