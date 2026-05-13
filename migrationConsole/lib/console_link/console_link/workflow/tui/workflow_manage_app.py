@@ -53,7 +53,8 @@ class WorkflowTreeApp(App):
                  argo_service: ArgoWorkflowInterface,
                  pod_scraper: PodScraperInterface,
                  workflow_waiter: WaiterInterface,
-                 refresh_interval: float):
+                 refresh_interval: float,
+                 resource_view: bool = False):
         super().__init__()
         self.title = f"[{namespace}] {name}"  # override from base
 
@@ -66,10 +67,15 @@ class WorkflowTreeApp(App):
         self._workflow_waiter = workflow_waiter
         self._pod_scraper = pod_scraper
         self._refresh_interval = refresh_interval
+        self._resource_view = resource_view
 
         # State Containers (Managers)
         self._pods = PodNameManager(self, pod_scraper, name, namespace)
-        self._tree_state = TreeStateManager(namespace=namespace, on_new_pod=self._pods.observe_node)
+        if resource_view:
+            from .resource_tree_state_manager import ResourceTreeStateManager
+            self._tree_state = ResourceTreeStateManager(namespace=namespace)
+        else:
+            self._tree_state = TreeStateManager(namespace=namespace, on_new_pod=self._pods.observe_node)
         self._logs = LogManager(pod_scraper, namespace)
         self._live = LiveStatusManager(refresh_interval)
 
