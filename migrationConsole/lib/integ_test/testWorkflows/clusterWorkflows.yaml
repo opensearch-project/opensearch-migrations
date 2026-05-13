@@ -1821,7 +1821,7 @@ spec:
                   serviceAccountName: migration-console-access-role
                   containers:
                     - name: solr
-                      image: mirror.gcr.io/library/solr:6.6.6
+                      image: {{inputs.parameters.image-registry-prefix}}migrations/custom-solr:6.6.6
                       securityContext:
                         runAsUser: 0
                       ports:
@@ -1863,7 +1863,7 @@ spec:
                         - name: solr-data
                           mountPath: /var/solr
                         - name: solr-xml
-                          mountPath: /opt/solr/server/solr/solr.xml
+                          mountPath: /var/solr/solr.xml
                           subPath: solr.xml
                   volumes:
                     - name: solr-data

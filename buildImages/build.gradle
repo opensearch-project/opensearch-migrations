@@ -123,6 +123,14 @@ def buildKitProjects = [
 
 // Test/CI-only images — not built by buildKitAll, use buildKitTestAll instead
 def testBuildKitProjects = [
+        // custom solr image since solr 6.x does not bring arm64 / multiplatform
+        [
+                serviceName: "customSolr666",
+                contextDir: "custom-solr-images/dockerfiles",
+                imageName:  "custom-solr",
+                imageTag:   "6.6.6",
+                buildArgs: []
+        ],
         // Custom Elasticsearch images for k8s integration tests
         [
                 serviceName: "customElasticsearch152",
