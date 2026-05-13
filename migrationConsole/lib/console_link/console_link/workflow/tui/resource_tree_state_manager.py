@@ -1,6 +1,6 @@
 """Resource-centric tree state manager for the workflow manage TUI."""
 
-from typing import Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from textual.widgets._tree import TreeNode, Tree
 
@@ -10,10 +10,9 @@ from console_link.workflow.resource_tree import (
     mark_not_configured_groups, PHASE_SYMBOLS, RESOURCE_SECTIONS,
 )
 from console_link.workflow.tree_utils import (
-    get_step_rich_label, get_step_status_output,
+    get_step_rich_label,
     build_nested_workflow_tree, filter_tree_nodes,
 )
-from console_link.workflow.commands.crd_utils import list_migration_resources_full
 
 
 class ResourceTreeStateManager:

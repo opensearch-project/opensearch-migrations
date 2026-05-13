@@ -8,8 +8,7 @@ from rich.tree import Tree
 
 from .commands.crd_utils import list_migration_resources_full
 from .tree_utils import (
-    build_nested_workflow_tree, filter_tree_nodes, get_node_input_parameter,
-    is_approval_node, get_step_rich_label, get_step_status_output,
+    get_node_input_parameter, get_step_rich_label,
 )
 
 
@@ -168,8 +167,6 @@ def _resolve_cr_name(node: Dict[str, Any]) -> Optional[str]:
     return get_node_input_parameter(node, 'resourceName')
 
 
-
-
 def _clean_step_name(name: str) -> str:
     """Clean up Argo step display names by removing parameters in parentheses."""
     paren = name.find('(')
@@ -279,8 +276,6 @@ def _add_resource_details(node, resource: ResourceNode) -> None:
     if resource.depends_on:
         deps = ", ".join(resource.depends_on)
         node.add(f"[dim]Depends on: {deps}[/dim]")
-    if resource.live_status:
-        _add_live_status(node, resource.live_status)
     if resource.workflow_step:
         _add_workflow_subtree(node, resource.workflow_step)
 
@@ -296,6 +291,13 @@ def _render_workflow_step(parent_node, step: Dict[str, Any]) -> None:
     """Recursively render a workflow step node using the same formatting as workflow status."""
     label = get_step_rich_label(step, status_output=None, show_approval_name=False)
     node = parent_node.add(label)
+    # Show live check results if present (from LiveCheckProcessor)
+    live_check = step.get('live_check')
+    if live_check and live_check.get('success') and 'value' in live_check:
+        value = live_check['value'].replace('\\n', '\n')
+        for line in value.strip().split('\n'):
+            if line.strip():
+                node.add(f"[cyan]{line.strip()}[/cyan]")
     for child in step.get('children', []):
         _render_workflow_step(node, child)
 
@@ -303,15 +305,6 @@ def _render_workflow_step(parent_node, step: Dict[str, Any]) -> None:
 def _node_phase(node: Dict[str, Any]) -> str:
     """Get the display phase for a workflow node."""
     return node.get('phase', 'Unknown')
-
-
-def _add_live_status(node, live_status: Dict[str, Any]) -> None:
-    """Render live status data under a resource."""
-    if live_status.get('type') == 'backfill':
-        message = live_status.get('message', '')
-        for line in message.strip().split('\n'):
-            if line.strip():
-                node.add(f"[cyan]{line.strip()}[/cyan]")
 
 
 def _format_spec_fields(resource: ResourceNode) -> str:
@@ -340,85 +333,3 @@ def _get_nested(d: Dict[str, Any], path: str) -> Any:
         if d is None:
             return None
     return d
-
-
-def extract_backfill_config(workflow_data: Dict[str, Any]) -> Optional[str]:
-    """Extract configContents from a backfill status check node in the workflow.
-
-    Returns the raw JSON config string that can be converted to services.yaml via jq.
-    """
-    if not workflow_data or not workflow_data.get('status', {}).get('nodes'):
-        return None
-
-    nodes = workflow_data.get('status', {}).get('nodes', {})
-    for node in nodes.values():
-        if 'checkBackfillStatus' in node.get('displayName', ''):
-            for p in node.get('inputs', {}).get('parameters', []):
-                if p.get('name') == 'configContents':
-                    return p.get('value')
-    return None
-
-
-def enrich_with_backfill_status(sections: List[ResourceSection], workflow_data: Dict[str, Any]) -> None:
-    """Fetch live backfill status and attach to the SnapshotMigration resource."""
-    config_json = extract_backfill_config(workflow_data)
-    if not config_json:
-        return
-
-    migration_resource = _find_active_migration(sections)
-    if not migration_resource:
-        return
-
-    live_status = _fetch_backfill_live_status(config_json)
-    if live_status:
-        migration_resource.live_status = live_status
-
-
-def _find_active_migration(sections: List[ResourceSection]) -> Optional[ResourceNode]:
-    """Find the first non-completed SnapshotMigration resource."""
-    for section in sections:
-        for group in section.groups:
-            for resource in group.resources:
-                if resource.plural == 'snapshotmigrations' and resource.phase != 'Completed':
-                    return resource
-    return None
-
-
-def _fetch_backfill_live_status(config_json: str) -> Optional[Dict[str, Any]]:
-    """Convert workflow config and fetch backfill status. Returns None on any failure."""
-    import logging
-    import subprocess
-    import os
-    import yaml
-
-    jq_script = os.environ.get('WORKFLOW_CONFIG_JQ_SCRIPT',
-                               '/root/workflowConfigToServicesConfig.jq')
-    try:
-        result = subprocess.run(['jq', '-f', jq_script],
-                                input=config_json, text=True, capture_output=True)
-        if result.returncode != 0:
-            return
-
-        from console_link.environment import Environment
-        env = Environment(config=yaml.safe_load(result.stdout))
-        if not env.backfill:
-            return
-
-        # Temporarily suppress noisy error logs from backfill internals
-        backfill_logger = logging.getLogger('console_link.models.backfill_rfs')
-        prev_level = backfill_logger.level
-        backfill_logger.setLevel(logging.CRITICAL)
-        try:
-            status_result = env.backfill.get_status(deep_check=True)
-        finally:
-            backfill_logger.setLevel(prev_level)
-
-        if status_result.success:
-            backfill_status, message = status_result.value
-            return {
-                'type': 'backfill',
-                'status': str(backfill_status),
-                'message': message,
-            }
-    except Exception:
-        pass

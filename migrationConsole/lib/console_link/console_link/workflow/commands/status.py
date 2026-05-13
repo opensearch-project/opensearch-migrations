@@ -500,7 +500,6 @@ def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, in
             from ..resource_tree import (
                 build_resource_tree, display_resource_tree,
                 extract_workflow_steps_by_resource, mark_not_configured_groups,
-                enrich_with_backfill_status,
             )
             from ..models.utils import load_k8s_config
             from ..tree_utils import build_nested_workflow_tree, filter_tree_nodes
@@ -515,7 +514,10 @@ def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, in
                 workflow_data = fetcher.get_workflow_data(
                     workflow_name, argo_server, namespace, insecure)
                 if workflow_data and workflow_data.get('status', {}).get('nodes'):
-                    filtered_tree = filter_tree_nodes(build_nested_workflow_tree(workflow_data))
+                    tree_nodes = build_nested_workflow_tree(workflow_data)
+                    if live_status:
+                        LiveCheckProcessor(ConfigConverter()).enrich_tree_with_live_checks(tree_nodes)
+                    filtered_tree = filter_tree_nodes(tree_nodes)
                     steps = extract_workflow_steps_by_resource(filtered_tree)
                     for section in groups:
                         for group in section.groups:
@@ -526,7 +528,6 @@ def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, in
                                     if child.name in steps:
                                         child.workflow_step = steps[child.name]
                     mark_not_configured_groups(groups, filtered_tree)
-                    enrich_with_backfill_status(groups, workflow_data)
                 elif not workflow_data:
                     workflow_unavailable = True
             except Exception:
