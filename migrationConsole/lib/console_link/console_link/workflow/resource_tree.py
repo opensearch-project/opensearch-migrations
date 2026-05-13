@@ -9,7 +9,7 @@ from rich.tree import Tree
 from .commands.crd_utils import list_migration_resources_full
 from .tree_utils import (
     build_nested_workflow_tree, filter_tree_nodes, get_node_input_parameter,
-    is_approval_node,
+    is_approval_node, get_step_rich_label, get_step_status_output,
 )
 
 
@@ -30,9 +30,13 @@ RESOURCE_SECTIONS = [
 PHASE_SYMBOLS = {
     'Ready': ('✓', 'green'),
     'Completed': ('✓', 'green'),
+    'Succeeded': ('✓', 'green'),
     'Running': ('▶', 'yellow'),
+    'Pending': ('○', 'cyan'),
     'Initialized': ('○', 'cyan'),
+    'Failed': ('✗', 'red'),
     'Error': ('✗', 'red'),
+    'Skipped': ('~', 'dim'),
     'Unknown': ('?', 'white'),
 }
 
@@ -65,7 +69,7 @@ class ResourceNode:
 
     # Future phases
     config_diff: Optional[Dict[str, Any]] = None
-    workflow_step: Optional[Dict[str, Any]] = None
+    workflow_step: Optional[List[Dict[str, Any]]] = None
     live_status: Optional[Dict[str, Any]] = None
 
 
@@ -130,22 +134,14 @@ def _nest_topics_under_kafka(resources: List[ResourceNode]) -> None:
         resources.remove(topic)
 
 
-def extract_workflow_steps_by_resource(workflow_data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    """Extract the active workflow step for each resource from Argo workflow data.
+def extract_workflow_steps_by_resource(filtered_tree: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Extract the workflow subtree for each resource from a filtered Argo tree.
 
-    Returns a dict mapping CR name → step info dict with keys:
-        display_name, phase, is_approval, denial_reason
+    Returns a dict mapping CR name → list of filtered workflow step nodes.
     """
-    if not workflow_data or not workflow_data.get('status', {}).get('nodes'):
-        return {}
-
-    tree = build_nested_workflow_tree(workflow_data)
-    filtered = filter_tree_nodes(tree)
     result = {}
-
-    for node in filtered:
+    for node in filtered_tree:
         _extract_steps_recursive(node, result)
-
     return result
 
 
@@ -160,12 +156,9 @@ def _extract_steps_recursive(node: Dict[str, Any], result: Dict[str, Dict[str, A
         _extract_steps_recursive(child, result)
 
 
-def _step_for_node(node: Dict[str, Any]) -> Dict[str, Any]:
-    """Get the step info for a resource node."""
-    completed = {'display_name': 'completed', 'phase': 'Succeeded', 'is_approval': False, 'denial_reason': None}
-    if node.get('phase') == 'Succeeded':
-        return completed
-    return _find_active_step(node.get('children', [])) or completed
+def _step_for_node(node: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Get the workflow subtree for a resource node."""
+    return node.get('children', [])
 
 
 def _resolve_cr_name(node: Dict[str, Any]) -> Optional[str]:
@@ -175,53 +168,6 @@ def _resolve_cr_name(node: Dict[str, Any]) -> Optional[str]:
     return get_node_input_parameter(node, 'resourceName')
 
 
-def _find_active_step(children: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Find the most relevant step to display from a resource's subtree."""
-    running_approval = None
-    running_leaf = None
-    failed_leaf = None
-    all_succeeded = True
-
-    for node in _iter_nodes(children):
-        phase = node.get('phase', '')
-        is_leaf = not node.get('children')
-
-        if phase == 'Running' and is_approval_node(node):
-            running_approval = _make_step(node, is_approval=True)
-        elif is_leaf:
-            running_leaf, failed_leaf, all_succeeded = _classify_leaf(
-                node, phase, running_leaf, failed_leaf, all_succeeded)
-
-    return running_approval or running_leaf or failed_leaf or (
-        _make_completed_step() if all_succeeded and children else None
-    )
-
-
-def _classify_leaf(node, phase, running_leaf, failed_leaf, all_succeeded):
-    """Classify a leaf node and update tracking variables."""
-    if phase == 'Running':
-        running_leaf = _make_step(node)
-    elif phase == 'Pending' and not running_leaf:
-        running_leaf = _make_step(node)
-    elif phase in ('Failed', 'Error'):
-        failed_leaf = _make_step(node)
-    if phase not in ('Succeeded', 'Skipped'):
-        all_succeeded = False
-    return running_leaf, failed_leaf, all_succeeded
-
-
-def _make_step(node: Dict[str, Any], is_approval: bool = False) -> Dict[str, Any]:
-    """Create a step info dict from a node."""
-    return {
-        'display_name': _clean_step_name(node.get('display_name', '')),
-        'phase': node.get('phase', ''),
-        'is_approval': is_approval,
-        'denial_reason': node.get('denial_reason') if is_approval else None,
-    }
-
-
-def _make_completed_step() -> Dict[str, Any]:
-    return {'display_name': 'completed', 'phase': 'Succeeded', 'is_approval': False, 'denial_reason': None}
 
 
 def _clean_step_name(name: str) -> str:
@@ -239,14 +185,11 @@ def _iter_nodes(nodes: List[Dict[str, Any]]):
         yield from _iter_nodes(node.get('children', []))
 
 
-def mark_not_configured_groups(sections: List[ResourceSection], workflow_data: Dict[str, Any]) -> None:
+def mark_not_configured_groups(sections: List[ResourceSection], filtered_tree: List[Dict[str, Any]]) -> None:
     """Mark groups as 'not configured' if they have no CRs but the workflow skipped them."""
-    if not workflow_data or not workflow_data.get('status', {}).get('nodes'):
+    if not filtered_tree:
         return
-
-    tree = build_nested_workflow_tree(workflow_data)
-    filtered = filter_tree_nodes(tree)
-    _mark_not_configured_from_filtered(sections, filtered)
+    _mark_not_configured_from_filtered(sections, filtered_tree)
 
 
 def _mark_not_configured_from_filtered(sections: List[ResourceSection], filtered: List[Dict[str, Any]]) -> None:
@@ -339,32 +282,27 @@ def _add_resource_details(node, resource: ResourceNode) -> None:
     if resource.live_status:
         _add_live_status(node, resource.live_status)
     if resource.workflow_step:
-        step = resource.workflow_step
-        # Don't show "completed" if the CR phase already indicates completion
-        if step['phase'] == 'Succeeded' and resource.phase in ('Ready', 'Completed'):
-            return
-        _add_workflow_step(node, step)
+        _add_workflow_subtree(node, resource.workflow_step)
 
 
-def _add_workflow_step(node, step: Dict[str, Any]) -> None:
-    """Render a workflow progress line under a resource."""
-    phase = step['phase']
-    name = step['display_name']
+def _add_workflow_subtree(parent_node, steps: List[Dict[str, Any]]) -> None:
+    """Render the workflow subtree under a resource."""
+    workflow_node = parent_node.add("[bold]Workflow progress:[/bold]")
+    for step in steps:
+        _render_workflow_step(workflow_node, step)
 
-    if step.get('is_approval'):
-        reason = step.get('denial_reason') or ''
-        suffix = f" ({reason})" if reason else ""
-        label = f"[yellow]⟳ Workflow progress: WAITING FOR APPROVAL{suffix}[/yellow]"
-    elif phase == 'Succeeded':
-        label = f"[green]✓ Workflow progress: {name}[/green]"
-    elif phase in ('Running', 'Pending'):
-        label = f"[yellow]▶ Workflow progress: {name} ({phase})[/yellow]"
-    elif phase in ('Failed', 'Error'):
-        label = f"[red]✗ Workflow progress: {name} ({phase})[/red]"
-    else:
-        label = f"[dim]Workflow progress: {name} ({phase})[/dim]"
 
-    node.add(label)
+def _render_workflow_step(parent_node, step: Dict[str, Any]) -> None:
+    """Recursively render a workflow step node using the same formatting as workflow status."""
+    label = get_step_rich_label(step, status_output=None, show_approval_name=False)
+    node = parent_node.add(label)
+    for child in step.get('children', []):
+        _render_workflow_step(node, child)
+
+
+def _node_phase(node: Dict[str, Any]) -> str:
+    """Get the display phase for a workflow node."""
+    return node.get('phase', 'Unknown')
 
 
 def _add_live_status(node, live_status: Dict[str, Any]) -> None:
