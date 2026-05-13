@@ -93,6 +93,18 @@ public final class SidecarBuilder implements PostingsSink, AutoCloseable {
     private boolean built = false;
     private boolean closed = false;
 
+    /**
+     * Bytes this builder has reserved from {@link SpillBudget}. Tracked here so
+     * {@link #close()} releases exactly what was reserved, even on a half-built
+     * failure path. Updates only on the {@code accept()} / {@code buildAndOpenReader()}
+     * thread; reads from {@code close()} use the same monitor as the writers.
+     */
+    private long reservedBytes = 0L;
+    /** Bytes written to {@code sort-input.bin} since the last volume-headroom probe. */
+    private long bytesSinceVolumeProbe = 0L;
+    /** Probe disk usable-space at most every 64 MiB written. */
+    private static final long VOLUME_PROBE_INTERVAL_BYTES = 64L * 1024 * 1024;
+
     public SidecarBuilder(Path spillDir, long sortBufferBytes, int maxDoc) throws IOException {
         this.spillDir = spillDir;
         this.maxDoc = Math.max(1, maxDoc);
@@ -121,6 +133,21 @@ public final class SidecarBuilder implements PostingsSink, AutoCloseable {
     @Override
     public void accept(int termId, int docId, int[] positions, int[] startOffsets, int[] endOffsets, int positionCount) throws IOException {
         if (positionCount <= 0 || docId < 0 || docId >= maxDoc) return;
+
+        // Reserve before writing so we abort fast (typed exception) instead of running disk to ENOSPC.
+        // Each tuple is RECORD_BYTES on the wire — the builder's full sort-input footprint is
+        // positionCount × RECORD_BYTES summed across every accept() call.
+        long pendingBytes = (long) positionCount * RECORD_BYTES;
+        SpillBudget.tryReserve(pendingBytes);
+        reservedBytes += pendingBytes;
+
+        // Coarse-grained disk-volume probe: avoid syscall-per-record overhead.
+        bytesSinceVolumeProbe += pendingBytes;
+        if (bytesSinceVolumeProbe >= VOLUME_PROBE_INTERVAL_BYTES) {
+            bytesSinceVolumeProbe = 0L;
+            SpillBudget.assertVolumeHeadroom(spillDir);
+        }
+
         byte[] rec = recordScratch;
         VH_BE_INT.set(rec, 0, docId);
         VH_BE_INT.set(rec, 8, termId);
@@ -140,6 +167,14 @@ public final class SidecarBuilder implements PostingsSink, AutoCloseable {
         termsStage.close();
         CodecUtil.writeFooter(sortInputOut);
         sortInputWriter.close();
+
+        // OfflineSorter spills runs to disk and merges them — peak transient cost
+        // is roughly the sort-input size again. Reserve it up front so the segment
+        // fails fast if the merge would push past the cap, instead of mid-merge ENOSPC.
+        long mergeReservation = reservedBytes;
+        SpillBudget.tryReserve(mergeReservation);
+        reservedBytes += mergeReservation;
+        SpillBudget.assertVolumeHeadroom(spillDir);
 
         OfflineSorter sorter = new OfflineSorter(
                 dir, "sort", Comparator.naturalOrder(), sortBufferSize,
@@ -204,6 +239,13 @@ public final class SidecarBuilder implements PostingsSink, AutoCloseable {
             dir.deleteFile(sortedName);
             dir.deleteFile(TERMS_STAGE_FILE);
         }
+
+        // Sort scratch is gone; the only remaining on-disk artifact is sidecar.bin
+        // (compressed final form, materially smaller than the raw record stream).
+        // Release the full reservation back to the JVM-wide budget so other concurrent
+        // builders can proceed.
+        SpillBudget.release(reservedBytes);
+        reservedBytes = 0L;
 
         closed = true;
         return SidecarReader.open(spillDir);
@@ -346,6 +388,12 @@ public final class SidecarBuilder implements PostingsSink, AutoCloseable {
             Files.deleteIfExists(spillDir.resolve(TERMS_STAGE_FILE));
         } catch (IOException e) {
             log.debug("Ignored terms-stage delete error: {}", e.toString());
+        }
+        // Failure path: release any bytes still on the JVM-wide budget so a single
+        // failed segment doesn't permanently shrink headroom for the rest of the worker.
+        if (reservedBytes > 0L) {
+            SpillBudget.release(reservedBytes);
+            reservedBytes = 0L;
         }
     }
 }
