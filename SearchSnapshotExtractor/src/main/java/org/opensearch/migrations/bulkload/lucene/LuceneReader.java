@@ -336,9 +336,8 @@ public class LuceneReader {
                 openSearchDocId, getSegmentReaderDebugInfo, indexDirectoryPath, termIndex);
         }
         if (mappingContext != null) {
-            String merged = SourceReconstructor.mergeWithDocValues(
-                new String(sourceBytes, java.nio.charset.StandardCharsets.UTF_8), reader, luceneDocId, document, mappingContext, termIndex);
-            return merged.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            return SourceReconstructor.mergeWithDocValues(
+                sourceBytes, reader, luceneDocId, document, mappingContext, termIndex);
         }
         return sourceBytes;
     }
@@ -356,8 +355,8 @@ public class LuceneReader {
         }
         log.atDebug().setMessage("Document {} has no _source, attempting reconstruction from doc_values and stored fields")
             .addArgument(openSearchDocId).log();
-        String reconstructed = SourceReconstructor.reconstructSource(reader, luceneDocId, document, mappingContext, termIndex);
-        if (reconstructed == null || reconstructed.isEmpty()) {
+        byte[] reconstructed = SourceReconstructor.reconstructSource(reader, luceneDocId, document, mappingContext, termIndex);
+        if (reconstructed == null || reconstructed.length == 0) {
             log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, _source is missing and reconstruction failed.")
                 .addArgument(luceneDocId)
                 .addArgument(getSegmentReaderDebugInfo)
@@ -367,7 +366,7 @@ public class LuceneReader {
         }
         log.atDebug().setMessage("Successfully reconstructed _source for document {} from doc_values")
             .addArgument(openSearchDocId).log();
-        return reconstructed.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return reconstructed;
     }
 
     /** Backwards-compatible overload without mapping context */

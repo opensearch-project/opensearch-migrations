@@ -55,15 +55,15 @@ class SourceReconstructorTest {
     // ---------- Helpers to construct mocks/records without repeating boilerplate ----------
 
     private static FieldMappingInfo mapping(EsFieldType type, String mappingType) {
-        return new FieldMappingInfo(type, mappingType, null, null, true, null);
+        return new FieldMappingInfo(type, mappingType, null, null, true, true, null);
     }
 
     private static FieldMappingInfo mapping(EsFieldType type, String mappingType, String format) {
-        return new FieldMappingInfo(type, mappingType, format, null, true, null);
+        return new FieldMappingInfo(type, mappingType, format, null, true, true, null);
     }
 
     private static FieldMappingInfo mappingScaled(double scalingFactor) {
-        return new FieldMappingInfo(EsFieldType.SCALED_FLOAT, "scaled_float", null, scalingFactor, true, null);
+        return new FieldMappingInfo(EsFieldType.SCALED_FLOAT, "scaled_float", null, scalingFactor, true, true, null);
     }
 
     private static FieldMappingContext contextOf(String fieldName, FieldMappingInfo info) {
@@ -184,6 +184,20 @@ class SourceReconstructorTest {
         }
     }
 
+    /** Overload for byte[] returned by the updated API. */
+    private static JsonNode parseField(byte[] json, String field) {
+        try {
+            return MAPPER.readTree(json).get(field);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Convert byte[] to String for tests that need String-level assertions. */
+    private static String toStr(byte[] bytes) {
+        return bytes == null ? null : new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
     // ==========================================================================================
     // 1. STORED FIELDS PATH
     // ==========================================================================================
@@ -194,7 +208,7 @@ class SourceReconstructorTest {
         var doc = document(storedString("enabled", "T"), storedString("disabled", "F"));
         var ctx = new FieldMappingContext(null);
         // boolean stored as T/F does not require a mapping — heuristic handles it.
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertEquals(true, parseField(json, "enabled").asBoolean());
         assertEquals(false, parseField(json, "disabled").asBoolean());
     }
@@ -204,7 +218,7 @@ class SourceReconstructorTest {
         var reader = storedOnlyReader();
         var doc = document(storedNumber("count", 42L));
         var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertEquals(42L, parseField(json, "count").asLong());
     }
 
@@ -214,7 +228,7 @@ class SourceReconstructorTest {
         // 1_700_000_000_000 ms = 2023-11-14T22:13:20Z
         var doc = document(storedNumber("ts", 1_700_000_000_000L));
         var ctx = contextOf("ts", mapping(EsFieldType.DATE, "date"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertEquals("2023-11-14T22:13:20Z", parseField(json, "ts").asText());
     }
 
@@ -223,7 +237,7 @@ class SourceReconstructorTest {
         var reader = storedOnlyReader();
         var doc = document(storedNumber("ts", 1_700_000_000_000L));
         var ctx = contextOf("ts", mapping(EsFieldType.DATE, "date", "epoch_millis"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertEquals(1_700_000_000_000L, parseField(json, "ts").asLong());
     }
 
@@ -234,7 +248,7 @@ class SourceReconstructorTest {
         long nanos = 1_700_000_000_000_000_500L;
         var doc = document(storedNumber("ts", nanos));
         var ctx = contextOf("ts", mapping(EsFieldType.DATE_NANOS, "date_nanos"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertEquals("2023-11-14T22:13:20.000000500Z", parseField(json, "ts").asText());
     }
 
@@ -244,7 +258,7 @@ class SourceReconstructorTest {
         // stored raw 12345 with scaling_factor 100 => 123.45
         var doc = document(storedNumber("price", 12345L));
         var ctx = contextOf("price", mappingScaled(100.0));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertEquals(123.45, parseField(json, "price").asDouble(), 1e-9);
     }
 
@@ -255,7 +269,7 @@ class SourceReconstructorTest {
         long ipLong = (192L << 24) | (168L << 16) | (1L << 8) | 100L;
         var doc = document(storedNumber("source_ip", ipLong));
         var ctx = contextOf("source_ip", mapping(EsFieldType.IP, "ip"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertEquals("192.168.1.100", parseField(json, "source_ip").asText());
     }
 
@@ -264,7 +278,7 @@ class SourceReconstructorTest {
         var reader = storedOnlyReader();
         var doc = document(storedBinary("source_ip", ipv4MappedIpv6(10, 0, 0, 1)));
         var ctx = contextOf("source_ip", mapping(EsFieldType.IP, "ip"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertEquals("10.0.0.1", parseField(json, "source_ip").asText());
     }
 
@@ -274,7 +288,7 @@ class SourceReconstructorTest {
         long ipLong = (172L << 24) | (16L << 16) | (0L << 8) | 5L;
         var doc = document(storedString("source_ip", String.valueOf(ipLong)));
         var ctx = contextOf("source_ip", mapping(EsFieldType.IP, "ip"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertEquals("172.16.0.5", parseField(json, "source_ip").asText());
     }
 
@@ -283,7 +297,7 @@ class SourceReconstructorTest {
         var reader = storedOnlyReader();
         var doc = document(storedBinary("name", "héllo".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         var ctx = contextOf("name", mapping(EsFieldType.STRING, "keyword"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertEquals("héllo", parseField(json, "name").asText());
     }
 
@@ -293,7 +307,7 @@ class SourceReconstructorTest {
         byte[] payload = {0x00, 0x10, (byte) 0xFF, 0x7F};
         var doc = document(storedBinary("blob", payload));
         var ctx = contextOf("blob", mapping(EsFieldType.BINARY, "binary"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertEquals(Base64.getEncoder().encodeToString(payload), parseField(json, "blob").asText());
     }
 
@@ -303,7 +317,7 @@ class SourceReconstructorTest {
         var reader = storedOnlyReader();
         var doc = document(storedBinary("loc", new byte[]{1, 2, 3, 4, 5, 6, 7, 8}));
         var ctx = contextOf("loc", mapping(EsFieldType.GEO_POINT, "geo_point"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         // No stored output should appear (null return means empty reconstruction).
         assertNull(json, "geo_point stored-field path should yield null to defer to doc_values");
     }
@@ -332,7 +346,7 @@ class SourceReconstructorTest {
     void reconstructFromDocValues_booleanNumericZeroOne() throws IOException {
         var reader = docValueReader("enabled", DocValueFieldInfo.DocValueType.NUMERIC, true, 1L);
         var ctx = contextOf("enabled", mapping(EsFieldType.BOOLEAN, "boolean"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(true, parseField(json, "enabled").asBoolean());
     }
 
@@ -344,7 +358,7 @@ class SourceReconstructorTest {
         var reader = docValueReader("flags", DocValueFieldInfo.DocValueType.SORTED_NUMERIC, true,
                 List.of(1L, 0L));
         var ctx = contextOf("flags", mapping(EsFieldType.BOOLEAN, "boolean"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         JsonNode arr = parseField(json, "flags");
         assertTrue(arr.isArray(), "expected array for multi-valued boolean field");
         assertEquals(2, arr.size());
@@ -359,7 +373,7 @@ class SourceReconstructorTest {
     void reconstructFromDocValues_numericLongPassthrough() throws IOException {
         var reader = docValueReader("count", DocValueFieldInfo.DocValueType.NUMERIC, false, 999L);
         var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(999L, parseField(json, "count").asLong());
     }
 
@@ -369,7 +383,7 @@ class SourceReconstructorTest {
         long bits = Float.floatToIntBits(3.14f);
         var reader = docValueReader("price", DocValueFieldInfo.DocValueType.NUMERIC, false, bits);
         var ctx = contextOf("price", mapping(EsFieldType.NUMERIC, "float"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(3.14, parseField(json, "price").asDouble(), 1e-5);
     }
 
@@ -378,7 +392,7 @@ class SourceReconstructorTest {
         long bits = Double.doubleToLongBits(2.718281828);
         var reader = docValueReader("e", DocValueFieldInfo.DocValueType.NUMERIC, false, bits);
         var ctx = contextOf("e", mapping(EsFieldType.NUMERIC, "double"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(2.718281828, parseField(json, "e").asDouble(), 1e-9);
     }
 
@@ -386,7 +400,7 @@ class SourceReconstructorTest {
     void reconstructFromDocValues_scaledFloatDivides() throws IOException {
         var reader = docValueReader("price", DocValueFieldInfo.DocValueType.NUMERIC, false, 12345L);
         var ctx = contextOf("price", mappingScaled(100.0));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(123.45, parseField(json, "price").asDouble(), 1e-9);
     }
 
@@ -394,7 +408,7 @@ class SourceReconstructorTest {
     void reconstructFromDocValues_dateEpochMillisFormatsIso() throws IOException {
         var reader = docValueReader("ts", DocValueFieldInfo.DocValueType.NUMERIC, false, 1_700_000_000_000L);
         var ctx = contextOf("ts", mapping(EsFieldType.DATE, "date"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals("2023-11-14T22:13:20Z", parseField(json, "ts").asText());
     }
 
@@ -403,7 +417,7 @@ class SourceReconstructorTest {
         long nanos = 1_700_000_000_000_000_500L;
         var reader = docValueReader("ts", DocValueFieldInfo.DocValueType.NUMERIC, false, nanos);
         var ctx = contextOf("ts", mapping(EsFieldType.DATE_NANOS, "date_nanos"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals("2023-11-14T22:13:20.000000500Z", parseField(json, "ts").asText());
     }
 
@@ -412,7 +426,7 @@ class SourceReconstructorTest {
         var reader = docValueReader("source_ip", DocValueFieldInfo.DocValueType.SORTED_SET, false,
                 ipv4MappedIpv6(10, 1, 2, 3));
         var ctx = contextOf("source_ip", mapping(EsFieldType.IP, "ip"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals("10.1.2.3", parseField(json, "source_ip").asText());
     }
 
@@ -421,7 +435,7 @@ class SourceReconstructorTest {
         long ipLong = (8L << 24) | (8L << 16) | (8L << 8) | 8L;
         var reader = docValueReader("source_ip", DocValueFieldInfo.DocValueType.NUMERIC, false, ipLong);
         var ctx = contextOf("source_ip", mapping(EsFieldType.IP, "ip"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals("8.8.8.8", parseField(json, "source_ip").asText());
     }
 
@@ -430,7 +444,7 @@ class SourceReconstructorTest {
         // -1L as unsigned_long is 2^64 - 1
         var reader = docValueReader("u", DocValueFieldInfo.DocValueType.NUMERIC, false, -1L);
         var ctx = contextOf("u", mapping(EsFieldType.UNSIGNED_LONG, "unsigned_long"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(new java.math.BigInteger("18446744073709551615"), parseField(json, "u").bigIntegerValue());
     }
 
@@ -438,7 +452,7 @@ class SourceReconstructorTest {
     void reconstructFromDocValues_stringPassthrough() throws IOException {
         var reader = docValueReader("name", DocValueFieldInfo.DocValueType.SORTED, false, "foo");
         var ctx = contextOf("name", mapping(EsFieldType.STRING, "keyword"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals("foo", parseField(json, "name").asText());
     }
 
@@ -448,7 +462,7 @@ class SourceReconstructorTest {
         String base64 = Base64.getEncoder().encodeToString(original.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         var reader = docValueReader("w", DocValueFieldInfo.DocValueType.BINARY, false, base64);
         var ctx = contextOf("w", mapping(EsFieldType.STRING, "wildcard"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(original, parseField(json, "w").asText());
     }
 
@@ -459,7 +473,7 @@ class SourceReconstructorTest {
         // We'll pick lat=0 lon=0 equivalent: Morton encoded as 0.
         var reader = docValueReader("loc", DocValueFieldInfo.DocValueType.NUMERIC, false, 0L);
         var ctx = contextOf("loc", mapping(EsFieldType.GEO_POINT, "geo_point"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         JsonNode loc = parseField(json, "loc");
         assertNotNull(loc);
         // For Morton hash 0 the decoded values land on the negative boundary; just verify
@@ -472,7 +486,7 @@ class SourceReconstructorTest {
         byte[] payload = {0x00, 0x10, (byte) 0xFF, 0x7F};
         var reader = docValueReader("blob", DocValueFieldInfo.DocValueType.BINARY, false, payload);
         var ctx = contextOf("blob", mapping(EsFieldType.BINARY, "binary"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(Base64.getEncoder().encodeToString(payload), parseField(json, "blob").asText());
     }
 
@@ -497,7 +511,7 @@ class SourceReconstructorTest {
     void reconstructFromPoints_longBkd() throws IOException {
         var reader = pointsReader("count", EsFieldType.NUMERIC, packLong(123456789L));
         var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(123456789L, parseField(json, "count").asLong());
     }
 
@@ -505,7 +519,7 @@ class SourceReconstructorTest {
     void reconstructFromPoints_negativeLongBkd() throws IOException {
         var reader = pointsReader("signed", EsFieldType.NUMERIC, packLong(-42L));
         var ctx = contextOf("signed", mapping(EsFieldType.NUMERIC, "long"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(-42L, parseField(json, "signed").asLong());
     }
 
@@ -513,7 +527,7 @@ class SourceReconstructorTest {
     void reconstructFromPoints_intBkd() throws IOException {
         var reader = pointsReader("small", EsFieldType.NUMERIC, packInt(-1234));
         var ctx = contextOf("small", mapping(EsFieldType.NUMERIC, "integer"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(-1234, parseField(json, "small").asInt());
     }
 
@@ -521,7 +535,7 @@ class SourceReconstructorTest {
     void reconstructFromPoints_floatBkd() throws IOException {
         var reader = pointsReader("f", EsFieldType.NUMERIC, packFloat(1.5f));
         var ctx = contextOf("f", mapping(EsFieldType.NUMERIC, "float"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(1.5, parseField(json, "f").asDouble(), 1e-6);
     }
 
@@ -529,7 +543,7 @@ class SourceReconstructorTest {
     void reconstructFromPoints_doubleBkd() throws IOException {
         var reader = pointsReader("d", EsFieldType.NUMERIC, packDouble(-0.25));
         var ctx = contextOf("d", mapping(EsFieldType.NUMERIC, "double"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(-0.25, parseField(json, "d").asDouble(), 1e-12);
     }
 
@@ -537,7 +551,7 @@ class SourceReconstructorTest {
     void reconstructFromPoints_dateBkdToIso() throws IOException {
         var reader = pointsReader("ts", EsFieldType.DATE, packLong(1_700_000_000_000L));
         var ctx = contextOf("ts", mapping(EsFieldType.DATE, "date"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals("2023-11-14T22:13:20Z", parseField(json, "ts").asText());
     }
 
@@ -546,7 +560,7 @@ class SourceReconstructorTest {
         long nanos = 1_700_000_000_000_000_500L;
         var reader = pointsReader("ts", EsFieldType.DATE_NANOS, packLong(nanos));
         var ctx = contextOf("ts", mapping(EsFieldType.DATE_NANOS, "date_nanos"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals("2023-11-14T22:13:20.000000500Z", parseField(json, "ts").asText());
     }
 
@@ -554,7 +568,7 @@ class SourceReconstructorTest {
     void reconstructFromPoints_ipBkd16Bytes() throws IOException {
         var reader = pointsReader("source_ip", EsFieldType.IP, ipv4MappedIpv6(192, 168, 1, 100));
         var ctx = contextOf("source_ip", mapping(EsFieldType.IP, "ip"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals("192.168.1.100", parseField(json, "source_ip").asText());
     }
 
@@ -580,7 +594,7 @@ class SourceReconstructorTest {
         long ipLong = (10L << 24) | (0L << 16) | (0L << 8) | 1L;
         var reader = numericTermReader("source_ip", EsFieldType.IP, ipLong);
         var ctx = contextOf("source_ip", mapping(EsFieldType.IP, "ip"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals("10.0.0.1", parseField(json, "source_ip").asText());
     }
 
@@ -588,7 +602,7 @@ class SourceReconstructorTest {
     void reconstructFromNumericTerms_dateFromLong() throws IOException {
         var reader = numericTermReader("ts", EsFieldType.DATE, 1_700_000_000_000L);
         var ctx = contextOf("ts", mapping(EsFieldType.DATE, "date"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals("2023-11-14T22:13:20Z", parseField(json, "ts").asText());
     }
 
@@ -596,7 +610,7 @@ class SourceReconstructorTest {
     void reconstructFromNumericTerms_longPassthrough() throws IOException {
         var reader = numericTermReader("count", EsFieldType.NUMERIC, 42L);
         var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(42L, parseField(json, "count").asLong());
     }
 
@@ -604,7 +618,7 @@ class SourceReconstructorTest {
     void reconstructFromNumericTerms_intFromLong() throws IOException {
         var reader = numericTermReader("n", EsFieldType.NUMERIC, -1234L);
         var ctx = contextOf("n", mapping(EsFieldType.NUMERIC, "integer"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(-1234, parseField(json, "n").asInt());
     }
 
@@ -615,7 +629,7 @@ class SourceReconstructorTest {
         int sortable = bits ^ ((bits >> 31) & 0x7fffffff);
         var reader = numericTermReader("f", EsFieldType.NUMERIC, (long) sortable);
         var ctx = contextOf("f", mapping(EsFieldType.NUMERIC, "float"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(3.14, parseField(json, "f").asDouble(), 1e-5);
     }
 
@@ -625,7 +639,7 @@ class SourceReconstructorTest {
         long sortable = bits ^ ((bits >> 63) & 0x7fffffffffffffffL);
         var reader = numericTermReader("d", EsFieldType.NUMERIC, sortable);
         var ctx = contextOf("d", mapping(EsFieldType.NUMERIC, "double"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(-0.5, parseField(json, "d").asDouble(), 1e-12);
     }
 
@@ -633,7 +647,7 @@ class SourceReconstructorTest {
     void reconstructFromNumericTerms_scaledFloatDivides() throws IOException {
         var reader = numericTermReader("price", EsFieldType.SCALED_FLOAT, 12345L);
         var ctx = contextOf("price", mappingScaled(100.0));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(123.45, parseField(json, "price").asDouble(), 1e-9);
     }
 
@@ -641,7 +655,7 @@ class SourceReconstructorTest {
     void reconstructFromNumericTerms_unsignedLongNegativeMasked() throws IOException {
         var reader = numericTermReader("u", EsFieldType.UNSIGNED_LONG, -1L);
         var ctx = contextOf("u", mapping(EsFieldType.UNSIGNED_LONG, "unsigned_long"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(new java.math.BigInteger("18446744073709551615"), parseField(json, "u").bigIntegerValue());
     }
 
@@ -660,7 +674,7 @@ class SourceReconstructorTest {
             // SourceReconstructor receives the already-joined String from LuceneLeafReader.
             .thenReturn(Optional.of(new RecoveredValue.TextTerm("quick brown fox")));
         var ctx = contextOf("body", mapping(EsFieldType.STRING, "text"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals("quick brown fox", parseField(json, "body").asText());
     }
 
@@ -674,7 +688,7 @@ class SourceReconstructorTest {
                 org.mockito.ArgumentMatchers.any()))
             .thenReturn(Optional.of(new RecoveredValue.TextTerm("T")));
         var ctx = contextOf("enabled", mapping(EsFieldType.BOOLEAN, "boolean"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(true, parseField(json, "enabled").asBoolean());
     }
 
@@ -696,7 +710,7 @@ class SourceReconstructorTest {
             .thenReturn(Optional.empty());
         var doc = document(storedNumber("count", 42L));
         var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         // Stored field's 42 should win over doc_values' 999.
         assertEquals(42L, parseField(json, "count").asLong());
     }
@@ -714,7 +728,7 @@ class SourceReconstructorTest {
                 org.mockito.ArgumentMatchers.any()))
             .thenReturn(Optional.of(new RecoveredValue.PointBytes(List.of(packLong(999L)))));
         var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(77L, parseField(json, "count").asLong());
     }
 
@@ -737,12 +751,12 @@ class SourceReconstructorTest {
             f.setAccessible(true);
             @SuppressWarnings("unchecked")
             var m = (java.util.Map<String, FieldMappingInfo>) f.get(ctx);
-            m.put("count", new FieldMappingInfo(EsFieldType.NUMERIC, "long", null, null, false, null));
+            m.put("count", new FieldMappingInfo(EsFieldType.NUMERIC, "long", null, null, false, true, null));
         } catch (ReflectiveOperationException e) {
             throw new RuntimeException(e);
         }
 
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         // Mapping says doc_values disabled — reconstructor must not surface the value from the
         // doc_values read, and with no stored field nor fallback the document ends up empty → null.
         assertNull(json);
@@ -828,7 +842,7 @@ class SourceReconstructorTest {
     @MethodSource("allTypesMatrix")
     void allTypesMatrix(Row row) throws IOException {
         var info = new FieldMappingInfo(row.type(), row.mappingType(), row.format(),
-                row.scalingFactor(), true, null);
+                row.scalingFactor(), true, true, null);
         var ctx = contextOf("field", info);
 
         LuceneLeafReader reader;
@@ -852,7 +866,7 @@ class SourceReconstructorTest {
             default -> throw new IllegalStateException("Unhandled path: " + row.path());
         }
 
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertNotNull(json, () -> "Expected non-null reconstruction for " + row.name());
         JsonNode actual = parseField(json, "field");
         assertNotNull(actual, () -> "Expected field in JSON for " + row.name() + " → " + json);
@@ -888,8 +902,8 @@ class SourceReconstructorTest {
                 org.mockito.ArgumentMatchers.eq(info))).thenReturn(42L);
 
         var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
-        String merged = SourceReconstructor.mergeWithDocValues(
-                "{\"name\":\"alice\"}", reader, 0, document(), ctx);
+        byte[] merged = SourceReconstructor.mergeWithDocValues(
+                "{\"name\":\"alice\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8), reader, 0, document(), ctx);
 
         Map<?,?> result = MAPPER.readValue(merged, Map.class);
         assertEquals("alice", result.get("name"));
@@ -905,8 +919,8 @@ class SourceReconstructorTest {
                 org.mockito.ArgumentMatchers.eq(info))).thenReturn(99L);
 
         var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
-        String merged = SourceReconstructor.mergeWithDocValues(
-                "{\"count\":7}", reader, 0, document(), ctx);
+        byte[] merged = SourceReconstructor.mergeWithDocValues(
+                "{\"count\":7}".getBytes(java.nio.charset.StandardCharsets.UTF_8), reader, 0, document(), ctx);
 
         Map<?,?> result = MAPPER.readValue(merged, Map.class);
         // Existing source value should not be overwritten by the doc_values value.
@@ -928,7 +942,7 @@ class SourceReconstructorTest {
                 storedString("name", "alice")
         );
         var ctx = contextOf("name", mapping(EsFieldType.STRING, "keyword"));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         JsonNode tree;
         try {
             tree = MAPPER.readTree(json);
@@ -978,7 +992,7 @@ class SourceReconstructorTest {
         var ctx = contextOfMany(java.util.Map.of(
             "address.city", mapping(EsFieldType.STRING, "keyword")
         ));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         JsonNode tree;
         try {
             tree = MAPPER.readTree(json);
@@ -1004,7 +1018,7 @@ class SourceReconstructorTest {
             "address.city", mapping(EsFieldType.STRING, "keyword"),
             "address.zip", mapping(EsFieldType.STRING, "keyword")
         ));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         JsonNode tree;
         try {
             tree = MAPPER.readTree(json);
@@ -1024,7 +1038,7 @@ class SourceReconstructorTest {
         var ctx = contextOfMany(java.util.Map.of(
             "user.profile.email", mapping(EsFieldType.STRING, "keyword")
         ));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         JsonNode tree;
         try {
             tree = MAPPER.readTree(json);
@@ -1048,7 +1062,7 @@ class SourceReconstructorTest {
             "title", mapping(EsFieldType.STRING, "text")
             // NOTE: title.keyword intentionally NOT registered.
         ));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         JsonNode tree;
         try {
             tree = MAPPER.readTree(json);
@@ -1072,7 +1086,7 @@ class SourceReconstructorTest {
             storedString("address.city", "dropped")
         );
         var ctx = new FieldMappingContext(null);  // empty — no field info.
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         JsonNode tree;
         try {
             tree = MAPPER.readTree(json);
@@ -1100,7 +1114,7 @@ class SourceReconstructorTest {
             "_id", mapping(EsFieldType.STRING, "keyword"),
             "_routing", mapping(EsFieldType.STRING, "keyword")
         ));
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         JsonNode tree;
         try {
             tree = MAPPER.readTree(json);
@@ -1139,14 +1153,14 @@ class SourceReconstructorTest {
         var ctx = contextOfMany(java.util.Map.of(
             "address.zip", mapping(EsFieldType.STRING, "keyword")
         ));
-        String merged = SourceReconstructor.mergeWithDocValues(
-                "{\"address\":{\"city\":\"NYC\"}}", reader, 0, document(), ctx);
+        byte[] merged = SourceReconstructor.mergeWithDocValues(
+                "{\"address\":{\"city\":\"NYC\"}}".getBytes(java.nio.charset.StandardCharsets.UTF_8), reader, 0, document(), ctx);
 
         JsonNode tree = MAPPER.readTree(merged);
         assertEquals("NYC", tree.path("address").path("city").asText(),
-            "existing subfield preserved: " + merged);
+            "existing subfield preserved: " + toStr(merged));
         assertEquals("10001", tree.path("address").path("zip").asText(),
-            "doc-value subfield written into existing parent map: " + merged);
+            "doc-value subfield written into existing parent map: " + toStr(merged));
     }
 
     @Test
@@ -1154,9 +1168,9 @@ class SourceReconstructorTest {
         // Sanity: when nothing is added, we return the exact original string (no re-serialize churn).
         var reader = storedOnlyReader();  // no docvalues, no points, no terms
         var ctx = contextOf("name", mapping(EsFieldType.STRING, "keyword"));
-        String original = "{\"name\":\"alice\"}";
-        String merged = SourceReconstructor.mergeWithDocValues(original, reader, 0, document(), ctx);
-        assertEquals(original, merged, "unchanged payload must be returned verbatim");
+        byte[] original = "{\"name\":\"alice\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] merged = SourceReconstructor.mergeWithDocValues(original, reader, 0, document(), ctx);
+        assertEquals(toStr(original), toStr(merged), "unchanged payload must be returned verbatim");
     }
 
     @Test
@@ -1181,15 +1195,15 @@ class SourceReconstructorTest {
             "address.city", mapping(EsFieldType.STRING, "keyword")
         ));
         // partial source with the literal dotted key preserved verbatim (some ingest pipelines do this)
-        String merged = SourceReconstructor.mergeWithDocValues(
-                "{\"address.city\":\"NYC\"}", reader, 0, document(), ctx);
+        byte[] merged = SourceReconstructor.mergeWithDocValues(
+                "{\"address.city\":\"NYC\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8), reader, 0, document(), ctx);
 
         JsonNode tree = MAPPER.readTree(merged);
         assertEquals("NYC", tree.path("address.city").asText(),
-            "literal dotted key preserved: " + merged);
+            "literal dotted key preserved: " + toStr(merged));
         // Must NOT also emit a nested {address:{city:...}} copy.
         assertTrue(!tree.has("address") || tree.path("address").isNull(),
-            "nested duplicate must not be emitted: " + merged);
+            "nested duplicate must not be emitted: " + toStr(merged));
     }
 
     @Test
@@ -1214,13 +1228,13 @@ class SourceReconstructorTest {
             "address.city", mapping(EsFieldType.STRING, "keyword")
         ));
         // existing source has `address` as a plain scalar string (pathological but possible from old snapshots)
-        String merged = SourceReconstructor.mergeWithDocValues(
-                "{\"address\":\"plain scalar address\"}", reader, 0, document(), ctx);
+        byte[] merged = SourceReconstructor.mergeWithDocValues(
+                "{\"address\":\"plain scalar address\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8), reader, 0, document(), ctx);
 
         // Scalar parent wins; subfield quietly dropped (warn log only). The existing source must be returned
         // UNCHANGED — no corruption, no partial write.
-        assertEquals("{\"address\":\"plain scalar address\"}", merged,
-            "scalar parent blocks nested write; output unchanged: " + merged);
+        assertEquals("{\"address\":\"plain scalar address\"}", toStr(merged),
+            "scalar parent blocks nested write; output unchanged: " + toStr(merged));
     }
 
     @Test
@@ -1243,7 +1257,7 @@ class SourceReconstructorTest {
         var ctx = contextOfMany(java.util.Map.of(
             "user.email", mapping(EsFieldType.STRING, "keyword")
         ));
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         JsonNode tree = MAPPER.readTree(json);
         assertEquals("alice@example.com", tree.path("user").path("email").asText(),
             "dotted subfield from doc_values path must nest: " + json);
@@ -1392,7 +1406,7 @@ class SourceReconstructorTest {
             "{\"from\":{\"type\":\"keyword\",\"copy_to\":\"users.all\"},"
             + "\"users\":{\"properties\":{\"all\":{\"type\":\"text\"}}}}"
         );
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         JsonNode tree = parseField(json, "from") == null ? null : MAPPER.valueToTree(json);
         assertEquals("joe@example.com", parseField(json, "from").asText());
         try {
@@ -1416,7 +1430,7 @@ class SourceReconstructorTest {
             "{\"from\":{\"type\":\"keyword\",\"copy_to\":\"users.from\"},"
             + "\"users\":{\"properties\":{\"from\":{\"type\":\"keyword\"}}}}"
         );
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertNotNull(json, "reconstruction produced null output");
         assertEquals("joe@example.com", parseField(json, "from").asText(),
             "source `from` must be reverse-derived from copy_to target `users.from`: " + json);
@@ -1443,7 +1457,7 @@ class SourceReconstructorTest {
             + "\"all\":{\"type\":\"text\"}"
             + "}}}"
         );
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertEquals("joe@example.com", parseField(json, "from").asText(),
             "less-lossy keyword target must win over text target: " + json);
     }
@@ -1464,7 +1478,7 @@ class SourceReconstructorTest {
             + "\"all\":{\"type\":\"text\"}"
             + "}}}"
         );
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertNotNull(parseField(json, "from"),
             "text target must be used as last-resort fallback: " + json);
         assertEquals("joe@example.com mary@example.com", parseField(json, "from").asText(),
@@ -1484,7 +1498,7 @@ class SourceReconstructorTest {
             "{\"from\":{\"type\":\"keyword\",\"copy_to\":\"users.from\"},"
             + "\"users\":{\"properties\":{\"from\":{\"type\":\"keyword\"}}}}"
         );
-        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
         assertEquals("original@source.com", parseField(json, "from").asText(),
             "source's own stored value must win over copy_to target: " + json);
     }
@@ -1519,7 +1533,7 @@ class SourceReconstructorTest {
             + "\"users\":{\"properties\":{\"from\":{\"type\":\"keyword\"}}}}"
         );
 
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        byte[] json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
 
         assertNotNull(json, "reconstruction must not silently drop the doc with a CCE");
         JsonNode from = parseField(json, "from");
@@ -1589,8 +1603,8 @@ class SourceReconstructorTest {
             "files.size", mapping(EsFieldType.NUMERIC, "long"),
             "files.cksum", mapping(EsFieldType.STRING, "keyword")
         ));
-        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}";
-        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        byte[] seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
 
         JsonNode tree = MAPPER.readTree(merged);
         JsonNode files = tree.path("files");
@@ -1618,8 +1632,8 @@ class SourceReconstructorTest {
             "files.name", mapping(EsFieldType.STRING, "keyword"),
             "files.cksum", mapping(EsFieldType.STRING, "keyword")
         ));
-        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"},{\"cksum\":\"h3\"}]}";
-        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        byte[] seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"},{\"cksum\":\"h3\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
 
         JsonNode files = MAPPER.readTree(merged).path("files");
         assertEquals(3, files.size());
@@ -1643,8 +1657,8 @@ class SourceReconstructorTest {
             "files.size", mapping(EsFieldType.NUMERIC, "long"),
             "files.cksum", mapping(EsFieldType.STRING, "keyword")
         ));
-        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}";  // 2 elements
-        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        byte[] seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8);  // 2 elements
+        byte[] merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
 
         JsonNode files = MAPPER.readTree(merged).path("files");
         assertEquals(2, files.size(), "seed array length preserved: " + merged);
@@ -1666,11 +1680,11 @@ class SourceReconstructorTest {
             "files.tstatus", mapping(EsFieldType.NUMERIC, "long"),
             "files.cksum", mapping(EsFieldType.STRING, "keyword")
         ));
-        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}";
-        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        byte[] seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
 
         JsonNode files = MAPPER.readTree(merged).path("files");
-        assertEquals(1L, files.get(0).path("tstatus").asLong(), "element 0 gets broadcast: " + merged);
+        assertEquals(1L, files.get(0).path("tstatus").asLong(), "element 0 gets broadcast: " + toStr(merged));
         assertEquals(1L, files.get(1).path("tstatus").asLong(), "element 1 gets broadcast: " + merged);
     }
 
@@ -1689,8 +1703,8 @@ class SourceReconstructorTest {
             "files.cksum", mapping(EsFieldType.STRING, "keyword")
         ));
         // Element 0 already carries size=999 from a hypothetical upstream pipeline — must survive.
-        String seed = "{\"files\":[{\"cksum\":\"h1\",\"size\":999},{\"cksum\":\"h2\"}]}";
-        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        byte[] seed = "{\"files\":[{\"cksum\":\"h1\",\"size\":999},{\"cksum\":\"h2\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
 
         JsonNode files = MAPPER.readTree(merged).path("files");
         assertEquals(999L, files.get(0).path("size").asLong(),
@@ -1714,13 +1728,13 @@ class SourceReconstructorTest {
             "files.size", mapping(EsFieldType.NUMERIC, "long"),
             "files.cksum", mapping(EsFieldType.STRING, "keyword")
         ));
-        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}";
-        String firstPass = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
-        String secondPass = SourceReconstructor.mergeWithDocValues(firstPass, reader, 0, document(), ctx);
+        byte[] seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] firstPass = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        byte[] secondPass = SourceReconstructor.mergeWithDocValues(firstPass, reader, 0, document(), ctx);
 
-        assertEquals(firstPass, secondPass,
-            "re-merge against same seed+docvalues must be a fixed point: first=" + firstPass
-                + " second=" + secondPass);
+        assertEquals(toStr(firstPass), toStr(secondPass),
+            "re-merge against same seed+docvalues must be a fixed point: first=" + toStr(firstPass)
+                + " second=" + toStr(secondPass));
     }
 
     @Test
@@ -1739,8 +1753,8 @@ class SourceReconstructorTest {
             "files.cksum", mapping(EsFieldType.STRING, "keyword")
         ));
         // Middle element already has size=999 — must be preserved; others get distributed.
-        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\",\"size\":999},{\"cksum\":\"h3\"}]}";
-        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        byte[] seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\",\"size\":999},{\"cksum\":\"h3\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
 
         JsonNode files = MAPPER.readTree(merged).path("files");
         assertEquals(100L, files.get(0).path("size").asLong());
@@ -1760,10 +1774,10 @@ class SourceReconstructorTest {
         var ctx = contextOfMany(java.util.Map.of(
             "files.size", mapping(EsFieldType.NUMERIC, "long")
         ));
-        String seed = "{\"files\":[\"a.txt\",\"b.txt\"]}";
-        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        byte[] seed = "{\"files\":[\"a.txt\",\"b.txt\"]}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
 
-        assertEquals(seed, merged, "scalar-array parent preserves warn-and-drop contract: " + merged);
+        assertEquals(toStr(seed), toStr(merged), "scalar-array parent preserves warn-and-drop contract: " + toStr(merged));
     }
 
     @Test
@@ -1778,10 +1792,10 @@ class SourceReconstructorTest {
         var ctx = contextOfMany(java.util.Map.of(
             "files.size", mapping(EsFieldType.NUMERIC, "long")
         ));
-        String seed = "{\"files\":[]}";
-        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        byte[] seed = "{\"files\":[]}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
 
-        assertEquals(seed, merged, "empty array is not distributed into: " + merged);
+        assertEquals(toStr(seed), toStr(merged), "empty array is not distributed into: " + toStr(merged));
     }
 
     @Test
@@ -1796,11 +1810,11 @@ class SourceReconstructorTest {
         var ctx = contextOfMany(java.util.Map.of(
             "files.meta.size", mapping(EsFieldType.NUMERIC, "long")
         ));
-        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}";
-        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        byte[] seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
 
-        assertEquals(seed, merged,
-            "deep-nesting under a List<Map> parent is unsupported; seed must be unchanged: " + merged);
+        assertEquals(toStr(seed), toStr(merged),
+            "deep-nesting under a List<Map> parent is unsupported; seed must be unchanged: " + toStr(merged));
     }
 
     @Test
@@ -1816,12 +1830,12 @@ class SourceReconstructorTest {
             "files.cksum", mapping(EsFieldType.STRING, "keyword")
         ));
         var doc = document(storedNumber("files.tstatus", 1L));
-        String seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}";
-        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, doc, ctx);
+        byte[] seed = "{\"files\":[{\"cksum\":\"h1\"},{\"cksum\":\"h2\"}]}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, doc, ctx);
 
         JsonNode files = MAPPER.readTree(merged).path("files");
-        assertEquals(1L, files.get(0).path("tstatus").asLong(), "element 0 broadcast: " + merged);
-        assertEquals(1L, files.get(1).path("tstatus").asLong(), "element 1 broadcast: " + merged);
+        assertEquals(1L, files.get(0).path("tstatus").asLong(), "element 0 broadcast: " + toStr(merged));
+        assertEquals(1L, files.get(1).path("tstatus").asLong(), "element 1 broadcast: " + toStr(merged));
         assertEquals("h1", files.get(0).path("cksum").asText());
         assertEquals("h2", files.get(1).path("cksum").asText());
     }

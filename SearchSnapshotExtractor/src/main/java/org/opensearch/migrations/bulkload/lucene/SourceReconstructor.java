@@ -9,6 +9,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
@@ -45,13 +46,14 @@ public class SourceReconstructor {
         if (fieldName.startsWith("_")) {
             return true;
         }
-        // Unified source-exclusion gate: strips copy_to targets (index-time-only, never in
-        // _source) AND honours index-level _source.includes / _source.excludes. Cheap no-op
-        // when the mapping declared neither directive.
-        if (mappingContext != null && mappingContext.isSourceExcluded(fieldName)) {
+        // Skip copy_to targets: these are index-time-only duplicates that never appear
+        // in the original _source. We do NOT skip _source.excludes fields because the
+        // goal of sourceless reconstruction is to recover the full original document —
+        // _source.excludes was a storage optimization, not data exclusion.
+        if (mappingContext != null && mappingContext.isCopyToTarget(fieldName)) {
             return true;
         }
-        if (!fieldName.contains(".")) {
+        if (fieldName.indexOf('.') < 0) {
             return false;
         }
         // Dotted field: keep it only if the mapping recognizes it as an object subfield.
@@ -71,20 +73,26 @@ public class SourceReconstructor {
      */
     @SuppressWarnings("unchecked")
     private static boolean descendsIntoExistingObjectArray(Map<String, Object> target, String fieldName) {
-        if (!fieldName.contains(".")) {
+        int firstDot = fieldName.indexOf('.');
+        if (firstDot < 0) {
             return false;
         }
-        String[] parts = fieldName.split("\\.");
         Map<String, Object> cursor = target;
-        for (int i = 0; i < parts.length - 1; i++) {
-            Object next = cursor.get(parts[i]);
+        int start = 0;
+        int dot = firstDot;
+        while (dot >= 0) {
+            String part = fieldName.substring(start, dot);
+            Object next = cursor.get(part);
             if (next instanceof java.util.List<?> list && isListOfMaps(list)) {
                 // Only treat as an object-array carve-out when the remainder is a SINGLE leaf
                 // segment — distributeSubfieldAcrossList only handles single-leaf distribution.
-                return i == parts.length - 2;
+                int nextDot = fieldName.indexOf('.', dot + 1);
+                return nextDot < 0;
             }
-            if (next instanceof Map<?, ?>) {
-                cursor = (Map<String, Object>) next;
+            if (next instanceof Map<?, ?> map) {
+                cursor = (Map<String, Object>) map;
+                start = dot + 1;
+                dot = fieldName.indexOf('.', start);
                 continue;
             }
             return false;
@@ -121,7 +129,8 @@ public class SourceReconstructor {
      */
     @SuppressWarnings("unchecked")
     private static boolean putNested(Map<String, Object> target, String fieldName, Object value) {
-        if (!fieldName.contains(".")) {
+        int firstDot = fieldName.indexOf('.');
+        if (firstDot < 0) {
             if (target.containsKey(fieldName)) {
                 return false;
             }
@@ -134,15 +143,17 @@ public class SourceReconstructor {
         if (target.containsKey(fieldName)) {
             return false;
         }
-        String[] parts = fieldName.split("\\.");
         Map<String, Object> cursor = target;
-        for (int i = 0; i < parts.length - 1; i++) {
-            Object next = cursor.get(parts[i]);
+        int start = 0;
+        int dot = firstDot;
+        while (dot >= 0) {
+            String part = fieldName.substring(start, dot);
+            Object next = cursor.get(part);
             if (next instanceof Map<?, ?> map) {
                 cursor = (Map<String, Object>) map;
             } else if (next == null) {
                 Map<String, Object> child = new LinkedHashMap<>();
-                cursor.put(parts[i], child);
+                cursor.put(part, child);
                 cursor = child;
             } else if (next instanceof java.util.List<?> list && isListOfMaps(list)) {
                 // Array-of-objects at this path (e.g. seeded _source has `files`: [{cksum:h1}, {cksum:h2}]).
@@ -151,7 +162,8 @@ public class SourceReconstructor {
                 // (e.g. `files.meta.size` where `files[i].meta` would itself be an object) falls through
                 // to the warn branch below since per-element object construction from doc_values is
                 // outside the guarantees doc_values can provide.
-                if (i != parts.length - 2) {
+                int nextDot = fieldName.indexOf('.', dot + 1);
+                if (nextDot >= 0) {
                     // Distribution supports only immediate-leaf subfields (one segment past the
                     // List<Map> parent, e.g. `files.size`). Deeper paths like `files.meta.size`
                     // would require synthesising per-element `meta` objects from columnar
@@ -163,12 +175,12 @@ public class SourceReconstructor {
                                 + "only immediate-leaf subfields (parent.leaf) are supported. "
                                 + "Dropping recovered value (further occurrences silenced)")
                             .addArgument(fieldName)
-                            .addArgument(parts[i])
+                            .addArgument(part)
                             .log();
                     }
                     return false;
                 }
-                String leafForList = parts[parts.length - 1];
+                String leafForList = fieldName.substring(dot + 1);
                 return distributeSubfieldAcrossList((java.util.List<Object>) list, leafForList, value, fieldName);
             } else {
                 // Non-map already sits at this path — cannot nest under a scalar. Warn once
@@ -177,14 +189,16 @@ public class SourceReconstructor {
                     log.atWarn()
                         .setMessage("Cannot write nested field '{}' under scalar at '{}' (type {}); dropping recovered value (further occurrences silenced)")
                         .addArgument(fieldName)
-                        .addArgument(parts[i])
+                        .addArgument(part)
                         .addArgument(next.getClass().getSimpleName())
                         .log();
                 }
                 return false;
             }
+            start = dot + 1;
+            dot = fieldName.indexOf('.', start);
         }
-        String leaf = parts[parts.length - 1];
+        String leaf = fieldName.substring(start);
         if (cursor.containsKey(leaf)) {
             return false;
         }
@@ -281,34 +295,43 @@ public class SourceReconstructor {
         if (target.containsKey(fieldName)) {
             return true;
         }
-        if (!fieldName.contains(".")) {
+        int firstDot = fieldName.indexOf('.');
+        if (firstDot < 0) {
             return false;
         }
-        String[] parts = fieldName.split("\\.");
         Map<String, Object> cursor = target;
-        for (int i = 0; i < parts.length - 1; i++) {
-            Object next = cursor.get(parts[i]);
-            if (next instanceof Map<?, ?>) {
-                cursor = (Map<String, Object>) next;
-                continue;
-            }
-            // Array-of-objects ancestor (e.g. `files` is List<Map>): the leaf is considered present
-            // iff the suffix is the immediate leaf AND every element already carries it. This keeps
-            // mergeWithDocValues idempotent — a second pass over the same doc won't re-distribute,
-            // and it correctly reports "not present" when only some elements have the subfield so
-            // the distribute path can fill the gaps.
-            if (next instanceof java.util.List<?> list && i == parts.length - 2 && !list.isEmpty()) {
-                String leafForList = parts[parts.length - 1];
-                for (Object element : list) {
-                    if (!(element instanceof Map<?, ?> m) || !m.containsKey(leafForList)) {
-                        return false;
+        int start = 0;
+        int dot = firstDot;
+        while (dot >= 0) {
+            String part = fieldName.substring(start, dot);
+            Object next = cursor.get(part);
+            if (next instanceof Map<?, ?> map) {
+                cursor = (Map<String, Object>) map;
+                start = dot + 1;
+                dot = fieldName.indexOf('.', start);
+            } else if (next instanceof java.util.List<?> list) {
+                // Array-of-objects ancestor (e.g. `files` is List<Map>): the leaf is considered present
+                // iff the suffix is the immediate leaf AND every element already carries it. This keeps
+                // mergeWithDocValues idempotent — a second pass over the same doc won't re-distribute,
+                // and it correctly reports "not present" when only some elements have the subfield so
+                // the distribute path can fill the gaps.
+                int nextDot = fieldName.indexOf('.', dot + 1);
+                if (nextDot < 0 && !list.isEmpty()) {
+                    String leaf = fieldName.substring(dot + 1);
+                    for (Object element : list) {
+                        if (!(element instanceof Map<?, ?> m) || !m.containsKey(leaf)) {
+                            return false;
+                        }
                     }
+                    return true;
                 }
-                return true;
+                return false;
+            } else {
+                return false;
             }
-            return false;
         }
-        return cursor.containsKey(parts[parts.length - 1]);
+        String leaf = fieldName.substring(start);
+        return cursor.containsKey(leaf);
     }
 
     /**
@@ -318,8 +341,9 @@ public class SourceReconstructor {
      * @param termIndex per-segment term position cache, scoped to the current
      *                  segment's Flux; may be null if caller does not need
      *                  analyzed-text fallback (treated as empty).
+     * @return reconstructed _source as raw bytes, or null if no fields found
      */
-    public static String reconstructSource(LuceneLeafReader reader, int docId, LuceneDocument document,
+    public static byte[] reconstructSource(LuceneLeafReader reader, int docId, LuceneDocument document,
             FieldMappingContext mappingContext, SegmentTermIndex termIndex) {
         try {
             Map<String, Object> reconstructed = new LinkedHashMap<>();
@@ -330,7 +354,7 @@ public class SourceReconstructor {
                 return null;
             }
 
-            return OBJECT_MAPPER.writeValueAsString(reconstructed);
+            return OBJECT_MAPPER.writeValueAsBytes(reconstructed);
         } catch (IOException e) {
             log.atWarn().setCause(e).setMessage("Failed to reconstruct source for document {}").addArgument(docId).log();
             return null;
@@ -338,7 +362,7 @@ public class SourceReconstructor {
     }
 
     /** Backwards-compatible overload for callers that don't supply a term index (e.g. Solr path). */
-    public static String reconstructSource(LuceneLeafReader reader, int docId, LuceneDocument document,
+    public static byte[] reconstructSource(LuceneLeafReader reader, int docId, LuceneDocument document,
             FieldMappingContext mappingContext) {
         return reconstructSource(reader, docId, document, mappingContext, null);
     }
@@ -349,23 +373,233 @@ public class SourceReconstructor {
      * Applies the same stored → doc_values → points/terms recovery chain as
      * {@link #reconstructSource}, but only for fields missing from the existing source,
      * so existing values are preserved verbatim.
+     *
+     * @return merged _source as raw bytes
      */
-    public static String mergeWithDocValues(String existingSource, LuceneLeafReader reader, int docId,
+    public static byte[] mergeWithDocValues(byte[] existingSourceBytes, LuceneLeafReader reader, int docId,
             LuceneDocument document, FieldMappingContext mappingContext) {
-        return mergeWithDocValues(existingSource, reader, docId, document, mappingContext, null);
+        return mergeWithDocValues(existingSourceBytes, reader, docId, document, mappingContext, null);
     }
 
     @SuppressWarnings("unchecked")
-    public static String mergeWithDocValues(String existingSource, LuceneLeafReader reader, int docId,
+    public static byte[] mergeWithDocValues(byte[] existingSourceBytes, LuceneLeafReader reader, int docId,
             LuceneDocument document, FieldMappingContext mappingContext, SegmentTermIndex termIndex) {
         try {
-            Map<String, Object> existing = OBJECT_MAPPER.readValue(existingSource, Map.class);
+            Map<String, Object> existing = OBJECT_MAPPER.readValue(existingSourceBytes, Map.class);
             boolean modified = populateFromSegment(existing, reader, docId, document, mappingContext, termIndex);
-            return modified ? OBJECT_MAPPER.writeValueAsString(existing) : existingSource;
+            return modified ? OBJECT_MAPPER.writeValueAsBytes(existing) : existingSourceBytes;
         } catch (IOException e) {
             log.atWarn().setCause(e).setMessage("Failed to merge fields for document {}").addArgument(docId).log();
+            return existingSourceBytes;
+        }
+    }
+
+    /**
+     * Optimized merge that avoids parsing the full existing _source JSON.
+     * Only reconstructs fields from _source.excludes and injects them at the byte level.
+     * Falls back to the full-parse mergeWithDocValues if object-array injection is needed.
+     *
+     * <p>For indices with {@code _source.excludes}, we know statically which fields are missing
+     * from the partial source. This method recovers only those fields, serializes them into a
+     * small JSON fragment, and injects the fragment into the existing bytes by stripping the
+     * trailing {@code }} and appending {@code ,<recovered fields>}}.
+     *
+     * @param existingSource the partial _source bytes from the Lucene segment
+     * @param reader the leaf reader for the current segment
+     * @param docId the Lucene document ID within the segment
+     * @param document the stored-fields document
+     * @param mappingContext the field mapping context (must not be null)
+     * @param termIndex the per-segment term index for analyzed-text recovery
+     * @return merged _source as raw bytes
+     */
+    public static byte[] mergeExcludedFieldsByByteInjection(
+            byte[] existingSource,
+            LuceneLeafReader reader, int docId,
+            LuceneDocument document, FieldMappingContext mappingContext,
+            SegmentTermIndex termIndex) {
+
+        Set<String> excludedFields = mappingContext.getSourceExcludedFieldNames();
+
+        // If there are no source-excluded fields, the partial source is already complete.
+        if (excludedFields.isEmpty()) {
             return existingSource;
         }
+
+        // Check if any excluded field has a dotted path whose parent might be an array in
+        // the existing source. If so, fall back to the full-parse path which can distribute
+        // subfield values across object-array elements correctly.
+        for (String fieldName : excludedFields) {
+            int dot = fieldName.indexOf('.');
+            if (dot > 0) {
+                String parent = fieldName.substring(0, dot);
+                // Quick byte-level check: look for "parent":[ in the existing source
+                byte[] probe = ("\"" + parent + "\":[").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                if (containsBytes(existingSource, probe)) {
+                    // Object-array detected — fall back to full-parse merge
+                    return mergeWithDocValues(existingSource, reader, docId, document, mappingContext, termIndex);
+                }
+            }
+        }
+
+        try {
+            // Build a small map with only the recovered excluded fields.
+            Map<String, Object> recoveredMap = new LinkedHashMap<>();
+            recoverExcludedFields(recoveredMap, excludedFields, reader, docId, document, mappingContext, termIndex);
+
+            if (recoveredMap.isEmpty()) {
+                return existingSource;
+            }
+
+            // Serialize only the recovered fields map
+            byte[] recoveredJson = OBJECT_MAPPER.writeValueAsBytes(recoveredMap);
+            // recoveredJson = {"field1":"value1","field2":"value2"}
+            // We want: existingSource[0..lastBrace-1] + "," + recoveredJson[1:]
+
+            // Find the last '}' in existingSource
+            int lastBrace = -1;
+            for (int i = existingSource.length - 1; i >= 0; i--) {
+                if (existingSource[i] == '}') {
+                    lastBrace = i;
+                    break;
+                }
+            }
+            if (lastBrace < 0) {
+                // Malformed JSON — fall back to full-parse merge
+                return mergeWithDocValues(existingSource, reader, docId, document, mappingContext, termIndex);
+            }
+
+            // Construct result: existingSource[0..lastBrace-1] + "," + recoveredJson[1:]
+            // recoveredJson[1:] strips the leading '{', keeping the closing '}'
+            int prefixLen = lastBrace;
+            int suffixLen = recoveredJson.length - 1; // skip leading '{'
+            byte[] result = new byte[prefixLen + 1 + suffixLen];
+            System.arraycopy(existingSource, 0, result, 0, prefixLen);
+            result[prefixLen] = ',';
+            System.arraycopy(recoveredJson, 1, result, prefixLen + 1, suffixLen);
+
+            return result;
+        } catch (IOException e) {
+            log.atWarn().setCause(e).setMessage("Byte-injection merge failed for document {}, falling back to full parse")
+                .addArgument(docId).log();
+            return mergeWithDocValues(existingSource, reader, docId, document, mappingContext, termIndex);
+        }
+    }
+
+    /**
+     * Recovers values for the given set of excluded field names using the same
+     * stored -> doc_values -> points/terms -> constant -> copy_to chain as
+     * {@link #populateFromSegment}, but only for the specified fields.
+     */
+    private static void recoverExcludedFields(Map<String, Object> target, Set<String> excludedFields,
+            LuceneLeafReader reader, int docId, LuceneDocument document,
+            FieldMappingContext mappingContext, SegmentTermIndex termIndex) throws IOException {
+
+        // Pass 1: Stored fields
+        for (var field : document.getFields()) {
+            String fieldName = field.name();
+            if (!excludedFields.contains(fieldName) || hasNested(target, fieldName)) {
+                continue;
+            }
+            FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
+            Object value = getStoredFieldValue(field, mappingInfo);
+            if (value != null) {
+                putNested(target, fieldName, value);
+            }
+        }
+
+        // Pass 2: Doc values
+        for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
+            String fieldName = fieldInfo.name();
+            if (!excludedFields.contains(fieldName) || hasNested(target, fieldName)) {
+                continue;
+            }
+            FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
+            if (mappingInfo != null && !mappingInfo.docValues()) {
+                continue;
+            }
+            Object value = reader.getDocValue(docId, fieldInfo);
+            if (value != null) {
+                Object converted = convertDocValue(value, fieldInfo, mappingInfo);
+                if (converted != null) {
+                    putNested(target, fieldName, converted);
+                }
+            }
+        }
+
+        // Pass 3: Points/terms fallback for excluded fields that need reconstruction
+        Set<String> fieldsNeedingReconstruction = mappingContext.getFieldsNeedingReconstruction();
+        for (String fieldName : excludedFields) {
+            if (hasNested(target, fieldName) || !fieldsNeedingReconstruction.contains(fieldName)) {
+                continue;
+            }
+            FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
+            if (mappingInfo != null) {
+                var fallbackValue = reader.getValueFromPointsOrTerms(docId, fieldName, mappingInfo.type(), termIndex);
+                if (fallbackValue.isPresent()) {
+                    Object converted = convertFallbackValue(fallbackValue.get(), mappingInfo);
+                    if (converted != null) {
+                        putNested(target, fieldName, converted);
+                    }
+                }
+            }
+        }
+
+        // Pass 4: Constant values for excluded fields
+        for (String fieldName : mappingContext.getConstantFields()) {
+            if (!excludedFields.contains(fieldName) || hasNested(target, fieldName)) {
+                continue;
+            }
+            FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
+            if (mappingInfo != null && mappingInfo.constantValue() != null) {
+                putNested(target, fieldName, mappingInfo.constantValue());
+            }
+        }
+
+        // Pass 5: Reverse-derive from copy_to targets (for excluded fields only)
+        for (String sourceField : mappingContext.getCopyToSourcesForReverseDerivation()) {
+            if (!excludedFields.contains(sourceField) || hasNested(target, sourceField)) {
+                continue;
+            }
+            List<String> rankedTargets = mappingContext.getCopyToTargets(sourceField);
+            FieldMappingInfo sourceMapping = mappingContext.getFieldInfo(sourceField);
+            for (String targetField : rankedTargets) {
+                ProbeResult recovered = probeFieldValue(reader, docId, document, targetField,
+                        mappingContext, termIndex);
+                if (recovered == null) {
+                    continue;
+                }
+                Object converted = switch (recovered) {
+                    case ProbeResult.Final f -> f.value();
+                    case ProbeResult.Raw r -> sourceMapping != null
+                            ? convertFallbackValue(r.raw(), sourceMapping)
+                            : null;
+                };
+                if (converted != null) {
+                    putNested(target, sourceField, converted);
+                    break;
+                }
+            }
+        }
+    }
+
+    /**
+     * Checks if {@code haystack} contains the byte sequence {@code needle}.
+     * Used for quick byte-level probing (e.g., detecting {@code "parent":[} in source bytes).
+     */
+    private static boolean containsBytes(byte[] haystack, byte[] needle) {
+        if (needle.length > haystack.length) {
+            return false;
+        }
+        outer:
+        for (int i = 0; i <= haystack.length - needle.length; i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) {
+                    continue outer;
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -418,11 +652,15 @@ public class SourceReconstructor {
         }
 
         // 3. Points / indexed terms fallback (recovers indexed-only numeric/boolean/keyword)
+        //    AND mapping-level constant values (constant_keyword stores its value in the mapping,
+        //    not the segment). Merged into a single pass over pre-computed field subsets to avoid
+        //    iterating all 492+ fields twice with redundant skip-checks.
         if (mappingContext != null) {
-            for (String fieldName : mappingContext.getFieldNames()) {
-                if ((shouldSkipField(fieldName, mappingContext)
-                        && !descendsIntoExistingObjectArray(target, fieldName))
-                        || hasNested(target, fieldName)) {
+            // 3a. Points/terms fallback — pre-computed set already excludes copy_to targets
+            //     and UNSUPPORTED types, so no shouldSkipField check needed. Only hasNested
+            //     guards against overwriting values already recovered in passes 1-2.
+            for (String fieldName : mappingContext.getFieldsNeedingReconstruction()) {
+                if (hasNested(target, fieldName)) {
                     continue;
                 }
                 FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
@@ -436,14 +674,10 @@ public class SourceReconstructor {
                     }
                 }
             }
-        }
 
-        // 4. Mapping-level constant values (constant_keyword stores its value in the mapping, not the segment)
-        if (mappingContext != null) {
-            for (String fieldName : mappingContext.getFieldNames()) {
-                if ((shouldSkipField(fieldName, mappingContext)
-                        && !descendsIntoExistingObjectArray(target, fieldName))
-                        || hasNested(target, fieldName)) {
+            // 3b. Constant values — only the (typically very few) constant_keyword fields.
+            for (String fieldName : mappingContext.getConstantFields()) {
+                if (hasNested(target, fieldName)) {
                     continue;
                 }
                 FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
@@ -470,21 +704,11 @@ public class SourceReconstructor {
         // with thousands of leaves, this skips the hasNested/shouldSkipField overhead on every
         // field that has nothing to reverse-derive from anyway.
         if (mappingContext != null) {
-            for (String sourceField : mappingContext.getCopyToSourceFields()) {
+            for (String sourceField : mappingContext.getCopyToSourcesForReverseDerivation()) {
                 if (hasNested(target, sourceField)) {
                     continue;
                 }
-                // Respect _source.excludes / .includes for the SOURCE field itself. If the
-                // user told ES not to store "secret" in _source, we must not resurrect it
-                // via its copy_to target. shouldSkipField covers the leading-underscore and
-                // copy_to-target cases too, so the same gate is reusable here.
-                if (shouldSkipField(sourceField, mappingContext)) {
-                    continue;
-                }
                 List<String> rankedTargets = mappingContext.getCopyToTargets(sourceField);
-                if (rankedTargets.isEmpty()) {
-                    continue;
-                }
                 FieldMappingInfo sourceMapping = mappingContext.getFieldInfo(sourceField);
                 for (String targetField : rankedTargets) {
                     ProbeResult recovered = probeFieldValue(reader, docId, document, targetField,

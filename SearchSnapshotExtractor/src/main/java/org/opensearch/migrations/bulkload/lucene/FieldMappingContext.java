@@ -53,6 +53,19 @@ public class FieldMappingContext {
     private final List<String> sourceIncludes = new ArrayList<>();
     private final List<String> sourceExcludes = new ArrayList<>();
 
+    // Pre-computed field subsets — built lazily on first access. Laziness is required because
+    // test helpers inject fields via reflection after construction; eager computation in the
+    // constructor would miss those injected entries.
+    // Narrows the per-document iteration in populateFromSegment passes 3+4.
+    /** Fields needing points/terms fallback: typed, not a copy_to target, can produce values. */
+    private volatile Set<String> fieldsNeedingReconstruction;
+    /** Fields with a non-null constantValue (constant_keyword). */
+    private volatile Set<String> constantFields;
+    /** Copy_to source fields that pass static shouldSkipField checks AND have non-empty ranked targets. */
+    private volatile Set<String> copyToSourcesForReverseDerivation;
+    /** All mapped field names excluded from _source by _source.excludes/includes filter rules (NOT copy_to targets). */
+    private volatile Set<String> sourceExcludedFieldNames;
+
     public FieldMappingContext(JsonNode mappingsNode) {
         if (mappingsNode == null) {
             log.debug("Mappings node is null, no field mappings available");
@@ -79,6 +92,84 @@ public class FieldMappingContext {
         log.debug("Parsed {} field mappings, {} copy_to edges, {} include/exclude rules",
             fieldMappings.size(), copyToBySource.size(),
             sourceIncludes.size() + sourceExcludes.size());
+    }
+
+    /**
+     * Computes the narrow field subsets used by SourceReconstructor passes 3+4 so that
+     * per-document iteration only visits fields that can actually produce values, rather than
+     * scanning all 492+ mapped fields each time. Built lazily on first access (double-checked
+     * locking on volatile) so that test helpers injecting fields via reflection after
+     * construction still see the correct sets.
+     */
+    private void ensureFieldSubsets() {
+        if (fieldsNeedingReconstruction != null) {
+            return;
+        }
+        synchronized (fieldMappings) {
+            if (fieldsNeedingReconstruction != null) {
+                return;
+            }
+            Set<String> reconstruction = new HashSet<>();
+            Set<String> constants = new HashSet<>();
+            for (Map.Entry<String, FieldMappingInfo> entry : fieldMappings.entrySet()) {
+                String fieldName = entry.getKey();
+                FieldMappingInfo info = entry.getValue();
+                // Constant fields (constant_keyword): mapping-level value, no segment IO needed.
+                if (info.constantValue() != null) {
+                    constants.add(fieldName);
+                }
+                // Fields needing points/terms fallback: fields that are NOT already
+                // present in the partial _source and CAN be recovered from the index.
+                // - copy_to targets: never in _source, but handled by pass 5
+                // - _source.excludes fields: need recovery from points/terms/sidecar
+                // - Fields with index:false + doc_values:false: rely on pass 5
+                //
+                // For the merge path (partial _source), non-excluded fields are already
+                // in the parsed JSON and will be caught by hasNested. Including them adds
+                // a cheap hasNested check per doc but avoids missing edge cases where
+                // the field was not in a particular document's _source.
+                if (info.type() == null || info.type() == EsFieldType.UNSUPPORTED) {
+                    continue;
+                }
+                if (isCopyToTarget(fieldName)) {
+                    continue;
+                }
+                if (!info.canProduceValue()) {
+                    continue;
+                }
+                reconstruction.add(fieldName);
+            }
+            this.constantFields = Collections.unmodifiableSet(constants);
+            this.fieldsNeedingReconstruction = Collections.unmodifiableSet(reconstruction);
+
+            // Pre-filter copy_to sources: only those with non-empty ranked targets
+            // (after text-target pruning) and not internal fields. We do NOT filter by
+            // isSourceExcluded because the goal of sourceless migration is to reconstruct
+            // the original document fully — _source.excludes was a storage optimization
+            // on the source, not a reason to skip recovery on the target.
+            Set<String> validCopyToSources = new HashSet<>();
+            for (String sourceField : copyToBySource.keySet()) {
+                if (sourceField.startsWith("_")) continue;
+                List<String> targets = getCopyToTargets(sourceField);
+                if (!targets.isEmpty()) {
+                    validCopyToSources.add(sourceField);
+                }
+            }
+            this.copyToSourcesForReverseDerivation = Collections.unmodifiableSet(validCopyToSources);
+
+            // Pre-compute the set of mapped field names excluded from _source by the
+            // _source.includes/_source.excludes filter rules (NOT copy_to targets).
+            Set<String> excluded = new HashSet<>();
+            for (String fieldName : fieldMappings.keySet()) {
+                if (isCopyToTarget(fieldName)) {
+                    continue;
+                }
+                if (isSourceExcludedByFilter(fieldName)) {
+                    excluded.add(fieldName);
+                }
+            }
+            this.sourceExcludedFieldNames = Collections.unmodifiableSet(excluded);
+        }
     }
 
     private JsonNode extractMappingContainer(JsonNode mappingsNode) {
@@ -220,6 +311,46 @@ public class FieldMappingContext {
      */
     public java.util.Set<String> getFieldNames() {
         return fieldMappings.keySet();
+    }
+
+    /**
+     * Returns only the fields that need the points/terms fallback pass in
+     * {@code SourceReconstructor.populateFromSegment}: fields with a real non-STRING type
+     * that are not source-excluded or copy_to targets. Computed lazily on first access.
+     */
+    public Set<String> getFieldsNeedingReconstruction() {
+        ensureFieldSubsets();
+        return fieldsNeedingReconstruction;
+    }
+
+    /**
+     * Returns only the fields with a non-null {@code constantValue()} (constant_keyword fields).
+     * Typically very few per mapping. Computed lazily on first access.
+     */
+    public Set<String> getConstantFields() {
+        ensureFieldSubsets();
+        return constantFields;
+    }
+
+    /**
+     * Returns all mapped field names that are excluded from {@code _source} by the
+     * {@code _source.includes}/{@code _source.excludes} filter rules. Does NOT include
+     * copy_to targets (those are excluded for a different reason). Used by the byte-injection
+     * optimization to know exactly which fields need recovery without parsing the full JSON.
+     */
+    public Set<String> getSourceExcludedFieldNames() {
+        ensureFieldSubsets();
+        return sourceExcludedFieldNames;
+    }
+
+    /**
+     * Returns copy_to source fields pre-filtered by static checks (not underscore-prefixed,
+     * not source-excluded, have non-empty ranked targets after text-target pruning).
+     * Eliminates per-document shouldSkipField + getCopyToTargets overhead in pass 5.
+     */
+    public Set<String> getCopyToSourcesForReverseDerivation() {
+        ensureFieldSubsets();
+        return copyToSourcesForReverseDerivation;
     }
 
     /**
