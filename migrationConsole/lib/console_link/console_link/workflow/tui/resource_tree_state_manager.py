@@ -13,6 +13,7 @@ from console_link.workflow.tree_utils import (
     get_step_rich_label,
     build_nested_workflow_tree, filter_tree_nodes,
 )
+from console_link.workflow.commands.status import LiveCheckProcessor, ConfigConverter
 
 
 class ResourceTreeStateManager:
@@ -88,7 +89,9 @@ class ResourceTreeStateManager:
         sections = build_resource_tree(self._namespace)
 
         if workflow_data and workflow_data.get('status', {}).get('nodes'):
-            filtered_tree = filter_tree_nodes(build_nested_workflow_tree(workflow_data))
+            tree_nodes = build_nested_workflow_tree(workflow_data)
+            LiveCheckProcessor(ConfigConverter()).enrich_tree_with_live_checks(tree_nodes)
+            filtered_tree = filter_tree_nodes(tree_nodes)
             steps = extract_workflow_steps_by_resource(filtered_tree)
             for section in sections:
                 for group in section.groups:
@@ -161,5 +164,10 @@ class ResourceTreeStateManager:
         """Add a workflow step node (carries Argo dict for interactions)."""
         label = get_step_rich_label(step, status_output=None, show_approval_name=False)
         node = parent.add(label, data=step)
+        live_check = step.get('live_check')
+        if live_check and live_check.get('success') and 'value' in live_check:
+            for line in live_check['value'].replace('\\n', '\n').strip().split('\n'):
+                if line.strip():
+                    node.add(f"[cyan]{line.strip()}[/cyan]", data=None)
         for child in step.get('children', []):
             self._add_workflow_step(node, child)
