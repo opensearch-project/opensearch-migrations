@@ -147,6 +147,7 @@ kubectl delete approvalgates.migrations.opensearch.org \\
         .addRequiredInput("configChecksum", typeToken<string>())
         .addOptionalInput("groupName_view", c => "Kafka Cluster")
         .addOptionalInput("sortOrder_view", c => 999)
+        .addOptionalInput("resourceName", c => "")
 
         .addSteps(b => {
             return b
@@ -195,6 +196,7 @@ kubectl delete approvalgates.migrations.opensearch.org \\
         .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
         .addOptionalInput("groupName_view", c => "Proxy")
         .addOptionalInput("sortOrder_view", c => 999)
+        .addOptionalInput("resourceName", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "CaptureProxy"]))
 
         .addSteps(b => b
@@ -560,6 +562,7 @@ kubectl delete approvalgates.migrations.opensearch.org \\
         .addRequiredInput("dependsOn", typeToken<string[]>())
         .addOptionalInput("groupName_view", c => "Traffic Replay")
         .addOptionalInput("sortOrder_view", c => 999)
+        .addOptionalInput("resourceName", c => "")
         .addRequiredInput("dependsOnSnapshotMigrations", typeToken<z.infer<typeof ENRICHED_SNAPSHOT_MIGRATION_FILTER>[]>())
 
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "TrafficReplayer"]))
@@ -697,6 +700,7 @@ kubectl delete approvalgates.migrations.opensearch.org \\
                     version: expr.get(c.item, "version"),
                     resourceUid: expr.get(c.item, "resourceUid"),
                     configChecksum: expr.dig(c.item, ["configChecksum"], ""),
+                    resourceName: expr.get(c.item, "name"),
                     groupName_view: expr.get(c.item, "name"),
                     sortOrder_view: expr.literal(1),
                 }), {
@@ -768,6 +772,7 @@ kubectl delete approvalgates.migrations.opensearch.org \\
                         expr.makeDict({})
                     )),
                     groupName_view: expr.get(c.item, "name"),
+                    resourceName: expr.get(c.item, "name"),
                     sortOrder_view: expr.literal(2),
                 }), {
                     loopWith: makeParameterLoop(
@@ -829,6 +834,7 @@ kubectl delete approvalgates.migrations.opensearch.org \\
                         ...selectInputsFieldsAsExpressionRecord(c.item, c, getZodKeys(DENORMALIZED_REPLAY_CONFIG)),
                         targetConfig: expr.get(c.item, "toTarget"),
                         replayerOptions: expr.get(c.item, "replayerConfig"),
+                        resourceName: expr.get(c.item, "name"),
                         groupName_view: expr.concat(
                             expr.get(c.item, "fromProxy"),
                             expr.literal(" → "),

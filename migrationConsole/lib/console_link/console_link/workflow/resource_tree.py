@@ -36,7 +36,11 @@ PHASE_SYMBOLS = {
     'Unknown': ('?', 'white'),
 }
 
-# Key spec fields to display per resource type
+# Key spec fields to display per resource type.
+# TODO: Derive these from the generated JSON schema instead of hardcoding here.
+# The Zod schemas in orchestrationSpecs/packages/schemas/src/userSchemas.ts already emit
+# x-change-restriction via getSchemaFromZod.ts; a similar x-user-visible annotation could
+# be added, then this code would filter the JSON schema (at runtime or build time).
 SPEC_DISPLAY_FIELDS = {
     'kafkaclusters': ['version', 'auth.type', 'nodePool.replicas'],
     'capturedtraffics': ['topicName', 'partitions', 'replicas'],
@@ -146,20 +150,11 @@ def extract_workflow_steps_by_resource(workflow_data: Dict[str, Any]) -> Dict[st
 
 
 def _extract_steps_recursive(node: Dict[str, Any], result: Dict[str, Dict[str, Any]]) -> None:
-    """Walk the tree and extract steps for the innermost resource-tagged nodes."""
+    """Walk the tree and extract steps for nodes with resourceName."""
     cr_name = _resolve_cr_name(node)
     if cr_name:
-        has_explicit_name = (
-            get_node_input_parameter(node, 'resourceName') or
-            get_node_input_parameter(node, 'name')
-        )
-        has_inner_tagged = any(
-            child.get('group_name') for child in node.get('children', [])
-        )
-        # Extract step if this is the authoritative node for the CR
-        if has_explicit_name or not has_inner_tagged:
-            result[cr_name] = _step_for_node(node)
-            return
+        result[cr_name] = _step_for_node(node)
+        return
 
     for child in node.get('children', []):
         _extract_steps_recursive(child, result)
@@ -174,16 +169,10 @@ def _step_for_node(node: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _resolve_cr_name(node: Dict[str, Any]) -> Optional[str]:
-    """Resolve the CR name from a node with groupName_view."""
+    """Resolve the CR name from a resource-level node's resourceName input parameter."""
     if not node.get('group_name'):
         return None
-    resource_name = get_node_input_parameter(node, 'resourceName')
-    if resource_name:
-        return resource_name
-    name = get_node_input_parameter(node, 'name')
-    if name:
-        return name
-    return node['group_name']
+    return get_node_input_parameter(node, 'resourceName')
 
 
 def _find_active_step(children: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
