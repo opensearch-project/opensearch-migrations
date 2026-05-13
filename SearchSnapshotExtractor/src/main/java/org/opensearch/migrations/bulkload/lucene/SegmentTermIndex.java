@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -30,7 +30,13 @@ import shadow.lucene10.org.apache.lucene.util.IOUtils;
  *       on (docId, position, termId), and encoded into a compact varint sidecar
  *       with a flat long[maxDoc] doc index. The reader mmaps the sidecar and
  *       serves {@code get(docId)} with zero heap allocation beyond the returned
- *       ArrayList. Heap footprint is bounded regardless of segment size.</li>
+ *       ArrayList. Heap footprint is bounded regardless of segment size.
+ *
+ *       <p>This map is an access-order LRU when
+ *       {@link SourcelessSpillConfig#MAX_OPEN_FIELD_SIDECARS_PROP} is set.
+ *       Eviction closes (and unlinks) the evicted sidecar; if the field is
+ *       re-requested, it is rebuilt from postings. Default behavior is
+ *       unbounded, so existing callers see no behavior change.</li>
  *
  *   <li><b>numericByField</b>: fieldName -&gt; docId -&gt; decoded Long.
  *       Used to reconstruct trie-encoded numeric fields
@@ -51,22 +57,25 @@ import shadow.lucene10.org.apache.lucene.util.IOUtils;
  * via {@code synchronized} to protect against the per-document concurrent reads
  * within a segment's Flux (see {@link LuceneReader#SEGMENT_READ_CONCURRENCY}).
  * Once a field's {@link SidecarReader} has been built, its {@link SidecarReader#get(int)}
- * is lock-free and safe for concurrent readers — the {@code synchronized} is
- * only needed to protect the build.
+ * is only called while the synchronized lock is held by the calling thread, so
+ * an LRU eviction on another thread's miss cannot race a live read.
  */
 @Slf4j
 public class SegmentTermIndex implements AutoCloseable {
 
     private final Path spillRoot;
     private final long sortBufferBytes;
-    private final Map<String, SidecarReader> byField = new HashMap<>();
-    private final Map<String, Map<Integer, Long>> numericByField = new HashMap<>();
+    private final int maxOpenFieldSidecars;
+    /** Access-order LRU of per-field sidecars. Eviction closes the evicted reader. */
+    private final LinkedHashMap<String, SidecarReader> byField;
+    private final Map<String, Map<Integer, Long>> numericByField = new java.util.HashMap<>();
+    private long evictionCount;
     private volatile boolean closed;
 
     /**
-     * Creates an index scoped to {@code spillRoot} for on-disk term spill files.
-     * The directory is created lazily on first field build; callers can pass a
-     * path that does not yet exist.
+     * Creates an index scoped to {@code spillRoot} for on-disk term spill files,
+     * using the JVM-level cap {@link SourcelessSpillConfig#maxOpenFieldSidecars()}
+     * for the per-field sidecar LRU.
      *
      * @param spillRoot per-segment directory owned by this index. Deleted on {@link #close()}.
      * @param sortBufferBytes in-memory sort buffer budget for the external merge sort
@@ -75,8 +84,42 @@ public class SegmentTermIndex implements AutoCloseable {
      *                        int-sized scratch buffer.
      */
     public SegmentTermIndex(Path spillRoot, long sortBufferBytes) {
+        this(spillRoot, sortBufferBytes, SourcelessSpillConfig.maxOpenFieldSidecars());
+    }
+
+    /**
+     * Test-friendly constructor that accepts an explicit per-field LRU cap. Production
+     * callers should use the two-argument form, which reads the cap from the JVM property.
+     */
+    public SegmentTermIndex(Path spillRoot, long sortBufferBytes, int maxOpenFieldSidecars) {
         this.spillRoot = spillRoot;
         this.sortBufferBytes = Math.min(sortBufferBytes, Integer.MAX_VALUE);
+        this.maxOpenFieldSidecars =
+                Math.max(SourcelessSpillConfig.MIN_MAX_OPEN_FIELD_SIDECARS, maxOpenFieldSidecars);
+        // initialCapacity, loadFactor=0.75, accessOrder=true so get() updates the LRU position.
+        // removeEldestEntry trips after a successful put when size exceeds the cap.
+        this.byField = new LinkedHashMap<String, SidecarReader>(16, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, SidecarReader> eldest) {
+                if (size() <= SegmentTermIndex.this.maxOpenFieldSidecars) {
+                    return false;
+                }
+                try {
+                    eldest.getValue().close();
+                } catch (Exception ex) {
+                    log.warn("Failed to close evicted sidecar for field {}: {}", eldest.getKey(), ex.toString());
+                }
+                evictionCount++;
+                if (log.isDebugEnabled()) {
+                    log.debug(
+                            "Evicted field sidecar {} from segment cache (cap={}, total evictions={})",
+                            eldest.getKey(),
+                            SegmentTermIndex.this.maxOpenFieldSidecars,
+                            evictionCount);
+                }
+                return true;
+            }
+        };
     }
 
     /**
@@ -107,17 +150,14 @@ public class SegmentTermIndex implements AutoCloseable {
         if (closed) {
             throw new IOException("SegmentTermIndex has been closed");
         }
-        try {
-            return byField.computeIfAbsent(fieldName, k -> {
-                try {
-                    return buildFieldIndex(reader, fieldName);
-                } catch (IOException e) {
-                    throw new java.io.UncheckedIOException(e);
-                }
-            }).get(docId);
-        } catch (java.io.UncheckedIOException e) {
-            throw e.getCause();
+        // Explicit get-then-put (rather than computeIfAbsent) so each call counts as an access
+        // event for the LRU and so that build failures don't leave a sentinel under the key.
+        SidecarReader cached = byField.get(fieldName);
+        if (cached == null) {
+            cached = buildFieldIndex(reader, fieldName);
+            byField.put(fieldName, cached);
         }
+        return cached.get(docId);
     }
 
     /**
@@ -140,6 +180,16 @@ public class SegmentTermIndex implements AutoCloseable {
             numericByField.put(fieldName, forField);
         }
         return forField.get(docId);
+    }
+
+    /** Test hook: number of LRU evictions observed since construction. */
+    synchronized long evictionCount() {
+        return evictionCount;
+    }
+
+    /** Test hook: current resident sidecar count. */
+    synchronized int residentFieldCount() {
+        return byField.size();
     }
 
     /**
@@ -179,8 +229,11 @@ public class SegmentTermIndex implements AutoCloseable {
                 sb.append('_');
             }
         }
-        // append the insertion order so two sanitized-equal names don't collide
-        sb.append('-').append(byField.size());
+        // append the insertion order so two sanitized-equal names don't collide.
+        // Eviction in the LRU does not shrink this counter, which is intentional:
+        // a re-built field after eviction needs a fresh spill subdir to avoid
+        // colliding with the freed-but-not-yet-deleted prior tree.
+        sb.append('-').append(byField.size() + (int) Math.min(evictionCount, Integer.MAX_VALUE));
         return sb.toString();
     }
 

@@ -23,15 +23,33 @@ import lombok.extern.slf4j.Slf4j;
  *   <dd>In-memory sort buffer budget per field build. Default: 256 MiB.
  *       Smaller buffer = more runs = more merge passes = more disk I/O, but bounded heap.
  *       Tune down via {@code -Drfs.reconstruction.sortBufferBytes} on smaller workers.</dd>
+ *
+ *   <dt>{@code rfs.reconstruction.maxOpenFieldSidecars}</dt>
+ *   <dd>Maximum number of per-field {@link org.opensearch.migrations.bulkload.lucene.sidecar.SidecarReader}
+ *       instances kept open in {@link SegmentTermIndex#byField} at one time. Sidecar readers hold
+ *       an mmap of the per-field doc index plus an open file handle on the encoded sidecar; on
+ *       segments with hundreds of analyzed-text fields the cumulative file-descriptor and
+ *       virtual-address-space pressure can exhaust worker limits before any one field is large
+ *       enough to trip the spill-byte budget. When this cap is set, the cache uses an
+ *       access-order LRU and closes (and unlinks) evicted sidecars; if a previously evicted
+ *       field is re-requested it is rebuilt from postings. Default: {@link Integer#MAX_VALUE}
+ *       (unbounded, opt-in for safety — the existing default behavior).</dd>
  * </dl>
  */
 @Slf4j
 public final class SourcelessSpillConfig {
 
     public static final String SORT_BUFFER_BYTES_PROP = "rfs.reconstruction.sortBufferBytes";
+    public static final String MAX_OPEN_FIELD_SIDECARS_PROP = "rfs.reconstruction.maxOpenFieldSidecars";
 
     /** 256 MiB sort buffer — tuned for production 4+ GiB heaps. */
     public static final long DEFAULT_SORT_BUFFER_BYTES = 256L * 1024 * 1024;
+
+    /** Unbounded by default — opt-in to LRU eviction by setting the {@code -D} flag. */
+    public static final int DEFAULT_MAX_OPEN_FIELD_SIDECARS = Integer.MAX_VALUE;
+
+    /** Floor on the LRU cap — below 2 the LRU thrashes and never holds the working set. */
+    public static final int MIN_MAX_OPEN_FIELD_SIDECARS = 2;
 
     /** Sub-directory of the shard's Lucene dir where per-segment spill trees live. */
     static final String SPILL_SUBDIR = ".rfs-spill";
@@ -64,6 +82,27 @@ public final class SourcelessSpillConfig {
         } catch (NumberFormatException e) {
             log.warn("Invalid {}={}, using default {}", SORT_BUFFER_BYTES_PROP, override, DEFAULT_SORT_BUFFER_BYTES);
             return DEFAULT_SORT_BUFFER_BYTES;
+        }
+    }
+
+    /**
+     * Returns the configured cap on simultaneously-open per-field sidecar readers, or
+     * {@link #DEFAULT_MAX_OPEN_FIELD_SIDECARS} if unset. Values below
+     * {@link #MIN_MAX_OPEN_FIELD_SIDECARS} are clamped up so the LRU does not thrash.
+     */
+    public static int maxOpenFieldSidecars() {
+        String override = System.getProperty(MAX_OPEN_FIELD_SIDECARS_PROP);
+        if (override == null || override.isBlank()) return DEFAULT_MAX_OPEN_FIELD_SIDECARS;
+        try {
+            int n = Integer.parseInt(override.trim());
+            return Math.max(MIN_MAX_OPEN_FIELD_SIDECARS, n);
+        } catch (NumberFormatException e) {
+            log.warn(
+                    "Invalid {}={}, using default {}",
+                    MAX_OPEN_FIELD_SIDECARS_PROP,
+                    override,
+                    DEFAULT_MAX_OPEN_FIELD_SIDECARS);
+            return DEFAULT_MAX_OPEN_FIELD_SIDECARS;
         }
     }
 }
