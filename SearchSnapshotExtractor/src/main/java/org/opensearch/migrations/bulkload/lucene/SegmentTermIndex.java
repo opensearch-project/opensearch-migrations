@@ -14,7 +14,6 @@ import org.opensearch.migrations.bulkload.lucene.sidecar.TermEntry;
 
 import lombok.extern.slf4j.Slf4j;
 import shadow.lucene10.org.apache.lucene.util.IOUtils;
-
 /**
  * Per-segment cache of per-field term indexes.
  *
@@ -60,8 +59,19 @@ public class SegmentTermIndex implements AutoCloseable {
     private final Path spillRoot;
     private final long sortBufferBytes;
     private final Map<String, SidecarReader> byField = new HashMap<>();
+    private final Map<String, StreamingFieldPostings> streamingByField = new HashMap<>();
+    private final Map<String, Boolean> streamingDisabledForField = new HashMap<>();
     private final Map<String, Map<Integer, Long>> numericByField = new HashMap<>();
     private volatile boolean closed;
+
+    /**
+     * Toggle the streaming-postings path. When {@code true}, tier-3 text recovery walks
+     * the field's posting lists in a single pass via a min-heap of PostingsEnum cursors,
+     * skipping the OfflineSorter-backed sidecar build entirely. Defaults to enabled —
+     * set the system property to {@code false} to fall back to the sidecar build.
+     */
+    private static final boolean STREAMING_PATH_ENABLED =
+            !"false".equalsIgnoreCase(System.getProperty("rfs.sourceless.streamingPostings", "true"));
 
     /**
      * Creates an index scoped to {@code spillRoot} for on-disk term spill files.
@@ -106,6 +116,31 @@ public class SegmentTermIndex implements AutoCloseable {
             LuceneLeafReader reader, int docId, String fieldName) throws IOException {
         if (closed) {
             throw new IOException("SegmentTermIndex has been closed");
+        }
+        // Streaming path: forward-only cursor, no spill, no sort. Cached per field.
+        // Falls back to the sidecar build if the reader doesn't support streaming, or if
+        // a previous advance call detected a non-monotonic docId for this field.
+        if (STREAMING_PATH_ENABLED && !Boolean.TRUE.equals(streamingDisabledForField.get(fieldName))) {
+            StreamingFieldPostings cursor = streamingByField.get(fieldName);
+            if (cursor == null && !streamingByField.containsKey(fieldName)) {
+                cursor = reader.openStreamingFieldPostings(fieldName);
+                streamingByField.put(fieldName, cursor); // may be null, which we cache
+            }
+            if (cursor != null) {
+                try {
+                    return cursor.advance(docId);
+                } catch (IllegalStateException nonMonotonic) {
+                    // Caller broke the strict-ascending contract for this field — drop
+                    // streaming for it and fall back to the sidecar build for any
+                    // subsequent calls. This is defensive; the v10 caller is monotonic.
+                    log.atDebug().setCause(nonMonotonic)
+                            .addArgument(fieldName)
+                            .log("Streaming postings disabled for field {} after non-monotonic advance");
+                    streamingDisabledForField.put(fieldName, Boolean.TRUE);
+                    streamingByField.remove(fieldName).close();
+                    // fall through to sidecar build
+                }
+            }
         }
         try {
             return byField.computeIfAbsent(fieldName, k -> {
@@ -201,6 +236,17 @@ public class SegmentTermIndex implements AutoCloseable {
             }
         }
         byField.clear();
+        for (Map.Entry<String, StreamingFieldPostings> e : streamingByField.entrySet()) {
+            StreamingFieldPostings cursor = e.getValue();
+            if (cursor == null) continue;
+            try {
+                cursor.close();
+            } catch (Exception ex) {
+                log.warn("Failed to close streaming postings for field {}: {}", e.getKey(), ex.toString());
+            }
+        }
+        streamingByField.clear();
+        streamingDisabledForField.clear();
         numericByField.clear();
         try {
             IOUtils.rm(spillRoot);
