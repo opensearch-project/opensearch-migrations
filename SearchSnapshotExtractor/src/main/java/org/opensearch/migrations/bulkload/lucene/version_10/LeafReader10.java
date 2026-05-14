@@ -4,7 +4,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
@@ -37,6 +39,11 @@ public class LeafReader10 implements LuceneLeafReader {
     private final LeafReader wrapped;
     @Getter
     private final BitSetConverter.FixedLengthBitSet liveDocs;
+
+    private Map<String, NumericDocValues> cachedNumericDv;
+    private Map<String, BinaryDocValues> cachedBinaryDv;
+    private Map<String, SortedSetDocValues> cachedSortedSetDv;
+    private Map<String, SortedNumericDocValues> cachedSortedNumericDv;
 
     public LeafReader10(LeafReader wrapped) {
         this.wrapped = wrapped;
@@ -150,8 +157,40 @@ public class LeafReader10 implements LuceneLeafReader {
     }
 
     @Override
+    public void initDocValueIterators(Iterable<DocValueFieldInfo> fields) throws IOException {
+        cachedNumericDv = new HashMap<>();
+        cachedBinaryDv = new HashMap<>();
+        cachedSortedSetDv = new HashMap<>();
+        cachedSortedNumericDv = new HashMap<>();
+        for (DocValueFieldInfo fi : fields) {
+            String name = fi.name();
+            switch (fi.docValueType()) {
+                case NUMERIC -> {
+                    NumericDocValues dv = wrapped.getNumericDocValues(name);
+                    if (dv != null) cachedNumericDv.put(name, dv);
+                }
+                case BINARY -> {
+                    BinaryDocValues dv = wrapped.getBinaryDocValues(name);
+                    if (dv != null) cachedBinaryDv.put(name, dv);
+                }
+                case SORTED_SET -> {
+                    SortedSetDocValues dv = wrapped.getSortedSetDocValues(name);
+                    if (dv != null) cachedSortedSetDv.put(name, dv);
+                }
+                case SORTED_NUMERIC -> {
+                    SortedNumericDocValues dv = wrapped.getSortedNumericDocValues(name);
+                    if (dv != null) cachedSortedNumericDv.put(name, dv);
+                }
+                default -> {}
+            }
+        }
+    }
+
+    @Override
     public Object getNumericValue(int docId, String fieldName) throws IOException {
-        NumericDocValues dv = wrapped.getNumericDocValues(fieldName);
+        NumericDocValues dv = (cachedNumericDv != null)
+            ? cachedNumericDv.get(fieldName)
+            : wrapped.getNumericDocValues(fieldName);
         if (dv != null && dv.advanceExact(docId)) {
             return dv.longValue();
         }
@@ -160,11 +199,12 @@ public class LeafReader10 implements LuceneLeafReader {
 
     @Override
     public Object getBinaryValue(int docId, String fieldName) throws IOException {
-        BinaryDocValues dv = wrapped.getBinaryDocValues(fieldName);
+        BinaryDocValues dv = (cachedBinaryDv != null)
+            ? cachedBinaryDv.get(fieldName)
+            : wrapped.getBinaryDocValues(fieldName);
         if (dv != null && dv.advanceExact(docId)) {
             BytesRef value = dv.binaryValue();
             if (value != null && value.length > 0) {
-                // Binary doc values use VInt encoding: count + (len + bytes)*
                 ByteArrayDataInput in = new ByteArrayDataInput(value.bytes, value.offset, value.length);
                 int count = in.readVInt();
                 if (count > 0) {
@@ -180,10 +220,11 @@ public class LeafReader10 implements LuceneLeafReader {
 
     @Override
     public Object getSortedSetValues(int docId, String fieldName) throws IOException {
-        SortedSetDocValues dv = wrapped.getSortedSetDocValues(fieldName);
+        SortedSetDocValues dv = (cachedSortedSetDv != null)
+            ? cachedSortedSetDv.get(fieldName)
+            : wrapped.getSortedSetDocValues(fieldName);
         if (dv != null && dv.advanceExact(docId)) {
             List<String> values = new ArrayList<>();
-            // Lucene 10: NO_MORE_ORDS removed; iterate docValueCount() times.
             int ordCount = dv.docValueCount();
             for (int i = 0; i < ordCount; i++) {
                 long ord = dv.nextOrd();
@@ -199,7 +240,9 @@ public class LeafReader10 implements LuceneLeafReader {
 
     @Override
     public Object getSortedNumericValues(int docId, String fieldName) throws IOException {
-        SortedNumericDocValues dv = wrapped.getSortedNumericDocValues(fieldName);
+        SortedNumericDocValues dv = (cachedSortedNumericDv != null)
+            ? cachedSortedNumericDv.get(fieldName)
+            : wrapped.getSortedNumericDocValues(fieldName);
         if (dv != null && dv.advanceExact(docId)) {
             int count = dv.docValueCount();
             if (count == 1) {

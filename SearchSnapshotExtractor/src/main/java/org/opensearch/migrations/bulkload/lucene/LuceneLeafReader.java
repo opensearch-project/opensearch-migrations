@@ -46,6 +46,14 @@ public interface LuceneLeafReader {
         };
     }
 
+    /**
+     * Eagerly opens and caches DocValues iterators for the given fields.
+     * Subsequent calls to getDocValue/getNumericValue/etc. will use the cached
+     * iterators instead of re-acquiring them from the underlying LeafReader.
+     * Requires that documents are processed in strictly ascending docId order.
+     */
+    default void initDocValueIterators(Iterable<DocValueFieldInfo> fields) throws IOException {}
+
     default Object getNumericValue(int docId, String fieldName) throws IOException { return null; }
     default Object getSortedValue(int docId, String fieldName) throws IOException { return null; }
     default Object getSortedSetValues(int docId, String fieldName) throws IOException { return null; }
