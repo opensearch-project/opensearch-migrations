@@ -94,6 +94,23 @@ public interface LuceneLeafReader {
     void streamFieldPostings(String fieldName, PostingsSink sink) throws IOException;
 
     /**
+     * Opens a forward-only streaming cursor over the (segment, field) postings, or
+     * {@code null} if this reader version does not support streaming reconstruction.
+     *
+     * <p>When non-null, callers prefer this over {@link #streamFieldPostings} for
+     * per-doc tier-3 text recovery: the streaming cursor avoids building a per-field
+     * sidecar (no spill, no external sort). When null, callers must fall back to the
+     * sidecar-build path.
+     *
+     * <p>The returned cursor caches one PostingsEnum per term and one decoded term
+     * string per term — implementations should bound memory by the field's term count
+     * (not its posting count). Callers own the lifecycle and must close.
+     */
+    default StreamingFieldPostings openStreamingFieldPostings(String fieldName) throws IOException {
+        return null;
+    }
+
+    /**
      * Version-specific hook: walk the terms dictionary for a trie-encoded numeric field (ES 1.x /
      * Lucene 4-5: long, int, double, float, date, ip) and return a docId -> decoded Long map.
      *
