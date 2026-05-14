@@ -131,6 +131,21 @@ public interface LuceneLeafReader {
     }
 
     /**
+     * Builds a {@code docId -> term-string} map for a STRING field by walking the
+     * terms dictionary once. For keyword / not-analyzed fields each docId has exactly
+     * one term, so this map is the inverted-index inverse; it makes per-doc single-term
+     * recovery O(1) instead of O(numTerms) per doc.
+     *
+     * <p>Default implementation returns an empty map — concrete readers should override
+     * to walk their version-specific TermsEnum / PostingsEnum and populate the map.
+     *
+     * <p>Called at most once per (segment, field) via {@link SegmentTermIndex}.
+     */
+    default Map<Integer, String> buildSingleTermIndex(String fieldName) throws IOException {
+        return Collections.emptyMap();
+    }
+
+    /**
      * Fallback recovery: tries Points (for numerics/IP/date), terms (for boolean),
      * or full term collection (for analyzed strings without stored fields).
      * Used when doc_values and stored fields are not available.
@@ -167,7 +182,12 @@ public interface LuceneLeafReader {
                         // Field indexed without positions; fall through to single-term path.
                     }
                 }
-                String singleTerm = getValueFromTerms(docId, fieldName);
+                String singleTerm;
+                if (termIndex != null) {
+                    singleTerm = termIndex.getSingleTermForDocument(this, docId, fieldName);
+                } else {
+                    singleTerm = getValueFromTerms(docId, fieldName);
+                }
                 yield singleTerm != null
                         ? Optional.of(new RecoveredValue.TextTerm(singleTerm))
                         : Optional.empty();

@@ -62,6 +62,7 @@ public class SegmentTermIndex implements AutoCloseable {
     private final Map<String, StreamingFieldPostings> streamingByField = new HashMap<>();
     private final Map<String, Boolean> streamingDisabledForField = new HashMap<>();
     private final Map<String, Map<Integer, Long>> numericByField = new HashMap<>();
+    private final Map<String, Map<Integer, String>> singleTermByField = new HashMap<>();
     private volatile boolean closed;
 
     /**
@@ -178,6 +179,28 @@ public class SegmentTermIndex implements AutoCloseable {
     }
 
     /**
+     * Returns the single decoded term string for {@code docId} in {@code fieldName},
+     * building the per-field {@code docId -> term} map on first access. Returns null
+     * if the field has no terms or the doc was not indexed with a value for the field.
+     *
+     * <p>This avoids the O(numTerms) per-doc linear scan in
+     * {@link LuceneLeafReader#getValueFromTerms(int, String)} for keyword / not-analyzed
+     * fields, which is the dominant cost when many docs need the same field reconstructed.
+     */
+    public synchronized String getSingleTermForDocument(LuceneLeafReader reader, int docId, String fieldName)
+            throws IOException {
+        if (closed) {
+            throw new IOException("SegmentTermIndex has been closed");
+        }
+        Map<Integer, String> forField = singleTermByField.get(fieldName);
+        if (forField == null) {
+            forField = reader.buildSingleTermIndex(fieldName);
+            singleTermByField.put(fieldName, forField);
+        }
+        return forField.get(docId);
+    }
+
+    /**
      * Builds the sidecar for {@code fieldName} by streaming the terms dict once into a
      * {@link SidecarBuilder}.
      *
@@ -248,6 +271,7 @@ public class SegmentTermIndex implements AutoCloseable {
         streamingByField.clear();
         streamingDisabledForField.clear();
         numericByField.clear();
+        singleTermByField.clear();
         try {
             IOUtils.rm(spillRoot);
         } catch (IOException e) {
