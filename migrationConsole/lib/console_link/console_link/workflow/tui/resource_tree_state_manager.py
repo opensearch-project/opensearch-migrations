@@ -69,20 +69,20 @@ class ResourceTreeStateManager:
 
     def _restore_collapsed(self, collapsed_ids: set) -> None:
         """Restore collapsed state by ID, expanding everything else."""
+        for child in self._all_tree_nodes():
+            node_id = child.data.get('id') if isinstance(child.data, dict) else None
+            if node_id and node_id in collapsed_ids:
+                child.collapse()
+            else:
+                child.expand()
 
-        def walk(node):
-            for child in node.children:
-                if child.data:
-                    node_id = child.data.get('id') if isinstance(child.data, dict) else None
-                    if node_id and node_id in collapsed_ids:
-                        child.collapse()
-                    else:
-                        child.expand()
-                else:
-                    child.expand()
-                walk(child)
-
-        walk(self.tree.root)
+    def _all_tree_nodes(self):
+        """Yield all tree nodes depth-first."""
+        stack = list(self.tree.root.children)
+        while stack:
+            node = stack.pop()
+            yield node
+            stack.extend(node.children)
 
     def _build_sections(self, workflow_data: Dict) -> List[ResourceSection]:
         """Build the resource sections with workflow steps merged."""
@@ -93,17 +93,22 @@ class ResourceTreeStateManager:
             LiveCheckProcessor(ConfigConverter()).enrich_tree_with_live_checks(tree_nodes)
             filtered_tree = filter_tree_nodes(tree_nodes)
             steps = extract_workflow_steps_by_resource(filtered_tree)
-            for section in sections:
-                for group in section.groups:
-                    for resource in group.resources:
-                        if resource.name in steps:
-                            resource.workflow_progress = steps[resource.name]
-                        for child in resource.children:
-                            if child.name in steps:
-                                child.workflow_progress = steps[child.name]
+            self._assign_workflow_progress(sections, steps)
             mark_not_configured_groups(sections, filtered_tree)
 
         return sections
+
+    @staticmethod
+    def _assign_workflow_progress(sections: List[ResourceSection], steps: Dict) -> None:
+        """Attach workflow step data to matching resource nodes."""
+        for section in sections:
+            for group in section.groups:
+                for resource in group.resources:
+                    if resource.name in steps:
+                        resource.workflow_progress = steps[resource.name]
+                    for child in resource.children:
+                        if child.name in steps:
+                            child.workflow_progress = steps[child.name]
 
     def _populate_tree(self, sections: List[ResourceSection]) -> None:
         """Populate the Textual Tree widget from resource sections."""

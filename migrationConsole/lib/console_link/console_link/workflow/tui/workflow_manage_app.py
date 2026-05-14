@@ -35,6 +35,7 @@ NODE_TYPE_POD = "Pod"
 PHASE_RUNNING = "Running"
 PHASE_SUCCEEDED = "Succeeded"
 LOADING_ROOT_LABEL = "[yellow]⏳ Waiting for Workflow to be created...[/]"
+DESC_SHOW_OUTPUT = "Show Output"
 PATCH_OUTPUT_STEPS = {
     "patchMetadataEvaluateOutput": ("snapshotmigrations", "metadataEvaluate"),
     "patchMetadataMigrateOutput": ("snapshotmigrations", "metadataMigrate"),
@@ -409,27 +410,30 @@ class WorkflowTreeApp(App):
 
         node = self.current_node_data
         if node:
-            node_id = node.get('id') or ''
-            ntype = node.get('type')
-            pod_resolved = self._pods.get_name(node_id) is not None
-
-            if node_id.startswith('resource:'):
-                self.bind("l", "view_resource_logs", description="View Logs")
-                if self._collect_managed_output_refs():
-                    self.bind("o", "view_output", description="Show Output")
-            elif ntype == NODE_TYPE_POD and pod_resolved and not is_approval_node(node):
-                self.bind("l", "view_logs", description="View Logs")
-                if self._collect_managed_output_refs():
-                    self.bind("o", "view_output", description="Show Output")
-                if node.get('phase') == PHASE_RUNNING:
-                    self.bind("f", "follow_logs", description="Follow Logs")
-                self.bind("c", "copy_pod_name", description="Copy Pod Name")
-            elif is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
-                self.bind("a", "approve_step", description="Approve")
-            elif self._collect_managed_output_refs():
-                self.bind("o", "view_output", description="Show Output")
+            self._bind_node_actions(node)
 
         self.refresh_bindings()
+
+    def _bind_node_actions(self, node: Dict) -> None:
+        """Bind context-sensitive keys for the selected node."""
+        node_id = node.get('id') or ''
+        ntype = node.get('type')
+
+        if node_id.startswith('resource:'):
+            self.bind("l", "view_resource_logs", description="View Logs")
+            if self._collect_managed_output_refs():
+                self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
+        elif ntype == NODE_TYPE_POD and self._pods.get_name(node_id) and not is_approval_node(node):
+            self.bind("l", "view_logs", description="View Logs")
+            if self._collect_managed_output_refs():
+                self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
+            if node.get('phase') == PHASE_RUNNING:
+                self.bind("f", "follow_logs", description="Follow Logs")
+            self.bind("c", "copy_pod_name", description="Copy Pod Name")
+        elif is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
+            self.bind("a", "approve_step", description="Approve")
+        elif self._collect_managed_output_refs():
+            self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
 
 
 # --- Utilities ---
