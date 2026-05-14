@@ -44,14 +44,11 @@ class JenkinsConfig:
 
     @property
     def webhook_url(self) -> str:
-        return f"{self.jenkins_url}/generic-webhook-trigger/invoke"
+        return f"{self.jenkins_url}/generic-webhook-trigger/invoke?token={self.pipeline_token}"
 
     @property
     def auth_headers(self) -> dict[str, str]:
-        return {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.pipeline_token}",
-        }
+        return {"Content-Type": "application/json"}
 
     @property
     def payload(self) -> dict[str, str]:
