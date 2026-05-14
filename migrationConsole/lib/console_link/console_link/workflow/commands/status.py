@@ -389,7 +389,7 @@ class LiveCheckProcessor:
                 display_name = node.get('display_name', '')
                 node_name = display_name.split('(')[0] if '(' in display_name else display_name
 
-                if node_name in ('createSnapshot', 'bulkLoadDocuments'):
+                if node_name in ('createSnapshot', 'bulkLoadDocuments', 'checkBackfillStatus'):
                     yield node
                 else:
                     yield from find_intermediate_nodes(node.get('children', []))
@@ -422,8 +422,12 @@ class LiveCheckProcessor:
     def _has_status_output(self, node: Dict[str, Any]) -> bool:
         """Check if node has statusOutput parameter and configContents."""
         has_config = get_node_input_parameter(node, 'configContents') is not None
-        outputs = node.get('outputs', {}).get('parameters', [])
-        has_status_output = any(p.get('name') == 'statusOutput' for p in outputs)
+        outputs_params = node.get('outputs', {}).get('parameters', [])
+        outputs_artifacts = node.get('outputs', {}).get('artifacts', [])
+        has_status_output = (
+            any(p.get('name') == 'statusOutput' for p in outputs_params) or
+            any(a.get('name') == 'statusOutput' for a in outputs_artifacts)
+        )
         return has_config and has_status_output and node.get('type') == 'Pod'
 
     def _run_live_checks_parallel(self, in_progress_nodes: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -476,7 +480,7 @@ class LiveCheckProcessor:
 @click.option('--token', hidden=True, envvar='ARGO_TOKEN', help='Bearer token for authentication')
 @click.option('--all', 'show_all', is_flag=True, default=False,
               help='Show all workflows including completed ones (default: only running)')
-@click.option('--live-status', is_flag=True, default=False,
+@click.option('--live-status/--no-live-status', default=True,
               help='Run a current status check for each snapshot and backfill still running')
 @click.option('--resources', is_flag=True, default=False,
               help='Show resource-centric view of deployed migration resources')
