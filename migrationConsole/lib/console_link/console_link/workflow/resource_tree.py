@@ -8,8 +8,11 @@ from rich.tree import Tree
 
 from .commands.crd_utils import list_migration_resources_full
 from .tree_utils import (
-    get_node_input_parameter, get_step_rich_label,
+    get_node_input_parameter, get_step_rich_label, is_approval_node, get_node_phase,
 )
+
+# Steps that have viewable output artifacts (keep in sync with PATCH_OUTPUT_STEPS in workflow_manage_app.py)
+OUTPUT_STEPS = {'patchMetadataEvaluateOutput', 'patchMetadataMigrateOutput'}
 
 
 # Sections and their resource groups
@@ -277,14 +280,56 @@ def _add_resource_details(node, resource: ResourceNode) -> None:
         deps = ", ".join(resource.depends_on)
         node.add(f"[dim]Depends on: {deps}[/dim]")
     if resource.workflow_progress:
-        _add_workflow_subtree(node, resource.workflow_progress)
+        if _has_notable_steps(resource.workflow_progress):
+            _add_workflow_subtree(node, resource.workflow_progress)
+
+
+def _should_show_step(step: Dict[str, Any]) -> bool:
+    """Return True if a workflow step should be shown in the filtered view."""
+    phase = get_node_phase(step) if 'phase' in step else step.get('phase', '')
+    if phase in ('Failed', 'Error', 'Running', 'Pending'):
+        return True
+    if step.get('live_check'):
+        return True
+    if is_approval_node(step) and phase == 'Running':
+        return True
+    display_name = (step.get('display_name') or '').split('(')[0].strip()
+    if display_name in OUTPUT_STEPS:
+        return True
+    return False
+
+
+def _has_notable_steps(steps: List[Dict[str, Any]]) -> bool:
+    """Return True if any step in the subtree should be shown."""
+    for step in steps:
+        if _should_show_step(step):
+            return True
+        if _has_notable_steps(step.get('children', [])):
+            return True
+    return False
 
 
 def _add_workflow_subtree(parent_node, steps: List[Dict[str, Any]]) -> None:
-    """Render the workflow subtree under a resource."""
+    """Render only notable workflow steps under a resource."""
+    notable = _collect_notable_steps(steps)
+    if not notable:
+        return
     workflow_node = parent_node.add("[bold]Workflow progress:[/bold]")
-    for step in steps:
+    for step in notable:
         _render_workflow_step(workflow_node, step)
+
+
+def _collect_notable_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Filter steps to only those worth showing, preserving hierarchy for notable children."""
+    result = []
+    for step in steps:
+        if _should_show_step(step):
+            result.append(step)
+        else:
+            # Check if any children are notable — if so, lift them up
+            notable_children = _collect_notable_steps(step.get('children', []))
+            result.extend(notable_children)
+    return result
 
 
 def _render_workflow_step(parent_node, step: Dict[str, Any]) -> None:
@@ -298,7 +343,7 @@ def _render_workflow_step(parent_node, step: Dict[str, Any]) -> None:
         for line in value.strip().split('\n'):
             if line.strip():
                 node.add(f"[cyan]{line.strip()}[/cyan]")
-    for child in step.get('children', []):
+    for child in _collect_notable_steps(step.get('children', [])):
         _render_workflow_step(node, child)
 
 

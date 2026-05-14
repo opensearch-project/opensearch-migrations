@@ -35,7 +35,7 @@ class ResourceTreeStateManager:
         """Full rebuild of the resource tree."""
         self._workflow_data = workflow_data
         self.tree.clear()
-        self.tree.root.label = "[bold]Migration Resources[/]"
+        self.tree.root.label = "[bold]Migration Status[/]"
 
         sections = self._build_sections(workflow_data)
         self._populate_tree(sections)
@@ -46,7 +46,7 @@ class ResourceTreeStateManager:
         self._workflow_data = workflow_data
         collapsed_ids = self._collect_collapsed_ids()
         self.tree.clear()
-        self.tree.root.label = "[bold]Migration Resources[/]"
+        self.tree.root.label = "[bold]Migration Status[/]"
 
         sections = self._build_sections(workflow_data)
         self._populate_tree(sections)
@@ -150,11 +150,15 @@ class ResourceTreeStateManager:
 
         # Workflow subtree (nodes carry Argo dict data for interactions)
         if resource.workflow_progress:
-            wf_node = resource_node.add(
-                "[bold]Workflow progress:[/bold]",
-                data={'id': f'workflow:{resource.name}'})
-            for step in resource.workflow_progress:
-                self._add_workflow_step(wf_node, step)
+            from console_link.workflow.resource_tree import _has_notable_steps, _collect_notable_steps
+            if _has_notable_steps(resource.workflow_progress):
+                notable = _collect_notable_steps(resource.workflow_progress)
+                if notable:
+                    wf_node = resource_node.add(
+                        "[bold]Workflow progress:[/bold]",
+                        data={'id': f'workflow:{resource.name}'})
+                    for step in notable:
+                        self._add_workflow_step(wf_node, step)
 
         # Children (e.g., topics under kafka)
         for child in resource.children:
@@ -162,6 +166,7 @@ class ResourceTreeStateManager:
 
     def _add_workflow_step(self, parent: TreeNode, step: Dict) -> None:
         """Add a workflow step node (carries Argo dict for interactions)."""
+        from console_link.workflow.resource_tree import _collect_notable_steps
         label = get_step_rich_label(step, status_output=None, show_approval_name=False)
         node = parent.add(label, data=step)
         live_check = step.get('live_check')
@@ -169,5 +174,5 @@ class ResourceTreeStateManager:
             for line in live_check['value'].replace('\\n', '\n').strip().split('\n'):
                 if line.strip():
                     node.add(f"[cyan]{line.strip()}[/cyan]", data=None)
-        for child in step.get('children', []):
+        for child in _collect_notable_steps(step.get('children', [])):
             self._add_workflow_step(node, child)
