@@ -5,8 +5,7 @@ from unittest.mock import Mock, patch, mock_open
 import pytest
 import yaml
 
-from console_link.models.argo_service import ArgoService, WorkflowEndedBeforeSuspend
-from console_link.models.cluster import Cluster
+from integ_test.integration_test_argo_service import IntegrationTestArgoService, WorkflowEndedBeforeSuspend
 from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunnerError, FlagOnlyArgument
 
@@ -14,18 +13,8 @@ from console_link.models.command_runner import CommandRunnerError, FlagOnlyArgum
 # Test fixtures
 @pytest.fixture
 def argo_service():
-    """Create ArgoService instance with test configuration."""
-    return ArgoService(
-        namespace="test-namespace",
-        argo_image="test-image:latest",
-        service_account="test-account"
-    )
-
-
-@pytest.fixture
-def default_argo_service():
-    """Create ArgoService instance with default configuration."""
-    return ArgoService()
+    """Create IntegrationTestArgoService instance with test configuration."""
+    return IntegrationTestArgoService(namespace="test-namespace")
 
 
 @pytest.fixture
@@ -43,12 +32,6 @@ def mock_completed_process():
 def mock_success_result():
     """Create a successful CommandResult for testing."""
     return CommandResult(success=True, value="test-workflow-123")
-
-
-@pytest.fixture
-def mock_failure_result():
-    """Create a failed CommandResult for testing."""
-    return CommandResult(success=False, value="Command failed")
 
 
 # Helper functions
@@ -89,9 +72,9 @@ def create_mock_cluster_workflow_data(cluster_type="source", config=None):
 
 
 # Workflow lifecycle tests
-@patch('console_link.models.argo_service.ArgoService._run_kubectl_command')
-@patch('console_link.models.argo_service.ArgoService._create_workflow_yaml')
-@patch('console_link.models.argo_service.ArgoService._wait_for_workflow_exists')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._run_kubectl_command')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._create_workflow_yaml')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._wait_for_workflow_exists')
 @patch('os.unlink')
 def test_start_workflow_success(mock_unlink, mock_wait, mock_create_yaml, mock_kubectl,
                                 argo_service, mock_completed_process):
@@ -113,8 +96,8 @@ def test_start_workflow_success(mock_unlink, mock_wait, mock_create_yaml, mock_k
     mock_unlink.assert_called_once_with("/tmp/test-workflow.yaml")
 
 
-@patch('console_link.models.argo_service.ArgoService._run_kubectl_command')
-@patch('console_link.models.argo_service.ArgoService._create_workflow_yaml')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._run_kubectl_command')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._create_workflow_yaml')
 def test_start_workflow_failure(mock_create_yaml, mock_kubectl, argo_service):
     """Test workflow start failure."""
     mock_create_yaml.return_value = "/tmp/test-workflow.yaml"
@@ -126,35 +109,79 @@ def test_start_workflow_failure(mock_create_yaml, mock_kubectl, argo_service):
     assert "Failed to start workflow" in result.value
 
 
-@patch('console_link.models.argo_service.ArgoService._run_argo_command')
-def test_resume_workflow(mock_argo_command, argo_service, mock_success_result):
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._patch_workflow')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_status_json')
+def test_resume_workflow(mock_get_json, mock_patch, argo_service, mock_success_result):
     """Test workflow resume."""
-    mock_argo_command.return_value = mock_success_result
+    workflow_data = {
+        "spec": {"suspend": True},
+        "status": {
+            "nodes": {
+                "node1": {
+                    "type": "Suspend",
+                    "phase": "Running",
+                    "outputs": {
+                        "parameters": [
+                            {
+                                "name": "approval",
+                                "valueFrom": {"supplied": {}, "default": "approved"}
+                            }
+                        ]
+                    }
+                },
+                "node2": {"type": "Pod", "phase": "Running"}
+            }
+        }
+    }
+    mock_get_json.return_value = workflow_data
+    mock_patch.return_value = mock_success_result
 
     result = argo_service.resume_workflow("test-workflow")
 
     assert result.success is True
-    mock_argo_command.assert_called_once_with(
-        pod_action="resume-workflow",
-        argo_args={"resume": "test-workflow"}
-    )
+    assert workflow_data["status"]["nodes"]["node1"]["phase"] == "Succeeded"
+    assert "finishedAt" in workflow_data["status"]["nodes"]["node1"]
+    assert workflow_data["status"]["nodes"]["node1"]["outputs"]["parameters"][0]["value"] == "approved"
+    assert "valueFrom" not in workflow_data["status"]["nodes"]["node1"]["outputs"]["parameters"][0]
+    patch_data = mock_patch.call_args[0][1]
+    assert mock_patch.call_args[0][0] == "test-workflow"
+    assert patch_data["spec"] == {"suspend": None}
+    assert patch_data["status"]["nodes"]["node1"]["phase"] == "Succeeded"
+    assert "finishedAt" in patch_data["status"]["nodes"]["node1"]
+    assert patch_data["status"]["nodes"]["node1"]["outputs"]["parameters"][0]["value"] == "approved"
 
 
-@patch('console_link.models.argo_service.ArgoService._run_argo_command')
-def test_stop_workflow(mock_argo_command, argo_service, mock_success_result):
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_status_json')
+def test_resume_workflow_no_suspend_state(mock_get_json, argo_service):
+    """Test workflow resume when nothing is suspended."""
+    mock_get_json.return_value = {"spec": {}, "status": {"nodes": {"node1": {"type": "Pod", "phase": "Running"}}}}
+
+    with patch.object(argo_service, '_patch_workflow') as mock_patch:
+        result = argo_service.resume_workflow("test-workflow")
+
+    assert result.success is True
+    assert "did not need to be resumed" in result.value
+    mock_patch.assert_not_called()
+
+
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._run_kubectl_command')
+def test_stop_workflow(mock_kubectl, argo_service, mock_success_result):
     """Test workflow stop."""
-    mock_argo_command.return_value = mock_success_result
+    mock_kubectl.return_value = mock_success_result
 
     result = argo_service.stop_workflow("test-workflow")
 
     assert result.success is True
-    mock_argo_command.assert_called_once_with(
-        pod_action="stop-workflow",
-        argo_args={"stop": "test-workflow"}
-    )
+    mock_kubectl.assert_called_once_with({
+        "patch": FlagOnlyArgument,
+        "workflow": "test-workflow",
+        "--namespace": "test-namespace",
+        "--type": "merge",
+        "-p": json.dumps({"spec": {"shutdown": "Stop"}})
+    })
 
 
-@patch('console_link.models.argo_service.ArgoService._run_kubectl_command')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._run_kubectl_command')
 def test_delete_workflow(mock_kubectl, argo_service, mock_success_result):
     """Test workflow deletion."""
     mock_kubectl.return_value = mock_success_result
@@ -171,7 +198,7 @@ def test_delete_workflow(mock_kubectl, argo_service, mock_success_result):
 
 
 # Workflow status tests
-@patch('console_link.models.argo_service.ArgoService._get_workflow_status_json')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_status_json')
 def test_get_workflow_status_with_suspended_nodes(mock_get_json, argo_service):
     """Test getting workflow status with suspended nodes."""
     mock_get_json.return_value = create_mock_workflow_data("Running", has_suspend_node=True)
@@ -183,7 +210,7 @@ def test_get_workflow_status_with_suspended_nodes(mock_get_json, argo_service):
     assert result.value["has_suspended_nodes"] is True
 
 
-@patch('console_link.models.argo_service.ArgoService._get_workflow_status_json')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_status_json')
 def test_get_workflow_status_without_suspended_nodes(mock_get_json, argo_service):
     """Test getting workflow status without suspended nodes."""
     mock_get_json.return_value = create_mock_workflow_data("Running", has_suspend_node=False)
@@ -195,7 +222,7 @@ def test_get_workflow_status_without_suspended_nodes(mock_get_json, argo_service
     assert result.value["has_suspended_nodes"] is False
 
 
-@patch('console_link.models.argo_service.ArgoService._get_workflow_status_json')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_status_json')
 def test_get_workflow_status_completed(mock_get_json, argo_service):
     """Test getting workflow status for completed workflow."""
     mock_get_json.return_value = create_mock_workflow_data("Succeeded", has_suspend_node=False)
@@ -208,7 +235,7 @@ def test_get_workflow_status_completed(mock_get_json, argo_service):
 
 
 # Workflow waiting tests
-@patch('console_link.models.argo_service.ArgoService.get_workflow_status')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')
 def test_wait_for_suspend_success(mock_get_status, argo_service):
     """Test successful wait for suspend."""
     mock_get_status.return_value = CommandResult(
@@ -222,7 +249,7 @@ def test_wait_for_suspend_success(mock_get_status, argo_service):
     assert "suspended state" in result.value
 
 
-@patch('console_link.models.argo_service.ArgoService.get_workflow_status')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')
 def test_wait_for_suspend_workflow_ended(mock_get_status, argo_service):
     """Test wait for suspend when workflow ends."""
     mock_get_status.return_value = CommandResult(
@@ -237,7 +264,7 @@ def test_wait_for_suspend_workflow_ended(mock_get_status, argo_service):
     assert "Failed" in str(exc_info.value)
 
 
-@patch('console_link.models.argo_service.ArgoService.get_workflow_status')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')
 @patch('time.sleep')
 def test_wait_for_suspend_timeout(mock_sleep, mock_get_status, argo_service):
     """Test wait for suspend timeout."""
@@ -252,7 +279,7 @@ def test_wait_for_suspend_timeout(mock_sleep, mock_get_status, argo_service):
     assert "did not reach suspended state" in str(exc_info.value)
 
 
-@patch('console_link.models.argo_service.ArgoService.get_workflow_status')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')
 def test_wait_for_suspend_status_failure(mock_get_status, argo_service):
     """Test wait for suspend when status check fails."""
     mock_get_status.return_value = CommandResult(success=False, value="Status check failed")
@@ -263,12 +290,12 @@ def test_wait_for_suspend_status_failure(mock_get_status, argo_service):
     assert "Failed to get workflow status" in str(exc_info.value)
 
 
-@patch('console_link.models.argo_service.ArgoService.is_workflow_completed')
-def test_wait_for_ending_phase_success(mock_is_completed, argo_service):
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')
+def test_wait_for_ending_phase_success(mock_get_status, argo_service):
     """Test successful wait for ending phase."""
-    mock_is_completed.return_value = CommandResult(
+    mock_get_status.return_value = CommandResult(
         success=True,
-        value="Workflow test-workflow has reached an ending phase of Succeeded"
+        value={"phase": "Succeeded", "has_suspended_nodes": False}
     )
 
     result = argo_service.wait_for_ending_phase("test-workflow", timeout_seconds=1, interval=0.1)
@@ -277,11 +304,14 @@ def test_wait_for_ending_phase_success(mock_is_completed, argo_service):
     assert "ending phase of Succeeded" in result.value
 
 
-@patch('console_link.models.argo_service.ArgoService.is_workflow_completed')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')
 @patch('time.sleep')
-def test_wait_for_ending_phase_timeout(mock_sleep, mock_is_completed, argo_service):
+def test_wait_for_ending_phase_timeout(mock_sleep, mock_get_status, argo_service):
     """Test wait for ending phase timeout."""
-    mock_is_completed.return_value = CommandResult(success=False, value="Still running")
+    mock_get_status.return_value = CommandResult(
+        success=True,
+        value={"phase": "Running", "has_suspended_nodes": False}
+    )
 
     with pytest.raises(TimeoutError) as exc_info:
         argo_service.wait_for_ending_phase("test-workflow", timeout_seconds=1, interval=0.1)
@@ -289,110 +319,21 @@ def test_wait_for_ending_phase_timeout(mock_sleep, mock_is_completed, argo_servi
     assert "did not reach ending state" in str(exc_info.value)
 
 
-# Workflow completion tests
-@patch('console_link.models.argo_service.ArgoService.get_workflow_status')
-def test_is_workflow_completed_true(mock_get_status, argo_service):
-    """Test workflow completion check when completed."""
-    mock_get_status.return_value = CommandResult(
-        success=True,
-        value={"phase": "Succeeded", "has_suspended_nodes": False}
-    )
-
-    result = argo_service.is_workflow_completed("test-workflow")
-
-    assert result.success is True
-    assert "ending phase of Succeeded" in result.value
-
-
-@patch('console_link.models.argo_service.ArgoService.get_workflow_status')
-def test_is_workflow_completed_false(mock_get_status, argo_service):
-    """Test workflow completion check when not completed."""
-    mock_get_status.return_value = CommandResult(
-        success=True,
-        value={"phase": "Running", "has_suspended_nodes": False}
-    )
-
-    result = argo_service.is_workflow_completed("test-workflow")
-
-    assert result.success is False
-    assert "has not completed" in result.value
-
-
-@patch('console_link.models.argo_service.ArgoService.get_workflow_status')
-def test_is_workflow_completed_status_failure(mock_get_status, argo_service):
-    """Test workflow completion check when status check fails."""
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService.get_workflow_status')
+def test_wait_for_ending_phase_status_failure(mock_get_status, argo_service):
+    """Test wait for ending phase when status check fails."""
     mock_get_status.return_value = CommandResult(success=False, value="Status check failed")
 
-    with pytest.raises(ValueError):
-        argo_service.is_workflow_completed("test-workflow")
+    with pytest.raises(ValueError) as exc_info:
+        argo_service.wait_for_ending_phase("test-workflow", timeout_seconds=1, interval=0.1)
 
-
-# Workflow watching tests
-@patch('console_link.models.argo_service.ArgoService._run_argo_command')
-def test_watch_workflow_with_streaming(mock_argo_command, argo_service, mock_success_result):
-    """Test watching workflow with streaming enabled."""
-    mock_argo_command.return_value = mock_success_result
-
-    result = argo_service.watch_workflow("test-workflow", stream_output=True)
-
-    assert result.success is True
-    expected_args = {
-        "logs": "test-workflow",
-        "--follow": FlagOnlyArgument
-    }
-    mock_argo_command.assert_called_once_with(
-        pod_action="watch-workflow",
-        argo_args=expected_args,
-        print_output=True,
-        stream_output=True
-    )
-
-
-@patch('console_link.models.argo_service.ArgoService._run_argo_command')
-def test_watch_workflow_without_streaming(mock_argo_command, argo_service, mock_success_result):
-    """Test watching workflow without streaming."""
-    mock_argo_command.return_value = mock_success_result
-
-    result = argo_service.watch_workflow("test-workflow", stream_output=False)
-
-    assert result.success is True
-    mock_argo_command.assert_called_once_with(
-        pod_action="watch-workflow",
-        argo_args={"logs": "test-workflow", "--follow": FlagOnlyArgument},
-        print_output=False,
-        stream_output=False
-    )
-
-
-# Cluster extraction tests
-@patch('console_link.models.argo_service.ArgoService._get_cluster_config_from_workflow')
-def test_get_source_cluster_from_workflow(mock_get_cluster_config, argo_service):
-    """Test extracting source cluster from workflow."""
-    mock_cluster = Mock(spec=Cluster)
-    mock_get_cluster_config.return_value = mock_cluster
-
-    result = argo_service.get_source_cluster_from_workflow("test-workflow")
-
-    assert result == mock_cluster
-    mock_get_cluster_config.assert_called_once_with("test-workflow", "source")
-
-
-@patch('console_link.models.argo_service.ArgoService._get_cluster_config_from_workflow')
-def test_get_target_cluster_from_workflow(mock_get_cluster_config, argo_service):
-    """Test extracting target cluster from workflow."""
-    mock_cluster = Mock(spec=Cluster)
-    mock_get_cluster_config.return_value = mock_cluster
-
-    result = argo_service.get_target_cluster_from_workflow("test-workflow")
-
-    assert result == mock_cluster
-    mock_get_cluster_config.assert_called_once_with("test-workflow", "target")
+    assert "Failed to get workflow status" in str(exc_info.value)
 
 
 # Internal method tests
 def test_run_kubectl_command_success(argo_service, mock_success_result):
     """Test successful kubectl command execution."""
-    with patch('console_link.models.argo_service.CommandRunner') as mock_command_runner_class:
+    with patch('integ_test.integration_test_argo_service.CommandRunner') as mock_command_runner_class:
         mock_runner_instance = Mock()
         mock_runner_instance.run.return_value = mock_success_result
         mock_command_runner_class.return_value = mock_runner_instance
@@ -406,7 +347,7 @@ def test_run_kubectl_command_success(argo_service, mock_success_result):
 
 def test_run_kubectl_command_failure(argo_service):
     """Test kubectl command execution failure."""
-    with patch('console_link.models.argo_service.CommandRunner') as mock_command_runner_class:
+    with patch('integ_test.integration_test_argo_service.CommandRunner') as mock_command_runner_class:
         mock_runner_instance = Mock()
         mock_runner_instance.run.side_effect = CommandRunnerError(1, ["kubectl"], "Command failed")
         mock_command_runner_class.return_value = mock_runner_instance
@@ -415,33 +356,40 @@ def test_run_kubectl_command_failure(argo_service):
             argo_service._run_kubectl_command({"get": "pods"})
 
 
-def test_run_argo_command_success(argo_service, mock_success_result):
-    """Test successful argo command execution."""
-    with patch('console_link.models.argo_service.CommandRunner') as mock_command_runner_class:
+def test_get_workflow_logs_success(argo_service, mock_success_result):
+    """Test successful workflow log command execution."""
+    with patch('integ_test.integration_test_argo_service.CommandRunner') as mock_command_runner_class:
         mock_runner_instance = Mock()
         mock_runner_instance.run.return_value = mock_success_result
         mock_command_runner_class.return_value = mock_runner_instance
 
-        result = argo_service._run_argo_command("test-action", {"arg1": "value1"})
+        result = argo_service._get_workflow_logs(
+            "test-workflow", follow=True, print_output=True, stream_output=True
+        )
 
         assert result.success is True
-        # Verify kubectl was called with proper argo pod configuration
-        mock_command_runner_class.assert_called_once()
-        call_args = mock_command_runner_class.call_args
-        assert call_args[0][0] == "kubectl"
-        assert "--namespace" in call_args[0][1]
-        assert call_args[0][1]["--namespace"] == "test-namespace"
+        expected_args = {
+            "logs": FlagOnlyArgument,
+            "-l": "workflows.argoproj.io/workflow=test-workflow",
+            "--namespace": "test-namespace",
+            "--all-containers=true": FlagOnlyArgument,
+            "--prefix=true": FlagOnlyArgument,
+            "--tail": "-1",
+            "--follow": FlagOnlyArgument
+        }
+        mock_command_runner_class.assert_called_once_with("kubectl", expected_args)
+        mock_runner_instance.run.assert_called_once_with(print_to_console=True, stream_output=True)
 
 
-def test_run_argo_command_failure(argo_service):
-    """Test argo command execution failure."""
-    with patch('console_link.models.argo_service.CommandRunner') as mock_command_runner_class:
+def test_get_workflow_logs_failure(argo_service):
+    """Test workflow log command execution failure."""
+    with patch('integ_test.integration_test_argo_service.CommandRunner') as mock_command_runner_class:
         mock_runner_instance = Mock()
         mock_runner_instance.run.side_effect = CommandRunnerError(1, ["kubectl"], "Command failed")
         mock_command_runner_class.return_value = mock_runner_instance
 
         with pytest.raises(CommandRunnerError):
-            argo_service._run_argo_command("test-action", {"arg1": "value1"})
+            argo_service._get_workflow_logs("test-workflow")
 
 
 def test_create_workflow_yaml_without_parameters(argo_service):
@@ -509,7 +457,7 @@ def test_create_workflow_yaml_with_parameters(argo_service):
             assert json.loads(list_param["value"]) == ["item1", "item2"]
 
 
-@patch('console_link.models.argo_service.ArgoService._run_kubectl_command')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._run_kubectl_command')
 @patch('time.sleep')
 def test_wait_for_workflow_exists_success(mock_sleep, mock_kubectl, argo_service):
     """Test successful wait for workflow to exist."""
@@ -527,7 +475,7 @@ def test_wait_for_workflow_exists_success(mock_sleep, mock_kubectl, argo_service
     assert "Workflow test-workflow exists" in result.value
 
 
-@patch('console_link.models.argo_service.ArgoService._run_kubectl_command')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._run_kubectl_command')
 @patch('time.sleep')
 def test_wait_for_workflow_exists_timeout(mock_sleep, mock_kubectl, argo_service):
     """Test timeout waiting for workflow to exist."""
@@ -545,7 +493,7 @@ def test_wait_for_workflow_exists_timeout(mock_sleep, mock_kubectl, argo_service
     assert "Timeout waiting for workflow" in result.value
 
 
-@patch('console_link.models.argo_service.ArgoService._run_kubectl_command')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._run_kubectl_command')
 def test_get_workflow_status_json_success(mock_kubectl, argo_service):
     """Test successful workflow status JSON retrieval."""
     workflow_data = {"status": {"phase": "Running"}}
@@ -569,7 +517,7 @@ def test_get_workflow_status_json_success(mock_kubectl, argo_service):
     mock_kubectl.assert_called_once_with(expected_args)
 
 
-@patch('console_link.models.argo_service.ArgoService._run_kubectl_command')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._run_kubectl_command')
 def test_get_workflow_status_json_invalid_json(mock_kubectl, argo_service):
     """Test workflow status JSON retrieval with invalid JSON."""
     mock_completed_process = CompletedProcess(
@@ -584,23 +532,23 @@ def test_get_workflow_status_json_invalid_json(mock_kubectl, argo_service):
         argo_service._get_workflow_status_json("test-workflow")
 
 
-@patch('console_link.models.argo_service.ArgoService._get_workflow_status_json')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_status_json')
 def test_get_cluster_config_from_workflow_success(mock_get_json, argo_service):
     """Test successful cluster config extraction."""
     cluster_config = {"endpoint": "https://test-cluster.com", "no_auth": None}
     mock_get_json.return_value = create_mock_cluster_workflow_data("source", cluster_config)
 
-    with patch('console_link.models.argo_service.Cluster') as mock_cluster_class:
+    with patch('integ_test.integration_test_argo_service.Cluster') as mock_cluster_class:
         mock_cluster_instance = Mock()
         mock_cluster_class.return_value = mock_cluster_instance
 
-        result = argo_service._get_cluster_config_from_workflow("test-workflow", "source")
+        result = argo_service.get_cluster_config_from_workflow("test-workflow", "source")
 
         assert result == mock_cluster_instance
         mock_cluster_class.assert_called_once_with(config=cluster_config)
 
 
-@patch('console_link.models.argo_service.ArgoService._get_workflow_status_json')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_status_json')
 def test_get_cluster_config_from_workflow_node_not_found(mock_get_json, argo_service):
     """Test cluster config extraction when node not found."""
     workflow_data = {
@@ -616,12 +564,12 @@ def test_get_cluster_config_from_workflow_node_not_found(mock_get_json, argo_ser
     mock_get_json.return_value = workflow_data
 
     with pytest.raises(ValueError) as exc_info:
-        argo_service._get_cluster_config_from_workflow("test-workflow", "source")
+        argo_service.get_cluster_config_from_workflow("test-workflow", "source")
 
     assert "Did not find source cluster config" in str(exc_info.value)
 
 
-@patch('console_link.models.argo_service.ArgoService._get_workflow_status_json')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_status_json')
 def test_get_cluster_config_from_workflow_no_config_param(mock_get_json, argo_service):
     """Test cluster config extraction when config parameter not found."""
     workflow_data = {
@@ -642,12 +590,12 @@ def test_get_cluster_config_from_workflow_no_config_param(mock_get_json, argo_se
     mock_get_json.return_value = workflow_data
 
     with pytest.raises(ValueError) as exc_info:
-        argo_service._get_cluster_config_from_workflow("test-workflow", "source")
+        argo_service.get_cluster_config_from_workflow("test-workflow", "source")
 
     assert "Did not find source cluster config" in str(exc_info.value)
 
 
-@patch('console_link.models.argo_service.ArgoService._get_workflow_status_json')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_status_json')
 def test_get_cluster_config_from_workflow_invalid_json(mock_get_json, argo_service):
     """Test cluster config extraction with invalid JSON config."""
     workflow_data = {
@@ -668,4 +616,4 @@ def test_get_cluster_config_from_workflow_invalid_json(mock_get_json, argo_servi
     mock_get_json.return_value = workflow_data
 
     with pytest.raises(json.JSONDecodeError):
-        argo_service._get_cluster_config_from_workflow("test-workflow", "source")
+        argo_service.get_cluster_config_from_workflow("test-workflow", "source")

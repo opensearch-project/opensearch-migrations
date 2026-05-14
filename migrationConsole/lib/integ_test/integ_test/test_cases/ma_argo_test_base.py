@@ -5,8 +5,9 @@ import subprocess
 from ..cluster_version import ClusterVersion, is_incoming_version_supported
 from ..operations_library_factory import get_operations_library_by_version
 
-from console_link.models.argo_service import ArgoService
 from console_link.middleware.clusters import cat_indices, connection_check, clear_indices, ConnectionResult
+
+from ..integration_test_argo_service import IntegrationTestArgoService
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ class MATestBase:
             None if self.is_aoss
             else ClusterVersion(version_str=user_args.target_version)
         )
-        self.argo_service = ArgoService()
+        self.argo_service = IntegrationTestArgoService()
         self.workflow_name = None
         self.source_cluster = None
         self.target_cluster = None
@@ -231,8 +232,10 @@ class MATestBase:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         if not self.imported_clusters:
             self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=1000)
-            self.source_cluster = self.argo_service.get_source_cluster_from_workflow(workflow_name=self.workflow_name)
-            self.target_cluster = self.argo_service.get_target_cluster_from_workflow(workflow_name=self.workflow_name)
+            self.source_cluster = self.argo_service.get_cluster_config_from_workflow(
+                workflow_name=self.workflow_name, cluster_type="source")
+            self.target_cluster = self.argo_service.get_cluster_config_from_workflow(
+                workflow_name=self.workflow_name, cluster_type="target")
 
     def prepare_clusters(self):
         pass
