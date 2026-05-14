@@ -1,0 +1,38 @@
+#!/bin/bash
+
+set -eo pipefail
+
+# NOTE: the below only creates resources if they dont already exist. If you want any of those recreated,
+# need to remove first.
+# Example for removing builder to rebuild in the below:
+# docker buildx rm local-remote-builder 2>/dev/null || true
+
+docker network inspect local-migrations-network >/dev/null 2>&1 || docker network create local-migrations-network
+
+docker ps -q -f name=^docker-registry$ | grep -q . || docker run -d --restart=always \
+  --name docker-registry \
+  --network local-migrations-network \
+  -p 5001:5000 \
+  -v registry-data:/var/lib/registry \
+  registry:2
+
+docker ps -q -f name=^buildkitd$ | grep -q . || docker run -d --privileged \
+  --name buildkitd \
+  --dns 8.8.8.8 \
+  --network local-migrations-network \
+  -p 1234:1234 \
+  -v ./buildkitd.toml:/etc/buildkit/buildkitd.toml \
+  --restart=always \
+  moby/buildkit:latest \
+  --addr tcp://0.0.0.0:1234 \
+  --config /etc/buildkit/buildkitd.toml
+
+docker buildx inspect local-remote-builder >/dev/null 2>&1 || docker buildx create --name local-remote-builder --driver remote tcp://localhost:1234
+
+PLATFORM=$(uname -m)
+echo "Building general and test images"
+../gradlew "buildImagesToRegistry_${PLATFORM}" "buildKitTestAll_${PLATFORM}" -PregistryEndpoint=localhost:5001 -Pbuilder=local-remote-builder
+
+
+echo "Registry contents:"
+curl http://localhost:5001/v2/_catalog

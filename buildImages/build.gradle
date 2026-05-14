@@ -129,7 +129,6 @@ def testBuildKitProjects = [
                 contextDir: "custom-solr-images/dockerfiles",
                 imageName:  "custom-solr",
                 imageTag:   "6.6.6",
-                buildArgs: []
         ],
         // Custom Elasticsearch images for k8s integration tests
         [

@@ -1,0 +1,46 @@
+FROM amazoncorretto:8-alpine
+
+ARG SOLR_VERSION=6.6.6
+ARG SOLR_SHA1=1dfd3de06c8e6554c42e69f49573b563125da5a1
+ENV SOLR_HOME=/var/solr/data
+ENV PATH=/opt/solr/bin:$PATH
+ENV LANG=C.UTF-8
+
+RUN set -eux; \
+  apk add --no-cache \
+      bash \
+      ca-certificates \
+      curl \
+      lsof \
+      procps \
+      shadow \
+      su-exec \
+      tini \
+      tzdata \
+      zip;
+
+RUN --mount=type=cache,target=/var/cache/downloads,sharing=locked \
+  set -eux; \
+  TARBALL=/var/cache/downloads/solr-${SOLR_VERSION}.tgz; \
+  [ -s "$TARBALL" ] || curl -fsSLo "$TARBALL" \
+    "https://archive.apache.org/dist/lucene/solr/${SOLR_VERSION}/solr-${SOLR_VERSION}.tgz"; \
+  echo "${SOLR_SHA1}  $TARBALL" | sha1sum -c -; \
+  mkdir -p /var/solr; \
+  groupadd -r -g 8983 solr; \
+  useradd  -r -u 8983 -g solr -m -d "${SOLR_HOME}" -s /bin/bash solr; \
+  tar -xzf "$TARBALL" -C /opt; \
+  mv "/opt/solr-${SOLR_VERSION}" /opt/solr; \
+  cp /opt/solr/server/solr/solr.xml /opt/solr/server/solr-template.solr.xml; \
+  cp /opt/solr/server/solr/zoo.cfg  /opt/solr/server/solr-template.zoo.cfg; \
+  chown -R solr:solr /opt/solr "${SOLR_HOME}"
+
+COPY --chmod=0755 entrypoint.sh /usr/local/bin/entrypoint.sh
+
+USER solr
+WORKDIR ${SOLR_HOME}
+EXPOSE 8983
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl -fsS "http://localhost:8983/solr/admin/info/system?wt=json" > /dev/null || exit 1
+
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/entrypoint.sh"]
