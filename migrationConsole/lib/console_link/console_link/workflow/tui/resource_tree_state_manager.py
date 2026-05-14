@@ -101,14 +101,18 @@ class ResourceTreeStateManager:
     @staticmethod
     def _assign_workflow_progress(sections: List[ResourceSection], steps: Dict) -> None:
         """Attach workflow step data to matching resource nodes."""
-        for section in sections:
-            for group in section.groups:
-                for resource in group.resources:
-                    if resource.name in steps:
-                        resource.workflow_progress = steps[resource.name]
-                    for child in resource.children:
-                        if child.name in steps:
-                            child.workflow_progress = steps[child.name]
+        all_resources = (
+            resource
+            for section in sections
+            for group in section.groups
+            for resource in group.resources
+        )
+        for resource in all_resources:
+            if resource.name in steps:
+                resource.workflow_progress = steps[resource.name]
+            for child in resource.children:
+                if child.name in steps:
+                    child.workflow_progress = steps[child.name]
 
     def _populate_tree(self, sections: List[ResourceSection]) -> None:
         """Populate the Textual Tree widget from resource sections."""
