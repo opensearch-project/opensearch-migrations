@@ -69,10 +69,8 @@ class ResourceNode:
     created_at: Optional[str] = None
     children: List['ResourceNode'] = field(default_factory=list)
 
-    # Future phases
-    config_diff: Optional[Dict[str, Any]] = None
     workflow_progress: Optional[List[Dict[str, Any]]] = None
-    live_status: Optional[Dict[str, Any]] = None
+    config_diff: Optional[Dict[str, Any]] = None  # Future: pending config changes
 
 
 @dataclass

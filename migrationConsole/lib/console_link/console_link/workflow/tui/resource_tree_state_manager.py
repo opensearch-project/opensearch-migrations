@@ -159,20 +159,27 @@ class ResourceTreeStateManager:
             resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
 
         # Workflow subtree (nodes carry Argo dict data for interactions)
-        if resource.workflow_progress:
-            from console_link.workflow.resource_tree import _has_notable_steps, _collect_notable_steps
-            if _has_notable_steps(resource.workflow_progress):
-                notable = _collect_notable_steps(resource.workflow_progress)
-                if notable:
-                    wf_node = resource_node.add(
-                        "[bold]Workflow progress:[/bold]",
-                        data={'id': f'workflow:{resource.name}'})
-                    for step in notable:
-                        self._add_workflow_step(wf_node, step)
+        self._add_workflow_progress(resource_node, resource)
 
         # Children (e.g., topics under kafka)
         for child in resource.children:
             self._add_resource(resource_node, child)
+
+    def _add_workflow_progress(self, resource_node: TreeNode, resource: ResourceNode) -> None:
+        """Add filtered workflow progress subtree if notable steps exist."""
+        if not resource.workflow_progress:
+            return
+        from console_link.workflow.resource_tree import _has_notable_steps, _collect_notable_steps
+        if not _has_notable_steps(resource.workflow_progress):
+            return
+        notable = _collect_notable_steps(resource.workflow_progress)
+        if not notable:
+            return
+        wf_node = resource_node.add(
+            "[bold]Workflow progress:[/bold]",
+            data={'id': f'workflow:{resource.name}'})
+        for step in notable:
+            self._add_workflow_step(wf_node, step)
 
     def _add_workflow_step(self, parent: TreeNode, step: Dict) -> None:
         """Add a workflow step node (carries Argo dict for interactions)."""
