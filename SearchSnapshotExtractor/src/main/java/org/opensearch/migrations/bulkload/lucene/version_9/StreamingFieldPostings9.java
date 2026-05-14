@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.lucene.version_9;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -61,6 +62,14 @@ final class StreamingFieldPostings9 implements StreamingFieldPostings {
     private int lastAdvancedDoc = -1;
     private boolean closed;
 
+    // Reusable scratch buffers for the per-doc collect-and-sort path. Grow on demand;
+    // never shrink. Encoding: sortKey[i] = (pos << 32) | (i & 0xFFFFFFFFL), so a single
+    // primitive Arrays.sort orders by position ascending with i as the stable tiebreak.
+    private long[] scratchSortKey = new long[64];
+    private String[] scratchTerm = new String[64];
+    private int[] scratchStart;
+    private int[] scratchEnd;
+
     StreamingFieldPostings9(LeafReader wrapped, String fieldName) throws IOException {
         Terms terms = wrapped.terms(fieldName);
         if (terms == null || !terms.hasPositions()) {
@@ -73,6 +82,10 @@ final class StreamingFieldPostings9 implements StreamingFieldPostings {
         this.fieldHasOffsets = fi != null
             && fi.getIndexOptions().compareTo(IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS) >= 0;
         int postingsFlags = fieldHasOffsets ? PostingsEnum.OFFSETS : PostingsEnum.POSITIONS;
+        if (fieldHasOffsets) {
+            this.scratchStart = new int[64];
+            this.scratchEnd = new int[64];
+        }
 
         // Estimate term count to size the heap. Terms.size() returns -1 if unknown;
         // we fall back to an ArrayList-style growth pattern via a temporary list.
@@ -137,22 +150,44 @@ final class StreamingFieldPostings9 implements StreamingFieldPostings {
             return Collections.emptyList();
         }
 
-        // Collect (term, position, startOff, endOff) for every cursor whose head equals docId.
-        // We then sort by position to deliver position-ordered output, mirroring the sidecar contract.
-        ArrayList<TermEntry> collected = new ArrayList<>();
-        ArrayList<int[]> posOffsets = new ArrayList<>(); // parallel arrays: [pos, startOff, endOff, termIdx-into-collected]
+        // Collect (term, position[, startOff, endOff]) for every cursor whose head equals docId
+        // into reusable primitive scratch buffers. Encode (pos, idx) as a packed long so we can
+        // call Arrays.sort(long[]) — a vectorized intrinsic on JDK 21 — instead of TimSort over
+        // boxed int[] objects with a Comparator. Strings live in a parallel String[] referenced
+        // by index. No per-token allocation.
+        int n = 0;
+        long[] sortKey = scratchSortKey;
+        String[] terms = scratchTerm;
+        int[] startOff = scratchStart;
+        int[] endOff = scratchEnd;
+        boolean offsets = fieldHasOffsets;
         while (heapSize > 0 && heap[0].currentDoc == docId) {
             Cursor c = heap[0];
             int freq = c.postings.freq();
+            // Grow scratch in one shot if needed.
+            int need = n + freq;
+            if (need > sortKey.length) {
+                int newLen = Math.max(need, sortKey.length << 1);
+                sortKey = Arrays.copyOf(sortKey, newLen);
+                terms = Arrays.copyOf(terms, newLen);
+                if (offsets) {
+                    startOff = Arrays.copyOf(startOff, newLen);
+                    endOff = Arrays.copyOf(endOff, newLen);
+                }
+            }
             for (int i = 0; i < freq; i++) {
                 int pos = c.postings.nextPosition();
                 if (pos < 0) continue;
-                int startOff = fieldHasOffsets ? c.postings.startOffset() : PostingsSink.NO_OFFSET;
-                int endOff = fieldHasOffsets ? c.postings.endOffset() : PostingsSink.NO_OFFSET;
-                posOffsets.add(new int[]{pos, startOff, endOff, collected.size()});
-                // Stash term placeholder; index into a parallel array for cheap re-lookup.
-                collected.add(new TermEntry(c.term, startOff, endOff));
-                // We'll overwrite collected entries after sort, but we need term per index.
+                // Pack pos in the high 32 bits; n in the low 32 bits as the stable tiebreak.
+                // Reinterpreting pos as unsigned via & 0xFFFFFFFFL keeps the comparison correct
+                // for any non-negative int (negatives were filtered above).
+                sortKey[n] = ((long) pos << 32) | (n & 0xFFFFFFFFL);
+                terms[n] = c.term;
+                if (offsets) {
+                    startOff[n] = c.postings.startOffset();
+                    endOff[n] = c.postings.endOffset();
+                }
+                n++;
             }
             // Advance this cursor to next doc.
             int next = c.postings.nextDoc();
@@ -166,22 +201,34 @@ final class StreamingFieldPostings9 implements StreamingFieldPostings {
                 siftDown(0);
             }
         }
+        // Persist any growth for next call.
+        scratchSortKey = sortKey;
+        scratchTerm = terms;
+        if (offsets) {
+            scratchStart = startOff;
+            scratchEnd = endOff;
+        }
 
-        if (posOffsets.isEmpty()) {
+        if (n == 0) {
             return Collections.emptyList();
         }
 
-        // Sort by position ascending; tiebreak by collected order for determinism.
-        posOffsets.sort((a, b) -> {
-            int d = Integer.compare(a[0], b[0]);
-            return d != 0 ? d : Integer.compare(a[3], b[3]);
-        });
+        // Primitive long sort — JDK 21 intrinsic, dramatically faster than ArrayList.sort with
+        // a boxed Comparator. Pos in high bits orders by position ascending; tiebreak by
+        // insertion index (low bits) gives a stable order matching the original logic.
+        Arrays.sort(sortKey, 0, n);
 
-        ArrayList<TermEntry> ordered = new ArrayList<>(posOffsets.size());
-        for (int[] po : posOffsets) {
-            TermEntry placeholder = collected.get(po[3]);
-            // collected[i] stores the correct term + offsets already.
-            ordered.add(new TermEntry(placeholder.term(), po[1], po[2]));
+        ArrayList<TermEntry> ordered = new ArrayList<>(n);
+        if (offsets) {
+            for (int k = 0; k < n; k++) {
+                int idx = (int) sortKey[k];
+                ordered.add(new TermEntry(terms[idx], startOff[idx], endOff[idx]));
+            }
+        } else {
+            for (int k = 0; k < n; k++) {
+                int idx = (int) sortKey[k];
+                ordered.add(new TermEntry(terms[idx], PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET));
+            }
         }
         return ordered;
     }
