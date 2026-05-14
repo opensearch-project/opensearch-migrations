@@ -320,6 +320,20 @@ class WorkflowTreeApp(App):
         if pod_name:
             self._logs.show_in_pager(self, pod_name, node_data.get('display_name', ''))
 
+    def action_view_resource_logs(self) -> None:
+        """View logs for a migration resource."""
+        node = self.current_node_data
+        if not node or not node.get('resource_path'):
+            return
+        resource_path = node['resource_path']
+        try:
+            from ..commands.log import get_resource_logs
+            logs = get_resource_logs(self._namespace, resource_path)
+            self._logs.show_output_texts_in_pager(
+                self, [(resource_path, logs)], resource_path, clean=True)
+        except Exception as e:
+            self.notify(f"Log error: {e}", severity="error")
+
     def action_copy_pod_name(self) -> None:
         if not self.current_node_data:
             return
@@ -395,11 +409,15 @@ class WorkflowTreeApp(App):
 
         node = self.current_node_data
         if node:
-            node_id = node.get('id')
+            node_id = node.get('id') or ''
             ntype = node.get('type')
             pod_resolved = self._pods.get_name(node_id) is not None
 
-            if ntype == NODE_TYPE_POD and pod_resolved and not is_approval_node(node):
+            if node_id.startswith('resource:'):
+                self.bind("l", "view_resource_logs", description="View Logs")
+                if self._collect_managed_output_refs():
+                    self.bind("o", "view_output", description="Show Output")
+            elif ntype == NODE_TYPE_POD and pod_resolved and not is_approval_node(node):
                 self.bind("l", "view_logs", description="View Logs")
                 if self._collect_managed_output_refs():
                     self.bind("o", "view_output", description="Show Output")
