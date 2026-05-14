@@ -328,9 +328,38 @@ def _cleanup_output_artifacts(plural, name, uid, created_at=None):
         click.echo(f"  Warning: {e}", err=True)
 
 
+def _snapshot_advisory(namespace, plural, name):
+    """Print advisory about surviving snapshot data when deleting a datasnapshots CR."""
+    if plural != 'datasnapshots':
+        return
+    try:
+        custom = client.CustomObjectsApi()
+        item = custom.get_namespaced_custom_object(
+            group=CRD_GROUP, version=CRD_VERSION,
+            namespace=namespace, plural=plural, name=name,
+        )
+        snapshot_name = item.get('status', {}).get('snapshotName')
+        if not snapshot_name:
+            return
+        labels = item.get('metadata', {}).get('labels', {})
+        source_label = labels.get('migrations.opensearch.org/source', 'source')
+        click.echo(
+            f"\n⚠️  Snapshot data will survive this reset:\n"
+            f"   Snapshot name: {snapshot_name}\n"
+            f"   Source cluster: {source_label}\n"
+            f"   To delete it manually, run:\n"
+            f"     console clusters curl {source_label} -- "
+            f"\"_snapshot/<repo-name>/{snapshot_name}\" -X DELETE\n"
+            f"   Or use: console snapshot delete\n"
+        )
+    except ApiException:
+        pass
+
+
 def _delete_and_wait(namespace, plural, name, delete_output_artifacts=True):
     """Delete a single CRD and poll until it is gone."""
     uid, created_at = _resource_metadata(namespace, plural, name)
+    _snapshot_advisory(namespace, plural, name)
     _mark_deleting(namespace, plural, name)
     _cleanup_owned_resources(namespace, plural, name)
     if delete_output_artifacts:
