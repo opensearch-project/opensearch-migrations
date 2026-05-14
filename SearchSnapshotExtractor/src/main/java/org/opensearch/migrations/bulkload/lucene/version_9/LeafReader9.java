@@ -11,6 +11,7 @@ import java.util.Map;
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
+import org.opensearch.migrations.bulkload.lucene.StreamingFieldPostings;
 
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -365,5 +366,11 @@ public class LeafReader9 implements LuceneLeafReader {
 
     public String toString() {
         return wrapped.toString();
+    }
+
+    /** See {@link LuceneLeafReader#openStreamingFieldPostings}. */
+    @Override
+    public StreamingFieldPostings openStreamingFieldPostings(String fieldName) throws IOException {
+        return new StreamingFieldPostings9(wrapped, fieldName);
     }
 }
