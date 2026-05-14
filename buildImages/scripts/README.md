@@ -1,20 +1,65 @@
 ### Minikube Test Setup
 
-#### Getting started
-Within buildImages folder:
-- `./scripts/startMinikubeAndFillWithImages.sh`: starts up minikube, image registry, builds and uploads images to registry
-  and installs helm charts needed for migration assistant. At the end of it, you will have argo (and related tooling)
-  running in your minkube setup.
+In `buildImages/scripts` you will find a bunch of scripts helping with local minikube setup / commands.
+- `fillLocalRegistry.sh`: setup of local registry and building of needed images and pushing to that local registry
+- `startMinikube.sh`: script to startup local minikube
+- `startMinikubeAndDeployCharts.sh`: combines `startMinikube.sh` with chart deployments
+- `updateArgoWorkflowTempate.sh`: simply updates `clusterWorkflows.yaml` in case changes were made to it and need update  
+  in running argo
+- `redeployMigrationConsole.sh`: removal of possible image caching in minikube and `helm upgrade` call
 
+So to start fresh, u would do (from buildImages folder):
+1. `./scripts/fillLocalRegistry.sh`
+2. `./scripts/startMinikubeAndDeployCharts.sh`
 
-#### Running Tests
-The tests, for the specified source and target versions, pull the needed charts and deploys them.
-Tests be started by:
-- from project folder (see test_runner.py):  `pipenv run app --test-ids=0001 --source-version=ES_7.10 --target-version=OS_2.19 --registry-prefix localhost:30500/`
+Then you would run tests via:
+- ssh into migrationConsole pod: `kubectl -n ma exec --stdin --tty $(kubectl get pods -n ma -l app=migration-console --sort-by=.metadata.creationTimestamp -o jsonpath="{.items[-1].metadata.name}") -- /bin/bash` 
+- within the pod, kick off the test (HOST_IP_FROM_MINIKUBE stands for the IP under which minikube has access to the host): 
+  - find the ip by which minikube has access to the host to allow pulling images from the locally deployed registry: 
+    - either from host via: `HOST_IP_FROM_MINIKUBE=$(minikube ssh -- ip route 2>/dev/null | awk '/default/ {print $3}' | tr -d '\r')`
+    - or in minikube: `export HOST_IP_FROM_MINIKUBE=$(ip route 2>/dev/null | awk '/default/ {print $3}' | tr -d '\r')`
+  - in the mac (if you determined HOST_IP_FROM_MINIKUBE on host, replace below placeholder withh respective ip or set env var in minikube after ssh into it)
+    ```
+    pipenv run pytest /root/lib/integ_test/integ_test/ma_workflow_test.py --unique_id 12345 --config_file_path "/config/migration_services.yaml" --test_ids "0001" --source_version "SOLR_6.6" --target_version "OS_2.19" --image_registry_prefix "$HOST_IP_FROM_MINIKUBE:5001/"
+    ```
+
+Alternatively you can start tests without ssh into the micrationConsole via:
+- from libraries/testAutomation/testAutomation folder (see test_runner.py):  `pipenv run app --test-ids=0001 --source-version=ES_7.10 --target-version=OS_2.19 --registry-prefix [your reachable docker registry ip]:[docker registry port]/`
   - append `--delete-only` for deletion of test related resources
-- by from within migration-console pod: 
-  - ssh into pod: `kubectl -n ma exec --stdin --tty $(kubectl get pods -n ma -l app=migration-console --sort-by=.metadata.creationTimestamp -o jsonpath="{.items[-1].metadata.name}") -- /bin/bash` 
-  - run test: `pipenv run pytest /root/lib/integ_test/integ_test/ma_workflow_test.py --unique_id 12345 --config_file_path "/config/migration_services.yaml" --test_ids "0001" --source_version "ES_7.10" --target_version "OS_2.19" --image_registry_prefix "localhost:30500/"` 
+
+For changes made to the cluster templates, note a few points about the setup:
+The argo workflows are installed via `installWorkflows.yaml`, which is run in two scenarios:
+1. `helm install` — when the migrationAssistantWithArgo chart is installed for the first time
+2. `helm upgrade` — every time the chart is upgraded
+
+Removal of templates: `helm uninstall [release-name]` deletes workflow templates by pre-delete hook `remove-argo-migration-templates`
+that deletes all WorkflowTemplates labelled with the release name passed to helm uninstall cmd.
+
+`fullMigrationWithClusters.yaml` calls sub-templates from `clusterWorkflows.yaml`, e.g `cluster-templates/elasticsearch-7-10-single-node`,
+thus `clusterWorkflows.yaml` are lib of reusable steps, not a runnable workflow by itself.
+
+If you make changes to clusterWorkflow (such as for adjustment or addition of source / target systems), you can simply 
+update them without touching the other setup with: `kubectl apply -f ../migrationConsole/lib/integ_test/testWorkflows/clusterWorkflows.yaml -n ma`
+
+
+### NOTES
+- if you touch the regexes that do version checks in javascript, you might need to update the jest snapshot:
+  - `cd orchestrationSpecs/packages/schemas`
+  - `npm test -- --updateSnapshot`
+- port forward for solr access: `kubectl port-forward [solr-pod-name] 8983:8983 -n ma`
+  - ClusterVersionDetector detectSolrVersion call in workflow uses `curl -X get http://localhost:8983/solr/admin/info/system?wt=json`
+    and tries to parse `lucene.solr-spec-version` to determine solr version to use (NOTE: Solr version 7.x and higher default to json output, Solr 6.x needs the wt=json parameter)
+- in case you use colima and are getting connection / dns issues: `colima start --dns 1.1.1.1 --dns 8.8.8.8`
+- in case you use colima, start colima with `colima start --edit` and make sure the resources in the `startMinikubeAndDeployCharts.sh`.
+  script are less or equal the resources configured for colima.
+- redeploy migrationConsole only:
+```
+helm template ma ../deployment/k8s/charts/aggregates/migrationAssistantWithArgo \                                                                    
+    -n ma \       
+    --show-only templates/resources/migrationConsole.yaml \                                                                                            
+    -f <(envsubst < ../deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8sWithEnvSubst.yaml) \
+    | kubectl apply -n ma -f -
+```
 
 
 #### Port Forwarding
@@ -24,113 +69,24 @@ Tests be started by:
 
 #### Commands
 - see complete installation notes from all subcharts: `kubectl get configmap ma-installation-notes -n ma -o jsonpath='{.data.all-notes\.txt}' | less`
-- open bash in migration console: `kubectl -n ma exec --stdin --tty $(kubectl get pods -n ma -l app=migration-console --sort-by=.metadata.creationTimestamp -o jsonpath="{.items[-1].metadata.name}") -- /bin/bash`
-  - can run tests directly from here via test_runner.py: `pipenv run pytest /root/lib/integ_test/integ_test/ma_workflow_test.py --unique_id 12345 --config_file_path "/config/migration_services.yaml" --test_ids "0001" --source_version "ES_7.10" --target_version "OS_2.19" --image_registry_prefix "localhost:30500/"`
-- from libraries/testAutomation/testAutomation folder (calling test_runner.py): 
-  - ElasticSearch example: `pipenv run app --dev --test-ids=0001 --source-version=ES_7.10 --target-version=OS_2.19 --registry-prefix localhost:30500/ --copy-logs`
-  - Solr example: `pipenv run app --dev --test-ids=0001 --source-version=SOLR_8.11 --target-version=OS_2.19 --registry-prefix localhost:30500/ --copy-logs`
-- to delete the deployment corresponding to above tests use `--delete-only` flag:
-  - `pipenv run app --delete-only`
 - ssh into minikube runtime: `minikube ssh`
 - get migration assistant related services with labels: `kubectl get services -n ma --show-labels`
-- describe specific workload pod (e.g to identify issues): `kubectl -n ma describe pod/migration-workflow-3847500648-rfs-64465d8588-k5zd2`
+- describe specific workload pod: `kubectl -n ma describe pod/migration-workflow-3847500648-rfs-64465d8588-k5zd2`
 - get logs for multiple pods with specific label: `kubectl logs -l workflows.argoproj.io/workflow=migration-workflow --all-pods=true -n ma`
 - checking disk usage within minikube: `minikube ssh -- df -h`
 - delete namespace: `kubectl delete namespace [your-namespace]`
 
 
-#### Other
-- images are defined in `clusterWorkflows.yaml` (here custom elastic image is referenced with tag)
-  - Retrieve available version tags: `curl http://localhost:5001/v2/migrations/custom-elasticsearch/tags/list`
-    - should find all / some of: `"2.4.6","6.8.23","cache_arm64","1.5.2","7.10.2","5.6.16"`
-
-
-#### Docker Runtime
-- in case you use colima, start colima with `colima start --edit` and make sure the resources in the startMinikubeAndFillWithImages.sh
-  script are less or equal the resources configured for colima.
-
 #### Troubleshoot
 There is one step of the workflow that claims 200gb of storage,
 thus if your minikube setup doesnt have that configured (--disk-size param)
 or if your docker runtime is not configured to allow the required
-amount of space, then your workflow wont run through.
-Example describe output:
+amount of space, then your workflow wont run through. Either reduce the ephemeral storage ask or provide the correct
+amount of space.
+Example workflow for high disc requirement if unchanged:
 ```
 Name:             migration-workflow-4035117585-rfs-ddc47b868-hzlvr
 Namespace:        ma
 Priority:         0
 Service Account:  argo-workflow-executor
-Node:             <none>
-Labels:           app=bulk-loader
-                  deployment-name=migration-workflow-4035117585-rfs
-                  migrations.opensearch.org/from-snapshot-migration=migration-0
-                  migrations.opensearch.org/snapshot=testsnapshot
-                  migrations.opensearch.org/source=source1
-                  migrations.opensearch.org/target=target1
-                  migrations.opensearch.org/task=reindexFromSnapshot
-                  pod-template-hash=ddc47b868
-                  workflows.argoproj.io/workflow=migration-workflow
-Annotations:      kyverno.io/mutated-by: zero-resource-requests
-Status:           Pending
-IP:               
-IPs:              <none>
-Controlled By:    ReplicaSet/migration-workflow-4035117585-rfs-ddc47b868
-Containers:
-  bulk-loader:
-    Image:      localhost:30500/migrations/reindex_from_snapshot:latest
-    Port:       <none>
-    Host Port:  <none>
-    Command:
-      /rfs-app/runJavaWithClasspathWithRepeat.sh
-    Args:
-      org.opensearch.migrations.RfsMigrateDocuments
-      ---INLINE-JSON
-      ...
-    Limits:
-      cpu:                3300m
-      ephemeral-storage:  200Gi
-      memory:             7000Mi
-    Requests:
-      cpu:                0
-      ephemeral-storage:  200Gi
-      memory:             0
-    Environment:
-      TARGET_USERNAME:               <set to the key 'username' in secret 'target-opensearch-2-19-e173d262-creds'>  Optional: true
-      TARGET_PASSWORD:               <set to the key 'password' in secret 'target-opensearch-2-19-e173d262-creds'>  Optional: true
-      COORDINATOR_USERNAME:          <set to the key 'username' in secret 'target-opensearch-2-19-e173d262-creds'>  Optional: true
-      COORDINATOR_PASSWORD:          <set to the key 'password' in secret 'target-opensearch-2-19-e173d262-creds'>  Optional: true
-      FAILED_REQUESTS_LOGGER_LEVEL:  OFF
-      CONSOLE_LOG_FORMAT:            json
-      JDK_JAVA_OPTIONS:               
-      AWS_SHARED_CREDENTIALS_FILE:   /config/credentials/configuration
-    Mounts:
-      /config/credentials from localstack-test-creds (ro)
-      /config/logConfiguration from log4j-configuration (ro)
-      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-m2mff (ro)
-Conditions:
-  Type           Status
-  PodScheduled   False 
-Volumes:
-  log4j-configuration:
-    Type:      ConfigMap (a volume populated by a ConfigMap)
-    Name:      default-log4j-config
-    Optional:  true
-  localstack-test-creds:
-    Type:      ConfigMap (a volume populated by a ConfigMap)
-    Name:      localstack-test-creds
-    Optional:  false
-  kube-api-access-m2mff:
-    Type:                    Projected (a volume that contains injected data from multiple sources)
-    TokenExpirationSeconds:  3607
-    ConfigMapName:           kube-root-ca.crt
-    Optional:                false
-    DownwardAPI:             true
-QoS Class:                   Burstable
-Node-Selectors:              <none>
-Tolerations:                 node.kubernetes.io/not-ready:NoExecute op=Exists for 300s
-                             node.kubernetes.io/unreachable:NoExecute op=Exists for 300s
-Events:
-  Type     Reason            Age               From               Message
-  ----     ------            ----              ----               -------
-  Warning  FailedScheduling  4s (x7 over 95s)  default-scheduler  0/1 nodes are available: 1 Insufficient ephemeral-storage. no new claims to deallocate, preemption: 0/1 nodes are available: 1 Preemption is not helpful for scheduling.
 ```
