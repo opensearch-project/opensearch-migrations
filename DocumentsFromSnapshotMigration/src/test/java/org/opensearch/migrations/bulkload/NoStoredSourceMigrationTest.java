@@ -179,6 +179,20 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
         );
     }
 
+    /**
+     * Argument provider for ES-7.10-only matrix cells. The targeted reconstruction
+     * cases below (norms:false source-disabled recovery, mixed source-posture
+     * copy_to in a single index, strict per-element object-array text
+     * reconstruction) are pinned to ES 7.10.2 by design — they exercise codec-
+     * version- and mapping-shape-specific recovery paths whose semantics on other
+     * source versions are out of scope for the targeted regression guard.
+     */
+    static Stream<Arguments> es710OnlyPair() {
+        return Stream.of(
+            Arguments.of(SearchClusterContainer.ES_V7_10_2, SearchClusterContainer.OS_V3_5_0)
+        );
+    }
+
     @TempDir
     private File localDirectory;
 
@@ -1876,6 +1890,347 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             }
             assertEquals(Set.of("a.txt", "b.txt", "c.txt"), names,
                 "names from _source.includes must be preserved on every element: " + files);
+        }
+    }
+
+    /**
+     * ES-7.10 only. Verifies sourceless reconstruction of {@code text} fields with
+     * {@code norms:false} when {@code _source.enabled:false}.
+     * <p>
+     * Two recovery postures in the same index:
+     * <ul>
+     *   <li>{@code body_stored} — text + norms:false + store:true: must be recovered
+     *       byte-exact from stored fields.</li>
+     *   <li>{@code body_tokens} — text + norms:false + store:false (no doc_values
+     *       on text): not recoverable byte-exact; reconstruction must produce a
+     *       non-empty value derived from the term dictionary tokens. We assert
+     *       presence and analyzer-normalised token equivalence rather than byte
+     *       equality.</li>
+     * </ul>
+     */
+    @ParameterizedTest(name = "normsFalseSourceDisabled: {0} -> {1}")
+    @MethodSource("es710OnlyPair")
+    public void testNormsFalseSourceDisabledRecovery(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "norms_false_source_disabled_test";
+
+            // Mapping: two text fields, both with norms:false; one stored, one not.
+            String propertiesJson =
+                "\"properties\":{"
+                + "\"body_stored\":{\"type\":\"text\",\"norms\":false,\"store\":true},"
+                + "\"body_tokens\":{\"type\":\"text\",\"norms\":false,\"store\":false}"
+                + "}";
+
+            // ES 7.10 declares _source at the mappings root.
+            String indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{\"_source\":{\"enabled\":false}," + propertiesJson + "}}";
+
+            String storedText = "Hello World From Sourceless";
+            String tokensText = "alpha beta gamma delta epsilon";
+            String doc = "{\"body_stored\":\"" + storedText + "\","
+                + "\"body_tokens\":\"" + tokensText + "\"}";
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc, null, null);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            // Target keeps _source enabled (default) so we can read back what RFS wrote.
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + propertiesJson + "}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            log.info("Target search response: {}", response);
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertFalse(hits.isEmpty(), "No documents migrated. Response: " + response);
+
+            JsonNode source = hits.get(0).path("_source");
+            log.info("Reconstructed _source: {}", source);
+
+            // body_stored: stored fields path → exact recovery.
+            assertEquals(storedText, source.path("body_stored").asText(),
+                "store:true text + norms:false must reconstruct byte-exact. _source=" + source);
+
+            // body_tokens: not byte-exact; must be present and contain analyzer
+            // tokens. Lowercased standard analyzer tokens of "alpha beta gamma
+            // delta epsilon" are the same words; assert the full token set.
+            String reconstructedTokens = source.path("body_tokens").asText().toLowerCase();
+            assertFalse(reconstructedTokens.isEmpty(),
+                "store:false text + norms:false + source-disabled must reconstruct from tokens "
+                + "(non-empty), got empty. _source=" + source);
+            for (String tok : List.of("alpha", "beta", "gamma", "delta", "epsilon")) {
+                assertTrue(reconstructedTokens.contains(tok),
+                    "tokens-only reconstruction missing analyzer token '" + tok
+                    + "'. reconstructed=" + reconstructedTokens);
+            }
+        }
+    }
+
+    /**
+     * ES-7.10 only. Verifies sourceless reconstruction in a SINGLE index where
+     * two source fields with {@code copy_to} share a target field but have
+     * different {@code _source} postures: {@code foo} is included by default,
+     * {@code baz} is excluded via {@code _source.excludes}.
+     * <p>
+     * Two corners covered as separate documents in the same index:
+     * <ul>
+     *   <li>doc id 1: both populated. {@code foo} must reconstruct to its own
+     *       value; {@code baz} must NOT appear in {@code _source} (mapping
+     *       declared excludes).</li>
+     *   <li>doc id 2: {@code foo} empty, {@code baz} populated. The empty
+     *       {@code foo} must remain empty/absent — reconstruction must NOT bleed
+     *       {@code baz}'s tokens through the shared {@code copy_to bar} target
+     *       back into {@code foo}.</li>
+     * </ul>
+     */
+    @ParameterizedTest(name = "copyToMixedSourcePosture: {0} -> {1}")
+    @MethodSource("es710OnlyPair")
+    public void testCopyToWithMixedSourcePosture(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "copy_to_mixed_source_posture_test";
+
+            // foo & baz: text, both copy_to "bar". bar: text target.
+            // foo's source posture = default (included). baz: excluded via _source.excludes.
+            String propertiesJson =
+                "\"properties\":{"
+                + "\"foo\":{\"type\":\"text\",\"copy_to\":[\"bar\"]},"
+                + "\"baz\":{\"type\":\"text\",\"copy_to\":[\"bar\"]},"
+                + "\"bar\":{\"type\":\"text\"}"
+                + "}";
+
+            String sourceFilterJson = "\"_source\":{\"excludes\":[\"baz\"]}";
+
+            String indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + sourceFilterJson + "," + propertiesJson + "}}";
+
+            // doc 1: both populated.
+            String doc1 = "{\"foo\":\"foo-one\",\"baz\":\"baz-one\"}";
+            // doc 2: foo empty (explicit empty string), baz populated.
+            String doc2 = "{\"foo\":\"\",\"baz\":\"baz-two\"}";
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc1, null, null);
+            sourceOps.createDocument(indexName, "2", doc2, null, null);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            // Target keeps both copy_to declarations and OMITS the source filter so
+            // we can read what RFS wrote.
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + propertiesJson + "}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search?size=10").getValue();
+            log.info("Target search response: {}", response);
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertEquals(2, hits.size(), "Expected 2 docs migrated. Response: " + response);
+
+            // Index hits by id for stable assertions regardless of search order.
+            JsonNode src1 = null;
+            JsonNode src2 = null;
+            for (JsonNode hit : hits) {
+                String id = hit.path("_id").asText();
+                if ("1".equals(id)) src1 = hit.path("_source");
+                else if ("2".equals(id)) src2 = hit.path("_source");
+            }
+            assertNotNull(src1, "missing doc id=1. Response: " + response);
+            assertNotNull(src2, "missing doc id=2. Response: " + response);
+
+            // doc 1: foo present (own value), baz absent (excluded), bar must NOT
+            // appear in reconstructed _source (it's a copy_to target — never in _source).
+            assertEquals("foo-one", src1.path("foo").asText(),
+                "doc 1: foo must reconstruct to own value. _source=" + src1);
+            assertTrue(src1.path("baz").isMissingNode() || src1.path("baz").asText().isEmpty(),
+                "doc 1: baz must be excluded from reconstructed _source. _source=" + src1);
+            assertTrue(src1.path("bar").isMissingNode(),
+                "doc 1: bar (copy_to target) must not appear in reconstructed _source. _source=" + src1);
+
+            // doc 2: foo MUST remain empty/absent — no token bleed from baz via shared bar.
+            // baz must still be excluded. bar still absent.
+            JsonNode foo2 = src2.path("foo");
+            assertTrue(foo2.isMissingNode() || foo2.asText().isEmpty(),
+                "doc 2: empty foo must NOT be reconstructed with bleed-through tokens "
+                + "from baz via shared copy_to target bar. _source=" + src2);
+            assertTrue(src2.path("baz").isMissingNode() || src2.path("baz").asText().isEmpty(),
+                "doc 2: baz must be excluded from reconstructed _source. _source=" + src2);
+            assertTrue(src2.path("bar").isMissingNode(),
+                "doc 2: bar (copy_to target) must not appear in reconstructed _source. _source=" + src2);
+        }
+    }
+
+    /**
+     * ES-7.10 only. STRICT per-element reconstruction guard for non-nested
+     * object arrays whose text+text subfields are NOT in _source and whose
+     * doc_values are disabled. The reconstructor must rely on the term
+     * dictionary's per-document positional information to attribute tokens
+     * back to the correct element of the array.
+     * <p>
+     * The values are deliberately chosen so analyzer-normalised tokens are
+     * single-word per cell (no phrase tokenisation surprises), which lets us
+     * assert per-element exact equality after lowercasing.
+     * <p>
+     * If the reconstructor cannot maintain per-element attribution under these
+     * conditions (i.e. tokens bleed across array elements), this test surfaces
+     * that as a hard failure rather than the soft "approximate binding" caveat
+     * documented on the keyword/long subfield case in
+     * {@link #testObjectArraySubfieldDistributionApproximateBinding}.
+     */
+    @ParameterizedTest(name = "objectArrayTextStrict: {0} -> {1}")
+    @MethodSource("es710OnlyPair")
+    public void testObjectArrayTextKeywordPhraseReconstruction(
+        ContainerVersion sourceVersion, ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var sourceCluster = new SearchClusterContainer(sourceVersion);
+            var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            sourceCluster.start();
+            targetCluster.start();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            String indexName = "object_array_text_strict_test";
+
+            String propsBody = "\"properties\":{"
+                + "\"arr\":{\"type\":\"object\",\"properties\":{"
+                + "\"foo\":{\"type\":\"text\",\"doc_values\":false},"
+                + "\"bar\":{\"type\":\"text\",\"doc_values\":false}"
+                + "}}}";
+            String sourceDirective = "\"_source\":{\"excludes\":[\"arr.*\"]},";
+
+            String indexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + sourceDirective + propsBody + "}}";
+
+            // User's literal example. Single-word foo cells; multi-word bar cells.
+            String doc = "{\"arr\":["
+                + "{\"foo\":\"this\",\"bar\":\"one two three\"},"
+                + "{\"foo\":\"tomorrow\",\"bar\":\"four five six\"}"
+                + "]}";
+
+            log.info("Source version: {}, Target version: {}", sourceVersion, targetVersion);
+            log.info("Index body: {}", indexBody);
+            log.info("Document: {}", doc);
+
+            sourceOps.createIndex(indexName, indexBody);
+            sourceOps.createDocument(indexName, "1", doc, null, null);
+            sourceOps.post("/_refresh", null);
+
+            var snapshotCtx = SnapshotTestContext.factory().noOtelTracking();
+            createSnapshot(sourceCluster, "snap", snapshotCtx);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            String targetIndexBody = "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},"
+                + "\"mappings\":{" + propsBody + "}}";
+            targetOps.createIndex(indexName, targetIndexBody);
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+
+            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                sourceRepo, "snap", List.of(indexName), targetCluster,
+                new AtomicInteger(), new Random(1), docCtx,
+                sourceCluster.getContainerVersion().getVersion(),
+                targetCluster.getContainerVersion().getVersion()
+            ));
+
+            targetOps.post("/_refresh", null);
+            String response = targetOps.get("/" + indexName + "/_search").getValue();
+            JsonNode root = MAPPER.readTree(response);
+            JsonNode hits = root.path("hits").path("hits");
+            assertFalse(hits.isEmpty(), "No document migrated. Response: " + response);
+            JsonNode source = hits.get(0).path("_source");
+            log.info("Reconstructed _source: {}", source);
+
+            JsonNode arr = source.path("arr");
+            assertTrue(arr.isArray(),
+                "arr must remain an object-array, not collapse to columnar. _source=" + source);
+            assertEquals(2, arr.size(),
+                "arr length must be preserved (2 elements). _source=" + source);
+
+            // STRICT per-element assertion. Lowercase compare to normalise the
+            // analyzer; reconstruction may emit tokens in lower case.
+            JsonNode e0 = arr.get(0);
+            JsonNode e1 = arr.get(1);
+
+            String e0Foo = e0.path("foo").asText().trim().toLowerCase();
+            String e0Bar = e0.path("bar").asText().trim().toLowerCase();
+            String e1Foo = e1.path("foo").asText().trim().toLowerCase();
+            String e1Bar = e1.path("bar").asText().trim().toLowerCase();
+
+            assertEquals("this", e0Foo,
+                "element 0 foo must reconstruct strictly. _source=" + source);
+            assertEquals("one two three", e0Bar,
+                "element 0 bar must reconstruct strictly (no token bleed across elements). _source=" + source);
+            assertEquals("tomorrow", e1Foo,
+                "element 1 foo must reconstruct strictly. _source=" + source);
+            assertEquals("four five six", e1Bar,
+                "element 1 bar must reconstruct strictly (no token bleed across elements). _source=" + source);
         }
     }
 
