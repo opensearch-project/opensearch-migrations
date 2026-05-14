@@ -29,6 +29,10 @@ public class LuceneReader {
     /** Concurrency for flatMapSequential within a segment — matches the scheduler thread count. */
     private static final int SEGMENT_READ_CONCURRENCY = 100;
 
+    /** Concurrency for sourceless reconstruction: must be 1 because cached DocValues iterators
+     *  are not thread-safe and require strictly ascending docId access. */
+    private static final int RECONSTRUCTION_READ_CONCURRENCY = 1;
+
     private LuceneReader() {}
 
     /* Start reading docs from a specific segment and document id.
@@ -145,6 +149,24 @@ public class LuceneReader {
             s == null ? segmentReader.toString() : s
         );
 
+        // Cache DocValues iterators for the segment when reconstruction is active.
+        // Since docs are processed sequentially in ascending order, iterators only advance
+        // forward — eliminating the per-doc re-acquisition overhead.
+        final SegmentDocValueReader dvReader;
+        if (mappingContext != null) {
+            try {
+                dvReader = new SegmentDocValueReader(segmentReader);
+            } catch (IOException e) {
+                return Flux.error(new RuntimeException("Failed to initialize SegmentDocValueReader", e));
+            }
+        } else {
+            dvReader = null;
+        }
+
+        final int readConcurrency = (mappingContext != null)
+            ? RECONSTRUCTION_READ_CONCURRENCY
+            : SEGMENT_READ_CONCURRENCY;
+
         log.atDebug().setMessage("For segment: {}, migrating from doc: {}. Will process {} docs in segment.")
                 .addArgument(readerAndBase.getReader())
                 .addArgument(startDocIdInSegment)
@@ -167,8 +189,11 @@ public class LuceneReader {
                         return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
-                }).subscribeOn(LUCENE_IO_SCHEDULER), SEGMENT_READ_CONCURRENCY, 1)
-            .doFinally(sig -> termIndex.close());
+                }).subscribeOn(LUCENE_IO_SCHEDULER), readConcurrency, 1)
+            .doFinally(sig -> {
+                if (dvReader != null) dvReader.close();
+                termIndex.close();
+            });
     }
 
     /** Backwards-compatible overload without mapping context */
