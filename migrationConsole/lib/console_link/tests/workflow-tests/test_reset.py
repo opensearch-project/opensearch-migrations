@@ -12,6 +12,7 @@ from console_link.workflow.commands.reset import (
     _find_ancestors,
     _find_dependents,
     _prune_ancestors_of_protected_proxies,
+    _snapshot_advisory,
 )
 
 
@@ -317,3 +318,67 @@ class TestResetAll:
 
         assert result.exit_code == 0
         mock_delete_targets.assert_called_once_with([resource], 'ma', False)
+
+
+class TestSnapshotAdvisory:
+    @patch('console_link.workflow.commands.reset.client')
+    def test_advisory_prints_snapshot_name_for_datasnapshots(self, mock_client):
+        mock_custom = Mock()
+        mock_client.CustomObjectsApi.return_value = mock_custom
+        mock_custom.get_namespaced_custom_object.return_value = {
+            'metadata': {
+                'labels': {
+                    'migrations.opensearch.org/source': 'source',
+                    'migrations.opensearch.org/snapshot': 'snap1',
+                }
+            },
+            'status': {
+                'snapshotName': 'source_snap1_1778642920',
+                'phase': 'Completed',
+            },
+        }
+
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch('console_link.workflow.commands.reset.click') as mock_click:
+                captured = []
+                mock_click.echo = lambda msg, **kw: captured.append(msg)
+                _snapshot_advisory('ma', 'datasnapshots', 'snap-a')
+
+            full_output = '\n'.join(captured)
+            assert 'source_snap1_1778642920' in full_output
+            assert '_snapshot' in full_output
+            assert 'DELETE' in full_output
+            assert 'console clusters curl source' in full_output
+
+    @patch('console_link.workflow.commands.reset.client')
+    def test_advisory_skips_non_datasnapshot_types(self, mock_client):
+        mock_custom = Mock()
+        mock_client.CustomObjectsApi.return_value = mock_custom
+
+        from click.testing import CliRunner
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            with patch('console_link.workflow.commands.reset.click') as mock_click:
+                captured = []
+                mock_click.echo = lambda msg, **kw: captured.append(msg)
+                _snapshot_advisory('ma', 'trafficreplays', 'replay-a')
+
+            assert captured == []
+            mock_custom.get_namespaced_custom_object.assert_not_called()
+
+    @patch('console_link.workflow.commands.reset.client')
+    def test_advisory_skips_when_no_snapshot_name_in_status(self, mock_client):
+        mock_custom = Mock()
+        mock_client.CustomObjectsApi.return_value = mock_custom
+        mock_custom.get_namespaced_custom_object.return_value = {
+            'metadata': {'labels': {}},
+            'status': {'phase': 'Initialized'},
+        }
+
+        with patch('console_link.workflow.commands.reset.click') as mock_click:
+            captured = []
+            mock_click.echo = lambda msg, **kw: captured.append(msg)
+            _snapshot_advisory('ma', 'datasnapshots', 'snap-a')
+
+        assert captured == []
