@@ -61,25 +61,22 @@ jobs:
       run_k8s_local: ${{ github.event_name == 'push' || steps.check.outputs.run_k8s_local != 'false' }}
       run_docker: ${{ github.event_name == 'push' || steps.check.outputs.run_docker != 'false' }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
       - name: Check for relevant changes
         id: check
         if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # Use GitHub API to get changed files — no full clone needed.
+          # For PRs: paginated files API (handles up to 3000 files).
+          # For merge_group: compare API between base and head SHAs.
           if [ "${{ github.event_name }}" = "merge_group" ]; then
-            BASE=${{ github.event.merge_group.base_sha }}
-            HEAD=${{ github.event.merge_group.head_sha }}
+            CHANGED=$(gh api repos/${{ github.repository }}/compare/${{ github.event.merge_group.base_sha }}...${{ github.event.merge_group.head_sha }} \
+              --jq '.files[].filename' 2>/dev/null || echo "")
           else
-            BASE=${{ github.event.pull_request.base.sha }}
-            HEAD=${{ github.event.pull_request.head.sha }}
+            CHANGED=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files \
+              --paginate --jq '.[].filename' 2>/dev/null || echo "")
           fi
-          # Fetch both SHAs (pull_request_target only checks out base branch)
-          git fetch origin "$BASE" "$HEAD" --depth=1 2>/dev/null || true
-          CHANGED=$(git diff --name-only "$BASE"..."$HEAD" 2>/dev/null || \
-                    git diff --name-only "$BASE".."$HEAD" 2>/dev/null || \
-                    echo "")
           echo "Changed files:"
           echo "$CHANGED"
           if [ -z "$CHANGED" ]; then
