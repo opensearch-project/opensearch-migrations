@@ -197,6 +197,17 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             return;
         }
 
+        var removedTokenFilters = invalidResponse.getRemovedTokenFilters();
+        if (!removedTokenFilters.isEmpty()) {
+            // The settings ObjectNode is the inner "settings" body; pass it through a synthetic
+            // wrapper so the utility can locate analysis.analyzer.<name>.filter consistently.
+            var wrapper = mapper.createObjectNode();
+            wrapper.set("settings", settings);
+            ObjectNodeUtils.removeAnalyzerFilters(wrapper, removedTokenFilters);
+            log.info("Reattempting creation of index '{}' after removing removed token filters: {}", indexName, removedTokenFilters);
+            return;
+        }
+
         var unsupportedMappingParams = invalidResponse.getUnsupportedMappingParameters();
 
         if (!unsupportedMappingParams.isEmpty()) {

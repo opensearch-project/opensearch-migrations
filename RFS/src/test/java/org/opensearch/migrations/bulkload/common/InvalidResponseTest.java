@@ -276,6 +276,46 @@ class InvalidResponseTest {
     }
 
     @Test
+    void testGetRemovedTokenFilters_topLevel() {
+        var errorBody = "{\r\n" +
+            "  \"error\": {\r\n" +
+            "    \"root_cause\": [\r\n" +
+            "      {\r\n" +
+            "        \"type\": \"illegal_argument_exception\",\r\n" +
+            "        \"reason\": \"The [standard] token filter has been removed.\"\r\n" +
+            "      }\r\n" +
+            "    ],\r\n" +
+            "    \"type\": \"illegal_argument_exception\",\r\n" +
+            "    \"reason\": \"The [standard] token filter has been removed.\"\r\n" +
+            "  },\r\n" +
+            "  \"status\": 400\r\n" +
+            "}";
+        var response = new HttpResponse(400, "Bad Request", Map.of(), errorBody);
+        var iar = new InvalidResponse("ignored", response);
+
+        var result = iar.getRemovedTokenFilters();
+
+        assertThat(result, containsInAnyOrder("standard"));
+    }
+
+    @Test
+    void testGetRemovedTokenFilters_noMatch() {
+        var errorBody = "{\r\n" +
+            "  \"error\": {\r\n" +
+            "    \"type\": \"illegal_argument_exception\",\r\n" +
+            "    \"reason\": \"unknown setting [index.creation_date]\"\r\n" +
+            "  },\r\n" +
+            "  \"status\": 400\r\n" +
+            "}";
+        var response = new HttpResponse(400, "Bad Request", Map.of(), errorBody);
+        var iar = new InvalidResponse("ignored", response);
+
+        var result = iar.getRemovedTokenFilters();
+
+        assertThat(result, empty());
+    }
+
+    @Test
     void testGetUnsupportedMappingParameters_notMappingError() {
         var errorBody = "{\r\n" +
             "  \"error\": {\r\n" +

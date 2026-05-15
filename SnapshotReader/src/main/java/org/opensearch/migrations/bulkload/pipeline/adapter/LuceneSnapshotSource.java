@@ -56,6 +56,8 @@ public class LuceneSnapshotSource implements DocumentSource {
     // When true, treat _recovery_source as _source if present
     private final boolean useRecoverySource;
 
+    private final LuceneAdapter luceneAdapter;
+
     private LuceneSnapshotSource(Builder builder) {
         this.extractor = builder.extractor;
         this.snapshotName = builder.snapshotName;
@@ -66,6 +68,7 @@ public class LuceneSnapshotSource implements DocumentSource {
         this.deltaContextFactory = builder.deltaContextFactory;
         this.sourcelessMappingContextProvider = builder.sourcelessMappingContextProvider;
         this.useRecoverySource = builder.useRecoverySource;
+        this.luceneAdapter = new LuceneAdapter(builder.emitDocType);
     }
 
     public static Builder builder(SnapshotExtractor extractor, String snapshotName, Path workDir) {
@@ -82,6 +85,7 @@ public class LuceneSnapshotSource implements DocumentSource {
         private Supplier<IRfsContexts.IDeltaStreamContext> deltaContextFactory;
         private Function<String, FieldMappingContext> sourcelessMappingContextProvider;
         private boolean useRecoverySource;
+        private boolean emitDocType;
 
         private Builder(SnapshotExtractor extractor, String snapshotName, Path workDir) {
             this.extractor = extractor;
@@ -114,6 +118,11 @@ public class LuceneSnapshotSource implements DocumentSource {
 
         public Builder useRecoverySource(boolean useRecoverySource) {
             this.useRecoverySource = useRecoverySource;
+            return this;
+        }
+
+        public Builder emitDocType(boolean emitDocType) {
+            this.emitDocType = emitDocType;
             return this;
         }
 
@@ -199,7 +208,7 @@ public class LuceneSnapshotSource implements DocumentSource {
             log.info("Reading delta documents from {} (mode={}, offset={})", partition, deltaMode, startingDocOffset);
             return extractor.readDeltaDocuments(entry, previousEntry, deltaMode, workDir, deltaContextFactory)
                 .skip(startingDocOffset)
-                .map(LuceneAdapter::fromLucene);
+                .map(luceneAdapter::fromLucene);
         }
 
         return readRegularDocuments(entry, partition, startingDocOffset);
@@ -214,7 +223,7 @@ public class LuceneSnapshotSource implements DocumentSource {
             ? sourcelessMappingContextProvider.apply(esPartition.indexName())
             : null;
         return extractor.readDocuments(entry, workDir, Math.toIntExact(startingDocOffset), mappingContext, useRecoverySource)
-            .map(LuceneAdapter::fromLucene);
+            .map(luceneAdapter::fromLucene);
     }
 
     private SnapshotExtractor.ShardEntry resolveShardEntry(

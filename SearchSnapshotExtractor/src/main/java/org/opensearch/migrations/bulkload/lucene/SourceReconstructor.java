@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -44,11 +45,53 @@ public class SourceReconstructor {
         if (fieldName.startsWith("_")) {
             return true;
         }
+        // Only skip copy_to targets (index-time duplicates that never appear in original _source).
+        // Do NOT skip source-excluded fields — those need reconstruction (that's the whole point).
+        if (mappingContext != null && mappingContext.isCopyToTarget(fieldName)) {
+            return true;
+        }
         if (!fieldName.contains(".")) {
             return false;
         }
         // Dotted field: keep it only if the mapping recognizes it as an object subfield.
         return mappingContext == null || mappingContext.getFieldInfo(fieldName) == null;
+    }
+
+    /**
+     * Returns {@code true} when {@code fieldName} is a dotted path whose ancestor segment already
+     * resolves to a non-empty {@code List<Map>} in {@code target} — i.e. the seed's object-array
+     * structure is already in place and we're filling subfields into it. This is the legitimate
+     * carve-out from a {@code _source.includes}/{@code _source.excludes} suppression: when the
+     * customer's mapping declared {@code _source.includes=["files.name"]}, the {@code files}
+     * object-array IS in scope (the parent path is included). Subsequent reverse-derivation of
+     * sibling subfields (e.g. {@code files.size}) is filling out the kept structural element, not
+     * resurrecting an excluded top-level field. The caller still consults {@link #shouldSkipField}
+     * for top-level paths and for paths whose ancestor isn't an existing object-array seed.
+     */
+    @SuppressWarnings("unchecked")
+    private static boolean descendsIntoExistingObjectArray(Map<String, Object> target, String fieldName) {
+        int dot = fieldName.indexOf('.');
+        if (dot < 0) {
+            return false;
+        }
+        Map<String, Object> cursor = target;
+        int start = 0;
+        while (dot >= 0) {
+            String segment = fieldName.substring(start, dot);
+            int nextDot = fieldName.indexOf('.', dot + 1);
+            Object next = cursor.get(segment);
+            if (next instanceof java.util.List<?> list && (isListOfMaps(list) || list.isEmpty())) {
+                return nextDot < 0;
+            }
+            if (next instanceof Map<?, ?>) {
+                cursor = (Map<String, Object>) next;
+                start = dot + 1;
+                dot = nextDot;
+                continue;
+            }
+            return false;
+        }
+        return false;
     }
 
     /**
@@ -93,57 +136,71 @@ public class SourceReconstructor {
         if (target.containsKey(fieldName)) {
             return false;
         }
-        String[] parts = fieldName.split("\\.");
         Map<String, Object> cursor = target;
-        for (int i = 0; i < parts.length - 1; i++) {
-            Object next = cursor.get(parts[i]);
+        int start = 0;
+        int dot = fieldName.indexOf('.');
+        while (dot >= 0) {
+            String segment = fieldName.substring(start, dot);
+            int nextDot = fieldName.indexOf('.', dot + 1);
+            boolean isLastParent = nextDot < 0;
+            Object next = cursor.get(segment);
             if (next instanceof Map<?, ?> map) {
                 cursor = (Map<String, Object>) map;
+                start = dot + 1;
+                dot = nextDot;
             } else if (next == null) {
+                if (isLastParent && value instanceof java.util.List<?> valueList
+                        && shouldSeedObjectArray(valueList)) {
+                    java.util.List<Object> seeded = new java.util.ArrayList<>(valueList.size());
+                    for (int k = 0; k < valueList.size(); k++) {
+                        seeded.add(new LinkedHashMap<String, Object>());
+                    }
+                    cursor.put(segment, seeded);
+                    return distributeSubfieldAcrossList(seeded, fieldName.substring(dot + 1), value, fieldName);
+                }
                 Map<String, Object> child = new LinkedHashMap<>();
-                cursor.put(parts[i], child);
+                cursor.put(segment, child);
                 cursor = child;
+                start = dot + 1;
+                dot = nextDot;
+            } else if (next instanceof java.util.List<?> emptyList && emptyList.isEmpty()
+                    && isLastParent
+                    && value instanceof java.util.List<?> valueList
+                    && shouldSeedObjectArray(valueList)) {
+                java.util.List<Object> seeded = new java.util.ArrayList<>(valueList.size());
+                for (int k = 0; k < valueList.size(); k++) {
+                    seeded.add(new LinkedHashMap<String, Object>());
+                }
+                cursor.put(segment, seeded);
+                return distributeSubfieldAcrossList(seeded, fieldName.substring(dot + 1), value, fieldName);
             } else if (next instanceof java.util.List<?> list && isListOfMaps(list)) {
-                // Array-of-objects at this path (e.g. seeded _source has `files`: [{cksum:h1}, {cksum:h2}]).
-                // The remaining suffix names the subfield to distribute across the list elements.
-                // Only the LAST path segment is handled here; deeper nesting under a List<Map> parent
-                // (e.g. `files.meta.size` where `files[i].meta` would itself be an object) falls through
-                // to the warn branch below since per-element object construction from doc_values is
-                // outside the guarantees doc_values can provide.
-                if (i != parts.length - 2) {
-                    // Distribution supports only immediate-leaf subfields (one segment past the
-                    // List<Map> parent, e.g. `files.size`). Deeper paths like `files.meta.size`
-                    // would require synthesising per-element `meta` objects from columnar
-                    // doc_values, which has no positional guarantee. Warn once per JVM so the
-                    // class of problem is visible without flooding logs.
+                if (!isLastParent) {
                     if (DEEP_NEST_UNDER_LIST_WARNED.compareAndSet(false, true)) {
                         log.atWarn()
                             .setMessage("Cannot distribute deeply-nested field '{}' under List<Map> at '{}'; "
                                 + "only immediate-leaf subfields (parent.leaf) are supported. "
                                 + "Dropping recovered value (further occurrences silenced)")
                             .addArgument(fieldName)
-                            .addArgument(parts[i])
+                            .addArgument(segment)
                             .log();
                     }
                     return false;
                 }
-                String leafForList = parts[parts.length - 1];
-                return distributeSubfieldAcrossList((java.util.List<Object>) list, leafForList, value, fieldName);
+                return distributeSubfieldAcrossList((java.util.List<Object>) list, fieldName.substring(dot + 1), value, fieldName);
             } else {
-                // Non-map already sits at this path — cannot nest under a scalar. Warn once
-                // per JVM so operators notice the class of problem without log floods.
                 if (NEST_COLLISION_WARNED.compareAndSet(false, true)) {
                     log.atWarn()
                         .setMessage("Cannot write nested field '{}' under scalar at '{}' (type {}); dropping recovered value (further occurrences silenced)")
                         .addArgument(fieldName)
-                        .addArgument(parts[i])
+                        .addArgument(segment)
                         .addArgument(next.getClass().getSimpleName())
                         .log();
                 }
                 return false;
             }
         }
-        String leaf = parts[parts.length - 1];
+        // Reached the leaf (no more dots)
+        String leaf = fieldName.substring(start);
         if (cursor.containsKey(leaf)) {
             return false;
         }
@@ -169,6 +226,33 @@ public class SourceReconstructor {
     }
 
     /**
+     * Marker {@link ArrayList} subtype emitted by {@link #convertFallbackValue} for the
+     * {@link RecoveredValue.TextTermList} variant. Its sole purpose is to let
+     * {@link #putNested} distinguish "this list represents per-element attribution recovered
+     * from the position-increment-gap splitter" from "this list is a multi-valued scalar leaf"
+     * without leaking a sealed-interface variant into the {@code Object}-typed value plumbing.
+     *
+     * <p>Behaviourally it is just an {@link ArrayList}: Jackson serialises it as a JSON array
+     * exactly like any other {@code List<String>} when written into _source as a top-level
+     * leaf (single-valued path). The marker only changes behaviour inside {@code putNested},
+     * where it triggers lazy-grow of an absent {@code parent.leaf} parent into a sized
+     * {@code List<Map>} so the existing distribute logic can attribute each element correctly.
+     */
+    private static final class PerElementList<E> extends java.util.ArrayList<E> {
+        PerElementList(java.util.Collection<? extends E> c) { super(c); }
+    }
+
+    /**
+     * True iff {@code value} is a {@link PerElementList} of size {@code >= 2}. The size guard
+     * mirrors the splitter's own threshold (it only emits {@code TextTermList} when at least
+     * two buckets were detected) and prevents seeding a single-element object array from a
+     * single-valued field that incidentally surfaced as a list.
+     */
+    private static boolean shouldSeedObjectArray(java.util.List<?> value) {
+        return value instanceof PerElementList<?> && value.size() >= 2;
+    }
+
+    /**
      * Distributes a recovered subfield value across the elements of an object-array seed.
      * <p>
      * Positional distribution ({@code list[i][leaf] = value[i]}) is used when {@code value} is a
@@ -190,14 +274,33 @@ public class SourceReconstructor {
     private static boolean distributeSubfieldAcrossList(java.util.List<Object> list, String leaf,
                                                         Object value, String fieldName) {
         if (value instanceof java.util.List<?> valueList) {
-            if (valueList.size() != list.size()) {
-                log.atWarn()
-                    .setMessage("Cannot distribute '{}' across object array: got {} values for {} elements; dropping recovered value")
-                    .addArgument(fieldName)
-                    .addArgument(valueList.size())
-                    .addArgument(list.size())
-                    .log();
-                return false;
+            if (valueList.size() > list.size()) {
+                if (valueList instanceof PerElementList) {
+                    // Over-split from position-gap detection (e.g. small position_increment_gap
+                    // caused false splits within a single array element). Keep first N-1 splits
+                    // as separate elements, merge all remaining into the last slot with a single
+                    // space between each (the inter-token spacing within each bucket was already
+                    // handled by joinWithOffsets).
+                    java.util.List<Object> coalesced = new java.util.ArrayList<>(list.size());
+                    for (int i = 0; i < list.size() - 1; i++) {
+                        coalesced.add(valueList.get(i));
+                    }
+                    StringBuilder last = new StringBuilder();
+                    for (int i = list.size() - 1; i < valueList.size(); i++) {
+                        if (!last.isEmpty()) last.append(' ');
+                        last.append(valueList.get(i));
+                    }
+                    coalesced.add(last.toString());
+                    valueList = coalesced;
+                } else {
+                    log.atWarn()
+                        .setMessage("Cannot distribute '{}' across object array: got {} values for {} elements; dropping recovered value")
+                        .addArgument(fieldName)
+                        .addArgument(valueList.size())
+                        .addArgument(list.size())
+                        .log();
+                    return false;
+                }
             }
             log.atDebug()
                 .setMessage("Distributing {} values for '{}' across {}-element object array")
@@ -206,7 +309,7 @@ public class SourceReconstructor {
                 .addArgument(list.size())
                 .log();
             boolean modified = false;
-            for (int i = 0; i < list.size(); i++) {
+            for (int i = 0; i < valueList.size(); i++) {
                 Map<String, Object> element = (Map<String, Object>) list.get(i);
                 if (element.containsKey(leaf)) {
                     continue;
@@ -240,26 +343,26 @@ public class SourceReconstructor {
         if (target.containsKey(fieldName)) {
             return true;
         }
-        if (!fieldName.contains(".")) {
+        int dot = fieldName.indexOf('.');
+        if (dot < 0) {
             return false;
         }
-        String[] parts = fieldName.split("\\.");
         Map<String, Object> cursor = target;
-        for (int i = 0; i < parts.length - 1; i++) {
-            Object next = cursor.get(parts[i]);
+        int start = 0;
+        while (dot >= 0) {
+            String segment = fieldName.substring(start, dot);
+            int nextDot = fieldName.indexOf('.', dot + 1);
+            Object next = cursor.get(segment);
             if (next instanceof Map<?, ?>) {
                 cursor = (Map<String, Object>) next;
+                start = dot + 1;
+                dot = nextDot;
                 continue;
             }
-            // Array-of-objects ancestor (e.g. `files` is List<Map>): the leaf is considered present
-            // iff the suffix is the immediate leaf AND every element already carries it. This keeps
-            // mergeWithDocValues idempotent — a second pass over the same doc won't re-distribute,
-            // and it correctly reports "not present" when only some elements have the subfield so
-            // the distribute path can fill the gaps.
-            if (next instanceof java.util.List<?> list && i == parts.length - 2 && !list.isEmpty()) {
-                String leafForList = parts[parts.length - 1];
+            if (next instanceof java.util.List<?> list && nextDot < 0 && !list.isEmpty()) {
+                String leaf = fieldName.substring(dot + 1);
                 for (Object element : list) {
-                    if (!(element instanceof Map<?, ?> m) || !m.containsKey(leafForList)) {
+                    if (!(element instanceof Map<?, ?> m) || !m.containsKey(leaf)) {
                         return false;
                     }
                 }
@@ -267,7 +370,7 @@ public class SourceReconstructor {
             }
             return false;
         }
-        return cursor.containsKey(parts[parts.length - 1]);
+        return cursor.containsKey(fieldName.substring(start));
     }
 
     /**
@@ -342,7 +445,9 @@ public class SourceReconstructor {
         // 1. Stored fields (exact values when present)
         for (var field : document.getFields()) {
             String fieldName = field.name();
-            if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+            if ((shouldSkipField(fieldName, mappingContext)
+                    && !descendsIntoExistingObjectArray(target, fieldName))
+                    || hasNested(target, fieldName)) {
                 continue;
             }
             FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
@@ -355,7 +460,9 @@ public class SourceReconstructor {
         // 2. Doc values (fast, lossless for typed fields)
         for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
             String fieldName = fieldInfo.name();
-            if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+            if ((shouldSkipField(fieldName, mappingContext)
+                    && !descendsIntoExistingObjectArray(target, fieldName))
+                    || hasNested(target, fieldName)) {
                 continue;
             }
             FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
@@ -372,38 +479,175 @@ public class SourceReconstructor {
             }
         }
 
-        // 3. Points / indexed terms fallback (recovers indexed-only numeric/boolean/keyword)
+        // 3 + 4. Points/indexed-terms fallback (recovers indexed-only numeric/boolean/keyword)
+        // merged with mapping-level constant values (constant_keyword stores its value in the
+        // mapping, not the segment). A single iteration over the mapping's field-name set:
+        // points/terms wins when present; otherwise the constant value is written. This halves
+        // the {@link #shouldSkipField}/{@link #hasNested} overhead on the mapping leaf set —
+        // significant on indices with thousands of leaves where the per-doc cost of two full
+        // walks dominated steady-state throughput.
         if (mappingContext != null) {
             for (String fieldName : mappingContext.getFieldNames()) {
-                if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
+                if ((shouldSkipField(fieldName, mappingContext)
+                        && !descendsIntoExistingObjectArray(target, fieldName))
+                        || hasNested(target, fieldName)) {
                     continue;
                 }
                 FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
-                if (mappingInfo != null) {
-                    var fallbackValue = reader.getValueFromPointsOrTerms(docId, fieldName, mappingInfo.type(), termIndex);
-                    if (fallbackValue.isPresent()) {
-                        Object converted = convertFallbackValue(fallbackValue.get(), mappingInfo);
-                        if (converted != null) {
-                            modified |= putNested(target, fieldName, converted);
-                        }
+                if (mappingInfo == null) {
+                    continue;
+                }
+                int gap = mappingInfo.positionIncrementGap();
+                var fallbackValue = gap == LuceneLeafReader.DEFAULT_POSITION_INCREMENT_GAP
+                        ? reader.getValueFromPointsOrTerms(docId, fieldName, mappingInfo.type(), termIndex)
+                        : reader.getValueFromPointsOrTerms(docId, fieldName, mappingInfo.type(), termIndex, gap);
+                if (fallbackValue.isPresent()) {
+                    Object converted = convertFallbackValue(fallbackValue.get(), mappingInfo);
+                    if (converted != null) {
+                        modified |= putNested(target, fieldName, converted);
+                        continue;
+                    }
+                }
+                if (mappingInfo.constantValue() != null) {
+                    modified |= putNested(target, fieldName, mappingInfo.constantValue());
+                }
+            }
+        }
+
+        // 5. Reverse-derive from copy_to targets (last-resort fallback).
+        //
+        // copy_to makes target fields indexed-only mirrors of the source's value. When the source
+        // field's own stored/doc_values/points chain returned nothing (e.g. source had index:true
+        // but store:false and no doc_values), we can still recover its value by reading any of its
+        // copy_to TARGETS — which ARE indexed with real data. Targets are ranked by lossiness:
+        // keyword-class (exact) before text (tokenized/analyzed recovery only).
+        //
+        // Value extraction replays the same stored -> doc_values -> points/terms chain used for
+        // primary-source recovery, but keyed on the TARGET's field name. The first non-null hit
+        // wins and is routed into the SOURCE's path via putNested. The target itself is already
+        // filtered by shouldSkipField in passes 1-4 so it never appears in _source.
+        //
+        // We iterate only fields with declared copy_to edges, not the full mapping — for indices
+        // with thousands of leaves, this skips the hasNested/shouldSkipField overhead on every
+        // field that has nothing to reverse-derive from anyway.
+        if (mappingContext != null) {
+            for (String sourceField : mappingContext.getCopyToSourceFields()) {
+                if (hasNested(target, sourceField)) {
+                    continue;
+                }
+                // Skip internal fields (_id, etc.) but NOT source-excluded fields —
+                // source-excluded copy_to sources are the primary reverse-derivation use case.
+                if (sourceField.startsWith("_")) {
+                    continue;
+                }
+                // Skip reverse-derivation for source fields that have no Lucene footprint
+                // (index:false AND doc_values:false) AND are not source-excluded. Such fields
+                // exist only in _source — if absent from the seed, the doc genuinely didn't
+                // have that field. But source-excluded fields need reconstruction via their
+                // copy_to targets even if they themselves have no index/dv.
+                FieldMappingInfo sourceMapping = mappingContext.getFieldInfo(sourceField);
+                if (sourceMapping != null && !sourceMapping.indexed() && !sourceMapping.docValues()
+                        && !mappingContext.isSourceExcluded(sourceField)) {
+                    continue;
+                }
+                List<String> rankedTargets = mappingContext.getCopyToTargets(sourceField);
+                if (rankedTargets.isEmpty()) {
+                    continue;
+                }
+                for (String targetField : rankedTargets) {
+                    ProbeResult recovered = probeFieldValue(reader, docId, document, targetField,
+                            mappingContext, termIndex);
+                    if (recovered == null) {
+                        continue;
+                    }
+                    // Tiers 1/2/4 already shaped the value through the TARGET's mapping —
+                    // write it verbatim. Only the points/terms tier (Raw) still needs decoding,
+                    // and that decode runs through the SOURCE mapping so the JSON shape matches
+                    // the source field's declared type (date formatting, scaled_float division,
+                    // IP rendering, etc.).
+                    Object converted = switch (recovered) {
+                        case ProbeResult.Final f -> f.value();
+                        case ProbeResult.Raw r -> sourceMapping != null
+                                ? convertFallbackValue(r.raw(), sourceMapping)
+                                : null;
+                    };
+                    if (converted != null) {
+                        modified |= putNested(target, sourceField, converted);
+                        break; // first-hit wins; stop iterating targets.
                     }
                 }
             }
         }
 
-        // 4. Mapping-level constant values (constant_keyword stores its value in the mapping, not the segment)
-        if (mappingContext != null) {
-            for (String fieldName : mappingContext.getFieldNames()) {
-                if (shouldSkipField(fieldName, mappingContext) || hasNested(target, fieldName)) {
-                    continue;
-                }
-                FieldMappingInfo mappingInfo = mappingContext.getFieldInfo(fieldName);
-                if (mappingInfo != null && mappingInfo.constantValue() != null) {
-                    modified |= putNested(target, fieldName, mappingInfo.constantValue());
+        return modified;
+    }
+
+    /**
+     * Replays the stored → doc_values → points/terms → constant chain for a single field
+     * and returns a {@link ProbeResult} tagged with whether the value is already shaped
+     * ({@link ProbeResult.Final}) or still a raw points/terms recovery
+     * ({@link ProbeResult.Raw}) that needs decoding through the source field's mapping.
+     * Returns {@code null} if no tier produced a value.
+     *
+     * <p>Used by the copy_to reverse-derivation pass: tiers 1/2/4 produce
+     * already-target-mapped Java values (the target's stored field, the target's doc_values
+     * after {@link #convertDocValue}, the target's mapping-level constant), all of which the
+     * caller writes verbatim into the source field's slot. Only tier 3 returns raw bytes/longs
+     * that need a fresh round of source-mapping conversion — keeping the two passes separate
+     * is what prevents the previous double-conversion bug.
+     */
+    private static ProbeResult probeFieldValue(LuceneLeafReader reader, int docId, LuceneDocument document,
+            String fieldName, FieldMappingContext mappingContext, SegmentTermIndex termIndex) throws IOException {
+        FieldMappingInfo targetMapping = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
+
+        // Tier 1: stored field lookup.
+        for (var field : document.getFields()) {
+            if (fieldName.equals(field.name())) {
+                Object value = getStoredFieldValue(field, targetMapping);
+                if (value != null) {
+                    return new ProbeResult.Final(value);
                 }
             }
         }
-        return modified;
+
+        // Tier 2: doc_values lookup.
+        for (DocValueFieldInfo fieldInfo : reader.getDocValueFields()) {
+            if (!fieldName.equals(fieldInfo.name())) {
+                continue;
+            }
+            if (targetMapping != null && !targetMapping.docValues()) {
+                break;
+            }
+            Object value = reader.getDocValue(docId, fieldInfo);
+            if (value != null) {
+                Object converted = convertDocValue(value, fieldInfo, targetMapping);
+                if (converted != null) {
+                    return new ProbeResult.Final(converted);
+                }
+            }
+            break;
+        }
+
+        // Tier 3: points / indexed-terms fallback. Use the target's type if known so STRING
+        // targets go through the token-stream concatenation path (see
+        // LuceneLeafReader.getValueFromPointsOrTerms STRING branch) — that's what delivers the
+        // "joe smith joe x com" best-effort text recovery.
+        if (targetMapping != null) {
+            int gap = targetMapping.positionIncrementGap();
+            var fallback = gap == LuceneLeafReader.DEFAULT_POSITION_INCREMENT_GAP
+                    ? reader.getValueFromPointsOrTerms(docId, fieldName, targetMapping.type(), termIndex)
+                    : reader.getValueFromPointsOrTerms(docId, fieldName, targetMapping.type(), termIndex, gap);
+            if (fallback.isPresent()) {
+                return new ProbeResult.Raw(fallback.get());
+            }
+        }
+
+        // Tier 4: mapping-level constant (constant_keyword target).
+        if (targetMapping != null && targetMapping.constantValue() != null) {
+            return new ProbeResult.Final(targetMapping.constantValue());
+        }
+
+        return null;
     }
 
     /** Extracts value from stored field, converting booleans stored as T/F and binary as base64 */
@@ -705,26 +949,31 @@ public class SourceReconstructor {
         return b;
     }
 
-    /** Convert fallback value from Points (List&lt;byte[]&gt;), Terms (String), or NumericTerms (Long) */
-    @SuppressWarnings("unchecked")
-    private static Object convertFallbackValue(Object value, FieldMappingInfo mappingInfo) {
-        // Terms fallback returns String (for boolean - stored as "T"/"F" in Lucene)
-        if (value instanceof String termValue) {
-            if (mappingInfo.type() == EsFieldType.BOOLEAN) {
-                return "T".equals(termValue);
+    /**
+     * Routes a {@link RecoveredValue} from the points/terms recovery tier through the per-mapping
+     * decoder. The sealed dispatch replaces an earlier {@code instanceof}-on-{@code Object} branch
+     * whose unchecked {@code (List<byte[]>)} cast crashed when copy_to reverse-derivation handed
+     * in a {@code List<String>} from SORTED_SET doc_values.
+     */
+    private static Object convertFallbackValue(RecoveredValue value, FieldMappingInfo mappingInfo) {
+        return switch (value) {
+            case RecoveredValue.TextTerm t -> mappingInfo.type() == EsFieldType.BOOLEAN
+                    ? "T".equals(t.text())
+                    : t.text();
+            case RecoveredValue.TextTermList tl -> {
+                // Multi-element analyzed text from a multi-valued (array) field: the position-gap
+                // splitter reconstructed N per-element analyzed phrases. Wrap as a PerElementList
+                // marker so putNested can lazy-grow an absent parent into a sized List<Map> seed
+                // and trigger per-element distribution. Plain List<String> would not be
+                // distinguishable from a multi-valued scalar leaf value.
+                if (mappingInfo.type() == EsFieldType.BOOLEAN) {
+                    yield tl.texts().isEmpty() ? null : "T".equals(tl.texts().get(0));
+                }
+                yield new PerElementList<>(tl.texts());
             }
-            return termValue;
-        }
-        // Points fallback returns List<byte[]>
-        if (value instanceof java.util.List<?> pointValues) {
-            return decodePointValue((java.util.List<byte[]>) pointValues, mappingInfo);
-        }
-        // Numeric terms fallback returns a raw Long decoded from shift==0 trie term
-        // (Lucene 4-5 / ES 1.x-2.x indexes numerics/ip/date as prefix-coded longs or ints).
-        if (value instanceof Long numericVal) {
-            return decodeNumericTerm(numericVal, mappingInfo);
-        }
-        return null;
+            case RecoveredValue.PointBytes p -> decodePointValue(p.packed(), mappingInfo);
+            case RecoveredValue.NumericTerm n -> decodeNumericTerm(n.encoded(), mappingInfo);
+        };
     }
 
     /** Decode a raw Long harvested from a shift==0 numeric term into the mapped JSON type. */

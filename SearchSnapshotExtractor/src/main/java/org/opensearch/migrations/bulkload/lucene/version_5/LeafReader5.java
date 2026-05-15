@@ -10,6 +10,7 @@ import java.util.Map;
 
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
+import org.opensearch.migrations.bulkload.lucene.GenericStreamingFieldPostings;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.Getter;
@@ -42,6 +43,11 @@ public class LeafReader5 implements LuceneLeafReader {
     public LeafReader5(LeafReader wrapped) {
         this.wrapped = wrapped;
         this.liveDocs = convertLiveDocs(wrapped.getLiveDocs());
+    }
+
+    @Override
+    public LuceneLeafReader newView() {
+        return new LeafReader5(wrapped);
     }
 
     private static BitSetConverter.FixedLengthBitSet convertLiveDocs(Bits bits) {
@@ -102,18 +108,23 @@ public class LeafReader5 implements LuceneLeafReader {
                 .toString();
     }
 
+    private volatile List<DocValueFieldInfo> cachedDocValueFields;
+
     @Override
     public Iterable<DocValueFieldInfo> getDocValueFields() {
+        List<DocValueFieldInfo> cached = cachedDocValueFields;
+        if (cached != null) return cached;
         List<DocValueFieldInfo> fields = new ArrayList<>();
         for (FieldInfo fieldInfo : wrapped.getFieldInfos()) {
             DocValueFieldInfo.DocValueType dvType = convertDocValuesType(fieldInfo.getDocValuesType());
             if (dvType != DocValueFieldInfo.DocValueType.NONE) {
-                boolean isBoolean = dvType == DocValueFieldInfo.DocValueType.SORTED_NUMERIC 
+                boolean isBoolean = dvType == DocValueFieldInfo.DocValueType.SORTED_NUMERIC
                     && DocValueFieldInfo.hasOnlyBooleanTerms(getFieldTermsInternal(fieldInfo.name));
                 fields.add(new DocValueFieldInfo.Simple(fieldInfo.name, dvType, isBoolean));
             }
         }
-        return fields;
+        cachedDocValueFields = Collections.unmodifiableList(fields);
+        return cachedDocValueFields;
     }
 
     private List<String> getFieldTermsInternal(String fieldName) {
@@ -275,6 +286,11 @@ public class LeafReader5 implements LuceneLeafReader {
             org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink sink) throws IOException {
         Terms terms = wrapped.terms(fieldName);
         if (terms == null) return;
+        // If positions weren't indexed (e.g. keyword/"not_analyzed" string, or text with
+        // index_options stripped below positions) there's nothing useful to stream — drop out
+        // so the caller falls through to the single-term path. Requesting POSITIONS on a
+        // postings list that doesn't carry them is undefined and can yield bogus sentinels.
+        if (!terms.hasPositions()) return;
         TermsEnum termsEnum = terms.iterator();
         BytesRef term;
         int[] positions    = new int[16];
@@ -373,6 +389,42 @@ public class LeafReader5 implements LuceneLeafReader {
             return (long) NumericUtils.prefixCodedToInt(term);
         }
         return null;
+    }
+
+    @Override
+    public org.opensearch.migrations.bulkload.lucene.StreamingFieldPostings openStreamingFieldPostings(
+            String fieldName) throws IOException {
+        Terms terms = wrapped.terms(fieldName);
+        if (terms == null || !terms.hasPositions()) {
+            return null;
+        }
+        FieldInfo fi = wrapped.getFieldInfos().fieldInfo(fieldName);
+        boolean fieldHasOffsets = fi != null
+            && fi.getIndexOptions().compareTo(IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS) >= 0;
+        int postingsFlags = fieldHasOffsets ? PostingsEnum.OFFSETS : PostingsEnum.POSITIONS;
+
+        ArrayList<GenericStreamingFieldPostings.TermPostings> built = new ArrayList<>();
+        TermsEnum te = terms.iterator();
+        BytesRef term;
+        while ((term = te.next()) != null) {
+            String termStr = term.utf8ToString();
+            PostingsEnum postings = te.postings(null, postingsFlags);
+            int firstDoc = postings.nextDoc();
+            if (firstDoc == PostingsEnum.NO_MORE_DOCS) continue;
+            final PostingsEnum pe = postings;
+            GenericStreamingFieldPostings.PostingsCursor cursor =
+                new GenericStreamingFieldPostings.PostingsCursor() {
+                    @Override public int nextDoc() throws IOException { return pe.nextDoc(); }
+                    @Override public int advance(int target) throws IOException { return pe.advance(target); }
+                    @Override public int freq() throws IOException { return pe.freq(); }
+                    @Override public int nextPosition() throws IOException { return pe.nextPosition(); }
+                    @Override public int startOffset() throws IOException { return pe.startOffset(); }
+                    @Override public int endOffset() throws IOException { return pe.endOffset(); }
+                };
+            built.add(new GenericStreamingFieldPostings.TermPostings(termStr, cursor, firstDoc));
+        }
+        if (built.isEmpty()) return null;
+        return GenericStreamingFieldPostings.build(built, fieldHasOffsets);
     }
 
     public String toString() {

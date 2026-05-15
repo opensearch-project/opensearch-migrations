@@ -200,6 +200,12 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
                 }
                 return;
             } catch (Exception e) {
+                var removedTokenFilters = findRemovedTokenFilters(e);
+                if (!removedTokenFilters.isEmpty()) {
+                    ObjectNodeUtils.removeAnalyzerFilters(templateBody, removedTokenFilters);
+                    log.info("Reattempting creation of template '{}' after removing removed token filters: {}", templateName, removedTokenFilters);
+                    continue;
+                }
                 var unsupportedParams = findUnsupportedMappingParams(e);
                 if (unsupportedParams.isEmpty()) {
                     throw e;
@@ -215,6 +221,18 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
                 var params = ir.getUnsupportedMappingParameters();
                 if (!params.isEmpty()) {
                     return params;
+                }
+            }
+        }
+        return Set.of();
+    }
+
+    private static Set<String> findRemovedTokenFilters(Throwable e) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof InvalidResponse ir) {
+                var filters = ir.getRemovedTokenFilters();
+                if (!filters.isEmpty()) {
+                    return filters;
                 }
             }
         }

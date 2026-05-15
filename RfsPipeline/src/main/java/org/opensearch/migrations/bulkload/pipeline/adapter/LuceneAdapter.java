@@ -18,17 +18,24 @@ import org.opensearch.migrations.bulkload.pipeline.model.Document;
  */
 public final class LuceneAdapter {
 
-    private LuceneAdapter() {}
+    private final boolean emitDocType;
+
+    public LuceneAdapter() {
+        this(false);
+    }
 
     /**
-     * Convert a {@link LuceneDocumentChange} to a clean {@link Document}.
-     *
-     * @param luceneDoc the Lucene-specific document change
-     * @return a clean IR document with hints and sourceMetadata populated
+     * @param emitDocType when true, propagates the ES {@code _type} field into
+     *                    {@link Document#hints()} for downstream transformers that need it
+     *                    (e.g. TypeMappingSanitizationTransformer for ES 5.x multi-type indices)
      */
-    public static Document fromLucene(LuceneDocumentChange luceneDoc) {
+    public LuceneAdapter(boolean emitDocType) {
+        this.emitDocType = emitDocType;
+    }
+
+    public Document fromLucene(LuceneDocumentChange luceneDoc) {
         var hints = new HashMap<String, String>();
-        if (luceneDoc.getType() != null) {
+        if (emitDocType && luceneDoc.getType() != null) {
             hints.put(Document.HINT_TYPE, luceneDoc.getType());
         }
         if (luceneDoc.getRouting() != null) {

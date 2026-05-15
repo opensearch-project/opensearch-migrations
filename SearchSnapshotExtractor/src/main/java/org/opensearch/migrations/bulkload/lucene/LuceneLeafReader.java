@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -10,6 +11,15 @@ import org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink;
 import org.opensearch.migrations.bulkload.lucene.sidecar.TermEntry;
 
 public interface LuceneLeafReader {
+
+    /**
+     * Default {@code position_increment_gap} for analyzed text fields (100). Overridable
+     * per-field in the mapping via {@code "position_increment_gap": N}.
+     *
+     * @see <a href="https://docs.opensearch.org/latest/mappings/mapping-parameters/position-increment-gap/">
+     *      OpenSearch position_increment_gap documentation</a>
+     */
+    int DEFAULT_POSITION_INCREMENT_GAP = 100;
 
     public LuceneDocument document(int luceneDocId) throws IOException;
 
@@ -22,6 +32,22 @@ public interface LuceneLeafReader {
     public String getSegmentName();
 
     public String getSegmentInfoString();
+
+    /**
+     * Creates an independent reader view backed by the same underlying segment data.
+     * <p>
+     * The new view shares the on-disk segment files but maintains its own per-instance
+     * mutable caches — most importantly, its own DocValues iterators populated by
+     * {@link #initDocValueIterators(Iterable)}. This is the primitive that lets
+     * {@link LuceneReader#readDocsFromSegment} run N parallel workers against a single
+     * segment, each with its own forward-only iterator cursors, while keeping the
+     * per-segment open cost paid only once.
+     * <p>
+     * Two views over the same underlying reader must be safe to advance concurrently
+     * provided each view sees a strictly-ascending docId subsequence (round-robin
+     * partitioning satisfies this).
+     */
+    LuceneLeafReader newView();
 
     /**
      * Returns field information for all fields with doc_values.
@@ -45,6 +71,14 @@ public interface LuceneLeafReader {
             case NONE -> null;
         };
     }
+
+    /**
+     * Eagerly opens and caches DocValues iterators for the given fields.
+     * Subsequent calls to getDocValue/getNumericValue/etc. will use the cached
+     * iterators instead of re-acquiring them from the underlying LeafReader.
+     * Requires that documents are processed in strictly ascending docId order.
+     */
+    default void initDocValueIterators(Iterable<DocValueFieldInfo> fields) throws IOException {}
 
     default Object getNumericValue(int docId, String fieldName) throws IOException { return null; }
     default Object getSortedValue(int docId, String fieldName) throws IOException { return null; }
@@ -74,17 +108,32 @@ public interface LuceneLeafReader {
      * (matches Lucene's {@code PostingsEnum.nextDoc()}). Positions within each callback are
      * already in ascending order as emitted by {@code PostingsEnum.nextPosition()}.
      *
-     * <p>The default implementation is a no-op: versions that don't support source
-     * reconstruction from the inverted index (e.g. Lucene 10 / OS 3.x which always have
-     * stored fields or doc_values) leave this unimplemented and callers see an empty stream.
+     * <p>Required on every implementation: position-aware text recovery is the only path that
+     * preserves multi-token analyzed text. Implementors with no terms to stream (e.g. a
+     * synthetic test reader) must explicitly return without calling the sink.
      *
      * <p>Callers must first invoke {@link PostingsSink#registerTerm} on each new term (as it
      * appears in the walk) to get its assigned {@code termId}, then invoke
      * {@link PostingsSink#accept(int, int, int[], int)} once per (term, doc). The reusable
      * {@code int[]} passed to {@code accept} is only borrowed for the duration of the call.
      */
-    default void streamFieldPostings(String fieldName, PostingsSink sink) throws IOException {
-        // no-op: default reader has no terms to stream.
+    void streamFieldPostings(String fieldName, PostingsSink sink) throws IOException;
+
+    /**
+     * Opens a forward-only streaming cursor over the (segment, field) postings, or
+     * {@code null} if this reader version does not support streaming reconstruction.
+     *
+     * <p>When non-null, callers prefer this over {@link #streamFieldPostings} for
+     * per-doc tier-3 text recovery: the streaming cursor avoids building a per-field
+     * sidecar (no spill, no external sort). When null, callers must fall back to the
+     * sidecar-build path.
+     *
+     * <p>The returned cursor caches one PostingsEnum per term and one decoded term
+     * string per term — implementations should bound memory by the field's term count
+     * (not its posting count). Callers own the lifecycle and must close.
+     */
+    default StreamingFieldPostings openStreamingFieldPostings(String fieldName) throws IOException {
+        return null;
     }
 
     /**
@@ -108,56 +157,122 @@ public interface LuceneLeafReader {
     }
 
     /**
+     * Builds a {@code docId -> List<String>} map for a multi-valued keyword/not-analyzed
+     * field by walking the terms dictionary once. Each term is repeated {@code freq} times
+     * (the number of times it was indexed for that doc). This recovers the full multiset of
+     * values including duplicates, though insertion order is lost (terms arrive in dictionary
+     * order, not the original array element order).
+     *
+     * <p>For a single-valued field, returns a one-element list per doc. Called at most once
+     * per (segment, field) via {@link SegmentTermIndex}.
+     */
+    default Map<Integer, List<String>> buildMultiTermIndex(String fieldName) throws IOException {
+        return Collections.emptyMap();
+    }
+
+    /**
+     * Builds a {@code docId -> term-string} map for a STRING field by walking the
+     * terms dictionary once. For keyword / not-analyzed fields each docId has exactly
+     * one term, so this map is the inverted-index inverse; it makes per-doc single-term
+     * recovery O(1) instead of O(numTerms) per doc.
+     *
+     * <p>Default implementation returns an empty map — concrete readers should override
+     * to walk their version-specific TermsEnum / PostingsEnum and populate the map.
+     *
+     * <p>Called at most once per (segment, field) via {@link SegmentTermIndex}.
+     */
+    default Map<Integer, String> buildSingleTermIndex(String fieldName) throws IOException {
+        return Collections.emptyMap();
+    }
+
+    /**
      * Fallback recovery: tries Points (for numerics/IP/date), terms (for boolean),
      * or full term collection (for analyzed strings without stored fields).
      * Used when doc_values and stored fields are not available.
      *
+     * <p>The {@link RecoveredValue} variants make the recovery channel explicit so the caller
+     * cannot conflate doc_values output (a {@link List} of typed scalars) with point bytes
+     * (a {@code List<byte[]>}) — a confusion that previously caused a {@code ClassCastException}
+     * on the copy_to reverse-derivation path.
+     *
      * @param termIndex per-segment term cache; may be null if the caller does not need
      *                  analyzed-string or numeric-term reconstruction.
      */
-    default Optional<Object> getValueFromPointsOrTerms(int docId, String fieldName, EsFieldType fieldType,
-                                                      SegmentTermIndex termIndex) throws IOException {
+    default Optional<RecoveredValue> getValueFromPointsOrTerms(int docId, String fieldName, EsFieldType fieldType,
+                                                               SegmentTermIndex termIndex) throws IOException {
+        return getValueFromPointsOrTerms(docId, fieldName, fieldType, termIndex, DEFAULT_POSITION_INCREMENT_GAP);
+    }
+
+    default Optional<RecoveredValue> getValueFromPointsOrTerms(int docId, String fieldName, EsFieldType fieldType,
+                                                               SegmentTermIndex termIndex,
+                                                               int positionIncrementGap) throws IOException {
         return switch (fieldType) {
             case BOOLEAN -> {
                 String term = getValueFromTerms(docId, fieldName);
-                yield term != null ? Optional.of(term) : Optional.empty();
+                yield term != null ? Optional.of(new RecoveredValue.TextTerm(term)) : Optional.empty();
             }
             case STRING -> {
-                // For analyzed string fields without stored fields or doc_values,
-                // reconstruct a lossy version by collecting all indexed tokens in position order.
-                // For keyword / "string"+index:not_analyzed fields (which are indexed with
-                // IndexOptions.DOCS and therefore have no positions), fall back to
-                // single-term recovery which preserves the exact original value.
                 if (termIndex != null) {
                     try {
                         List<TermEntry> entries =
                                 termIndex.getTermEntriesForDocument(this, docId, fieldName);
                         if (entries != null && !entries.isEmpty()) {
-                            yield Optional.of(joinWithOffsets(entries));
+                            List<List<TermEntry>> elements =
+                                    splitByPositionGap(entries, positionIncrementGap);
+                            if (elements.size() >= 2) {
+                                List<String> perElement = new ArrayList<>(elements.size());
+                                for (List<TermEntry> bucket : elements) {
+                                    perElement.add(joinWithOffsets(bucket));
+                                }
+                                yield Optional.of(new RecoveredValue.TextTermList(perElement));
+                            }
+                            yield Optional.of(new RecoveredValue.TextTerm(joinWithOffsets(entries)));
                         }
                     } catch (UnsupportedOperationException e) {
                         // Field indexed without positions; fall through to single-term path.
                     }
                 }
-                String singleTerm = getValueFromTerms(docId, fieldName);
-                yield singleTerm != null ? Optional.of(singleTerm) : Optional.empty();
+                // Multi-valued keyword recovery: use freq-aware term walk to get all values
+                // including duplicates. Falls back to single-term for backward compat.
+                if (termIndex != null) {
+                    List<String> multiTerms = termIndex.getMultiTermsForDocument(this, docId, fieldName);
+                    if (multiTerms != null && !multiTerms.isEmpty()) {
+                        if (multiTerms.size() == 1) {
+                            yield Optional.of(new RecoveredValue.TextTerm(multiTerms.get(0)));
+                        }
+                        yield Optional.of(new RecoveredValue.TextTermList(multiTerms));
+                    }
+                }
+                String singleTerm;
+                if (termIndex != null) {
+                    singleTerm = termIndex.getSingleTermForDocument(this, docId, fieldName);
+                } else {
+                    singleTerm = getValueFromTerms(docId, fieldName);
+                }
+                yield singleTerm != null
+                        ? Optional.of(new RecoveredValue.TextTerm(singleTerm))
+                        : Optional.empty();
             }
             case NUMERIC, UNSIGNED_LONG, SCALED_FLOAT, DATE, DATE_NANOS, IP -> {
                 // First try Points (Lucene 6+ stores numerics as BKD-tree points).
                 List<byte[]> points = getPointValues(docId, fieldName);
                 if (points != null && !points.isEmpty()) {
-                    yield Optional.of(points);
+                    yield Optional.of(new RecoveredValue.PointBytes(points));
                 }
                 // Fall back to trie-encoded terms (Lucene 4-5 / ES 1.x-2.x).
                 if (termIndex == null) {
                     yield Optional.empty();
                 }
                 Long numericVal = termIndex.getNumericForDocument(this, docId, fieldName);
-                yield numericVal != null ? Optional.of(numericVal) : Optional.empty();
+                yield numericVal != null
+                        ? Optional.of(new RecoveredValue.NumericTerm(numericVal))
+                        : Optional.empty();
             }
             default -> {
                 List<byte[]> points = getPointValues(docId, fieldName);
-                yield (points != null && !points.isEmpty()) ? Optional.of(points) : Optional.empty();
+                yield (points != null && !points.isEmpty())
+                        ? Optional.of(new RecoveredValue.PointBytes(points))
+                        : Optional.empty();
             }
         };
     }
@@ -212,4 +327,44 @@ public interface LuceneLeafReader {
         return sb.toString();
     }
 
+    /**
+     * Splits a position-ordered list of {@link TermEntry} into per-element buckets by
+     * detecting position-increment gaps that mark array element boundaries.
+     *
+     * <p>Within a single multi-valued (array) text field, Lucene assigns increasing
+     * positions to tokens. Tokens within the same array element are consecutive (gap of 1).
+     * Between successive array elements, Lucene inserts a {@code position_increment_gap}
+     * (configurable per-field, default 100) so phrase queries cannot match across elements.
+     * A jump of {@code >= positionIncrementGap} between two adjacent entries therefore
+     * reliably reveals "the next entry belongs to the next array element."
+     *
+     * <p>For single-valued fields (or any field whose tokens never exhibit a gap >=
+     * the configured threshold), the returned list contains a single bucket equal to the
+     * input — the caller can detect this cheaply via {@code result.size() == 1}.
+     *
+     * @param entries position-ordered tokens for the field
+     * @param positionIncrementGap the gap threshold from the field mapping
+     * @see <a href="https://docs.opensearch.org/latest/mappings/mapping-parameters/position-increment-gap/">
+     *      OpenSearch position_increment_gap documentation</a>
+     */
+    static List<List<TermEntry>> splitByPositionGap(List<TermEntry> entries, int positionIncrementGap) {
+        if (entries.isEmpty()) return Collections.emptyList();
+        if (positionIncrementGap <= 0) return List.of(entries);
+        List<List<TermEntry>> buckets = new ArrayList<>();
+        List<TermEntry> current = new ArrayList<>();
+        int prevPos = entries.get(0).position();
+        current.add(entries.get(0));
+        for (int i = 1; i < entries.size(); i++) {
+            TermEntry e = entries.get(i);
+            int gap = e.position() - prevPos;
+            if (gap >= positionIncrementGap) {
+                buckets.add(current);
+                current = new ArrayList<>();
+            }
+            current.add(e);
+            prevPos = e.position();
+        }
+        buckets.add(current);
+        return buckets;
+    }
 }

@@ -96,11 +96,7 @@ public class RfsMigrateDocuments {
     private static final double DECREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD = 0.025;
     private static final double INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD = 0.1;
 
-    public static final String DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG = "[" +
-            "  {" +
-            "    \"JsonTransformerForDocumentTypeRemovalProvider\":\"\"" +
-            "  }" +
-            "]";
+    public static final String DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG = null;
 
     public static class DurationConverter implements IStringConverter<Duration> {
         @Override
@@ -280,6 +276,13 @@ public class RfsMigrateDocuments {
             names = { "--coordinator-retry-max-delay-ms" },
             description = "Optional. Maximum delay in milliseconds for any single coordinator completion retry. Default: 64000")
         public long coordinatorRetryMaxDelayMs = 64_000;
+
+        @Parameter(required = false,
+            names = { "--emit-doc-type" },
+            description = "Optional. When true, propagates the ES _type field into bulk action-line metadata. " +
+                "Required when using type-mapping transformers (e.g. TypeMappingSanitizationTransformerProvider) " +
+                "for ES 5.x multi-type index migrations. Default: false")
+        public boolean emitDocType = false;
 
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
@@ -508,12 +511,17 @@ public class RfsMigrateDocuments {
             }
         };
 
-        var docTransformerConfig = Optional.ofNullable(TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams))
-            .orElse(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
-        log.atInfo().setMessage("Doc Transformations config string: {}")
-                .addArgument(docTransformerConfig).log();
+        var docTransformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams);
+        if (docTransformerConfig != null) {
+            log.atInfo().setMessage("Doc Transformations config string: {}")
+                    .addArgument(docTransformerConfig).log();
+        } else {
+            log.atInfo().setMessage("No doc transformations configured; using raw-bytes fast path").log();
+        }
         var transformationLoader = new TransformationLoader();
-        Supplier<IJsonTransformer> docTransformerSupplier = () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
+        Supplier<IJsonTransformer> docTransformerSupplier = docTransformerConfig == null
+            ? null
+            : () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
 
         if (arguments.sourceVersion != null && arguments.sourceVersion.getFlavor() == Flavor.SOLR) {
             runSolrBackupMigration(arguments, targetClient, docTransformerSupplier, useServerGeneratedIds, context);
@@ -621,7 +629,8 @@ public class RfsMigrateDocuments {
                 arguments.experimental.previousSnapshotName,
                 arguments.experimental.experimentalDeltaMode,
                 arguments.experimental.enableSourcelessMigrations,
-                arguments.experimental.useRecoverySource);
+                arguments.experimental.useRecoverySource,
+                arguments.emitDocType);
             cleanShutdownCompleted.set(true);
             if (status == CompletionStatus.NOTHING_DONE) {
                 log.atInfo().setMessage("Work exists but none available to this worker. Exiting with exit code " + NO_WORK_AVAILABLE_EXIT_CODE).log();
@@ -1163,7 +1172,7 @@ public class RfsMigrateDocuments {
             useServerGeneratedIds, allowlist, maxDocsPerBatch, maxBytesPerBatch, batchConcurrency,
             maxShardSizeBytes, progressCursor, workCoordinator, maxInitialLeaseDuration, leaseExpireTrigger,
             workItemTimeProvider, indexMetadataFactory, indexAllowlist, rootDocumentContext, cancellationRunnable,
-            previousSnapshotName, deltaMode, false, false);
+            previousSnapshotName, deltaMode, false, false, false);
     }
 
     public static CompletionStatus runWithPipeline(
@@ -1190,7 +1199,8 @@ public class RfsMigrateDocuments {
         String previousSnapshotName,
         DeltaMode deltaMode,
         boolean enableSourcelessMigrations,
-        boolean useRecoverySource
+        boolean useRecoverySource,
+        boolean emitDocType
     ) throws IOException, InterruptedException, NoWorkLeftException {
         var scopedWorkCoordinator = prepareWorkCoordination(
             workCoordinator, leaseExpireTrigger, indexMetadataFactory,
@@ -1216,6 +1226,7 @@ public class RfsMigrateDocuments {
                 : null)
             .enableSourcelessMigrations(enableSourcelessMigrations)
             .useRecoverySource(useRecoverySource)
+            .emitDocType(emitDocType)
             .indexMetadataFactory(indexMetadataFactory)
             .workCoordinator(scopedWorkCoordinator)
             .workItemTimeProvider(workItemTimeProvider)
