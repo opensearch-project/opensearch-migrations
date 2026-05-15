@@ -317,3 +317,60 @@ class TestResetAll:
 
         assert result.exit_code == 0
         mock_delete_targets.assert_called_once_with([resource], 'ma', False)
+
+
+class TestSnapshotMigrationTargetIndexReminder:
+    @patch('console_link.workflow.commands.reset.load_k8s_config')
+    @patch('console_link.workflow.commands.reset._delete_targets')
+    @patch('console_link.workflow.commands.reset.list_migration_resources')
+    @patch('console_link.workflow.commands.reset._find_resource_by_name')
+    def test_reminder_shown_when_resetting_snapshot_migration(
+        self, mock_find, mock_list, mock_delete_targets, _mock_k8s
+    ):
+        resource = ('snapshotmigrations', 'mig-a', 'Ready', [])
+        mock_find.return_value = resource
+        mock_list.return_value = [resource]
+        mock_delete_targets.return_value = True
+
+        runner = CliRunner()
+        result = runner.invoke(workflow_cli, ['reset', 'mig-a'])
+
+        assert result.exit_code == 0
+        assert 'console clusters clear-indices --cluster target' in result.output
+
+    @patch('console_link.workflow.commands.reset.load_k8s_config')
+    @patch('console_link.workflow.commands.reset._delete_targets')
+    @patch('console_link.workflow.commands.reset.list_migration_resources')
+    @patch('console_link.workflow.commands.reset._find_resource_by_name')
+    def test_reminder_not_shown_when_no_snapshot_migration(
+        self, mock_find, mock_list, mock_delete_targets, _mock_k8s
+    ):
+        resource = ('trafficreplays', 'replay-a', 'Ready', [])
+        mock_find.return_value = resource
+        mock_list.return_value = [resource]
+        mock_delete_targets.return_value = True
+
+        runner = CliRunner()
+        result = runner.invoke(workflow_cli, ['reset', 'replay-a'])
+
+        assert result.exit_code == 0
+        assert 'clear-indices' not in result.output
+
+    @patch('console_link.workflow.commands.reset._handle_kafka_storage')
+    @patch('console_link.workflow.commands.reset.load_k8s_config')
+    @patch('console_link.workflow.commands.reset._delete_targets')
+    @patch('console_link.workflow.commands.reset.list_migration_resources')
+    def test_reminder_shown_for_reset_all_with_snapshot_migration(
+        self, mock_list, mock_delete_targets, _mock_k8s, _mock_storage
+    ):
+        mock_list.return_value = [
+            ('datasnapshots', 'snap-a', 'Ready', []),
+            ('snapshotmigrations', 'mig-a', 'Ready', ['snap-a']),
+        ]
+        mock_delete_targets.return_value = True
+
+        runner = CliRunner()
+        result = runner.invoke(workflow_cli, ['reset', '--all'])
+
+        assert result.exit_code == 0
+        assert 'console clusters clear-indices --cluster target' in result.output
