@@ -7,15 +7,13 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
+import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
-import org.opensearch.migrations.bulkload.lucene.LuceneLeafReaderContext;
-import org.opensearch.migrations.bulkload.lucene.SegmentNameSorter;
+import org.opensearch.migrations.bulkload.lucene.SegmentDocStream;
 import org.opensearch.migrations.bulkload.lucene.version_6.IndexReader6;
 import org.opensearch.migrations.bulkload.lucene.version_7.IndexReader7;
 import org.opensearch.migrations.bulkload.lucene.version_9.IndexReader9;
@@ -29,8 +27,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 import shadow.lucene9.org.apache.lucene.store.FSDirectory;
 
 /**
@@ -58,12 +54,18 @@ public class SolrBackupSource implements DocumentSource {
     private final String collectionName;
     private final JsonNode solrSchema;
     private final int solrMajorVersion;
+    private final FieldMappingContext mappingContext;
 
     public SolrBackupSource(Path backupDir, String collectionName, JsonNode solrSchema, int solrMajorVersion) {
+        this(backupDir, collectionName, solrSchema, solrMajorVersion, null);
+    }
+
+    public SolrBackupSource(Path backupDir, String collectionName, JsonNode solrSchema, int solrMajorVersion, FieldMappingContext mappingContext) {
         this.backupDir = backupDir;
         this.collectionName = collectionName;
         this.solrSchema = solrSchema;
         this.solrMajorVersion = solrMajorVersion;
+        this.mappingContext = mappingContext;
     }
 
     /**
@@ -271,37 +273,18 @@ public class SolrBackupSource implements DocumentSource {
         org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader directoryReader,
         long startingDocOffset
     ) {
-        var scheduler = Schedulers.newBoundedElastic(10, Integer.MAX_VALUE, "solrReader");
+        var scheduler = reactor.core.scheduler.Schedulers.newBoundedElastic(10, Integer.MAX_VALUE, "solrReader");
 
-        var sortedLeaves = directoryReader.leaves().stream()
-            .map(LuceneLeafReaderContext::reader)
-            .sorted(SegmentNameSorter.INSTANCE)
-            .toList();
-
-        int[] docBases = new int[sortedLeaves.size()];
-        for (int i = 1; i < sortedLeaves.size(); i++) {
-            docBases[i] = docBases[i - 1] + sortedLeaves.get(i - 1).maxDoc();
-        }
-
-        return Flux.range(0, sortedLeaves.size())
-            .concatMap(segIdx -> {
-                var segReader = sortedLeaves.get(segIdx);
-                int segDocBase = docBases[segIdx];
-                var liveDocs = segReader.getLiveDocs();
-                var liveDocStream = (liveDocs != null)
-                    ? liveDocs.stream()
-                    : IntStream.range(0, segReader.maxDoc());
-
-                return Flux.fromStream(liveDocStream.boxed())
-                    .flatMapSequential(docIdx -> Mono.fromCallable(() ->
-                        SolrLuceneDocReader.getDocument(
-                            segReader, docIdx, true, segDocBase,
-                            DocumentChangeType.INDEX
-                        )
-                    ).subscribeOn(scheduler), 10)
-                    .filter(Objects::nonNull);
-            })
-            .skip(startingDocOffset)
+        return SegmentDocStream.<LuceneDocumentChange>fromLeaves(
+                directoryReader.leaves(),
+                (int) startingDocOffset,
+                10,
+                scheduler,
+                (segReader, docIdx, segDocBase) -> {
+                    var doc = SolrLuceneDocReader.getDocument(
+                        segReader, docIdx, true, segDocBase, DocumentChangeType.INDEX, mappingContext);
+                    return reactor.core.publisher.Mono.justOrEmpty(doc);
+                })
             .map(SolrBackupSource::toDocument)
             .doFinally(s -> scheduler.dispose());
     }

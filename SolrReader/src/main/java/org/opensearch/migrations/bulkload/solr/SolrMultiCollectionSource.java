@@ -7,12 +7,14 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
+import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.pipeline.model.CollectionMetadata;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.pipeline.model.Partition;
 import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 
@@ -78,8 +80,26 @@ public class SolrMultiCollectionSource implements DocumentSource {
             var schema = schemas.get(c);
             var schemaNode = schema != null ? schema.path("schema") : schema;
             var collectionDir = SolrBackupLayout.resolveCollectionDataDir(backupDir.resolve(c));
-            return new SolrBackupSource(collectionDir, c, schemaNode, solrMajorVersion);
+            var mappingContext = buildMappingContext(schemaNode);
+            return new SolrBackupSource(collectionDir, c, schemaNode, solrMajorVersion, mappingContext);
         });
+    }
+
+    private static FieldMappingContext buildMappingContext(JsonNode schemaNode) {
+        if (schemaNode == null) {
+            return null;
+        }
+        try {
+            ObjectNode osMappings = SolrSchemaConverter.convertToOpenSearchMappings(
+                schemaNode.path("fields"),
+                schemaNode.path("dynamicFields"),
+                schemaNode.path("copyFields"),
+                schemaNode.path("fieldTypes"));
+            return new FieldMappingContext(osMappings);
+        } catch (Exception e) {
+            log.atWarn().setCause(e).setMessage("Failed to build mapping context from Solr schema, falling back to basic type conversion").log();
+            return null;
+        }
     }
 
     @Override
