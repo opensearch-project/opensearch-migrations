@@ -81,6 +81,13 @@ class S3DlqSinkTest {
         ObjectNode resp1 = mapper.createObjectNode();
         resp1.putObject("index").put("_id", "doc-1").put("status", 400);
 
+        // Fire-and-forget the per-record Mono — matches the production pattern in
+        // OpenSearchClient.emitDlqRecord (which also does .subscribe()). With the
+        // onePerFlush rotation policy, the write's future is only completed when
+        // rotate() runs inside flush(), so awaiting the write directly would
+        // deadlock. flush().block() is the durability gate: it returns only
+        // after the upload future has completed, so any assertions that follow
+        // are reading post-upload state.
         sink.write(DlqRecord.builder()
             .sessionId("sess-A")
             .workerId("worker-1")
@@ -91,7 +98,7 @@ class S3DlqSinkTest {
             .timestamp(Instant.parse("2026-05-14T12:00:00Z").toString())
             .requestItem(req1)
             .responseItem(resp1)
-            .build()).block();
+            .build()).subscribe();
 
         sink.flush().block();
         sink.close();
