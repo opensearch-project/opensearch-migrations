@@ -1,6 +1,5 @@
 package org.opensearch.migrations.parsing;
 
-import java.util.List;
 import java.util.Set;
 
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
