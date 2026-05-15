@@ -1,5 +1,8 @@
 ### Minikube Test Setup
 
+First make sure your docker runtime is already up. See notes below in case youre using colima.
+
+
 In `buildImages/scripts` you will find a bunch of scripts helping with local minikube setup / commands.
 - `fillLocalRegistry.sh`: setup of local registry and building of needed images and pushing to that local registry
 - `startMinikube.sh`: script to startup local minikube
@@ -90,3 +93,17 @@ Namespace:        ma
 Priority:         0
 Service Account:  argo-workflow-executor
 ```
+- when running tests, and you see Solr 6, Solr 7 fail on backup creation, few things to note:
+  the test workflow composes the requested backup location via:
+  - suffix from the workflow.uid:`SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)`
+  - a fixed term `testsnapshot`
+  - an id that is appended in `scripts/createMigrationWorkflowFromUserConfiguration.sh` that is created as uuid (unique per run)
+  - those are composed as `/[suffix]/source1_testsnapshot_[uuid-snippet from above script]`
+This conflicts with th fact that solr local backup in 6 / 7 need to create the folders before the backup command 
+is handled, otherwise this will fail due to folder not existing. Right now the folder created on solr startup assumes
+the extracted uuid to be 1, which is not the case in normal runs. To fix either set 
+```yaml
+- name: uniqueRunNonce
+  value: "1"
+```
+in above script for local runs. Fix to handle this dynamically to be filed shortly.

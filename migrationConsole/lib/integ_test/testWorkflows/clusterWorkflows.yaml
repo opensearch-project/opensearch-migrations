@@ -1751,7 +1751,7 @@ spec:
               path: /tmp/cluster-config.json
 
     # Solr 6.6 Single Node Template (SolrCloud mode with embedded ZooKeeper)
-    # S3BackupRepository is not available in Solr 6.x; no backup section in solr.xml.
+    # S3BackupRepository is not available in Solr 6.x; using LocalFileSystemRepository in solr.xml.
     - name: solr-6-6-single-node
       inputs:
         parameters:
@@ -1783,6 +1783,10 @@ spec:
                 <str name="zkCredentialsProvider">${zkCredentialsProvider:org.apache.solr.common.cloud.DefaultZkCredentialsProvider}</str>
                 <str name="zkACLProvider">${zkACLProvider:org.apache.solr.common.cloud.DefaultZkACLProvider}</str>
               </solrcloud>
+            
+              <backup>
+                <repository name="default" class="org.apache.solr.core.backup.repository.LocalFileSystemRepository" default="true"/>
+              </backup>
 
               <shardHandlerFactory name="shardHandlerFactory" class="HttpShardHandlerFactory">
                 <int name="socketTimeout">${socketTimeout:600000}</int>
@@ -1875,6 +1879,16 @@ spec:
                       args:
                         - |
                           set -eo pipefail
+            
+                          # that is the id used as location when running backup command in the workflow, we need to create
+                          # symlink here to actual target folder. Note that the below is a fixed value for the 
+                          # local k8s migration tests only, thus creating folder with the given naming convention.
+                          # for other cases this needs to be reflected here / made configurable
+                          echo "Determining used suffix to create folder for backup and symlink into /var/solr/data/[suffix]"
+                          SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+                          echo "Found suffix: $SUFFIX"
+                          mkdir -p "/var/solr/data/$SUFFIX/source1_testsnapshot_1" "/$SUFFIX"
+                          ln -s "/var/solr/data/$SUFFIX/source1_testsnapshot_1" "/$SUFFIX/source1_testsnapshot_1"
             
                           echo "Starting up solr"
                           exec solr -f -force -cloud -DzkRun &
@@ -2001,7 +2015,7 @@ spec:
               path: /tmp/cluster-config.json
 
     # Solr 7.7 Single Node Template (SolrCloud mode with embedded ZooKeeper)
-    # S3BackupRepository is not available in Solr 7.x; no backup section in solr.xml.
+    # S3BackupRepository is not available in Solr 7.x; using LocalFileSystemRepository in solr.xml.
     - name: solr-7-7-single-node
       inputs:
         parameters:
@@ -2032,6 +2046,10 @@ spec:
                 <str name="zkCredentialsProvider">${zkCredentialsProvider:org.apache.solr.common.cloud.DefaultZkCredentialsProvider}</str>
                 <str name="zkACLProvider">${zkACLProvider:org.apache.solr.common.cloud.DefaultZkACLProvider}</str>
               </solrcloud>
+            
+              <backup>
+                <repository name="default" class="org.apache.solr.core.backup.repository.LocalFileSystemRepository" default="true"/>
+              </backup>
 
               <shardHandlerFactory name="shardHandlerFactory" class="HttpShardHandlerFactory">
                 <int name="socketTimeout">${socketTimeout:600000}</int>
@@ -2146,6 +2164,16 @@ spec:
 
             echo "Waiting for Solr to be ready..."
             kubectl rollout status deployment/${CLUSTER_NAME} -n ${NAMESPACE} --timeout=300s
+            
+            # that is the id used as location when running backup command in the workflow, we need to create
+            # symlink here to actual target folder. Note that the below is a fixed value for the 
+            # local k8s migration tests only, thus creating folder with the given naming convention.
+            # for other cases this needs to be reflected here / made configurable
+            echo "Determining used suffix to create folder for backup and symlink into /var/solr/data/[suffix]"
+            SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+            echo "Found suffix: $SUFFIX"
+            mkdir -p "/var/solr/data/$SUFFIX/source1_testsnapshot_1" "/$SUFFIX"
+            ln -s "/var/solr/data/$SUFFIX/source1_testsnapshot_1" "/$SUFFIX/source1_testsnapshot_1"
 
             echo "Creating 'dummy' collection..."
             SOLR_URL="http://${CLUSTER_NAME}.${NAMESPACE}.svc.cluster.local:8983"
