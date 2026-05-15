@@ -245,7 +245,7 @@ def _parse_describe_row(tokens: List[str], header_indices: dict) -> Optional[dic
 
 
 def _parse_offset(token: str) -> Optional[int]:
-    if token == '-' or token == '':
+    if token in ('-', ''):
         return None
     try:
         return int(token)
@@ -417,7 +417,9 @@ def _format_partition_row(
         '--property', 'print.value=false',
         '--property', 'print.key=false',
     ] + extra_console_consumer_args
-    logger.info(f"Probing record timestamp: {command}")
+    # debug-level: this fires once per partition and would flood operator-facing
+    # output on a topic with many partitions.
+    logger.debug("Probing record timestamp: %s", command)
 
     # Allow a small buffer over Kafka's --timeout-ms so the JVM can exit cleanly.
     wall_timeout = (probe_timeout_ms / 1000.0) + 5.0
@@ -454,7 +456,7 @@ def _augment_describe_output_with_time_lag(
             probe_timeout_ms=probe_timeout_ms,
         )
     except Exception as exc:  # noqa: BLE001 — never let a probe failure mask the describe output
-        logger.warning(f"Failed to build time-lag section: {exc}")
+        logger.warning("Failed to build time-lag section: %s", exc, exc_info=True)
         return base_result
     return CommandResult(success=True, value=base_result.value.rstrip() + '\n\n' + section)
 

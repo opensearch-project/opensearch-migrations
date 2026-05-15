@@ -1,6 +1,7 @@
 import pytest
 
 from console_link.models import kafka as kafka_module
+from console_link.models.command_result import CommandResult
 from console_link.models.factories import UnsupportedKafkaError, get_kafka
 from console_link.models.kafka import Kafka, MSK, StandardKafka, ScramKafka
 
@@ -380,9 +381,6 @@ def test_scram_kafka_list_topics(mocker):
 # Time-lag augmentation: parser, formatters, and section builder
 # ---------------------------------------------------------------------------
 
-from console_link.models.command_result import CommandResult
-
-
 _DESCRIBE_OUTPUT_BASIC = """\
 
 GROUP     TOPIC          PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG  CONSUMER-ID  HOST  CLIENT-ID
@@ -422,6 +420,19 @@ g1       t1         2          50              100             50
 def test_parse_consumer_group_describe_handles_empty_or_no_header():
     assert kafka_module.parse_consumer_group_describe("") == []
     assert kafka_module.parse_consumer_group_describe("Consumer group 'foo' has no active members.\n") == []
+
+
+def test_parse_consumer_group_describe_recovers_lag_when_dash():
+    # Older Kafka versions occasionally render LAG as '-' for an inactive group
+    # even when offsets are committed. The parser should fall back to
+    # LOG-END-OFFSET - CURRENT-OFFSET so the row is still usable.
+    output = """\
+GROUP   TOPIC   PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG
+g1      t1      0          90              100             -
+"""
+    rows = kafka_module.parse_consumer_group_describe(output)
+    assert len(rows) == 1
+    assert rows[0]['lag'] == 10
 
 
 def test_format_duration_compact():
@@ -523,9 +534,17 @@ g1      t1       0          100             150             50
         now_ms=2_000_000_000_000,
     )
     assert 'probe timed out' in section
-    # Time-lag column should be a dash on failure
-    lines = [line for line in section.splitlines() if 't1' in line]
-    assert lines, 'expected a data row for topic t1'
+    # The data row for t1 should carry: probed offset (100), dash for the
+    # timestamp column, dash for the time-lag column, and the error in NOTE.
+    data_rows = [line for line in section.splitlines() if line.startswith('t1')]
+    assert data_rows, 'expected a data row for topic t1'
+    row_tokens = data_rows[0].split()
+    # Layout: TOPIC PARTITION PROBED-OFFSET TIMESTAMP TIME-LAG NOTE...
+    assert row_tokens[0] == 't1'
+    assert row_tokens[1] == '0'
+    assert row_tokens[2] == '100'
+    assert row_tokens[3] == '-'
+    assert row_tokens[4] == '-'
 
 
 def test_build_time_lag_section_no_committed_offsets_message():

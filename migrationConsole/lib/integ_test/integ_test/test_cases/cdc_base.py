@@ -122,6 +122,44 @@ def run_generate_data(cluster: str, index_name: str, num_docs: int):
     logger.info("generate-data output: %s", result.stdout.strip())
 
 
+def log_kafka_consumer_group_state(label: str, group_name: str = "logging-group-default",
+                                   timeout_seconds: int = 120) -> None:
+    """Run 'console kafka describe-consumer-group' and log its output (including
+    the per-partition TIME LAG section) at a labelled point in a CDC test.
+
+    Records consumer-group offset/lag posture at well-known points (typically
+    just after the replayer joins the group, and after replay verification
+    completes) so post-mortem of a failed run can read the lag trajectory from
+    logs alone.
+
+    Failures here are non-fatal: this is an observability helper, not a gate. A
+    missing 'console' CLI, broker auth issue, or probe timeout must not break a
+    passing migration test.
+    """
+    cmd = ["console", "kafka", "describe-consumer-group", group_name]
+    logger.info("[%s] Running: %s", label, " ".join(cmd))
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        logger.warning("[%s] '%s' timed out after %ds; continuing.",
+                       label, " ".join(cmd), timeout_seconds)
+        return
+    except FileNotFoundError:
+        logger.warning("[%s] 'console' CLI not found on PATH; skipping consumer-group describe.",
+                       label)
+        return
+
+    stdout = (result.stdout or "").rstrip()
+    stderr = (result.stderr or "").rstrip()
+    if result.returncode != 0:
+        logger.warning("[%s] describe-consumer-group exited with %d. stdout:\n%s\nstderr:\n%s",
+                       label, result.returncode, stdout, stderr)
+        return
+    if stderr:
+        logger.info("[%s] describe-consumer-group stderr:\n%s", label, stderr)
+    logger.info("[%s] describe-consumer-group output:\n%s", label, stdout)
+
+
 def send_bulk(cluster, index_name: str, start: int, count: int):
     """Send a batch of docs with sequential IDs via _bulk API.
 
