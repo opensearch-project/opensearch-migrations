@@ -78,9 +78,18 @@ public class SourceReconstructor {
         Map<String, Object> cursor = target;
         for (int i = 0; i < parts.length - 1; i++) {
             Object next = cursor.get(parts[i]);
+            // Existing seed is a non-empty list of maps: classic object-array carve-out.
             if (next instanceof java.util.List<?> list && isListOfMaps(list)) {
                 // Only treat as an object-array carve-out when the remainder is a SINGLE leaf
                 // segment — distributeSubfieldAcrossList only handles single-leaf distribution.
+                return i == parts.length - 2;
+            }
+            // Existing seed is an empty list: ES preserved the parent key as `[]` (e.g.
+            // _source.excludes stripped object-array subfields but kept the empty array shell).
+            // Treat this as a structural seed we may grow when subfields arrive — putNested's
+            // empty-list lazy-grow arm handles the actual sizing once the per-element value
+            // shows up.
+            if (next instanceof java.util.List<?> emptyList && emptyList.isEmpty()) {
                 return i == parts.length - 2;
             }
             if (next instanceof Map<?, ?>) {
@@ -141,9 +150,39 @@ public class SourceReconstructor {
             if (next instanceof Map<?, ?> map) {
                 cursor = (Map<String, Object>) map;
             } else if (next == null) {
+                // Lazy-grow: when value is a List<?> recovered from per-element analyzed text
+                // (TextTermList) AND the suffix is a single leaf, seed the parent as a List<Map>
+                // sized to the value list so distribute logic below picks it up. Without this
+                // seed, the next iteration would create an empty Map and the value list would
+                // be assigned to leaf as-is, collapsing per-element identity.
+                if (i == parts.length - 2 && value instanceof java.util.List<?> valueList
+                        && shouldSeedObjectArray(valueList)) {
+                    java.util.List<Object> seeded = new java.util.ArrayList<>(valueList.size());
+                    for (int k = 0; k < valueList.size(); k++) {
+                        seeded.add(new LinkedHashMap<String, Object>());
+                    }
+                    cursor.put(parts[i], seeded);
+                    String leafForList = parts[parts.length - 1];
+                    return distributeSubfieldAcrossList(seeded, leafForList, value, fieldName);
+                }
                 Map<String, Object> child = new LinkedHashMap<>();
                 cursor.put(parts[i], child);
                 cursor = child;
+            } else if (next instanceof java.util.List<?> emptyList && emptyList.isEmpty()
+                    && i == parts.length - 2
+                    && value instanceof java.util.List<?> valueList
+                    && shouldSeedObjectArray(valueList)) {
+                // Lazy-grow over an EXISTING empty list seed. Some partial _source flows
+                // pre-seed object-array parents as []; without this branch, the per-element
+                // attribution arriving for the first sibling column would hit the scalar-
+                // collision warn branch and be dropped, leaving `arr` permanently empty.
+                java.util.List<Object> seeded = new java.util.ArrayList<>(valueList.size());
+                for (int k = 0; k < valueList.size(); k++) {
+                    seeded.add(new LinkedHashMap<String, Object>());
+                }
+                cursor.put(parts[i], seeded);
+                String leafForList = parts[parts.length - 1];
+                return distributeSubfieldAcrossList(seeded, leafForList, value, fieldName);
             } else if (next instanceof java.util.List<?> list && isListOfMaps(list)) {
                 // Array-of-objects at this path (e.g. seeded _source has `files`: [{cksum:h1}, {cksum:h2}]).
                 // The remaining suffix names the subfield to distribute across the list elements.
@@ -207,6 +246,33 @@ public class SourceReconstructor {
             }
         }
         return true;
+    }
+
+    /**
+     * Marker {@link ArrayList} subtype emitted by {@link #convertFallbackValue} for the
+     * {@link RecoveredValue.TextTermList} variant. Its sole purpose is to let
+     * {@link #putNested} distinguish "this list represents per-element attribution recovered
+     * from the position-increment-gap splitter" from "this list is a multi-valued scalar leaf"
+     * without leaking a sealed-interface variant into the {@code Object}-typed value plumbing.
+     *
+     * <p>Behaviourally it is just an {@link ArrayList}: Jackson serialises it as a JSON array
+     * exactly like any other {@code List<String>} when written into _source as a top-level
+     * leaf (single-valued path). The marker only changes behaviour inside {@code putNested},
+     * where it triggers lazy-grow of an absent {@code parent.leaf} parent into a sized
+     * {@code List<Map>} so the existing distribute logic can attribute each element correctly.
+     */
+    private static final class PerElementList<E> extends java.util.ArrayList<E> {
+        PerElementList(java.util.Collection<? extends E> c) { super(c); }
+    }
+
+    /**
+     * True iff {@code value} is a {@link PerElementList} of size {@code >= 2}. The size guard
+     * mirrors the splitter's own threshold (it only emits {@code TextTermList} when at least
+     * two buckets were detected) and prevents seeding a single-element object array from a
+     * single-valued field that incidentally surfaced as a list.
+     */
+    private static boolean shouldSeedObjectArray(java.util.List<?> value) {
+        return value instanceof PerElementList<?> && value.size() >= 2;
     }
 
     /**
@@ -889,6 +955,17 @@ public class SourceReconstructor {
             case RecoveredValue.TextTerm t -> mappingInfo.type() == EsFieldType.BOOLEAN
                     ? "T".equals(t.text())
                     : t.text();
+            case RecoveredValue.TextTermList tl -> {
+                // Multi-element analyzed text from a multi-valued (array) field: the position-gap
+                // splitter reconstructed N per-element analyzed phrases. Wrap as a PerElementList
+                // marker so putNested can lazy-grow an absent parent into a sized List<Map> seed
+                // and trigger per-element distribution. Plain List<String> would not be
+                // distinguishable from a multi-valued scalar leaf value.
+                if (mappingInfo.type() == EsFieldType.BOOLEAN) {
+                    yield tl.texts().isEmpty() ? null : "T".equals(tl.texts().get(0));
+                }
+                yield new PerElementList<>(tl.texts());
+            }
             case RecoveredValue.PointBytes p -> decodePointValue(p.packed(), mappingInfo);
             case RecoveredValue.NumericTerm n -> decodeNumericTerm(n.encoded(), mappingInfo);
         };

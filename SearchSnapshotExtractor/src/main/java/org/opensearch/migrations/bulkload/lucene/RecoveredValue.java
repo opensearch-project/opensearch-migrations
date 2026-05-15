@@ -16,7 +16,8 @@ import java.util.List;
 public sealed interface RecoveredValue
         permits RecoveredValue.PointBytes,
                 RecoveredValue.NumericTerm,
-                RecoveredValue.TextTerm {
+                RecoveredValue.TextTerm,
+                RecoveredValue.TextTermList {
 
     /**
      * Packed BKD point values for numerics / IP / date fields (Lucene 6+).
@@ -36,4 +37,14 @@ public sealed interface RecoveredValue
      * (boolean "T"/"F", keyword) or a position-ordered token concatenation for analyzed text.
      */
     record TextTerm(String text) implements RecoveredValue {}
+
+    /**
+     * Per-element analyzed text for multi-valued (array) text fields, recovered when the
+     * position-increment gap between adjacent tokens reveals an array element boundary
+     * (Lucene's {@code position_increment_gap}, default 100). Each list element is the
+     * analyzed phrase that belonged to that array element. The list size equals the number
+     * of array elements that contributed indexed tokens; elements that produced no tokens
+     * (empty strings, all-stopword-filtered phrases) are not represented.
+     */
+    record TextTermList(List<String> texts) implements RecoveredValue {}
 }

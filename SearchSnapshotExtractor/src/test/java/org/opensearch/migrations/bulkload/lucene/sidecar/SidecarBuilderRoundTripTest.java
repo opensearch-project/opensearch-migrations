@@ -161,9 +161,9 @@ class SidecarBuilderRoundTripTest {
         try {
             List<TermEntry> entries = reader.get(0);
             assertEquals(3, entries.size());
-            assertEquals(new TermEntry("date",  0,  4), entries.get(0));
-            assertEquals(new TermEntry("tue",   6,  9), entries.get(1));
-            assertEquals(new TermEntry("26",   11, 13), entries.get(2));
+            assertEquals(new TermEntry("date",  0,  0,  4), entries.get(0));
+            assertEquals(new TermEntry("tue",   1,  6,  9), entries.get(1));
+            assertEquals(new TermEntry("26",    2, 11, 13), entries.get(2));
 
             // LuceneLeafReader.joinWithOffsets should produce "date  tue  26"
             String joined = org.opensearch.migrations.bulkload.lucene.LuceneLeafReader
@@ -181,8 +181,8 @@ class SidecarBuilderRoundTripTest {
     @Test
     void noOffset_fallsBackToSingleSpaceJoin() throws IOException {
         List<TermEntry> entries = List.of(
-            new TermEntry("hello", PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET),
-            new TermEntry("world", PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET)
+            new TermEntry("hello", 0, PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET),
+            new TermEntry("world", 1, PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET)
         );
         String joined = org.opensearch.migrations.bulkload.lucene.LuceneLeafReader
                 .joinWithOffsets(entries);
