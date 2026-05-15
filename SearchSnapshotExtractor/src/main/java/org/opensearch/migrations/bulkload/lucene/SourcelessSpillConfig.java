@@ -28,10 +28,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public final class SourcelessSpillConfig {
 
-    public static final String SORT_BUFFER_BYTES_PROP = "rfs.reconstruction.sortBufferBytes";
-
-    /** 256 MiB sort buffer — tuned for production 4+ GiB heaps. */
-    public static final long DEFAULT_SORT_BUFFER_BYTES = 256L * 1024 * 1024;
 
     /** Sub-directory of the shard's Lucene dir where per-segment spill trees live. */
     static final String SPILL_SUBDIR = ".rfs-spill";
@@ -56,14 +52,14 @@ public final class SourcelessSpillConfig {
      * default if unset. Values below one tuple width are clamped up so builds don't deadlock.
      */
     public static long sortBufferBytes() {
-        String override = System.getProperty(SORT_BUFFER_BYTES_PROP);
-        if (override == null || override.isBlank()) return DEFAULT_SORT_BUFFER_BYTES;
+        String override = System.getProperty(RfsTunables.SORT_BUFFER_BYTES_PROP);
+        if (override == null || override.isBlank()) return RfsTunables.DEFAULT_SORT_BUFFER_BYTES;
         try {
             long n = Long.parseLong(override.trim());
             return Math.max(org.opensearch.migrations.bulkload.lucene.sidecar.SidecarBuilder.RECORD_BYTES, n);
         } catch (NumberFormatException e) {
-            log.warn("Invalid {}={}, using default {}", SORT_BUFFER_BYTES_PROP, override, DEFAULT_SORT_BUFFER_BYTES);
-            return DEFAULT_SORT_BUFFER_BYTES;
+            log.warn("Invalid {}={}, using default {}", RfsTunables.SORT_BUFFER_BYTES_PROP, override, RfsTunables.DEFAULT_SORT_BUFFER_BYTES);
+            return RfsTunables.DEFAULT_SORT_BUFFER_BYTES;
         }
     }
 }

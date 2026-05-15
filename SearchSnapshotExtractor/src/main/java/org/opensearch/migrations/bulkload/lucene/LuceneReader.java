@@ -42,19 +42,27 @@ public class LuceneReader {
      * a no-op) — there the wins come from overlapping {@code reader.document(docId)} calls
      * across cores. With N=1 the topology degenerates to today's sequential read.
      *
-     * <p>Tunable via {@code RFS_READER_PARALLELISM} env var (default 1). Tied to the read-side
-     * perf spike — diminishing returns expected at the {@link SegmentTermIndex} synchronized
-     * ceiling (analyzed-text recovery serializes through one monitor per segment) and at
-     * the bulk-loader's {@code activeBatches=10/10} write-side cap.
+     * <p>Tunable via {@code -Drfs.reader.parallelism} or {@code RFS_READER_PARALLELISM} env var.
+     * Default: availableProcessors - 1 (min 1). Diminishing returns expected at the
+     * {@link SegmentTermIndex} synchronized ceiling (analyzed-text recovery serializes through
+     * one monitor per segment) and at the bulk-loader's {@code activeBatches=10/10} write-side cap.
      */
     private static final int READER_PARALLELISM = readerParallelism();
 
     private static int readerParallelism() {
         // Prefer system property (passes through JDK_JAVA_OPTIONS without WorkflowTemplate
-        // edits); fall back to env var for direct kubectl set env. Returns 1 if neither set.
-        String raw = System.getProperty("rfs.reader.parallelism");
-        if (raw == null || raw.isBlank()) raw = System.getenv("RFS_READER_PARALLELISM");
-        if (raw == null || raw.isBlank()) return 1;
+        // edits); fall back to env var for direct kubectl set env.
+        // Default: availableProcessors - 1 (min 1) — saturate CPU without starving the
+        // reactor event loop and GC threads.
+        String raw = System.getProperty(RfsTunables.READER_PARALLELISM_PROP);
+        if (raw == null || raw.isBlank()) raw = System.getenv(RfsTunables.READER_PARALLELISM_ENV);
+        if (raw == null || raw.isBlank()) {
+            int cpus = Runtime.getRuntime().availableProcessors();
+            int defaultParallelism = Math.max(1, cpus - 1);
+            log.atInfo().setMessage("reader-parallelism not set, defaulting to {} (cpus={})")
+                .addArgument(defaultParallelism).addArgument(cpus).log();
+            return defaultParallelism;
+        }
         try {
             int n = Integer.parseInt(raw.trim());
             if (n < 1) {

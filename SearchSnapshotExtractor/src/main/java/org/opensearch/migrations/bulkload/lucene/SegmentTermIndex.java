@@ -72,7 +72,7 @@ public class SegmentTermIndex implements AutoCloseable {
      * set the system property to {@code false} to fall back to the sidecar build.
      */
     private static final boolean STREAMING_PATH_ENABLED =
-            !"false".equalsIgnoreCase(System.getProperty("rfs.sourceless.streamingPostings", "true"));
+            !"false".equalsIgnoreCase(System.getProperty(RfsTunables.STREAMING_POSTINGS_PROP, "true"));
 
     /**
      * Creates an index scoped to {@code spillRoot} for on-disk term spill files.
