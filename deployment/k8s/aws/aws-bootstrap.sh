@@ -533,7 +533,7 @@ check_existing_ma_release() {
 
 # Check required tools
 missing=0
-for cmd in jq kubectl tac aws curl; do
+for cmd in jq kubectl aws curl; do
   if ! command -v $cmd &>/dev/null; then
     echo "Missing required tool: $cmd"
     missing=1
@@ -551,6 +551,12 @@ fi
 
 # --- CFN deployment (optional) ---
 if [[ "$deploy_cfn" == "true" ]]; then
+  if ! command -v tac &>/dev/null; then
+    echo "Missing required tool: tac (used for CloudFormation event streaming)" >&2
+    echo "On macOS, install with: brew install coreutils" >&2
+    exit 1
+  fi
+
   # Determine template source
   if [[ "$build" == "true" ]]; then
     echo "Building CloudFormation templates from source..."
