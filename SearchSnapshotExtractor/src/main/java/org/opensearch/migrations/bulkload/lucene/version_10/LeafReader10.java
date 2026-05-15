@@ -18,7 +18,6 @@ import lombok.extern.slf4j.Slf4j;
 import shadow.lucene10.org.apache.lucene.index.BinaryDocValues;
 import shadow.lucene10.org.apache.lucene.index.FieldInfo;
 import shadow.lucene10.org.apache.lucene.index.FilterCodecReader;
-import shadow.lucene10.org.apache.lucene.index.IndexOptions;
 import shadow.lucene10.org.apache.lucene.index.LeafReader;
 import shadow.lucene10.org.apache.lucene.index.NumericDocValues;
 import shadow.lucene10.org.apache.lucene.index.PointValues;

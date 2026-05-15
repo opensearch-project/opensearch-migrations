@@ -56,6 +56,7 @@ public class SegmentTermIndex implements AutoCloseable {
      * Creates a no-arg index. The streaming path is always used for text recovery.
      */
     public SegmentTermIndex() {
+        // Fields are lazily populated via getTermsForDocument/addNumericValue/etc.
     }
 
     /**
