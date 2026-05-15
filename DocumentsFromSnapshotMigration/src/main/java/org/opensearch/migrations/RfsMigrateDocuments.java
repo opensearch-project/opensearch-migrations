@@ -96,19 +96,6 @@ public class RfsMigrateDocuments {
     private static final double DECREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD = 0.025;
     private static final double INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD = 0.1;
 
-    /**
-     * Default document-transformation config used when the user does not supply one.
-     *
-     * <p>Historically this defaulted to {@code JsonTransformerForDocumentTypeRemovalProvider}
-     * to strip the {@code _type} action-line field on ES 5/6/7 → OpenSearch migrations.
-     * That stripping is no longer needed: the bulk NDJSON action lines in
-     * {@link org.opensearch.migrations.bulkload.common.bulk.BulkNdjson} are built from
-     * scratch with only {@code id}, {@code index}, and {@code routing}, so {@code _type}
-     * is never written to the wire regardless of source. Defaulting to {@code null}
-     * lets {@link org.opensearch.migrations.bulkload.pipeline.adapter.OpenSearchDocumentSink}
-     * take its raw-bytes fast path (skipping the {@code byte[]→Map→byte[]} round-trip)
-     * for every migration that doesn't supply a custom transformation.
-     */
     public static final String DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG = null;
 
     public static class DurationConverter implements IStringConverter<Duration> {

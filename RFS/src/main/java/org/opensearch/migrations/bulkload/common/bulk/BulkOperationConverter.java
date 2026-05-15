@@ -38,7 +38,6 @@ public class BulkOperationConverter {
 
         String routing = doc.hints().get(Document.HINT_ROUTING);
         String type = doc.hints().get(Document.HINT_TYPE);
-
         if (doc.operation() == Document.Operation.DELETE) {
             return DeleteOp.builder()
                 .operation(DeleteOperationMeta.builder()
