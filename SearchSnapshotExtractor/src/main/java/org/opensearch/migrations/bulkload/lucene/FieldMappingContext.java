@@ -335,25 +335,22 @@ public class FieldMappingContext {
         // reconstruction (e.g. texts.user.content receives copy_to data AND has its own
         // indexed content). Don't suppress those — let them be recovered from Lucene.
         if (isCopyToTarget(fieldPath)) {
-            for (String glob : sourceExcludes) {
-                if (matchesGlob(glob, fieldPath)) {
-                    return false;
-                }
-            }
-            return true;
+            return !matchesAnyGlob(sourceExcludes, fieldPath);
         }
-        for (String glob : sourceExcludes) {
-            if (matchesGlob(glob, fieldPath)) {
-                return true;
-            }
+        if (matchesAnyGlob(sourceExcludes, fieldPath)) {
+            return true;
         }
         if (!sourceIncludes.isEmpty()) {
-            for (String glob : sourceIncludes) {
-                if (matchesGlob(glob, fieldPath)) {
-                    return false;
-                }
+            return !matchesAnyGlob(sourceIncludes, fieldPath);
+        }
+        return false;
+    }
+
+    private static boolean matchesAnyGlob(List<String> globs, String path) {
+        for (String glob : globs) {
+            if (matchesGlob(glob, path)) {
+                return true;
             }
-            return true;
         }
         return false;
     }

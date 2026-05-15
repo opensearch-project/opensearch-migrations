@@ -32,7 +32,9 @@ public final class GenericStreamingFieldPostings implements StreamingFieldPostin
     }
 
     /** A (term, cursor) pair provided by the version-specific builder. */
-    public record TermPostings(String term, PostingsCursor cursor, int firstDoc) {}
+    public record TermPostings(String term, PostingsCursor cursor, int firstDoc) {
+        // Record — no additional methods needed.
+    }
 
     private static final class Cursor {
         final String term;
@@ -138,7 +140,6 @@ public final class GenericStreamingFieldPostings implements StreamingFieldPostin
         String[] terms = scratchTerm;
         int[] startOff = scratchStart;
         int[] endOff = scratchEnd;
-        boolean offsets = fieldHasOffsets;
 
         while (heapSize > 0 && heap[0].currentDoc == docId) {
             Cursor c = heap[0];
@@ -148,41 +149,51 @@ public final class GenericStreamingFieldPostings implements StreamingFieldPostin
                 int newLen = Math.max(need, sortKey.length << 1);
                 sortKey = Arrays.copyOf(sortKey, newLen);
                 terms = Arrays.copyOf(terms, newLen);
-                if (offsets) {
+                if (fieldHasOffsets) {
                     startOff = Arrays.copyOf(startOff, newLen);
                     endOff = Arrays.copyOf(endOff, newLen);
                 }
             }
-            for (int i = 0; i < freq; i++) {
-                int pos = c.postings.nextPosition();
-                if (pos < 0) continue;
-                sortKey[n] = ((long) pos << 32) | (n & 0xFFFFFFFFL);
-                terms[n] = c.term;
-                if (offsets) {
-                    startOff[n] = c.postings.startOffset();
-                    endOff[n] = c.postings.endOffset();
-                }
-                n++;
-            }
-            int next = c.postings.nextDoc();
-            if (next == PostingsCursor.NO_MORE_DOCS) {
-                heap[0] = heap[--heapSize];
-                heap[heapSize] = null;
-            } else {
-                c.currentDoc = next;
-            }
-            if (heapSize > 0) {
-                siftDown(0);
-            }
+            n = drainPositions(c, sortKey, terms, startOff, endOff, n, freq);
+            advanceHeapHead();
         }
 
         scratchSortKey = sortKey;
         scratchTerm = terms;
-        if (offsets) {
+        if (fieldHasOffsets) {
             scratchStart = startOff;
             scratchEnd = endOff;
         }
         return n;
+    }
+
+    private int drainPositions(Cursor c, long[] sortKey, String[] terms,
+            int[] startOff, int[] endOff, int n, int freq) throws IOException {
+        for (int i = 0; i < freq; i++) {
+            int pos = c.postings.nextPosition();
+            if (pos < 0) continue;
+            sortKey[n] = ((long) pos << 32) | (n & 0xFFFFFFFFL);
+            terms[n] = c.term;
+            if (fieldHasOffsets) {
+                startOff[n] = c.postings.startOffset();
+                endOff[n] = c.postings.endOffset();
+            }
+            n++;
+        }
+        return n;
+    }
+
+    private void advanceHeapHead() throws IOException {
+        int next = heap[0].postings.nextDoc();
+        if (next == PostingsCursor.NO_MORE_DOCS) {
+            heap[0] = heap[--heapSize];
+            heap[heapSize] = null;
+        } else {
+            heap[0].currentDoc = next;
+        }
+        if (heapSize > 0) {
+            siftDown(0);
+        }
     }
 
     private List<TermEntry> sortAndBuildResult(int n) {
