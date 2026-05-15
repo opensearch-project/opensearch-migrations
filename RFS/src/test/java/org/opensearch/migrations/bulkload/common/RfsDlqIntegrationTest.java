@@ -53,9 +53,11 @@ import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.startsWith;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
 
@@ -65,15 +67,32 @@ import static org.mockito.Mockito.withSettings;
  * <p>Drives the real {@code OpenSearchClient.executeBulkWithRetry} loop with a mock
  * RestClient that returns a hand-crafted sequence of bulk responses, and a real
  * {@link S3DlqSink} backed by a mock {@code S3AsyncClient} that captures NDJSON.gz
- * uploads. Then reads the captured S3 objects back to verify:
+ * uploads. Then reads the captured S3 objects back.
  *
- * <ul>
- *   <li>successful documents flow through (drop out of the retry loop)</li>
- *   <li>terminal failures are persisted to the DLQ (both NON_RETRYABLE
- *       written immediately and RETRYABLE_EXHAUSTED written after retries)</li>
- *   <li>the failure count reported on the wire matches the DLQ contents</li>
- *   <li>records from a prior session never appear in a later session's prefix</li>
- * </ul>
+ * <p>Sub-criterion → assertion mapping for
+ * {@link #forcesFailures_andDlqMatches_andSessionsAreIsolated()}:
+ *
+ * <ol>
+ *   <li><b>Successful documents still migrate.</b> Per-attempt bulk-request bodies
+ *       are captured via {@link ArgumentCaptor}: the first attempt contains
+ *       {@code ok-1} (and {@code ok-2}), and subsequent retry attempts contain
+ *       <i>only</i> {@code throttled} — positive proof that ok-1's success ack
+ *       was honored and the doc was not re-sent.</li>
+ *   <li><b>Failed documents are persisted to the DLQ.</b> The captured S3 bytes
+ *       are decoded and asserted to contain {@code bad-map} (NON_RETRYABLE) and
+ *       {@code throttled} (RETRYABLE_EXHAUSTED) with the correct
+ *       {@code failureClass} / {@code failureType}.</li>
+ *   <li><b>Reported failure count matches DLQ contents.</b>
+ *       {@code assertThat(sessionARecords, hasSize(reportedTerminalFailures))}
+ *       where {@code reportedTerminalFailures = 2} is the number of forced
+ *       terminal failures — i.e. record count == failure count, no double-count
+ *       and no drops.</li>
+ *   <li><b>Records from a prior run are not incorrectly reported for a later
+ *       run.</b> Session B runs after A with a different session id; A's prefix
+ *       is re-read and still has only A's two records, B's prefix has only B's
+ *       one record, and a cross-check confirms B's records never reference A's
+ *       doc ids.</li>
+ * </ol>
  */
 @ExtendWith(MockitoExtension.class)
 class RfsDlqIntegrationTest {
@@ -155,6 +174,26 @@ class RfsDlqIntegrationTest {
         // Mirror the workflow's lease-completion contract: flush before "completing" the work.
         dlqSinkA.flush().block();
         dlqSinkA.close();
+
+        // ─── Sub-criterion 1: successful documents still migrate ────────────────────
+        // Positive proof: capture every bulk request body and verify that
+        //   - the first attempt sent all four docs (ok-1, ok-2, bad-map, throttled), and
+        //   - subsequent retry attempts sent only "throttled".
+        // i.e., the cluster's success ack for ok-1 was honored and the doc was NOT
+        // re-sent on retry — together with the negative assertion below that ok-1
+        // never lands in the DLQ, that's end-to-end "successful docs migrate".
+        ArgumentCaptor<byte[]> bodyCaptor = ArgumentCaptor.forClass(byte[].class);
+        verify(restClient, atLeast(2)).postAsyncBytes(any(), bodyCaptor.capture(), any(), any());
+        var capturedBodies = bodyCaptor.getAllValues();
+        var firstAttemptIds = extractDocIds(capturedBodies.get(0));
+        assertThat("first attempt should send all four docs", firstAttemptIds,
+            containsInAnyOrder("ok-1", "ok-2", "bad-map", "throttled"));
+        for (int i = 1; i < capturedBodies.size(); i++) {
+            var retryIds = extractDocIds(capturedBodies.get(i));
+            assertThat("retry attempt " + i + " must contain only 'throttled' "
+                + "(ok-1 + ok-2 + bad-map dropped from the retry loop)",
+                retryIds, contains("throttled"));
+        }
 
         // ─── Assertions for session A ───────────────────────────────────────────────
         var sessionAObjects = s3Captured.objectsUnder("rfs-dlq/session=session-A/");
@@ -249,6 +288,90 @@ class RfsDlqIntegrationTest {
         }
     }
 
+    /**
+     * Regression test for the acceptance criterion that allowlisted exception
+     * types are excluded from DLQ records and failure counts, specifically in
+     * the retry-exhaust path.
+     *
+     * <p>Constructs a worst-case position-misalignment scenario: a single
+     * attempt (0 retries) whose response interleaves an allowlisted item at
+     * position 0 with a retryable failure at position 1. The position 0 entry
+     * is dropped by {@code compactPendingDocs}, so the post-compaction
+     * {@code pendingOps} has one item at index 0 — which corresponds to
+     * response position 1, not 0. A naive position lookup in
+     * {@code emitRetryExhaustedToDlq} would mis-attribute the allowlisted
+     * item's {@code failureType} to the surviving retryable doc; this test
+     * asserts that doesn't happen.
+     */
+    @Test
+    void allowlistedExceptionsAreNeverWrittenToDlq_evenOnRetryExhaust() throws Exception {
+        when(connectionContext.getUri()).thenReturn(URI.create("http://localhost/"));
+        when(restClient.getConnectionContext()).thenReturn(connectionContext);
+
+        // One response containing both an allowlisted item and a retryable failure.
+        // The allowlisted item is at position 0 (before the retryable failure)
+        // so the post-compaction pendingOps will have a different size than the
+        // response — exactly the position-shift case we care about.
+        var response = buildBulkResponse(List.of(
+            allowlistedItem("dup-1"),
+            retryableItem("throttled-1")
+        ));
+        when(restClient.postAsyncBytes(any(), any(), any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(200, "", null, response)));
+
+        var s3Captured = new S3Capture();
+        var dlqSink = S3DlqSink.builder()
+            .s3Client(s3Captured.mockClient())
+            .bucket("rfs-bucket")
+            .prefix("rfs-dlq/")
+            .sessionId("session-exhaust")
+            .workerId("worker-1")
+            .policy(S3DlqSink.RotationPolicy.onePerFlush())
+            .build();
+
+        var allowlist = new DocumentExceptionAllowlist(Set.of("version_conflict_engine_exception"));
+        var failedRequestsLogger = mock(FailedRequestsLogger.class);
+        var openSearchClient = spy(new OpenSearchClient_OS_2_11(
+            restClient, failedRequestsLogger, Version.fromString("OS 2.11"), CompressionMode.UNCOMPRESSED));
+        openSearchClient.setDlqContext(dlqSink, "session-exhaust", "worker-1");
+        // 0 retries: any error from attempt 1 exhausts immediately, taking the
+        // doOnError → emitRetryExhaustedToDlq path with the original response
+        // (which still contains the allowlisted item at position 0).
+        doReturn(Retry.fixedDelay(0, Duration.ofMillis(1))).when(openSearchClient).getBulkRetryStrategy();
+
+        assertThrows(Exception.class, () -> openSearchClient.sendBulkRequest(
+            "movies",
+            List.of(createBulkDoc("dup-1"), createBulkDoc("throttled-1")),
+            mock(IRfsContexts.IRequestContext.class),
+            false,
+            allowlist
+        ).block());
+        dlqSink.flush().block();
+        dlqSink.close();
+
+        var records = s3Captured.objectsUnder("rfs-dlq/session=session-exhaust/").stream()
+            .flatMap(o -> decode(o.bytes).stream())
+            .toList();
+
+        // Failure count: exactly one record (the retryable doc). The allowlisted
+        // doc must not contribute to the count.
+        assertThat("Only the retryable doc should be in the DLQ", records, hasSize(1));
+
+        var rec = records.get(0);
+        assertThat(rec.path("documentId").asText(), equalTo("throttled-1"));
+        assertThat(rec.path("failureClass").asText(), equalTo("RETRYABLE_EXHAUSTED"));
+
+        // Critical assertion: no allowlisted exception type appears anywhere in
+        // the DLQ records — neither as the docId of an allowlisted item nor as
+        // the failureType attached to a real failure (the position-shift bug).
+        for (var r : records) {
+            assertThat(r.path("documentId").asText(), not(equalTo("dup-1")));
+            assertThat(r.path("failureType").asText(),
+                not(equalTo("version_conflict_engine_exception")));
+        }
+    }
+
+
     // ─── Helpers ────────────────────────────────────────────────────────────────────
 
     private static String buildBulkResponse(List<String> items) {
@@ -307,6 +430,30 @@ class RfsDlqIntegrationTest {
             out.put(r.path("documentId").asText(), r);
         }
         return out;
+    }
+
+    /**
+     * Extract the document ids from a captured bulk-API request body. Bulk NDJSON
+     * alternates action lines ({@code {"index":{"_index":"...","_id":"..."}}}) and
+     * source lines; we read every other line as the action and pull {@code _id}.
+     */
+    private static List<String> extractDocIds(byte[] body) {
+        var ids = new ArrayList<String>();
+        var lines = new String(body).split("\n");
+        for (int i = 0; i < lines.length; i += 2) {
+            var line = lines[i].strip();
+            if (line.isEmpty()) continue;
+            try {
+                var node = MAPPER.readTree(line);
+                // Each action line is an object with a single op key (index/create/...).
+                var entry = node.fields().next();
+                var id = entry.getValue().path("_id").asText(null);
+                if (id != null) ids.add(id);
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to parse bulk action line: " + line, e);
+            }
+        }
+        return ids;
     }
 
     private static <T> org.hamcrest.Matcher<T> not(org.hamcrest.Matcher<T> matcher) {

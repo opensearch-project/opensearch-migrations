@@ -5,13 +5,23 @@ when terminal document failures occur (see issue #2975). Records for a given
 backfill session live under ``s3://<bucket>/<prefix>/session=<session_id>/`` —
 new runs use a new ``session_id``, so prior-run records are never mixed in.
 
-Location/session are conveyed to the console via environment variables that the
-Argo workflow templates set on the console container:
+Location/session are conveyed to the console via two paths, in priority order:
 
-* ``RFS_DLQ_S3_BUCKET`` — bucket holding DLQ objects
-* ``RFS_DLQ_S3_PREFIX`` — key prefix above ``session=``
-* ``RFS_DLQ_SESSION_ID`` — current run's session id (Argo workflow UID by default)
-* ``RFS_DLQ_S3_REGION`` — region for the bucket (optional)
+1. **CLI / env override** — for explicit operator control:
+   * ``RFS_DLQ_S3_BUCKET`` — explicit bucket override
+   * ``RFS_DLQ_S3_PREFIX`` — key prefix above ``session=``
+   * ``RFS_DLQ_SESSION_ID`` — pinned session id
+   * ``RFS_DLQ_S3_REGION`` — region for the bucket
+
+2. **Per-run ConfigMap mount** at :data:`SESSION_CONFIGMAP_MOUNT` — the
+   bulk-load workflow patches a ``rfs-dlq-current-session`` ConfigMap with the
+   current ``{{workflow.uid}}`` before launching RFS, and the console mounts
+   that ConfigMap as a volume. Each new workflow rotates the values, so the
+   console always sees the *latest* run's session without a pod restart.
+
+3. **Default bucket fallback** — ``MIGRATIONS_DEFAULT_S3_BUCKET`` /
+   ``BUCKET_NAME`` from the deployment-provisioned
+   ``migrations-default-<account>-<stage>-<region>`` bucket.
 
 This module is intentionally a thin wrapper around the S3 listing/get APIs so a
 customer can also inspect the DLQ with the aws CLI if they prefer.
@@ -49,26 +59,66 @@ class DlqConfig:
 
 
 class DlqNotConfigured(RuntimeError):
-    """Raised when DLQ environment variables are not set."""
+    """Raised when no session id / bucket is available from any source."""
+
+
+SESSION_CONFIGMAP_MOUNT = "/etc/rfs-dlq"
+
+
+def _read_mounted(key: str) -> Optional[str]:
+    # ConfigMap-as-volume mounts expose each data key as a regular file.
+    # kubelet refreshes the symlinks within ~60s after the ConfigMap is
+    # patched, so re-running ``console backfill dlq …`` after a new
+    # workflow starts will pick up the new session without a pod restart.
+    path = os.path.join(SESSION_CONFIGMAP_MOUNT, key)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            value = f.read().strip()
+            return value or None
+    except (FileNotFoundError, IsADirectoryError, PermissionError):
+        return None
 
 
 def load_config(session_override: Optional[str] = None) -> DlqConfig:
-    bucket = os.environ.get("RFS_DLQ_S3_BUCKET")
+    # Bucket resolution: explicit override → mounted ConfigMap → deployment
+    # default bucket. The explicit override exists so an operator can pin
+    # inspection to a non-default bucket (e.g., investigating a historical
+    # run that wrote elsewhere).
+    bucket = (
+        os.environ.get("RFS_DLQ_S3_BUCKET")
+        or _read_mounted("bucket")
+        or os.environ.get("MIGRATIONS_DEFAULT_S3_BUCKET")
+        or os.environ.get("BUCKET_NAME")
+    )
     if not bucket:
         raise DlqNotConfigured(
-            "RFS_DLQ_S3_BUCKET is not set. The DLQ is configured by the Argo "
-            "workflow templates; set --dlq-s3-bucket in the RFS step or export "
-            "RFS_DLQ_S3_BUCKET / RFS_DLQ_S3_PREFIX / RFS_DLQ_SESSION_ID."
+            "No DLQ bucket is configured. Run a bulk-load workflow first (which "
+            "patches /etc/rfs-dlq/bucket), or set RFS_DLQ_S3_BUCKET / "
+            "MIGRATIONS_DEFAULT_S3_BUCKET / BUCKET_NAME in the console env."
         )
-    prefix = os.environ.get("RFS_DLQ_S3_PREFIX", "rfs-dlq/")
+    # Prefix resolution: env override → mounted ConfigMap → safe default.
+    prefix = (
+        os.environ.get("RFS_DLQ_S3_PREFIX")
+        or _read_mounted("prefix")
+        or "rfs-dlq/"
+    )
     if not prefix.endswith("/"):
         prefix = prefix + "/"
-    session = session_override or os.environ.get("RFS_DLQ_SESSION_ID")
+    # Session resolution: --session arg → env override → mounted ConfigMap.
+    # The mounted file is the *current* session id (Argo workflow UID) that
+    # the bulk-load workflow most recently patched in.
+    session = (
+        session_override
+        or os.environ.get("RFS_DLQ_SESSION_ID")
+        or _read_mounted("session_id")
+    )
     if not session:
         raise DlqNotConfigured(
-            "RFS_DLQ_SESSION_ID is not set and no --session was supplied."
+            "No DLQ session id is available. Run a bulk-load workflow first "
+            "(which patches /etc/rfs-dlq/session_id with the workflow UID), "
+            "or pass --session <id> to target a specific historical run."
         )
-    region = os.environ.get("RFS_DLQ_S3_REGION")
+    region = os.environ.get("RFS_DLQ_S3_REGION") or _read_mounted("region")
     return DlqConfig(bucket=bucket, prefix=prefix, session_id=session, region=region)
 
 

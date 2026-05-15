@@ -309,13 +309,16 @@ public class RfsMigrateDocuments {
 
     /**
      * Configuration for the durable DLQ where terminal document failures are persisted.
-     * See issue #2975. DLQ is enabled when --dlq-s3-bucket is provided (or can be derived
-     * from --s3-repo-uri); otherwise terminal failures are not captured to a sink.
+     * See issue #2975. DLQ is enabled when --dlq-s3-bucket is provided, or when the
+     * deployment-provisioned default bucket is available via MIGRATIONS_DEFAULT_S3_BUCKET;
+     * otherwise terminal failures are not captured to a sink.
      */
     public static class DlqArgs {
         @Parameter(required = false,
             names = { "--dlq-s3-bucket" },
-            description = "S3 bucket for durable DLQ records. Providing this (or --s3-repo-uri) enables the DLQ.")
+            description = "S3 bucket for durable DLQ records. When unset, the deployment-provisioned " +
+                "default bucket (migrations-default-<account>-<stage>-<region>, conveyed via the " +
+                "MIGRATIONS_DEFAULT_S3_BUCKET env var) is used.")
         public String dlqS3Bucket = null;
 
         @Parameter(required = false,
@@ -550,7 +553,8 @@ public class RfsMigrateDocuments {
             // workflow can capture as an output parameter (see Argo template).
             System.out.println("RFS_DLQ_LOCATION=" + dlqSink.getLocation());
         } else {
-            log.atInfo().setMessage("DLQ disabled: no --dlq-s3-bucket configured").log();
+            log.atInfo().setMessage("DLQ disabled: no --dlq-s3-bucket configured "
+                + "and MIGRATIONS_DEFAULT_S3_BUCKET is not set").log();
         }
         
         // Determine if server-generated IDs should be used
@@ -611,7 +615,8 @@ public class RfsMigrateDocuments {
                         () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
                         cleanShutdownCompleted,
                         context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
-                        context.getWorkCoordinationContext()::createReleaseWorkItemContext),
+                        context.getWorkCoordinationContext()::createReleaseWorkItemContext,
+                        dlqSink),
                 Clock.systemUTC());) {
             // Set up a hook to attempt to shut down cleanly (to mark progress in the worker coordination system) in the
             // event of a SIGTERM signal.
@@ -621,7 +626,8 @@ public class RfsMigrateDocuments {
                 try {
                     executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
                             context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
-                            context.getWorkCoordinationContext()::createReleaseWorkItemContext);
+                            context.getWorkCoordinationContext()::createReleaseWorkItemContext,
+                            dlqSink);
                     log.atInfo().setMessage("Clean shutdown completed.").log();
                 } catch (InterruptedException e) {
                     log.atError().setMessage("Clean exit process was interrupted: {}").addArgument(e).log();
@@ -766,14 +772,18 @@ public class RfsMigrateDocuments {
 
     /**
      * Build the S3 DLQ sink, or return null when no bucket is configured. The bucket
-     * comes from --dlq-s3-bucket or, as a fallback, the snapshot repo bucket so EKS
-     * deployments don't need to manage a separate bucket. The per-session prefix
-     * keeps DLQ and snapshot objects in their own keyspace.
+     * comes from --dlq-s3-bucket; when absent we fall back to the migrations-default
+     * bucket (``migrations-default-<account>-<stage>-<region>``) that the deployment
+     * provisions and exposes to the pod as MIGRATIONS_DEFAULT_S3_BUCKET. The per-
+     * session prefix keeps DLQ and snapshot objects in their own keyspace.
      */
     private static DlqSink buildDlqSink(Args arguments, String workerId, String sessionId) {
         String bucket = arguments.dlqArgs.dlqS3Bucket;
-        if ((bucket == null || bucket.isBlank()) && arguments.s3RepoUri != null) {
-            bucket = new org.opensearch.migrations.bulkload.common.S3Uri(arguments.s3RepoUri).bucketName;
+        if (bucket == null || bucket.isBlank()) {
+            var fromEnv = System.getenv("MIGRATIONS_DEFAULT_S3_BUCKET");
+            if (fromEnv != null && !fromEnv.isBlank()) {
+                bucket = fromEnv;
+            }
         }
         if (bucket == null || bucket.isBlank()) {
             return null;
@@ -845,7 +855,8 @@ public class RfsMigrateDocuments {
             IWorkCoordinator coordinator,
             AtomicBoolean cleanShutdownCompleted,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier,
-            Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier
+            Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier,
+            DlqSink dlqSink
     ) throws IOException, InterruptedException {
         if (cleanShutdownCompleted.get())  {
             log.atInfo().setMessage("Clean shutdown already completed").log();
@@ -865,13 +876,50 @@ public class RfsMigrateDocuments {
             cleanShutdownCompleted.set(true);
             return;
         }
-        log.atInfo().setMessage("Marking progress: " + workItemAndDuration.getWorkItem().toString() + ", at doc " + progressCursor.get().getProgressCheckpointNum()).log();
+        var workItemId = workItemAndDuration.getWorkItem().toString();
+        log.atInfo().setMessage("Marking progress: " + workItemId + ", at doc " + progressCursor.get().getProgressCheckpointNum()).log();
         var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, progressCursor.get());
 
+        // Don't checkmark the work item as done until the DLQ stuff is written/flushed.
+        // If the flush fails, refuse to mark complete so the lease naturally expires and a
+        // successor worker re-processes from a known-good state — preserving evidence of
+        // any terminal failures we accumulated but couldn't persist.
+        if (!flushDlqBeforeComplete(dlqSink, workItemId)) {
+            return;
+        }
+
         coordinator.createSuccessorWorkItemsAndMarkComplete(
-                workItemAndDuration.getWorkItem().toString(), successorWorkItem, 1, contextSupplier
+                workItemId, successorWorkItem, 1, contextSupplier
         );
         cleanShutdownCompleted.set(true);
+    }
+
+    /**
+     * Flush any buffered DLQ records to S3 before marking the current work item complete.
+     * Returns {@code true} if it's safe to proceed with the mark-complete call. A
+     * {@code false} return means the flush failed and the caller must NOT mark the work
+     * item complete — letting the lease expire naturally lets a successor worker pick
+     * up the partition and re-emit terminal failures to the DLQ.
+     *
+     * <p>A null {@code dlqSink} (DLQ disabled) returns {@code true} immediately. The 5-min
+     * timeout mirrors {@link DocumentMigrationBootstrap}'s flush deadline.
+     */
+    private static boolean flushDlqBeforeComplete(DlqSink dlqSink, String workItemId) {
+        if (dlqSink == null) {
+            return true;
+        }
+        try {
+            dlqSink.flush().block(Duration.ofMinutes(5));
+            return true;
+        } catch (Exception e) {
+            log.atError().setCause(e)
+                .setMessage("DLQ flush failed before checkmarking work item {} complete; "
+                    + "skipping mark-complete so the lease expires and a successor retries — "
+                    + "any unflushed DLQ records will be re-emitted by the successor")
+                .addArgument(workItemId)
+                .log();
+            return false;
+        }
     }
 
     /**
@@ -903,7 +951,8 @@ public class RfsMigrateDocuments {
             Runnable cancellationRunnable,
             AtomicBoolean cleanShutdownCompleted,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier,
-            Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier) {
+            Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier,
+            DlqSink dlqSink) {
         log.atWarn().setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
                 .addArgument(workItemId)
                 .log();
@@ -931,6 +980,14 @@ public class RfsMigrateDocuments {
                     log.atWarn().setMessage("Successor Work Ids: {}").addArgument(String.join(", ", successorWorkItemIds))
                             .log();
                     var successorNextAcquisitionLeaseExponent = getSuccessorNextAcquisitionLeaseExponent(workItemTimeProvider, initialLeaseDuration, workItemAndDuration.getLeaseExpirationTime());
+
+                    // Don't checkmark the work item as done until the DLQ stuff is flushed.
+                    // On flush failure, skip the mark-complete and let the lease expire so a
+                    // successor reprocesses the partition and re-emits its terminal failures.
+                    if (!flushDlqBeforeComplete(dlqSink, workItemId)) {
+                        return;
+                    }
+
                     coordinator.createSuccessorWorkItemsAndMarkComplete(
                             workItemId,
                             successorWorkItemIds,
@@ -1092,7 +1149,8 @@ public class RfsMigrateDocuments {
                             () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
                             cleanShutdownCompleted,
                             context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
-                            context.getWorkCoordinationContext()::createReleaseWorkItemContext),
+                            context.getWorkCoordinationContext()::createReleaseWorkItemContext,
+                            targetClient.getDlqSink()),
                     Clock.systemUTC())) {
 
                 // Work coordination will naturally short-circuit via ShardWorkPreparer.onAlreadyCompleted
@@ -1209,7 +1267,8 @@ public class RfsMigrateDocuments {
                     try {
                         executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
                                 context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
-                                context.getWorkCoordinationContext()::createReleaseWorkItemContext);
+                                context.getWorkCoordinationContext()::createReleaseWorkItemContext,
+                                targetClient.getDlqSink());
                         log.atInfo().setMessage("Clean shutdown completed.").log();
                     } catch (InterruptedException e) {
                         log.atError().setMessage("Clean exit process was interrupted: {}").addArgument(e).log();

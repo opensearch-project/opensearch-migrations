@@ -603,7 +603,7 @@ public abstract class OpenSearchClient {
         .retryWhen(getBulkRetryStrategy())
         .doOnError(error -> {
             if (!pendingOps.isEmpty()) {
-                emitRetryExhaustedToDlq(indexName, pendingOps, error);
+                emitRetryExhaustedToDlq(indexName, pendingOps, error, allowlist);
                 failedRequestsLogger.logBulkFailure(
                     indexName,
                     pendingOps::size,
@@ -691,11 +691,18 @@ public abstract class OpenSearchClient {
      * failing response (carried on {@link OperationFailed}); falls back to null
      * responseItem when the error is not an {@code OperationFailed} (e.g. a network
      * failure that never produced a bulk response).
+     *
+     * <p>The configured {@code allowlist} is honored when classifying the last response:
+     * allowlisted items are routed to {@code successPositions} and intentionally NOT
+     * added to {@code perPosition}, so a position-shifted lookup can never attach an
+     * allowlisted item's {@code failureType} or documentId to a real retryable failure's
+     * DLQ record (acceptance criterion for issue #2975).
      */
     private void emitRetryExhaustedToDlq(
         String indexName,
         ArrayList<BulkOperationSpec> pendingOps,
-        Throwable error
+        Throwable error,
+        DocumentExceptionAllowlist allowlist
     ) {
         // Retry exhausted by Reactor wraps the underlying OperationFailed inside a
         // RetryExhausted/RuntimeException — unwrap the cause chain to recover the
@@ -712,7 +719,7 @@ public abstract class OpenSearchClient {
         HttpResponse lastResponse = opFailed != null ? opFailed.response : null;
         Map<Integer, ItemFailure> perPosition = new HashMap<>();
         if (lastResponse != null && lastResponse.body != null) {
-            ItemPartition partition = BulkResponseParser.partitionItems(lastResponse.body, DocumentExceptionAllowlist.empty());
+            ItemPartition partition = BulkResponseParser.partitionItems(lastResponse.body, allowlist);
             if (partition != null) {
                 for (ItemFailure f : partition.getRetryableFailures()) {
                     perPosition.put(f.getPosition(), f);
