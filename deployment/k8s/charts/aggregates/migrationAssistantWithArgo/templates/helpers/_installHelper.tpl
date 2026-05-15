@@ -10,24 +10,27 @@
 {{- else }}
               VALUE_PARAM=""
 {{- end }}
+              do_install_{{ $name | replace "-" "_" }}() {
 {{- $repo := $chart.repository }}
 {{- if hasPrefix "oci://" $repo }}
-              helm upgrade --install {{ $name }} {{ $repo }} \
+                helm upgrade --install {{ $name }} {{ $repo }} \
 {{- else }}
-              helm upgrade --install {{ $name }} chart-repo-{{ $name }}/{{ $name }} \
+                helm upgrade --install {{ $name }} chart-repo-{{ $name }}/{{ $name }} \
 {{- end }}
 {{- if $chart.version }}
-                --version {{ $chart.version }} \
+                  --version {{ $chart.version }} \
 {{- end }}
 {{- if $chart.namespace }}
-                --namespace {{ $chart.namespace }} \
-                --create-namespace \
+                  --namespace {{ $chart.namespace }} \
+                  --create-namespace \
 {{- end }}
-                --timeout {{ default "300" $chart.timeout }}s \
-                --set global.managedBy="{{ $root.Release.Name }}" \
-                $VALUE_PARAM \
+                  --timeout {{ default "300" $chart.timeout }}s \
+                  --set global.managedBy="{{ $root.Release.Name }}" \
+                  $VALUE_PARAM \
 {{- if or $chart.waitForInstallation $forceWait }}
-                --wait
+                  --wait
 {{- end }}
+              }
+              retry 2 15 "helm upgrade --install {{ $name }}" -- do_install_{{ $name | replace "-" "_" }}
               touch /tmp/helm-status/{{ $name }}.done
 {{- end }}

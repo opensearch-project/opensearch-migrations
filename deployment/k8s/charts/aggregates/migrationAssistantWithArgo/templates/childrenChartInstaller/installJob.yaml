@@ -13,7 +13,18 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 1
+  activeDeadlineSeconds: 1200
   ttlSecondsAfterFinished: 600
+  podFailurePolicy:
+    rules:
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+      - action: FailJob
+        onExitCodes:
+          containerName: helm-installer
+          operator: NotIn
+          values: [0]
   template:
     metadata:
       labels:
@@ -45,14 +56,21 @@ spec:
             - |
               #!/bin/sh
               set -e
+              {{- include "migration.retryFunctions" . | nindent 14 }}
 
       {{- if .Values.ecrAuth }}
               echo "Authenticating with ECR for OCI chart pulls..."
       {{- if .Values.ecrAuth.token }}
-              echo "{{ .Values.ecrAuth.token }}" | helm registry login --username AWS --password-stdin {{ .Values.ecrAuth.registry }}
+              ecr_login_token() {
+                echo "{{ .Values.ecrAuth.token }}" | helm registry login --username AWS --password-stdin {{ .Values.ecrAuth.registry }}
+              }
+              retry 2 5 "ECR registry login (token)" -- ecr_login_token
       {{- else }}
-              aws ecr get-login-password --region "${AWS_DEFAULT_REGION}" 2>/dev/null | \
-                helm registry login --username AWS --password-stdin {{ .Values.ecrAuth.registry }} || \
+              ecr_login_iam() {
+                aws ecr get-login-password --region "${AWS_DEFAULT_REGION}" 2>/dev/null | \
+                  helm registry login --username AWS --password-stdin {{ .Values.ecrAuth.registry }}
+              }
+              retry 2 5 "ECR registry login (IAM)" -- ecr_login_iam || \
                 echo "WARNING: Could not authenticate with ECR. OCI chart pulls may fail."
       {{- end }}
       {{- end }}
@@ -72,12 +90,13 @@ spec:
           {{- $repo := $chart.repository }}
           {{- if and (index $.Values.conditionalPackageInstalls $name) (ne (substr 0 6 $repo) "oci://") }}
               echo "Adding chart repository..."
-              helm repo add chart-repo-{{ $name }} {{ $repo }}
+              retry 3 5 "helm repo add {{ $name }}" -- helm repo add chart-repo-{{ $name }} {{ $repo }}
           {{- end }}
       {{- end }}
 
       {{- if .Values.charts }}
-              time helm repo update || echo "No traditional helm repos to update (OCI repos don't need it)"
+              retry 3 10 "helm repo update" -- helm repo update || \
+                echo "No traditional helm repos to update (OCI repos don't need it)"
       {{- end }}
 
               # Helper function.  Charts that define "dependsOn" will check a dependency with this.
@@ -116,7 +135,7 @@ spec:
       {{- if $.Values.kyvernoPolicies.zeroResourceRequests }}
               echo "Applying zero-resource-requests ClusterPolicy before installing other charts..."
               kubectl wait --for=condition=Established crd/clusterpolicies.kyverno.io --timeout=60s
-              kubectl apply -f /policy/policy.yaml
+              retry 3 5 "apply zero-resource-requests policy" -- kubectl apply -f /policy/policy.yaml
               echo "Waiting for zero-resource-requests policy to be ready..."
               kubectl wait --for=condition=Ready clusterpolicy/zero-resource-requests --timeout=60s
               echo "Verifying policy is actively enforcing via canary pod..."
@@ -170,45 +189,47 @@ spec:
                 check_dependency "{{ $chart.dependsOn }}"
           {{- end }}
 
+                do_install_{{ $name | replace "-" "_" }}() {
           {{- $repo := $chart.repository }}
           {{- $version := $chart.version }}
           {{- if hasPrefix "oci://" $repo }}
-                echo "Installing OCI chart: {{ $name }}"
-                helm upgrade --install \
-                  {{ $name }} \
-                  {{ $repo }} \
+                  echo "Installing OCI chart: {{ $name }}"
+                  helm upgrade --install \
+                    {{ $name }} \
+                    {{ $repo }} \
           {{- else }}
-                echo "Installing chart from Helm repo: {{ $name }}"
-                helm upgrade --install \
-                  {{ $name }} \
-                  chart-repo-{{ $name }}/{{ $name }} \
+                  echo "Installing chart from Helm repo: {{ $name }}"
+                  helm upgrade --install \
+                    {{ $name }} \
+                    chart-repo-{{ $name }}/{{ $name }} \
           {{- end }}
-
           {{- if $chart.version }}
-                  --version {{ $chart.version }} \
+                    --version {{ $chart.version }} \
           {{- end }}
           {{- if $chart.namespace }}
-                  --namespace {{ $chart.namespace }} \
-                  --create-namespace \
+                    --namespace {{ $chart.namespace }} \
+                    --create-namespace \
           {{- end }}
-                  --timeout {{ default "300" $chart.timeout }}s \
-                  --set global.managedBy="{{ $.Release.Name }}" \
+                    --timeout {{ default "300" $chart.timeout }}s \
+                    --set global.managedBy="{{ $.Release.Name }}" \
           {{- if eq $name "argo-workflows" }}
-                  --set artifactRepository.s3.bucket="{{ printf "migrations-default-%s-%s-%s" (toString $.Values.aws.account) $.Values.stageName $.Values.aws.region }}" \
-                  --set artifactRepository.s3.region="{{ $.Values.aws.region }}" \
+                    --set artifactRepository.s3.bucket="{{ printf "migrations-default-%s-%s-%s" (toString $.Values.aws.account) $.Values.stageName $.Values.aws.region }}" \
+                    --set artifactRepository.s3.region="{{ $.Values.aws.region }}" \
             {{- if $.Values.defaultBucketConfiguration.useLocalStack }}
-                  --set artifactRepository.s3.endpoint="{{ $.Values.defaultBucketConfiguration.endpoint }}.{{ $.Release.Namespace }}.svc.cluster.local:4566" \
+                    --set artifactRepository.s3.endpoint="{{ $.Values.defaultBucketConfiguration.endpoint }}.{{ $.Release.Namespace }}.svc.cluster.local:4566" \
             {{- else }}
-                  --set artifactRepository.s3.endpoint="s3.{{ $.Values.aws.region }}.amazonaws.com" \
+                    --set artifactRepository.s3.endpoint="s3.{{ $.Values.aws.region }}.amazonaws.com" \
             {{- end }}
           {{- end }}
           {{- if eq $name "ack-cloudwatch-controller" }}
-                  --set aws.region="{{ $.Values.aws.region }}" \
+                    --set aws.region="{{ $.Values.aws.region }}" \
           {{- end }}
-                  $VALUE_PARAM \
+                    $VALUE_PARAM \
           {{- if $chart.waitForInstallation }}
-                  --wait
+                    --wait
           {{- end }}
+                }
+                retry 2 15 "helm upgrade --install {{ $name }}" -- do_install_{{ $name | replace "-" "_" }}
 
                 # Mark this chart as done
                 touch /tmp/helm-status/{{ $name }}.done
@@ -228,7 +249,10 @@ spec:
               echo "Waiting for Dashboard CRD to be established..."
               kubectl wait --for=condition=Established crd/dashboards.cloudwatch.services.k8s.aws --timeout=120s
               echo "Applying CloudWatch Dashboard CRs..."
-              echo '{{ include "cloudwatch.dashboardCRs" (dict "region" $region "account" $account "stage" $stage "root" $) | b64enc }}' | base64 -d | kubectl apply -f -
+              apply_dashboards() {
+                echo '{{ include "cloudwatch.dashboardCRs" (dict "region" $region "account" $account "stage" $stage "root" $) | b64enc }}' | base64 -d | kubectl apply -f -
+              }
+              retry 3 5 "apply CloudWatch Dashboard CRs" -- apply_dashboards
               echo "Dashboard CRs applied."
       {{- end }}
 
@@ -266,7 +290,7 @@ spec:
               cat /tmp/all-notes.yaml
 
               # Apply the ConfigMap to store all notes
-              kubectl apply -f /tmp/all-notes.yaml
+              retry 2 5 "apply installation-notes ConfigMap" -- kubectl apply -f /tmp/all-notes.yaml
 
               echo "Installation complete! View aggregated notes with:"
               echo "kubectl get configmap {{ $.Release.Name }}-installation-notes -n {{ $.Release.Namespace }} -o jsonpath='{.data.all-notes\\.txt}'"
