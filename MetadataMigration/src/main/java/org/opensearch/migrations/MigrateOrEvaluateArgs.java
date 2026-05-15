@@ -94,6 +94,15 @@ public class MigrateOrEvaluateArgs {
     )
     public boolean enableSourcelessMigrations = false;
 
+    @Parameter(required = false,
+        names = { "--allow-existing-indexes" },
+        description = "When true, indexes that already exist on the target cluster are reported as a non-fatal " +
+            "warning instead of a fatal error. This makes metadata migration idempotent so it can be safely re-run " +
+            "alongside document backfill. When false (default), encountering an existing index aborts the migration.",
+        arity = 1
+    )
+    public boolean allowExistingIndexes = false;
+
     // Accepted for parity with RfsMigrateDocuments but not used by MetadataMigration.
     // The orchestration layer forwards a shared config bag to both CLIs.
     @Parameter(required = false,

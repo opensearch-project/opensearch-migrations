@@ -76,12 +76,12 @@ copy_image() {
   ptc_src=$(ptc_rewrite "$ptc" "$image") && sources="$ptc_src ${sources}"
 
   for src in $sources; do
-    for attempt in 1 2 3; do
+    for attempt in 1 2 3 4 5; do
       if crane copy "$src" "$dest" 2>/dev/null; then
         [ "$src" != "$image" ] && echo "  ℹ️  $image (via $src)"
         echo "  ✅ $image"; return 0
       fi
-      sleep 5
+      sleep $((5 * 2**(attempt-1)))  # exponential backoff: 5s, 10s, 20s, 40s, 80s
     done
   done
   echo "  ❌ $image" >&2; return 1

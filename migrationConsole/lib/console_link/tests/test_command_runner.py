@@ -135,3 +135,67 @@ def test_command_runner_handles_no_output_on_error(capsys, mocker):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == ""
+
+
+# --- Timeout behaviour -------------------------------------------------------
+# The default is opt-in (timeout=None). Callers that are reachable from tests
+# (e.g. ArgoService._run_kubectl_command, execute_api_call) set explicit timeouts.
+
+def test_command_runner_default_timeout_is_none():
+    # Opt-in default: no timeout unless the caller asks for one.
+    runner = CommandRunner("true", {})
+    assert runner.timeout is None
+
+
+def test_command_runner_synchronous_timeout_raises_command_runner_error():
+    # sleep 10 with timeout=0.5 → subprocess.TimeoutExpired → CommandRunnerError(-1)
+    runner = CommandRunner("sleep", {"10": FlagOnlyArgument}, timeout=0.5)
+    with pytest.raises(CommandRunnerError) as excinfo:
+        runner.run(print_to_console=False)
+    assert excinfo.value.returncode == -1
+
+
+def test_command_runner_synchronous_unbounded_when_timeout_none():
+    # timeout=None (the default) is unbounded; a quick command still succeeds.
+    runner = CommandRunner("true", {}, timeout=None)
+    result = runner.run(print_to_console=False)
+    assert result.success
+
+
+def test_command_runner_synchronous_succeeds_well_within_timeout():
+    # A ~no-op command with a generous timeout should succeed.
+    runner = CommandRunner("true", {}, timeout=5.0)
+    result = runner.run(print_to_console=False)
+    assert result.success
+
+
+def test_command_runner_streaming_idle_timeout_kills_silent_child():
+    # Streaming + idle timeout: a child that produces no output for
+    # self.timeout seconds is SIGKILL'd. `sleep` is the canonical silent child.
+    runner = CommandRunner("sleep", {"10": FlagOnlyArgument}, timeout=0.5)
+    with pytest.raises(CommandRunnerError) as excinfo:
+        runner.run(print_to_console=False, stream_output=True)
+    assert excinfo.value.returncode == -1
+
+
+def test_command_runner_streaming_idle_timer_resets_on_output():
+    # A streaming child that produces a line every 100ms must NOT be killed
+    # with idle timeout=500ms, even if total runtime exceeds 500ms. The timer
+    # should be re-armed on each line of progress.
+    # We spawn python -c that prints 8 lines with 100ms gaps (~800ms total);
+    # idle budget is 500ms so a naive wall-clock timer would kill it.
+    cmd = (
+        "import sys, time\n"
+        "for i in range(8):\n"
+        "    print(f'line {i}', flush=True)\n"
+        "    time.sleep(0.1)\n"
+    )
+    runner = CommandRunner("python3", {"-c": cmd}, timeout=0.5)
+    result = runner.run(print_to_console=False, stream_output=True)
+    assert result.success
+
+
+def test_command_runner_streaming_succeeds_well_within_timeout():
+    runner = CommandRunner("true", {}, timeout=5.0)
+    result = runner.run(print_to_console=False, stream_output=True)
+    assert result.success

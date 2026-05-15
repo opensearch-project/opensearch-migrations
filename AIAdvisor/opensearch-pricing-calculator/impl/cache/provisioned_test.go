@@ -179,7 +179,7 @@ func TestUpdateWarmInstance(t *testing.T) {
 	assert.Equal(t, "UW-RC1", iu.Price["OnDemand"].RateCode)
 }
 
-func TestUpdateWarmInstanceJVMMemoryCap(t *testing.T) {
+func TestUpdateWarmInstance_JVMMemoryCap(t *testing.T) {
 	instances := make(map[string]price.InstanceUnit)
 
 	itemValue := map[string]interface{}{
@@ -197,7 +197,7 @@ func TestUpdateWarmInstanceJVMMemoryCap(t *testing.T) {
 	assert.Equal(t, 30.5, iu.JVMMemory) // 128/2 = 64, capped at 30.5
 }
 
-func TestUpdateWarmInstanceEmptyInstanceType(t *testing.T) {
+func TestUpdateWarmInstance_EmptyInstanceType(t *testing.T) {
 	instances := make(map[string]price.InstanceUnit)
 
 	itemValue := map[string]interface{}{
@@ -209,7 +209,7 @@ func TestUpdateWarmInstanceEmptyInstanceType(t *testing.T) {
 	assert.Empty(t, instances)
 }
 
-func TestUpdateHotInstance1OnDemand(t *testing.T) {
+func TestUpdateHotInstance1_OnDemand(t *testing.T) {
 	instances := make(map[string]price.InstanceUnit)
 
 	itemValue := map[string]interface{}{
@@ -234,7 +234,7 @@ func TestUpdateHotInstance1OnDemand(t *testing.T) {
 	assert.Equal(t, "HOT-RC1", iu.Price["OnDemand"].RateCode)
 }
 
-func TestUpdateHotInstance1SkipsUltraWarm(t *testing.T) {
+func TestUpdateHotInstance1_SkipsUltraWarm(t *testing.T) {
 	instances := make(map[string]price.InstanceUnit)
 
 	itemValue := map[string]interface{}{
@@ -247,7 +247,7 @@ func TestUpdateHotInstance1SkipsUltraWarm(t *testing.T) {
 	assert.Empty(t, instances)
 }
 
-func TestUpdateHotInstance1SkipsEmptyInstanceType(t *testing.T) {
+func TestUpdateHotInstance1_SkipsEmptyInstanceType(t *testing.T) {
 	instances := make(map[string]price.InstanceUnit)
 
 	itemValue := map[string]interface{}{
@@ -260,7 +260,7 @@ func TestUpdateHotInstance1SkipsEmptyInstanceType(t *testing.T) {
 	assert.Empty(t, instances)
 }
 
-func TestUpdateHotInstance1ReservedInstance(t *testing.T) {
+func TestUpdateHotInstance1_ReservedInstance(t *testing.T) {
 	instances := make(map[string]price.InstanceUnit)
 
 	// First add the on-demand entry
@@ -297,7 +297,7 @@ func TestUpdateHotInstance1ReservedInstance(t *testing.T) {
 	assert.Equal(t, "RI-PC-RC", iu.Price["PURI1PC"].RateCode)
 }
 
-func TestCreateNewOnDemandHotInstanceUnitEBSOnly(t *testing.T) {
+func TestCreateNewOnDemandHotInstanceUnit_EBSOnly(t *testing.T) {
 	value := map[string]interface{}{
 		"Instance Type": "r6g.xlarge.search",
 		"Storage":       "EBS Only",
@@ -309,7 +309,7 @@ func TestCreateNewOnDemandHotInstanceUnitEBSOnly(t *testing.T) {
 	assert.NotNil(t, iu.Price)
 }
 
-func TestCreateNewOnDemandHotInstanceUnitInternalStorage(t *testing.T) {
+func TestCreateNewOnDemandHotInstanceUnit_InternalStorage(t *testing.T) {
 	value := map[string]interface{}{
 		"Instance Type": "i3.xlarge.search",
 		"Storage":       "1 x 950 GB",
@@ -320,7 +320,7 @@ func TestCreateNewOnDemandHotInstanceUnitInternalStorage(t *testing.T) {
 	assert.Equal(t, 950, iu.Storage.Internal) // 1 * 950
 }
 
-func TestCreateNewOnDemandHotInstanceUnitSkipsUltraWarm(t *testing.T) {
+func TestCreateNewOnDemandHotInstanceUnit_SkipsUltraWarm(t *testing.T) {
 	value := map[string]interface{}{
 		"Instance Type": "ultrawarm1.medium.search",
 	}
@@ -329,7 +329,7 @@ func TestCreateNewOnDemandHotInstanceUnitSkipsUltraWarm(t *testing.T) {
 	assert.Empty(t, iu.InstanceType)
 }
 
-func TestProvisionedPriceGetAllRegions(t *testing.T) {
+func TestProvisionedPrice_GetAllRegions(t *testing.T) {
 	pp := &ProvisionedPrice{
 		Regions: map[string]price.ProvisionedRegion{
 			"US East (N. Virginia)": {},
@@ -343,7 +343,7 @@ func TestProvisionedPriceGetAllRegions(t *testing.T) {
 	assert.Contains(t, regions, "EU (Ireland)")
 }
 
-func TestProvisionedPriceGetAllRegionsEmpty(t *testing.T) {
+func TestProvisionedPrice_GetAllRegions_Empty(t *testing.T) {
 	pp := &ProvisionedPrice{
 		Regions: map[string]price.ProvisionedRegion{},
 	}
@@ -383,7 +383,7 @@ func TestToString(t *testing.T) {
 	assert.Equal(t, "", toString(map[string]interface{}{}))
 }
 
-func TestUpdateWarmInstanceNonStringValues(t *testing.T) {
+func TestUpdateWarmInstance_NonStringValues(t *testing.T) {
 	// Verify that non-string values in the pricing data don't cause panics
 	instances := make(map[string]price.InstanceUnit)
 
@@ -402,7 +402,7 @@ func TestUpdateWarmInstanceNonStringValues(t *testing.T) {
 	assert.Equal(t, "UltraWarm", iu.Family)
 }
 
-func TestUpdateHotInstance1NonStringValues(t *testing.T) {
+func TestUpdateHotInstance1_NonStringValues(t *testing.T) {
 	instances := make(map[string]price.InstanceUnit)
 
 	// Instance Type as string so it gets created, but other values as wrong types
@@ -418,7 +418,7 @@ func TestUpdateHotInstance1NonStringValues(t *testing.T) {
 	assert.Len(t, instances, 1)
 }
 
-func TestCreateNewOnDemandHotInstanceUnitMissingInstanceType(t *testing.T) {
+func TestCreateNewOnDemandHotInstanceUnit_MissingInstanceType(t *testing.T) {
 	// nil value for Instance Type should not panic
 	value := map[string]interface{}{
 		"Storage": "EBS Only",

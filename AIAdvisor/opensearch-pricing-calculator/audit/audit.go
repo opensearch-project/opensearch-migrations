@@ -33,8 +33,6 @@ const (
 	EventInstanceTypesAccessed EventType = "INSTANCE_TYPES_ACCESSED"
 )
 
-const logMsgAuditEvent = "Audit event"
-
 // Result represents the outcome of an audited operation
 type Result string
 
@@ -126,11 +124,11 @@ func (l *Logger) LogEvent(ctx context.Context, event AuditEvent) {
 
 	switch event.Result {
 	case ResultSuccess:
-		l.logger.Info(logMsgAuditEvent, fields...)
+		l.logger.Info("Audit event", fields...)
 	case ResultFailure, ResultError:
-		l.logger.Warn(logMsgAuditEvent, fields...)
+		l.logger.Warn("Audit event", fields...)
 	default:
-		l.logger.Info(logMsgAuditEvent, fields...)
+		l.logger.Info("Audit event", fields...)
 	}
 }
 

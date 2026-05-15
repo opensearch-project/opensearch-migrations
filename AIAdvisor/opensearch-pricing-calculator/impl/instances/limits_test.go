@@ -177,7 +177,7 @@ func TestGetMaxEbsVolume(t *testing.T) {
 
 // --- Real instance lookup tests ---
 
-func TestInstanceLimitsMapR6gLarge(t *testing.T) {
+func TestInstanceLimitsMap_R6gLarge(t *testing.T) {
 	limits, found := InstanceLimitsMap["r6g.large.search"]
 	if !found {
 		t.Fatal("expected r6g.large.search in InstanceLimitsMap")
@@ -190,7 +190,7 @@ func TestInstanceLimitsMapR6gLarge(t *testing.T) {
 	}
 }
 
-func TestInstanceLimitsMapR3LargeNoGP3(t *testing.T) {
+func TestInstanceLimitsMap_R3Large_NoGP3(t *testing.T) {
 	limits, found := InstanceLimitsMap["r3.large.search"]
 	if !found {
 		t.Fatal("expected r3.large.search in InstanceLimitsMap")

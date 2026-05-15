@@ -1,10 +1,18 @@
+"""Argo Workflow helpers used only by integration tests.
+
+Production migration workflows should use the `workflow` command/services under
+`console_link.workflow`. This module exists for integration test workflows in
+`testWorkflows/` that submit WorkflowTemplates directly and pause on raw Argo
+`suspend: {}` steps while test clusters are prepared.
+"""
+
 import time
 import json
 import logging
 import tempfile
 import os
-import uuid
 import yaml
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 from console_link.models.cluster import Cluster
@@ -16,20 +24,28 @@ logger = logging.getLogger(__name__)
 ENDING_ARGO_PHASES = ["Succeeded", "Failed", "Error", "Stopped", "Terminated"]
 
 
+def _utc_now_for_kubernetes() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _command_stdout(result: CommandResult) -> str:
+    if result.output and result.output.stdout:
+        return result.output.stdout
+    return result.display()
+
+
 class WorkflowEndedBeforeSuspend(Exception):
     def __init__(self, workflow_name: str, phase: str):
         super().__init__(f"The workflow '{workflow_name}' reached ending phase of {phase} before reaching "
                          f"suspend state")
 
 
-class ArgoService:
-    def __init__(self, namespace: str = "ma", argo_image: str = "quay.io/argoproj/argocli:v4.0.3",
-                 service_account: str = "argo-workflow-executor"):
+class IntegrationTestArgoService:
+    def __init__(self, namespace: str = "ma"):
         self.namespace = namespace
-        self.argo_image = argo_image
-        self.service_account = service_account
 
     def start_workflow(self, workflow_template_name: str, parameters: Optional[Dict[str, Any]] = None) -> CommandResult:
+        temp_file = None
         try:
             # Create temporary workflow file
             temp_file = self._create_workflow_yaml(workflow_template_name, parameters)
@@ -43,12 +59,6 @@ class ArgoService:
             }
 
             result = self._run_kubectl_command(kubectl_args)
-
-            # Clean up temporary file
-            try:
-                os.unlink(temp_file)
-            except OSError:
-                logger.warning(f"Failed to delete temporary file: {temp_file}")
 
             name = result.output.stdout.strip()
             logger.info(f"Started workflow: {name}")
@@ -64,20 +74,48 @@ class ArgoService:
                 success=False,
                 value=f"Failed to start workflow: {e}"
             )
+        finally:
+            if temp_file:
+                try:
+                    os.unlink(temp_file)
+                except OSError:
+                    logger.warning(f"Failed to delete temporary file: {temp_file}")
 
     def resume_workflow(self, workflow_name: str) -> CommandResult:
-        args = {
-            "resume": workflow_name
-        }
-        result = self._run_argo_command(pod_action="resume-workflow", argo_args=args)
+        workflow_data = self._get_workflow_status_json(workflow_name)
+        workflow_patch: Dict[str, Any] = {}
+
+        spec = workflow_data.setdefault("spec", {})
+        if spec.get("suspend") is True:
+            workflow_patch.setdefault("spec", {})["suspend"] = None
+
+        now = _utc_now_for_kubernetes()
+        node_patches = {}
+        for node_id, node in workflow_data.get("status", {}).get("nodes", {}).items():
+            if self._is_active_suspend_node(node):
+                node_patch = {
+                    "phase": "Succeeded",
+                    "finishedAt": now
+                }
+                self._apply_default_output_parameters(node.get("outputs"))
+                if node.get("outputs"):
+                    node_patch["outputs"] = node["outputs"]
+                node.update(node_patch)
+                node_patches[node_id] = node_patch
+
+        if node_patches:
+            workflow_patch.setdefault("status", {})["nodes"] = node_patches
+
+        if not workflow_patch:
+            logger.info(f"Argo workflow '{workflow_name}' did not have active suspend state to resume")
+            return CommandResult(success=True, value=f"Workflow {workflow_name} did not need to be resumed")
+
+        result = self._patch_workflow(workflow_name, workflow_patch)
         logger.info(f"Argo workflow '{workflow_name}' has been resumed")
         return result
 
     def stop_workflow(self, workflow_name: str) -> CommandResult:
-        args = {
-            "stop": workflow_name
-        }
-        result = self._run_argo_command(pod_action="stop-workflow", argo_args=args)
+        result = self._patch_workflow(workflow_name, {"spec": {"shutdown": "Stop"}})
         logger.info(f"Argo workflow '{workflow_name}' has been stopped")
         return result
 
@@ -109,7 +147,15 @@ class ArgoService:
         except Exception as e:
             logger.error(f"Failed to get namespace resources: {e}")
 
-    def save_namespace_diagnostics(self, output_dir: str) -> Optional[str]:
+        try:
+            logger.info(f"===== Workflow {workflow_name} pod logs =====")
+            logs = self._get_workflow_logs(workflow_name)
+            if logs.output and logs.output.stdout:
+                logger.info(logs.output.stdout)
+        except Exception as e:
+            logger.error(f"Failed to get workflow logs: {e}")
+
+    def save_namespace_diagnostics(self, output_dir: str, workflow_name: Optional[str] = None) -> Optional[str]:
         """Save detailed namespace diagnostics to a file for artifact collection."""
         diagnostic_resources = "pods,services,deployments,statefulsets,workflows"
         try:
@@ -127,7 +173,7 @@ class ArgoService:
                         "--namespace": self.namespace,
                         "-o": "wide"
                     }).run()
-                    f.write(result + "\n\n")
+                    f.write(_command_stdout(result) + "\n\n")
                 except Exception as e:
                     f.write(f"Error: {e}\n\n")
 
@@ -138,7 +184,7 @@ class ArgoService:
                         "describe": diagnostic_resources,
                         "--namespace": self.namespace
                     }).run()
-                    f.write(result + "\n\n")
+                    f.write(_command_stdout(result) + "\n\n")
                 except Exception as e:
                     f.write(f"Error: {e}\n\n")
 
@@ -150,9 +196,17 @@ class ArgoService:
                         "--namespace": self.namespace,
                         "--sort-by": ".lastTimestamp"
                     }).run()
-                    f.write(result + "\n\n")
+                    f.write(_command_stdout(result) + "\n\n")
                 except Exception as e:
                     f.write(f"Error: {e}\n\n")
+
+                if workflow_name:
+                    f.write(f"===== kubectl logs for workflow {workflow_name} =====\n")
+                    try:
+                        result = self._get_workflow_logs(workflow_name)
+                        f.write((result.output.stdout if result.output else "") + "\n\n")
+                    except Exception as e:
+                        f.write(f"Error: {e}\n\n")
 
             logger.info(f"Saved namespace diagnostics to {output_file}")
             return output_file
@@ -162,10 +216,15 @@ class ArgoService:
 
     def get_workflow_status(self, workflow_name: str) -> CommandResult:
         workflow_data = self._get_workflow_status_json(workflow_name)
-        phase = workflow_data.get("status", {}).get("phase", "")
+        status = workflow_data.get("status", {}) or {}
+        phase = status.get("phase", "")
+        # `message` is populated by Argo on termination (e.g. "Stopped with strategy 'Stop'"
+        # when stop_workflow is called). Tests need it to distinguish a workflow stopped
+        # deliberately by the test framework from one that failed on its own.
+        message = status.get("message", "") or ""
 
         # Check for suspended nodes
-        nodes = workflow_data.get("status", {}).get("nodes", {})
+        nodes = status.get("nodes", {}) or {}
         has_suspended_nodes = False
         for node_id, node in nodes.items():
             if node.get("phase") == "Running":
@@ -174,6 +233,7 @@ class ArgoService:
 
         status_info = {
             "phase": phase,
+            "message": message,
             "has_suspended_nodes": has_suspended_nodes
         }
 
@@ -205,42 +265,21 @@ class ArgoService:
 
         raise TimeoutError(f"Workflow did not reach suspended state in timeout of {timeout_seconds} seconds")
 
-    def is_workflow_completed(self, workflow_name: str) -> CommandResult:
-        status_result = self.get_workflow_status(workflow_name)
-        if not status_result.success:
-            raise ValueError(f"Failed to get workflow status: {status_result}")
-
-        status_info = status_result.value
-        phase = status_info.get("phase", "")
-
-        if phase in ENDING_ARGO_PHASES:
-            return CommandResult(success=True, value=f"Workflow {workflow_name} has reached an ending phase of {phase}")
-        return CommandResult(success=False, value=f"Workflow {workflow_name} has not completed and is in {phase} phase")
-
     def wait_for_ending_phase(self, workflow_name: str, timeout_seconds: int = 120, interval: int = 5) -> CommandResult:
         start_time = time.time()
 
         while time.time() - start_time < timeout_seconds:
-            phase_result = self.is_workflow_completed(workflow_name)
-            if phase_result.success:
-                return phase_result
+            status_result = self.get_workflow_status(workflow_name)
+            if not status_result.success:
+                raise ValueError(f"Failed to get workflow status: {status_result}")
+
+            phase = status_result.value.get("phase", "")
+            if phase in ENDING_ARGO_PHASES:
+                return CommandResult(success=True, value=f"Workflow {workflow_name} has reached an ending phase of "
+                                                         f"{phase}")
             time.sleep(interval)
 
         raise TimeoutError(f"Workflow did not reach ending state in timeout of {timeout_seconds} seconds")
-
-    def watch_workflow(self, workflow_name: str, stream_output: bool = True) -> CommandResult:
-        argo_args = {
-            "logs": workflow_name,
-            "--follow": FlagOnlyArgument
-        }
-        return self._run_argo_command(pod_action="watch-workflow", argo_args=argo_args, print_output=stream_output,
-                                      stream_output=stream_output)
-
-    def get_source_cluster_from_workflow(self, workflow_name: str) -> Cluster:
-        return self._get_cluster_config_from_workflow(workflow_name, "source")
-
-    def get_target_cluster_from_workflow(self, workflow_name: str) -> Cluster:
-        return self._get_cluster_config_from_workflow(workflow_name, "target")
 
     def get_cluster_from_configmap(self, configmap_name_prefix: str,
                                    config_key: str = "cluster-config") -> Optional[Cluster]:
@@ -306,35 +345,65 @@ class ArgoService:
             logger.error(f"Failed to execute kubectl command: {e}")
             raise ValueError(f"Failed to read ConfigMap '{configmap_name}': {e}")
 
-    def _run_argo_command(self, pod_action: str, argo_args: Dict, print_output: bool = False,
-                          stream_output: bool = False) -> CommandResult:
-        pod_name = f"argo-{pod_action}-{uuid.uuid4().hex[:6]}"
-        command_args = {
-            "run": pod_name,
-            "--namespace": self.namespace,
-            "--image": self.argo_image,
-            "--rm": FlagOnlyArgument,
-            "-i": FlagOnlyArgument,
-            "--overrides": '{"spec":{"serviceAccountName":"argo-workflow-executor"}}',
-            "--restart": "Never",
-            "--": FlagOnlyArgument,
-        }
-        command_args.update(argo_args)
-
-        runner = CommandRunner("kubectl", command_args)
-        try:
-            return runner.run(print_to_console=print_output, stream_output=stream_output)
-        except CommandRunnerError as e:
-            logger.error(f"Argo command failed: {e}")
-            raise
-
     def _run_kubectl_command(self, kubectl_args: Dict[str, Any], print_output: bool = False) -> CommandResult:
-        runner = CommandRunner("kubectl", kubectl_args)
+        # Direct kubectl get/describe/patch calls — typical responses are sub-second.
+        # A 120s timeout fails fast (CommandRunnerError) when the apiserver is
+        # unresponsive (pod evicted, kubelet↔apiserver broken, EKS auth
+        # refresh stuck) rather than hanging pytest until the outer pipeline times out.
+        runner = CommandRunner("kubectl", kubectl_args, timeout=120.0)
         try:
             return runner.run(print_to_console=print_output)
         except CommandRunnerError as e:
             logger.error(f"Kubectl command failed: {e}")
             raise
+
+    def _get_workflow_logs(self, workflow_name: str, follow: bool = False, print_output: bool = False,
+                           stream_output: bool = False) -> CommandResult:
+        kubectl_args = {
+            "logs": FlagOnlyArgument,
+            "-l": f"workflows.argoproj.io/workflow={workflow_name}",
+            "--namespace": self.namespace,
+            "--all-containers=true": FlagOnlyArgument,
+            "--prefix=true": FlagOnlyArgument,
+            "--tail": "-1"
+        }
+        if follow:
+            kubectl_args["--follow"] = FlagOnlyArgument
+        runner = CommandRunner("kubectl", kubectl_args)
+        try:
+            return runner.run(print_to_console=print_output, stream_output=stream_output)
+        except CommandRunnerError as e:
+            logger.error(f"Workflow logs command failed: {e}")
+            raise
+
+    def _patch_workflow(self, workflow_name: str, patch: Dict[str, Any]) -> CommandResult:
+        return self._run_kubectl_command({
+            "patch": FlagOnlyArgument,
+            "workflow": workflow_name,
+            "--namespace": self.namespace,
+            "--type": "merge",
+            "-p": json.dumps(patch)
+        })
+
+    @staticmethod
+    def _is_active_suspend_node(node: Dict[str, Any]) -> bool:
+        return node.get("type") == "Suspend" and node.get("phase") == "Running"
+
+    @staticmethod
+    def _apply_default_output_parameters(outputs: Optional[Dict[str, Any]]) -> None:
+        if not outputs:
+            return
+        for parameter in outputs.get("parameters", []) or []:
+            value_from = parameter.get("valueFrom")
+            if not isinstance(value_from, dict) or "supplied" not in value_from:
+                continue
+            if "default" not in value_from:
+                raise ValueError(
+                    f"raw output parameter '{parameter.get('name')}' has not been set and does not have a default "
+                    "value"
+                )
+            parameter["value"] = value_from["default"]
+            parameter.pop("valueFrom", None)
 
     def _create_workflow_yaml(self, workflow_template_name: str, parameters: Optional[Dict[str, Any]] = None) -> str:
         """Create a temporary workflow YAML file based on the template structure."""
@@ -453,7 +522,7 @@ class ArgoService:
             return {"sigv4": self._convert_sigv4_auth(auth_config["sigv4"])}
         return {}
 
-    def _get_legacy_auth_fields(self, workflow_config: Dict[str, Any]) -> Dict[str, Any]:
+    def _get_direct_auth_fields(self, workflow_config: Dict[str, Any]) -> Dict[str, Any]:
         """Extract auth fields if workflow config already uses Python schema."""
         if "basic_auth" in workflow_config:
             return {"basic_auth": workflow_config["basic_auth"]}
@@ -489,17 +558,17 @@ class ArgoService:
         if auth_config:
             converted.update(self._convert_auth_config(auth_config))
         else:
-            # Fall back to legacy/direct auth fields
-            legacy_auth = self._get_legacy_auth_fields(workflow_config)
-            if legacy_auth:
-                converted.update(legacy_auth)
+            # Fall back to direct auth fields already using the Python schema.
+            direct_auth = self._get_direct_auth_fields(workflow_config)
+            if direct_auth:
+                converted.update(direct_auth)
             else:
                 # Default to no_auth if no authentication is specified
                 converted["no_auth"] = None
 
         return converted
 
-    def _get_cluster_config_from_workflow(self, workflow_name: str, cluster_type: str) -> Cluster:
+    def get_cluster_config_from_workflow(self, workflow_name: str, cluster_type: str) -> Cluster:
         workflow_data = self._get_workflow_status_json(workflow_name)
         nodes = workflow_data.get("status", {}).get("nodes", {})
         search = f"create-{cluster_type}-cluster"

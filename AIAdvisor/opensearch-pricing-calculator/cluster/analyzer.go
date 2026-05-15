@@ -158,9 +158,9 @@ type clusterStats struct {
 }
 
 type clusterIndicesStats struct {
-	Count    int              `json:"count"`
-	Shards   clusterShards    `json:"shards"`
-	Store    clusterStore     `json:"store"`
+	Count     int              `json:"count"`
+	Shards    clusterShards    `json:"shards"`
+	Store     clusterStore     `json:"store"`
 	Fielddata clusterFielddata `json:"fielddata"`
 }
 

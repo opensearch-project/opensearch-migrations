@@ -90,7 +90,12 @@ class TestRunner:
         for report in reports:
             version_label = f"{report.summary.source_version} -> {report.summary.target_version}"
             row = [version_label]
-            test_results = {test.name: "✓" if test.result == "passed" else "X" for test in report.tests}
+            test_results = {
+                test.name: ("✓" if test.result == "passed"
+                            else "-" if test.result == "skipped"
+                            else "X")
+                for test in report.tests
+            }
             for name in all_test_names:
                 row.append(test_results.get(name, "N/A"))
             matrix_rows.append(row)
@@ -223,15 +228,50 @@ class TestRunner:
         except Exception as e:
             logger.warning(f"Failed to cleanup labeled Kubernetes resources: {e}")
 
-    def cleanup_deployment(self) -> None:
+    def cleanup_deployment(self) -> bool:
+        """Tear down the Migration Assistant deployment.
+
+        Mirrors the sequence a customer would run, with test-only extras
+        clearly separated. Every step is resilient — no single step aborts
+        the ones that follow it.
+
+        Returns True when cleanup is fully clean: 'kyverno-ma' and the main
+        namespace are both fully deleted, AND step 5 left no residual PVCs.
+        Returns False if any of those signal incomplete cleanup. The CLI
+        entrypoint translates False into a non-zero exit code so the Jenkins
+        post block surfaces the incomplete cleanup as UNSTABLE.
+        Outer infra teardown (EKS/minikube delete) still handles any residue.
+
+        Customer-parity sequence (steps 1-3):
+
+          1. cleanup_ack_dashboard_crs — ACK controller must still be alive
+             to finalise AWS-side dashboards (step 3 kills the controller).
+          2. workflow reset --all --include-proxies --delete-storage — the
+             customer-facing CLI that teardowns MA CRDs + children in
+             dependency order and strips stuck finalizers.
+          3. helm uninstall ma — tears down the umbrella chart (10m timeout).
+
+        Test-scaffolding extras (steps 4-7):
+
+          4. cleanup_clusters — source/target test cluster helm releases.
+          5. delete_all_pvcs — any non-Kafka residual PVCs (timeout governed
+             by K8sService.PVC_DELETION_TIMEOUT_SECONDS).
+             Returns the names of any PVCs that didn't terminate; a non-empty
+             list signals a stuck finalizer and propagates to the bool return.
+          6. delete_namespace — webhook cleanup + kubectl delete namespace.
+          7. wait_for_namespace_deleted — warn-only. Raising here previously
+             aborted the Jenkins post block and left CFN stacks behind; the
+             outer infra teardown (EKS/minikube delete) finishes the job.
+
+        Re-raises HelmCommandFailed if step 3 fails. Namespace-delete
+        timeout is not treated as a hard failure.
+        """
         helm_uninstall_error = None
+
+        # 1. Dashboards (ACK controller alive).
         self.k8s_service.cleanup_ack_dashboard_crs()
-        self.k8s_service.cleanup_strimzi_crs()
-        # Run 'workflow reset --all --include-proxies --delete-storage' inside the
-        # migration-console pod BEFORE helm uninstall so the CLI can find and delete
-        # Kafka PVCs while the pod and Strimzi operator are still alive. Without this
-        # step, Kafka PVCs leak between consecutive test runs and cause cluster-ID
-        # conflicts on redeployment.
+
+        # 2. workflow reset: ordered CRD teardown + Kafka PVCs + finaliser strip.
         try:
             self.k8s_service.exec_migration_console_cmd(
                 ["/bin/bash", "-lc",
@@ -240,27 +280,50 @@ class TestRunner:
             )
         except Exception as e:
             logger.warning(f"workflow reset --delete-storage failed (continuing): {e}")
+
+        # 3. helm uninstall (10m timeout set in helm_uninstall).
         try:
             self.k8s_service.helm_uninstall(release_name=MA_RELEASE_NAME)
         except Exception as e:
             logger.error(f"Helm uninstall of '{MA_RELEASE_NAME}' release failed: {e}")
             helm_uninstall_error = e
+
+        # 4. Test-only source/target clusters.
         self.cleanup_clusters()
-        # Belt-and-suspenders: nuke any remaining PVCs before namespace deletion so a
-        # stuck PVC finalizer doesn't block namespace teardown.
+
+        # 5. Residual PVCs.
+        residual_pvcs: List[str] = []
         try:
-            self.k8s_service.delete_all_pvcs()
+            residual_pvcs = self.k8s_service.delete_all_pvcs()
         except Exception as e:
-            logger.warning(f"delete_all_pvcs failed (continuing): {e}")
+            logger.warning(f"delete_all_pvcs raised unexpectedly (continuing): {e}")
+
+        if residual_pvcs:
+            logger.error(
+                "Residual PVCs after %ds — likely a stuck finalizer "
+                "(Strimzi/csi-provisioner/kafka-broker-pvc). A customer running "
+                "the equivalent cleanup would also see this and need manual "
+                "intervention. Residuals (%d): %s",
+                self.k8s_service.PVC_DELETION_TIMEOUT_SECONDS,
+                len(residual_pvcs), residual_pvcs,
+            )
+
+        # 6. Namespace + webhooks.
         self.k8s_service.delete_namespace()
-        # Assert both namespaces are actually gone
-        self.k8s_service.wait_for_namespace_deleted("kyverno-ma", timeout_seconds=60)
-        self.k8s_service.wait_for_namespace_deleted(self.k8s_service.namespace, timeout_seconds=120)
+
+        # 7. Confirm namespaces gone; warn-only, outer infra teardown handles residue.
+        kyverno_gone = self.k8s_service.wait_for_namespace_deleted(
+            "kyverno-ma", timeout_seconds=60)
+        ma_gone = self.k8s_service.wait_for_namespace_deleted(
+            self.k8s_service.namespace, timeout_seconds=120)
+
         if helm_uninstall_error:
             raise HelmCommandFailed(
                 f"Helm uninstall of '{MA_RELEASE_NAME}' release failed cleanly. "
                 f"This may indicate webhook or finalizer issues (e.g. Kyverno)."
             ) from helm_uninstall_error
+
+        return ma_gone and kyverno_gone and not residual_pvcs
 
     def copy_logs(self, destination: str = "./logs") -> None:
         self.k8s_service.copy_log_files(destination=destination)
@@ -572,7 +635,15 @@ def main() -> None:
                              observed_packet_timeout=args.observed_packet_timeout)
 
     if args.delete_only:
-        return test_runner.cleanup_deployment()
+        fully_clean = test_runner.cleanup_deployment()
+        if not fully_clean:
+            logger.warning(
+                "Cleanup finished with namespaces still terminating — "
+                "exiting rc=2 so the caller can surface it as UNSTABLE. "
+                "Infra teardown will remove any residue."
+            )
+            sys.exit(2)
+        return
     if args.delete_clusters_only:
         return test_runner.cleanup_clusters()
     skip_delete = args.skip_delete

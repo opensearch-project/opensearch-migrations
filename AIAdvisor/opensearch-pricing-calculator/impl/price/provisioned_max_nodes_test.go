@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// TestInstanceUnitGetRequiredNodeCountPerAZLimit tests that the per-AZ limit (334 nodes)
+// TestInstanceUnit_GetRequiredNodeCount_PerAZLimit tests that the per-AZ limit (334 nodes)
 // is enforced alongside the family limit. Effective limit = min(334 * azs, familyLimit).
-func TestInstanceUnitGetRequiredNodeCountPerAZLimit(t *testing.T) {
+func TestInstanceUnit_GetRequiredNodeCount_PerAZLimit(t *testing.T) {
 	// Setup instance limits for testing
 	originalLimits := instances.InstanceLimitsMap
 	defer func() {
@@ -102,7 +102,7 @@ func TestInstanceUnitGetRequiredNodeCountPerAZLimit(t *testing.T) {
 	}
 }
 
-func TestInstanceUnitGetRequiredNodeCountMaxNodesCount(t *testing.T) {
+func TestInstanceUnit_GetRequiredNodeCount_MaxNodesCount(t *testing.T) {
 	// Setup instance limits for testing
 	originalLimits := instances.InstanceLimitsMap
 	defer func() {

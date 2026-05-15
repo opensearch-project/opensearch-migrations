@@ -59,7 +59,7 @@ func TestSetMonthlyS3cost(t *testing.T) {
 	}
 }
 
-func TestSetDailyIngestOcuZero(t *testing.T) {
+func TestSetDailyIngestOcu_Zero(t *testing.T) {
 	e := Estimate{}
 	e.SetDailyIngestOcu(0)
 	if e.Day.IndexOcu != 0 || e.Month.IndexOcu != 0 || e.Year.IndexOcu != 0 {
@@ -67,7 +67,7 @@ func TestSetDailyIngestOcuZero(t *testing.T) {
 	}
 }
 
-func TestUpdateTotalNoDiscount(t *testing.T) {
+func TestUpdateTotal_NoDiscount(t *testing.T) {
 	e := Estimate{Edp: 0}
 	e.SetDailyIngestOcu(100)
 	e.SetDailySearchOcu(50)
@@ -86,7 +86,7 @@ func TestUpdateTotalNoDiscount(t *testing.T) {
 	}
 }
 
-func TestUpdateTotalWithDiscount(t *testing.T) {
+func TestUpdateTotal_WithDiscount(t *testing.T) {
 	e := Estimate{Edp: 20} // 20% discount
 	e.SetDailyIngestOcu(100)
 	e.SetDailySearchOcu(100)
@@ -116,7 +116,7 @@ func TestUpdateTotalWithDiscount(t *testing.T) {
 	}
 }
 
-func TestDaysPerMonthValue(t *testing.T) {
+func TestDaysPerMonth_Value(t *testing.T) {
 	expected := 365.0 / 12.0
 	if math.Abs(DaysPerMonth-expected) > 0.001 {
 		t.Errorf("expected DaysPerMonth %f, got %f", expected, DaysPerMonth)
@@ -125,7 +125,7 @@ func TestDaysPerMonthValue(t *testing.T) {
 
 // --- ProvisionedRegion tests ---
 
-func TestGetStorageUnitPriceGP3(t *testing.T) {
+func TestGetStorageUnitPrice_GP3(t *testing.T) {
 	pr := ProvisionedRegion{
 		Storage: Storage{Gp3: Unit{Price: 0.08}},
 	}
@@ -134,7 +134,7 @@ func TestGetStorageUnitPriceGP3(t *testing.T) {
 	}
 }
 
-func TestGetStorageUnitPriceGP2(t *testing.T) {
+func TestGetStorageUnitPrice_GP2(t *testing.T) {
 	pr := ProvisionedRegion{
 		Storage: Storage{Gp2: Unit{Price: 0.10}},
 	}
@@ -143,7 +143,7 @@ func TestGetStorageUnitPriceGP2(t *testing.T) {
 	}
 }
 
-func TestGetStorageUnitPriceManagedStorage(t *testing.T) {
+func TestGetStorageUnitPrice_ManagedStorage(t *testing.T) {
 	pr := ProvisionedRegion{
 		Storage: Storage{ManagedStorage: Unit{Price: 0.024}},
 	}
@@ -152,14 +152,14 @@ func TestGetStorageUnitPriceManagedStorage(t *testing.T) {
 	}
 }
 
-func TestGetStorageUnitPriceUnknown(t *testing.T) {
+func TestGetStorageUnitPrice_Unknown(t *testing.T) {
 	pr := ProvisionedRegion{}
 	if pr.GetStorageUnitPrice("unknown") != -1 {
 		t.Errorf("expected -1 for unknown storage class")
 	}
 }
 
-func TestGetHotNodeFound(t *testing.T) {
+func TestGetHotNode_Found(t *testing.T) {
 	pr := ProvisionedRegion{
 		HotInstances: map[string]InstanceUnit{
 			"r6g.large": {CPU: 2, Memory: 16},
@@ -174,7 +174,7 @@ func TestGetHotNodeFound(t *testing.T) {
 	}
 }
 
-func TestGetHotNodeNotFound(t *testing.T) {
+func TestGetHotNode_NotFound(t *testing.T) {
 	pr := ProvisionedRegion{
 		HotInstances: map[string]InstanceUnit{},
 	}
@@ -184,7 +184,7 @@ func TestGetHotNodeNotFound(t *testing.T) {
 	}
 }
 
-func TestGetWarmNodeFound(t *testing.T) {
+func TestGetWarmNode_Found(t *testing.T) {
 	pr := ProvisionedRegion{
 		WarmInstances: map[string]InstanceUnit{
 			"ultrawarm1.medium": {CPU: 2, Memory: 8},
@@ -199,7 +199,7 @@ func TestGetWarmNodeFound(t *testing.T) {
 	}
 }
 
-func TestGetWarmNodeNotFound(t *testing.T) {
+func TestGetWarmNode_NotFound(t *testing.T) {
 	pr := ProvisionedRegion{
 		WarmInstances: map[string]InstanceUnit{},
 	}
@@ -209,14 +209,14 @@ func TestGetWarmNodeNotFound(t *testing.T) {
 	}
 }
 
-func TestHasInstanceStoreTrue(t *testing.T) {
+func TestHasInstanceStore_True(t *testing.T) {
 	is := InstanceStorage{Internal: 1024}
 	if !is.HasInstanceStore() {
 		t.Error("expected HasInstanceStore to return true")
 	}
 }
 
-func TestHasInstanceStoreFalse(t *testing.T) {
+func TestHasInstanceStore_False(t *testing.T) {
 	is := InstanceStorage{Internal: 0}
 	if is.HasInstanceStore() {
 		t.Error("expected HasInstanceStore to return false")
@@ -232,7 +232,7 @@ func TestGetVectorMemory(t *testing.T) {
 	}
 }
 
-func TestGetVectorMemoryZeroBreaker(t *testing.T) {
+func TestGetVectorMemory_ZeroBreaker(t *testing.T) {
 	iu := InstanceUnit{Memory: 64, JVMMemory: 32}
 	result := iu.GetVectorMemory(0)
 	if result != 0 {
@@ -240,7 +240,7 @@ func TestGetVectorMemoryZeroBreaker(t *testing.T) {
 	}
 }
 
-func TestCalculateNodeCountCPUOnly(t *testing.T) {
+func TestCalculateNodeCount_CPUOnly(t *testing.T) {
 	iu := InstanceUnit{CPU: 4, Memory: 32, JVMMemory: 16}
 	count := iu.CalculateNodeCount(10, 0, 0)
 	expected := int(math.Ceil(10.0 / 4.0)) // 3
@@ -249,7 +249,7 @@ func TestCalculateNodeCountCPUOnly(t *testing.T) {
 	}
 }
 
-func TestCalculateNodeCountMemoryDominant(t *testing.T) {
+func TestCalculateNodeCount_MemoryDominant(t *testing.T) {
 	iu := InstanceUnit{CPU: 32, Memory: 64, JVMMemory: 32}
 	// By CPU: ceil(2/32) = 1
 	// By memory: ceil(100 / ((64-32) * 50/100)) = ceil(100/16) = 7
@@ -291,7 +291,7 @@ func TestHasRemoteStorage(t *testing.T) {
 	}
 }
 
-func TestHasPricingOptionDirect(t *testing.T) {
+func TestHasPricingOption_Direct(t *testing.T) {
 	iu := InstanceUnit{
 		Price: map[string]Unit{
 			"OnDemand": {Price: 0.5},
@@ -302,7 +302,7 @@ func TestHasPricingOptionDirect(t *testing.T) {
 	}
 }
 
-func TestHasPricingOptionHCVariant(t *testing.T) {
+func TestHasPricingOption_HCVariant(t *testing.T) {
 	iu := InstanceUnit{
 		Price: map[string]Unit{
 			"NURI_1HC": {Price: 0.3},
@@ -313,7 +313,7 @@ func TestHasPricingOptionHCVariant(t *testing.T) {
 	}
 }
 
-func TestHasPricingOptionNotFound(t *testing.T) {
+func TestHasPricingOption_NotFound(t *testing.T) {
 	iu := InstanceUnit{
 		Price: map[string]Unit{},
 	}
