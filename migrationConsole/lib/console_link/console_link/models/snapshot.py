@@ -733,21 +733,32 @@ def _compute_eta(started_dt: Optional[datetime], pct: float, step_state: StepSta
 
 
 def _accumulate_collection_result(result: dict, accum: dict) -> None:
-    """Update accumulator with a single collection's poll result."""
+    """Update accumulator with a single collection's poll result.
+
+    Solr's REQUESTSTATUS sometimes reports state="running" or "submitted" even after
+    every shard has reported success — the overseer task can lag behind the per-shard
+    completions. Treat a collection as completed when its per-shard success count
+    equals its shard count, regardless of the async-task state field, so a workflow
+    polling for SUCCESS doesn't loop forever on a backup that's actually done.
+    """
     state = result["state"]
+    num_shards = result["num_shards"]
+    success_count = result["success_count"]
+    completed = state == "completed" or (num_shards > 0 and success_count >= num_shards)
+
     accum["any_found"] = True
-    accum["total_shards"] += result["num_shards"]
+    accum["total_shards"] += num_shards
     accum["index_size_bytes"] += result["size_bytes"]
     if result["started_dt"] and accum["started_dt"] is None:
         accum["started_dt"] = result["started_dt"]
-    if state == "completed":
-        accum["completed_shards"] += result["num_shards"]
+    if completed:
+        accum["completed_shards"] += num_shards
     elif state == "failed":
         accum["any_failed"] = True
         accum["all_completed"] = False
     else:
         accum["all_completed"] = False
-        accum["completed_shards"] += result["success_count"]
+        accum["completed_shards"] += success_count
 
 
 def _is_solr_standalone(cluster: Cluster) -> bool:
