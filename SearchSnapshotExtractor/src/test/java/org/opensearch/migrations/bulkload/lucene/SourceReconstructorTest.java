@@ -1716,8 +1716,12 @@ class SourceReconstructorTest {
         assertEquals(3, files.size(), "array has 3 elements: " + merged);
         assertEquals("text/plain", files.get(0).path("ext").asText(), "element 0: " + merged);
         assertEquals("application/pdf", files.get(1).path("ext").asText(), "element 1: " + merged);
+        // Element[2] originally had a duplicate ext value (e.g. "text/plain") but Lucene's
+        // position-gap splitter only produced 2 buckets (the third element's empty/duplicate
+        // token didn't create a gap). The PerElementList is shorter than the seed, so
+        // prefix-distribution fills [0] and [1] and leaves [2] without the subfield.
         assertTrue(files.get(2).path("ext").isMissingNode(),
-            "element 2 has no ext (was empty string): " + merged);
+            "element 2 has no ext (shorter PerElementList, not recoverable): " + merged);
         assertEquals("a.txt", files.get(0).path("name").asText());
         assertEquals("b.pdf", files.get(1).path("name").asText());
         assertEquals("c.bin", files.get(2).path("name").asText());
