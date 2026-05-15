@@ -296,10 +296,33 @@ public class SourceReconstructor {
         }
     }
 
-    /** Backwards-compatible overload for callers that don't supply a term index (e.g. Solr path). */
+    /** Backwards-compatible overload for callers that don't supply a term index. */
     public static String reconstructSource(LuceneLeafReader reader, int docId, LuceneDocument document,
             FieldMappingContext mappingContext) {
         return reconstructSource(reader, docId, document, mappingContext, null);
+    }
+
+    /**
+     * Reconstruct source with flat field name mode — dots in field names are treated as literal
+     * characters, not object path separators. Used by Solr where "attr_thing.withdot" is a single
+     * field, not a nested object.
+     */
+    public static String reconstructSourceFlat(LuceneLeafReader reader, int docId, LuceneDocument document,
+            FieldMappingContext mappingContext) {
+        try {
+            Map<String, Object> reconstructed = new LinkedHashMap<>();
+            populateFromSegmentFlat(reconstructed, reader, docId, document, mappingContext);
+
+            if (reconstructed.isEmpty()) {
+                log.atWarn().setMessage("No stored fields or doc_values found for document {}").addArgument(docId).log();
+                return null;
+            }
+
+            return OBJECT_MAPPER.writeValueAsString(reconstructed);
+        } catch (IOException e) {
+            log.atWarn().setCause(e).setMessage("Failed to reconstruct source for document {}").addArgument(docId).log();
+            return null;
+        }
     }
 
     /**
@@ -312,6 +335,35 @@ public class SourceReconstructor {
     public static String mergeWithDocValues(String existingSource, LuceneLeafReader reader, int docId,
             LuceneDocument document, FieldMappingContext mappingContext) {
         return mergeWithDocValues(existingSource, reader, docId, document, mappingContext, null);
+    }
+
+    /**
+     * Flat-field-name variant of populateFromSegment. Treats all field names as literal (no dot splitting).
+     * Only uses stored fields (no doc_values/points/terms fallback) since Solr stores all needed fields.
+     */
+    @SuppressWarnings("unchecked")
+    private static void populateFromSegmentFlat(Map<String, Object> target, LuceneLeafReader reader, int docId,
+            LuceneDocument document, FieldMappingContext mappingContext) {
+        for (var field : document.getFields()) {
+            String fieldName = field.name();
+            if (fieldName.startsWith("_")) continue;
+            FieldMappingInfo mappingInfo = mappingContext != null ? mappingContext.getFieldInfo(fieldName) : null;
+            Object value = getStoredFieldValue(field, mappingInfo);
+            if (value != null) {
+                // Multi-value: collect into list if field appears multiple times
+                var existing = target.get(fieldName);
+                if (existing == null) {
+                    target.put(fieldName, value);
+                } else if (existing instanceof java.util.List) {
+                    ((java.util.List<Object>) existing).add(value);
+                } else {
+                    var list = new java.util.ArrayList<>();
+                    list.add(existing);
+                    list.add(value);
+                    target.put(fieldName, list);
+                }
+            }
+        }
     }
 
     @SuppressWarnings("unchecked")

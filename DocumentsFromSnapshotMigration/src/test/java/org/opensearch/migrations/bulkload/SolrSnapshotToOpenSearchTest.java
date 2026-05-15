@@ -229,8 +229,8 @@ public class SolrSnapshotToOpenSearchTest {
 
                 // Set up work items (like ShardWorkPreparer does for ES)
                 new ShardWorkPreparer().run(
-                    scopedWorkCoordinator, indexMetadataFactory,
-                    "solr-test", List.of(COLLECTION_NAME), testContext
+                    scopedWorkCoordinator, documentSource,
+                    List.of(COLLECTION_NAME), testContext
                 );
 
                 // Process shards one at a time until no work left
@@ -238,12 +238,12 @@ public class SolrSnapshotToOpenSearchTest {
                 while (true) {
                     var runner = DocumentMigrationBootstrap.builder()
                         .targetClient(targetClient)
-                        .snapshotName("solr-test")
+                        
                         .maxDocsPerBatch(1000)
                         .maxBytesPerBatch(Long.MAX_VALUE)
                         .batchConcurrency(10)
                         .allowlist(DocumentExceptionAllowlist.empty())
-                        .externalDocumentSource(documentSource)
+                        .documentSource(documentSource)
                         .workCoordinator(scopedWorkCoordinator)
                         .maxInitialLeaseDuration(Duration.ofMinutes(5))
                         .cursorConsumer(progressCursor::set)
@@ -378,8 +378,8 @@ public class SolrSnapshotToOpenSearchTest {
                 // Register work items — this is where the bug was: ShardWorkPreparer
                 // calls fromRepo() which needs shard_backup_metadata to count shards correctly
                 new ShardWorkPreparer().run(
-                    scopedWorkCoordinator, indexMetadataFactory,
-                    "solr-multishard", List.of(collection), testContext
+                    scopedWorkCoordinator, documentSource,
+                    List.of(collection), testContext
                 );
 
                 // Process shards one at a time until no work left
@@ -387,12 +387,12 @@ public class SolrSnapshotToOpenSearchTest {
                 for (int attempt = 0; attempt < 10; attempt++) {
                     var runner = DocumentMigrationBootstrap.builder()
                         .targetClient(targetClient)
-                        .snapshotName("solr-multishard")
+                        
                         .maxDocsPerBatch(1000)
                         .maxBytesPerBatch(Long.MAX_VALUE)
                         .batchConcurrency(10)
                         .allowlist(DocumentExceptionAllowlist.empty())
-                        .externalDocumentSource(documentSource)
+                        .documentSource(documentSource)
                         .workCoordinator(scopedWorkCoordinator)
                         .maxInitialLeaseDuration(Duration.ofMinutes(5))
                         .cursorConsumer(progressCursor::set)
@@ -602,8 +602,8 @@ public class SolrSnapshotToOpenSearchTest {
 
                 // Register work items for both collections
                 new ShardWorkPreparer().run(
-                    scopedWorkCoordinator, indexMetadataFactory,
-                    "solr-multi", List.of("movies", "books"), testContext
+                    scopedWorkCoordinator, documentSource,
+                    List.of("movies", "books"), testContext
                 );
 
                 // Process one shard at a time — each call should migrate exactly one shard
@@ -611,12 +611,12 @@ public class SolrSnapshotToOpenSearchTest {
                 for (int attempt = 0; attempt < 10; attempt++) {
                     var runner = DocumentMigrationBootstrap.builder()
                         .targetClient(targetClient)
-                        .snapshotName("solr-multi")
+                        
                         .maxDocsPerBatch(1000)
                         .maxBytesPerBatch(Long.MAX_VALUE)
                         .batchConcurrency(10)
                         .allowlist(DocumentExceptionAllowlist.empty())
-                        .externalDocumentSource(documentSource)
+                        .documentSource(documentSource)
                         .workCoordinator(scopedWorkCoordinator)
                         .maxInitialLeaseDuration(Duration.ofMinutes(5))
                         .cursorConsumer(progressCursor::set)

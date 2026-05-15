@@ -33,8 +33,9 @@ import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
-import org.opensearch.migrations.bulkload.models.IndexMetadata;
+import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap;
+import org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource;
 import org.opensearch.migrations.bulkload.solr.SolrBackupIndexMetadataFactory;
 import org.opensearch.migrations.bulkload.solr.SolrBackupLayout;
 import org.opensearch.migrations.bulkload.solr.SolrMultiCollectionSource;
@@ -638,32 +639,72 @@ public class RfsMigrateDocuments {
 
             var extractor = SnapshotExtractor.create(
                 arguments.sourceVersion, sourceResourceProvider, sourceRepo);
-            return runWithPipeline(
-                extractor,
-                targetClient,
-                arguments.snapshotName,
-                luceneDirPath,
-                docTransformerSupplier,
-                useServerGeneratedIds,
-                allowlist,
-                arguments.numDocsPerBulkRequest,
-                arguments.numBytesPerBulkRequest,
-                arguments.maxConnections,
-                arguments.maxShardSizeBytes,
-                progressCursor,
-                workCoordinator,
-                arguments.initialLeaseDuration,
-                processManager,
-                workItemTimeProvider,
-                sourceResourceProvider.getIndexMetadata(),
-                arguments.indexAllowlist,
-                context,
-                cancellationRunnableRef,
-                arguments.experimental.previousSnapshotName,
-                arguments.experimental.experimentalDeltaMode,
-                arguments.experimental.enableSourcelessMigrations,
-                arguments.experimental.useRecoverySource);
+
+            var sourceBuilder = LuceneSnapshotSource.builder(extractor, arguments.snapshotName, luceneDirPath)
+                .maxShardSizeBytes(arguments.maxShardSizeBytes)
+                .useRecoverySource(arguments.experimental.useRecoverySource);
+            if (arguments.experimental.previousSnapshotName != null && arguments.experimental.experimentalDeltaMode != null) {
+                sourceBuilder.delta(arguments.experimental.previousSnapshotName,
+                    arguments.experimental.experimentalDeltaMode,
+                    () -> new RfsContexts.DeltaStreamContext(context, null));
+            }
+            if (arguments.experimental.enableSourcelessMigrations) {
+                var indexMetadataFactory = sourceResourceProvider.getIndexMetadata();
+                Map<String, Optional<FieldMappingContext>> cache = new java.util.concurrent.ConcurrentHashMap<>();
+                sourceBuilder.sourcelessMappingContextProvider(indexName -> cache.computeIfAbsent(indexName, name -> {
+                    try {
+                        var meta = indexMetadataFactory.fromRepo(arguments.snapshotName, name);
+                        if (!meta.needsSourceReconstruction()) return Optional.empty();
+                        return Optional.of(new FieldMappingContext(meta.getMappings()));
+                    } catch (Exception e) {
+                        throw new RuntimeException("Failed to read metadata for index " + name, e);
+                    }
+                }).orElse(null));
+            }
+            var documentSource = sourceBuilder.build();
+
+            return prepareAndMigrate(documentSource,
+                workCoordinator, processManager, targetClient, docTransformerSupplier,
+                useServerGeneratedIds, allowlist, progressCursor, cancellationRunnableRef,
+                workItemTimeProvider, arguments, context);
         };
+    }
+
+    private static CompletionStatus prepareAndMigrate(
+        org.opensearch.migrations.bulkload.pipeline.source.DocumentSource documentSource,
+        IWorkCoordinator workCoordinator,
+        LeaseExpireTrigger processManager,
+        OpenSearchClient targetClient,
+        Supplier<IJsonTransformer> docTransformerSupplier,
+        boolean useServerGeneratedIds,
+        DocumentExceptionAllowlist allowlist,
+        AtomicReference<WorkItemCursor> progressCursor,
+        AtomicReference<Runnable> cancellationRunnableRef,
+        WorkItemTimeProvider workItemTimeProvider,
+        Args arguments,
+        RootDocumentMigrationContext context
+    ) throws IOException, InterruptedException, NoWorkLeftException {
+        var scopedWorkCoordinator = prepareWorkCoordination(
+            workCoordinator, processManager, documentSource,
+            arguments.indexAllowlist, context);
+
+        var runner = DocumentMigrationBootstrap.builder()
+            .documentSource(documentSource)
+            .targetClient(targetClient)
+            .maxDocsPerBatch(arguments.numDocsPerBulkRequest)
+            .maxBytesPerBatch(arguments.numBytesPerBulkRequest)
+            .batchConcurrency(arguments.maxConnections)
+            .transformerSupplier(docTransformerSupplier)
+            .allowServerGeneratedIds(useServerGeneratedIds)
+            .allowlist(allowlist)
+            .workCoordinator(scopedWorkCoordinator)
+            .workItemTimeProvider(workItemTimeProvider)
+            .maxInitialLeaseDuration(arguments.initialLeaseDuration)
+            .cursorConsumer(progressCursor::set)
+            .cancellationTriggerConsumer(cancellationRunnableRef::set)
+            .build();
+
+        return runner.migrateOneShard(context::createReindexContext);
     }
 
     @SuppressWarnings({"java:S100", "java:S1172", "java:S1186"})
@@ -940,6 +981,7 @@ public class RfsMigrateDocuments {
         }
         var workItem = workItemAndDuration.getWorkItem();
         // Set successor as same last checkpoint Num, this will ensure we process every document fully in cases where there is a 1:many doc split
+        // Re-process same checkpoint to handle 1:many doc splits correctly
         var successorStartingCheckpointNum = progressCursor.getProgressCheckpointNum();
         var successorWorkItem = new IWorkCoordinator.WorkItemAndDuration
                 .WorkItem(workItem.getIndexName(), workItem.getShardNumber(),
@@ -1031,6 +1073,7 @@ public class RfsMigrateDocuments {
                 var dataDir = dataPrefix.isEmpty() ? collectionRoot : collectionRoot.resolve(dataPrefix);
                 schemas.put(collection, SolrSchemaXmlParser.findAndParse(dataDir));
             };
+            // Only S3 needs lazy per-shard downloads; filesystem backups are already local
             Consumer<SolrShardPartition> shardPreparer = (finalS3Repo != null) ? partition -> {
                 var dataPrefix = dataPrefixByCollection.getOrDefault(partition.collection(), "");
                 var collectionDataPrefix = dataPrefix.isEmpty()
@@ -1054,137 +1097,27 @@ public class RfsMigrateDocuments {
             var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, collectionPreparer, solrMajor);
             var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer, shardPreparer, solrMajor);
 
-            var scopedWorkCoordinator = prepareWorkCoordination(
-                workCoordinator, processManager, indexMetadataFactory,
-                arguments.snapshotName, arguments.indexAllowlist, context);
-
-            var runner = DocumentMigrationBootstrap.builder()
-                .targetClient(targetClient)
-                .snapshotName(arguments.snapshotName)
-                .maxDocsPerBatch(arguments.numDocsPerBulkRequest)
-                .maxBytesPerBatch(arguments.numBytesPerBulkRequest)
-                .batchConcurrency(arguments.maxConnections)
-                .transformerSupplier(docTransformerSupplier)
-                .allowServerGeneratedIds(useServerGeneratedIds)
-                .allowlist(allowlist)
-                .externalDocumentSource(documentSource)
-                .workCoordinator(scopedWorkCoordinator)
-                .workItemTimeProvider(workItemTimeProvider)
-                .maxInitialLeaseDuration(arguments.initialLeaseDuration)
-                .cursorConsumer(progressCursor::set)
-                .cancellationTriggerConsumer(cancellationRunnableRef::set)
-                .build();
-
-            return runner.migrateOneShard(context::createReindexContext);
+            return prepareAndMigrate(documentSource,
+                workCoordinator, processManager, targetClient, docTransformerSupplier,
+                useServerGeneratedIds, allowlist, progressCursor, cancellationRunnableRef,
+                workItemTimeProvider, arguments, context);
         };
     }
 
-    public static CompletionStatus runWithPipeline(
-        SnapshotExtractor extractor,
-        OpenSearchClient targetClient,
-        String snapshotName,
-        Path workDir,
-        Supplier<IJsonTransformer> transformerSupplier,
-        boolean useServerGeneratedIds,
-        DocumentExceptionAllowlist allowlist,
-        int maxDocsPerBatch,
-        long maxBytesPerBatch,
-        int batchConcurrency,
-        long maxShardSizeBytes,
-        AtomicReference<WorkItemCursor> progressCursor,
-        IWorkCoordinator workCoordinator,
-        Duration maxInitialLeaseDuration,
-        LeaseExpireTrigger leaseExpireTrigger,
-        WorkItemTimeProvider workItemTimeProvider,
-        IndexMetadata.Factory indexMetadataFactory,
-        List<String> indexAllowlist,
-        RootDocumentMigrationContext rootDocumentContext,
-        AtomicReference<Runnable> cancellationRunnable,
-        String previousSnapshotName,
-        DeltaMode deltaMode
-    ) throws IOException, InterruptedException, NoWorkLeftException {
-        return runWithPipeline(extractor, targetClient, snapshotName, workDir, transformerSupplier,
-            useServerGeneratedIds, allowlist, maxDocsPerBatch, maxBytesPerBatch, batchConcurrency,
-            maxShardSizeBytes, progressCursor, workCoordinator, maxInitialLeaseDuration, leaseExpireTrigger,
-            workItemTimeProvider, indexMetadataFactory, indexAllowlist, rootDocumentContext, cancellationRunnable,
-            previousSnapshotName, deltaMode, false, false);
-    }
-
-    public static CompletionStatus runWithPipeline(
-        SnapshotExtractor extractor,
-        OpenSearchClient targetClient,
-        String snapshotName,
-        java.nio.file.Path workDir,
-        Supplier<IJsonTransformer> transformerSupplier,
-        boolean useServerGeneratedIds,
-        DocumentExceptionAllowlist allowlist,
-        int maxDocsPerBatch,
-        long maxBytesPerBatch,
-        int batchConcurrency,
-        long maxShardSizeBytes,
-        AtomicReference<WorkItemCursor> progressCursor,
-        IWorkCoordinator workCoordinator,
-        Duration maxInitialLeaseDuration,
-        LeaseExpireTrigger leaseExpireTrigger,
-        WorkItemTimeProvider workItemTimeProvider,
-        IndexMetadata.Factory indexMetadataFactory,
-        List<String> indexAllowlist,
-        RootDocumentMigrationContext rootDocumentContext,
-        AtomicReference<Runnable> cancellationRunnable,
-        String previousSnapshotName,
-        DeltaMode deltaMode,
-        boolean enableSourcelessMigrations,
-        boolean useRecoverySource
-    ) throws IOException, InterruptedException, NoWorkLeftException {
-        var scopedWorkCoordinator = prepareWorkCoordination(
-            workCoordinator, leaseExpireTrigger, indexMetadataFactory,
-            snapshotName, indexAllowlist, rootDocumentContext
-        );
-
-        var runner = DocumentMigrationBootstrap.builder()
-            .extractor(extractor)
-            .targetClient(targetClient)
-            .snapshotName(snapshotName)
-            .workDir(workDir)
-            .maxDocsPerBatch(maxDocsPerBatch)
-            .maxBytesPerBatch(maxBytesPerBatch)
-            .batchConcurrency(batchConcurrency)
-            .maxShardSizeBytes(maxShardSizeBytes)
-            .transformerSupplier(transformerSupplier)
-            .allowServerGeneratedIds(useServerGeneratedIds)
-            .allowlist(allowlist)
-            .previousSnapshotName(previousSnapshotName)
-            .deltaMode(deltaMode)
-            .deltaContextFactory(previousSnapshotName != null && deltaMode != null
-                ? () -> new RfsContexts.DeltaStreamContext(rootDocumentContext, null)
-                : null)
-            .enableSourcelessMigrations(enableSourcelessMigrations)
-            .useRecoverySource(useRecoverySource)
-            .indexMetadataFactory(indexMetadataFactory)
-            .workCoordinator(scopedWorkCoordinator)
-            .workItemTimeProvider(workItemTimeProvider)
-            .maxInitialLeaseDuration(maxInitialLeaseDuration)
-            .cursorConsumer(progressCursor::set)
-            .cancellationTriggerConsumer(cancellationRunnable::set)
-            .build();
-
-        return runner.migrateOneShard(rootDocumentContext::createReindexContext);
-    }
 
     /**
      * Shared work-coordination setup: creates a scoped coordinator, ensures shard prep
      * is complete, and verifies there is still work to do.
      */
-    private static ScopedWorkCoordinator prepareWorkCoordination(
+    public static ScopedWorkCoordinator prepareWorkCoordination(
         IWorkCoordinator workCoordinator,
         LeaseExpireTrigger leaseExpireTrigger,
-        IndexMetadata.Factory indexMetadataFactory,
-        String snapshotName,
+        org.opensearch.migrations.bulkload.pipeline.source.DocumentSource documentSource,
         List<String> indexAllowlist,
         RootDocumentMigrationContext rootDocumentContext
     ) throws IOException, InterruptedException, NoWorkLeftException {
         var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
-        confirmShardPrepIsComplete(indexMetadataFactory, snapshotName, indexAllowlist,
+        confirmShardPrepIsComplete(documentSource, indexAllowlist,
             scopedWorkCoordinator, rootDocumentContext);
         if (!workCoordinator.workItemsNotYetComplete(
             rootDocumentContext.getWorkCoordinationContext()::createItemsPendingContext
@@ -1195,8 +1128,7 @@ public class RfsMigrateDocuments {
     }
 
     private static void confirmShardPrepIsComplete(
-        IndexMetadata.Factory indexMetadataFactory,
-        String snapshotName,
+        org.opensearch.migrations.bulkload.pipeline.source.DocumentSource documentSource,
         List<String> indexAllowlist,
         ScopedWorkCoordinator scopedWorkCoordinator,
         RootDocumentMigrationContext rootContext
@@ -1209,8 +1141,7 @@ public class RfsMigrateDocuments {
             try {
                 new ShardWorkPreparer().run(
                     scopedWorkCoordinator,
-                    indexMetadataFactory,
-                    snapshotName,
+                    documentSource,
                     indexAllowlist,
                     rootContext
                 );

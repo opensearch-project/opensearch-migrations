@@ -184,7 +184,7 @@ public class SolrToOpenSearchEndToEndTest {
             assertThat("stored_long value", doc.path("stored_long").asLong(), equalTo(1234567890L));
             assertThat("stored_float value", (double) doc.path("stored_float").floatValue(), closeTo(3.14, 0.01));
             assertThat("stored_double value", doc.path("stored_double").doubleValue(), closeTo(2.718281828, 0.0001));
-            assertThat("stored_date value", doc.path("stored_date").asLong(), equalTo(1705314600000L));
+            assertThat("stored_date value", doc.path("stored_date").asText(), equalTo("2024-01-15T10:30:00Z"));
             assertThat("stored_bool value", doc.path("stored_bool").asBoolean(), equalTo(true));
 
             assertTrue(doc.path("multi_string").isArray(), "multi_string should be an array");

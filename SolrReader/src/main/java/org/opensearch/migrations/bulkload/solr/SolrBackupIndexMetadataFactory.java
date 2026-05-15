@@ -56,10 +56,16 @@ public class SolrBackupIndexMetadataFactory implements IndexMetadata.Factory {
         var schema = schemas.get(indexName);
         var schemaNode = schema != null ? schema.path("schema") : MAPPER.createObjectNode();
 
-        // Discover shard count from backup directory
+        // SolrCloud: count shards from shard_backup_metadata; standalone cores are always 1 shard
         var collectionDir = SolrBackupLayout.resolveCollectionDataDir(backupDir.resolve(indexName));
-        var source = new SolrBackupSource(collectionDir, indexName, schemaNode, solrMajorVersion);
-        int shardCount = source.listPartitions(indexName).size();
+        var metadataDir = collectionDir.resolve("shard_backup_metadata");
+        int shardCount;
+        if (java.nio.file.Files.isDirectory(metadataDir)) {
+            var shardFiles = SolrBackupLayout.findLatestShardMetadataFiles(metadataDir);
+            shardCount = Math.max(shardFiles.size(), 1);
+        } else {
+            shardCount = 1; // Standalone Solr core — always single shard
+        }
         log.info("Solr collection {} has {} shard(s)", indexName, shardCount);
 
         // Build OpenSearch-compatible index metadata with proper mappings
