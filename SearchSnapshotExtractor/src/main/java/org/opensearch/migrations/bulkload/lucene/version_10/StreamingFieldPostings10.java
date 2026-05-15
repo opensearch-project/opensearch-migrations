@@ -6,8 +6,7 @@ import java.util.Collections;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.lucene.StreamingFieldPostings;
-import org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink;
-import org.opensearch.migrations.bulkload.lucene.sidecar.TermEntry;
+import org.opensearch.migrations.bulkload.lucene.TermEntry;
 
 import lombok.extern.slf4j.Slf4j;
 import shadow.lucene10.org.apache.lucene.index.FieldInfo;
@@ -169,8 +168,8 @@ final class StreamingFieldPostings10 implements StreamingFieldPostings {
         for (int i = 0; i < freq; i++) {
             int pos = c.postings.nextPosition();
             if (pos < 0) continue;
-            int startOff = fieldHasOffsets ? c.postings.startOffset() : PostingsSink.NO_OFFSET;
-            int endOff = fieldHasOffsets ? c.postings.endOffset() : PostingsSink.NO_OFFSET;
+            int startOff = fieldHasOffsets ? c.postings.startOffset() : TermEntry.NO_OFFSET;
+            int endOff = fieldHasOffsets ? c.postings.endOffset() : TermEntry.NO_OFFSET;
             posOffsets.add(new int[]{pos, startOff, endOff, collected.size()});
             collected.add(new TermEntry(c.term, pos, startOff, endOff));
         }

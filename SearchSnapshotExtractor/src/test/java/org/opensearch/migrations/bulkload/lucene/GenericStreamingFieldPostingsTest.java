@@ -7,8 +7,6 @@ import java.util.List;
 
 import org.opensearch.migrations.bulkload.lucene.GenericStreamingFieldPostings.PostingsCursor;
 import org.opensearch.migrations.bulkload.lucene.GenericStreamingFieldPostings.TermPostings;
-import org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink;
-import org.opensearch.migrations.bulkload.lucene.sidecar.TermEntry;
 
 import org.junit.jupiter.api.Test;
 
@@ -86,13 +84,13 @@ class GenericStreamingFieldPostingsTest {
         @Override
         public int startOffset() {
             int[] offsets = docs.get(docIdx).startOffsets();
-            return (offsets != null) ? offsets[posIdx] : PostingsSink.NO_OFFSET;
+            return (offsets != null) ? offsets[posIdx] : TermEntry.NO_OFFSET;
         }
 
         @Override
         public int endOffset() {
             int[] offsets = docs.get(docIdx).endOffsets();
-            return (offsets != null) ? offsets[posIdx] : PostingsSink.NO_OFFSET;
+            return (offsets != null) ? offsets[posIdx] : TermEntry.NO_OFFSET;
         }
     }
 
@@ -121,8 +119,8 @@ class GenericStreamingFieldPostingsTest {
         assertEquals(1, entries.size());
         assertEquals("hello", entries.get(0).term());
         assertEquals(0, entries.get(0).position());
-        assertEquals(PostingsSink.NO_OFFSET, entries.get(0).startOffset());
-        assertEquals(PostingsSink.NO_OFFSET, entries.get(0).endOffset());
+        assertEquals(TermEntry.NO_OFFSET, entries.get(0).startOffset());
+        assertEquals(TermEntry.NO_OFFSET, entries.get(0).endOffset());
 
         sfp.close();
     }

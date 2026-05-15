@@ -175,19 +175,14 @@ public class LuceneReader {
         // Start at
         int startDocIdInSegment = (docStartingId <= segmentDocBase) ? 0 : docStartingId - segmentDocBase;
 
-        // Per-segment term position cache. Built lazily on first need. Backed by an on-disk
-        // spill directory so the in-heap footprint stays bounded even for large segments
-        // (a 3GB shard's analyzed-text TreeMap can otherwise OOM at 64GB JVM). Spill data
-        // lives under the same Lucene scratch dir as the unpacked segment, so cleanup
-        // follows the worker's existing --lucene-dir lifecycle.
+        // Per-segment term position cache. Built lazily on first need. The streaming path
+        // (min-heap of PostingsEnum cursors) processes everything in-memory — no disk spill.
         //
         // Shared across all N reader-parallelism workers: SegmentTermIndex's read methods
         // are synchronized on the instance, so concurrent advance from N views is safe but
         // serializes through one monitor — that is the expected ceiling for analyzed-text
         // recovery and a known input to the diminishing-returns curve.
-        final Path spillRoot = SourcelessSpillConfig.newSegmentSpillRoot(indexDirectoryPath);
-        final SegmentTermIndex termIndex = new SegmentTermIndex(
-                spillRoot, SourcelessSpillConfig.sortBufferBytes());
+        final SegmentTermIndex termIndex = new SegmentTermIndex();
 
         // For any errors, we want to log the segment reader debug info so we can see which segment is causing the issue.
         // This allows us to pass the supplier to getDocument without having to recompute the debug info

@@ -7,8 +7,7 @@ import java.util.Collections;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.lucene.StreamingFieldPostings;
-import org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink;
-import org.opensearch.migrations.bulkload.lucene.sidecar.TermEntry;
+import org.opensearch.migrations.bulkload.lucene.TermEntry;
 
 import lombok.extern.slf4j.Slf4j;
 import shadow.lucene9.org.apache.lucene.index.FieldInfo;
@@ -256,7 +255,7 @@ final class StreamingFieldPostings9 implements StreamingFieldPostings {
                 long key = scratchSortKey[k];
                 int idx = (int) key;
                 int pos = (int) (key >>> 32);
-                ordered.add(new TermEntry(scratchTerm[idx], pos, PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET));
+                ordered.add(new TermEntry(scratchTerm[idx], pos, TermEntry.NO_OFFSET, TermEntry.NO_OFFSET));
             }
         }
         return ordered;

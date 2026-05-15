@@ -1650,31 +1650,17 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
     }
 
     /**
-     * Exercises the position-buffer grow loop in LeafReader{5,7,9}.streamFieldPostings:
+     * Exercises the streaming postings path across multiple frequency regimes in a single
+     * segment: a doc with freq &lt;= 16 (small), 16 &lt; freq &lt;= 32 (medium), and
+     * freq &gt; 32 (large). Because all three docs live in one segment and scratch buffers
+     * are reused, a doc with freq=200 AFTER a doc with freq=5 proves the buffer is
+     * correctly reused at a small freq after having been grown.
      *
-     *   int[] positions = new int[16];                                // seed
-     *   if (freq > positions.length) {
-     *       positions = new int[Math.max(freq, positions.length * 2)]; // grow
-     *   }
-     *   if (pos < 0) continue;                                        // drop invalid
-     *
-     * The grow formula has three regimes that this test forces in a single segment:
-     *   1. freq &lt;= 16            — seed covers it, no reallocation.
-     *   2. 16 &lt; freq &lt;= 32    — doubling branch: new length = positions.length * 2.
-     *   3. freq &gt; positions.length * 2 — jump-to-freq branch: new length = freq.
-     *
-     * Strategy: index one `text` document where a single token is repeated enough times
-     * to trigger (2) and (3). Because all three docs live in one segment and {@code positions}
-     * is hoisted across the term-docs loop, the buffer grows monotonically — a doc with
-     * freq=200 AFTER a doc with freq=5 proves the hoisted buffer is correctly reused at a
-     * small freq after having been grown.
-     *
-     * Forces the streamFieldPostings path by disabling _source entirely (the engine keeps
+     * Forces the streaming postings path by disabling _source entirely (the engine keeps
      * no original JSON, reconstruction must walk postings to recover anything).
      *
      * Scoped to ES 5+ because pre-ES5 uses the `string` type with a different index-options
-     * contract (analysed/not_analysed enum). The fragment lives in LeafReader5/7/9 and is
-     * the same logic on all three.
+     * contract (analysed/not_analysed enum).
      */
     @ParameterizedTest(name = "positionBufferGrow: {0} -> {1}")
     @MethodSource("versionPairs")
@@ -1699,7 +1685,7 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             String docType = needsDocType(sourceVersion) ? "doc" : null;
 
             // _source disabled forces reconstruction via inverted index; the text field
-            // has positions (default for text), so streamFieldPostings fires on migration.
+            // has positions (default for text), so streaming postings fires on migration.
             String mappingProps = "\"body\": {\"type\": \"text\"}";
             String indexBody;
             if (docType != null) {

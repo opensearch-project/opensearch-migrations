@@ -7,8 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink;
-import org.opensearch.migrations.bulkload.lucene.sidecar.TermEntry;
 
 public interface LuceneLeafReader {
 
@@ -99,34 +97,12 @@ public interface LuceneLeafReader {
     default String getValueFromTerms(int docId, String fieldName) throws IOException { return null; }
 
     /**
-     * Streams the inverted index for {@code fieldName} into {@code sink} as
-     * {@code (termId, docId, positions[])} callbacks, one per (term, doc) pair that has
-     * at least one non-negative position.
-     *
-     * <p>Ordering contract: terms are visited in ascending-bytes order (matches Lucene's
-     * {@code TermsEnum.next()}), and for each term docs are visited in ascending-docId order
-     * (matches Lucene's {@code PostingsEnum.nextDoc()}). Positions within each callback are
-     * already in ascending order as emitted by {@code PostingsEnum.nextPosition()}.
-     *
-     * <p>Required on every implementation: position-aware text recovery is the only path that
-     * preserves multi-token analyzed text. Implementors with no terms to stream (e.g. a
-     * synthetic test reader) must explicitly return without calling the sink.
-     *
-     * <p>Callers must first invoke {@link PostingsSink#registerTerm} on each new term (as it
-     * appears in the walk) to get its assigned {@code termId}, then invoke
-     * {@link PostingsSink#accept(int, int, int[], int)} once per (term, doc). The reusable
-     * {@code int[]} passed to {@code accept} is only borrowed for the duration of the call.
-     */
-    void streamFieldPostings(String fieldName, PostingsSink sink) throws IOException;
-
-    /**
      * Opens a forward-only streaming cursor over the (segment, field) postings, or
-     * {@code null} if this reader version does not support streaming reconstruction.
+     * {@code null} if the field has no positional postings to stream.
      *
-     * <p>When non-null, callers prefer this over {@link #streamFieldPostings} for
-     * per-doc tier-3 text recovery: the streaming cursor avoids building a per-field
-     * sidecar (no spill, no external sort). When null, callers must fall back to the
-     * sidecar-build path.
+     * <p>The streaming cursor walks posting lists via a min-heap of PostingsEnum
+     * cursors in a single pass, producing position-ordered {@link TermEntry} lists
+     * without any disk spill.
      *
      * <p>The returned cursor caches one PostingsEnum per term and one decoded term
      * string per term — implementations should bound memory by the field's term count
@@ -281,7 +257,7 @@ public interface LuceneLeafReader {
      * Joins a list of {@link TermEntry} tokens into a single string.
      *
      * <p>When every entry carries valid character offsets (i.e. none equals
-     * {@link org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink#NO_OFFSET}),
+     * {@link TermEntry#NO_OFFSET}),
      * the gap between consecutive tokens is preserved exactly: the number of space characters
      * inserted equals {@code entry[i].startOffset() - entry[i-1].endOffset()}. This round-trips
      * the inter-token spacing that the original analyzer saw, including double-spaces.

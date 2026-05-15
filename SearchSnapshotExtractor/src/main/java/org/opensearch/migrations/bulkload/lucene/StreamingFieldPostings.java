@@ -4,7 +4,6 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.List;
 
-import org.opensearch.migrations.bulkload.lucene.sidecar.TermEntry;
 
 /**
  * Streaming cursor over all postings for a single (segment, field).

@@ -26,38 +26,4 @@ public final class RfsTunables {
      */
     public static final String READER_PARALLELISM_PROP = "rfs.reader.parallelism";
     public static final String READER_PARALLELISM_ENV = "RFS_READER_PARALLELISM";
-
-    // --- External merge-sort buffer ---
-
-    /**
-     * In-memory sort-buffer budget (bytes) for the external merge sort used by the
-     * sidecar-based term index (tier-3 text field recovery).
-     *
-     * <p>System property: {@code -Drfs.reconstruction.sortBufferBytes=<long>}
-     * <p>Default: 256 MiB ({@code 268435456}).
-     *
-     * <p>Smaller buffer → more spill runs → more merge passes → more disk I/O but bounded
-     * heap. Tune down on workers with less than 4 GiB heap; tune up on large workers to
-     * reduce merge passes for very high-cardinality text fields.
-     */
-    public static final String SORT_BUFFER_BYTES_PROP = "rfs.reconstruction.sortBufferBytes";
-    public static final long DEFAULT_SORT_BUFFER_BYTES = 256L * 1024 * 1024;
-
-    // --- Streaming postings toggle ---
-
-    /**
-     * Enables/disables the streaming-postings path for tier-3 text field recovery.
-     * When {@code true} (default), text recovery walks posting lists via a min-heap of
-     * PostingsEnum cursors in a single pass, skipping the OfflineSorter-backed sidecar
-     * build entirely. Set to {@code false} to fall back to the sidecar build path.
-     *
-     * <p>System property: {@code -Drfs.sourceless.streamingPostings=true|false}
-     * <p>Default: {@code true}.
-     *
-     * <p>The streaming path uses less disk I/O and avoids temp-file creation but holds
-     * more heap during reconstruction (one PostingsEnum per unique term in the segment).
-     * Disable on segments with extremely high term cardinality if OOM occurs.
-     */
-    public static final String STREAMING_POSTINGS_PROP = "rfs.sourceless.streamingPostings";
-    public static final boolean DEFAULT_STREAMING_POSTINGS = true;
 }

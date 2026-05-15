@@ -358,66 +358,6 @@ public class LeafReader9 implements LuceneLeafReader {
         return out;
     }
 
-    /** See {@link LuceneLeafReader#streamFieldPostings}. */
-    @Override
-    public void streamFieldPostings(String fieldName,
-            org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink sink) throws IOException {
-        Terms terms = wrapped.terms(fieldName);
-        if (terms == null) {
-            return;
-        }
-        // If positions weren't indexed (e.g. keyword/"not_analyzed" string, or text with
-        // index_options stripped below positions) there's nothing useful to stream — drop out
-        // so the caller falls through to the single-term path. Requesting POSITIONS on a
-        // postings list that doesn't carry them is undefined and can yield bogus sentinels.
-        if (!terms.hasPositions()) {
-            return;
-        }
-        TermsEnum termsEnum = terms.iterator();
-        BytesRef term;
-        int[] positions    = new int[16];
-        int[] startOffsets = new int[16];
-        int[] endOffsets   = new int[16];
-        // Only request OFFSETS when the field was actually indexed with them.
-        // Requesting OFFSETS on a POSITIONS-only field in Lucene 9.12 routes to
-        // EverythingEnum which reads the .pay file — but if no field in the segment
-        // has offsets/payloads, that file is never written and payIn == null, causing NPE.
-        FieldInfo fi = wrapped.getFieldInfos().fieldInfo(fieldName);
-        boolean fieldHasOffsets = fi != null
-            && fi.getIndexOptions().compareTo(IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS) >= 0;
-        int postingsFlags = fieldHasOffsets ? PostingsEnum.OFFSETS : PostingsEnum.POSITIONS;
-        while ((term = termsEnum.next()) != null) {
-            int termId = sink.registerTerm(
-                new org.opensearch.migrations.bulkload.lucene.sidecar.BytesRefLike(
-                    term.bytes, term.offset, term.length));
-            PostingsEnum postings = termsEnum.postings(null, postingsFlags);
-            int doc;
-            while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
-                int freq = postings.freq();
-                if (freq > positions.length) {
-                    int newLen = Math.max(freq, positions.length * 2);
-                    positions    = new int[newLen];
-                    startOffsets = new int[newLen];
-                    endOffsets   = new int[newLen];
-                }
-                int n = 0;
-                for (int i = 0; i < freq; i++) {
-                    int pos = postings.nextPosition();
-                    if (pos < 0) continue;
-                    positions[n]    = pos;
-                    startOffsets[n] = fieldHasOffsets
-                        ? postings.startOffset()
-                        : org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink.NO_OFFSET;
-                    endOffsets[n]   = fieldHasOffsets
-                        ? postings.endOffset()
-                        : org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink.NO_OFFSET;
-                    n++;
-                }
-                if (n > 0) sink.accept(termId, doc, positions, startOffsets, endOffsets, n);
-            }
-        }
-    }
-
     public String toString() {
         return wrapped.toString();
     }
