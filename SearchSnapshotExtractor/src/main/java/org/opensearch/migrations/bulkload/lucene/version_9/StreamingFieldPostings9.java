@@ -129,13 +129,27 @@ final class StreamingFieldPostings9 implements StreamingFieldPostings {
             return Collections.emptyList();
         }
 
-        // Skip cursors whose currentDoc < docId. Each such cursor must be advanced
-        // forward past or to the target, then re-heapified.
+        skipToDoc(docId);
+
+        if (heapSize == 0 || heap[0].currentDoc != docId) {
+            return Collections.emptyList();
+        }
+
+        int n = collectIntoScratch(docId);
+
+        if (n == 0) {
+            return Collections.emptyList();
+        }
+
+        return sortAndBuildResult(n);
+    }
+
+    /** Advances all heap cursors that are behind {@code docId}, dropping exhausted ones. */
+    private void skipToDoc(int docId) throws IOException {
         while (heapSize > 0 && heap[0].currentDoc < docId) {
             Cursor c = heap[0];
             int next = c.postings.advance(docId);
             if (next == PostingsEnum.NO_MORE_DOCS) {
-                // Drop this cursor: replace heap[0] with last and shrink.
                 heap[0] = heap[--heapSize];
                 heap[heapSize] = null;
             } else {
@@ -145,26 +159,24 @@ final class StreamingFieldPostings9 implements StreamingFieldPostings {
                 siftDown(0);
             }
         }
+    }
 
-        if (heapSize == 0 || heap[0].currentDoc != docId) {
-            return Collections.emptyList();
-        }
-
-        // Collect (term, position[, startOff, endOff]) for every cursor whose head equals docId
-        // into reusable primitive scratch buffers. Encode (pos, idx) as a packed long so we can
-        // call Arrays.sort(long[]) — a vectorized intrinsic on JDK 21 — instead of TimSort over
-        // boxed int[] objects with a Comparator. Strings live in a parallel String[] referenced
-        // by index. No per-token allocation.
+    /**
+     * Drains all heap cursors positioned at {@code docId} into the reusable scratch buffers.
+     * Encodes each token as {@code (pos << 32) | idx} for a single primitive sort pass.
+     * Returns the number of tokens written.
+     */
+    private int collectIntoScratch(int docId) throws IOException {
         int n = 0;
         long[] sortKey = scratchSortKey;
         String[] terms = scratchTerm;
         int[] startOff = scratchStart;
         int[] endOff = scratchEnd;
         boolean offsets = fieldHasOffsets;
+
         while (heapSize > 0 && heap[0].currentDoc == docId) {
             Cursor c = heap[0];
             int freq = c.postings.freq();
-            // Grow scratch in one shot if needed.
             int need = n + freq;
             if (need > sortKey.length) {
                 int newLen = Math.max(need, sortKey.length << 1);
@@ -175,59 +187,72 @@ final class StreamingFieldPostings9 implements StreamingFieldPostings {
                     endOff = Arrays.copyOf(endOff, newLen);
                 }
             }
-            for (int i = 0; i < freq; i++) {
-                int pos = c.postings.nextPosition();
-                if (pos < 0) continue;
-                // Pack pos in the high 32 bits; n in the low 32 bits as the stable tiebreak.
-                // Reinterpreting pos as unsigned via & 0xFFFFFFFFL keeps the comparison correct
-                // for any non-negative int (negatives were filtered above).
-                sortKey[n] = ((long) pos << 32) | (n & 0xFFFFFFFFL);
-                terms[n] = c.term;
-                if (offsets) {
-                    startOff[n] = c.postings.startOffset();
-                    endOff[n] = c.postings.endOffset();
-                }
-                n++;
-            }
-            // Advance this cursor to next doc.
-            int next = c.postings.nextDoc();
-            if (next == PostingsEnum.NO_MORE_DOCS) {
-                heap[0] = heap[--heapSize];
-                heap[heapSize] = null;
-            } else {
-                c.currentDoc = next;
-            }
-            if (heapSize > 0) {
-                siftDown(0);
-            }
+            n = drainCursorPositions(c, sortKey, terms, startOff, endOff, offsets, n, freq);
+            n = advanceHeapHead(n);
         }
-        // Persist any growth for next call.
+
         scratchSortKey = sortKey;
         scratchTerm = terms;
         if (offsets) {
             scratchStart = startOff;
             scratchEnd = endOff;
         }
+        return n;
+    }
 
-        if (n == 0) {
-            return Collections.emptyList();
+    private int drainCursorPositions(Cursor c, long[] sortKey, String[] terms,
+            int[] startOff, int[] endOff, boolean offsets, int n, int freq) throws IOException {
+        for (int i = 0; i < freq; i++) {
+            int pos = c.postings.nextPosition();
+            if (pos < 0) continue;
+            // Pack pos in high 32 bits; n in low 32 bits as stable tiebreak.
+            sortKey[n] = ((long) pos << 32) | (n & 0xFFFFFFFFL);
+            terms[n] = c.term;
+            if (offsets) {
+                startOff[n] = c.postings.startOffset();
+                endOff[n] = c.postings.endOffset();
+            }
+            n++;
         }
+        return n;
+    }
 
-        // Primitive long sort — JDK 21 intrinsic, dramatically faster than ArrayList.sort with
-        // a boxed Comparator. Pos in high bits orders by position ascending; tiebreak by
-        // insertion index (low bits) gives a stable order matching the original logic.
-        Arrays.sort(sortKey, 0, n);
+    /**
+     * Moves the current heap head to its next doc (dropping if exhausted) and re-heapifies.
+     * Returns {@code n} unchanged — signature matches the call site pattern for readability.
+     */
+    private int advanceHeapHead(int n) throws IOException {
+        int next = heap[0].postings.nextDoc();
+        if (next == PostingsEnum.NO_MORE_DOCS) {
+            heap[0] = heap[--heapSize];
+            heap[heapSize] = null;
+        } else {
+            heap[0].currentDoc = next;
+        }
+        if (heapSize > 0) {
+            siftDown(0);
+        }
+        return n;
+    }
+
+    /**
+     * Sorts the first {@code n} entries in {@code scratchSortKey} using a primitive long sort
+     * (JDK 21 vectorized intrinsic) and builds the output list.
+     */
+    private List<TermEntry> sortAndBuildResult(int n) {
+        // Primitive long sort — vectorized on JDK 21, much faster than boxed Comparator sort.
+        Arrays.sort(scratchSortKey, 0, n);
 
         ArrayList<TermEntry> ordered = new ArrayList<>(n);
-        if (offsets) {
+        if (fieldHasOffsets) {
             for (int k = 0; k < n; k++) {
-                int idx = (int) sortKey[k];
-                ordered.add(new TermEntry(terms[idx], startOff[idx], endOff[idx]));
+                int idx = (int) scratchSortKey[k];
+                ordered.add(new TermEntry(scratchTerm[idx], scratchStart[idx], scratchEnd[idx]));
             }
         } else {
             for (int k = 0; k < n; k++) {
-                int idx = (int) sortKey[k];
-                ordered.add(new TermEntry(terms[idx], PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET));
+                int idx = (int) scratchSortKey[k];
+                ordered.add(new TermEntry(scratchTerm[idx], PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET));
             }
         }
         return ordered;

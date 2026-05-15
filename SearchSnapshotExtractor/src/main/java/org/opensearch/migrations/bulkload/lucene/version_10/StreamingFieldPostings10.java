@@ -116,46 +116,28 @@ final class StreamingFieldPostings10 implements StreamingFieldPostings {
             return Collections.emptyList();
         }
 
-        // Skip cursors whose currentDoc < docId. Each such cursor must be advanced
-        // forward past or to the target, then re-heapified.
-        while (heapSize > 0 && heap[0].currentDoc < docId) {
-            Cursor c = heap[0];
-            int next = c.postings.advance(docId);
-            if (next == PostingsEnum.NO_MORE_DOCS) {
-                // Drop this cursor: replace heap[0] with last and shrink.
-                heap[0] = heap[--heapSize];
-                heap[heapSize] = null;
-            } else {
-                c.currentDoc = next;
-            }
-            if (heapSize > 0) {
-                siftDown(0);
-            }
-        }
+        skipToDoc(docId);
 
         if (heapSize == 0 || heap[0].currentDoc != docId) {
             return Collections.emptyList();
         }
 
-        // Collect (term, position, startOff, endOff) for every cursor whose head equals docId.
-        // We then sort by position to deliver position-ordered output, mirroring the sidecar contract.
         ArrayList<TermEntry> collected = new ArrayList<>();
-        ArrayList<int[]> posOffsets = new ArrayList<>(); // parallel arrays: [pos, startOff, endOff, termIdx-into-collected]
-        while (heapSize > 0 && heap[0].currentDoc == docId) {
+        ArrayList<int[]> posOffsets = new ArrayList<>();
+        collectPostingsForDoc(docId, collected, posOffsets);
+
+        if (posOffsets.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return sortAndBuildResult(collected, posOffsets);
+    }
+
+    /** Advances all heap cursors that are behind {@code docId}, dropping exhausted ones. */
+    private void skipToDoc(int docId) throws IOException {
+        while (heapSize > 0 && heap[0].currentDoc < docId) {
             Cursor c = heap[0];
-            int freq = c.postings.freq();
-            for (int i = 0; i < freq; i++) {
-                int pos = c.postings.nextPosition();
-                if (pos < 0) continue;
-                int startOff = fieldHasOffsets ? c.postings.startOffset() : PostingsSink.NO_OFFSET;
-                int endOff = fieldHasOffsets ? c.postings.endOffset() : PostingsSink.NO_OFFSET;
-                posOffsets.add(new int[]{pos, startOff, endOff, collected.size()});
-                // Stash term placeholder; index into a parallel array for cheap re-lookup.
-                collected.add(new TermEntry(c.term, startOff, endOff));
-                // We'll overwrite collected entries after sort, but we need term per index.
-            }
-            // Advance this cursor to next doc.
-            int next = c.postings.nextDoc();
+            int next = c.postings.advance(docId);
             if (next == PostingsEnum.NO_MORE_DOCS) {
                 heap[0] = heap[--heapSize];
                 heap[heapSize] = null;
@@ -166,12 +148,49 @@ final class StreamingFieldPostings10 implements StreamingFieldPostings {
                 siftDown(0);
             }
         }
+    }
 
-        if (posOffsets.isEmpty()) {
-            return Collections.emptyList();
+    /**
+     * Drains all heap cursors positioned at {@code docId}, collecting each (pos, offset) token
+     * into {@code posOffsets} with a back-reference into {@code collected} for the term string.
+     */
+    private void collectPostingsForDoc(int docId, ArrayList<TermEntry> collected, ArrayList<int[]> posOffsets)
+            throws IOException {
+        while (heapSize > 0 && heap[0].currentDoc == docId) {
+            Cursor c = heap[0];
+            drainCursorPositions(c, collected, posOffsets);
+            advanceHeapHead();
         }
+    }
 
-        // Sort by position ascending; tiebreak by collected order for determinism.
+    private void drainCursorPositions(Cursor c, ArrayList<TermEntry> collected, ArrayList<int[]> posOffsets)
+            throws IOException {
+        int freq = c.postings.freq();
+        for (int i = 0; i < freq; i++) {
+            int pos = c.postings.nextPosition();
+            if (pos < 0) continue;
+            int startOff = fieldHasOffsets ? c.postings.startOffset() : PostingsSink.NO_OFFSET;
+            int endOff = fieldHasOffsets ? c.postings.endOffset() : PostingsSink.NO_OFFSET;
+            posOffsets.add(new int[]{pos, startOff, endOff, collected.size()});
+            collected.add(new TermEntry(c.term, startOff, endOff));
+        }
+    }
+
+    /** Moves the current heap head to its next doc, dropping it if exhausted, then re-heapifies. */
+    private void advanceHeapHead() throws IOException {
+        int next = heap[0].postings.nextDoc();
+        if (next == PostingsEnum.NO_MORE_DOCS) {
+            heap[0] = heap[--heapSize];
+            heap[heapSize] = null;
+        } else {
+            heap[0].currentDoc = next;
+        }
+        if (heapSize > 0) {
+            siftDown(0);
+        }
+    }
+
+    private static List<TermEntry> sortAndBuildResult(ArrayList<TermEntry> collected, ArrayList<int[]> posOffsets) {
         posOffsets.sort((a, b) -> {
             int d = Integer.compare(a[0], b[0]);
             return d != 0 ? d : Integer.compare(a[3], b[3]);
@@ -180,7 +199,6 @@ final class StreamingFieldPostings10 implements StreamingFieldPostings {
         ArrayList<TermEntry> ordered = new ArrayList<>(posOffsets.size());
         for (int[] po : posOffsets) {
             TermEntry placeholder = collected.get(po[3]);
-            // collected[i] stores the correct term + offsets already.
             ordered.add(new TermEntry(placeholder.term(), po[1], po[2]));
         }
         return ordered;

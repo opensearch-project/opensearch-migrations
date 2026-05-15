@@ -42,5 +42,6 @@ public class SegmentDocValueReader implements AutoCloseable {
 
     @Override
     public void close() {
+        // Reader lifecycle is managed by the caller; nothing owned to release here.
     }
 }
