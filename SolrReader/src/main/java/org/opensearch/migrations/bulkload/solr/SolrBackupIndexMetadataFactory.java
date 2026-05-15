@@ -25,23 +25,19 @@ public class SolrBackupIndexMetadataFactory implements IndexMetadata.Factory {
     private final Path backupDir;
     private final Map<String, JsonNode> schemas;
     private final Consumer<String> collectionPreparer;
-    private final int solrMajorVersion;
 
     /**
      * @param collectionPreparer called once per collection before counting shards.
      *                           For S3 sources this downloads shard_backup_metadata so that
      *                           {@link SolrBackupSource#listPartitions} can discover all shards.
-     * @param solrMajorVersion source Solr major version; selects the Lucene reader to use when
-     *                         counting shards for a backup.
      */
     public SolrBackupIndexMetadataFactory(
         Path backupDir, Map<String, JsonNode> schemas,
-        Consumer<String> collectionPreparer, int solrMajorVersion
+        Consumer<String> collectionPreparer
     ) {
         this.backupDir = backupDir;
         this.schemas = schemas;
         this.collectionPreparer = collectionPreparer;
-        this.solrMajorVersion = solrMajorVersion;
     }
 
     @Override
@@ -56,16 +52,8 @@ public class SolrBackupIndexMetadataFactory implements IndexMetadata.Factory {
         var schema = schemas.get(indexName);
         var schemaNode = schema != null ? schema.path("schema") : MAPPER.createObjectNode();
 
-        // SolrCloud: count shards from shard_backup_metadata; standalone cores are always 1 shard
         var collectionDir = SolrBackupLayout.resolveCollectionDataDir(backupDir.resolve(indexName));
-        var metadataDir = collectionDir.resolve("shard_backup_metadata");
-        int shardCount;
-        if (java.nio.file.Files.isDirectory(metadataDir)) {
-            var shardFiles = SolrBackupLayout.findLatestShardMetadataFiles(metadataDir);
-            shardCount = Math.max(shardFiles.size(), 1);
-        } else {
-            shardCount = 1; // Standalone Solr core — always single shard
-        }
+        int shardCount = SolrBackupLayout.countShards(collectionDir);
         log.info("Solr collection {} has {} shard(s)", indexName, shardCount);
 
         // Build OpenSearch-compatible index metadata with proper mappings

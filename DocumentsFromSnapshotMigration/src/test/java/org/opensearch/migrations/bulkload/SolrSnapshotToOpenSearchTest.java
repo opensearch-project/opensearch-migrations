@@ -207,7 +207,7 @@ public class SolrSnapshotToOpenSearchTest {
             var targetVersion_ = targetClient.getClusterVersion();
 
             var schemas = Map.<String, JsonNode>of(COLLECTION_NAME, MAPPER.createObjectNode().set("schema", schema));
-            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, null, solrVersion.major());
+            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, null);
             var documentSource = new SolrMultiCollectionSource(backupDir, schemas, null, null, solrVersion.major());
 
             var coordinatorFactory = new WorkCoordinatorFactory(targetVersion_);
@@ -355,7 +355,7 @@ public class SolrSnapshotToOpenSearchTest {
             var targetVersion_ = targetClient.getClusterVersion();
 
             var schemas = Map.<String, JsonNode>of(collection, schema);
-            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupRoot, schemas, null, solrVersion.major());
+            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupRoot, schemas, null);
             var documentSource = new SolrMultiCollectionSource(backupRoot, schemas, null, null, solrVersion.major());
 
             var coordinatorFactory = new WorkCoordinatorFactory(targetVersion_);
@@ -575,7 +575,7 @@ public class SolrSnapshotToOpenSearchTest {
                 "movies", MAPPER.createObjectNode().set("schema", moviesSchema),
                 "books", MAPPER.createObjectNode().set("schema", booksSchema)
             );
-            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupRoot, schemas, null, solrVersion.major());
+            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupRoot, schemas, null);
             var documentSource = new SolrMultiCollectionSource(backupRoot, schemas, null, null, solrVersion.major());
 
             var connectionContext = ConnectionContextTestParams.builder()

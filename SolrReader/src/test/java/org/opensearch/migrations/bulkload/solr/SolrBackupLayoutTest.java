@@ -167,4 +167,96 @@ class SolrBackupLayoutTest {
         var latest = SolrBackupLayout.findLatestShardMetadataFiles(tempDir.resolve("nonexistent"));
         assertThat(latest, hasSize(0));
     }
+
+    @Test
+    void countShards_nullPath() {
+        assertThat(SolrBackupLayout.countShards(null), equalTo(1));
+    }
+
+    @Test
+    void countShards_nonExistentPath() {
+        assertThat(SolrBackupLayout.countShards(tempDir.resolve("nonexistent")), equalTo(1));
+    }
+
+    @Test
+    void countShards_emptyDirectory() throws IOException {
+        var collectionDir = tempDir.resolve("emptyCollection");
+        Files.createDirectories(collectionDir);
+        assertThat(SolrBackupLayout.countShards(collectionDir), equalTo(1));
+    }
+
+    @Test
+    void countShards_shardBackupMetadata_fourLatestFiles() throws IOException {
+        var collectionDir = tempDir.resolve("incrementalCollection");
+        var metadataDir = collectionDir.resolve("shard_backup_metadata");
+        Files.createDirectories(metadataDir);
+        // Four shards, each with a superseded older revision (_0) and a newer one (_1)
+        for (int i = 1; i <= 4; i++) {
+            Files.writeString(metadataDir.resolve("md_shard" + i + "_0.json"), "{\"old\":{}}");
+            Files.writeString(metadataDir.resolve("md_shard" + i + "_1.json"), "{\"new\":{}}");
+        }
+        assertThat(SolrBackupLayout.countShards(collectionDir), equalTo(4));
+    }
+
+    @Test
+    void countShards_emptyShardBackupMetadata_fallsThroughToShardDirs() throws IOException {
+        var collectionDir = tempDir.resolve("fallthroughCollection");
+        Files.createDirectories(collectionDir.resolve("shard_backup_metadata"));
+        // Provide shard subdirectories so the fallthrough strategy yields a known value
+        Files.createDirectories(collectionDir.resolve("shard1"));
+        Files.createFile(collectionDir.resolve("shard1").resolve("segments_1"));
+        Files.createDirectories(collectionDir.resolve("shard2"));
+        Files.createFile(collectionDir.resolve("shard2").resolve("segments_1"));
+
+        assertThat(SolrBackupLayout.countShards(collectionDir), equalTo(2));
+    }
+
+    @Test
+    void countShards_directShardSubdirsWithSegments() throws IOException {
+        var collectionDir = tempDir.resolve("directShardsCollection");
+        Files.createDirectories(collectionDir.resolve("shard1"));
+        Files.createFile(collectionDir.resolve("shard1").resolve("segments_1"));
+        Files.createDirectories(collectionDir.resolve("shard2"));
+        Files.createFile(collectionDir.resolve("shard2").resolve("segments_1"));
+
+        assertThat(SolrBackupLayout.countShards(collectionDir), equalTo(2));
+    }
+
+    @Test
+    void countShards_nestedDataIndexLayout() throws IOException {
+        var collectionDir = tempDir.resolve("nestedCollection");
+        var index = collectionDir.resolve("shard1").resolve("data").resolve("index");
+        Files.createDirectories(index);
+        Files.createFile(index.resolve("segments_1"));
+
+        assertThat(SolrBackupLayout.countShards(collectionDir), equalTo(1));
+    }
+
+    @Test
+    void countShards_mixedShardAndNonShardDirs() throws IOException {
+        var collectionDir = tempDir.resolve("mixedCollection");
+        Files.createDirectories(collectionDir.resolve("shard1"));
+        Files.createFile(collectionDir.resolve("shard1").resolve("segments_1"));
+        // "stats/" looks like a directory but lacks a segments_ file -> must NOT be counted
+        Files.createDirectories(collectionDir.resolve("stats"));
+        Files.writeString(collectionDir.resolve("stats").resolve("info.txt"), "not a shard");
+
+        assertThat(SolrBackupLayout.countShards(collectionDir), equalTo(1));
+    }
+
+    @Test
+    void countShards_unreadableDirectory_fallsBackToOne() throws IOException {
+        var collectionDir = tempDir.resolve("unreadableCollection");
+        Files.createDirectories(collectionDir);
+        var perms = collectionDir.toFile().setReadable(false, false);
+        if (!perms) {
+            // Skip if the platform refuses to remove read permission (e.g. running as root)
+            return;
+        }
+        try {
+            assertThat(SolrBackupLayout.countShards(collectionDir), equalTo(1));
+        } finally {
+            collectionDir.toFile().setReadable(true, false);
+        }
+    }
 }

@@ -1094,7 +1094,7 @@ public class RfsMigrateDocuments {
             } : null;
 
             var solrMajor = arguments.sourceVersion.getMajor();
-            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, collectionPreparer, solrMajor);
+            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, collectionPreparer);
             var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer, shardPreparer, solrMajor);
 
             return prepareAndMigrate(documentSource,
