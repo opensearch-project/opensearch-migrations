@@ -722,19 +722,9 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             return;
         }
 
-        // For INCLUDES/EXCLUDES modes, fields filtered out by the _source include/exclude
-        // policy are dropped from _source entirely — they must NOT be reconstructed from
-        // doc_values/stored-fields/points, even when those sources are available. This
-        // mirrors ES semantics: include/exclude defines the authoritative _source shape.
-        if (perm.sm() == SourceMode.INCLUDES || perm.sm() == SourceMode.EXCLUDES) {
-            assertNull(
-                fieldValue,
-                fieldName + " [mode=" + perm.sm() + "] should be absent (filtered by _source.includes/excludes)"
-            );
-            return;
-        }
-
-        // Reconstruction path (DISABLED mode only — no includes/excludes filtering).
+        // Reconstruction path — applies to DISABLED mode and to fields filtered out by
+        // INCLUDES/EXCLUDES. The migration reconstructs from doc_values/stored-fields/points/terms
+        // regardless of the original _source include/exclude policy.
         boolean pointsSupported = !UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion.getVersion());
 
         if (!cfg.recoverable()) {
