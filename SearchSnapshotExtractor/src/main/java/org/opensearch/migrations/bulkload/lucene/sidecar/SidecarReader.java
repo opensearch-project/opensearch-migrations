@@ -204,7 +204,7 @@ public final class SidecarReader implements AutoCloseable {
             int j = i + 1;
             while (j < n && pos[j] == pos[i]) j++;
             int best = (j - i == 1) ? i : pickLongest(termIds, i, j);
-            result.add(new TermEntry(readTerm(termIds[best]), startOff[best], endOff[best]));
+            result.add(new TermEntry(readTerm(termIds[best]), pos[best], startOff[best], endOff[best]));
             i = j;
         }
         return result;

@@ -1,6 +1,7 @@
 package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -10,6 +11,25 @@ import org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink;
 import org.opensearch.migrations.bulkload.lucene.sidecar.TermEntry;
 
 public interface LuceneLeafReader {
+
+    /**
+     * Lucene's default {@code position_increment_gap} for analyzed text fields. This is the
+     * universal default across the Lucene-based search stack — Apache Lucene itself, OpenSearch,
+     * Apache Solr, and the upstream snapshot formats this codebase imports from — all insert a
+     * position gap of 100 between successive elements of a multi-valued (array) text field so
+     * that a phrase query cannot match across element boundaries. Adjacent tokens within a
+     * single value increment by 1; a jump of {@code >= 100} between two adjacent tokens is
+     * therefore a reliable "this is the start of the next array element" signal in the
+     * recovered position stream.
+     *
+     * <p>This is the standard default and is overridable per-field in the mapping
+     * ({@code "position_increment_gap": N}). The reconstructor uses the default because the
+     * sourceless path does not currently surface per-field analyzer overrides; users who
+     * configure a custom gap will not see worse behaviour than today (the splitter
+     * conservatively does not split when no gap is found, falling back to the existing
+     * single-string concatenation).
+     */
+    int POSITION_INCREMENT_GAP = 100;
 
     public LuceneDocument document(int luceneDocId) throws IOException;
 
@@ -176,6 +196,20 @@ public interface LuceneLeafReader {
                         List<TermEntry> entries =
                                 termIndex.getTermEntriesForDocument(this, docId, fieldName);
                         if (entries != null && !entries.isEmpty()) {
+                            // Multi-valued (array) text fields are stored with a position-increment
+                            // gap of POSITION_INCREMENT_GAP (default 100) between elements. Detect
+                            // those gaps and split into a List<String> of per-element analyzed
+                            // phrases so the reconstructor can distribute them across an object-array
+                            // seed by per-element identity instead of collapsing every element's
+                            // tokens into one string.
+                            List<List<TermEntry>> elements = splitByPositionGap(entries);
+                            if (elements.size() >= 2) {
+                                List<String> perElement = new ArrayList<>(elements.size());
+                                for (List<TermEntry> bucket : elements) {
+                                    perElement.add(joinWithOffsets(bucket));
+                                }
+                                yield Optional.of(new RecoveredValue.TextTermList(perElement));
+                            }
                             yield Optional.of(new RecoveredValue.TextTerm(joinWithOffsets(entries)));
                         }
                     } catch (UnsupportedOperationException e) {
@@ -266,4 +300,46 @@ public interface LuceneLeafReader {
         return sb.toString();
     }
 
+    /**
+     * Splits a position-ordered list of {@link TermEntry} into per-element buckets by
+     * detecting position-increment gaps that mark array element boundaries.
+     *
+     * <p>Within a single multi-valued (array) text field, Lucene assigns increasing
+     * positions to tokens. Tokens within the same array element are consecutive (gap of 1).
+     * Between successive array elements, Lucene inserts a {@code position_increment_gap}
+     * (default {@link #POSITION_INCREMENT_GAP} = 100) so phrase queries cannot match across
+     * elements. A jump of {@code >= POSITION_INCREMENT_GAP} between two adjacent entries
+     * therefore reliably reveals "the next entry belongs to the next array element."
+     *
+     * <p>For single-valued fields (or any field whose tokens never exhibit a 100+ gap), the
+     * returned list contains a single bucket equal to the input — the caller can detect this
+     * cheaply via {@code result.size() == 1} and stay on the existing single-string path.
+     *
+     * <p>Empty array elements (e.g. {@code ""} as one element of {@code ["", "value"]}) do not
+     * contribute any tokens and so do not appear as a bucket. The reconstructor's
+     * distribute-across-list logic accommodates this by tolerating a recovered {@code List}
+     * shorter than the array seed (writing into the prefix and leaving trailing elements as-is).
+     *
+     * <p>This method is package-visible from the same package as {@code LuceneLeafReader} for
+     * unit testing; production callers reach it through {@link #getValueFromPointsOrTerms}.
+     */
+    static List<List<TermEntry>> splitByPositionGap(List<TermEntry> entries) {
+        if (entries.isEmpty()) return Collections.emptyList();
+        List<List<TermEntry>> buckets = new ArrayList<>();
+        List<TermEntry> current = new ArrayList<>();
+        int prevPos = entries.get(0).position();
+        current.add(entries.get(0));
+        for (int i = 1; i < entries.size(); i++) {
+            TermEntry e = entries.get(i);
+            int gap = e.position() - prevPos;
+            if (gap >= POSITION_INCREMENT_GAP) {
+                buckets.add(current);
+                current = new ArrayList<>();
+            }
+            current.add(e);
+            prevPos = e.position();
+        }
+        buckets.add(current);
+        return buckets;
+    }
 }
