@@ -1682,11 +1682,10 @@ class SourceReconstructorTest {
     }
 
     @Test
-    void reconstructSource_textTermListShorterThanSeed_distributesIntoPrefix() throws IOException {
+    void mergeWithDocValues_textTermListShorterThanSeed_distributesIntoPrefix() throws IOException {
         // TextTermList from position-gap splitting preserves insertion order. When some
         // array elements had empty strings (no indexed tokens), the recovered list is shorter
-        // than the seed. The positional values are still correctly ordered, so distributing
-        // into the prefix elements is safe — trailing elements simply had empty values.
+        // than the seed. Distributing into the prefix elements is safe.
         var reader = mock(LuceneLeafReader.class);
         when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
         // files.ext: text field, 3-element array but element[2] was empty → 2 buckets
@@ -1697,37 +1696,28 @@ class SourceReconstructorTest {
                 org.mockito.ArgumentMatchers.any()))
             .thenReturn(Optional.of(new RecoveredValue.TextTermList(
                 List.of("text/plain", "application/pdf"))));
-        // files.name: text field, all 3 elements have values
-        when(reader.getValueFromPointsOrTerms(
-                org.mockito.ArgumentMatchers.eq(0),
-                org.mockito.ArgumentMatchers.eq("files.name"),
-                org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
-                org.mockito.ArgumentMatchers.any()))
-            .thenReturn(Optional.of(new RecoveredValue.TextTermList(
-                List.of("a.txt", "b.pdf", "c.bin"))));
         when(reader.getValueFromPointsOrTerms(
                 org.mockito.ArgumentMatchers.anyInt(),
-                org.mockito.ArgumentMatchers.argThat(s -> !"files.ext".equals(s) && !"files.name".equals(s)),
+                org.mockito.ArgumentMatchers.argThat(s -> !"files.ext".equals(s)),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any()))
             .thenReturn(Optional.empty());
 
         var ctx = contextOfMany(java.util.Map.of(
             "files.ext", mapping(EsFieldType.STRING, "text"),
-            "files.name", mapping(EsFieldType.STRING, "text")
+            "files.name", mapping(EsFieldType.STRING, "keyword")
         ));
 
-        // Seed creates a 3-element object array (files.name seeds it).
-        // files.ext only has 2 values — distributes into prefix, element[2] gets nothing.
-        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
-        assertNotNull(json, "reconstruction must not be null");
-        JsonNode files = MAPPER.readTree(json).path("files");
-        assertTrue(files.isArray(), "files must be an array: " + json);
-        assertEquals(3, files.size(), "array has 3 elements from name: " + json);
-        assertEquals("text/plain", files.get(0).path("ext").asText(), "element 0: " + json);
-        assertEquals("application/pdf", files.get(1).path("ext").asText(), "element 1: " + json);
+        // 3-element seed; files.ext has only 2 values (PerElementList) → prefix distribution
+        String seed = "{\"files\":[{\"name\":\"a.txt\"},{\"name\":\"b.pdf\"},{\"name\":\"c.bin\"}]}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        JsonNode files = MAPPER.readTree(merged).path("files");
+        assertTrue(files.isArray(), "files must be an array: " + merged);
+        assertEquals(3, files.size(), "array has 3 elements: " + merged);
+        assertEquals("text/plain", files.get(0).path("ext").asText(), "element 0: " + merged);
+        assertEquals("application/pdf", files.get(1).path("ext").asText(), "element 1: " + merged);
         assertTrue(files.get(2).path("ext").isMissingNode(),
-            "element 2 has no ext (was empty string): " + json);
+            "element 2 has no ext (was empty string): " + merged);
         assertEquals("a.txt", files.get(0).path("name").asText());
         assertEquals("b.pdf", files.get(1).path("name").asText());
         assertEquals("c.bin", files.get(2).path("name").asText());
@@ -1969,5 +1959,156 @@ class SourceReconstructorTest {
         assertEquals(1L, files.get(1).path("tstatus").asLong(), "element 1 broadcast: " + merged);
         assertEquals("h1", files.get(0).path("cksum").asText());
         assertEquals("h2", files.get(1).path("cksum").asText());
+    }
+
+    // ==========================================================================================
+    // 12. ENRON MAPPING REGRESSION: copy_to leakage & source-excluded text field reconstruction
+    // ==========================================================================================
+
+    /**
+     * Builds a FieldMappingContext matching the key structure from the enron/alcatraz mapping:
+     * - iusers.from.user (index:false, doc_values:false, copy_to: users.from.user)
+     * - iusers.to.user   (index:false, doc_values:false, copy_to: users.to.user)
+     * - users.from.user  (keyword, indexed, doc_values:true) — the copy_to TARGET
+     * - users.to.user    (keyword, indexed, doc_values:true) — the copy_to TARGET
+     * - texts.user.content   (text, analyzed) — excluded from _source
+     * - texts.user.attrvals  (text, index:false, copy_to: texts.user.content) — excluded from _source
+     * - subj (text, analyzed) — excluded from _source
+     */
+    private static FieldMappingContext enronLikeContext() {
+        return contextFromJsonWithSourceFilter(
+            "{"
+            // iusers source fields — index:false, doc_values:false, copy_to targets
+            + "\"iusers\":{\"properties\":{"
+            + "  \"from\":{\"properties\":{\"user\":{\"type\":\"keyword\",\"index\":false,\"doc_values\":false,\"copy_to\":\"users.from.user\"}}},"
+            + "  \"to\":{\"properties\":{\"user\":{\"type\":\"keyword\",\"index\":false,\"doc_values\":false,\"copy_to\":\"users.to.user\"}}}"
+            + "}},"
+            // eusers source fields — same pattern
+            + "\"eusers\":{\"properties\":{"
+            + "  \"from\":{\"properties\":{\"user\":{\"type\":\"keyword\",\"index\":false,\"doc_values\":false,\"copy_to\":\"users.from.user\"}}}"
+            + "}},"
+            // users — the copy_to TARGETS (indexed, doc_values)
+            + "\"users\":{\"properties\":{"
+            + "  \"from\":{\"properties\":{\"user\":{\"type\":\"keyword\"}}},"
+            + "  \"to\":{\"properties\":{\"user\":{\"type\":\"keyword\"}}}"
+            + "}},"
+            // texts — excluded from source; content is indexed text, attrvals copies to content
+            + "\"texts\":{\"properties\":{"
+            + "  \"user\":{\"properties\":{"
+            + "    \"content\":{\"type\":\"text\",\"norms\":false},"
+            + "    \"attrvals\":{\"type\":\"text\",\"index\":false,\"copy_to\":\"texts.user.content\"}"
+            + "  }}"
+            + "}},"
+            // subj — excluded text field
+            + "\"subj\":{\"type\":\"text\",\"norms\":false}"
+            + "}",
+            // _source.excludes
+            "{\"excludes\":[\"subj\",\"texts\"]}"
+        );
+    }
+
+    @Test
+    void enronMapping_copyToTargets_neverLeakIntoSource() throws IOException {
+        // Bug: the reconstructor emits `iusers.to`, `iusers.cc`, `eusers.from` etc. in the
+        // output — these are index:false/doc_values:false fields whose values exist ONLY in
+        // _source. The copy_to targets (users.to.user etc.) have doc_values data, but reverse-
+        // derivation should NOT write into iusers/eusers when those source fields are already
+        // present in the partial _source seed (they're NOT in _source.excludes).
+        var reader = mock(LuceneLeafReader.class);
+        // users.from.user has doc_values (it's the copy_to target)
+        var usersFromInfo = new DocValueFieldInfo.Simple(
+                "users.from.user", DocValueFieldInfo.DocValueType.SORTED_SET, false);
+        var usersToInfo = new DocValueFieldInfo.Simple(
+                "users.to.user", DocValueFieldInfo.DocValueType.SORTED_SET, false);
+        when(reader.getDocValueFields()).thenReturn(List.of(usersFromInfo, usersToInfo));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq(usersFromInfo)))
+            .thenReturn(List.of("alice@example.com"));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq(usersToInfo)))
+            .thenReturn(List.of("bob@example.com"));
+        when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+
+        var ctx = enronLikeContext();
+
+        // Partial _source seed: iusers.from and eusers.to are in _source (NOT excluded)
+        String seed = "{\"iusers\":{\"from\":[{\"user\":\"alice@example.com\"}]}"
+                + ",\"eusers\":{\"from\":[{\"user\":\"alice@example.com\"}]}}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        JsonNode tree = MAPPER.readTree(merged);
+
+        // iusers.to must NOT appear — it wasn't in the seed, and it's index:false/dv:false
+        // so there's no Lucene data to recover it from. Reverse-derivation from users.to.user
+        // should NOT write into iusers.to.
+        assertTrue(tree.path("iusers").path("to").isMissingNode(),
+            "iusers.to must not be reverse-derived from copy_to target: " + merged);
+
+        // users.from and users.to are copy_to TARGETS — must NOT appear in _source
+        assertTrue(tree.path("users").isMissingNode(),
+            "users.* copy_to targets must never appear in reconstructed _source: " + merged);
+
+        // The seed values must be preserved
+        assertEquals("alice@example.com",
+            tree.path("iusers").path("from").get(0).path("user").asText(),
+            "seed iusers.from preserved: " + merged);
+    }
+
+    @Test
+    void enronMapping_sourceExcludedTextField_recoveredFromIndex() throws IOException {
+        // Bug: texts.user.content (a text field in _source.excludes) should be reconstructed
+        // from the inverted index. Instead, the reconstructor either:
+        // (a) suppresses it because it's a copy_to target (of attrvals), OR
+        // (b) reverse-derives into attrvals (which has index:false, so no Lucene data)
+        //
+        // Expected: texts.user.content IS emitted with analyzed tokens from the index.
+        // texts.user.attrvals must NOT appear (it's index:false/dv:false, unrecoverable).
+        var reader = mock(LuceneLeafReader.class);
+        when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
+        // texts.user.content is a text field — tier-3 fallback recovers analyzed tokens
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq("texts.user.content"),
+                org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of(new RecoveredValue.TextTerm("lucy here few questions")));
+        // subj is a text field — tier-3 fallback returns empty (it was "")
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq("subj"),
+                org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+        // Default: nothing else recoverable
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.argThat(s ->
+                    !"texts.user.content".equals(s) && !"subj".equals(s)),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+
+        var ctx = enronLikeContext();
+
+        // Partial seed: only non-excluded fields present (e.g. gcid)
+        String seed = "{\"gcid\":\"abc123\"}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        JsonNode tree = MAPPER.readTree(merged);
+
+        // texts.user.content MUST be emitted — it's excluded from _source but recoverable
+        assertEquals("lucy here few questions",
+            tree.path("texts").path("user").path("content").asText(),
+            "texts.user.content must be reconstructed from inverted index: " + merged);
+
+        // texts.user.attrvals must NOT appear — index:false, doc_values not specified (defaults
+        // to false for text), no stored field. It's completely unrecoverable.
+        assertTrue(tree.path("texts").path("user").path("attrvals").isMissingNode(),
+            "texts.user.attrvals (index:false) must not appear in output: " + merged);
+
+        // Seed fields preserved
+        assertEquals("abc123", tree.path("gcid").asText());
     }
 }

@@ -331,7 +331,15 @@ public class FieldMappingContext {
         if (sourcesByTarget.isEmpty() && sourceIncludes.isEmpty() && sourceExcludes.isEmpty()) {
             return false;
         }
+        // Copy_to targets that are also source-excluded are real indexed fields needing
+        // reconstruction (e.g. texts.user.content receives copy_to data AND has its own
+        // indexed content). Don't suppress those — let them be recovered from Lucene.
         if (isCopyToTarget(fieldPath)) {
+            for (String glob : sourceExcludes) {
+                if (matchesGlob(glob, fieldPath)) {
+                    return false;
+                }
+            }
             return true;
         }
         for (String glob : sourceExcludes) {
@@ -359,6 +367,11 @@ public class FieldMappingContext {
         }
         if (glob.endsWith(".*")) {
             return path.startsWith(glob.substring(0, glob.length() - 1));
+        }
+        // ES semantics: a plain name like "texts" in _source.excludes matches the field
+        // itself AND all dotted sub-paths (texts.user.content, texts.sys.attrs, etc.)
+        if (glob.indexOf('*') < 0 && glob.indexOf('?') < 0) {
+            return path.equals(glob) || path.startsWith(glob + ".");
         }
         // Bare `*` wildcards (no dot delimiter): support common single-`*` patterns
         // matching ES _source.includes/excludes semantics — `prefix*`, `*suffix`,

@@ -547,11 +547,17 @@ public class SourceReconstructor {
                 if (shouldSkipField(sourceField, mappingContext)) {
                     continue;
                 }
+                // Skip reverse-derivation for source fields that have no Lucene footprint
+                // (index:false AND doc_values:false). Such fields exist only in _source — if
+                // they're absent from the seed, the doc genuinely didn't have that field.
+                FieldMappingInfo sourceMapping = mappingContext.getFieldInfo(sourceField);
+                if (sourceMapping != null && !sourceMapping.indexed() && !sourceMapping.docValues()) {
+                    continue;
+                }
                 List<String> rankedTargets = mappingContext.getCopyToTargets(sourceField);
                 if (rankedTargets.isEmpty()) {
                     continue;
                 }
-                FieldMappingInfo sourceMapping = mappingContext.getFieldInfo(sourceField);
                 for (String targetField : rankedTargets) {
                     ProbeResult recovered = probeFieldValue(reader, docId, document, targetField,
                             mappingContext, termIndex);
