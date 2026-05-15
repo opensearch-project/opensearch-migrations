@@ -1655,11 +1655,11 @@ class SourceReconstructorTest {
     }
 
     @Test
-    void mergeWithDocValues_fewerDocValues_dropsValueAndPreservesSeed() throws IOException {
-        // SORTED_SET doc_values deduplicates and loses insertion order — when fewer values
-        // arrive than array elements, positional binding is impossible. Drop all values.
-        // (This is the enron2_archive.av5 case: `files` has 3 elements but `files.conttype`
-        // only has 2 unique sorted-set entries — the binding is unknowable.)
+    void mergeWithDocValues_fewerDocValues_distributesIntoPrefixBestEffort() throws IOException {
+        // SORTED_SET doc_values deduplicates and loses insertion order. When fewer values
+        // arrive than array elements, we do best-effort prefix distribution: values go into
+        // elements [0..N-1], trailing elements get nothing. Order is lexicographic (not
+        // original), but at least values are present and searchable.
         var reader = multiDocValueReader(java.util.Map.of(
             "files.conttype", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.SORTED_SET, false,
                 java.util.List.of("application/pdf", "text/plain"))  // 2 values for 3 elements
@@ -1673,9 +1673,12 @@ class SourceReconstructorTest {
 
         JsonNode files = MAPPER.readTree(merged).path("files");
         assertEquals(3, files.size(), "seed array length preserved: " + merged);
-        assertTrue(!files.get(0).has("conttype") && !files.get(1).has("conttype")
-                && !files.get(2).has("conttype"),
-            "conttype must NOT be distributed when doc_values count mismatches: " + merged);
+        assertEquals("application/pdf", files.get(0).path("conttype").asText(),
+            "element 0 gets first value (lexicographic): " + merged);
+        assertEquals("text/plain", files.get(1).path("conttype").asText(),
+            "element 1 gets second value: " + merged);
+        assertTrue(files.get(2).path("conttype").isMissingNode(),
+            "element 2 has no conttype (no more values to distribute): " + merged);
     }
 
     @Test
@@ -1883,17 +1886,19 @@ class SourceReconstructorTest {
     void reconstructSource_objectArrayFromTextTermList_duplicateValues() throws IOException {
         // Reproduces: files: [{name:"a.pdf", ext:"pdf"}, {name:"b.gif", ext:"gif"},
         //                     {name:"c.pdf", ext:"pdf"}, {name:"d.gif", ext:"gif"}]
-        // Without _source, `files.ext` as a TEXT field with positions recovers all 4 elements
-        // via position-gap splitting (TextTermList), including duplicates. The PerElementList
-        // marker triggers lazy-grow of the absent `files` parent into a 4-element List<Map>
-        // so distribute logic can attribute each element correctly.
         //
-        // For KEYWORD fields, SORTED_SET doc_values deduplicates to ["gif","pdf"] — losing
-        // positional binding entirely. This test validates the TEXT + position-gap path.
+        // For TEXT fields with positions, position-gap splitting preserves insertion order.
+        // For KEYWORD fields without positions, the multi-term recovery uses freq-aware
+        // term walking which recovers the full multiset (all 4 values including duplicates)
+        // but in dictionary order, not insertion order.
+        //
+        // This test validates that a TEXT field with position-gap splitting correctly
+        // reconstructs per-element values in the original order (the ideal path).
         var reader = mock(LuceneLeafReader.class);
         when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
 
         // files.ext: TEXT field, recovered via position-gap splitting → 4 per-element values
+        // in original insertion order (positions preserve this).
         when(reader.getValueFromPointsOrTerms(
                 org.mockito.ArgumentMatchers.eq(0),
                 org.mockito.ArgumentMatchers.eq("files.ext"),
@@ -1931,6 +1936,7 @@ class SourceReconstructorTest {
         assertTrue(files.isArray(), "files must be an object array: " + json);
         assertEquals(4, files.size(), "all 4 elements reconstructed: " + json);
 
+        // Position-gap splitting preserves insertion order for text fields
         assertEquals("a.pdf", files.get(0).path("name").asText(), "element 0 name: " + json);
         assertEquals("pdf", files.get(0).path("ext").asText(), "element 0 ext: " + json);
         assertEquals("b.gif", files.get(1).path("name").asText(), "element 1 name: " + json);
@@ -1940,6 +1946,7 @@ class SourceReconstructorTest {
         assertEquals("d.gif", files.get(3).path("name").asText(), "element 3 name: " + json);
         assertEquals("gif", files.get(3).path("ext").asText(), "element 3 ext: " + json);
     }
+
 
     @Test
     void mergeWithDocValues_storedFieldSubfield_distributesAcrossObjectArray() throws IOException {

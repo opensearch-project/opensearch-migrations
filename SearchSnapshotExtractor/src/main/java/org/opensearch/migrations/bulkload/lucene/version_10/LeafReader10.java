@@ -323,6 +323,28 @@ public class LeafReader10 implements LuceneLeafReader {
         return out;
     }
 
+    @Override
+    public java.util.Map<Integer, java.util.List<String>> buildMultiTermIndex(String fieldName) throws IOException {
+        Terms terms = wrapped.terms(fieldName);
+        if (terms == null) return java.util.Collections.emptyMap();
+        java.util.HashMap<Integer, java.util.List<String>> out = new java.util.HashMap<>();
+        TermsEnum termsEnum = terms.iterator();
+        BytesRef term;
+        while ((term = termsEnum.next()) != null) {
+            String termStr = term.utf8ToString();
+            PostingsEnum postings = termsEnum.postings(null, PostingsEnum.FREQS);
+            int doc;
+            while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
+                int freq = postings.freq();
+                java.util.List<String> list = out.computeIfAbsent(doc, k -> new java.util.ArrayList<>());
+                for (int i = 0; i < freq; i++) {
+                    list.add(termStr);
+                }
+            }
+        }
+        return out;
+    }
+
     /** See {@link LuceneLeafReader#streamFieldPostings}. */
     @Override
     public void streamFieldPostings(String fieldName,

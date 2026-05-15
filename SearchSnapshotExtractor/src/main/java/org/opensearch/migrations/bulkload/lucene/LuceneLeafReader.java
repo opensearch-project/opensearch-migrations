@@ -151,6 +151,20 @@ public interface LuceneLeafReader {
     }
 
     /**
+     * Builds a {@code docId -> List<String>} map for a multi-valued keyword/not-analyzed
+     * field by walking the terms dictionary once. Each term is repeated {@code freq} times
+     * (the number of times it was indexed for that doc). This recovers the full multiset of
+     * values including duplicates, though insertion order is lost (terms arrive in dictionary
+     * order, not the original array element order).
+     *
+     * <p>For a single-valued field, returns a one-element list per doc. Called at most once
+     * per (segment, field) via {@link SegmentTermIndex}.
+     */
+    default Map<Integer, List<String>> buildMultiTermIndex(String fieldName) throws IOException {
+        return Collections.emptyMap();
+    }
+
+    /**
      * Builds a {@code docId -> term-string} map for a STRING field by walking the
      * terms dictionary once. For keyword / not-analyzed fields each docId has exactly
      * one term, so this map is the inverted-index inverse; it makes per-doc single-term
@@ -214,6 +228,17 @@ public interface LuceneLeafReader {
                         }
                     } catch (UnsupportedOperationException e) {
                         // Field indexed without positions; fall through to single-term path.
+                    }
+                }
+                // Multi-valued keyword recovery: use freq-aware term walk to get all values
+                // including duplicates. Falls back to single-term for backward compat.
+                if (termIndex != null) {
+                    List<String> multiTerms = termIndex.getMultiTermsForDocument(this, docId, fieldName);
+                    if (multiTerms != null && !multiTerms.isEmpty()) {
+                        if (multiTerms.size() == 1) {
+                            yield Optional.of(new RecoveredValue.TextTerm(multiTerms.get(0)));
+                        }
+                        yield Optional.of(new RecoveredValue.TextTermList(multiTerms));
                     }
                 }
                 String singleTerm;

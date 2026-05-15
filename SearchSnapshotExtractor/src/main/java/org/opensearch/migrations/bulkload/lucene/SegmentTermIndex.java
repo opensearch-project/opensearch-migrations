@@ -200,6 +200,31 @@ public class SegmentTermIndex implements AutoCloseable {
         return forField.get(docId);
     }
 
+    private final Map<String, Map<Integer, List<String>>> multiTermByField = new HashMap<>();
+
+    /**
+     * Returns ALL terms for {@code docId} in {@code fieldName}, each repeated by its
+     * per-doc frequency. For multi-valued keyword fields (object-array subfields), this
+     * recovers the full multiset of values including duplicates — unlike SORTED_SET
+     * doc_values which deduplicates, or getSingleTermForDocument which returns only one.
+     *
+     * <p>Order is dictionary order (not insertion order), so positional binding to specific
+     * array elements is not guaranteed. However, the total count matches the original array
+     * size, enabling exact-size distribution.
+     */
+    public synchronized List<String> getMultiTermsForDocument(LuceneLeafReader reader, int docId, String fieldName)
+            throws IOException {
+        if (closed) {
+            throw new IOException("SegmentTermIndex has been closed");
+        }
+        Map<Integer, List<String>> forField = multiTermByField.get(fieldName);
+        if (forField == null) {
+            forField = reader.buildMultiTermIndex(fieldName);
+            multiTermByField.put(fieldName, forField);
+        }
+        return forField.get(docId);
+    }
+
     /**
      * Builds the sidecar for {@code fieldName} by streaming the terms dict once into a
      * {@link SidecarBuilder}.
@@ -272,6 +297,7 @@ public class SegmentTermIndex implements AutoCloseable {
         streamingDisabledForField.clear();
         numericByField.clear();
         singleTermByField.clear();
+        multiTermByField.clear();
         try {
             IOUtils.rm(spillRoot);
         } catch (IOException e) {
