@@ -298,13 +298,20 @@ public class SourceReconstructor {
                                                         Object value, String fieldName) {
         if (value instanceof java.util.List<?> valueList) {
             if (valueList.size() != list.size()) {
-                log.atWarn()
-                    .setMessage("Cannot distribute '{}' across object array: got {} values for {} elements; dropping recovered value")
-                    .addArgument(fieldName)
-                    .addArgument(valueList.size())
-                    .addArgument(list.size())
-                    .log();
-                return false;
+                // PerElementList preserves insertion order (from position-gap splitting) so a
+                // shorter list means trailing elements were empty strings that produced no tokens.
+                // Distributing into the prefix is safe. For plain lists (from doc_values), order is
+                // lexicographic (SORTED_SET) or ascending (SORTED_NUMERIC) — not insertion order —
+                // so any size mismatch makes positional binding impossible.
+                if (!(valueList instanceof PerElementList) || valueList.size() > list.size()) {
+                    log.atWarn()
+                        .setMessage("Cannot distribute '{}' across object array: got {} values for {} elements; dropping recovered value")
+                        .addArgument(fieldName)
+                        .addArgument(valueList.size())
+                        .addArgument(list.size())
+                        .log();
+                    return false;
+                }
             }
             log.atDebug()
                 .setMessage("Distributing {} values for '{}' across {}-element object array")
@@ -313,7 +320,7 @@ public class SourceReconstructor {
                 .addArgument(list.size())
                 .log();
             boolean modified = false;
-            for (int i = 0; i < list.size(); i++) {
+            for (int i = 0; i < valueList.size(); i++) {
                 Map<String, Object> element = (Map<String, Object>) list.get(i);
                 if (element.containsKey(leaf)) {
                     continue;

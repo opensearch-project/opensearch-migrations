@@ -1632,9 +1632,9 @@ class SourceReconstructorTest {
     }
 
     @Test
-    void mergeWithDocValues_sizeMismatch_dropsValueAndPreservesSeed() throws IOException {
-        // Positional distribution requires equal lengths. A size mismatch cannot safely distribute
-        // (no ordinal→element binding), so the branch warns and drops — seed stays intact.
+    void mergeWithDocValues_moreValuesThanElements_dropsValueAndPreservesSeed() throws IOException {
+        // When doc_values produces MORE values than the array has elements, positional binding is
+        // ambiguous (can't safely pick which values to assign), so the branch warns and drops.
         var reader = multiDocValueReader(java.util.Map.of(
             "files.size", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.SORTED_NUMERIC, false,
                 java.util.List.of(100L, 500L, 2000L))  // 3 values
@@ -1652,6 +1652,82 @@ class SourceReconstructorTest {
             "size must NOT be partially distributed on length mismatch: " + merged);
         assertEquals("h1", files.get(0).path("cksum").asText());
         assertEquals("h2", files.get(1).path("cksum").asText());
+    }
+
+    @Test
+    void mergeWithDocValues_fewerDocValues_dropsValueAndPreservesSeed() throws IOException {
+        // SORTED_SET doc_values deduplicates and loses insertion order — when fewer values
+        // arrive than array elements, positional binding is impossible. Drop all values.
+        // (This is the enron2_archive.av5 case: `files` has 3 elements but `files.conttype`
+        // only has 2 unique sorted-set entries — the binding is unknowable.)
+        var reader = multiDocValueReader(java.util.Map.of(
+            "files.conttype", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.SORTED_SET, false,
+                java.util.List.of("application/pdf", "text/plain"))  // 2 values for 3 elements
+        ));
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.conttype", mapping(EsFieldType.STRING, "keyword"),
+            "files.name", mapping(EsFieldType.STRING, "keyword")
+        ));
+        String seed = "{\"files\":[{\"name\":\"a.txt\"},{\"name\":\"b.pdf\"},{\"name\":\"c.bin\"}]}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+
+        JsonNode files = MAPPER.readTree(merged).path("files");
+        assertEquals(3, files.size(), "seed array length preserved: " + merged);
+        assertTrue(!files.get(0).has("conttype") && !files.get(1).has("conttype")
+                && !files.get(2).has("conttype"),
+            "conttype must NOT be distributed when doc_values count mismatches: " + merged);
+    }
+
+    @Test
+    void reconstructSource_textTermListShorterThanSeed_distributesIntoPrefix() throws IOException {
+        // TextTermList from position-gap splitting preserves insertion order. When some
+        // array elements had empty strings (no indexed tokens), the recovered list is shorter
+        // than the seed. The positional values are still correctly ordered, so distributing
+        // into the prefix elements is safe — trailing elements simply had empty values.
+        var reader = mock(LuceneLeafReader.class);
+        when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
+        // files.ext: text field, 3-element array but element[2] was empty → 2 buckets
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq("files.ext"),
+                org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of(new RecoveredValue.TextTermList(
+                List.of("text/plain", "application/pdf"))));
+        // files.name: text field, all 3 elements have values
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq("files.name"),
+                org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of(new RecoveredValue.TextTermList(
+                List.of("a.txt", "b.pdf", "c.bin"))));
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.argThat(s -> !"files.ext".equals(s) && !"files.name".equals(s)),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.ext", mapping(EsFieldType.STRING, "text"),
+            "files.name", mapping(EsFieldType.STRING, "text")
+        ));
+
+        // Seed creates a 3-element object array (files.name seeds it).
+        // files.ext only has 2 values — distributes into prefix, element[2] gets nothing.
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertNotNull(json, "reconstruction must not be null");
+        JsonNode files = MAPPER.readTree(json).path("files");
+        assertTrue(files.isArray(), "files must be an array: " + json);
+        assertEquals(3, files.size(), "array has 3 elements from name: " + json);
+        assertEquals("text/plain", files.get(0).path("ext").asText(), "element 0: " + json);
+        assertEquals("application/pdf", files.get(1).path("ext").asText(), "element 1: " + json);
+        assertTrue(files.get(2).path("ext").isMissingNode(),
+            "element 2 has no ext (was empty string): " + json);
+        assertEquals("a.txt", files.get(0).path("name").asText());
+        assertEquals("b.pdf", files.get(1).path("name").asText());
+        assertEquals("c.bin", files.get(2).path("name").asText());
     }
 
     @Test
@@ -1801,6 +1877,68 @@ class SourceReconstructorTest {
 
         assertEquals(seed, merged,
             "deep-nesting under a List<Map> parent is unsupported; seed must be unchanged: " + merged);
+    }
+
+    @Test
+    void reconstructSource_objectArrayFromTextTermList_duplicateValues() throws IOException {
+        // Reproduces: files: [{name:"a.pdf", ext:"pdf"}, {name:"b.gif", ext:"gif"},
+        //                     {name:"c.pdf", ext:"pdf"}, {name:"d.gif", ext:"gif"}]
+        // Without _source, `files.ext` as a TEXT field with positions recovers all 4 elements
+        // via position-gap splitting (TextTermList), including duplicates. The PerElementList
+        // marker triggers lazy-grow of the absent `files` parent into a 4-element List<Map>
+        // so distribute logic can attribute each element correctly.
+        //
+        // For KEYWORD fields, SORTED_SET doc_values deduplicates to ["gif","pdf"] — losing
+        // positional binding entirely. This test validates the TEXT + position-gap path.
+        var reader = mock(LuceneLeafReader.class);
+        when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
+
+        // files.ext: TEXT field, recovered via position-gap splitting → 4 per-element values
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq("files.ext"),
+                org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of(new RecoveredValue.TextTermList(
+                List.of("pdf", "gif", "pdf", "gif"))));
+
+        // files.name: TEXT field, recovered via position-gap splitting → 4 unique per-element values
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq("files.name"),
+                org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of(new RecoveredValue.TextTermList(
+                List.of("a.pdf", "b.gif", "c.pdf", "d.gif"))));
+
+        // No other fields produce values
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.argThat(s -> !"files.ext".equals(s) && !"files.name".equals(s)),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.ext", mapping(EsFieldType.STRING, "text"),
+            "files.name", mapping(EsFieldType.STRING, "text")
+        ));
+
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertNotNull(json, "reconstruction must not be null");
+        JsonNode tree = MAPPER.readTree(json);
+        JsonNode files = tree.path("files");
+        assertTrue(files.isArray(), "files must be an object array: " + json);
+        assertEquals(4, files.size(), "all 4 elements reconstructed: " + json);
+
+        assertEquals("a.pdf", files.get(0).path("name").asText(), "element 0 name: " + json);
+        assertEquals("pdf", files.get(0).path("ext").asText(), "element 0 ext: " + json);
+        assertEquals("b.gif", files.get(1).path("name").asText(), "element 1 name: " + json);
+        assertEquals("gif", files.get(1).path("ext").asText(), "element 1 ext: " + json);
+        assertEquals("c.pdf", files.get(2).path("name").asText(), "element 2 name: " + json);
+        assertEquals("pdf", files.get(2).path("ext").asText(), "element 2 ext: " + json);
+        assertEquals("d.gif", files.get(3).path("name").asText(), "element 3 name: " + json);
+        assertEquals("gif", files.get(3).path("ext").asText(), "element 3 ext: " + json);
     }
 
     @Test
