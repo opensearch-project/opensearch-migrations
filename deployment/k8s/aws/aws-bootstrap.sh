@@ -533,7 +533,7 @@ check_existing_ma_release() {
 
 # Check required tools
 missing=0
-for cmd in jq kubectl; do
+for cmd in jq kubectl tac aws curl; do
   if ! command -v $cmd &>/dev/null; then
     echo "Missing required tool: $cmd"
     missing=1
