@@ -274,11 +274,26 @@ class MATestBase:
     def workflow_finish(self):
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
+        # Two paths to a terminal phase:
+        #
+        # 1. k8s-local (imported_clusters=False): the workflow is waiting at its
+        #    second suspend (pause-for-migration-verification). Resume past it,
+        #    then wait for the ending phase.
+        # 2. imported_clusters=True: workflow_perform_migrations already drove
+        #    the functional steps. CDC tests' outer workflow runs to completion
+        #    via monitorWorkflow polling the inner migration-workflow until
+        #    Succeeded; non-CDC imported-clusters tests are typically already
+        #    terminal here (so wait is a fast no-op). The kafka/proxy/replayer
+        #    resources spawned by CDC tests keep running independently and are
+        #    cleaned up by helm uninstall / workflow reset, not by the outer
+        #    workflow's lifecycle.
         if not self.imported_clusters:
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
-            self.argo_service.wait_for_ending_phase(workflow_name=self.workflow_name)
+        self.argo_service.wait_for_ending_phase(
+            workflow_name=self.workflow_name, timeout_seconds=300
+        )
 
     def test_after(self):
         status_result = self.argo_service.get_workflow_status(workflow_name=self.workflow_name)
         phase = status_result.value.get("phase", "")
-        assert phase == "Succeeded"
+        assert phase == "Succeeded", f"Expected workflow phase 'Succeeded', got '{phase}'"

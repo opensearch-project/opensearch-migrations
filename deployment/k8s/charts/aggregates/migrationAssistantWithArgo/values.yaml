@@ -37,25 +37,27 @@ kyvernoPolicies:
   mountLocalAwsCredsPath: "~/.aws"
 
 images:
+  # Empty project image tags default to Chart.appVersion. Release packaging sets
+  # appVersion from the release git tag; source/dev chart renders keep appVersion as "latest".
   captureProxy:
     repository: migrations/capture_proxy
-    tag: latest
+    tag: ""
     pullPolicy: IfNotPresent
   trafficReplayer:
     repository: migrations/traffic_replayer
-    tag: latest
+    tag: ""
     pullPolicy: IfNotPresent
   reindexFromSnapshot:
     repository: migrations/reindex_from_snapshot
-    tag: latest
+    tag: ""
     pullPolicy: IfNotPresent
   migrationConsole:
     repository: migrations/migration_console
-    tag: latest
+    tag: ""
     pullPolicy: IfNotPresent
   installer:
     repository: migrations/migration_console
-    tag: latest
+    tag: ""
     pullPolicy: IfNotPresent
   coordinatorCluster:
     repository: mirror.gcr.io/opensearchproject/opensearch
@@ -378,6 +380,16 @@ charts:
         env:
           - name: RESOURCE_STATE_CHECK_INTERVAL
             value: "1s"
+          # Widen argoexec's internal retry so a single kubectl apply/patch
+          # rides out a dependency pod (webhook, admission controller) restart
+          # of ~80-130s without the resource step giving up. Steps=8 yields
+          # 7 sleeps between 8 attempts (k8s wait.ExponentialBackoff semantics):
+          #   2 + 3.2 + 5.12 + 8.19 + 13.11 + 20.98 + 33.56 ≈ 86s nominal
+          # With factor=1.6 jitter=0.5, expected ~108s avg, ~129s worst-case.
+          - name: EXECUTOR_RETRY_BACKOFF_STEPS
+            value: "8"
+          - name: EXECUTOR_RETRY_BACKOFF_DURATION
+            value: "2s"
       server:
         secure: true
         replicas: 2

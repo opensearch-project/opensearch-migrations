@@ -216,10 +216,15 @@ class IntegrationTestArgoService:
 
     def get_workflow_status(self, workflow_name: str) -> CommandResult:
         workflow_data = self._get_workflow_status_json(workflow_name)
-        phase = workflow_data.get("status", {}).get("phase", "")
+        status = workflow_data.get("status", {}) or {}
+        phase = status.get("phase", "")
+        # `message` is populated by Argo on termination (e.g. "Stopped with strategy 'Stop'"
+        # when stop_workflow is called). Tests need it to distinguish a workflow stopped
+        # deliberately by the test framework from one that failed on its own.
+        message = status.get("message", "") or ""
 
         # Check for suspended nodes
-        nodes = workflow_data.get("status", {}).get("nodes", {})
+        nodes = status.get("nodes", {}) or {}
         has_suspended_nodes = False
         for node_id, node in nodes.items():
             if node.get("phase") == "Running":
@@ -228,6 +233,7 @@ class IntegrationTestArgoService:
 
         status_info = {
             "phase": phase,
+            "message": message,
             "has_suspended_nodes": has_suspended_nodes
         }
 
@@ -340,7 +346,11 @@ class IntegrationTestArgoService:
             raise ValueError(f"Failed to read ConfigMap '{configmap_name}': {e}")
 
     def _run_kubectl_command(self, kubectl_args: Dict[str, Any], print_output: bool = False) -> CommandResult:
-        runner = CommandRunner("kubectl", kubectl_args)
+        # Direct kubectl get/describe/patch calls — typical responses are sub-second.
+        # A 120s timeout fails fast (CommandRunnerError) when the apiserver is
+        # unresponsive (pod evicted, kubelet↔apiserver broken, EKS auth
+        # refresh stuck) rather than hanging pytest until the outer pipeline times out.
+        runner = CommandRunner("kubectl", kubectl_args, timeout=120.0)
         try:
             return runner.run(print_to_console=print_output)
         except CommandRunnerError as e:

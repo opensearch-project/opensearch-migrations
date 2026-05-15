@@ -86,7 +86,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: apply-policy
-          image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.installer) }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
           command:
             - /bin/sh

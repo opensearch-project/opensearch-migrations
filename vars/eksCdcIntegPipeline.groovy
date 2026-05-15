@@ -231,47 +231,14 @@ def call(Map config = [:]) {
 
         post {
             always {
-                timeout(time: 75, unit: 'MINUTES') {
-                    script {
-                        def region = params.REGION ?: 'us-east-1'
-                        def maStackName = env.MA_STACK_NAME ?: "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${region}"
-
-                        withMigrationsTestAccount(region: region, duration: 4500) { accountId ->
-                            sh "mkdir -p libraries/testAutomation/logs"
-                            archiveArtifacts artifacts: 'libraries/testAutomation/logs/**', allowEmptyArchive: true
-
-                            if (env.eksClusterName) {
-                                cdcCleanupStep(kubeContext: env.eksKubeContext)
-                                eksCleanupStep(
-                                    stackName: maStackName,
-                                    eksClusterName: env.eksClusterName,
-                                    kubeContext: env.eksKubeContext
-                                )
-                            }
-
-                            // Destroy AOS domains and MA stack in parallel (independent — no shared VPC)
-                            parallel(
-                                'Destroy AOS Domains': {
-                                    dir('test') {
-                                        echo "CLEANUP: Destroying domain stacks via CDK"
-                                        sh "./awsDeployCluster.sh --stage ${maStageName} --context-file ${clusterContextFilePath} --destroy || true"
-                                    }
-                                },
-                                'Delete MA Stack': {
-                                    echo "CLEANUP: Deleting MA stack ${maStackName}"
-                                    sh "aws cloudformation delete-stack --stack-name ${maStackName} --region ${region} || true"
-                                    sh "aws cloudformation wait stack-delete-complete --stack-name ${maStackName} --region ${region} || true"
-                                }
-                            )
-                        }
-
-                        sh """
-                            if command -v kubectl >/dev/null 2>&1; then
-                                kubectl config delete-context ${env.eksKubeContext} 2>/dev/null || true
-                            fi
-                        """
-                    }
-                }
+                eksPostCleanup(
+                    maStackName: env.MA_STACK_NAME ?: "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${params.REGION}",
+                    clusterStackName: "OpenSearch-${maStageName}-${params.REGION}",
+                    kubeContext: env.eksKubeContext,
+                    eksClusterName: env.eksClusterName,
+                    cdkContextFile: clusterContextFilePath,
+                    cdkStage: maStageName,
+                )
             }
         }
     }

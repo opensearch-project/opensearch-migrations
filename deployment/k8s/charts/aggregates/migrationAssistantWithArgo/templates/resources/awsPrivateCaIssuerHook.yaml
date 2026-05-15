@@ -17,7 +17,7 @@ spec:
       serviceAccountName: {{ .Values.argoWorkflowServiceAccountName | default "argo-workflow-executor" }}
       containers:
       - name: create-pca-and-issuer
-        image: {{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}
+        image: {{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}
         command: ["/bin/sh", "-c"]
         args:
         - |

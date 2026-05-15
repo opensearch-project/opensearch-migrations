@@ -78,12 +78,40 @@ func (sl *ServerlessPrice) GetRegionPrice(region string) (price.ServerlessRegion
 // Invalidate Reloads Serverless price cache.
 //
 // It reads the json from the ServerlessPricingUrl, processes it and updates the local copy.
+// It also attempts to fetch Secret Region serverless pricing (aws-iso-b partition).
 // If any error occurs, it returns an InvalidationStatus with the error message.
 // If no error occurs, it returns an InvalidationStatus with a success message and the timestamp of the update.
 func (sl *ServerlessPrice) Invalidate() (response InvalidationStatus) {
-	pricingJsonBytes, err := downloadJson(price.ServerlessPricingUrl)
+	response = sl.invalidateFromURL(price.ServerlessPricingUrl)
+	if response.Message != "" && response.UpdatedTime.IsZero() {
+		return
+	}
+
+	// Attempt to fetch isolated partition serverless pricing
+	// Serverless is not currently available in these partitions but will work when it becomes available
+	for _, ep := range []struct{ label, url string }{
+		{"Secret", price.SecretServerlessPricingUrl},
+		{"Top Secret", price.TopSecretServerlessPricingUrl},
+	} {
+		resp := sl.invalidateFromURL(ep.url)
+		if resp.UpdatedTime.IsZero() {
+			zap.L().Warn("failed to fetch isolated region serverless pricing, continuing",
+				zap.String("partition", ep.label), zap.String("message", resp.Message))
+		}
+	}
+
+	return InvalidationStatus{
+		Message:     fmt.Sprintf("New Serverless price for %d regions updated", len(sl.Regions)),
+		UpdatedTime: time.Now(),
+	}
+}
+
+// invalidateFromURL fetches and processes serverless pricing from a given URL,
+// merging results into the existing Regions map.
+func (sl *ServerlessPrice) invalidateFromURL(url string) (response InvalidationStatus) {
+	pricingJsonBytes, err := downloadJson(url)
 	if err != nil {
-		response.Message = "error in updating serverless price"
+		response.Message = fmt.Sprintf("error fetching serverless pricing from %s: %v", url, err)
 		return
 	}
 	rp, ok := pricingJsonBytes.(map[string]interface{})
@@ -91,6 +119,7 @@ func (sl *ServerlessPrice) Invalidate() (response InvalidationStatus) {
 		response.Message = "unexpected response format from serverless pricing API"
 		return
 	}
+	count := 0
 	for region, pricing := range rp {
 		var regPri price.ServerlessRegion
 		regionMap, ok := pricing.(map[string]interface{})
@@ -113,9 +142,10 @@ func (sl *ServerlessPrice) Invalidate() (response InvalidationStatus) {
 			}
 		}
 		sl.Regions[region] = regPri
+		count++
 	}
 	return InvalidationStatus{
-		Message:     fmt.Sprintf("New Serverless price for %d regions updated", len(sl.Regions)),
+		Message:     fmt.Sprintf("Serverless price for %d regions updated from %s", count, url),
 		UpdatedTime: time.Now(),
 	}
 }
@@ -150,7 +180,7 @@ func getRateCodeAndPrice(itemValue map[string]interface{}) (rateCode string, pri
 // The function uses the json.Unmarshal function to unmarshal the JSON into an interface, and then uses the jsonpath.Read function to read the "$.regions" property from the interface.
 func downloadJson(url string) (gi interface{}, err error) {
 	spaceClient := http.Client{
-		Timeout: 30 * time.Minute,
+		Timeout: 5 * time.Minute,
 	}
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
@@ -165,7 +195,7 @@ func downloadJson(url string) (gi interface{}, err error) {
 
 	if res.StatusCode != http.StatusOK {
 		if res.Body != nil {
-			res.Body.Close()
+			_ = res.Body.Close()
 		}
 		return nil, fmt.Errorf("pricing API returned status %d for %s", res.StatusCode, url)
 	}
@@ -179,7 +209,8 @@ func downloadJson(url string) (gi interface{}, err error) {
 		}(res.Body)
 	}
 	var f interface{}
-	body, err := io.ReadAll(res.Body)
+	const maxResponseSize = 10 << 20 // 10 MB
+	body, err := io.ReadAll(io.LimitReader(res.Body, maxResponseSize))
 	if err != nil {
 		return nil, err
 	}

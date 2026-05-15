@@ -32,7 +32,7 @@ spec:
 {{- end }}
       containers:
         - name: helm-installer
-          image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.installer) }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
 {{- if and .Values.conditionalPackageInstalls.kyverno .Values.kyvernoPolicies.zeroResourceRequests }}
           volumeMounts:
@@ -120,7 +120,7 @@ spec:
               echo "Waiting for zero-resource-requests policy to be ready..."
               kubectl wait --for=condition=Ready clusterpolicy/zero-resource-requests --timeout=60s
               echo "Verifying policy is actively enforcing via canary pod..."
-              INSTALLER_IMAGE="{{ $.Values.images.installer.repository }}:{{ $.Values.images.installer.tag }}"
+              INSTALLER_IMAGE="{{ include "migration.image" (dict "root" $ "image" $.Values.images.installer) }}"
               until kubectl run kyverno-canary -n {{ $.Release.Namespace }} --image="$INSTALLER_IMAGE" --restart=Never --command -- sleep 999 2>/dev/null \
                 && kubectl get pod -n {{ $.Release.Namespace }} kyverno-canary -o jsonpath='{.metadata.annotations.kyverno\.io/mutated-by}' 2>/dev/null | grep -q zero-resource-requests; do
                 kubectl delete pod kyverno-canary -n {{ $.Release.Namespace }} --ignore-not-found 2>/dev/null

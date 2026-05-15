@@ -12,6 +12,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.MetadataMigration;
+import org.opensearch.migrations.MigrateOrEvaluateArgs;
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
@@ -34,6 +37,7 @@ import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactor
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
+import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -48,6 +52,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.closeTo;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -409,6 +414,129 @@ public class SolrSnapshotToOpenSearchTest {
     }
 
     /**
+     * Backfill E2E regression: Solr fields with dotted names (including names
+     * whose top-level segment matches a default {@code dynamicField} pattern)
+     * survive the full backfill flow — {@code MetadataMigration} pushes the
+     * converted schema, then {@code RfsMigrateDocuments} writes documents.
+     *
+     * <p>SOURCE — Solr collection {@code dotted_collection} (Solr default schema's
+     * dynamic fields) with two explicit dotted-name fields and one document.
+     * <pre>{@code
+     *   schema (explicit dotted fields):
+     *     category.name      string  (→ OS keyword)
+     *     metric.cpu.percent pfloat  (→ OS float)
+     *   schema (default dynamicField patterns exercised):
+     *     attr_*  → text_general,  *_i → pint
+     *   doc1: {
+     *     category.name:"books",                // explicit dotted field
+     *     metric.cpu.percent:42.5,              // explicit 3-segment dotted field
+     *     attr_thing.withdot:"vip",             // attr_*  + dotted leaf (regression case)
+     *     counter.value_i:17                    // *_i     + dotted leaf
+     *   }
+     * }</pre>
+     *
+     * <p>TARGET — OpenSearch index {@code dotted_collection} containing exactly one
+     * doc with all four dotted keys preserved verbatim in {@code _source}, the
+     * declared dotted fields typed in the {@code _mapping}, and dotted-path
+     * queries returning the doc.
+     *
+     * <p>Pre-fix, MetadataMigration emitted dynamic templates with plain
+     * {@code match}, so the {@code attr_*} template fired on the synthesized
+     * parent {@code attr_thing} when the doc was written, and the bulk write
+     * failed with {@code mapper_parsing_exception}, dropping the doc.
+     */
+    @ParameterizedTest(name = "backfill dotted-name fields: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch3Cloud")
+    void backfillsDottedFieldNames(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        var collection = "dotted_collection";
+        try (
+            var solr = SolrClusterContainer.cloud(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            // ---- SOURCE: Solr collection with explicit dotted fields + 1 doc ----
+            createCollection(solr, collection);
+            addSchemaFields(solr, collection, "["
+                + "{\"name\":\"category.name\",      \"type\":\"string\", \"stored\":true, \"indexed\":true, \"docValues\":true},"
+                + "{\"name\":\"metric.cpu.percent\", \"type\":\"pfloat\", \"stored\":true, \"indexed\":true, \"docValues\":true}"
+                + "]");
+            indexDocs(solr, collection, "[{"
+                + "\"id\":\"doc1\","
+                + "\"category.name\":\"books\","
+                + "\"metric.cpu.percent\":42.5,"
+                + "\"attr_thing.withdot\":\"vip\","
+                + "\"counter.value_i\":17"
+                + "}]");
+
+            // ---- MIGRATE: backup → MetadataMigration (schema) → RfsMigrateDocuments CLI (docs) ----
+            var backupRoot = createBackup(solr, collection);
+
+            // 1. Push the converted Solr schema (with dotted-leaf-safe dynamic templates) to OS.
+            var metadataArgs = new MigrateOrEvaluateArgs();
+            metadataArgs.fileSystemRepoPath = backupRoot.toString();
+            metadataArgs.sourceVersion = Version.fromString("SOLR " + solrVersion.tag());
+            metadataArgs.targetArgs.host = target.getUrl();
+            var metaResult = new MetadataMigration().migrate(metadataArgs)
+                .execute(MetadataMigrationTestContext.factory().noOtelTracking());
+            log.atInfo().setMessage("MetadataMigration result: {}").addArgument(metaResult.asCliOutput()).log();
+            assertEquals(0, metaResult.getExitCode(), "MetadataMigration should succeed");
+
+            // 2. Backfill documents through the CLI.
+            int exitCode = SourceTestBase.runProcessAgainstTarget(new String[]{
+                "--source-version", "SOLR_" + solrVersion.tag(),
+                "--snapshot-local-dir", backupRoot.toString(),
+                "--snapshot-name", "solr-dotted",
+                "--target-host", target.getUrl(),
+                "--coordinator-host", target.getUrl(),
+                "--index-allowlist", collection
+            });
+            assertEquals(0, exitCode, "RfsMigrateDocuments should exit successfully");
+
+            // ---- TARGET: assert metadata, document content, and queries ----
+            verifyDocCount(target, collection, 1);
+
+            var restClient = new RestClient(
+                ConnectionContextTestParams.builder().host(target.getUrl()).build().toConnectionContext()
+            );
+            var ctx = DocumentMigrationTestContext.factory().noOtelTracking();
+            restClient.get("_refresh", ctx.createUnboundRequestContext());
+
+            // Metadata: explicit dotted fields land under their full dotted path with the
+            // OpenSearch type the converter derives from Solr. (Dynamic-leaf types are
+            // covered in SolrToOpenSearchEndToEndTest where the in-process pipeline
+            // exposes the dynamic_templates path directly.)
+            assertTargetFieldType(restClient, ctx, collection, "category.name",       "keyword");
+            assertTargetFieldType(restClient, ctx, collection, "metric.cpu.percent",  "float");
+
+            // Document content: every dotted key preserved verbatim in _source — including
+            // the dynamic-template regression case, which would have been dropped pre-fix.
+            var resp = restClient.get(
+                collection + "/_search?q=id:doc1&size=1", ctx.createUnboundRequestContext()
+            );
+            var hits = MAPPER.readTree(resp.body).path("hits").path("hits");
+            assertThat("Should find doc1", hits.size(), equalTo(1));
+            var src = hits.get(0).path("_source");
+            log.atInfo().setMessage("Backfilled dotted-name _source: {}").addArgument(src).log();
+            assertThat("_source.category.name",      src.path("category.name").asText(),     equalTo("books"));
+            assertThat("_source.metric.cpu.percent",
+                (double) src.path("metric.cpu.percent").floatValue(),                       closeTo(42.5, 0.01));
+            assertThat("_source.attr_thing.withdot", src.path("attr_thing.withdot").asText(), equalTo("vip"));
+            assertThat("_source.counter.value_i",    src.path("counter.value_i").asInt(),     equalTo(17));
+
+            // Queries by dotted path resolve back to the doc — including the regression case.
+            assertQueryHits(restClient, ctx, collection, "category.name:books",       1);
+            assertQueryHits(restClient, ctx, collection, "metric.cpu.percent:42.5",   1);
+            assertQueryHits(restClient, ctx, collection, "attr_thing.withdot:vip",    1);
+            assertQueryHits(restClient, ctx, collection, "counter.value_i:17",        1);
+        }
+    }
+
+    /**
      * Tests migrating multiple Solr collections through the work coordinator.
      * Each collection is a single shard, so migrateOneShard() should be called
      * exactly once per collection (2 total), then return NOTHING_DONE.
@@ -510,6 +638,49 @@ public class SolrSnapshotToOpenSearchTest {
     }
 
     // --- Helpers ---
+
+    /** POST {@code {"add-field":[...]}} to a Solr collection's Schema API. */
+    private static void addSchemaFields(SolrClusterContainer solr, String collection, String addFieldArrayJson)
+        throws Exception {
+        solr.execInContainer(
+            "curl", "-s", "-H", "Content-Type: application/json",
+            "http://localhost:8983/solr/" + collection + "/schema",
+            "-d", "{\"add-field\":" + addFieldArrayJson + "}"
+        );
+    }
+
+    /** POST a JSON document array to a Solr collection's /update endpoint with commit. */
+    private static void indexDocs(SolrClusterContainer solr, String collection, String jsonDocsArray)
+        throws Exception {
+        solr.execInContainer(
+            "curl", "-s", "-H", "Content-Type: application/json",
+            "http://localhost:8983/solr/" + collection + "/update?commit=true",
+            "-d", jsonDocsArray
+        );
+    }
+
+    /** Assert that {@code _field_caps} reports {@code field} on the target index with the given OS type. */
+    private static void assertTargetFieldType(
+        RestClient restClient, DocumentMigrationTestContext ctx,
+        String index, String field, String expectedType
+    ) throws Exception {
+        var resp = restClient.get(index + "/_field_caps?fields=" + field, ctx.createUnboundRequestContext());
+        var typeNode = MAPPER.readTree(resp.body)
+            .path("fields").path(field).path(expectedType).path("type");
+        assertThat(field + " → " + expectedType, typeNode.asText(), equalTo(expectedType));
+    }
+
+    /** Run a Lucene query string against the target and assert the hit count. */
+    private static void assertQueryHits(
+        RestClient restClient, DocumentMigrationTestContext ctx,
+        String index, String luceneQuery, int expectedHits
+    ) throws Exception {
+        var resp = restClient.get(
+            index + "/_search?q=" + luceneQuery + "&size=10", ctx.createUnboundRequestContext()
+        );
+        var hits = MAPPER.readTree(resp.body).path("hits").path("hits");
+        assertThat("query " + luceneQuery + " hit count", hits.size(), equalTo(expectedHits));
+    }
 
     private static SolrClusterContainer createSolr(SolrClusterContainer.SolrVersion version, boolean cloudMode) {
         return cloudMode ? SolrClusterContainer.cloud(version) : new SolrClusterContainer(version);

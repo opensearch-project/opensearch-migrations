@@ -267,8 +267,16 @@ public final class SolrSchemaConverter {
     }
 
     /**
-     * Build an OpenSearch dynamic_template from a Solr dynamic field pattern.
-     * Solr patterns: "*_s" (suffix), "attr_*" (prefix).
+     * Build an OpenSearch dynamic_template from a Solr dynamic field pattern
+     * ({@code "*_s"} suffix or {@code "attr_*"} prefix).
+     *
+     * <p>Uses {@code path_match} + {@code match_mapping_type} (not plain {@code match}).
+     * When a Solr doc field has dots in its name (e.g. {@code attr_field.withdot})
+     * OpenSearch auto-expands it into a nested object on write. With plain {@code match},
+     * the {@code attr_*} template would also fire on the synthesized parent
+     * ({@code attr_field}), type it as the target type, and then reject the child key
+     * with {@code mapper_parsing_exception}. {@code match_mapping_type} gates on the
+     * JSON value shape, which intermediate object containers never carry.
      */
     static ObjectNode buildDynamicTemplate(String solrPattern, String osType) {
         String matchPattern;
@@ -288,7 +296,11 @@ public final class SolrSchemaConverter {
 
         var template = MAPPER.createObjectNode();
         var inner = MAPPER.createObjectNode();
-        inner.put("match", matchPattern);
+        inner.put("path_match", matchPattern);
+        var jsonShape = osTypeToMatchMappingType(osType);
+        if (jsonShape != null) {
+            inner.put("match_mapping_type", jsonShape);
+        }
         var mapping = MAPPER.createObjectNode();
         mapping.put("type", osType);
         if (OS_DATE.equals(osType)) {
@@ -297,6 +309,33 @@ public final class SolrSchemaConverter {
         inner.set("mapping", mapping);
         template.set(templateName, inner);
         return template;
+    }
+
+    /**
+     * Map an OpenSearch field type to its {@code match_mapping_type} JSON-shape token,
+     * or {@code null} when no shape can be confidently asserted. Solr-extracted dates
+     * arrive as epoch-millis longs, so date templates gate on {@code long}.
+     *
+     * <p>{@code osType} is always non-null in practice ({@link #resolveOsType} falls
+     * back to {@code OS_TEXT}), so no defensive null guard is needed.
+     */
+    private static String osTypeToMatchMappingType(String osType) {
+        switch (osType) {
+            case OS_INTEGER:
+            case OS_LONG:
+            case OS_DATE:
+                return OS_LONG;
+            case OS_FLOAT:
+            case OS_DOUBLE:
+                return OS_DOUBLE;
+            case OS_BOOLEAN:
+                return OS_BOOLEAN;
+            case OS_KEYWORD:
+            case OS_TEXT:
+                return "string";
+            default:
+                return null;
+        }
     }
 
     private static boolean isInternalField(String name) {

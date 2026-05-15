@@ -59,7 +59,7 @@ func NewCacheScheduler(logger *zap.Logger, baseURL string) *CacheScheduler {
 		logger:  logger.Named("cache_scheduler"),
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Minute,
+			Timeout: 5 * time.Minute,
 		},
 		done: make(chan bool),
 	}
@@ -258,7 +258,7 @@ func (cs *CacheScheduler) invalidateCache() CacheInvalidationResult {
 		result.Duration = time.Since(start).String()
 		return result
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	result.StatusCode = resp.StatusCode
 	result.Duration = time.Since(start).String()

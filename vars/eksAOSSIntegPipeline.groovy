@@ -206,44 +206,14 @@ def call(Map config = [:]) {
 
         post {
             always {
-                timeout(time: 60, unit: 'MINUTES') {
-                    script {
-                        def eksClusterName = env.eksClusterName
-
-                        withMigrationsTestAccount(region: params.REGION) { accountId ->
-                                // 1. Delete cluster stack (AOSS collection — depends on MA VPC)
-                                echo "CLEANUP: Deleting cluster stack ${env.CLUSTER_STACK}"
-                                sh """
-                                    aws cloudformation delete-stack --stack-name "${env.CLUSTER_STACK}" --region "${params.REGION}" || true
-                                    aws cloudformation wait stack-delete-complete --stack-name "${env.CLUSTER_STACK}" --region "${params.REGION}" || true
-                                    echo "Cluster stack deleted."
-                                """
-
-                                // 2. Clean up EKS resources (namespace, instance profiles, security groups)
-                                eksCleanupStep(
-                                    stackName: env.STACK_NAME,
-                                    eksClusterName: eksClusterName,
-                                    kubeContext: env.eksKubeContext
-                                )
-
-                                // 3. Delete MA stack last (owns the VPC)
-                                echo "CLEANUP: Deleting MA stack ${env.STACK_NAME}"
-                                sh """
-                                    aws cloudformation delete-stack --stack-name "${env.STACK_NAME}" --region "${params.REGION}" || true
-                                    aws cloudformation wait stack-delete-complete --stack-name "${env.STACK_NAME}" --region "${params.REGION}" || true
-                                    echo "MA stack deleted."
-                                """
-                        }
-
-                        sh """
-                            if command -v kubectl >/dev/null 2>&1; then
-                                kubectl config delete-context ${env.eksKubeContext} 2>/dev/null || true
-                            fi
-                        """
-                        echo "Cleanup completed"
-                    }
-                }
-                archiveArtifacts artifacts: 'libraries/testAutomation/logs/**', allowEmptyArchive: true
+                eksPostCleanup(
+                    maStackName: env.STACK_NAME,
+                    clusterStackName: env.CLUSTER_STACK,
+                    clusterInsideMaVpc: true,
+                    kubeContext: env.eksKubeContext,
+                    eksClusterName: env.eksClusterName,
+                    timeoutMinutes: 60,
+                )
             }
         }
     }

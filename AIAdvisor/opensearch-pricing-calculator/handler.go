@@ -5,14 +5,14 @@ package main
 
 import (
 	"encoding/json"
-	"io"
-	"net/http"
-	"net/url"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/cache"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/price"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/provisioned"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/regions"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/serverless"
+	"io"
+	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -23,13 +23,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.uber.org/zap"
-)
-
-const (
-	headerContentType = "Content-Type"
-	contentTypeJSON   = "application/json"
-	errReadBody       = "failed to read request body"
-	errCalculation    = "calculation failed"
 )
 
 // ErrorResponse represents a standardized error response from the API.
@@ -59,7 +52,7 @@ func (app *application) errorResponseWithCode(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = w.Write(out)
 }
@@ -73,7 +66,7 @@ func (app *application) writeJSON(w http.ResponseWriter, status int, data interf
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = w.Write(out)
 }
@@ -93,7 +86,7 @@ func (app *application) validationErrorResponse(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusBadRequest)
 	_, _ = w.Write(out)
 }
@@ -120,7 +113,7 @@ func (app *application) Home(w http.ResponseWriter, r *http.Request) {
 // @Produces json
 // @Router /health [get]
 func (app *application) Health(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"healthy"}`))
 }
@@ -141,8 +134,8 @@ func (app *application) ServerlessEstimateV2(w http.ResponseWriter, r *http.Requ
 	var request serverless.EstimateRequest
 	b, err := io.ReadAll(r.Body)
 	if err != nil {
-		app.logger.Error(errReadBody, zap.Error(err))
-		app.errorResponse(w, r, http.StatusBadRequest, errReadBody)
+		app.logger.Error("failed to read request body", zap.Error(err))
+		app.errorResponse(w, r, http.StatusBadRequest, "failed to read request body")
 		return
 	}
 	if err = json.Unmarshal(b, &request); err != nil {
@@ -154,9 +147,9 @@ func (app *application) ServerlessEstimateV2(w http.ResponseWriter, r *http.Requ
 	response, err := request.CalculateV2()
 	if err != nil {
 		span.RecordError(err)
-		span.SetStatus(codes.Error, errCalculation)
+		span.SetStatus(codes.Error, "calculation failed")
 		app.logger.Error("serverless calculation failed", zap.Error(err))
-		app.errorResponse(w, r, http.StatusInternalServerError, errCalculation)
+		app.errorResponse(w, r, http.StatusInternalServerError, "calculation failed")
 		return
 	}
 	app.writeJSON(w, http.StatusOK, response)
@@ -287,7 +280,7 @@ func (app *application) ProvisionedEstimate(w http.ResponseWriter, r *http.Reque
 				zap.String("request_id", middleware.GetReqID(r.Context())))
 		}
 	} else {
-		app.logger.Error(errReadBody,
+		app.logger.Error("failed to read request body",
 			zap.Error(err),
 			zap.String("request_id", middleware.GetReqID(r.Context())))
 	}
@@ -332,8 +325,8 @@ func (app *application) ProvisionedEstimate(w http.ResponseWriter, r *http.Reque
 
 	if err != nil {
 		span.RecordError(err)
-		span.SetStatus(codes.Error, errCalculation)
-		app.logger.Error(errCalculation,
+		span.SetStatus(codes.Error, "calculation failed")
+		app.logger.Error("calculation failed",
 			zap.Error(err),
 			zap.String("request_type", requestType),
 			zap.String("request_id", middleware.GetReqID(r.Context())))
@@ -341,6 +334,9 @@ func (app *application) ProvisionedEstimate(w http.ResponseWriter, r *http.Reque
 		_, _ = w.Write([]byte("Internal server error"))
 		return
 	}
+
+	// Set currency based on region
+	response.Currency = request.GetCurrency()
 
 	out, err := json.Marshal(response)
 	if err != nil {
@@ -358,7 +354,7 @@ func (app *application) ProvisionedEstimate(w http.ResponseWriter, r *http.Reque
 		zap.Int("cluster_configs", len(response.ClusterConfigs)),
 		zap.String("request_id", middleware.GetReqID(r.Context())))
 
-	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(out)
 }
@@ -489,101 +485,87 @@ func (app *application) ProvisionedInstanceFamilyOptions(w http.ResponseWriter, 
 // @Router /provisioned/instanceTypesByFamily [get]
 // @Router /provisioned/instanceTypesByFamily/{region} [get]
 func (app *application) ProvisionedInstanceTypesByFamily(w http.ResponseWriter, r *http.Request) {
-	region, err := normalizeURLRegionParam(r)
-	if err != nil {
-		app.errorResponse(w, r, http.StatusBadRequest, "invalid region format")
-		return
-	}
-
-	families := parseFamiliesParam(r)
-
-	uniqueTypes, err := collectInstanceTypesByFamily(region, families)
-	if err != nil {
-		app.errorResponse(w, r, http.StatusNotFound, "region not found")
-		return
-	}
-
-	response := buildInstanceTypesByFamilyResponse(uniqueTypes)
-
-	out, err := json.Marshal(response)
-	if err != nil {
-		app.errorResponse(w, r, http.StatusInternalServerError, "error marshaling response")
-		return
-	}
-
-	w.Header().Set(headerContentType, contentTypeJSON)
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(out)
-}
-
-// normalizeURLRegionParam extracts and normalizes the region URL parameter.
-func normalizeURLRegionParam(r *http.Request) (string, error) {
 	region := chi.URLParam(r, "region")
-	if region == "" {
-		return "", nil
+	if region != "" {
+		// URL unescape the region value
+		unescapedRegion, err := url.QueryUnescape(region)
+		if err != nil {
+			app.errorResponse(w, r, http.StatusBadRequest, "invalid region format")
+			return
+		}
+		// Normalize region input to canonical display name for cache lookup
+		region = regions.NormalizeRegionInput(unescapedRegion)
 	}
-	unescapedRegion, err := url.QueryUnescape(region)
-	if err != nil {
-		return "", err
-	}
-	return regions.NormalizeRegionInput(unescapedRegion), nil
-}
 
-// parseFamiliesParam extracts the families query parameter as a slice.
-func parseFamiliesParam(r *http.Request) []string {
+	// Get families from query parameter
 	familiesParam := r.URL.Query().Get("families")
-	if familiesParam == "" {
-		return nil
+	var families []string
+	if familiesParam != "" {
+		families = strings.Split(familiesParam, ",")
 	}
-	return strings.Split(familiesParam, ",")
-}
 
-// collectInstanceTypesByFamily gathers unique instance types grouped by family.
-// If region is provided, only instances from that region are included.
-func collectInstanceTypesByFamily(region string, families []string) (map[string]map[string]bool, error) {
+	// Get the provisioned price cache
+	var provisionedPrice price.ProvisionedRegion
+	var exists error
+	if region != "" {
+		provisionedPrice, exists = cache.GetRegionProvisionedPrice(region)
+		if exists != nil {
+			app.errorResponse(w, r, http.StatusNotFound, "region not found")
+			return
+		}
+	}
+
+	// Create a map to store unique instance types by family
 	uniqueTypes := make(map[string]map[string]bool)
 
 	if region != "" {
-		provisionedPrice, err := cache.GetRegionProvisionedPrice(region)
-		if err != nil {
-			return nil, err
+		// Process instances from the specific region
+		for instanceType, instanceUnit := range provisionedPrice.HotInstances {
+			family := instanceUnit.Family
+			if len(families) > 0 && !contains(families, family) {
+				continue
+			}
+
+			// Get base instance type without size (e.g., "i4i" from "i4i.xlarge")
+			baseType := strings.Split(instanceType, ".")[0]
+
+			if _, exists := uniqueTypes[family]; !exists {
+				uniqueTypes[family] = make(map[string]bool)
+			}
+			uniqueTypes[family][baseType] = true
 		}
-		addInstanceTypesToMap(uniqueTypes, provisionedPrice.HotInstances, families)
 	} else {
+		// Process instances from all regions
 		allRegions := cache.GetProvisionedPrice()
 		for _, regionData := range allRegions.Regions {
-			addInstanceTypesToMap(uniqueTypes, regionData.HotInstances, families)
+			for instanceType, instanceUnit := range regionData.HotInstances {
+				family := instanceUnit.Family
+				if len(families) > 0 && !contains(families, family) {
+					continue
+				}
+
+				// Get base instance type without size
+				baseType := strings.Split(instanceType, ".")[0]
+
+				if _, exists := uniqueTypes[family]; !exists {
+					uniqueTypes[family] = make(map[string]bool)
+				}
+				uniqueTypes[family][baseType] = true
+			}
 		}
 	}
 
-	return uniqueTypes, nil
-}
-
-// addInstanceTypesToMap adds instance types from a set of hot instances to the unique types map.
-func addInstanceTypesToMap(uniqueTypes map[string]map[string]bool, hotInstances map[string]price.InstanceUnit, families []string) {
-	for instanceType, instanceUnit := range hotInstances {
-		family := instanceUnit.Family
-		if len(families) > 0 && !contains(families, family) {
-			continue
-		}
-		baseType := strings.Split(instanceType, ".")[0]
-		if _, exists := uniqueTypes[family]; !exists {
-			uniqueTypes[family] = make(map[string]bool)
-		}
-		uniqueTypes[family][baseType] = true
-	}
-}
-
-// buildInstanceTypesByFamilyResponse converts the unique types map into a sorted response.
-func buildInstanceTypesByFamilyResponse(uniqueTypes map[string]map[string]bool) provisioned.InstanceTypesByFamilyResponse {
+	// Convert map to response structure
 	var response provisioned.InstanceTypesByFamilyResponse
 
-	families := make([]string, 0, len(uniqueTypes))
+	// Get sorted families for consistent output
+	families = make([]string, 0, len(uniqueTypes))
 	for family := range uniqueTypes {
 		families = append(families, family)
 	}
 	sort.Strings(families)
 
+	// Build response with sorted families and instance types
 	for _, family := range families {
 		types := uniqueTypes[family]
 		instanceTypes := make([]string, 0, len(types))
@@ -598,7 +580,15 @@ func buildInstanceTypesByFamilyResponse(uniqueTypes map[string]map[string]bool) 
 		})
 	}
 
-	return response
+	out, err := json.Marshal(response)
+	if err != nil {
+		app.errorResponse(w, r, http.StatusInternalServerError, "error marshaling response")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(out)
 }
 
 // ProvisionedWarmInstanceTypes Returns available warm instance types for vector workloads
@@ -645,7 +635,7 @@ func (app *application) ProvisionedWarmInstanceTypes(w http.ResponseWriter, r *h
 		return
 	}
 
-	w.Header().Set(headerContentType, contentTypeJSON)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(out)
 }

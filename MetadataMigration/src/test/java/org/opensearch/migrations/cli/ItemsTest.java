@@ -264,11 +264,60 @@ public class ItemsTest {
         assertThat(stringOutput, containsString("ERROR - my_index already exists"));
         assertThat(stringOutput, containsString("console clusters clear-indices --cluster target"));
         assertThat(stringOutput, containsString("--index-allowlist"));
+        assertThat(stringOutput, containsString("--allow-existing-indexes"));
 
         var jsonOutput = items.asJsonOutput();
         var indexes = jsonOutput.get("indexes");
         assertThat(jsonOutput.toPrettyString(), indexes.get(0).get("failure").get("type").asText(), equalTo("INDEX_ALREADY_EXISTS"));
         assertThat(jsonOutput.toPrettyString(), indexes.get(0).get("failure").get("fatal").asBoolean(), is(true));
+    }
+
+    @Test
+    void testAllowExistingIndexesDowngradesIndexAlreadyExistsToWarn() throws Exception {
+        var items = createEmptyItemsBuilder()
+            .allowExistingIndexes(true)
+            .indexes(List.of(
+                CreationResult.builder().name("my_index").failureType(CreationFailureType.INDEX_ALREADY_EXISTS).build()
+            ))
+            .build();
+
+        var stringOutput = items.asCliOutput();
+        assertThat(stringOutput, containsString("WARN - my_index already exists"));
+        assertThat("Suggestion block is suppressed when --allow-existing-indexes is set",
+            stringOutput, not(containsString("To resolve, you can either")));
+
+        var jsonOutput = items.asJsonOutput();
+        var indexes = jsonOutput.get("indexes");
+        assertThat(jsonOutput.toPrettyString(), indexes.get(0).get("failure").get("type").asText(),
+            equalTo("INDEX_ALREADY_EXISTS"));
+        assertThat(jsonOutput.toPrettyString(), indexes.get(0).get("failure").get("fatal").asBoolean(), is(false));
+
+        // No fatal entry => no top-level error reported
+        var errors = jsonOutput.get("errors");
+        assertThat(jsonOutput.toPrettyString(), errors.size(), equalTo(0));
+    }
+
+    @Test
+    void testAllowExistingIndexesLeavesOtherFatalErrorsAlone() throws Exception {
+        var items = createEmptyItemsBuilder()
+            .allowExistingIndexes(true)
+            .indexes(List.of(
+                CreationResult.builder().name("my_index").failureType(CreationFailureType.INDEX_ALREADY_EXISTS).build(),
+                CreationResult.builder().name("bad_index").failureType(CreationFailureType.TARGET_CLUSTER_FAILURE)
+                    .exception(new RuntimeException("boom")).build()
+            ))
+            .build();
+
+        var stringOutput = items.asCliOutput();
+        assertThat(stringOutput, containsString("WARN - my_index already exists"));
+        assertThat(stringOutput, containsString("ERROR - bad_index failed on target cluster: boom"));
+
+        var jsonOutput = items.asJsonOutput();
+        var errors = jsonOutput.get("errors");
+        // Only the TARGET_CLUSTER_FAILURE remains as a fatal error
+        assertThat(jsonOutput.toPrettyString(), errors.size(), equalTo(1));
+        assertThat(jsonOutput.toPrettyString(), errors.get(0).asText(),
+            containsString("bad_index failed on target cluster"));
     }
 
 

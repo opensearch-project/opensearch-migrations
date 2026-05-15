@@ -1,4 +1,5 @@
 import logging
+import uuid
 from ..cluster_version import RFS_MIGRATION_COMBINATIONS
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
@@ -18,7 +19,7 @@ class Test0001SingleDocumentBackfill(MATestBase):
         # for opensearch-project/opensearch-migrations#2880 — prior to that fix, any index
         # whose name contained '__' was silently unmigratable because the work-item id
         # parser split on the first two occurrences of the separator.
-        self.index_name = f"test__0001__{self.unique_id}"
+        self.index_name = f"test__0001__{self.unique_id}-{uuid.uuid4().hex[:4]}"
         self.doc_id = "test_0001_doc"
         self.doc_type = "sample_type"
         self.source_cluster = None
@@ -56,7 +57,7 @@ class Test0002SingleDocumentBackfillWithRfsCoordinatorCluster(MATestBase):
                          description=description,
                          migrations_required=migrations_required,
                          allow_source_target_combinations=RFS_MIGRATION_COMBINATIONS)
-        self.index_name = f"test_0002_{self.unique_id}"
+        self.index_name = f"test_0002_{self.unique_id}-{uuid.uuid4().hex[:4]}"
         self.doc_id = "test_0002_doc"
         self.doc_type = "sample_type"
         self.source_cluster = None

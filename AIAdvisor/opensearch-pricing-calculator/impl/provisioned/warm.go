@@ -11,9 +11,22 @@ import (
 
 // UltraWarm cache sizes in GB
 const (
-	uwMediumCacheSize = 1.5 * 1024  // 1536 GB (1.5 TB) - ultrawarm1.medium.search
-	uwLargeCacheSize  = 20 * 1024   // 20480 GB (20 TB) - ultrawarm1.large.search
+	uwMediumCacheSize = 1.5 * 1024 // 1536 GB (1.5 TB) - ultrawarm1.medium.search
+	uwLargeCacheSize  = 20 * 1024  // 20480 GB (20 TB) - ultrawarm1.large.search
 )
+
+// AllWarmInstanceTypes is the full list of warm instance types evaluated during auto-selection.
+// UltraWarm types are always included. OI2 types are filtered out at evaluation time
+// for non-OpenSearch-Optimized hot nodes via the isOI2WarmInstance guard.
+var AllWarmInstanceTypes = []string{
+	"ultrawarm1.medium.search",
+	"ultrawarm1.large.search",
+	"oi2.large.search",
+	"oi2.xlarge.search",
+	"oi2.2xlarge.search",
+	"oi2.4xlarge.search",
+	"oi2.8xlarge.search",
+}
 
 // isOI2WarmInstance checks if the warm instance type is a valid OI2 warm instance.
 // Only instances defined in the centralized OI2WarmInstanceLimitsMap are considered valid.

@@ -92,6 +92,46 @@ func TestDetectStandby(t *testing.T) {
 	}
 }
 
+func TestExtractVectorEngine_S3(t *testing.T) {
+	parser := NewNLPParser()
+
+	tests := []struct {
+		name     string
+		query    string
+		expected string
+	}{
+		{
+			name:     "s3 lowercase",
+			query:    "Vector search with 10M vectors using s3",
+			expected: "s3",
+		},
+		{
+			name:     "S3 uppercase",
+			query:    "S3 vector engine with 768 dimensions",
+			expected: "s3",
+		},
+		{
+			name:     "s3 vector",
+			query:    "Use s3 vector for 5 million embeddings",
+			expected: "s3",
+		},
+		{
+			name:     "S3 vector engine",
+			query:    "Estimate cost for S3 vector engine",
+			expected: "s3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			engine := parser.extractVectorEngine(tt.query)
+			if engine != tt.expected {
+				t.Errorf("extractVectorEngine(%q) = %q, want %q", tt.query, engine, tt.expected)
+			}
+		})
+	}
+}
+
 func TestParseMultiAzWithStandby(t *testing.T) {
 	parser := NewNLPParser()
 

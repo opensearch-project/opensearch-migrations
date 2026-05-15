@@ -1262,17 +1262,20 @@ class TestWorkflowCLICommands:
         mock_custom = Mock()
         mock_client.CustomObjectsApi.return_value = mock_custom
         mock_custom.get_namespaced_custom_object.return_value = {
-            'metadata': {'uid': 'uid-1'},
+            'metadata': {'uid': 'uid-1', 'creationTimestamp': '2020-01-01T00:00:00Z'},
             'status': {'outputs': {}},
         }
         mock_list_artifacts.return_value = [
             {
-                'key': 'migration-outputs/snapshotmigration/mig/uid-1/metadataMigrate/wf-1.log',
+                'key': 'migration-outputs/snapshotmigration/mig/2020-01-01T00:00:00Z_uid-1/metadataMigrate/wf-1.log',
                 'last_modified': 1710000000.0,
                 'size': 12,
             },
             {
-                'key': 'migration-outputs/snapshotmigration/mig/uid-1/metadataMigrate/wf-1.log.metadata',
+                'key': (
+                    'migration-outputs/snapshotmigration/mig/'
+                    '2020-01-01T00:00:00Z_uid-1/metadataMigrate/wf-1.log.metadata'
+                ),
                 'last_modified': 1710000001.0,
                 'size': 2,
             },
@@ -1285,11 +1288,38 @@ class TestWorkflowCLICommands:
 
         assert result.exit_code == 0
         mock_list_artifacts.assert_called_once_with(
-            'migration-outputs/snapshotmigration/mig/uid-1/metadataMigrate/'
+            'migration-outputs/snapshotmigration/mig/2020-01-01T00:00:00Z_uid-1/metadataMigrate/'
         )
         assert 'metadataMigrate' in result.output
-        assert 's3://bucket/migration-outputs/snapshotmigration/mig/uid-1/metadataMigrate/wf-1.log' in result.output
+        expected_uri = ('s3://bucket/migration-outputs/snapshotmigration/mig/'
+                        '2020-01-01T00:00:00Z_uid-1/metadataMigrate/wf-1.log')
+        assert expected_uri in result.output
         assert '.metadata' not in result.output
+
+    def test_history_prefix_includes_creation_timestamp(self):
+        from console_link.workflow.commands.show import _history_prefix
+
+        resource = {
+            'metadata': {
+                'uid': 'accd2c5a-0e7c-4890-a083-96b3b201e1c9',
+                'creationTimestamp': '2026-05-11T21:23:08Z',
+            },
+        }
+
+        prefix = _history_prefix('snapshotmigration.my-migration-0', resource, 'metadataEvaluate')
+
+        assert prefix == (
+            'migration-outputs/snapshotmigration/my-migration-0/'
+            '2026-05-11T21:23:08Z_accd2c5a-0e7c-4890-a083-96b3b201e1c9/metadataEvaluate/'
+        )
+        # Verify the prefix matches the format used by reset.py's _artifact_output_prefix
+        from console_link.workflow.commands.reset import _artifact_output_prefix
+        reset_prefix = _artifact_output_prefix(
+            'snapshotmigrations', 'my-migration-0',
+            uid='accd2c5a-0e7c-4890-a083-96b3b201e1c9',
+            created_at='2026-05-11T21:23:08Z',
+        )
+        assert prefix.startswith(reset_prefix)
 
     @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
     @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')

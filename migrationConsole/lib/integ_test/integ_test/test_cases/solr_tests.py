@@ -10,12 +10,17 @@ workflow has non-trivial setup/teardown overhead, the realistic-customer scenari
 is packed into a single test that exercises:
   - Multiple collections (pre-existing 'dummy' + customer-created ones)
   - A multi-shard collection (regression for SolrBackupIndexMetadataFactory)
+  - A collection with flat field names containing '.' (e.g. category.name)
   - Hundreds of documents (bulk indexing path)
   - Full doc-count equivalence + sampled document retrieval on the target
 """
 import logging
+import uuid
+
+import requests
 
 from ..cluster_version import SolrV8_X, OpensearchV2_X, OpensearchV3_X
+from ..common_utils import execute_api_call
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments
 
 logger = logging.getLogger(__name__)
@@ -48,7 +53,7 @@ class TestSolr0001SingleDocumentBackfill(MATestBase):
             allow_source_target_combinations=SOLR_ALLOW_COMBINATIONS,
         )
         # Normalize unique_id — Solr collection names cannot contain '-'.
-        self._suffix = self.unique_id.replace("-", "_").lower()
+        self._suffix = f"{self.unique_id}-{uuid.uuid4().hex[:4]}".replace("-", "_").lower()
 
         # Pre-existing 'dummy' collection (created by the cluster template at startup).
         self.dummy_collection = "dummy"
@@ -64,6 +69,10 @@ class TestSolr0001SingleDocumentBackfill(MATestBase):
         self.sharded_collection = f"sharded_{self._suffix}"
         self.sharded_num_shards = 2
         self.sharded_doc_count = 40
+
+        # Dotted-field collection — exercises Solr field names containing '.'.
+        self.dotted_collection = f"dotted_{self._suffix}"
+        self.dotted_doc_id = "dotted_doc_0001"
 
     def prepare_clusters(self):
         # (1) Pre-existing 'dummy' collection — single smoke document.
@@ -114,6 +123,41 @@ class TestSolr0001SingleDocumentBackfill(MATestBase):
             docs=sharded_docs)
         self._assert_source_count(self.sharded_collection, self.sharded_doc_count)
 
+        # (4) Dotted-field collection — explicit schema fields whose names contain '.'.
+        logger.info(f"Creating SolrCloud collection '{self.dotted_collection}' "
+                    f"with explicit dotted-name fields")
+        self.source_operations.create_index(
+            cluster=self.source_cluster, index_name=self.dotted_collection,
+            num_shards=1, replication_factor=1)
+        self._add_solr_schema_fields(self.dotted_collection, [
+            {"name": "category.name", "type": "string", "stored": True, "indexed": True, "docValues": True},
+            {"name": "category.id", "type": "pint", "stored": True, "indexed": True, "docValues": True},
+            {"name": "metric.cpu.percent", "type": "pfloat", "stored": True, "indexed": True, "docValues": True},
+            {"name": "is.active", "type": "boolean", "stored": True, "docValues": True},
+        ])
+        self.source_operations.create_document(
+            cluster=self.source_cluster, index_name=self.dotted_collection,
+            doc_id=self.dotted_doc_id,
+            data={
+                "category.name": "books",
+                "category.id": 7,
+                "metric.cpu.percent": 42.5,
+                "is.active": True,
+            })
+        self._assert_source_count(self.dotted_collection, 1)
+
+    def _add_solr_schema_fields(self, collection: str, fields: list):
+        """Declare explicit schema fields on a Solr collection via the Schema API."""
+        url = f"{self.source_cluster.endpoint}/solr/{collection}/schema"
+        r = requests.post(url, json={"add-field": fields},
+                          headers={"Content-Type": "application/json"}, timeout=15)
+        r.raise_for_status()
+        # Solr returns 200 with errors embedded in the body on failure.
+        result = r.json()
+        if "errors" in result:
+            raise AssertionError(
+                f"Failed to add Solr schema fields for '{collection}': {result['errors']}")
+
     def _assert_source_count(self, collection: str, expected: int):
         actual = self.source_operations.get_doc_count(
             cluster=self.source_cluster, index_name=collection)
@@ -149,12 +193,46 @@ class TestSolr0001SingleDocumentBackfill(MATestBase):
                                       "collectionPreparer to download shard_backup_metadata "
                                       "from S3 before counting)."))
 
+        # (4) Dotted fields: doc-count, _source preservation, and query resolution.
+        self._assert_target_count(self.dotted_collection, 1,
+                                  regression_hint=(
+                                      "Dotted-field collection failed to migrate. Check that "
+                                      "SolrSchemaConverter emits dotted field names as literal "
+                                      "keys under 'properties'."))
+        self._assert_dotted_field_doc_round_trip()
+
+    def _assert_dotted_field_doc_round_trip(self):
+        """Verify _source preserves dotted keys and queries by dotted path resolve."""
+        resp = execute_api_call(
+            cluster=self.target_cluster,
+            path=f"/{self.dotted_collection}/_search?q=id:{self.dotted_doc_id}&size=1")
+        hits = resp.json().get("hits", {}).get("hits", [])
+        assert len(hits) == 1, f"Expected to find dotted-field doc by id, got {len(hits)} hits."
+        src = hits[0].get("_source", {})
+        assert src.get("category.name") == "books", f"_source mismatch: {src!r}"
+        assert src.get("category.id") == 7, f"_source mismatch: {src!r}"
+        actual_pct = src.get("metric.cpu.percent")
+        assert actual_pct is not None and abs(actual_pct - 42.5) < 0.01, f"_source mismatch: {src!r}"
+        assert src.get("is.active") is True, f"_source mismatch: {src!r}"
+
+        kw_hits = execute_api_call(
+            cluster=self.target_cluster,
+            path=f"/{self.dotted_collection}/_search?q=category.name:books&size=10",
+        ).json().get("hits", {}).get("hits", [])
+        assert len(kw_hits) == 1 and kw_hits[0].get("_id") == self.dotted_doc_id, (
+            f"Query 'category.name:books' should match dotted-field doc, got: {kw_hits}")
+
+        flt_hits = execute_api_call(
+            cluster=self.target_cluster,
+            path=f"/{self.dotted_collection}/_search?q=metric.cpu.percent:42.5&size=10",
+        ).json().get("hits", {}).get("hits", [])
+        assert len(flt_hits) == 1, f"Query on 'metric.cpu.percent' should match, got: {flt_hits}"
+
     def _assert_target_count(self, collection: str, expected: int, regression_hint: str = ""):
         # Retry a few times — bulk migration may not be fully flushed to the target yet.
         # Uses a direct _count API call per collection rather than get_all_index_details
         # (which crashes when called without index_prefix_ignore_list).
         import time
-        from ..common_utils import execute_api_call
         actual = 0
         for attempt in range(1, 31):
             try:

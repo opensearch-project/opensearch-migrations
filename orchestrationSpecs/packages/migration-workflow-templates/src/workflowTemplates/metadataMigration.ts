@@ -136,7 +136,15 @@ function makeParamsDict(
 
     const base = expr.mergeDicts(
         expr.mergeDicts(targetAndOptions, snapshotParams),
-        expr.makeDict({"outputFile": expr.literal(METADATA_OUTPUT_PATH)})
+        expr.makeDict({
+            "outputFile": expr.literal(METADATA_OUTPUT_PATH),
+            // The EKS workflow re-runs the metadata phase as part of SnapshotMigration
+            // reconciliation, alongside the document backfill phase that owns the same
+            // target indexes. Forcing --allow-existing-indexes makes the metadata phase
+            // idempotent so a re-applied SnapshotMigration doesn't abort on indexes the
+            // prior run created.
+            "allowExistingIndexes": expr.literal(true)
+        })
     );
 
     // When sourceEndpoint is non-empty at runtime, add sourceHost param.

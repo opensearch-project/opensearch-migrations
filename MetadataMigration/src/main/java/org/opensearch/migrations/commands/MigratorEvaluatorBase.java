@@ -106,6 +106,7 @@ public abstract class MigratorEvaluatorBase {
         var items = Items.builder();
         items.dryRun(migrationMode.equals(MigrationMode.SIMULATE));
         items.succeedOnEmpty(arguments.succeedOnEmpty);
+        items.allowExistingIndexes(arguments.allowExistingIndexes);
         var metadataResults = migrateGlobalMetadata(migrationMode, clusters, transformer, context);
 
         var indexTemplates = new ArrayList<CreationResult>();

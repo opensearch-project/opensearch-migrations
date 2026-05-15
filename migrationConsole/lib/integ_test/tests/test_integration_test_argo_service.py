@@ -341,7 +341,7 @@ def test_run_kubectl_command_success(argo_service, mock_success_result):
         result = argo_service._run_kubectl_command({"get": "pods"})
 
         assert result.success is True
-        mock_command_runner_class.assert_called_once_with("kubectl", {"get": "pods"})
+        mock_command_runner_class.assert_called_once_with("kubectl", {"get": "pods"}, timeout=120.0)
         mock_runner_instance.run.assert_called_once_with(print_to_console=False)
 
 
