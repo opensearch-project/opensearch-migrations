@@ -1323,6 +1323,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "useRecoverySource": {
                       "type": "boolean",
                       "default": false
+                    },
+                    "emitDocType": {
+                      "type": "boolean",
+                      "default": false
                     }
                   }
                 },
@@ -2822,6 +2826,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "boolean",
                         "default": false,
                         "description": "When enabled, treat the _recovery_source stored field (present in ES 7+ / OpenSearch snapshots with soft-deletes) as _source. This field is transient and may not be present for all documents, so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
+                      },
+                      "emitDocType": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When enabled, propagates the ES _type field into bulk action-line metadata. Required when using type-mapping transformers (e.g. TypeMappingSanitizationTransformerProvider) for ES 5.x multi-type index migrations. Not needed for ES 6.x+ single-type indices.",
                         "checksumFor": [
                           "replayer"
                         ],

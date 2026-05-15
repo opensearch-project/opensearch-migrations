@@ -71,7 +71,7 @@ def call(Map config = [:]) {
             "trafficReplayerServiceEnabled": true,
             "trafficReplayerExtraArgs": "--speedup-factor 10.0",
             "reindexFromSnapshotServiceEnabled": true,
-            "reindexFromSnapshotExtraArgs": "--doc-transformer-config-base64 $rfsTransformersArg",
+            "reindexFromSnapshotExtraArgs": "--emit-doc-type --doc-transformer-config-base64 $rfsTransformersArg",
             "sourceCluster": {
                 "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
                 "auth": {"type": "none"},

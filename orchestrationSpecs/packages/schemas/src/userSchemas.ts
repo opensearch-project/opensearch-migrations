@@ -744,6 +744,12 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
+    emitDocType: z.boolean().default(false).optional()
+        .describe("When enabled, propagates the ES _type field into bulk action-line metadata. " +
+            "Required when using type-mapping transformers (e.g. TypeMappingSanitizationTransformerProvider) " +
+            "for ES 5.x multi-type index migrations. Not needed for ES 6.x+ single-type indices.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
 }).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");
 
 export const USER_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(USER_RFS_WORKFLOW_OPTIONS);
