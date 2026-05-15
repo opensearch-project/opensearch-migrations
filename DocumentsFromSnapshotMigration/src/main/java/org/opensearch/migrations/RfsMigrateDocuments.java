@@ -277,6 +277,13 @@ public class RfsMigrateDocuments {
             description = "Optional. Maximum delay in milliseconds for any single coordinator completion retry. Default: 64000")
         public long coordinatorRetryMaxDelayMs = 64_000;
 
+        @Parameter(required = false,
+            names = { "--emit-doc-type" },
+            description = "Optional. When true, propagates the ES _type field into bulk action-line metadata. " +
+                "Required when using type-mapping transformers (e.g. TypeMappingSanitizationTransformerProvider) " +
+                "for ES 5.x multi-type index migrations. Default: false")
+        public boolean emitDocType = false;
+
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
 
@@ -622,7 +629,8 @@ public class RfsMigrateDocuments {
                 arguments.experimental.previousSnapshotName,
                 arguments.experimental.experimentalDeltaMode,
                 arguments.experimental.enableSourcelessMigrations,
-                arguments.experimental.useRecoverySource);
+                arguments.experimental.useRecoverySource,
+                arguments.emitDocType);
             cleanShutdownCompleted.set(true);
             if (status == CompletionStatus.NOTHING_DONE) {
                 log.atInfo().setMessage("Work exists but none available to this worker. Exiting with exit code " + NO_WORK_AVAILABLE_EXIT_CODE).log();
@@ -1164,7 +1172,7 @@ public class RfsMigrateDocuments {
             useServerGeneratedIds, allowlist, maxDocsPerBatch, maxBytesPerBatch, batchConcurrency,
             maxShardSizeBytes, progressCursor, workCoordinator, maxInitialLeaseDuration, leaseExpireTrigger,
             workItemTimeProvider, indexMetadataFactory, indexAllowlist, rootDocumentContext, cancellationRunnable,
-            previousSnapshotName, deltaMode, false, false);
+            previousSnapshotName, deltaMode, false, false, false);
     }
 
     public static CompletionStatus runWithPipeline(
@@ -1191,7 +1199,8 @@ public class RfsMigrateDocuments {
         String previousSnapshotName,
         DeltaMode deltaMode,
         boolean enableSourcelessMigrations,
-        boolean useRecoverySource
+        boolean useRecoverySource,
+        boolean emitDocType
     ) throws IOException, InterruptedException, NoWorkLeftException {
         var scopedWorkCoordinator = prepareWorkCoordination(
             workCoordinator, leaseExpireTrigger, indexMetadataFactory,
@@ -1217,6 +1226,7 @@ public class RfsMigrateDocuments {
                 : null)
             .enableSourcelessMigrations(enableSourcelessMigrations)
             .useRecoverySource(useRecoverySource)
+            .emitDocType(emitDocType)
             .indexMetadataFactory(indexMetadataFactory)
             .workCoordinator(scopedWorkCoordinator)
             .workItemTimeProvider(workItemTimeProvider)

@@ -554,7 +554,8 @@ public class SourcelessMigrationTest extends SourceTestBase {
                     null,           // no previous snapshot
                     null,           // no delta mode
                     true,           // ENABLE SOURCELESS MIGRATIONS
-                    false           // don't use _recovery_source
+                    false,          // don't use _recovery_source
+                    false           // don't emit _type
                 );
             }
         } finally {
