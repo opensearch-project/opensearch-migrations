@@ -172,7 +172,7 @@ final class StreamingFieldPostings10 implements StreamingFieldPostings {
             int startOff = fieldHasOffsets ? c.postings.startOffset() : PostingsSink.NO_OFFSET;
             int endOff = fieldHasOffsets ? c.postings.endOffset() : PostingsSink.NO_OFFSET;
             posOffsets.add(new int[]{pos, startOff, endOff, collected.size()});
-            collected.add(new TermEntry(c.term, startOff, endOff));
+            collected.add(new TermEntry(c.term, pos, startOff, endOff));
         }
     }
 
@@ -199,7 +199,7 @@ final class StreamingFieldPostings10 implements StreamingFieldPostings {
         ArrayList<TermEntry> ordered = new ArrayList<>(posOffsets.size());
         for (int[] po : posOffsets) {
             TermEntry placeholder = collected.get(po[3]);
-            ordered.add(new TermEntry(placeholder.term(), po[1], po[2]));
+            ordered.add(new TermEntry(placeholder.term(), po[0], po[1], po[2]));
         }
         return ordered;
     }

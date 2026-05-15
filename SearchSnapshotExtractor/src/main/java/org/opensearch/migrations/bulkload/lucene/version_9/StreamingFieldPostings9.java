@@ -246,13 +246,17 @@ final class StreamingFieldPostings9 implements StreamingFieldPostings {
         ArrayList<TermEntry> ordered = new ArrayList<>(n);
         if (fieldHasOffsets) {
             for (int k = 0; k < n; k++) {
-                int idx = (int) scratchSortKey[k];
-                ordered.add(new TermEntry(scratchTerm[idx], scratchStart[idx], scratchEnd[idx]));
+                long key = scratchSortKey[k];
+                int idx = (int) key;
+                int pos = (int) (key >>> 32);
+                ordered.add(new TermEntry(scratchTerm[idx], pos, scratchStart[idx], scratchEnd[idx]));
             }
         } else {
             for (int k = 0; k < n; k++) {
-                int idx = (int) scratchSortKey[k];
-                ordered.add(new TermEntry(scratchTerm[idx], PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET));
+                long key = scratchSortKey[k];
+                int idx = (int) key;
+                int pos = (int) (key >>> 32);
+                ordered.add(new TermEntry(scratchTerm[idx], pos, PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET));
             }
         }
         return ordered;
