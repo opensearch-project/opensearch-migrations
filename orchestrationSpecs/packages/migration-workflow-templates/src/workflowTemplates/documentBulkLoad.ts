@@ -57,8 +57,18 @@ function makeParamsDict(
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
     options: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>,
     sessionName: BaseExpression<string>,
+    workflowUid: BaseExpression<string>,
     sourceEndpoint?: BaseExpression<string>
 ) {
+    const repoConfig = expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig");
+    // Issue #2975: enable the durable S3 DLQ on every EKS bulk-load pod. We reuse the
+    // snapshot's S3 region/role/endpoint to avoid inventing a new credentials path; the
+    // bucket is derived from the snapshot repo URI parameter on the Java side
+    // (--dlq-s3-bucket can be overridden if the customer wants a separate bucket).
+    const dlqParams = expr.makeDict({
+        dlqS3Prefix: expr.literal("rfs-dlq/"),
+        dlqSessionId: workflowUid
+    });
     const base = expr.mergeDicts(
         expr.mergeDicts(
             expr.mergeDicts(
@@ -68,15 +78,18 @@ function makeParamsDict(
             expr.omit(expr.deserializeRecord(options), ...ARGO_RFS_WORKFLOW_OPTION_KEYS)
         ),
         expr.mergeDicts(
-            expr.makeDict({
-                snapshotName: expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
-                sourceVersion: sourceVersion,
-                sessionName: sessionName,
-                luceneDir: "/tmp",
-                cleanLocalDirs: true
-            }),
+            expr.mergeDicts(
+                expr.makeDict({
+                    snapshotName: expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
+                    sourceVersion: sourceVersion,
+                    sessionName: sessionName,
+                    luceneDir: "/tmp",
+                    cleanLocalDirs: true
+                }),
+                dlqParams
+            ),
             makeRepoParamDict(
-                expr.omit(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), "s3RoleArn"),
+                expr.omit(repoConfig, "s3RoleArn"),
                 true)
         )
     );
@@ -140,10 +153,15 @@ function getRfsDeploymentManifest
         env: [
             ...getTargetHttpAuthCredsEnvVars(args.targetBasicCredsSecretNameOrEmpty),
             ...getCoordinatorHttpAuthCredsEnvVars(args.coordinatorBasicCredsSecretNameOrEmpty),
-            // We don't have a mechanism to scrape these off disk so need to disable this to avoid filling up the disk
+            // Issue #2975: terminal RFS document failures now go to a durable S3 DLQ
+            // (see RFS/.../reindexer/dlq). The previous OFF override turned off the
+            // pod-local FailedRequests log because no durable replacement existed; we
+            // can now keep the in-pod logger at WARN as a local-dev safety net. The
+            // S3 sink is enabled by providing --dlq-s3-bucket (or by deriving it from
+            // --s3-repo-uri) inside rfsJsonConfig; per-pod session id comes from the workflow.
             {
                 name: "FAILED_REQUESTS_LOGGER_LEVEL",
-                value: "OFF"
+                value: "WARN"
             },
             {
                 name: "CONSOLE_LOG_FORMAT",
@@ -410,6 +428,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             b.inputs.snapshotConfig,
                             b.inputs.documentBackfillConfig,
                             b.inputs.sessionName,
+                            // Use the Argo workflow UID as the DLQ session id so re-runs
+                            // (a fresh workflow) land under a new S3 prefix and inspection
+                            // commands see exactly the failures from the current run.
+                            b.inputs.crdUid,
                             b.inputs.sourceEndpoint)
                     )),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources")),

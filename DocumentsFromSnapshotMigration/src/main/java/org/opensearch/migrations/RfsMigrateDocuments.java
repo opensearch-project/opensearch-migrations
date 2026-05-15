@@ -56,6 +56,8 @@ import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
+import org.opensearch.migrations.reindexer.dlq.DlqSink;
+import org.opensearch.migrations.reindexer.dlq.S3DlqSink;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -79,6 +81,8 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
 import org.slf4j.MDC;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3AsyncClient;
 
 @Slf4j
 public class RfsMigrateDocuments {
@@ -298,6 +302,43 @@ public class RfsMigrateDocuments {
                 "rather than failure. Example: --allowed-doc-exception-types version_conflict_engine_exception")
         public List<String> allowedDocExceptionTypes = List.of();
 
+        @ParametersDelegate
+        public DlqArgs dlqArgs = new DlqArgs();
+
+    }
+
+    /**
+     * Configuration for the durable DLQ where terminal document failures are persisted.
+     * See issue #2975. DLQ is enabled when --dlq-s3-bucket is provided (or can be derived
+     * from --s3-repo-uri); otherwise terminal failures are not captured to a sink.
+     */
+    public static class DlqArgs {
+        @Parameter(required = false,
+            names = { "--dlq-s3-bucket" },
+            description = "S3 bucket for durable DLQ records. Providing this (or --s3-repo-uri) enables the DLQ.")
+        public String dlqS3Bucket = null;
+
+        @Parameter(required = false,
+            names = { "--dlq-s3-prefix" },
+            description = "S3 key prefix under the DLQ bucket. Records are written to " +
+                "<prefix>/session=<sessionId>/worker=<workerId>/... Default: \"rfs-dlq/\".")
+        public String dlqS3Prefix = "rfs-dlq/";
+
+        @Parameter(required = false,
+            names = { "--dlq-s3-region" },
+            description = "AWS region for the DLQ bucket. Defaults to the same region as --s3-region when present.")
+        public String dlqS3Region = null;
+
+        @Parameter(required = false,
+            names = { "--dlq-s3-endpoint" },
+            description = "Optional S3 endpoint override for DLQ uploads (e.g. for localstack in tests).")
+        public String dlqS3Endpoint = null;
+
+        @Parameter(required = false,
+            names = { "--dlq-session-id" },
+            description = "Identifier for this RFS run; used as the S3 prefix that isolates this run's " +
+                "DLQ records from prior runs. Defaults to the Argo workflow UID when available.")
+        public String dlqSessionId = null;
     }
 
     public static class ExperimentalArgs {
@@ -493,6 +534,24 @@ public class RfsMigrateDocuments {
         var targetClientFactory = new OpenSearchClientFactory(targetConnectionContext, arguments.maxConnections);
         OpenSearchClient targetClient = targetClientFactory.determineVersionAndCreate();
         var targetVersion = targetClient.getClusterVersion();
+
+        // Build the DLQ sink and attach it to the target client. The sink is closed in
+        // the shutdown hook below; intermediate flushes happen per-shard in
+        // DocumentMigrationBootstrap before completeWorkItem.
+        var resolvedSessionId = resolveSessionId(arguments, workerId);
+        var dlqSink = buildDlqSink(arguments, workerId, resolvedSessionId);
+        targetClient.setDlqContext(dlqSink, resolvedSessionId, workerId);
+        if (dlqSink != null) {
+            log.atInfo().setMessage("DLQ enabled: sessionId={} location={}")
+                .addArgument(resolvedSessionId)
+                .addArgument(dlqSink.getLocation())
+                .log();
+            // Expose the DLQ location to the orchestrator on a dedicated line that the
+            // workflow can capture as an output parameter (see Argo template).
+            System.out.println("RFS_DLQ_LOCATION=" + dlqSink.getLocation());
+        } else {
+            log.atInfo().setMessage("DLQ disabled: no --dlq-s3-bucket configured").log();
+        }
         
         // Determine if server-generated IDs should be used
         boolean useServerGeneratedIds = switch (arguments.serverGeneratedIds) {
@@ -571,6 +630,15 @@ public class RfsMigrateDocuments {
                 } catch (Exception e) {
                     log.atError().setMessage("Could not complete clean exit process: {}").addArgument(e).log();
                 } finally {
+                    // Close the DLQ sink so any buffered records get flushed to S3 before
+                    // the JVM exits. Safe to call even if completeWorkItem was never reached.
+                    if (dlqSink != null) {
+                        try {
+                            dlqSink.close();
+                        } catch (Exception e) {
+                            log.atError().setCause(e).setMessage("Error closing DLQ sink during shutdown").log();
+                        }
+                    }
                     // Manually flush logs and shutdown log4j after all logging is done
                     LogManager.shutdown();
                 }
@@ -678,6 +746,57 @@ public class RfsMigrateDocuments {
             .addArgument(calculateTotalRetryWindowSeconds(completionRetryConfig))
             .log();
         return completionRetryConfig;
+    }
+
+    /**
+     * Resolve the DLQ session id, preferring an explicit CLI/env override, then the
+     * Argo workflow UID, then a worker-scoped fallback. The result drives the S3
+     * prefix that isolates this run's DLQ entries from prior runs.
+     */
+    private static String resolveSessionId(Args arguments, String workerId) {
+        if (arguments.dlqArgs.dlqSessionId != null && !arguments.dlqArgs.dlqSessionId.isBlank()) {
+            return arguments.dlqArgs.dlqSessionId;
+        }
+        var fromEnv = System.getenv("ARGO_WORKFLOW_UID");
+        if (fromEnv != null && !fromEnv.isBlank()) {
+            return fromEnv;
+        }
+        return "worker-" + workerId;
+    }
+
+    /**
+     * Build the S3 DLQ sink, or return null when no bucket is configured. The bucket
+     * comes from --dlq-s3-bucket or, as a fallback, the snapshot repo bucket so EKS
+     * deployments don't need to manage a separate bucket. The per-session prefix
+     * keeps DLQ and snapshot objects in their own keyspace.
+     */
+    private static DlqSink buildDlqSink(Args arguments, String workerId, String sessionId) {
+        String bucket = arguments.dlqArgs.dlqS3Bucket;
+        if ((bucket == null || bucket.isBlank()) && arguments.s3RepoUri != null) {
+            bucket = new org.opensearch.migrations.bulkload.common.S3Uri(arguments.s3RepoUri).bucketName;
+        }
+        if (bucket == null || bucket.isBlank()) {
+            return null;
+        }
+        var region = arguments.dlqArgs.dlqS3Region != null ? arguments.dlqArgs.dlqS3Region
+            : arguments.s3Region;
+        if (region == null) {
+            throw new ParameterException("--dlq-s3-region (or --s3-region) is required when --dlq-s3-bucket is set");
+        }
+        var builder = S3AsyncClient.builder().region(Region.of(region));
+        String endpoint = arguments.dlqArgs.dlqS3Endpoint != null
+            ? arguments.dlqArgs.dlqS3Endpoint : arguments.s3Endpoint;
+        if (endpoint != null) {
+            builder = builder.endpointOverride(URI.create(endpoint));
+        }
+        return S3DlqSink.builder()
+            .s3Client(builder.build())
+            .bucket(bucket)
+            .prefix(arguments.dlqArgs.dlqS3Prefix)
+            .sessionId(sessionId)
+            .workerId(workerId)
+            .policy(S3DlqSink.RotationPolicy.onePerFlush())
+            .build();
     }
 
     /**

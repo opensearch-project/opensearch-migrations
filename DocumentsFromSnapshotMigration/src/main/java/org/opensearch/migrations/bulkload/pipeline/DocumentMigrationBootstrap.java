@@ -262,6 +262,23 @@ public class DocumentMigrationBootstrap {
                 context.recordPipelineError();
                 throw new RfsException("Partition migration failed for " + wi, error);
             }
+
+            // Flush the DLQ before letting ScopedWorkCoordinator call completeWorkItem.
+            // If the flush fails (or times out), we throw so the work item is NOT marked
+            // complete — a successor worker can re-emit any failures we may have lost.
+            // This is the contract behind the lease-lifecycle requirement on #2975.
+            var dlqSink = targetClient.getDlqSink();
+            if (dlqSink != null) {
+                try {
+                    dlqSink.flush().block(Duration.ofMinutes(5));
+                } catch (Exception flushError) {
+                    log.atError().setCause(flushError)
+                        .setMessage("DLQ flush failed for {}; refusing to mark work item complete")
+                        .addArgument(wi).log();
+                    throw new RfsException("DLQ flush failed for " + wi, flushError);
+                }
+            }
+
             context.recordShardDuration(durationMs);
             context.recordDocsMigrated(totalDocsMigrated.get());
             context.recordBytesMigrated(totalBytesMigrated.get());
