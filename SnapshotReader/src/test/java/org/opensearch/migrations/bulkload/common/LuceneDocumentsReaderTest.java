@@ -267,6 +267,7 @@ public class LuceneDocumentsReaderTest {
         }
         when(mockReader.leaves()).thenAnswer(inv -> leaves);
         when(mockReader.maxDoc()).thenReturn(docsPerSegment * numSegments);
+        when(mockReader.getIndexDirectoryPath()).thenReturn(tempDirectory);
 
         // Create a custom LuceneDocumentsReader for testing
         LuceneIndexReader reader = new IndexReader9(Paths.get("dummy"), false, "dummy_field") {

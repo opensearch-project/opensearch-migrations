@@ -137,7 +137,7 @@ spec:
       terminationGracePeriodSeconds: 65
       initContainers:
         - name: workflow-schema-generator
-          image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.installer) }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
           command:
             - /bin/sh
@@ -191,7 +191,7 @@ spec:
       {{- end }}
       containers:
         - name: console
-          image: {{ .Values.images.migrationConsole.repository}}:{{ .Values.images.migrationConsole.tag }}
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
           # Since the console may be used interactively, try to keep the migration
           # console on the same node so that it can be stable.  Keep the requests

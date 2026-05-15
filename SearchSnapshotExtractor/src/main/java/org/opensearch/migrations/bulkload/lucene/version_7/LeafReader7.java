@@ -4,10 +4,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
 
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
@@ -17,6 +14,7 @@ import lombok.Getter;
 import shadow.lucene7.org.apache.lucene.index.BinaryDocValues;
 import shadow.lucene7.org.apache.lucene.index.FieldInfo;
 import shadow.lucene7.org.apache.lucene.index.FilterCodecReader;
+import shadow.lucene7.org.apache.lucene.index.IndexOptions;
 import shadow.lucene7.org.apache.lucene.index.LeafReader;
 import shadow.lucene7.org.apache.lucene.index.NumericDocValues;
 import shadow.lucene7.org.apache.lucene.index.PointValues;
@@ -272,29 +270,57 @@ public class LeafReader7 implements LuceneLeafReader {
         return null;
     }
 
-    /** See {@link LuceneLeafReader#buildTermPositionIndex}. */
+    /** See {@link LuceneLeafReader#streamFieldPostings}. */
     @Override
-    public Map<Integer, List<String>> buildTermPositionIndex(String fieldName) throws IOException {
+    public void streamFieldPostings(String fieldName,
+            org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink sink) throws IOException {
         Terms terms = wrapped.terms(fieldName);
-        if (terms == null) return Collections.emptyMap();
-        Map<Integer, TreeMap<Integer, String>> docPositions = new HashMap<>();
+        if (terms == null) return;
         TermsEnum termsEnum = terms.iterator();
         BytesRef term;
+        int[] positions    = new int[16];
+        int[] startOffsets = new int[16];
+        int[] endOffsets   = new int[16];
+        // Only request OFFSETS when the field was actually indexed with them.
+        // Requesting OFFSETS on a POSITIONS-only field in Lucene 7 routes to
+        // EverythingEnum which reads the .pay file — but if no field in the segment
+        // has offsets/payloads, that file is never written and payIn == null, causing NPE.
+        FieldInfo fi = wrapped.getFieldInfos().fieldInfo(fieldName);
+        boolean fieldHasOffsets = fi != null
+            && fi.getIndexOptions().compareTo(IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS) >= 0;
+        int postingsFlags = fieldHasOffsets ? PostingsEnum.OFFSETS : PostingsEnum.POSITIONS;
         while ((term = termsEnum.next()) != null) {
-            String termStr = term.utf8ToString();
-            PostingsEnum postings = termsEnum.postings(null, PostingsEnum.POSITIONS);
+            int termId = sink.registerTerm(
+                new org.opensearch.migrations.bulkload.lucene.sidecar.BytesRefLike(
+                    term.bytes, term.offset, term.length));
+            // OFFSETS is a superset of POSITIONS; also returns character start/end offsets when
+            // the field was indexed with index_options:offsets, or -1 otherwise.
+            PostingsEnum postings = termsEnum.postings(null, postingsFlags);
             int doc;
             while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
-                TreeMap<Integer, String> positions = docPositions.computeIfAbsent(doc, k -> new TreeMap<>());
                 int freq = postings.freq();
+                if (freq > positions.length) {
+                    int newLen = Math.max(freq, positions.length * 2);
+                    positions    = new int[newLen];
+                    startOffsets = new int[newLen];
+                    endOffsets   = new int[newLen];
+                }
+                int n = 0;
                 for (int i = 0; i < freq; i++) {
                     int pos = postings.nextPosition();
-                    positions.put(pos, termStr);
+                    if (pos < 0) continue;
+                    positions[n]    = pos;
+                    startOffsets[n] = fieldHasOffsets
+                        ? postings.startOffset()
+                        : org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink.NO_OFFSET;
+                    endOffsets[n]   = fieldHasOffsets
+                        ? postings.endOffset()
+                        : org.opensearch.migrations.bulkload.lucene.sidecar.PostingsSink.NO_OFFSET;
+                    n++;
                 }
+                if (n > 0) sink.accept(termId, doc, positions, startOffsets, endOffsets, n);
             }
         }
-        Map<Integer, List<String>> result = new HashMap<>(docPositions.size());
-        docPositions.forEach((docId, positions) -> result.put(docId, new ArrayList<>(positions.values())));
-        return result;
     }
+
 }

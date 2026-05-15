@@ -12,6 +12,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.MetadataMigration;
+import org.opensearch.migrations.MigrateOrEvaluateArgs;
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
@@ -34,6 +37,7 @@ import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactor
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
+import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -48,6 +52,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.closeTo;
 import static org.hamcrest.Matchers.greaterThan;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -68,7 +73,11 @@ public class SolrSnapshotToOpenSearchTest {
     File tempDir;
 
     static Stream<Arguments> solr8ToOpenSearch3() {
+        // Cloud BACKUP API quirks vary across Solr versions; the cloud=true variant stays
+        // pinned to Solr 8 until per-version SolrCloud BACKUP scaffolding is added.
         return Stream.of(
+            Arguments.of(SolrClusterContainer.SOLR_6, SearchClusterContainer.OS_V3_5_0, false),
+            Arguments.of(SolrClusterContainer.SOLR_7, SearchClusterContainer.OS_V3_5_0, false),
             Arguments.of(SolrClusterContainer.SOLR_8, SearchClusterContainer.OS_V3_5_0, false),
             Arguments.of(SolrClusterContainer.SOLR_8, SearchClusterContainer.OS_V3_5_0, true)
         );
@@ -104,7 +113,7 @@ public class SolrSnapshotToOpenSearchTest {
             var backupDir = createBackup(solr, COLLECTION_NAME);
 
             int exitCode = SourceTestBase.runProcessAgainstTarget(new String[]{
-                "--source-version", "SOLR_8.11.4",
+                "--source-version", "SOLR_" + solrVersion.tag(),
                 "--snapshot-local-dir", backupDir.toString(),
                 "--snapshot-name", "solr-migration",
                 "--target-host", target.getUrl(),
@@ -153,7 +162,7 @@ public class SolrSnapshotToOpenSearchTest {
             var schema = fetchSchema(solr, COLLECTION_NAME);
             var backupRoot = createBackup(solr, COLLECTION_NAME);
 
-            var source = new SolrBackupSource(backupRoot.resolve(COLLECTION_NAME), COLLECTION_NAME, schema);
+            var source = new SolrBackupSource(backupRoot.resolve(COLLECTION_NAME), COLLECTION_NAME, schema, solrVersion.major());
             var targetClient = new OpenSearchClientFactory(
                 ConnectionContextTestParams.builder().host(target.getUrl()).build().toConnectionContext()
             ).determineVersionAndCreate();
@@ -198,8 +207,8 @@ public class SolrSnapshotToOpenSearchTest {
             var targetVersion_ = targetClient.getClusterVersion();
 
             var schemas = Map.<String, JsonNode>of(COLLECTION_NAME, MAPPER.createObjectNode().set("schema", schema));
-            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas);
-            var documentSource = new SolrMultiCollectionSource(backupDir, schemas);
+            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, null, solrVersion.major());
+            var documentSource = new SolrMultiCollectionSource(backupDir, schemas, null, null, solrVersion.major());
 
             var coordinatorFactory = new WorkCoordinatorFactory(targetVersion_);
             var progressCursor = new AtomicReference<WorkItemCursor>();
@@ -346,8 +355,8 @@ public class SolrSnapshotToOpenSearchTest {
             var targetVersion_ = targetClient.getClusterVersion();
 
             var schemas = Map.<String, JsonNode>of(collection, schema);
-            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupRoot, schemas);
-            var documentSource = new SolrMultiCollectionSource(backupRoot, schemas);
+            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupRoot, schemas, null, solrVersion.major());
+            var documentSource = new SolrMultiCollectionSource(backupRoot, schemas, null, null, solrVersion.major());
 
             var coordinatorFactory = new WorkCoordinatorFactory(targetVersion_);
             var progressCursor = new AtomicReference<WorkItemCursor>();
@@ -405,6 +414,129 @@ public class SolrSnapshotToOpenSearchTest {
     }
 
     /**
+     * Backfill E2E regression: Solr fields with dotted names (including names
+     * whose top-level segment matches a default {@code dynamicField} pattern)
+     * survive the full backfill flow — {@code MetadataMigration} pushes the
+     * converted schema, then {@code RfsMigrateDocuments} writes documents.
+     *
+     * <p>SOURCE — Solr collection {@code dotted_collection} (Solr default schema's
+     * dynamic fields) with two explicit dotted-name fields and one document.
+     * <pre>{@code
+     *   schema (explicit dotted fields):
+     *     category.name      string  (→ OS keyword)
+     *     metric.cpu.percent pfloat  (→ OS float)
+     *   schema (default dynamicField patterns exercised):
+     *     attr_*  → text_general,  *_i → pint
+     *   doc1: {
+     *     category.name:"books",                // explicit dotted field
+     *     metric.cpu.percent:42.5,              // explicit 3-segment dotted field
+     *     attr_thing.withdot:"vip",             // attr_*  + dotted leaf (regression case)
+     *     counter.value_i:17                    // *_i     + dotted leaf
+     *   }
+     * }</pre>
+     *
+     * <p>TARGET — OpenSearch index {@code dotted_collection} containing exactly one
+     * doc with all four dotted keys preserved verbatim in {@code _source}, the
+     * declared dotted fields typed in the {@code _mapping}, and dotted-path
+     * queries returning the doc.
+     *
+     * <p>Pre-fix, MetadataMigration emitted dynamic templates with plain
+     * {@code match}, so the {@code attr_*} template fired on the synthesized
+     * parent {@code attr_thing} when the doc was written, and the bulk write
+     * failed with {@code mapper_parsing_exception}, dropping the doc.
+     */
+    @ParameterizedTest(name = "backfill dotted-name fields: {0} → {1}")
+    @MethodSource("solr8ToOpenSearch3Cloud")
+    void backfillsDottedFieldNames(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        var collection = "dotted_collection";
+        try (
+            var solr = SolrClusterContainer.cloud(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            // ---- SOURCE: Solr collection with explicit dotted fields + 1 doc ----
+            createCollection(solr, collection);
+            addSchemaFields(solr, collection, "["
+                + "{\"name\":\"category.name\",      \"type\":\"string\", \"stored\":true, \"indexed\":true, \"docValues\":true},"
+                + "{\"name\":\"metric.cpu.percent\", \"type\":\"pfloat\", \"stored\":true, \"indexed\":true, \"docValues\":true}"
+                + "]");
+            indexDocs(solr, collection, "[{"
+                + "\"id\":\"doc1\","
+                + "\"category.name\":\"books\","
+                + "\"metric.cpu.percent\":42.5,"
+                + "\"attr_thing.withdot\":\"vip\","
+                + "\"counter.value_i\":17"
+                + "}]");
+
+            // ---- MIGRATE: backup → MetadataMigration (schema) → RfsMigrateDocuments CLI (docs) ----
+            var backupRoot = createBackup(solr, collection);
+
+            // 1. Push the converted Solr schema (with dotted-leaf-safe dynamic templates) to OS.
+            var metadataArgs = new MigrateOrEvaluateArgs();
+            metadataArgs.fileSystemRepoPath = backupRoot.toString();
+            metadataArgs.sourceVersion = Version.fromString("SOLR " + solrVersion.tag());
+            metadataArgs.targetArgs.host = target.getUrl();
+            var metaResult = new MetadataMigration().migrate(metadataArgs)
+                .execute(MetadataMigrationTestContext.factory().noOtelTracking());
+            log.atInfo().setMessage("MetadataMigration result: {}").addArgument(metaResult.asCliOutput()).log();
+            assertEquals(0, metaResult.getExitCode(), "MetadataMigration should succeed");
+
+            // 2. Backfill documents through the CLI.
+            int exitCode = SourceTestBase.runProcessAgainstTarget(new String[]{
+                "--source-version", "SOLR_" + solrVersion.tag(),
+                "--snapshot-local-dir", backupRoot.toString(),
+                "--snapshot-name", "solr-dotted",
+                "--target-host", target.getUrl(),
+                "--coordinator-host", target.getUrl(),
+                "--index-allowlist", collection
+            });
+            assertEquals(0, exitCode, "RfsMigrateDocuments should exit successfully");
+
+            // ---- TARGET: assert metadata, document content, and queries ----
+            verifyDocCount(target, collection, 1);
+
+            var restClient = new RestClient(
+                ConnectionContextTestParams.builder().host(target.getUrl()).build().toConnectionContext()
+            );
+            var ctx = DocumentMigrationTestContext.factory().noOtelTracking();
+            restClient.get("_refresh", ctx.createUnboundRequestContext());
+
+            // Metadata: explicit dotted fields land under their full dotted path with the
+            // OpenSearch type the converter derives from Solr. (Dynamic-leaf types are
+            // covered in SolrToOpenSearchEndToEndTest where the in-process pipeline
+            // exposes the dynamic_templates path directly.)
+            assertTargetFieldType(restClient, ctx, collection, "category.name",       "keyword");
+            assertTargetFieldType(restClient, ctx, collection, "metric.cpu.percent",  "float");
+
+            // Document content: every dotted key preserved verbatim in _source — including
+            // the dynamic-template regression case, which would have been dropped pre-fix.
+            var resp = restClient.get(
+                collection + "/_search?q=id:doc1&size=1", ctx.createUnboundRequestContext()
+            );
+            var hits = MAPPER.readTree(resp.body).path("hits").path("hits");
+            assertThat("Should find doc1", hits.size(), equalTo(1));
+            var src = hits.get(0).path("_source");
+            log.atInfo().setMessage("Backfilled dotted-name _source: {}").addArgument(src).log();
+            assertThat("_source.category.name",      src.path("category.name").asText(),     equalTo("books"));
+            assertThat("_source.metric.cpu.percent",
+                (double) src.path("metric.cpu.percent").floatValue(),                       closeTo(42.5, 0.01));
+            assertThat("_source.attr_thing.withdot", src.path("attr_thing.withdot").asText(), equalTo("vip"));
+            assertThat("_source.counter.value_i",    src.path("counter.value_i").asInt(),     equalTo(17));
+
+            // Queries by dotted path resolve back to the doc — including the regression case.
+            assertQueryHits(restClient, ctx, collection, "category.name:books",       1);
+            assertQueryHits(restClient, ctx, collection, "metric.cpu.percent:42.5",   1);
+            assertQueryHits(restClient, ctx, collection, "attr_thing.withdot:vip",    1);
+            assertQueryHits(restClient, ctx, collection, "counter.value_i:17",        1);
+        }
+    }
+
+    /**
      * Tests migrating multiple Solr collections through the work coordinator.
      * Each collection is a single shard, so migrateOneShard() should be called
      * exactly once per collection (2 total), then return NOTHING_DONE.
@@ -443,8 +575,8 @@ public class SolrSnapshotToOpenSearchTest {
                 "movies", MAPPER.createObjectNode().set("schema", moviesSchema),
                 "books", MAPPER.createObjectNode().set("schema", booksSchema)
             );
-            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupRoot, schemas);
-            var documentSource = new SolrMultiCollectionSource(backupRoot, schemas);
+            var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupRoot, schemas, null, solrVersion.major());
+            var documentSource = new SolrMultiCollectionSource(backupRoot, schemas, null, null, solrVersion.major());
 
             var connectionContext = ConnectionContextTestParams.builder()
                 .host(target.getUrl()).build().toConnectionContext();
@@ -506,6 +638,49 @@ public class SolrSnapshotToOpenSearchTest {
     }
 
     // --- Helpers ---
+
+    /** POST {@code {"add-field":[...]}} to a Solr collection's Schema API. */
+    private static void addSchemaFields(SolrClusterContainer solr, String collection, String addFieldArrayJson)
+        throws Exception {
+        solr.execInContainer(
+            "curl", "-s", "-H", "Content-Type: application/json",
+            "http://localhost:8983/solr/" + collection + "/schema",
+            "-d", "{\"add-field\":" + addFieldArrayJson + "}"
+        );
+    }
+
+    /** POST a JSON document array to a Solr collection's /update endpoint with commit. */
+    private static void indexDocs(SolrClusterContainer solr, String collection, String jsonDocsArray)
+        throws Exception {
+        solr.execInContainer(
+            "curl", "-s", "-H", "Content-Type: application/json",
+            "http://localhost:8983/solr/" + collection + "/update?commit=true",
+            "-d", jsonDocsArray
+        );
+    }
+
+    /** Assert that {@code _field_caps} reports {@code field} on the target index with the given OS type. */
+    private static void assertTargetFieldType(
+        RestClient restClient, DocumentMigrationTestContext ctx,
+        String index, String field, String expectedType
+    ) throws Exception {
+        var resp = restClient.get(index + "/_field_caps?fields=" + field, ctx.createUnboundRequestContext());
+        var typeNode = MAPPER.readTree(resp.body)
+            .path("fields").path(field).path(expectedType).path("type");
+        assertThat(field + " → " + expectedType, typeNode.asText(), equalTo(expectedType));
+    }
+
+    /** Run a Lucene query string against the target and assert the hit count. */
+    private static void assertQueryHits(
+        RestClient restClient, DocumentMigrationTestContext ctx,
+        String index, String luceneQuery, int expectedHits
+    ) throws Exception {
+        var resp = restClient.get(
+            index + "/_search?q=" + luceneQuery + "&size=10", ctx.createUnboundRequestContext()
+        );
+        var hits = MAPPER.readTree(resp.body).path("hits").path("hits");
+        assertThat("query " + luceneQuery + " hit count", hits.size(), equalTo(expectedHits));
+    }
 
     private static SolrClusterContainer createSolr(SolrClusterContainer.SolrVersion version, boolean cloudMode) {
         return cloudMode ? SolrClusterContainer.cloud(version) : new SolrClusterContainer(version);
@@ -589,22 +764,56 @@ public class SolrSnapshotToOpenSearchTest {
     private Path createStandaloneBackup(
         SolrClusterContainer solr, String collection, String backupName, Path backupRoot
     ) throws Exception {
-        solr.execInContainer("curl", "-s",
-            "http://localhost:8983/solr/" + collection
-                + "/replication?command=backup&location=/var/solr/data&name=" + backupName);
-        waitForStandaloneBackup(solr, collection, 30);
+        // Probe for the actual writable Solr data directory.
+        // Solr 6/7 docker uses /opt/solr/server/solr; Solr 8/9 uses /var/solr/data.
+        var probe = solr.execInContainer("sh", "-c",
+            "for d in /var/solr/data /opt/solr/server/solr; do "
+            + "  if [ -d \"$d\" ] && [ -w \"$d\" ]; then echo \"$d\"; break; fi; "
+            + "done");
+        var solrDataDir = probe.getStdout().trim();
+        if (solrDataDir.isEmpty()) {
+            throw new RuntimeException("No writable Solr data directory found in container");
+        }
 
-        var snapshotDir = "/var/solr/data/snapshot." + backupName;
+        var trigger = solr.execInContainer("curl", "-s",
+            "http://localhost:8983/solr/" + collection
+                + "/replication?command=backup&location=" + solrDataDir + "&name=" + backupName);
+        log.atInfo().setMessage("Backup trigger response: {}").addArgument(trigger.getStdout()).log();
+
+        var snapshotDir = solrDataDir + "/snapshot." + backupName;
+        // Poll on the filesystem signal (segments_* present in snapshot dir), which works
+        // identically across Solr 6/7/8/9 regardless of the JSON details response shape.
+        boolean ready = false;
+        for (int i = 0; i < 60; i++) {
+            var find = solr.execInContainer("sh", "-c",
+                "find " + snapshotDir + " -name 'segments_*' -type f 2>/dev/null | head -1");
+            if (!find.getStdout().trim().isEmpty()) {
+                ready = true;
+                break;
+            }
+            Thread.sleep(1000);
+        }
+        if (!ready) {
+            var listing = solr.execInContainer("sh", "-c",
+                "ls -laR " + solrDataDir + " 2>&1 | head -200");
+            throw new RuntimeException(
+                "Backup did not produce a segments_* file under " + snapshotDir + " within 60s.\n"
+                + "Trigger response: " + trigger.getStdout() + "\n"
+                + "Container " + solrDataDir + " listing:\n" + listing.getStdout());
+        }
+
         var collectionDir = backupRoot.resolve(collection);
         Files.createDirectories(collectionDir);
 
-        var listResult = solr.execInContainer("ls", snapshotDir);
-        for (var fileName : listResult.getStdout().trim().split("\n")) {
-            if (fileName.isEmpty()) continue;
-            solr.copyFileFromContainer(
-                snapshotDir + "/" + fileName,
-                collectionDir.resolve(fileName).toString()
-            );
+        // Recursive copy — robust to any nested layout differences across Solr versions.
+        var findResult = solr.execInContainer("find", snapshotDir, "-type", "f");
+        for (var line : findResult.getStdout().trim().split("\n")) {
+            if (line.isEmpty()) continue;
+            var rel = line.substring(snapshotDir.length()).replaceFirst("^/", "");
+            var localFile = collectionDir.resolve(rel);
+            var parent = localFile.getParent();
+            if (parent != null) Files.createDirectories(parent);
+            solr.copyFileFromContainer(line, localFile.toString());
         }
         return backupRoot;
     }
@@ -612,7 +821,18 @@ public class SolrSnapshotToOpenSearchTest {
     private Path createCloudBackup(
         SolrClusterContainer solr, String collection, String backupName, Path backupRoot
     ) throws Exception {
-        var backupLocation = "/var/solr/data/backups";
+        // Probe for the actual writable Solr data directory (Solr 6/7 docker uses
+        // /opt/solr/server/solr; Solr 8/9 uses /var/solr/data). Solr 9's solr.allowPaths
+        // also restricts BACKUP locations to SOLR_HOME, so we must stay within it.
+        var probe = solr.execInContainer("sh", "-c",
+            "for d in /var/solr/data /opt/solr/server/solr; do "
+            + "  if [ -d \"$d\" ] && [ -w \"$d\" ]; then echo \"$d\"; break; fi; "
+            + "done");
+        var solrDataDir = probe.getStdout().trim();
+        if (solrDataDir.isEmpty()) {
+            throw new RuntimeException("No writable Solr data directory found in container");
+        }
+        var backupLocation = solrDataDir + "/backups";
         solr.execInContainer("mkdir", "-p", backupLocation);
 
         solr.execInContainer("curl", "-s",
@@ -620,10 +840,45 @@ public class SolrSnapshotToOpenSearchTest {
                 + "&name=" + backupName + "&collection=" + collection
                 + "&location=" + backupLocation + "&wt=json");
 
-        // Collections API BACKUP is synchronous (no async ID used here), but wait for files
-        Thread.sleep(2000);
+        // Poll on filesystem completion signals. Layout differs by version:
+        //   - Solr 6/7 non-incremental: writes <backupName>/snapshot.shardN/segments_* + zk_backup/
+        //   - Solr 8.x non-incremental (default): writes <backupName>/<collection>/<shardN>/segments_*
+        //   - Solr 8.9+/9 incremental: writes <backupName>/<collection>/index/<UUID files> +
+        //     shard_backup_metadata/md_shardN_0.json + backup_0.properties (NO segments_* file)
+        // Accept any of: segments_* file (non-incremental), or md_*.json + backup_*.properties
+        // pair (incremental). The pair is required so we don't trigger on a partial write.
+        boolean ready = false;
+        for (int i = 0; i < 60; i++) {
+            var check = solr.execInContainer("sh", "-c",
+                "BACKUP=" + backupLocation + "/" + backupName + "; "
+                + "if find \"$BACKUP\" -name 'segments_*' -type f 2>/dev/null | grep -q .; then echo OK; "
+                + "elif find \"$BACKUP\" -name 'backup_*.properties' -type f 2>/dev/null | grep -q . "
+                + "  && find \"$BACKUP\" -name 'md_*.json' -type f 2>/dev/null | grep -q .; then echo OK; "
+                + "fi");
+            if (check.getStdout().trim().equals("OK")) {
+                ready = true;
+                break;
+            }
+            Thread.sleep(1000);
+        }
+        if (!ready) {
+            var listing = solr.execInContainer("sh", "-c",
+                "ls -laR " + backupLocation + " 2>&1 | head -200");
+            throw new RuntimeException(
+                "SolrCloud BACKUP did not complete under " + backupLocation
+                + "/" + backupName + " within 60s.\nContainer listing:\n" + listing.getStdout());
+        }
 
-        var containerBackupDir = backupLocation + "/" + backupName + "/" + collection;
+        // Detect which layout Solr produced. Existing tests expect
+        // backupRoot.resolve(<collection>) to be the data dir, so we copy from the right
+        // source on each side:
+        //   - Incremental (Solr 8.9+/9): <backupLocation>/<backupName>/<collection>/...
+        //   - Non-incremental (Solr 6/7 only option, Solr 8.x default): <backupLocation>/<backupName>/...
+        var checkColl = solr.execInContainer("sh", "-c",
+            "test -d " + backupLocation + "/" + backupName + "/" + collection + " && echo yes || echo no");
+        String containerBackupDir = checkColl.getStdout().trim().equals("yes")
+            ? backupLocation + "/" + backupName + "/" + collection
+            : backupLocation + "/" + backupName;
         var collectionDir = backupRoot.resolve(collection);
         copyDirectoryFromContainer(solr, containerBackupDir, collectionDir);
         return backupRoot;
@@ -642,17 +897,6 @@ public class SolrSnapshotToOpenSearchTest {
             Files.createDirectories(localFile.getParent());
             solr.copyFileFromContainer(line, localFile.toString());
         }
-    }
-
-    private void waitForStandaloneBackup(SolrClusterContainer solr, String collection, int maxSeconds)
-        throws Exception {
-        for (int i = 0; i < maxSeconds; i++) {
-            var result = solr.execInContainer("curl", "-s",
-                "http://localhost:8983/solr/" + collection + "/replication?command=details&wt=json");
-            if (result.getStdout().contains("success")) return;
-            Thread.sleep(1000);
-        }
-        throw new RuntimeException("Backup did not complete within " + maxSeconds + "s");
     }
 
     private static void verifyDocCount(SearchClusterContainer cluster, String indexName, int expected) {

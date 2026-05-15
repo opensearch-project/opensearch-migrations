@@ -5,7 +5,7 @@ package price
 
 import "testing"
 
-func TestInstanceUnitGetRequiredNodeCount(t *testing.T) {
+func TestInstanceUnit_GetRequiredNodeCount(t *testing.T) {
 	type fields struct {
 		Price             map[string]Unit
 		CPU               int

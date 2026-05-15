@@ -14,6 +14,7 @@ Required environment variables (injected by Jenkins pipeline):
 import logging
 import os
 import time
+import uuid
 
 from console_link.models.cluster import Cluster
 
@@ -63,7 +64,7 @@ class Test0034CdcOnlyAossTarget(MATestBase):
             migrations_required=[MigrationType.CAPTURE_AND_REPLAY],
             allow_source_target_combinations=[],
         )
-        self.cdc_index = f"cdc0034-aoss-{self.unique_id}"
+        self.cdc_index = f"cdc0034-aoss-{self.unique_id}-{uuid.uuid4().hex[:4]}"
 
     def import_existing_clusters(self):
         self.target_cluster = _make_aoss_target_cluster()
@@ -123,9 +124,6 @@ class Test0034CdcOnlyAossTarget(MATestBase):
             time.sleep(10)
         raise AssertionError(f"{self.cdc_index}: expected {self.CDC_NUM_DOCS} docs, got {count}")
 
-    def test_after(self):
-        pass
-
 
 class Test0041CdcFullE2eAossTarget(MATestBase):
     """Full E2E (CDC + RFS) with AOSS search collection as target.
@@ -147,7 +145,7 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
                                  MigrationType.CAPTURE_AND_REPLAY],
             allow_source_target_combinations=[],
         )
-        uid = self.unique_id
+        uid = f"{self.unique_id}-{uuid.uuid4().hex[:4]}"
         self.idx_pre = f"cdc0041-pre-{uid}"
         self.idx_post = f"cdc0041-post-{uid}"
 
@@ -162,6 +160,16 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
         self.imported_clusters = True
         logger.info("AOSS target: %s", self.target_cluster.endpoint)
         logger.info("Source: %s", self.source_cluster.endpoint)
+
+    def prepare_workflow_snapshot_and_migration_config(self):
+        """Scope metadata + backfill to this test's own indices."""
+        allowlist = [self.idx_pre, self.idx_post]
+        self.workflow_snapshot_and_migration_config = [{
+            "migrations": [{
+                "metadataMigrationConfig": {"indexAllowlist": allowlist},
+                "documentBackfillConfig": {"indexAllowlist": allowlist},
+            }]
+        }]
 
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
@@ -231,6 +239,3 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
         raise AssertionError(
             f"Expected {self.idx_pre}={expected_pre}, {self.idx_post}={self.POST_SNAPSHOT_DOCS}, "
             f"got {self.idx_pre}={pre}, {self.idx_post}={post}")
-
-    def test_after(self):
-        pass

@@ -17,27 +17,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const fmtRegion = "Region:\t%s\n"
-
 // Provisioned estimate flags
 var (
-	provWorkload          string
-	provSize              float64
-	provAzs               int
-	provReplicas          int
-	provRegion            string
-	provPricing           string
-	provInputFile         string
-	provOutputFormat      string
-	provDedicatedManager  bool
-	provStorageClass      string
-	provCPUsPerShard      float32
-	provFreeStorage       int
-	provEdp               float64
-	provInstanceTypes     []string
-	provTargetShardSize   int
-	provExpansionRate     int
-	provMinimumJVM        float64
+	provWorkload         string
+	provSize             float64
+	provAzs              int
+	provReplicas         int
+	provRegion           string
+	provPricing          string
+	provInputFile        string
+	provOutputFormat     string
+	provDedicatedManager bool
+	provStorageClass     string
+	provCPUsPerShard     float32
+	provFreeStorage      int
+	provEdp              float64
+	provInstanceTypes    []string
+	provTargetShardSize  int
+	provExpansionRate    int
+	provMinimumJVM       float64
 	// Vector-specific flags
 	provVectorCount      int
 	provDimensions       int
@@ -52,16 +50,16 @@ var (
 
 // Serverless estimate flags
 var (
-	slsType          string
-	slsRegion        string
-	slsInputFile     string
-	slsOutputFormat  string
-	slsEdp           float64
-	slsRedundancy    bool
+	slsType         string
+	slsRegion       string
+	slsInputFile    string
+	slsOutputFormat string
+	slsEdp          float64
+	slsRedundancy   bool
 	// Ingest flags
-	slsMinIndexRate  float64
-	slsMaxIndexRate  float64
-	slsTimeAtMax     float64
+	slsMinIndexRate float64
+	slsMaxIndexRate float64
+	slsTimeAtMax    float64
 	// TimeSeries flags
 	slsDailyIndexSize float64
 	slsHotDays        int
@@ -69,11 +67,11 @@ var (
 	// Search flags
 	slsCollectionSize float64
 	// Vector flags
-	slsVectorCount   int64
-	slsDimensions    int64
-	slsVectorEngine  string
-	slsOnDisk        bool
-	slsCompression   int
+	slsVectorCount  int64
+	slsDimensions   int64
+	slsVectorEngine string
+	slsOnDisk       bool
+	slsCompression  int
 )
 
 var estimateProvisionedCmd = &cobra.Command{
@@ -209,10 +207,113 @@ func runEstimateProvisioned(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to parse input file: %w", err)
 		}
 	} else {
-		var err error
-		request, err = buildProvisionedRequestFromFlags()
-		if err != nil {
-			return err
+		if provSize == 0 {
+			return fmt.Errorf("--size is required (data size in GB)")
+		}
+
+		switch strings.ToLower(provWorkload) {
+		case "search":
+			sr := provisioned.GetDefaultSearchRequest()
+			sr.DataSize = provSize
+			sr.Region = provRegion
+			sr.PricingType = provPricing
+			if provAzs > 0 {
+				sr.Azs = provAzs
+			}
+			if provReplicas >= 0 {
+				sr.Replicas = provReplicas
+			}
+			sr.DedicatedManager = provDedicatedManager
+			sr.StorageClass = provStorageClass
+			if provCPUsPerShard > 0 {
+				sr.CPUsPerShard = provCPUsPerShard
+			}
+			sr.FreeStorageRequired = provFreeStorage
+			sr.Edp = provEdp
+			sr.ExpansionRate = provExpansionRate
+			sr.MinimumJVM = provMinimumJVM
+			if provTargetShardSize > 0 {
+				sr.TargetShardSize = provTargetShardSize
+			}
+			if len(provInstanceTypes) > 0 {
+				sr.InstanceTypes = provInstanceTypes
+			}
+			request.Search = sr
+
+		case "timeseries":
+			tr := provisioned.GetDefaultTimeSeriesRequest()
+			tr.IngestionSize = provSize
+			tr.Region = provRegion
+			tr.PricingType = provPricing
+			if provAzs > 0 {
+				tr.Azs = provAzs
+			}
+			if provReplicas >= 0 {
+				tr.Replicas = provReplicas
+			}
+			if provHotDays > 0 {
+				tr.HotRetentionPeriod = provHotDays
+			}
+			if provWarmDays > 0 {
+				tr.WarmRetentionPeriod = provWarmDays
+			}
+			if provColdDays > 0 {
+				tr.ColdRetentionPeriod = provColdDays
+			}
+			tr.DedicatedManager = provDedicatedManager
+			tr.StorageClass = provStorageClass
+			if provCPUsPerShard > 0 {
+				tr.CPUsPerShard = provCPUsPerShard
+			}
+			tr.FreeStorageRequired = provFreeStorage
+			tr.Edp = provEdp
+			tr.ExpansionRate = provExpansionRate
+			tr.MinimumJVM = provMinimumJVM
+			if provTargetShardSize > 0 {
+				tr.TargetShardSize = provTargetShardSize
+			}
+			if len(provInstanceTypes) > 0 {
+				tr.InstanceTypes = provInstanceTypes
+			}
+			request.TimeSeries = tr
+
+		case "vector":
+			vr := provisioned.GetDefaultVectorRequest()
+			vr.DataSize = provSize
+			vr.Region = provRegion
+			vr.PricingType = provPricing
+			if provAzs > 0 {
+				vr.Azs = provAzs
+			}
+			if provReplicas >= 0 {
+				vr.Replicas = provReplicas
+			}
+			if provVectorCount > 0 {
+				vr.VectorCount = provVectorCount
+			}
+			vr.DimensionsCount = provDimensions
+			vr.VectorEngineType = provVectorEngine
+			vr.OnDisk = provOnDisk
+			vr.CompressionLevel = provCompressionLevel
+			vr.DedicatedManager = provDedicatedManager
+			vr.StorageClass = provStorageClass
+			if provCPUsPerShard > 0 {
+				vr.CPUsPerShard = provCPUsPerShard
+			}
+			vr.FreeStorageRequired = provFreeStorage
+			vr.Edp = provEdp
+			vr.ExpansionRate = provExpansionRate
+			vr.MinimumJVM = provMinimumJVM
+			if provTargetShardSize > 0 {
+				vr.TargetShardSize = provTargetShardSize
+			}
+			if len(provInstanceTypes) > 0 {
+				vr.InstanceTypes = provInstanceTypes
+			}
+			request.Vector = vr
+
+		default:
+			return fmt.Errorf("unknown workload type: %s (use search, timeSeries, or vector)", provWorkload)
 		}
 	}
 
@@ -229,134 +330,6 @@ func runEstimateProvisioned(cmd *cobra.Command, args []string) error {
 	return outputResult(response, provOutputFormat)
 }
 
-// buildProvisionedRequestFromFlags constructs an EstimateRequest from CLI flags.
-func buildProvisionedRequestFromFlags() (provisioned.EstimateRequest, error) {
-	if provSize == 0 {
-		return provisioned.EstimateRequest{}, fmt.Errorf("--size is required (data size in GB)")
-	}
-
-	var request provisioned.EstimateRequest
-
-	switch strings.ToLower(provWorkload) {
-	case "search":
-		request.Search = buildSearchRequestFromFlags()
-	case "timeseries":
-		request.TimeSeries = buildTimeSeriesRequestFromFlags()
-	case "vector":
-		request.Vector = buildVectorRequestFromFlags()
-	default:
-		return provisioned.EstimateRequest{}, fmt.Errorf("unknown workload type: %s (use search, timeSeries, or vector)", provWorkload)
-	}
-
-	return request, nil
-}
-
-// buildSearchRequestFromFlags creates a search request from CLI flags.
-func buildSearchRequestFromFlags() *provisioned.SearchEstimateRequest {
-	sr := provisioned.GetDefaultSearchRequest()
-	sr.DataSize = provSize
-	sr.Region = provRegion
-	sr.PricingType = provPricing
-	if provAzs > 0 {
-		sr.Azs = provAzs
-	}
-	if provReplicas >= 0 {
-		sr.Replicas = provReplicas
-	}
-	sr.DedicatedManager = provDedicatedManager
-	sr.StorageClass = provStorageClass
-	if provCPUsPerShard > 0 {
-		sr.CPUsPerShard = provCPUsPerShard
-	}
-	sr.FreeStorageRequired = provFreeStorage
-	sr.Edp = provEdp
-	sr.ExpansionRate = provExpansionRate
-	sr.MinimumJVM = provMinimumJVM
-	if provTargetShardSize > 0 {
-		sr.TargetShardSize = provTargetShardSize
-	}
-	if len(provInstanceTypes) > 0 {
-		sr.InstanceTypes = provInstanceTypes
-	}
-	return sr
-}
-
-// buildTimeSeriesRequestFromFlags creates a time series request from CLI flags.
-func buildTimeSeriesRequestFromFlags() *provisioned.TimeSeriesEstimateRequest {
-	tr := provisioned.GetDefaultTimeSeriesRequest()
-	tr.IngestionSize = provSize
-	tr.Region = provRegion
-	tr.PricingType = provPricing
-	if provAzs > 0 {
-		tr.Azs = provAzs
-	}
-	if provReplicas >= 0 {
-		tr.Replicas = provReplicas
-	}
-	if provHotDays > 0 {
-		tr.HotRetentionPeriod = provHotDays
-	}
-	if provWarmDays > 0 {
-		tr.WarmRetentionPeriod = provWarmDays
-	}
-	if provColdDays > 0 {
-		tr.ColdRetentionPeriod = provColdDays
-	}
-	tr.DedicatedManager = provDedicatedManager
-	tr.StorageClass = provStorageClass
-	if provCPUsPerShard > 0 {
-		tr.CPUsPerShard = provCPUsPerShard
-	}
-	tr.FreeStorageRequired = provFreeStorage
-	tr.Edp = provEdp
-	tr.ExpansionRate = provExpansionRate
-	tr.MinimumJVM = provMinimumJVM
-	if provTargetShardSize > 0 {
-		tr.TargetShardSize = provTargetShardSize
-	}
-	if len(provInstanceTypes) > 0 {
-		tr.InstanceTypes = provInstanceTypes
-	}
-	return tr
-}
-
-// buildVectorRequestFromFlags creates a vector request from CLI flags.
-func buildVectorRequestFromFlags() *provisioned.VectorEstimateRequest {
-	vr := provisioned.GetDefaultVectorRequest()
-	vr.DataSize = provSize
-	vr.Region = provRegion
-	vr.PricingType = provPricing
-	if provAzs > 0 {
-		vr.Azs = provAzs
-	}
-	if provReplicas >= 0 {
-		vr.Replicas = provReplicas
-	}
-	if provVectorCount > 0 {
-		vr.VectorCount = provVectorCount
-	}
-	vr.DimensionsCount = provDimensions
-	vr.VectorEngineType = provVectorEngine
-	vr.OnDisk = provOnDisk
-	vr.CompressionLevel = provCompressionLevel
-	vr.DedicatedManager = provDedicatedManager
-	vr.StorageClass = provStorageClass
-	if provCPUsPerShard > 0 {
-		vr.CPUsPerShard = provCPUsPerShard
-	}
-	vr.FreeStorageRequired = provFreeStorage
-	vr.Edp = provEdp
-	vr.ExpansionRate = provExpansionRate
-	vr.MinimumJVM = provMinimumJVM
-	if provTargetShardSize > 0 {
-		vr.TargetShardSize = provTargetShardSize
-	}
-	if len(provInstanceTypes) > 0 {
-		vr.InstanceTypes = provInstanceTypes
-	}
-	return vr
-}
-
 func runEstimateServerless(cmd *cobra.Command, args []string) error {
 	var request serverless.EstimateRequest
 
@@ -369,10 +342,50 @@ func runEstimateServerless(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to parse input file: %w", err)
 		}
 	} else {
-		var err error
-		request, err = buildServerlessRequestFromFlags()
-		if err != nil {
-			return err
+		request.Region = slsRegion
+		request.Edp = slsEdp
+		request.Redundancy = &slsRedundancy
+
+		// Ingest is always required
+		request.Ingest = serverless.Ingest{
+			MinIndexingRate: slsMinIndexRate,
+			MaxIndexingRate: slsMaxIndexRate,
+			TimePerDayAtMax: slsTimeAtMax,
+		}
+
+		switch strings.ToLower(slsType) {
+		case "timeseries":
+			if slsDailyIndexSize == 0 {
+				return fmt.Errorf("--daily-index-size is required for timeSeries type")
+			}
+			request.TimeSeries = &serverless.TimeSeries{
+				DailyIndexSize: slsDailyIndexSize,
+				DaysInHot:      slsHotDays,
+				DaysInWarm:     slsWarmDays,
+			}
+
+		case "search":
+			if slsCollectionSize == 0 {
+				return fmt.Errorf("--collection-size is required for search type")
+			}
+			request.Search = &serverless.Search{
+				CollectionSize: slsCollectionSize,
+			}
+
+		case "vector":
+			if slsVectorCount == 0 {
+				return fmt.Errorf("--vector-count is required for vector type")
+			}
+			request.Vector = &serverless.Vector{
+				VectorCount:      slsVectorCount,
+				DimensionsCount:  slsDimensions,
+				VectorEngineType: slsVectorEngine,
+				OnDisk:           slsOnDisk,
+				CompressionLevel: slsCompression,
+			}
+
+		default:
+			return fmt.Errorf("unknown collection type: %s (use search, timeSeries, or vector)", slsType)
 		}
 	}
 
@@ -384,57 +397,6 @@ func runEstimateServerless(cmd *cobra.Command, args []string) error {
 	}
 
 	return outputResult(response, slsOutputFormat)
-}
-
-// buildServerlessRequestFromFlags constructs a serverless EstimateRequest from CLI flags.
-func buildServerlessRequestFromFlags() (serverless.EstimateRequest, error) {
-	request := serverless.EstimateRequest{
-		Region:     slsRegion,
-		Edp:        slsEdp,
-		Redundancy: &slsRedundancy,
-		Ingest: serverless.Ingest{
-			MinIndexingRate: slsMinIndexRate,
-			MaxIndexingRate: slsMaxIndexRate,
-			TimePerDayAtMax: slsTimeAtMax,
-		},
-	}
-
-	switch strings.ToLower(slsType) {
-	case "timeseries":
-		if slsDailyIndexSize == 0 {
-			return serverless.EstimateRequest{}, fmt.Errorf("--daily-index-size is required for timeSeries type")
-		}
-		request.TimeSeries = &serverless.TimeSeries{
-			DailyIndexSize: slsDailyIndexSize,
-			DaysInHot:      slsHotDays,
-			DaysInWarm:     slsWarmDays,
-		}
-
-	case "search":
-		if slsCollectionSize == 0 {
-			return serverless.EstimateRequest{}, fmt.Errorf("--collection-size is required for search type")
-		}
-		request.Search = &serverless.Search{
-			CollectionSize: slsCollectionSize,
-		}
-
-	case "vector":
-		if slsVectorCount == 0 {
-			return serverless.EstimateRequest{}, fmt.Errorf("--vector-count is required for vector type")
-		}
-		request.Vector = &serverless.Vector{
-			VectorCount:      slsVectorCount,
-			DimensionsCount:  slsDimensions,
-			VectorEngineType: slsVectorEngine,
-			OnDisk:           slsOnDisk,
-			CompressionLevel: slsCompression,
-		}
-
-	default:
-		return serverless.EstimateRequest{}, fmt.Errorf("unknown collection type: %s (use search, timeSeries, or vector)", slsType)
-	}
-
-	return request, nil
 }
 
 func outputResult(data interface{}, format string) error {
@@ -460,87 +422,73 @@ func outputTable(data interface{}) error {
 
 	switch resp := data.(type) {
 	case provisioned.EstimateResponse:
-		outputProvisionedTable(w, resp)
+		fmt.Fprintf(w, "OpenSearch Managed Cluster Cost Estimate\n")
+		fmt.Fprintf(w, "========================================\n\n")
+
+		if resp.SearchRequest != nil {
+			fmt.Fprintf(w, "Workload:\tSearch\n")
+			fmt.Fprintf(w, "Data Size:\t%.1f GB\n", resp.SearchRequest.DataSize)
+			fmt.Fprintf(w, "Region:\t%s\n", resp.SearchRequest.Region)
+		} else if resp.TimeSeriesRequest != nil {
+			fmt.Fprintf(w, "Workload:\tTime Series\n")
+			fmt.Fprintf(w, "Daily Ingestion:\t%.1f GB\n", resp.TimeSeriesRequest.IngestionSize)
+			fmt.Fprintf(w, "Region:\t%s\n", resp.TimeSeriesRequest.Region)
+		} else if resp.VectorRequest != nil {
+			fmt.Fprintf(w, "Workload:\tVector\n")
+			fmt.Fprintf(w, "Data Size:\t%.1f GB\n", resp.VectorRequest.DataSize)
+			fmt.Fprintf(w, "Region:\t%s\n", resp.VectorRequest.Region)
+		}
+
+		fmt.Fprintf(w, "\nHot Storage:\t%.1f GB\n", resp.TotalHotStorage)
+		if resp.TotalWarmStorage > 0 {
+			fmt.Fprintf(w, "Warm Storage:\t%.1f GB\n", resp.TotalWarmStorage)
+		}
+		if resp.TotalColdStorage > 0 {
+			fmt.Fprintf(w, "Cold Storage:\t%.1f GB\n", resp.TotalColdStorage)
+		}
+		fmt.Fprintf(w, "Primary Shards:\t%d\n", resp.ActivePrimaryShards)
+		fmt.Fprintf(w, "Total Shards:\t%d\n", resp.TotalActiveShards)
+
+		fmt.Fprintf(w, "\n%-5s\t%-20s\t%-6s\t%-12s\t%s\n", "Config", "Instance Type", "Nodes", "Monthly Cost", "Annual Cost")
+		fmt.Fprintf(w, "%-5s\t%-20s\t%-6s\t%-12s\t%s\n", "------", "--------------------", "------", "------------", "-----------")
+		for i, config := range resp.ClusterConfigs {
+			if config.HotNodes != nil {
+				fmt.Fprintf(w, "#%-4d\t%-20s\t%-6d\t$%-11.2f\t$%.2f\n",
+					i+1,
+					config.HotNodes.Type,
+					config.HotNodes.Count,
+					config.TotalCost,
+					config.TotalCost*12,
+				)
+			}
+		}
+
 	case serverless.EstimationResponse:
-		outputServerlessTable(w, resp)
+		fmt.Fprintf(w, "OpenSearch Serverless Cost Estimate\n")
+		fmt.Fprintf(w, "===================================\n\n")
+		fmt.Fprintf(w, "Region:\t%s\n", resp.Region)
+		fmt.Fprintf(w, "Redundancy:\t%v\n", resp.Redundancy)
+
+		fmt.Fprintf(w, "\nIngest OCU (min):\t%.1f\n", resp.Ingest.MinOCU)
+		fmt.Fprintf(w, "Ingest OCU (max):\t%.1f\n", resp.Ingest.MaxOCU)
+
+		if resp.TimeSeries != nil {
+			fmt.Fprintf(w, "\nType:\tTime Series\n")
+			fmt.Fprintf(w, "Hot Storage:\t%.1f GB\n", resp.TimeSeries.HotIndexSize)
+			fmt.Fprintf(w, "Warm Storage:\t%.1f GB\n", resp.TimeSeries.WarmIndexSize)
+		}
+		if resp.Search != nil {
+			fmt.Fprintf(w, "\nType:\tSearch\n")
+			fmt.Fprintf(w, "Collection Size:\t%.1f GB\n", resp.Search.CollectionSize)
+		}
+		if resp.Vector != nil {
+			fmt.Fprintf(w, "\nType:\tVector\n")
+			fmt.Fprintf(w, "Collection Size:\t%.1f GB\n", resp.Vector.CollectionSize)
+		}
+
+		fmt.Fprintf(w, "\nEstimated Monthly Cost:\t$%.2f\n", resp.Price.Month.Total)
+		fmt.Fprintf(w, "Estimated Annual Cost:\t$%.2f\n", resp.Price.Year.Total)
 	}
 
 	return w.Flush()
-}
-
-// outputProvisionedTable writes a provisioned estimate as a formatted table.
-func outputProvisionedTable(w *tabwriter.Writer, resp provisioned.EstimateResponse) {
-	fmt.Fprintf(w, "OpenSearch Managed Cluster Cost Estimate\n")
-	fmt.Fprintf(w, "========================================\n\n")
-
-	outputProvisionedWorkloadInfo(w, resp)
-
-	fmt.Fprintf(w, "\nHot Storage:\t%.1f GB\n", resp.TotalHotStorage)
-	if resp.TotalWarmStorage > 0 {
-		fmt.Fprintf(w, "Warm Storage:\t%.1f GB\n", resp.TotalWarmStorage)
-	}
-	if resp.TotalColdStorage > 0 {
-		fmt.Fprintf(w, "Cold Storage:\t%.1f GB\n", resp.TotalColdStorage)
-	}
-	fmt.Fprintf(w, "Primary Shards:\t%d\n", resp.ActivePrimaryShards)
-	fmt.Fprintf(w, "Total Shards:\t%d\n", resp.TotalActiveShards)
-
-	fmt.Fprintf(w, "\n%-5s\t%-20s\t%-6s\t%-12s\t%s\n", "Config", "Instance Type", "Nodes", "Monthly Cost", "Annual Cost")
-	fmt.Fprintf(w, "%-5s\t%-20s\t%-6s\t%-12s\t%s\n", "------", "--------------------", "------", "------------", "-----------")
-	for i, config := range resp.ClusterConfigs {
-		if config.HotNodes != nil {
-			fmt.Fprintf(w, "#%-4d\t%-20s\t%-6d\t$%-11.2f\t$%.2f\n",
-				i+1,
-				config.HotNodes.Type,
-				config.HotNodes.Count,
-				config.TotalCost,
-				config.TotalCost*12,
-			)
-		}
-	}
-}
-
-// outputProvisionedWorkloadInfo writes workload-specific header info for provisioned estimates.
-func outputProvisionedWorkloadInfo(w *tabwriter.Writer, resp provisioned.EstimateResponse) {
-	if resp.SearchRequest != nil {
-		fmt.Fprintf(w, "Workload:\tSearch\n")
-		fmt.Fprintf(w, "Data Size:\t%.1f GB\n", resp.SearchRequest.DataSize)
-		fmt.Fprintf(w, fmtRegion, resp.SearchRequest.Region)
-	} else if resp.TimeSeriesRequest != nil {
-		fmt.Fprintf(w, "Workload:\tTime Series\n")
-		fmt.Fprintf(w, "Daily Ingestion:\t%.1f GB\n", resp.TimeSeriesRequest.IngestionSize)
-		fmt.Fprintf(w, fmtRegion, resp.TimeSeriesRequest.Region)
-	} else if resp.VectorRequest != nil {
-		fmt.Fprintf(w, "Workload:\tVector\n")
-		fmt.Fprintf(w, "Data Size:\t%.1f GB\n", resp.VectorRequest.DataSize)
-		fmt.Fprintf(w, fmtRegion, resp.VectorRequest.Region)
-	}
-}
-
-// outputServerlessTable writes a serverless estimate as a formatted table.
-func outputServerlessTable(w *tabwriter.Writer, resp serverless.EstimationResponse) {
-	fmt.Fprintf(w, "OpenSearch Serverless Cost Estimate\n")
-	fmt.Fprintf(w, "===================================\n\n")
-	fmt.Fprintf(w, fmtRegion, resp.Region)
-	fmt.Fprintf(w, "Redundancy:\t%v\n", resp.Redundancy)
-
-	fmt.Fprintf(w, "\nIngest OCU (min):\t%.1f\n", resp.Ingest.MinOCU)
-	fmt.Fprintf(w, "Ingest OCU (max):\t%.1f\n", resp.Ingest.MaxOCU)
-
-	if resp.TimeSeries != nil {
-		fmt.Fprintf(w, "\nType:\tTime Series\n")
-		fmt.Fprintf(w, "Hot Storage:\t%.1f GB\n", resp.TimeSeries.HotIndexSize)
-		fmt.Fprintf(w, "Warm Storage:\t%.1f GB\n", resp.TimeSeries.WarmIndexSize)
-	}
-	if resp.Search != nil {
-		fmt.Fprintf(w, "\nType:\tSearch\n")
-		fmt.Fprintf(w, "Collection Size:\t%.1f GB\n", resp.Search.CollectionSize)
-	}
-	if resp.Vector != nil {
-		fmt.Fprintf(w, "\nType:\tVector\n")
-		fmt.Fprintf(w, "Collection Size:\t%.1f GB\n", resp.Vector.CollectionSize)
-	}
-
-	fmt.Fprintf(w, "\nEstimated Monthly Cost:\t$%.2f\n", resp.Price.Month.Total)
-	fmt.Fprintf(w, "Estimated Annual Cost:\t$%.2f\n", resp.Price.Year.Total)
 }

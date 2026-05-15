@@ -603,6 +603,17 @@ def _handle_kafka_storage(namespace, kafka_cluster_names, delete_storage):
         )
 
 
+def _warn_target_indexes_remain(targets):
+    """Remind users that snapshot migration target indexes are not deleted by reset."""
+    if not any(plural == 'snapshotmigrations' for plural, _, _, _ in targets):
+        return
+    click.echo(
+        "\nNote: reset does not delete indexes on the target cluster. "
+        "If the snapshot migration created indexes on the target, remove them with:\n"
+        "  console clusters clear-indices --cluster target"
+    )
+
+
 def _reset_by_resource_name(ctx, path, namespace, cascade, include_proxies, delete_storage,
                             delete_output_artifacts):
     """Handle reset for a specific resource path/pattern."""
@@ -618,6 +629,8 @@ def _reset_by_resource_name(ctx, path, namespace, cascade, include_proxies, dele
     _handle_kafka_storage(namespace, kafka_names, delete_storage)
     if not _delete_targets(targets, namespace, delete_output_artifacts):
         ctx.exit(ExitCode.FAILURE.value)
+        return
+    _warn_target_indexes_remain(targets)
 
 
 @click.command(name="reset")
@@ -701,6 +714,7 @@ def reset_command(ctx, names, reset_all, list_resources, cascade, include_proxie
             ctx.exit(ExitCode.FAILURE.value)
             return
 
+        _warn_target_indexes_remain(delete_targets)
         click.echo("Done.")
 
     except Exception as e:

@@ -1,4 +1,5 @@
 import logging
+import uuid
 from ..common_utils import convert_to_b64
 from ..cluster_version import ElasticsearchV5_X, OpensearchV1_X, OpensearchV2_X, OpensearchV3_X
 from .ma_argo_test_base import MATestBase, MATestUserArguments
@@ -17,7 +18,7 @@ class Test0004MultiTypeUnionMigration(MATestBase):
         super().__init__(user_args=user_args,
                          description=description,
                          allow_source_target_combinations=allow_combinations)
-        self.index_name = f"test_0004_{self.unique_id}"
+        self.index_name = f"test_0004_{self.unique_id}-{uuid.uuid4().hex[:4]}"
         self.doc_id1 = "test_0004_1"
         self.doc_id2 = "test_0004_2"
         self.doc_type1 = "sample_type1"
@@ -94,9 +95,10 @@ class Test0005MultiTypeSplitMigration(MATestBase):
         super().__init__(user_args=user_args,
                          description=description,
                          allow_source_target_combinations=allow_combinations)
-        self.index_name = f"test_0005_{self.unique_id}"
-        self.split_index_name1 = f"test_0005_split_1_{self.unique_id}"
-        self.split_index_name2 = f"test_0005_split_2_{self.unique_id}"
+        uid = f"{self.unique_id}-{uuid.uuid4().hex[:4]}"
+        self.index_name = f"test_0005_{uid}"
+        self.split_index_name1 = f"test_0005_split_1_{uid}"
+        self.split_index_name2 = f"test_0005_split_2_{uid}"
         self.doc_id1 = "test_0005_1"
         self.doc_id2 = "test_0005_2"
         self.doc_type1 = "sample_type1"

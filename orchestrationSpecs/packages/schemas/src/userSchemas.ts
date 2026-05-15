@@ -857,8 +857,8 @@ export const HTTP_AUTH_MTLS = z.object({
     })
 }).describe("Mutual TLS (mTLS) authentication using client certificates.");
 
-export const CLUSTER_VERSION_STRING = z.string().regex(/^(?:ES [125678]|OS [123]|SOLR [89])(?:\.[0-9]+)+$/)
-    .describe("Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0'.");
+export const CLUSTER_VERSION_STRING = z.string().regex(/^(?:ES [125678]|OS [123]|SOLR [6789])(?:\.[0-9]+)+$/)
+    .describe("Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.6'.");
 
 export const CLUSTER_CONFIG = z.object({
     endpoint:  z.string().regex(new RegExp(OPTIONAL_HTTP_ENDPOINT_PATTERN)).default("").optional()

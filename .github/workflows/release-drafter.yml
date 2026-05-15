@@ -14,12 +14,20 @@ env:
 permissions:
   id-token: write
   contents: write
-  issues: write
 
 jobs:
+  approve-release:
+    name: Approve release
+    if: ${{ !github.event.act && github.repository == 'opensearch-project/opensearch-migrations' }}
+    runs-on: ubuntu-22.04
+    environment: release-approval
+    steps:
+      - run: echo "Release approved"
+
   draft-a-release:
     name: Draft a release
-    if: ${{ github.event.act || github.repository == 'opensearch-project/opensearch-migrations' }}
+    needs: approve-release
+    if: ${{ github.event.act || needs.approve-release.result == 'success' }}
     runs-on: ubuntu-22.04
     services:
       registry:
@@ -38,17 +46,7 @@ jobs:
       - uses: ./.github/actions/setup-env
       - id: get_data
         run: |
-          echo "approvers=$(cat .github/CODEOWNERS | grep @ | tr -d '*\n ' | sed 's/@/,/g' | sed 's/,//1')" >> $GITHUB_OUTPUT
           echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-      - uses: trstringer/manual-approval@v1
-        if: ${{ !github.event.act }}
-        with:
-          secret: ${{ github.TOKEN }}
-          approvers: ${{ steps.get_data.outputs.approvers }}
-          minimum-approvals: 1
-          issue-title: 'Release opensearch-migrations version ${{ steps.get_data.outputs.version }}'
-          issue-body: "This release requires approval from at least one reviewer. Please approve or deny the release of opensearch-migrations **TAG**: ${{ github.ref_name }}  **COMMIT**: ${{ github.sha }} **VERSION**: ${{ steps.get_data.outputs.version }}. The published TrafficCapture version will be 0.${{ steps.get_data.outputs.version }}."
-          exclude-workflow-initiator-as-approver: true
       - name: Set up QEMU (for arm64 emulation)
         uses: docker/setup-qemu-action@v4
       - name: Set up Buildx builder (BuildKit)

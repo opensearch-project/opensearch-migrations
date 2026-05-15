@@ -104,6 +104,20 @@ public interface IWorkCoordinator extends AutoCloseable {
     ) throws IOException, InterruptedException;
 
     /**
+     * Release the lease on a work item without marking it complete, so that another worker can
+     * pick it up immediately.  Intended for the case where the current worker is shutting down
+     * before any progress (i.e. no checkpoint cursor) has been made on the item — staying on the
+     * lease until natural expiration would needlessly block the work.  This is a no-op if the
+     * work item is already completed or if the lease has already rolled to a different worker.
+     * The lease exponent is intentionally left untouched: a release implies the work hasn't
+     * been done yet and the next acquirer should still benefit from any prior backoff signal.
+     */
+    void releaseWorkItem(
+        String workItemId,
+        Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> contextSupplier
+    ) throws IOException, InterruptedException;
+
+    /**
      * Add the list of successor items to the work item, create new work items for each of the successors, and mark the
      * original work item as completed.
      * @param workItemId the work item that is being completed

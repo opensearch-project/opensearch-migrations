@@ -21,6 +21,8 @@ import org.testcontainers.utility.DockerImageName;
 @Slf4j
 public class SolrClusterContainer extends GenericContainer<SolrClusterContainer> {
 
+    public static final SolrVersion SOLR_6 = new SolrVersion("6.6.6");
+    public static final SolrVersion SOLR_7 = new SolrVersion("7.7.3");
     public static final SolrVersion SOLR_8 = new SolrVersion("8.11.4");
     public static final SolrVersion SOLR_9 = new SolrVersion("9.8.1");
 
@@ -80,6 +82,10 @@ public class SolrClusterContainer extends GenericContainer<SolrClusterContainer>
     }
 
     public record SolrVersion(String tag) {
+        public int major() {
+            return Integer.parseInt(tag.split("\\.")[0]);
+        }
+
         @Override
         public String toString() {
             return "Solr(" + tag + ")";

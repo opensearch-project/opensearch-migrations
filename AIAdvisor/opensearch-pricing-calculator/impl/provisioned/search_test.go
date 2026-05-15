@@ -31,14 +31,14 @@ func TestGetDefaultSearchRequest(t *testing.T) {
 
 // --- validateTierPercentages tests ---
 
-func TestSearchValidateTierPercentagesNegativeValues(t *testing.T) {
+func TestSearch_ValidateTierPercentages_NegativeValues(t *testing.T) {
 	r := &SearchEstimateRequest{WarmPercentage: -10, ColdPercentage: -5}
 	r.validateTierPercentages()
 	assert.Equal(t, 0, r.WarmPercentage)
 	assert.Equal(t, 0, r.ColdPercentage)
 }
 
-func TestSearchValidateTierPercentagesOverHundred(t *testing.T) {
+func TestSearch_ValidateTierPercentages_OverHundred(t *testing.T) {
 	r := &SearchEstimateRequest{WarmPercentage: 150, ColdPercentage: 200}
 	r.validateTierPercentages()
 	assert.LessOrEqual(t, r.WarmPercentage, 100)
@@ -46,26 +46,26 @@ func TestSearchValidateTierPercentagesOverHundred(t *testing.T) {
 	assert.LessOrEqual(t, r.WarmPercentage+r.ColdPercentage, 100)
 }
 
-func TestSearchValidateTierPercentagesSumExceeds100(t *testing.T) {
+func TestSearch_ValidateTierPercentages_SumExceeds100(t *testing.T) {
 	r := &SearchEstimateRequest{WarmPercentage: 60, ColdPercentage: 60}
 	r.validateTierPercentages()
 	assert.LessOrEqual(t, r.WarmPercentage+r.ColdPercentage, 100, "sum should not exceed 100")
 }
 
-func TestSearchValidateTierPercentagesValidValues(t *testing.T) {
+func TestSearch_ValidateTierPercentages_ValidValues(t *testing.T) {
 	r := &SearchEstimateRequest{WarmPercentage: 30, ColdPercentage: 20}
 	r.validateTierPercentages()
 	assert.Equal(t, 30, r.WarmPercentage)
 	assert.Equal(t, 20, r.ColdPercentage)
 }
 
-func TestSearchValidateTierPercentagesInvalidWarmInstanceType(t *testing.T) {
+func TestSearch_ValidateTierPercentages_InvalidWarmInstanceType(t *testing.T) {
 	r := &SearchEstimateRequest{WarmInstanceType: "invalid.instance.search"}
 	r.validateTierPercentages()
 	assert.Equal(t, "", r.WarmInstanceType, "invalid instance type should be reset")
 }
 
-func TestSearchValidateTierPercentagesValidWarmInstanceType(t *testing.T) {
+func TestSearch_ValidateTierPercentages_ValidWarmInstanceType(t *testing.T) {
 	validTypes := []string{
 		"ultrawarm1.medium.search", "ultrawarm1.large.search",
 		"oi2.xlarge.search", "oi2.2xlarge.search", "oi2.4xlarge.search",
@@ -80,18 +80,18 @@ func TestSearchValidateTierPercentagesValidWarmInstanceType(t *testing.T) {
 
 // --- isAutoSelectWarmInstance tests ---
 
-func TestSearchIsAutoSelectWarmInstanceNil(t *testing.T) {
+func TestSearch_IsAutoSelectWarmInstance_Nil(t *testing.T) {
 	r := &SearchEstimateRequest{}
 	assert.True(t, r.isAutoSelectWarmInstance(), "nil should default to true")
 }
 
-func TestSearchIsAutoSelectWarmInstanceTrue(t *testing.T) {
+func TestSearch_IsAutoSelectWarmInstance_True(t *testing.T) {
 	val := true
 	r := &SearchEstimateRequest{AutoSelectWarmInstance: &val}
 	assert.True(t, r.isAutoSelectWarmInstance())
 }
 
-func TestSearchIsAutoSelectWarmInstanceFalse(t *testing.T) {
+func TestSearch_IsAutoSelectWarmInstance_False(t *testing.T) {
 	val := false
 	r := &SearchEstimateRequest{AutoSelectWarmInstance: &val}
 	assert.False(t, r.isAutoSelectWarmInstance())
@@ -99,7 +99,7 @@ func TestSearchIsAutoSelectWarmInstanceFalse(t *testing.T) {
 
 // --- getStorageForTier tests ---
 
-func TestSearchGetStorageForTierAllHot(t *testing.T) {
+func TestSearch_GetStorageForTier_AllHot(t *testing.T) {
 	r := &SearchEstimateRequest{WarmPercentage: 0, ColdPercentage: 0}
 	hot, warm, cold := r.getStorageForTier(1000)
 	assert.Equal(t, 1000.0, hot)
@@ -107,7 +107,7 @@ func TestSearchGetStorageForTierAllHot(t *testing.T) {
 	assert.Equal(t, 0.0, cold)
 }
 
-func TestSearchGetStorageForTierMixed(t *testing.T) {
+func TestSearch_GetStorageForTier_Mixed(t *testing.T) {
 	r := &SearchEstimateRequest{WarmPercentage: 30, ColdPercentage: 20}
 	hot, warm, cold := r.getStorageForTier(1000)
 	assert.InDelta(t, 500.0, hot, 0.01)
@@ -115,7 +115,7 @@ func TestSearchGetStorageForTierMixed(t *testing.T) {
 	assert.InDelta(t, 200.0, cold, 0.01)
 }
 
-func TestSearchGetStorageForTierAllWarm(t *testing.T) {
+func TestSearch_GetStorageForTier_AllWarm(t *testing.T) {
 	r := &SearchEstimateRequest{WarmPercentage: 100, ColdPercentage: 0}
 	hot, warm, cold := r.getStorageForTier(1000)
 	assert.Equal(t, 0.0, hot)
@@ -123,7 +123,7 @@ func TestSearchGetStorageForTierAllWarm(t *testing.T) {
 	assert.Equal(t, 0.0, cold)
 }
 
-func TestSearchGetStorageForTierZeroTotal(t *testing.T) {
+func TestSearch_GetStorageForTier_ZeroTotal(t *testing.T) {
 	r := &SearchEstimateRequest{WarmPercentage: 50, ColdPercentage: 30}
 	hot, warm, cold := r.getStorageForTier(0)
 	assert.Equal(t, 0.0, hot)
@@ -133,19 +133,19 @@ func TestSearchGetStorageForTierZeroTotal(t *testing.T) {
 
 // --- calculateWarmStorage tests ---
 
-func TestSearchCalculateWarmStorageZero(t *testing.T) {
+func TestSearch_CalculateWarmStorage_Zero(t *testing.T) {
 	r := &SearchEstimateRequest{ExpansionRate: 10}
 	assert.Equal(t, 0.0, r.calculateWarmStorage(0))
 }
 
-func TestSearchCalculateWarmStorageWithExpansion(t *testing.T) {
+func TestSearch_CalculateWarmStorage_WithExpansion(t *testing.T) {
 	r := &SearchEstimateRequest{ExpansionRate: 10}
 	result := r.calculateWarmStorage(100)
 	// 100 * (1 + 10/100) = 100 * 1.1 = 110
 	assert.InDelta(t, 110.0, result, 0.01)
 }
 
-func TestSearchCalculateWarmStorageZeroExpansion(t *testing.T) {
+func TestSearch_CalculateWarmStorage_ZeroExpansion(t *testing.T) {
 	r := &SearchEstimateRequest{ExpansionRate: 0}
 	result := r.calculateWarmStorage(100)
 	assert.InDelta(t, 100.0, result, 0.01)
@@ -153,12 +153,12 @@ func TestSearchCalculateWarmStorageZeroExpansion(t *testing.T) {
 
 // --- calculateColdStorage tests ---
 
-func TestSearchCalculateColdStorageZero(t *testing.T) {
+func TestSearch_CalculateColdStorage_Zero(t *testing.T) {
 	r := &SearchEstimateRequest{}
 	assert.Equal(t, 0.0, r.calculateColdStorage(0))
 }
 
-func TestSearchCalculateColdStorageNonZero(t *testing.T) {
+func TestSearch_CalculateColdStorage_NonZero(t *testing.T) {
 	r := &SearchEstimateRequest{}
 	result := r.calculateColdStorage(500)
 	assert.Equal(t, 500.0, result)
@@ -166,24 +166,24 @@ func TestSearchCalculateColdStorageNonZero(t *testing.T) {
 
 // --- IsInstanceTypesAllowed tests ---
 
-func TestSearchIsInstanceTypesAllowedEmptyList(t *testing.T) {
+func TestSearch_IsInstanceTypesAllowed_EmptyList(t *testing.T) {
 	r := &SearchEstimateRequest{InstanceTypes: []string{}}
 	assert.True(t, r.IsInstanceTypesAllowed("r6g.xlarge.search"), "empty list should allow all")
 }
 
-func TestSearchIsInstanceTypesAllowedMatch(t *testing.T) {
+func TestSearch_IsInstanceTypesAllowed_Match(t *testing.T) {
 	r := &SearchEstimateRequest{InstanceTypes: []string{"r6g"}}
 	assert.True(t, r.IsInstanceTypesAllowed("r6g.xlarge.search"))
 	assert.True(t, r.IsInstanceTypesAllowed("r6g.2xlarge.search"))
 }
 
-func TestSearchIsInstanceTypesAllowedNoMatch(t *testing.T) {
+func TestSearch_IsInstanceTypesAllowed_NoMatch(t *testing.T) {
 	r := &SearchEstimateRequest{InstanceTypes: []string{"r6g"}}
 	assert.False(t, r.IsInstanceTypesAllowed("r7g.xlarge.search"))
 	assert.False(t, r.IsInstanceTypesAllowed("m5.xlarge.search"))
 }
 
-func TestSearchIsInstanceTypesAllowedMultipleTypes(t *testing.T) {
+func TestSearch_IsInstanceTypesAllowed_MultipleTypes(t *testing.T) {
 	r := &SearchEstimateRequest{InstanceTypes: []string{"r6g", "r7g"}}
 	assert.True(t, r.IsInstanceTypesAllowed("r6g.xlarge.search"))
 	assert.True(t, r.IsInstanceTypesAllowed("r7g.2xlarge.search"))
@@ -192,7 +192,7 @@ func TestSearchIsInstanceTypesAllowedMultipleTypes(t *testing.T) {
 
 // --- EstimateRequest.Validate tests ---
 
-func TestEstimateRequestValidateAllSet(t *testing.T) {
+func TestEstimateRequest_Validate_AllSet(t *testing.T) {
 	er := &EstimateRequest{
 		TimeSeries: &TimeSeriesEstimateRequest{},
 		Search:     &SearchEstimateRequest{},
@@ -202,25 +202,25 @@ func TestEstimateRequestValidateAllSet(t *testing.T) {
 	assert.Error(t, err, "should error when all three are set")
 }
 
-func TestEstimateRequestValidateSearchOnly(t *testing.T) {
+func TestEstimateRequest_Validate_SearchOnly(t *testing.T) {
 	er := &EstimateRequest{Search: &SearchEstimateRequest{}}
 	err := er.Validate()
 	assert.NoError(t, err)
 }
 
-func TestEstimateRequestValidateTimeSeriesOnly(t *testing.T) {
+func TestEstimateRequest_Validate_TimeSeriesOnly(t *testing.T) {
 	er := &EstimateRequest{TimeSeries: &TimeSeriesEstimateRequest{}}
 	err := er.Validate()
 	assert.NoError(t, err)
 }
 
-func TestEstimateRequestValidateVectorOnly(t *testing.T) {
+func TestEstimateRequest_Validate_VectorOnly(t *testing.T) {
 	er := &EstimateRequest{Vector: &VectorEstimateRequest{}}
 	err := er.Validate()
 	assert.NoError(t, err)
 }
 
-func TestEstimateRequestValidateNoneSet(t *testing.T) {
+func TestEstimateRequest_Validate_NoneSet(t *testing.T) {
 	er := &EstimateRequest{}
 	err := er.Validate()
 	assert.NoError(t, err)

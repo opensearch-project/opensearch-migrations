@@ -939,11 +939,18 @@ if [[ "$push_images_to_ecr" == "true" ]]; then
     echo "Mirroring MA images to private ECR..."
     export PATH="${HOME}/bin:${PATH}"
 
-    # crane copy with single retry
+    # crane copy with exponential backoff retry
     crane_copy_retry() {
       local src="$1" dst="$2"
-      crane copy "$src" "$dst" 2>&1 | tail -1 || { sleep 5; crane copy "$src" "$dst" 2>&1 | tail -1; } \
-        || echo "  ❌ FAILED: $src → $dst" >&2
+      local attempt
+      for attempt in 1 2 3 4 5; do
+        if crane copy "$src" "$dst" 2>&1 | tail -1; then
+          return 0
+        fi
+        sleep $((5 * 2**(attempt-1)))  # exponential backoff: 5s, 10s, 20s, 40s, 80s
+      done
+      echo "  ❌ FAILED: $src → $dst" >&2
+      return 1
     }
 
     # MA image mapping: build_tag_name|public_ecr_suffix

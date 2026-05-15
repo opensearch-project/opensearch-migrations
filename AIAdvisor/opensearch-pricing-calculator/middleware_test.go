@@ -19,7 +19,7 @@ func newTestApp() *application {
 	}
 }
 
-func TestEnableCorsAllowedOrigin(t *testing.T) {
+func TestEnableCors_AllowedOrigin(t *testing.T) {
 	app := newTestApp()
 
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +53,7 @@ func TestEnableCorsAllowedOrigin(t *testing.T) {
 	}
 }
 
-func TestEnableCorsDisallowedOrigin(t *testing.T) {
+func TestEnableCors_DisallowedOrigin(t *testing.T) {
 	app := newTestApp()
 
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +82,7 @@ func TestEnableCorsDisallowedOrigin(t *testing.T) {
 	}
 }
 
-func TestRateLimiterAllowsBelowLimit(t *testing.T) {
+func TestRateLimiter_AllowsBelowLimit(t *testing.T) {
 	rl := NewRateLimiter(10, time.Second, 5)
 
 	// The first 5 requests (burst size) should all be allowed.
@@ -93,7 +93,7 @@ func TestRateLimiterAllowsBelowLimit(t *testing.T) {
 	}
 }
 
-func TestRateLimiterBlocksAboveLimit(t *testing.T) {
+func TestRateLimiter_BlocksAboveLimit(t *testing.T) {
 	rl := NewRateLimiter(10, time.Second, 3)
 
 	// Exhaust all 3 burst tokens.
@@ -110,7 +110,7 @@ func TestRateLimiterBlocksAboveLimit(t *testing.T) {
 	}
 }
 
-func TestGetClientIPXForwardedFor(t *testing.T) {
+func TestGetClientIP_XForwardedFor(t *testing.T) {
 	tests := []struct {
 		name     string
 		xff      string
@@ -146,7 +146,7 @@ func TestGetClientIPXForwardedFor(t *testing.T) {
 	}
 }
 
-func TestGetClientIPFallbackToRemoteAddr(t *testing.T) {
+func TestGetClientIP_FallbackToRemoteAddr(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	// httptest.NewRequest sets RemoteAddr to "192.0.2.1:1234" by default.
 	// Clear proxy headers to force the RemoteAddr fallback path.

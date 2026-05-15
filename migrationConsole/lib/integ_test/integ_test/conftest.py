@@ -178,17 +178,11 @@ def pytest_runtest_makereport(item, call):
 
 
 def pytest_sessionfinish(session, exitstatus):
-    # If no compatible tests were found, record it in the report as a skip (not a failure).
-    # Version pairs with zero compatible tests (e.g. OS_1.3 → OS_2.19) are expected —
-    # the outer test_runner.py uses the expected==0 field to handle this gracefully.
-    error = session.config.test_summary.get("error")
-    if error:
-        session.config.collected_data.append({
-            "name": "test_compatibility_check",
-            "description": error,
-            "result": "skipped",
-            "duration": 0.0,
-        })
+    # Version pairs with zero compatible tests (expected==0) surface via
+    # summary.expected only — the outer test_runner.py treats that as
+    # non-failure. We intentionally do NOT synthesise a pseudo-test entry
+    # here; it would appear as a new column in the cross-version matrix.
+    _ = session.config.test_summary.get("error")
 
     # Write test report file at end of test session
     unique_id = session.config.getoption("unique_id")

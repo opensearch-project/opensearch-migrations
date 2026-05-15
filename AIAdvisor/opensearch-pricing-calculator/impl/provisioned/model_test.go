@@ -17,7 +17,7 @@ func TestMaxNodeCountPerCluster(t *testing.T) {
 	assert.Equal(t, 1002, MaxNodeCountPerCluster[3], "MaxNodeCountPerCluster for 3 AZs should be 1002")
 }
 
-func TestTimeSeriesEstimateRequestNodeCountLimit(t *testing.T) {
+func TestTimeSeriesEstimateRequest_NodeCountLimit(t *testing.T) {
 	tests := []struct {
 		name           string
 		azs            int
@@ -100,7 +100,7 @@ func TestTimeSeriesEstimateRequestNodeCountLimit(t *testing.T) {
 	}
 }
 
-func TestSearchEstimateRequestNodeCountLimit(t *testing.T) {
+func TestSearchEstimateRequest_NodeCountLimit(t *testing.T) {
 	// Mock instance unit for testing
 	instanceUnit := price.InstanceUnit{
 		CPU: 8,
@@ -161,7 +161,7 @@ func TestSearchEstimateRequestNodeCountLimit(t *testing.T) {
 	}
 }
 
-func TestHotNodesCalculateMetricsWithStandby(t *testing.T) {
+func TestHotNodes_CalculateMetricsWithStandby(t *testing.T) {
 	tests := []struct {
 		name                  string
 		count                 int
@@ -228,7 +228,7 @@ func TestHotNodesCalculateMetricsWithStandby(t *testing.T) {
 	}
 }
 
-func TestSearchEstimateRequestMultiAzWithStandbyNormalize(t *testing.T) {
+func TestSearchEstimateRequest_MultiAzWithStandby_Normalize(t *testing.T) {
 	tests := []struct {
 		name               string
 		replicas           int
@@ -283,7 +283,7 @@ func TestSearchEstimateRequestMultiAzWithStandbyNormalize(t *testing.T) {
 	}
 }
 
-func TestTimeSeriesEstimateRequestMultiAzWithStandbyNormalize(t *testing.T) {
+func TestTimeSeriesEstimateRequest_MultiAzWithStandby_Normalize(t *testing.T) {
 	tests := []struct {
 		name               string
 		replicas           int
@@ -320,7 +320,7 @@ func TestTimeSeriesEstimateRequestMultiAzWithStandbyNormalize(t *testing.T) {
 	}
 }
 
-func TestVectorEstimateRequestMultiAzWithStandbyNormalize(t *testing.T) {
+func TestVectorEstimateRequest_MultiAzWithStandby_Normalize(t *testing.T) {
 	tests := []struct {
 		name               string
 		replicas           int
@@ -357,7 +357,7 @@ func TestVectorEstimateRequestMultiAzWithStandbyNormalize(t *testing.T) {
 	}
 }
 
-func TestVectorEstimateRequestNodeCountLimit(t *testing.T) {
+func TestVectorEstimateRequest_NodeCountLimit(t *testing.T) {
 	// Similar to SearchEstimateRequest test but for VectorEstimateRequest
 	// Mock instance unit for testing
 	instanceUnit := price.InstanceUnit{

@@ -12,6 +12,7 @@ public interface IWorkCoordinationContexts {
         public static final String SYNC_REFRESH_CLUSTER = "refreshCluster";
         public static final String ACQUIRE_SPECIFIC_WORK = "acquireSpecificWorkItem";
         public static final String COMPLETE_WORK = "completeWork";
+        public static final String RELEASE_WORK = "releaseWork";
         public static final String ACQUIRE_NEXT_WORK = "acquireNextWorkItem";
         public static final String CREATE_SUCCESSOR_WORK_ITEMS = "createSuccessorWorkItems";
 
@@ -80,6 +81,10 @@ public interface IWorkCoordinationContexts {
         String ACTIVITY_NAME = ActivityNames.COMPLETE_WORK;
 
         IRefreshContext getRefreshContext();
+    }
+
+    interface IReleaseWorkItemContext extends IRetryableActivityContext {
+        String ACTIVITY_NAME = ActivityNames.RELEASE_WORK;
     }
 
     interface ICreateSuccessorWorkItemsContext extends IRetryableActivityContext {

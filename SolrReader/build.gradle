@@ -12,7 +12,10 @@ dependencies {
     implementation project(':RfsHttp')
     implementation project(':SearchSnapshotExtractor')
 
-    // Shadow lucene9 jar for reading Solr 8 (Lucene 8.11) backup files
+    // Shadow lucene jars for reading Solr backup files across versions:
+    //   Solr 6 → Lucene 6, Solr 7 → Lucene 7, Solr 8/9 → Lucene 9 (8 via backward-codecs).
+    implementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene6').map { it.outputs.files }
+    implementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene7').map { it.outputs.files }
     implementation project(':SearchSnapshotExtractor').tasks.named('shadowLucene9').map { it.outputs.files }
 
     implementation libs.jackson.databind

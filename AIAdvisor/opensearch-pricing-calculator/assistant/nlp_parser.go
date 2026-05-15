@@ -41,11 +41,11 @@ func NewNLPParser() *NLPParser {
 			"timeseries": regexp.MustCompile(`(?i)(time[\s-]?series|log|logs|logging|metrics|monitoring|observability)`),
 		},
 		sizePatterns:   regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*(gb|tb|pb|gib|tib|pib)`),
-		regionPatterns: regexp.MustCompile(`(?i)(us[\s-]?east[\s-]?1|us[\s-]?west[\s-]?2|eu[\s-]?west[\s-]?1|ap[\s-]?southeast[\s-]?1|us-east-1|us-west-2|eu-west-1|ap-southeast-1)`),
+		regionPatterns: regexp.MustCompile(`(?i)(us[\s-]?east[\s-]?[12]|us[\s-]?west[\s-]?[12]|eu[\s-]?west[\s-]?[123]|eu[\s-]?central[\s-]?[12]|eu[\s-]?north[\s-]?1|eu[\s-]?south[\s-]?[12]|ap[\s-]?southeast[\s-]?[1234]|ap[\s-]?northeast[\s-]?[123]|ap[\s-]?south[\s-]?[12]|ap[\s-]?east[\s-]?1|sa[\s-]?east[\s-]?1|ca[\s-]?central[\s-]?1|ca[\s-]?west[\s-]?1|me[\s-]?south[\s-]?1|me[\s-]?central[\s-]?1|af[\s-]?south[\s-]?1|il[\s-]?central[\s-]?1|cn[\s-]?north[\s-]?1|cn[\s-]?northwest[\s-]?1|us[\s-]?iso[\s-]?east[\s-]?1|us[\s-]?iso[\s-]?west[\s-]?1|us[\s-]?isob[\s-]?east[\s-]?1|us[\s-]?isob[\s-]?west[\s-]?1)`),
 		vectorPatterns: &vectorPatterns{
 			count:      regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*(million|m|billion|b|k|thousand)?\s*vectors?`),
 			dimensions: regexp.MustCompile(`(?i)(\d+)\s*(?:dim(?:ension)?s?|d)`),
-			engine:     regexp.MustCompile(`(?i)(hnsw(?:fp16|int8|bv|pq)?|nmslib|ivf(?:fp16|int8|bv|pq)?|exact\s*knn|faiss)`),
+			engine:     regexp.MustCompile(`(?i)(hnsw(?:fp16|int8|bv|pq)?|nmslib|ivf(?:fp16|int8|bv|pq)?|exact\s*knn|faiss|s3\s*vector(?:\s*engine)?|s3)`),
 		},
 		deploymentPatterns: map[string]*regexp.Regexp{
 			"managed":    regexp.MustCompile(`(?i)(managed|provisioned|dedicated|cluster)`),
@@ -68,18 +68,19 @@ func (p *NLPParser) Parse(query string) (*ParsedQuery, error) {
 	result := &ParsedQuery{
 		RawQuery:   query,
 		Confidence: 1.0,
-		Region:     "us-east-1",
+		Region:     "us-east-1", // default
 	}
 
 	// Detect workload type
 	result.WorkloadType = p.detectWorkloadType(query)
 	if result.WorkloadType == "" {
 		result.Confidence *= 0.5
-		result.WorkloadType = "search"
+		result.WorkloadType = "search" // default
 	}
 
 	// Extract size
-	if size := p.extractSize(query); size > 0 {
+	size := p.extractSize(query)
+	if size > 0 {
 		result.Size = size
 	} else {
 		result.Confidence *= 0.7
@@ -92,41 +93,32 @@ func (p *NLPParser) Parse(query string) (*ParsedQuery, error) {
 
 	// Extract vector-specific parameters
 	if result.WorkloadType == "vector" {
-		p.extractVectorParams(query, result)
+		vectorCount := p.extractVectorCount(query)
+		if vectorCount > 0 {
+			result.VectorCount = vectorCount
+		} else {
+			result.Confidence *= 0.6
+		}
+
+		dimensions := p.extractDimensions(query)
+		if dimensions > 0 {
+			result.Dimensions = dimensions
+		} else {
+			result.Confidence *= 0.6
+			result.Dimensions = 768 // default
+		}
+
+		if engine := p.extractVectorEngine(query); engine != "" {
+			result.VectorEngine = engine
+		} else {
+			result.VectorEngine = "hnswfp16" // default - most common/efficient algorithm
+		}
 	}
 
+	// Extract deployment preference
 	result.DeploymentPreference = p.detectDeploymentPreference(query)
-	p.extractRetentionPeriods(query, result)
-	result.MultiAzWithStandby = p.detectStandby(query)
-	result.Intent = p.determineIntent(query)
 
-	return result, nil
-}
-
-// extractVectorParams populates vector-specific fields on the parsed query.
-func (p *NLPParser) extractVectorParams(query string, result *ParsedQuery) {
-	if vectorCount := p.extractVectorCount(query); vectorCount > 0 {
-		result.VectorCount = vectorCount
-	} else {
-		result.Confidence *= 0.6
-	}
-
-	if dimensions := p.extractDimensions(query); dimensions > 0 {
-		result.Dimensions = dimensions
-	} else {
-		result.Confidence *= 0.6
-		result.Dimensions = 768
-	}
-
-	if engine := p.extractVectorEngine(query); engine != "" {
-		result.VectorEngine = engine
-	} else {
-		result.VectorEngine = "hnswfp16"
-	}
-}
-
-// extractRetentionPeriods populates hot and warm retention period fields on the parsed query.
-func (p *NLPParser) extractRetentionPeriods(query string, result *ParsedQuery) {
+	// Extract retention periods
 	hotPeriod := p.extractHotPeriod(query)
 	warmPeriod := p.extractWarmPeriod(query)
 
@@ -144,10 +136,18 @@ func (p *NLPParser) extractRetentionPeriods(query string, result *ParsedQuery) {
 		}
 	}
 
-	// For timeseries workloads, default to 14 days hot retention
+	// For timeseries workloads, if no retention period specified at all, default to 14 days hot
 	if result.WorkloadType == "timeseries" && result.HotPeriod == 0 && result.WarmPeriod == 0 {
-		result.HotPeriod = 14
+		result.HotPeriod = 14 // Default: 14 days hot retention
 	}
+
+	// Extract Multi-AZ with Standby preference
+	result.MultiAzWithStandby = p.detectStandby(query)
+
+	// Determine intent
+	result.Intent = p.determineIntent(query)
+
+	return result, nil
 }
 
 func (p *NLPParser) detectWorkloadType(query string) string {
@@ -275,6 +275,10 @@ func (p *NLPParser) extractVectorEngine(query string) string {
 		return "ivfbv"
 	case "ivfpq":
 		return "ivfpq"
+
+	// S3 vector engine
+	case "s3", "s3vector", "s3vectorengine":
+		return "s3"
 
 	// Other algorithms
 	case "nmslib":

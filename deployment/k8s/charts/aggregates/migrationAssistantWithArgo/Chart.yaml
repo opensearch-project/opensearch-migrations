@@ -2,4 +2,6 @@ apiVersion: v2
 name: migration-assistant
 version: 0.2.0
 type: application
-appVersion: "1.16.0"
+appVersion: "latest"
+# podFailurePolicy on Jobs requires Kubernetes >= 1.26 (beta) / GA in 1.31.
+kubeVersion: ">=1.35.0-0"

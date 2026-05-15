@@ -36,9 +36,18 @@ class ServiceStatusError(Exception):
     pass
 
 
-def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=None, headers=None, timeout=None,
+def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=None, headers=None, timeout=30,
                      session=None, expected_status_code: int = 200, max_attempts: int = 10, delay: float = 2.5,
                      test_case=None):
+    """HTTP gateway used by all integ_test checks.
+
+    timeout defaults to 30s per attempt because this is called from test
+    lifecycle code (verify_clusters, display_final_cluster_state, ...) where
+    a silently-stuck HTTP socket would otherwise hang pytest until the outer
+    Jenkins pipeline timeout fires. Any caller that legitimately needs longer
+    (slow reindex, large snapshot restore) passes an explicit timeout=.
+    Pass timeout=None to opt out (not recommended for test paths).
+    """
     api_exception = None
     last_received_status = None
     last_response = None
