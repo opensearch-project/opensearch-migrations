@@ -2,4 +2,4 @@ apiVersion: v2
 name: migration-assistant
 version: 0.2.0
 type: application
-appVersion: "1.16.0"
+appVersion: "latest"

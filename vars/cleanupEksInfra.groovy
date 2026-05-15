@@ -1,13 +1,13 @@
 /**
- * Shared EKS cleanup step for Jenkins pipeline post blocks.
+ * cleanupEksInfra — AWS-level infrastructure teardown for EKS.
  *
- * Cleans up EKS resources that CloudFormation cannot delete on its own:
- * - Kubernetes namespace (waits for ENI drain)
- * - EKS-managed instance profiles (detaches roles so CFN can delete them)
- * - Orphaned EKS security groups (blocks VPC deletion)
+ * Cleans up resources CloudFormation can't delete on its own:
+ * EKS-managed instance profiles, orphaned EKS security groups, and
+ * a namespace-terminated wait to let ENIs detach. Call this AFTER
+ * teardownMaApp and BEFORE CFN delete-stack. EKS-only.
  *
  * Usage:
- *   eksCleanupStep(stackName: 'my-cfn-stack', eksClusterName: 'my-cluster', kubeContext: 'my-context')
+ *   cleanupEksInfra(stackName: 'my-cfn-stack', eksClusterName: 'my-cluster', kubeContext: 'my-context')
  */
 def call(Map config = [:]) {
     def stackName = config.stackName
@@ -46,6 +46,9 @@ def call(Map config = [:]) {
     """
 
     // 3. Clean up orphaned EKS security groups that block VPC deletion.
+    //    Revoke ingress/egress rules first (breaks circular SG refs so ENIs
+    //    can detach), then retry delete 10 x 60s. On failure, dump residual
+    //    ENI/rule state.
     sh """
         echo "CLEANUP: Finding orphaned EKS security groups for cluster ${eksClusterName}"
         eks_sgs=\$(aws ec2 describe-security-groups \
@@ -54,16 +57,46 @@ def call(Map config = [:]) {
         if [ -z "\$eks_sgs" ]; then
             echo "CLEANUP: No orphaned EKS security groups found"
         else
+            # (a) Revoke rules — one describe per SG, split ingress/egress via jq.
+            for sg in \$eks_sgs; do
+                echo "CLEANUP: Revoking ingress/egress rules on SG \$sg to release ENI attachments"
+                sg_json=\$(aws ec2 describe-security-groups --group-ids "\$sg" \
+                    --query 'SecurityGroups[0]' --output json 2>/dev/null || echo '{}')
+                ingress=\$(echo "\$sg_json" | jq -c '.IpPermissions // []')
+                egress=\$(echo "\$sg_json" | jq -c '.IpPermissionsEgress // []')
+                if [ "\$ingress" != '[]' ]; then
+                    aws ec2 revoke-security-group-ingress --group-id "\$sg" \
+                        --ip-permissions "\$ingress" >/dev/null 2>&1 || true
+                fi
+                if [ "\$egress" != '[]' ]; then
+                    aws ec2 revoke-security-group-egress --group-id "\$sg" \
+                        --ip-permissions "\$egress" >/dev/null 2>&1 || true
+                fi
+            done
+
+            # (b) Retry delete up to 10 min.
             for sg in \$eks_sgs; do
                 echo "CLEANUP: Deleting EKS security group \$sg"
-                for i in 1 2 3 4 5; do
+                deleted=false
+                for i in 1 2 3 4 5 6 7 8 9 10; do
                     if aws ec2 delete-security-group --group-id "\$sg" >/dev/null 2>&1; then
-                        echo "CLEANUP: Deleted SG \$sg"
+                        echo "CLEANUP: Deleted SG \$sg on attempt \$i"
+                        deleted=true
                         break
                     fi
-                    echo "CLEANUP: SG \$sg delete failed (attempt \$i), waiting for ENIs to drain..."
-                    sleep 30
+                    echo "CLEANUP: SG \$sg delete failed (attempt \$i/10), waiting 60s for ENIs to drain..."
+                    sleep 60
                 done
+                if [ "\$deleted" = "false" ]; then
+                    # (c) Residual-state dump — exactly what ENIs/rules held the SG alive.
+                    echo "CLEANUP: SG \$sg still present after 10 retries — residual ENI/rule state:"
+                    aws ec2 describe-network-interfaces --filters "Name=group-id,Values=\$sg" \
+                        --query 'NetworkInterfaces[].[NetworkInterfaceId,Status,Attachment.InstanceId,Description]' \
+                        --output table 2>/dev/null || true
+                    aws ec2 describe-security-groups --group-ids "\$sg" \
+                        --query 'SecurityGroups[0].[IpPermissions,IpPermissionsEgress]' \
+                        --output json 2>/dev/null || true
+                fi
             done
         fi
     """

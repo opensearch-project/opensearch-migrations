@@ -304,51 +304,21 @@ def call(Map config = [:]) {
 
         post {
             always {
-                timeout(time: 75, unit: 'MINUTES') {
-                    script {
-                        def region = params.REGION ?: 'us-east-1'
-
-                        withMigrationsTestAccount(region: region, duration: 4500) { accountId ->
-                            sh "mkdir -p libraries/testAutomation/logs"
-                            archiveArtifacts artifacts: 'libraries/testAutomation/logs/**', allowEmptyArchive: true
-
-                            // CDC + EKS cleanup
-                            if (env.eksClusterName) {
-                                cdcCleanupStep(kubeContext: env.eksKubeContext)
-                                eksCleanupStep(
-                                    stackName: isolatedStackName,
-                                    eksClusterName: env.eksClusterName,
-                                    kubeContext: env.eksKubeContext
-                                )
-                            }
-
-                            // Destroy AOS domains and delete isolated CFN stack in parallel
-                            parallel(
-                                'Destroy AOS Domains': {
-                                    dir('test') {
-                                        echo "CLEANUP: Destroying AOS domain stacks"
-                                        sh "./awsDeployCluster.sh --stage ${env.maStageName} --context-file ${clusterContextFilePath} --destroy || true"
-                                    }
-                                },
-                                'Delete Isolated Stack': {
-                                    echo "CLEANUP: Deleting isolated CFN stack ${isolatedStackName}"
-                                    sh "aws cloudformation delete-stack --stack-name ${isolatedStackName} --region ${region} || true"
-                                    sh "aws cloudformation wait stack-delete-complete --stack-name ${isolatedStackName} --region ${region} || true"
-                                }
-                            )
-
-                            // Delete isolated VPC (after CFN stack is gone)
-                            cleanupIsolatedVpc(region: region, vpcId: isolatedVpcId, stage: env.maStageName)
-
-                            // Build stack deletion was initiated after Phase 2 — confirm completion
-                            echo "CLEANUP: Confirming build stack ${buildStackName} is deleted"
-                            sh "aws cloudformation delete-stack --stack-name ${buildStackName} --region ${region} || true"
-                            sh "aws cloudformation wait stack-delete-complete --stack-name ${buildStackName} --region ${region} || true"
-                        }
-
-                        sh "kubectl config delete-context ${env.eksKubeContext} 2>/dev/null || true"
-                    }
-                }
+                eksPostCleanup(
+                    maStackName: isolatedStackName,
+                    clusterStackName: "OpenSearch-${env.maStageName}-${params.REGION}",
+                    kubeContext: env.eksKubeContext,
+                    eksClusterName: env.eksClusterName,
+                    cdkContextFile: clusterContextFilePath,
+                    cdkStage: env.maStageName,
+                    stepsAfterMaDelete: [
+                        [type: 'isolated-vpc', vpcId: isolatedVpcId, stage: env.maStageName,
+                         reason: 'isolated VPC teardown'],
+                        [type: 'cfn-destroy', stackName: buildStackName,
+                         reason: 'build stack confirmation (deletion initiated in Phase 2)'],
+                    ],
+                    extraVerifyStacks: [buildStackName],
+                )
             }
         }
     }

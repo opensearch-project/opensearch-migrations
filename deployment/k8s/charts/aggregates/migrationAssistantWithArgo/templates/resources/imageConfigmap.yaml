@@ -7,13 +7,13 @@ metadata:
     workflows.argoproj.io/configmap-type: Parameter
 
 data:
-  captureProxyImage: "{{ .Values.images.captureProxy.repository }}:{{ .Values.images.captureProxy.tag }}"
+  captureProxyImage: "{{ include "migration.image" (dict "root" . "image" .Values.images.captureProxy) }}"
   captureProxyPullPolicy: "{{ .Values.images.captureProxy.pullPolicy }}"
-  trafficReplayerImage: "{{ .Values.images.trafficReplayer.repository }}:{{ .Values.images.trafficReplayer.tag }}"
+  trafficReplayerImage: "{{ include "migration.image" (dict "root" . "image" .Values.images.trafficReplayer) }}"
   trafficReplayerPullPolicy: "{{ .Values.images.trafficReplayer.pullPolicy }}"
-  reindexFromSnapshotImage: "{{ .Values.images.reindexFromSnapshot.repository }}:{{ .Values.images.reindexFromSnapshot.tag }}"
+  reindexFromSnapshotImage: "{{ include "migration.image" (dict "root" . "image" .Values.images.reindexFromSnapshot) }}"
   reindexFromSnapshotPullPolicy: "{{ .Values.images.reindexFromSnapshot.pullPolicy }}"
-  migrationConsoleImage: "{{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}"
+  migrationConsoleImage: "{{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}"
   migrationConsolePullPolicy: "{{ .Values.images.migrationConsole.pullPolicy }}"
   coordinatorClusterImage: "{{ .Values.images.coordinatorCluster.repository }}:{{ .Values.images.coordinatorCluster.tag }}"
   coordinatorClusterPullPolicy: "{{ .Values.images.coordinatorCluster.pullPolicy }}"

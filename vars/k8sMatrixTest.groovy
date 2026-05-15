@@ -209,25 +209,28 @@ def call(Map config = [:]) {
                     }
                 }
             }
-            stage('Print Complete Results') {
-                steps {
-                    timeout(time: 15, unit: 'MINUTES') {
-                        dir('libraries/testAutomation') {
-                            script {
-                                sh "pipenv install --deploy"
-                                sh "pipenv run app --test-reports-dir='./reports' --output-reports-summary-only"
-                            }
-                        }
-                    }
-                }
-            }
         }
         
         post {
             always {
+                // Render the aggregated matrix summary even when the pipeline
+                // was aborted or timed out mid-run, so triagers see what ran,
+                // what was still pending, and which child job to open. This
+                // aggregates junit XML from all parallel children, so it must
+                // live at the pipeline level (not inside pytest).
+                catchError(buildResult: null, stageResult: 'UNSTABLE', message: 'Failed to render matrix summary') {
+                    timeout(time: 15, unit: 'MINUTES') {
+                        dir('libraries/testAutomation') {
+                            sh '''
+                                pipenv install --deploy
+                                pipenv run app --test-reports-dir='./reports' --output-reports-summary-only
+                            '''
+                        }
+                    }
+                }
                 script {
                     echo "🏁 Migration test matrix completed"
-                    echo "📊 Final Results: ${env.PASSED_TESTS}/${env.TOTAL_TESTS} tests passed"
+                    echo "📊 Final Results: ${env.PASSED_TESTS ?: 'N/A'}/${env.TOTAL_TESTS ?: 'N/A'} tests passed"
                 }
             }
             success {

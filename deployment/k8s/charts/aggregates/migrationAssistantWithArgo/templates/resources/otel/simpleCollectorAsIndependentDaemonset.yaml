@@ -127,7 +127,7 @@ spec:
       serviceAccountName: {{ .Values.argoWorkflowServiceAccountName | default "argo-workflow-executor" }}
       containers:
       - name: apply-monitor
-        image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
+        image: {{ include "migration.image" (dict "root" . "image" .Values.images.installer) }}
         command: ["/bin/sh", "-c"]
         args:
         - |

@@ -1079,8 +1079,9 @@ public class RfsMigrateDocuments {
                     }
                 } : null;
 
-                var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, collectionPreparer);
-                var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer, shardPreparer);
+                var solrMajor = arguments.sourceVersion.getMajor();
+                var indexMetadataFactory = new SolrBackupIndexMetadataFactory(backupDir, schemas, collectionPreparer, solrMajor);
+                var documentSource = new SolrMultiCollectionSource(backupDir, schemas, collectionPreparer, shardPreparer, solrMajor);
 
                 // Set up a hook to attempt to shut down cleanly (to mark progress in the worker coordination system) in the
                 // event of a SIGTERM signal.

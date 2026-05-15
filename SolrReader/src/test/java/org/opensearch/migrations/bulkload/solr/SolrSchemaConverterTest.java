@@ -94,9 +94,9 @@ class SolrSchemaConverterTest {
     void dynamicFieldSuffixPatternMapsCorrectly() {
         var template = SolrSchemaConverter.buildDynamicTemplate("*_s", "keyword");
         assertNotNull(template);
-        // Template should have a match pattern
         var inner = template.fields().next().getValue();
-        assertThat(inner.get("match").asText(), equalTo("*_s"));
+        assertThat(inner.get("path_match").asText(), equalTo("*_s"));
+        assertThat(inner.get("match_mapping_type").asText(), equalTo("string"));
         assertThat(inner.get("mapping").get("type").asText(), equalTo("keyword"));
     }
 
@@ -105,8 +105,46 @@ class SolrSchemaConverterTest {
         var template = SolrSchemaConverter.buildDynamicTemplate("attr_*", "text");
         assertNotNull(template);
         var inner = template.fields().next().getValue();
-        assertThat(inner.get("match").asText(), equalTo("attr_*"));
+        assertThat(inner.get("path_match").asText(), equalTo("attr_*"));
+        assertThat(inner.get("match_mapping_type").asText(), equalTo("string"));
         assertThat(inner.get("mapping").get("type").asText(), equalTo("text"));
+    }
+
+    @Test
+    void dynamicFieldTemplateGatesByJsonShapeForEachOpenSearchType() {
+        // match_mapping_type pins each template to the JSON value shape OpenSearch
+        // reports for that type, so intermediate object containers (which have no
+        // value shape) never trigger the template — preventing the parent/child
+        // collision that occurs when a dotted-name leaf synthesizes an object whose
+        // top-level segment also matches the dynamic-field pattern.
+        assertThat(matchMappingType("attr_*", "integer"), equalTo("long"));
+        assertThat(matchMappingType("attr_*", "long"), equalTo("long"));
+        assertThat(matchMappingType("price_*", "float"), equalTo("double"));
+        assertThat(matchMappingType("price_*", "double"), equalTo("double"));
+        assertThat(matchMappingType("flag_*", "boolean"), equalTo("boolean"));
+        // Solr stores dates as epoch millis (JSON long) — gate accordingly.
+        assertThat(matchMappingType("when_*", "date"), equalTo("long"));
+        assertThat(matchMappingType("name_*", "keyword"), equalTo("string"));
+        assertThat(matchMappingType("body_*", "text"), equalTo("string"));
+    }
+
+    @Test
+    void dynamicFieldTemplateOmitsMatchMappingTypeForBinaryAndUnknownOsTypes() {
+        // No confidently-known JSON shape — fall back to path_match alone.
+        var binaryInner = SolrSchemaConverter.buildDynamicTemplate("blob_*", "binary")
+            .fields().next().getValue();
+        assertThat(binaryInner.get("path_match").asText(), equalTo("blob_*"));
+        assertThat(binaryInner.has("match_mapping_type"), equalTo(false));
+        assertThat(binaryInner.get("mapping").get("type").asText(), equalTo("binary"));
+
+        var unknownInner = SolrSchemaConverter.buildDynamicTemplate("x_*", "some_future_type")
+            .fields().next().getValue();
+        assertThat(unknownInner.has("match_mapping_type"), equalTo(false));
+    }
+
+    private static String matchMappingType(String pattern, String osType) {
+        return SolrSchemaConverter.buildDynamicTemplate(pattern, osType)
+            .fields().next().getValue().get("match_mapping_type").asText();
     }
 
     // --- CopyField tests ---
@@ -317,6 +355,28 @@ class SolrSchemaConverterTest {
         assertThat(name.get("type").asText(), equalTo("keyword"));
         assertTrue(name.get("format") == null || name.get("format").isMissingNode(),
             "Non-date fields should not have format");
+    }
+
+    // --- Dotted field name tests ---
+
+    @Test
+    void preservesDottedFieldNamesAsLiteralKeys() {
+        // Solr permits flat field names containing '.'. The converter emits them as
+        // literal keys under "properties"; OpenSearch then auto-expands them into a
+        // nested-object tree at index time. Date format must propagate through.
+        var fields = MAPPER.createArrayNode();
+        fields.add(field("id", "string"));
+        fields.add(field("category.name", "string"));
+        fields.add(field("metric.cpu.percent", "pfloat"));
+        fields.add(field("event.created", "pdate"));
+
+        var properties = SolrSchemaConverter.convertToOpenSearchMappings(fields).get("properties");
+
+        assertThat(properties.get("category.name").get("type").asText(), equalTo("keyword"));
+        assertThat(properties.get("metric.cpu.percent").get("type").asText(), equalTo("float"));
+        var eventCreated = properties.get("event.created");
+        assertThat(eventCreated.get("type").asText(), equalTo("date"));
+        assertThat(eventCreated.get("format").asText(), equalTo(SolrSchemaConverter.OS_DATE_FORMAT));
     }
 
     // --- Helpers ---

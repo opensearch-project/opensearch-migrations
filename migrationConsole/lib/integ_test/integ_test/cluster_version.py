@@ -46,27 +46,24 @@ def build_combinations(sources, targets):
     return [(s, t) for s in sources for t in targets]
 
 
-# Full supported migration matrix: every path Migration Assistant claims to support
-# (see top-level README.md). Tests that work across the full matrix should use this.
+# RFS backfill matrix. OS→OS is out of scope for this matrix today: the
+# workflow surface for OS-source imports isn't exercised the same way as
+# ES-source and would report all-skipped rows.
 RFS_MIGRATION_COMBINATIONS = (
     build_combinations(
         [ElasticsearchV1_X, ElasticsearchV2_X, ElasticsearchV5_X,
          ElasticsearchV6_X, ElasticsearchV7_X],
         [OpensearchV1_X, OpensearchV2_X, OpensearchV3_X]) +
-    build_combinations([ElasticsearchV8_X], [OpensearchV2_X, OpensearchV3_X]) +
-    build_combinations([OpensearchV1_X], [OpensearchV2_X, OpensearchV3_X]) +
-    build_combinations([OpensearchV2_X], [OpensearchV3_X])
+    build_combinations([ElasticsearchV8_X], [OpensearchV2_X, OpensearchV3_X])
 )
 
 # CDC migration matrix: Capture and Replay is supported from ES 5.x onwards
-# (not ES 1.x/2.x).
+# (not ES 1.x/2.x). OS→OS excluded for the same reason as RFS above.
 CDC_MIGRATION_COMBINATIONS = (
     build_combinations(
         [ElasticsearchV5_X, ElasticsearchV6_X, ElasticsearchV7_X],
         [OpensearchV1_X, OpensearchV2_X, OpensearchV3_X]) +
-    build_combinations([ElasticsearchV8_X], [OpensearchV2_X, OpensearchV3_X]) +
-    build_combinations([OpensearchV1_X], [OpensearchV2_X, OpensearchV3_X]) +
-    build_combinations([OpensearchV2_X], [OpensearchV3_X])
+    build_combinations([ElasticsearchV8_X], [OpensearchV2_X, OpensearchV3_X])
 )
 
 
