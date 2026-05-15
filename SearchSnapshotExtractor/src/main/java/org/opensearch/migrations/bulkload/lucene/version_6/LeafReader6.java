@@ -8,6 +8,7 @@ import java.util.List;
 
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
+import org.opensearch.migrations.bulkload.lucene.GenericStreamingFieldPostings;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.Getter;
@@ -351,4 +352,39 @@ public class LeafReader6 implements LuceneLeafReader {
         }
     }
 
+    @Override
+    public org.opensearch.migrations.bulkload.lucene.StreamingFieldPostings openStreamingFieldPostings(
+            String fieldName) throws IOException {
+        Terms terms = wrapped.terms(fieldName);
+        if (terms == null || !terms.hasPositions()) {
+            return null;
+        }
+        FieldInfo fi = wrapped.getFieldInfos().fieldInfo(fieldName);
+        boolean fieldHasOffsets = fi != null
+            && fi.getIndexOptions().compareTo(IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS) >= 0;
+        int postingsFlags = fieldHasOffsets ? PostingsEnum.OFFSETS : PostingsEnum.POSITIONS;
+
+        ArrayList<GenericStreamingFieldPostings.TermPostings> built = new ArrayList<>();
+        TermsEnum te = terms.iterator();
+        BytesRef term;
+        while ((term = te.next()) != null) {
+            String termStr = term.utf8ToString();
+            PostingsEnum postings = te.postings(null, postingsFlags);
+            int firstDoc = postings.nextDoc();
+            if (firstDoc == PostingsEnum.NO_MORE_DOCS) continue;
+            final PostingsEnum pe = postings;
+            GenericStreamingFieldPostings.PostingsCursor cursor =
+                new GenericStreamingFieldPostings.PostingsCursor() {
+                    @Override public int nextDoc() throws IOException { return pe.nextDoc(); }
+                    @Override public int advance(int target) throws IOException { return pe.advance(target); }
+                    @Override public int freq() throws IOException { return pe.freq(); }
+                    @Override public int nextPosition() throws IOException { return pe.nextPosition(); }
+                    @Override public int startOffset() throws IOException { return pe.startOffset(); }
+                    @Override public int endOffset() throws IOException { return pe.endOffset(); }
+                };
+            built.add(new GenericStreamingFieldPostings.TermPostings(termStr, cursor, firstDoc));
+        }
+        if (built.isEmpty()) return null;
+        return GenericStreamingFieldPostings.build(built, fieldHasOffsets);
+    }
 }
