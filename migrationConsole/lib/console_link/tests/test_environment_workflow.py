@@ -160,8 +160,8 @@ def test_get_kafka_from_workflow_config_existing_cluster_uses_reference():
     assert kafka.brokers == "broker.a:9092,broker.b:9092"
 
 
-def test_get_kafka_from_workflow_config_autocreate_scram(monkeypatch):
-    monkeypatch.setenv("KAFKA_SCRAM_PASSWORD", "test-password")
+@patch.object(Environment, '_resolve_strimzi_scram_credentials', return_value=("test-password", "/tmp/fake-ca.crt"))
+def test_get_kafka_from_workflow_config_autocreate_scram(mock_resolve):
     config = {
         "kafkaClusterConfiguration": {
             "default": {
@@ -186,6 +186,8 @@ def test_get_kafka_from_workflow_config_autocreate_scram(monkeypatch):
     assert isinstance(kafka, ScramKafka)
     assert kafka.brokers == "default-kafka-bootstrap:9093"
     assert kafka.username == "default-migration-app"
+    assert kafka.password == "test-password"
+    mock_resolve.assert_called_once_with("default")
 
 
 @patch('console_link.environment.WorkflowConfigStore')

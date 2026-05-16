@@ -1,6 +1,8 @@
+import base64
 import logging
+import tempfile
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, Optional, Tuple, Union
 from console_link.models.factories import get_replayer, get_backfill, get_kafka, get_snapshot, \
     get_metrics_source
 from console_link.models.cluster import Cluster, SourceCluster
@@ -241,6 +243,45 @@ class Environment:
             "allow_insecure": has_tls,
         }
 
+    @staticmethod
+    def _resolve_strimzi_scram_credentials(cluster_name: str, namespace: str = 'ma') -> Tuple[str, Optional[str]]:
+        """Read SCRAM password and cluster CA cert from Strimzi-managed k8s Secrets.
+
+        Strimzi creates a Secret named '<cluster>-migration-app' with the SCRAM
+        password and '<cluster>-cluster-ca-cert' with the CA certificate when a
+        KafkaUser with SCRAM auth is provisioned.
+
+        Returns (password, ca_cert_path). ca_cert_path is a temp file that the
+        caller must keep alive for the lifetime of the Kafka client.
+        """
+        from kubernetes import client
+        from console_link.workflow.models.utils import load_k8s_config
+        load_k8s_config()
+        v1 = client.CoreV1Api()
+
+        user_secret_name = f"{cluster_name}-migration-app"
+        secret = v1.read_namespaced_secret(name=user_secret_name, namespace=namespace)
+        password_b64 = secret.data.get("password")
+        if not password_b64:
+            raise ValueError(f"Secret '{user_secret_name}' in namespace '{namespace}' has no 'password' key")
+        password = base64.b64decode(password_b64).decode('utf-8')
+
+        ca_cert_path = None
+        ca_name = f"{cluster_name}-cluster-ca-cert"
+        try:
+            ca_secret = v1.read_namespaced_secret(name=ca_name, namespace=namespace)
+            ca_crt_b64 = ca_secret.data.get("ca.crt")
+            if ca_crt_b64:
+                import os
+                ca_crt = base64.b64decode(ca_crt_b64).decode('utf-8')
+                fd, ca_cert_path = tempfile.mkstemp(prefix='kafka-ca-', suffix='.crt')
+                with os.fdopen(fd, 'w') as f:
+                    f.write(ca_crt)
+        except Exception as e:
+            logger.warning("Could not read CA cert from secret '%s': %s", ca_name, e)
+
+        return password, ca_cert_path
+
     @classmethod
     def _get_kafka_from_workflow_config(cls, config: Dict) -> Optional[Kafka]:
         kafka_clusters = config.get("kafkaClusterConfiguration") or {}
@@ -286,13 +327,16 @@ class Environment:
             auth_config = auto_config.get("auth") or {}
             auth_type = auth_config.get("type", "")
             if auth_type == "scram-sha-512":
+                password, ca_cert_path = cls._resolve_strimzi_scram_credentials(cluster_name)
+                scram_config: Dict = {
+                    "username": f"{cluster_name}-migration-app",
+                    "password": password,
+                }
+                if ca_cert_path:
+                    scram_config["ca_cert_path"] = ca_cert_path
                 kafka_config = {
                     "broker_endpoints": f"{cluster_name}-kafka-bootstrap:9093",
-                    "scram": {
-                        "username": f"{cluster_name}-migration-app",
-                        "password_env": "KAFKA_SCRAM_PASSWORD",
-                        "ca_cert_path": "/config/kafka-ca/ca.crt",
-                    }
+                    "scram": scram_config,
                 }
             else:
                 kafka_config = {
