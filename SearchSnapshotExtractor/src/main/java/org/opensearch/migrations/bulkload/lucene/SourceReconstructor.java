@@ -45,7 +45,7 @@ public class SourceReconstructor {
         if (fieldName.startsWith("_")) {
             return true;
         }
-        if (mappingContext != null && mappingContext.isSourceExcluded(fieldName)) {
+        if (mappingContext != null && mappingContext.isCopyToTarget(fieldName)) {
             return true;
         }
         if (!fieldName.contains(".")) {
@@ -533,11 +533,17 @@ public class SourceReconstructor {
                 if (hasNested(target, sourceField)) {
                     continue;
                 }
-                if (sourceField.startsWith("_") || mappingContext.isSourceExcluded(sourceField)) {
+                if (sourceField.startsWith("_")) {
                     continue;
                 }
+                // Skip reverse-derivation for source fields that have no Lucene footprint
+                // (index:false AND doc_values:false) AND are not source-excluded. Such fields
+                // exist only in _source — if absent from the seed, the doc genuinely didn't
+                // have that field. But source-excluded fields need reconstruction via their
+                // copy_to targets even if they themselves have no index/dv.
                 FieldMappingInfo sourceMapping = mappingContext.getFieldInfo(sourceField);
-                if (sourceMapping != null && !sourceMapping.indexed() && !sourceMapping.docValues()) {
+                if (sourceMapping != null && !sourceMapping.indexed() && !sourceMapping.docValues()
+                        && !mappingContext.isSourceExcluded(sourceField)) {
                     continue;
                 }
                 List<String> rankedTargets = mappingContext.getCopyToTargets(sourceField);

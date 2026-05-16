@@ -2101,10 +2101,9 @@ class SourceReconstructorTest {
     }
 
     @Test
-    void sourceExcludedFields_neverAppearInReconstructedSource() throws IOException {
-        // body.* and title are in _source.excludes — they must NOT appear in the
-        // reconstructed output even when their values are recoverable from the inverted
-        // index or via reverse-derivation from copy_to targets.
+    void sourceExcludedCopyToSource_reverseDerivesFromTarget() throws IOException {
+        // body.main.raw (index:false, copy_to: body.main.content) is source-excluded but
+        // reconstruction maximizes data recovery — reverse-derivation from the target recovers it.
         var reader = mock(LuceneLeafReader.class);
         when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
         when(reader.getValueFromPointsOrTerms(
@@ -2133,13 +2132,19 @@ class SourceReconstructorTest {
         String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
         JsonNode tree = MAPPER.readTree(merged);
 
-        // body.* is source-excluded — must NOT appear
-        assertTrue(tree.path("body").isMissingNode(),
-            "body.* fields are source-excluded and must not appear in output: " + merged);
+        // body.main.raw reverse-derived from body.main.content (maximize recovery)
+        assertEquals("lucy here few questions",
+            tree.path("body").path("main").path("raw").asText(),
+            "body.main.raw must be reverse-derived from copy_to target: " + merged);
 
-        // title is source-excluded — must NOT appear
-        assertTrue(tree.path("title").isMissingNode(),
-            "title is source-excluded and must not appear in output: " + merged);
+        // body.main.content must NOT appear — it's a copy_to target, never in original _source
+        assertTrue(tree.path("body").path("main").path("content").isMissingNode(),
+            "body.main.content (copy_to target) must not appear in output: " + merged);
+
+        // title recovered directly from inverted index (maximize recovery)
+        assertEquals("bishops corner ltd buyout",
+            tree.path("title").asText(),
+            "title must be reconstructed from inverted index: " + merged);
 
         // Seed fields preserved
         assertEquals("abc123", tree.path("gcid").asText());
