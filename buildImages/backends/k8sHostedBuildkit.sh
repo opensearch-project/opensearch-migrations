@@ -23,20 +23,34 @@ set_k8s_context_args() {
   fi
 }
 
-# Resolves the cluster's first node InternalIP. Used for NodePort access to
-# both buildkitd (31234) and docker-registry (30500). Single source of truth
-# so callers don't reinvent it.
-get_node_internal_ip() {
-  set_k8s_context_args
-  kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get nodes \
-    -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}'
-}
+# Forward a cluster service to a stable host port. Always restarts the forward,
+# because pgrep-skip leaves stale forwards pointing at deleted pods after a
+# helm reinstall, which is exactly how Jib pushes vanish into the void.
+ensure_port_forward() {
+  local namespace="$1"
+  local service="$2"
+  local host_port="$3"
+  local svc_port="$4"
 
-# NodePort assignments for in-cluster build services. Keep in sync with
-# buildkitd-pod.yaml (31234) and buildImages/docker-registry.yaml (30500).
-readonly BUILDKIT_NODE_PORT=31234
-readonly REGISTRY_NODE_PORT=30500
-readonly REGISTRY_CLUSTER_DNS="docker-registry:5000"
+  pkill -f "kubectl port-forward.*${service}.*${host_port}:${svc_port}" 2>/dev/null || true
+
+  set_k8s_context_args
+  nohup kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
+    port-forward -n "${namespace}" "svc/${service}" "${host_port}:${svc_port}" \
+    > "/tmp/${service}-${host_port}.log" 2>&1 &
+
+  local i
+  for i in $(seq 1 60); do
+    if (echo >/dev/tcp/localhost/"${host_port}") 2>/dev/null; then
+      echo "Port-forward localhost:${host_port} -> ${service}:${svc_port} ready"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "ERROR: port-forward localhost:${host_port} -> ${service}:${svc_port} not ready after 60s" >&2
+  cat "/tmp/${service}-${host_port}.log" >&2 || true
+  return 1
+}
 
 ensure_k8s_buildkit_release() {
   local context
@@ -89,9 +103,7 @@ ensure_k8s_local_registry() {
   echo "Waiting for docker-registry deployment to be available..."
   kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} rollout status deployment/docker-registry -n buildkit --timeout=120s
 
-  # Kill any leftover registry port-forwards from older script versions; we now
-  # reach the registry via its NodePort instead, so the forward is a liability.
-  pkill -f "kubectl port-forward.*docker-registry.*5001:5000" 2>/dev/null || true
+  ensure_port_forward buildkit docker-registry 5001 5000
 }
 
 ensure_k8s_buildx_builder() {
@@ -137,33 +149,14 @@ ensure_k8s_buildx_builder() {
       "${BUILDKIT_RESOURCE_OPTS[@]}" \
       ${BUILDKIT_IMAGE:+--driver-opt="image=${BUILDKIT_IMAGE}"}
   else
-    echo "Detected local K8s, using remote driver via NodePort"
+    echo "Detected local K8s, using remote driver via port-forward"
     echo "Waiting for buildkitd pod..."
     kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} wait --for=condition=ready pod -l app=buildkitd -n "${namespace}" --timeout=120s
-
-    local node_ip buildkit_endpoint
-    node_ip="$(get_node_internal_ip)"
-    buildkit_endpoint="${node_ip}:${BUILDKIT_NODE_PORT}"
-
-    echo "Waiting for buildkit endpoint at ${buildkit_endpoint}..."
-    for i in $(seq 1 60); do
-      if (echo >/dev/tcp/"${node_ip}"/"${BUILDKIT_NODE_PORT}") 2>/dev/null; then
-        echo "buildkit endpoint reachable at ${buildkit_endpoint}"
-        break
-      fi
-      if [[ "${i}" -eq 60 ]]; then
-        echo "ERROR: buildkit endpoint not reachable at ${buildkit_endpoint} after 60s" >&2
-        kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get svc -n "${namespace}" >&2 || true
-        kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get pods -n "${namespace}" >&2 || true
-        exit 1
-      fi
-      sleep 1
-    done
-
+    ensure_port_forward "${namespace}" buildkitd 1234 1234
     docker buildx create \
       --name="${builder_name}" \
       --driver=remote \
-      "tcp://${buildkit_endpoint}"
+      "tcp://localhost:1234"
   fi
 
   docker buildx use "${builder_name}"
@@ -215,34 +208,11 @@ ensure_k8s_buildx_builder() {
 
 setup_build_backend() {
   export USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-false}"
+  if [[ "${USE_LOCAL_REGISTRY}" == "true" ]]; then
+    export BUILD_CONTAINER_REGISTRY_ENDPOINT="${BUILD_CONTAINER_REGISTRY_ENDPOINT:-docker-registry:5000}"
+  fi
   export BUILDKIT_NAMESPACE="${BUILDKIT_NAMESPACE:-buildkit}"
   ensure_k8s_buildkit_release
   ensure_k8s_local_registry
   ensure_k8s_buildx_builder
-
-  if [[ "${USE_LOCAL_REGISTRY}" != "true" ]]; then
-    return 0
-  fi
-
-  # Publish the resolved registry endpoint so subsequent gradle invocations
-  # (which run in a fresh shell under Jenkins) can pick it up. Writing both an
-  # exported env var and a sourceable file works for either calling style.
-  local node_ip registry_endpoint env_file
-  node_ip="$(get_node_internal_ip)"
-  registry_endpoint="${node_ip}:${REGISTRY_NODE_PORT}"
-  env_file="${BUILD_BACKEND_ENV_FILE:-/tmp/k8s-build-backend.env}"
-
-  export BUILD_REGISTRY_ENDPOINT="${registry_endpoint}"
-  export BUILD_CONTAINER_REGISTRY_ENDPOINT="${REGISTRY_CLUSTER_DNS}"
-
-  cat > "${env_file}" <<EOF
-# Generated by buildImages/backends/k8sHostedBuildkit.sh — source to inherit
-# the build endpoints resolved during setup.
-export BUILD_REGISTRY_ENDPOINT="${BUILD_REGISTRY_ENDPOINT}"
-export BUILD_CONTAINER_REGISTRY_ENDPOINT="${BUILD_CONTAINER_REGISTRY_ENDPOINT}"
-EOF
-
-  echo "Build registry endpoint: ${BUILD_REGISTRY_ENDPOINT}"
-  echo "Build container registry endpoint (in-cluster): ${BUILD_CONTAINER_REGISTRY_ENDPOINT}"
-  echo "Wrote build backend env to ${env_file}"
 }
