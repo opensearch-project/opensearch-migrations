@@ -72,9 +72,9 @@ def get_kafka(config: Dict):
         return StandardKafka(config)
     if 'scram' in config:
         return ScramKafka(config)
-    config.pop("broker_endpoints", None)
-    logger.error(f"An unsupported kafka source type was provided: {config.keys()}")
-    raise UnsupportedKafkaError(', '.join(config.keys()))
+    safe_keys = set(config.keys()) - {"broker_endpoints", "scram", "password"}
+    logger.error("An unsupported kafka source type was provided: %s", safe_keys)
+    raise UnsupportedKafkaError(', '.join(safe_keys) if safe_keys else '<unknown>')
 
 
 def get_backfill(config: Dict, target_cluster: Cluster,
