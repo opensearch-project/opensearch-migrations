@@ -23,6 +23,8 @@ type EstimateResponse struct {
 	ParsedQuery          *ParsedQuery           `json:"parsedQuery,omitempty"`
 	NeedsMoreInfo        bool                   `json:"needsMoreInfo,omitempty"`
 	FollowUpQuestion     string                 `json:"followUpQuestion,omitempty"`
+	AssistantMessage     string                 `json:"assistantMessage,omitempty"`
+	ServerlessNote       string                 `json:"serverlessNote,omitempty"`
 }
 
 // Metadata contains processing information
@@ -124,34 +126,6 @@ func GetWorkloadRequirements() map[string]WorkloadRequirements {
 	}
 }
 
-// MCPPayload represents the MCP request structure
-type MCPPayload struct {
-	JSONRPC string    `json:"jsonrpc"`
-	Method  string    `json:"method"`
-	ID      string    `json:"id"`
-	Params  MCPParams `json:"params"`
-}
-
-// MCPParams contains the tool call parameters
-type MCPParams struct {
-	Name      string                 `json:"name"`
-	Arguments map[string]interface{} `json:"arguments"`
-}
-
-// MCPResponse represents the MCP response structure
-type MCPResponse struct {
-	JSONRPC string                 `json:"jsonrpc"`
-	ID      string                 `json:"id"`
-	Result  map[string]interface{} `json:"result"`
-	Error   *MCPError              `json:"error,omitempty"`
-}
-
-// MCPError represents an error from MCP
-type MCPError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
 // EnhancedLLMResponse represents the complete response from enhanced LLM
 // Contains ready-to-use MCP request payloads
 type EnhancedLLMResponse struct {
@@ -162,6 +136,7 @@ type EnhancedLLMResponse struct {
 	ServerlessRequest    map[string]interface{} `json:"serverlessRequest"` // Complete MCP request for serverless
 	Confidence           float64                `json:"confidence"`
 	RawQuery             string                 `json:"rawQuery"`
+	Clarification        string                 `json:"-"` // Non-estimation response (clarification/explanation), not serialized
 }
 
 // ConversationMessage represents a single message in a conversation

@@ -83,7 +83,7 @@ func TestGetRateCodeAndPrice(t *testing.T) {
 	}
 }
 
-func TestDownloadJsonSuccess(t *testing.T) {
+func TestDownloadJson_Success(t *testing.T) {
 	// Create a test server that returns a valid pricing JSON
 	pricingData := map[string]interface{}{
 		"regions": map[string]interface{}{
@@ -112,7 +112,7 @@ func TestDownloadJsonSuccess(t *testing.T) {
 	assert.Contains(t, regions, "US East (N. Virginia)")
 }
 
-func TestDownloadJsonInvalidJSON(t *testing.T) {
+func TestDownloadJson_InvalidJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("not valid json"))
 	}))
@@ -122,13 +122,13 @@ func TestDownloadJsonInvalidJSON(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestDownloadJsonHTTPError(t *testing.T) {
+func TestDownloadJson_HTTPError(t *testing.T) {
 	// Use an invalid URL to trigger an HTTP error
 	_, err := downloadJson("http://127.0.0.1:1")
 	assert.Error(t, err)
 }
 
-func TestDownloadJsonNoRegionsKey(t *testing.T) {
+func TestDownloadJson_NoRegionsKey(t *testing.T) {
 	// JSON that doesn't have a "regions" key
 	data := map[string]interface{}{
 		"other": "data",
@@ -146,7 +146,7 @@ func TestDownloadJsonNoRegionsKey(t *testing.T) {
 	assert.Nil(t, result)
 }
 
-func TestDownloadJsonNon200Status(t *testing.T) {
+func TestDownloadJson_Non200Status(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("internal error"))
@@ -159,7 +159,7 @@ func TestDownloadJsonNon200Status(t *testing.T) {
 	assert.Contains(t, err.Error(), "status 500")
 }
 
-func TestDownloadJson404Status(t *testing.T) {
+func TestDownloadJson_404Status(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
@@ -171,7 +171,7 @@ func TestDownloadJson404Status(t *testing.T) {
 	assert.Contains(t, err.Error(), "status 404")
 }
 
-func TestServerlessPriceGetAllRegions(t *testing.T) {
+func TestServerlessPrice_GetAllRegions(t *testing.T) {
 	sp := &ServerlessPrice{
 		Regions: map[string]price.ServerlessRegion{
 			"US East (N. Virginia)": {},
@@ -187,7 +187,7 @@ func TestServerlessPriceGetAllRegions(t *testing.T) {
 	assert.Contains(t, regions, "Asia Pacific (Tokyo)")
 }
 
-func TestServerlessPriceGetAllRegionsEmpty(t *testing.T) {
+func TestServerlessPrice_GetAllRegions_Empty(t *testing.T) {
 	sp := &ServerlessPrice{
 		Regions: map[string]price.ServerlessRegion{},
 	}
@@ -196,7 +196,7 @@ func TestServerlessPriceGetAllRegionsEmpty(t *testing.T) {
 	assert.Empty(t, regions)
 }
 
-func TestServerlessPriceGetRegionPrice(t *testing.T) {
+func TestServerlessPrice_GetRegionPrice(t *testing.T) {
 	expectedRegion := price.ServerlessRegion{
 		IndexingOCU: price.Unit{RateCode: "IDX1", Price: 0.24},
 		SearchOCU:   price.Unit{RateCode: "SRC1", Price: 0.24},
@@ -214,7 +214,7 @@ func TestServerlessPriceGetRegionPrice(t *testing.T) {
 	assert.Equal(t, expectedRegion, region)
 }
 
-func TestServerlessPriceGetRegionPriceNotFound(t *testing.T) {
+func TestServerlessPrice_GetRegionPrice_NotFound(t *testing.T) {
 	sp := &ServerlessPrice{
 		Regions: map[string]price.ServerlessRegion{
 			"US East (N. Virginia)": {},
@@ -226,7 +226,7 @@ func TestServerlessPriceGetRegionPriceNotFound(t *testing.T) {
 	assert.Equal(t, "region not found", err.Error())
 }
 
-func TestGetRateCodeAndPriceSafeTypeAssertions(t *testing.T) {
+func TestGetRateCodeAndPrice_SafeTypeAssertions(t *testing.T) {
 	// Normal case
 	m := map[string]interface{}{
 		"rateCode": "RC123",

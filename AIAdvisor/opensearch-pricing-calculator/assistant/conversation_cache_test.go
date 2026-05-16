@@ -12,9 +12,6 @@ import (
 const testSessionID = "550e8400-e29b-41d4-a716-446655440000"
 const testSessionID2 = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
 
-const expectedOneMessageFmt = "expected 1 message, got %d"
-const invalidUUIDValue = "not-a-uuid"
-
 func TestNewConversationCache(t *testing.T) {
 	cache := NewConversationCache(5 * time.Minute)
 	defer cache.Stop()
@@ -27,7 +24,7 @@ func TestNewConversationCache(t *testing.T) {
 	}
 }
 
-func TestConversationCacheGetOrCreateNewSession(t *testing.T) {
+func TestConversationCache_GetOrCreate_NewSession(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      5 * time.Minute,
@@ -47,7 +44,7 @@ func TestConversationCacheGetOrCreateNewSession(t *testing.T) {
 	}
 }
 
-func TestConversationCacheGetOrCreateExistingSession(t *testing.T) {
+func TestConversationCache_GetOrCreate_ExistingSession(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      5 * time.Minute,
@@ -60,11 +57,11 @@ func TestConversationCacheGetOrCreateExistingSession(t *testing.T) {
 	// Look up by the actual assigned ID
 	session2 := cache.GetOrCreate(session1.ID)
 	if len(session2.Messages) != 1 {
-		t.Errorf(expectedOneMessageFmt, len(session2.Messages))
+		t.Errorf("expected 1 message from existing session, got %d", len(session2.Messages))
 	}
 }
 
-func TestConversationCacheGetOrCreateInvalidUUID(t *testing.T) {
+func TestConversationCache_GetOrCreate_InvalidUUID(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      5 * time.Minute,
@@ -72,11 +69,11 @@ func TestConversationCacheGetOrCreateInvalidUUID(t *testing.T) {
 	}
 
 	// Invalid session ID should be ignored; a new session is created with a generated UUID
-	session := cache.GetOrCreate(invalidUUIDValue)
+	session := cache.GetOrCreate("not-a-uuid")
 	if session == nil {
 		t.Fatal("expected non-nil session")
 	}
-	if session.ID == invalidUUIDValue {
+	if session.ID == "not-a-uuid" {
 		t.Error("expected invalid session ID to be replaced with a generated UUID")
 	}
 	if !isValidUUID(session.ID) {
@@ -84,7 +81,7 @@ func TestConversationCacheGetOrCreateInvalidUUID(t *testing.T) {
 	}
 }
 
-func TestConversationCacheGetOrCreateEmptyID(t *testing.T) {
+func TestConversationCache_GetOrCreate_EmptyID(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      5 * time.Minute,
@@ -97,7 +94,7 @@ func TestConversationCacheGetOrCreateEmptyID(t *testing.T) {
 	}
 }
 
-func TestConversationCacheGet(t *testing.T) {
+func TestConversationCache_Get(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      5 * time.Minute,
@@ -114,7 +111,7 @@ func TestConversationCacheGet(t *testing.T) {
 	}
 }
 
-func TestConversationCacheGetNotFound(t *testing.T) {
+func TestConversationCache_Get_NotFound(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      5 * time.Minute,
@@ -127,7 +124,7 @@ func TestConversationCacheGetNotFound(t *testing.T) {
 	}
 }
 
-func TestConversationCacheGetExpired(t *testing.T) {
+func TestConversationCache_Get_Expired(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      1 * time.Millisecond,
@@ -143,7 +140,7 @@ func TestConversationCacheGetExpired(t *testing.T) {
 	}
 }
 
-func TestConversationCacheUpdate(t *testing.T) {
+func TestConversationCache_Update(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      5 * time.Minute,
@@ -159,11 +156,11 @@ func TestConversationCacheUpdate(t *testing.T) {
 		t.Fatal("expected to find updated session")
 	}
 	if len(retrieved.Messages) != 1 {
-		t.Errorf(expectedOneMessageFmt, len(retrieved.Messages))
+		t.Errorf("expected 1 message, got %d", len(retrieved.Messages))
 	}
 }
 
-func TestConversationCacheAddMessage(t *testing.T) {
+func TestConversationCache_AddMessage(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      5 * time.Minute,
@@ -178,7 +175,7 @@ func TestConversationCacheAddMessage(t *testing.T) {
 
 	session, _ := cache.Get(created.ID)
 	if len(session.Messages) != 1 {
-		t.Fatalf(expectedOneMessageFmt, len(session.Messages))
+		t.Fatalf("expected 1 message, got %d", len(session.Messages))
 	}
 	if session.Messages[0].Role != "user" {
 		t.Errorf("expected role %q, got %q", "user", session.Messages[0].Role)
@@ -188,7 +185,7 @@ func TestConversationCacheAddMessage(t *testing.T) {
 	}
 }
 
-func TestConversationCacheAddMessageNonexistentSession(t *testing.T) {
+func TestConversationCache_AddMessage_NonexistentSession(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      5 * time.Minute,
@@ -201,7 +198,7 @@ func TestConversationCacheAddMessageNonexistentSession(t *testing.T) {
 	}
 }
 
-func TestConversationCacheDelete(t *testing.T) {
+func TestConversationCache_Delete(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      5 * time.Minute,
@@ -215,7 +212,7 @@ func TestConversationCacheDelete(t *testing.T) {
 	}
 }
 
-func TestConversationCacheClear(t *testing.T) {
+func TestConversationCache_Clear(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      5 * time.Minute,
@@ -230,7 +227,7 @@ func TestConversationCacheClear(t *testing.T) {
 	}
 }
 
-func TestConversationCacheGetRecentMessages(t *testing.T) {
+func TestConversationCache_GetRecentMessages(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      5 * time.Minute,
@@ -249,7 +246,7 @@ func TestConversationCacheGetRecentMessages(t *testing.T) {
 	}
 }
 
-func TestConversationCacheGetRecentMessagesLessThanCount(t *testing.T) {
+func TestConversationCache_GetRecentMessages_LessThanCount(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      5 * time.Minute,
@@ -261,11 +258,11 @@ func TestConversationCacheGetRecentMessagesLessThanCount(t *testing.T) {
 
 	msgs := cache.GetRecentMessages(created.ID, 5)
 	if len(msgs) != 1 {
-		t.Errorf(expectedOneMessageFmt, len(msgs))
+		t.Errorf("expected 1 message, got %d", len(msgs))
 	}
 }
 
-func TestConversationCacheGetRecentMessagesNonexistentSession(t *testing.T) {
+func TestConversationCache_GetRecentMessages_NonexistentSession(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      5 * time.Minute,
@@ -278,7 +275,7 @@ func TestConversationCacheGetRecentMessagesNonexistentSession(t *testing.T) {
 	}
 }
 
-func TestConversationCacheRemoveExpired(t *testing.T) {
+func TestConversationCache_RemoveExpired(t *testing.T) {
 	cache := &ConversationCache{
 		sessions: make(map[string]*ConversationSession),
 		ttl:      1 * time.Millisecond,
@@ -295,7 +292,7 @@ func TestConversationCacheRemoveExpired(t *testing.T) {
 	}
 }
 
-func TestConversationCacheStop(t *testing.T) {
+func TestConversationCache_Stop(t *testing.T) {
 	cache := NewConversationCache(5 * time.Minute)
 	cache.Stop() // Should not panic
 }
@@ -307,7 +304,7 @@ func TestIsValidUUID(t *testing.T) {
 	}{
 		{"550e8400-e29b-41d4-a716-446655440000", true},
 		{"6ba7b810-9dad-11d1-80b4-00c04fd430c8", true},
-		{invalidUUIDValue, false},
+		{"not-a-uuid", false},
 		{"", false},
 		{"test-session", false},
 		{"12345", false},

@@ -14,15 +14,13 @@ import (
 	"go.uber.org/zap"
 )
 
-const testBadRequestMsg = "bad request"
-
-func TestErrorResponseBasicError(t *testing.T) {
+func TestErrorResponse_BasicError(t *testing.T) {
 	app := &application{logger: zap.NewNop()}
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	rr := httptest.NewRecorder()
 
-	app.errorResponse(rr, req, http.StatusBadRequest, testBadRequestMsg)
+	app.errorResponse(rr, req, http.StatusBadRequest, "bad request")
 
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, rr.Code)
@@ -39,8 +37,8 @@ func TestErrorResponseBasicError(t *testing.T) {
 	if resp.Error != "Bad Request" {
 		t.Errorf("expected error %q, got %q", "Bad Request", resp.Error)
 	}
-	if resp.Message != testBadRequestMsg {
-		t.Errorf("expected message %q, got %q", testBadRequestMsg, resp.Message)
+	if resp.Message != "bad request" {
+		t.Errorf("expected message %q, got %q", "bad request", resp.Message)
 	}
 }
 
@@ -101,7 +99,7 @@ func TestValidationErrorResponse(t *testing.T) {
 
 // --- writeJSON tests ---
 
-func TestWriteJSONSuccess(t *testing.T) {
+func TestWriteJSON_Success(t *testing.T) {
 	app := newTestApp()
 	rr := httptest.NewRecorder()
 	data := map[string]string{"hello": "world"}
@@ -122,7 +120,7 @@ func TestWriteJSONSuccess(t *testing.T) {
 	}
 }
 
-func TestWriteJSONUnmarshalableData(t *testing.T) {
+func TestWriteJSON_UnmarshalableData(t *testing.T) {
 	app := newTestApp()
 	rr := httptest.NewRecorder()
 	// Functions cannot be marshaled to JSON
@@ -135,7 +133,7 @@ func TestWriteJSONUnmarshalableData(t *testing.T) {
 
 // --- Home handler tests ---
 
-func TestHomeReturnsStatus(t *testing.T) {
+func TestHome_ReturnsStatus(t *testing.T) {
 	app := newTestApp()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
@@ -164,7 +162,7 @@ func TestHomeReturnsStatus(t *testing.T) {
 
 // --- Health handler tests ---
 
-func TestHealthReturnsHealthy(t *testing.T) {
+func TestHealth_ReturnsHealthy(t *testing.T) {
 	app := newTestApp()
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	rr := httptest.NewRecorder()
@@ -182,7 +180,7 @@ func TestHealthReturnsHealthy(t *testing.T) {
 
 // --- ServerlessEstimateV2 handler error path tests ---
 
-func TestServerlessEstimateV2EmptyBody(t *testing.T) {
+func TestServerlessEstimateV2_EmptyBody(t *testing.T) {
 	app := newTestApp()
 	req := httptest.NewRequest(http.MethodPost, "/serverless/v2/estimate", nil)
 	rr := httptest.NewRecorder()
@@ -201,7 +199,7 @@ func TestServerlessEstimateV2EmptyBody(t *testing.T) {
 	}
 }
 
-func TestServerlessEstimateV2InvalidJSON(t *testing.T) {
+func TestServerlessEstimateV2_InvalidJSON(t *testing.T) {
 	app := newTestApp()
 	body := strings.NewReader(`{invalid json}`)
 	req := httptest.NewRequest(http.MethodPost, "/serverless/v2/estimate", body)
@@ -221,7 +219,7 @@ func TestServerlessEstimateV2InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestServerlessEstimateV2ValidSearchRequest(t *testing.T) {
+func TestServerlessEstimateV2_ValidSearchRequest(t *testing.T) {
 	app := newTestApp()
 	body := strings.NewReader(`{
 		"region": "US East (N. Virginia)",
@@ -243,7 +241,7 @@ func TestServerlessEstimateV2ValidSearchRequest(t *testing.T) {
 	}
 }
 
-func TestServerlessEstimateV2ValidTimeSeriesRequest(t *testing.T) {
+func TestServerlessEstimateV2_ValidTimeSeriesRequest(t *testing.T) {
 	app := newTestApp()
 	body := strings.NewReader(`{
 		"region": "US East (N. Virginia)",
@@ -261,7 +259,7 @@ func TestServerlessEstimateV2ValidTimeSeriesRequest(t *testing.T) {
 	}
 }
 
-func TestServerlessEstimateV2ValidVectorRequest(t *testing.T) {
+func TestServerlessEstimateV2_ValidVectorRequest(t *testing.T) {
 	app := newTestApp()
 	body := strings.NewReader(`{
 		"region": "US East (N. Virginia)",
@@ -279,7 +277,7 @@ func TestServerlessEstimateV2ValidVectorRequest(t *testing.T) {
 	}
 }
 
-func TestServerlessEstimateV2ReadBodyError(t *testing.T) {
+func TestServerlessEstimateV2_ReadBodyError(t *testing.T) {
 	app := newTestApp()
 	// Create a request with a body that fails on read
 	req := httptest.NewRequest(http.MethodPost, "/serverless/v2/estimate", &errorReader{})
@@ -301,7 +299,7 @@ func TestServerlessEstimateV2ReadBodyError(t *testing.T) {
 
 // --- ServerlessRegions handler tests ---
 
-func TestServerlessRegionsReturnsJSON(t *testing.T) {
+func TestServerlessRegions_ReturnsJSON(t *testing.T) {
 	app := newTestApp()
 	req := httptest.NewRequest(http.MethodGet, "/serverless/regions", nil)
 	rr := httptest.NewRecorder()
@@ -326,7 +324,7 @@ func TestServerlessRegionsReturnsJSON(t *testing.T) {
 
 // --- ServerlessPrice handler tests ---
 
-func TestServerlessPriceReturnsJSON(t *testing.T) {
+func TestServerlessPrice_ReturnsJSON(t *testing.T) {
 	app := newTestApp()
 	req := httptest.NewRequest(http.MethodGet, "/serverless/price", nil)
 	rr := httptest.NewRecorder()
@@ -366,7 +364,7 @@ func (e *errorReader) Read(p []byte) (n int, err error) {
 	return 0, io.ErrUnexpectedEOF
 }
 
-func TestErrorResponseOmitsEmptyFields(t *testing.T) {
+func TestErrorResponse_OmitsEmptyFields(t *testing.T) {
 	app := &application{logger: zap.NewNop()}
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)

@@ -21,7 +21,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: migration-console-for-workflows
-          image: {{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
           command:
             - "/bin/sh"
@@ -78,7 +78,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: migration-console-for-workflows
-          image: {{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
           command:
             - "/bin/sh"

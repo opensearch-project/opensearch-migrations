@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestOCUConfigurationGetVectorMemory(t *testing.T) {
+func TestOCUConfiguration_GetVectorMemory(t *testing.T) {
 	tests := []struct {
 		name     string
 		config   OCUConfiguration
@@ -39,7 +39,7 @@ func TestOCUConfigurationGetVectorMemory(t *testing.T) {
 	}
 }
 
-func TestOCUConfigurationGetStorage(t *testing.T) {
+func TestOCUConfiguration_GetStorage(t *testing.T) {
 	tests := []struct {
 		name     string
 		config   OCUConfiguration
@@ -70,7 +70,7 @@ func TestOCUConfigurationGetStorage(t *testing.T) {
 	}
 }
 
-func TestWorkerConfigScaleForIndexing(t *testing.T) {
+func TestWorkerConfig_ScaleForIndexing(t *testing.T) {
 	tests := []struct {
 		name               string
 		workerConfig       WorkerConfig
@@ -118,7 +118,7 @@ func TestWorkerConfigScaleForIndexing(t *testing.T) {
 	}
 }
 
-func TestWorkerConfigScaleForSearch(t *testing.T) {
+func TestWorkerConfig_ScaleForSearch(t *testing.T) {
 	tests := []struct {
 		name                     string
 		workerConfig             WorkerConfig
@@ -174,7 +174,7 @@ func TestWorkerConfigScaleForSearch(t *testing.T) {
 	}
 }
 
-func TestVectorCalculateV2(t *testing.T) {
+func TestVector_CalculateV2(t *testing.T) {
 	tests := []struct {
 		name                string
 		vector              Vector
@@ -235,7 +235,7 @@ func TestVectorCalculateV2(t *testing.T) {
 	}
 }
 
-func TestVectorCollectionFill(t *testing.T) {
+func TestVectorCollection_Fill(t *testing.T) {
 	vc := VectorCollection{
 		IndexingWorker: WorkerConfig{
 			RequiredStorage:       100,
@@ -253,7 +253,7 @@ func TestVectorCollectionFill(t *testing.T) {
 	assert.Equal(t, 6.0, vc.AvailableMemory, "Available memory mismatch")
 }
 
-func TestVectorCollectionGetOCUs(t *testing.T) {
+func TestVectorCollection_GetOCUs(t *testing.T) {
 	vc := VectorCollection{
 		IndexingWorker: WorkerConfig{
 			Worker:      OCUConfiguration{OCUsPerWorker: 2},

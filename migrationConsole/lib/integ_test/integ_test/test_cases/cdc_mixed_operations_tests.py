@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+import uuid
 
 from console_link.models.cluster import HttpMethod
 
@@ -39,7 +40,7 @@ class Test0033CdcOnlyMixedOperations(MATestBase):
             migrations_required=[MigrationType.CAPTURE_AND_REPLAY],
             allow_source_target_combinations=CDC_SOURCE_TARGET_COMBINATIONS,
         )
-        uid = self.unique_id
+        uid = f"{self.unique_id}-{uuid.uuid4().hex[:4]}"
         self.idx_bulk = f"cdc0033-bulk-{uid}"
         self.idx_lifecycle = f"cdc0033-lifecycle-{uid}"
         self.idx_template = f"cdc0033-tmpl-{uid}"
@@ -233,9 +234,6 @@ class Test0033CdcOnlyMixedOperations(MATestBase):
         alias_data = resp.json()
         assert self.idx_template in alias_data, \
             f"Expected alias {self.alias_name} to point to {self.idx_template}, got {alias_data}"
-
-    def test_after(self):
-        pass
 
     def cleanup(self):
         # Delete composable index templates created by this test from both clusters.

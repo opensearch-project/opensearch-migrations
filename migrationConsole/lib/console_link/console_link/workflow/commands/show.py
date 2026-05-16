@@ -205,9 +205,10 @@ def _history_prefix(resource_name: str, resource: Dict[str, Any], output_name: s
     display_type = _resource_display_type(resource_name)
     parsed = parse_resource_path(resource_name)
     uid = _resource_uid(resource)
-    if not display_type or not parsed or not uid:
+    creation_ts = resource.get("metadata", {}).get("creationTimestamp", "")
+    if not display_type or not parsed or not uid or not creation_ts:
         return None
-    return f"{OUTPUT_ROOT}/{display_type}/{parsed[1]}/{uid}/{output_name}/"
+    return f"{OUTPUT_ROOT}/{display_type}/{parsed[1]}/{creation_ts}_{uid}/{output_name}/"
 
 
 def _iso_timestamp(value) -> str:

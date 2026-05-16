@@ -71,6 +71,8 @@ definitions:
     type: object
   price.ProvisionedRegion:
     properties:
+      currency:
+        type: string
       hotInstances:
         additionalProperties:
           $ref: '#/definitions/price.InstanceUnit'
@@ -152,6 +154,8 @@ definitions:
         type: number
       leaderNodes:
         $ref: '#/definitions/provisioned.HotNodes'
+      score:
+        type: number
       totalCost:
         type: number
       warmNodes:
@@ -196,6 +200,8 @@ definitions:
         items:
           $ref: '#/definitions/provisioned.ClusterConfig'
         type: array
+      currency:
+        type: string
       searchRequest:
         $ref: '#/definitions/provisioned.SearchEstimateRequest'
       timeSeriesRequest:
@@ -352,6 +358,10 @@ definitions:
       derivedSource:
         description: Storage compression options
         type: boolean
+      dynamicSizing:
+        description: Enable workload-aware configuration scoring instead of cheapest-first
+          ranking
+        type: boolean
       edp:
         type: number
       freeStorageRequired:
@@ -415,6 +425,10 @@ definitions:
         type: boolean
       derivedSource:
         description: Storage compression options
+        type: boolean
+      dynamicSizing:
+        description: Enable workload-aware configuration scoring instead of cheapest-first
+          ranking
         type: boolean
       edp:
         type: number
@@ -493,6 +507,10 @@ definitions:
         type: boolean
       dimensionsCount:
         type: integer
+      dynamicSizing:
+        description: Enable workload-aware configuration scoring instead of cheapest-first
+          ranking
+        type: boolean
       edp:
         type: number
       exactKNN:
@@ -615,6 +633,9 @@ definitions:
     properties:
       continent:
         description: Continent name (e.g., "North America")
+        type: string
+      currency:
+        description: Currency code (e.g., "USD", "CNY")
         type: string
       displayName:
         description: Full region name (e.g., "US East (N. Virginia)")

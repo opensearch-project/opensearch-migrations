@@ -334,64 +334,27 @@ def call(Map config = [:]) {
 
         post {
             always {
-                timeout(time: 75, unit: 'MINUTES') {
-                    script {
-                        def region = params.REGION ?: 'us-east-1'
-                        def maStackName = env.MA_STACK_NAME ?: "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${region}"
-
-
-                        withMigrationsTestAccount(region: region, duration: 4500) { accountId ->
-                                sh "mkdir -p libraries/testAutomation/logs"
-                                archiveArtifacts artifacts: 'libraries/testAutomation/logs/**', allowEmptyArchive: true
-
-                                // EKS/k8s cleanup (only if EKS was deployed)
-                                if (env.eksClusterName) {
-                                    dir('libraries/testAutomation') {
-                                        sh "pipenv install --deploy"
-                                        sh "kubectl --context=${env.eksKubeContext} -n ma get pods || true"
-                                        sh "pipenv run app --delete-only --kube-context=${env.eksKubeContext}"
-                                    }
-
-                                    // Revoke security group rule added during setup
-                                    if (env.clusterDetailsJson && env.clusterSecurityGroup) {
-                                        def clusterDetails = readJSON text: env.clusterDetailsJson
-                                        def targetCluster = clusterDetails.target
-                                        sh """
-                                          if aws ec2 describe-security-groups --group-ids $targetCluster.securityGroupId >/dev/null 2>&1; then
-                                            exists=\$(aws ec2 describe-security-groups \
-                                              --group-ids $targetCluster.securityGroupId \
-                                              --query "SecurityGroups[0].IpPermissions[?UserIdGroupPairs[?GroupId=='$env.clusterSecurityGroup']]" \
-                                              --output json)
-                                            if [ "\$exists" != "[]" ]; then
-                                              echo "CLEANUP: Revoking EKS SG ingress rule"
-                                              aws ec2 revoke-security-group-ingress \
-                                                --group-id $targetCluster.securityGroupId \
-                                                --protocol -1 --port -1 \
-                                                --source-group $env.clusterSecurityGroup || true
-                                            fi
-                                          fi
-                                        """
-                                    }
-
-                                    eksCleanupStep(
-                                        stackName: maStackName,
-                                        eksClusterName: env.eksClusterName,
-                                        kubeContext: env.eksKubeContext
-                                    )
-                                }
-
-                                // Destroy domain stacks via CDK (uses same context file from deploy)
-                                dir('test') {
-                                    echo "CLEANUP: Destroying domain stacks via CDK"
-                                    sh "./awsDeployCluster.sh --stage ${maStageName} --context-file ${clusterContextFilePath} --destroy || true"
-                                }
-
-                                // Delete MA CloudFormation stack directly
-                                echo "CLEANUP: Deleting MA stack ${maStackName}"
-                                sh "aws cloudformation delete-stack --stack-name ${maStackName} --region ${region} || true"
-                                sh "aws cloudformation wait stack-delete-complete --stack-name ${maStackName} --region ${region} || true"
+                script {
+                    def stepsBefore = []
+                    if (env.clusterDetailsJson && env.clusterSecurityGroup) {
+                        def targetCluster = readJSON(text: env.clusterDetailsJson).target
+                        if (targetCluster?.securityGroupId) {
+                            stepsBefore << [type: 'revoke-sg',
+                                            sgId: targetCluster.securityGroupId,
+                                            sourceSg: env.clusterSecurityGroup,
+                                            reason: 'revoke EKS -> target ingress rule added during setup']
                         }
                     }
+                    eksPostCleanup(
+                        maStackName: env.MA_STACK_NAME ?: "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${params.REGION}",
+                        clusterStackName: "OpenSearch-${maStageName}-${params.REGION}",
+                        clusterInsideMaVpc: true,
+                        kubeContext: env.eksKubeContext,
+                        eksClusterName: env.eksClusterName,
+                        cdkContextFile: clusterContextFilePath,
+                        cdkStage: maStageName,
+                        stepsBeforeMaDelete: stepsBefore,
+                    )
                 }
             }
         }

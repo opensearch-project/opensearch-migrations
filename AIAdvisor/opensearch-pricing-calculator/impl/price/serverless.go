@@ -5,6 +5,14 @@ package price
 
 const ServerlessPricingUrl = "https://b0.p.awsstatic.com/pricing/2.0/meteredUnitMaps/es/USD/current/es-serverless.json"
 
+// SecretServerlessPricingUrl is the serverless pricing endpoint for the aws-iso-b partition.
+// Serverless is not currently available in Secret regions but will be fetched when it becomes available.
+const SecretServerlessPricingUrl = "https://calculator.aws/pricing/2.0/meteredUnitMaps/aws-iso-b/es/USD/current/es-serverless.json"
+
+// TopSecretServerlessPricingUrl is the serverless pricing endpoint for the aws-iso partition.
+// Serverless is not currently available in Top Secret regions but will be fetched when it becomes available.
+const TopSecretServerlessPricingUrl = "https://calculator.aws/pricing/2.0/meteredUnitMaps/aws-iso/es/USD/current/es-serverless.json"
+
 const DaysPerYear = 365
 const DaysPerMonth = DaysPerYear / 12.0
 

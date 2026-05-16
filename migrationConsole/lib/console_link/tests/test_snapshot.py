@@ -640,3 +640,114 @@ def test_delete_all_snapshots_repository_missing(request, snapshot_fixture, capl
     source_cluster.call_api.assert_has_calls([
         mock.call(f'/_snapshot/{snapshot.snapshot_repo_name}/_all', raise_error=True)
     ])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Solr snapshot finish detection
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _accum_initial():
+    return {
+        "total_shards": 0, "completed_shards": 0, "index_size_bytes": 0,
+        "started_dt": None, "all_completed": True, "any_failed": False, "any_found": False,
+    }
+
+
+def test_accumulate_collection_completed_state_marks_completed():
+    from console_link.models.snapshot import _accumulate_collection_result
+
+    accum = _accum_initial()
+    _accumulate_collection_result(
+        {"state": "completed", "num_shards": 30, "size_bytes": 0,
+         "started_dt": None, "success_count": 30},
+        accum,
+    )
+
+    assert accum["completed_shards"] == 30
+    assert accum["total_shards"] == 30
+    assert accum["all_completed"] is True
+    assert accum["any_failed"] is False
+
+
+def test_accumulate_collection_running_state_with_all_shards_succeeded_marks_completed():
+    """Solr's REQUESTSTATUS lags behind shard completions: state can stay 'running'
+    after every shard reports success. The accumulator must treat success_count
+    >= num_shards as completion so the workflow's SUCCESS poll can terminate."""
+    from console_link.models.snapshot import _accumulate_collection_result
+
+    accum = _accum_initial()
+    _accumulate_collection_result(
+        {"state": "running", "num_shards": 30, "size_bytes": 0,
+         "started_dt": None, "success_count": 30},
+        accum,
+    )
+
+    assert accum["completed_shards"] == 30
+    assert accum["total_shards"] == 30
+    assert accum["all_completed"] is True, \
+        "all shards successful must imply completed regardless of async-task state"
+    assert accum["any_failed"] is False
+
+
+def test_accumulate_collection_submitted_state_with_partial_progress_stays_running():
+    from console_link.models.snapshot import _accumulate_collection_result
+
+    accum = _accum_initial()
+    _accumulate_collection_result(
+        {"state": "submitted", "num_shards": 30, "size_bytes": 0,
+         "started_dt": None, "success_count": 5},
+        accum,
+    )
+
+    assert accum["completed_shards"] == 5
+    assert accum["total_shards"] == 30
+    assert accum["all_completed"] is False
+    assert accum["any_failed"] is False
+
+
+def test_accumulate_collection_failed_state_marks_failed():
+    from console_link.models.snapshot import _accumulate_collection_result
+
+    accum = _accum_initial()
+    _accumulate_collection_result(
+        {"state": "failed", "num_shards": 30, "size_bytes": 0,
+         "started_dt": None, "success_count": 12},
+        accum,
+    )
+
+    assert accum["any_failed"] is True
+    assert accum["all_completed"] is False
+
+
+def test_solr_snapshot_status_returns_success_when_all_shards_completed_with_lagging_state(monkeypatch):
+    """Reproduces the workflow regression: every collection reports all shards successful
+    but Solr's async-task state field is still 'running'. Status must still surface SUCCESS
+    so checkScript's `[ "$status" = "SUCCESS" ]` poll completes."""
+    from console_link.models import snapshot as snapshot_module
+
+    cluster = mock.Mock()
+
+    def fake_call_api(path, *args, **kwargs):
+        resp = mock.Mock()
+        if path == snapshot_module.SOLR_LIST_COLLECTIONS_API:
+            resp.status_code = 200
+            resp.json.return_value = {"collections": ["col-a", "col-b", "col-c"]}
+            return resp
+        # REQUESTSTATUS — simulate the lagging-state case: 30 shards each, all 30 succeeded,
+        # but the top-level state is still "running" because the overseer hasn't published
+        # the terminal state yet.
+        resp.status_code = 200
+        resp.json.return_value = {
+            "status": {"state": "running"},
+            "response": {"numShards": 30, "indexSizeMB": 0.0, "startTime": "2026-05-12T21:42:31Z"},
+            "success": {f"shard{i}": "ok" for i in range(30)},
+        }
+        return resp
+
+    cluster.call_api.side_effect = fake_call_api
+
+    result = snapshot_module._solr_backup_status(cluster, "snap-1", deep_check=False)
+
+    assert result.success
+    assert result.value == "SUCCESS", \
+        f"expected SUCCESS so the workflow poll terminates, got {result.value!r}"

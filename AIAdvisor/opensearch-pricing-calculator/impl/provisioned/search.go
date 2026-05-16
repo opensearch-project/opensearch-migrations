@@ -5,11 +5,11 @@ package provisioned
 
 import (
 	"fmt"
-	"math"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/cache"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/commons"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/price"
 	"github.com/opensearch-project/opensearch-pricing-calculator/impl/regions"
+	"math"
 	"sort"
 	"strings"
 
@@ -47,6 +47,7 @@ type SearchEstimateRequest struct {
 	ColdPercentage         int    `json:"coldPercentage,omitempty"`         // Percentage of data to store in cold tier (0-100)
 	WarmInstanceType       string `json:"warmInstanceType,omitempty"`       // Override UltraWarm instance type: "ultrawarm1.medium.search" or "ultrawarm1.large.search"
 	AutoSelectWarmInstance *bool  `json:"autoSelectWarmInstance,omitempty"` // Enable automatic warm instance selection based on storage (default: true)
+	DynamicSizing          bool   `json:"dynamicSizing,omitempty"`          // Enable workload-aware configuration scoring instead of cheapest-first ranking
 
 	logger *zap.Logger
 }
@@ -86,6 +87,20 @@ func GetDefaultSearchRequest() *SearchEstimateRequest {
 		WarmPercentage:      0, // All data in hot tier by default
 		ColdPercentage:      0, // No cold tier by default
 		// AutoSelectWarmInstance is nil, which means auto-select is enabled by default
+	}
+}
+
+// getDataScale returns the data scale tier based on data size.
+func (r *SearchEstimateRequest) getDataScale() string {
+	switch {
+	case r.DataSize < 100:
+		return "small"
+	case r.DataSize < 1000:
+		return "medium"
+	case r.DataSize < 10000:
+		return "large"
+	default:
+		return "xlarge"
 	}
 }
 
@@ -337,8 +352,8 @@ func (r *SearchEstimateRequest) GetClusterConfigs(totalActiveShards int, totalSt
 				// User specified a specific warm instance type
 				warmInstanceTypesToEvaluate = []string{r.WarmInstanceType}
 			} else {
-				// Auto-select: evaluate both warm instance types to find best price
-				warmInstanceTypesToEvaluate = []string{"ultrawarm1.medium.search", "ultrawarm1.large.search"}
+				// Auto-select: evaluate all warm instance types to find best price
+				warmInstanceTypesToEvaluate = AllWarmInstanceTypes
 			}
 		}
 
@@ -442,9 +457,18 @@ func (r *SearchEstimateRequest) GetClusterConfigs(totalActiveShards int, totalSt
 		return cc[i].TotalCost < cc[j].TotalCost
 	})
 
-	//return only the top 10 configs if there are more than 10 else return all
-	if len(cc) > 10 {
-		cc = cc[:10]
+	maxConfigs := 10
+	if r.DynamicSizing {
+		// Keep 3x candidates for scoring, then rank and return top N
+		oversampleLimit := maxConfigs * 3
+		if len(cc) > oversampleLimit {
+			cc = cc[:oversampleLimit]
+		}
+		cc = ScoreAndRank(cc, "search", r.getDataScale(), maxConfigs, 0)
+	} else {
+		if len(cc) > maxConfigs {
+			cc = cc[:maxConfigs]
+		}
 	}
 	return cc
 }

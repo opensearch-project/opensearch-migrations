@@ -158,7 +158,48 @@ ensure_k8s_buildx_builder() {
   docker buildx use "${builder_name}"
   echo "BUILDX_BUILDER=${builder_name}"
   echo "Bootstrapping builder..."
-  docker buildx inspect --bootstrap
+
+  # docker buildx inspect --bootstrap uses a hardcoded 110s timeout when it
+  # waits for the builder Deployments to become Ready. On EKS, the very first
+  # time the build-nodepool scales up, Karpenter cold-start routinely blows
+  # past 110s (node provisioning + image pull + container start), so the
+  # bootstrap fails with `expected 1 replicas to be ready, got 0` and the
+  # whole pipeline dies before any test runs.
+  #
+  # Do a longer kubectl-level pre-wait on every buildkit Deployment in the
+  # namespace first, then call buildx. The kubectl wait gives Karpenter the
+  # time it realistically needs; once pods are Available, buildx's internal
+  # 110s window is plenty. We still retry the bootstrap once in case a pod
+  # flaps between kubectl-wait and buildx-inspect.
+  local build_timeout="${BUILDKIT_BOOTSTRAP_TIMEOUT:-900s}"
+  local attempts="${BUILDKIT_BOOTSTRAP_ATTEMPTS:-2}"
+  local attempt=1
+  while true; do
+    echo "Pre-waiting up to ${build_timeout} for buildkit Deployments in '${namespace}' (attempt ${attempt}/${attempts})..."
+    kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
+      wait --for=condition=Available deployment --all -n "${namespace}" \
+      --timeout="${build_timeout}" || {
+        echo "Deployments not yet Available after kubectl wait; dumping state for diagnosis" >&2
+        kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
+          get deployments,replicasets,pods -n "${namespace}" -o wide >&2 || true
+        kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
+          describe pods -n "${namespace}" >&2 || true
+      }
+    if docker buildx inspect --bootstrap; then
+      break
+    fi
+    echo "buildx bootstrap failed on attempt ${attempt}/${attempts}" >&2
+    if [[ "${attempt}" -ge "${attempts}" ]]; then
+      echo "ERROR: buildx bootstrap exhausted ${attempts} attempt(s); dumping buildkit namespace state" >&2
+      kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
+        get all -n "${namespace}" >&2 || true
+      kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
+        describe pods -n "${namespace}" >&2 || true
+      return 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 10
+  done
 }
 
 setup_build_backend() {

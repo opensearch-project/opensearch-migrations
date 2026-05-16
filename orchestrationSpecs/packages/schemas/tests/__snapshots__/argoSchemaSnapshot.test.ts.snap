@@ -205,8 +205,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "version": {
                       "type": "string",
-                      "pattern": "^(?:ES [125678]|OS [123]|SOLR [89])(?:\\\\.[0-9]+)+$",
-                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0'."
+                      "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
+                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.6'."
                     },
                     "snapshotInfo": {
                       "type": "object",
@@ -988,8 +988,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "version": {
                       "type": "string",
-                      "pattern": "^(?:ES [125678]|OS [123]|SOLR [89])(?:\\\\.[0-9]+)+$",
-                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0'."
+                      "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
+                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.6'."
                     },
                     "label": {
                       "type": "string"
@@ -2220,8 +2220,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           },
           "version": {
             "type": "string",
-            "pattern": "^(?:ES [125678]|OS [123]|SOLR [89])(?:\\\\.[0-9]+)+$",
-            "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0'."
+            "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
+            "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.6'."
           },
           "snapshotInfo": {
             "type": "object",
