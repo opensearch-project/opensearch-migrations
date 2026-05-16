@@ -467,10 +467,8 @@ class Kafka(ABC):
     """
 
     def __init__(self, config):
-        logger.info(f"Initializing Kafka with broker_endpoints: {config.get('broker_endpoints')}")
         v = Validator(SCHEMA)
         if not v.validate({'kafka': config}):
-            logger.error(f"Invalid config: {v.errors}")
             raise ValueError(v.errors)
         self.brokers = config.get('broker_endpoints')
 
