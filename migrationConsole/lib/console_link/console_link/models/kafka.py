@@ -467,8 +467,10 @@ class Kafka(ABC):
     """
 
     def __init__(self, config):
+        logger.info(f"Initializing Kafka with config: {config}")
         v = Validator(SCHEMA)
         if not v.validate({'kafka': config}):
+            logger.error(f"Invalid config: {v.errors}")
             raise ValueError(v.errors)
         self.brokers = config.get('broker_endpoints')
 
@@ -612,11 +614,11 @@ class ScramKafka(Kafka):
     and passes --command-config to all Kafka CLI commands.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, password: Optional[str] = None):
         super().__init__(config)
         scram_config = config['scram']
         self.username = scram_config['username']
-        self.password = self._resolve_password(scram_config)
+        self.password = password if password else self._resolve_password(scram_config)
         self.ca_cert_path: Optional[str] = scram_config.get('ca_cert_path')
         self._props_file = self._write_properties_file()
 

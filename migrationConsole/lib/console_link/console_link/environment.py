@@ -330,7 +330,6 @@ class Environment:
                 password, ca_cert_path = cls._resolve_strimzi_scram_credentials(cluster_name)
                 scram_config: Dict = {
                     "username": f"{cluster_name}-migration-app",
-                    "password": password,
                 }
                 if ca_cert_path:
                     scram_config["ca_cert_path"] = ca_cert_path
@@ -338,6 +337,7 @@ class Environment:
                     "broker_endpoints": f"{cluster_name}-kafka-bootstrap:9093",
                     "scram": scram_config,
                 }
+                return get_kafka(kafka_config, scram_password=password)
             else:
                 kafka_config = {
                     "broker_endpoints": f"{cluster_name}-kafka-bootstrap:9092",
