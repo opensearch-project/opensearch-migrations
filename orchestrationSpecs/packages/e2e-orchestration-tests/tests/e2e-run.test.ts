@@ -541,7 +541,7 @@ describe("runNoopCase — lifecycle actors", () => {
 });
 
 describe("runNoopCase — error paths", () => {
-    it("marks outcome as 'partial' with a phase-timeout diagnostic when wait fails", async () => {
+    it("stops before noop-pre when baseline phase completion times out", async () => {
         const { deps, tmpDir } = makeRunnerTestDeps({
             spec: {
                 baseConfig: "./baseline.wf.yaml",
@@ -561,8 +561,18 @@ describe("runNoopCase — error paths", () => {
         try {
             const outPath = await runNoopCase(deps);
             const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
-            expect(snapshot.outcome).toBe("partial");
+            expect(snapshot.outcome).toBe("error");
             expect(snapshot.diagnostics.join("\n")).toMatch(/phase-timeout/);
+            expect(Object.keys(snapshot.runs)).toEqual(["baseline"]);
+            expect(snapshot.events).toEqual(
+                expect.arrayContaining([
+                    expect.objectContaining({
+                        phase: "baseline",
+                        action: "abort-after-checkpoint-failure",
+                        result: "error",
+                    }),
+                ]),
+            );
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }

@@ -105,6 +105,7 @@ Current branch status:
 - `[x]` Each submitted run deletes and waits for both the outer submitted Argo workflow and the fixed inner `migration-workflow`; failure to confirm baseline cleanup stops the noop run before it can collide.
 - `[x]` Workflow names are unique, sanitized, and length-limited for Kubernetes/Argo naming constraints.
 - `[x]` Noop and safe pass/fail assertions are wired into runner snapshots; gated and impossible case-plan assertions are wired in unit tests, with live validation still pending.
+- `[x]` Blocking checkpoint wait failures (`workflow-timeout`, `workflow-failed`, `phase-timeout`) now stop the case before the next plan step while preserving the failed run in the snapshot.
 
 Get a real cluster-backed test running as early as possible, even if it covers only one safe/noop path and uses hardcoded scenario data. This is intentionally a vertical slice from the design document's "How A Test Case Runs" section, not the full framework.
 
@@ -312,6 +313,11 @@ Exit criteria:
 - `[~]` CRD checksum/fingerprint is captured when available; Argo node execution evidence is captured and missing-Argo cases are diagnostic-only, but node execution is not yet correlated to components.
 - `[ ]` Snapshot diagnostics call out any disagreement between checksum-derived and Argo-derived behavior.
 
+Latest live validation note:
+
+- 2026-05-15 clean-cluster run used `kind-ma-workflow-clean` with image tag `workflow-tests-20260515` and `basicSnapshotNoop.test.yaml --noop-only`. The baseline reached the RFS path, created the RFS Deployment and coordinator, then failed to complete before timeout. Evidence: `SnapshotMigration/source-target-snap1-migration-0` stayed `Initialized` with `documentBackfill.phase=Pending`; coordinator restarted with `OOMKilled`/exit `137` under a `2Gi` limit; RFS worker retries failed first with coordinator DNS `NXDOMAIN` while the headless Service had only not-ready endpoints, then with `connection refused` while the coordinator was restarting. Treat this as the current SUT/live-environment blocker before gated/impossible live validation.
+- The same run exposed a harness issue where baseline timeout was logged and the runner continued into `noop-pre`; that is now fixed so checkpoint wait failures stop the case and write an error snapshot.
+
 ### 7. Matrix Expander And Mutator Registry `[~]`
 
 Current branch status:
@@ -406,6 +412,7 @@ Current branch status:
 - `[x]` Basic polling predicate exists and returns structured timeout diagnostics.
 - `[x]` `Pending` is not terminal for generic topology components; approval-gate held phases are modeled separately.
 - `[x]` `Paused` is treated as a held topology phase for gated checkpoints.
+- `[x]` A phase/workflow timeout is now blocking at the case-plan level; the runner does not continue from a timed-out baseline into noop or mutation steps.
 - `[ ]` Phase names still need validation against the first live runs.
 
 After the safe slice works, harden waiting semantics.

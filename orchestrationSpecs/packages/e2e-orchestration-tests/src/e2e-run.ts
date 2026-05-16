@@ -578,6 +578,7 @@ export async function runWorkflowCasePlan(
                 `${caseName}-${step.runName}-${suffixer()}`,
             );
             progress(deps, `[${caseName}] ${step.runName}: submit as ${workflowName}`);
+            const diagnosticStart = diagnostics.length;
             const run = await runSubmittedWorkflow({
                 deps,
                 runName: step.runName,
@@ -593,9 +594,25 @@ export async function runWorkflowCasePlan(
             violations.push(...collectViolations(run));
             priorComponents = lastComponents(run);
             progress(deps, `[${caseName}] ${step.runName}: complete`);
+            const blockingDiagnostics = diagnostics
+                .slice(diagnosticStart)
+                .filter(isBlockingCheckpointDiagnostic);
+            if (blockingDiagnostics.length > 0) {
+                outcome = "error";
+                const message =
+                    `stopping after ${step.runName}; blocking checkpoint failure: ` +
+                    blockingDiagnostics.join("; ");
+                events.push(event(clock, step.runName, "abort-after-checkpoint-failure", "error", {
+                    message,
+                }));
+                progress(deps, `[${caseName}] ${message}`);
+                break;
+            }
         }
 
-        outcome = diagnostics.length === 0 && violations.length === 0 ? "passed" : "partial";
+        if (outcome !== "error") {
+            outcome = diagnostics.length === 0 && violations.length === 0 ? "passed" : "partial";
+        }
     } catch (e) {
         outcome = "error";
         diagnostics.push(...formatFatalDiagnostics(e));
@@ -842,6 +859,10 @@ function formatFatalDiagnostics(e: unknown): string[] {
     if (err.stderr) diagnostics.push(`stderr: ${err.stderr.trim()}`);
     if (err.stdout) diagnostics.push(`stdout: ${err.stdout.trim()}`);
     return diagnostics;
+}
+
+function isBlockingCheckpointDiagnostic(diagnostic: string): boolean {
+    return /^(workflow-timeout|workflow-failed|phase-timeout) at /.test(diagnostic);
 }
 
 function progress(deps: Pick<LiveRunnerDeps, "progress">, message: string): void {
