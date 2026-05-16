@@ -244,6 +244,24 @@ class Environment:
         }
 
     @staticmethod
+    def _resolve_strimzi_bootstrap(cluster_name: str, listener_name: str, namespace: str = 'ma') -> str:
+        """Read the bootstrap address from the Strimzi Kafka CR status."""
+        from kubernetes import client as k8s_client
+        from console_link.workflow.models.utils import load_k8s_config
+        load_k8s_config()
+        custom = k8s_client.CustomObjectsApi()
+        kafka_cr = custom.get_namespaced_custom_object(
+            group="kafka.strimzi.io", version="v1",
+            namespace=namespace, plural="kafkas", name=cluster_name,
+        )
+        for listener in kafka_cr.get("status", {}).get("listeners", []):
+            if listener.get("name") == listener_name:
+                return listener["bootstrapServers"]
+        raise ValueError(
+            f"Kafka CR '{cluster_name}' has no listener named '{listener_name}' in .status.listeners"
+        )
+
+    @staticmethod
     def _resolve_strimzi_scram_credentials(cluster_name: str, namespace: str = 'ma') -> Tuple[str, Optional[str]]:
         """Read SCRAM password and cluster CA cert from Strimzi-managed k8s Secrets.
 
@@ -328,19 +346,21 @@ class Environment:
             auth_type = auth_config.get("type", "")
             if auth_type == "scram-sha-512":
                 password, ca_cert_path = cls._resolve_strimzi_scram_credentials(cluster_name)
+                bootstrap = cls._resolve_strimzi_bootstrap(cluster_name, "tls")
                 scram_config: Dict = {
                     "username": f"{cluster_name}-migration-app",
                 }
                 if ca_cert_path:
                     scram_config["ca_cert_path"] = ca_cert_path
                 kafka_config = {
-                    "broker_endpoints": f"{cluster_name}-kafka-bootstrap:9093",
+                    "broker_endpoints": bootstrap,
                     "scram": scram_config,
                 }
                 return get_kafka(kafka_config, scram_password=password)
             else:
+                bootstrap = cls._resolve_strimzi_bootstrap(cluster_name, "plain")
                 kafka_config = {
-                    "broker_endpoints": f"{cluster_name}-kafka-bootstrap:9092",
+                    "broker_endpoints": bootstrap,
                     "standard": None
                 }
         else:

@@ -111,7 +111,8 @@ def test_get_source_cluster_from_workflow_config_attaches_proxy():
     assert cluster.proxy.endpoint == "https://capture-proxy:9201"
 
 
-def test_get_kafka_from_workflow_config_autocreate_default_cluster():
+@patch.object(Environment, '_resolve_strimzi_bootstrap', return_value="default-kafka-bootstrap.ma.svc:9092")
+def test_get_kafka_from_workflow_config_autocreate_default_cluster(mock_bootstrap):
     config = {
         "kafkaClusterConfiguration": {
             "default": {
@@ -130,7 +131,8 @@ def test_get_kafka_from_workflow_config_autocreate_default_cluster():
     kafka = Environment._get_kafka_from_workflow_config(config)
 
     assert isinstance(kafka, StandardKafka)
-    assert kafka.brokers == "default-kafka-bootstrap:9092"
+    assert kafka.brokers == "default-kafka-bootstrap.ma.svc:9092"
+    mock_bootstrap.assert_called_once_with("default", "plain")
 
 
 def test_get_kafka_from_workflow_config_existing_cluster_uses_reference():
@@ -160,8 +162,9 @@ def test_get_kafka_from_workflow_config_existing_cluster_uses_reference():
     assert kafka.brokers == "broker.a:9092,broker.b:9092"
 
 
+@patch.object(Environment, '_resolve_strimzi_bootstrap', return_value="default-kafka-bootstrap.ma.svc:9093")
 @patch.object(Environment, '_resolve_strimzi_scram_credentials', return_value=("test-password", "/tmp/fake-ca.crt"))
-def test_get_kafka_from_workflow_config_autocreate_scram(mock_resolve):
+def test_get_kafka_from_workflow_config_autocreate_scram(mock_creds, mock_bootstrap):
     config = {
         "kafkaClusterConfiguration": {
             "default": {
@@ -184,10 +187,11 @@ def test_get_kafka_from_workflow_config_autocreate_scram(mock_resolve):
     kafka = Environment._get_kafka_from_workflow_config(config)
 
     assert isinstance(kafka, ScramKafka)
-    assert kafka.brokers == "default-kafka-bootstrap:9093"
+    assert kafka.brokers == "default-kafka-bootstrap.ma.svc:9093"
     assert kafka.username == "default-migration-app"
     assert kafka.password == "test-password"
-    mock_resolve.assert_called_once_with("default")
+    mock_creds.assert_called_once_with("default")
+    mock_bootstrap.assert_called_once_with("default", "tls")
 
 
 @patch('console_link.environment.WorkflowConfigStore')
