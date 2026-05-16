@@ -107,6 +107,9 @@ def call(Map config = [:]) {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
                             sh "kubectl config unset current-context || true"
+                            // Ensure no stale webhooks remain after cleanup stage (which may have timed out)
+                            sh "kubectl --context=minikube delete mutatingwebhookconfigurations --all --ignore-not-found || true"
+                            sh "kubectl --context=minikube delete validatingwebhookconfigurations --all --ignore-not-found || true"
                             sh "helm --kube-context=minikube uninstall buildkit -n buildkit 2>/dev/null || true"
                             sh "USE_LOCAL_REGISTRY=true KUBE_CONTEXT=minikube BUILDKIT_HELM_ARGS='--set buildkitd.maxParallelism=16 --set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0' sh -c '. ./buildImages/backends/k8sHostedBuildkit.sh && setup_build_backend'"
                             def pullThroughCacheEndpoint = sh(script: 'bash -l -c \'echo -n $ECR_PULL_THROUGH_ENDPOINT\'', returnStdout: true).trim()
