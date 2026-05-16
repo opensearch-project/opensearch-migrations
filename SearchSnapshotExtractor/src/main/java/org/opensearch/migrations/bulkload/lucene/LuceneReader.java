@@ -175,14 +175,16 @@ public class LuceneReader {
         // Start at
         int startDocIdInSegment = (docStartingId <= segmentDocBase) ? 0 : docStartingId - segmentDocBase;
 
-        // Per-segment term position cache. Built lazily on first need. The streaming path
-        // (min-heap of PostingsEnum cursors) processes everything in-memory — no disk spill.
-        //
-        // Shared across all N reader-parallelism workers: SegmentTermIndex's read methods
-        // are synchronized on the instance, so concurrent advance from N views is safe but
-        // serializes through one monitor — that is the expected ceiling for analyzed-text
-        // recovery and a known input to the diminishing-returns curve.
-        final SegmentTermIndex termIndex = new SegmentTermIndex();
+        // Per-worker term position caches. Each worker gets its own SegmentTermIndex because
+        // the streaming postings cursors inside are forward-only: they can only advance to
+        // higher docIds, never rewind. With round-robin partitioning each worker sees a
+        // strictly-ascending docId subsequence, so per-worker cursors advance monotonically.
+        // A shared cursor would race: if worker-1 advances to doc 3 before worker-0 requests
+        // doc 0, the cursor can never go back and doc 0 is silently lost.
+        final List<SegmentTermIndex> workerTermIndexes = new ArrayList<>(Math.max(1, READER_PARALLELISM));
+        for (int i = 0; i < Math.max(1, READER_PARALLELISM); i++) {
+            workerTermIndexes.add(new SegmentTermIndex());
+        }
 
         // For any errors, we want to log the segment reader debug info so we can see which segment is causing the issue.
         // This allows us to pass the supplier to getDocument without having to recompute the debug info
@@ -235,12 +237,13 @@ public class LuceneReader {
         if (parallelism == 1) {
             // Fast path: no merge, no per-doc round-robin overhead. Equivalent to the prior
             // single-threaded reconstruction loop.
+            final SegmentTermIndex singleTermIndex = workerTermIndexes.get(0);
             return Flux.fromIterable(allDocIds)
                 .flatMapSequential(docIdx -> Mono.defer(() -> readOneDoc(
                         workerReaders.get(0), docIdx, segmentDocBase, getSegmentReaderDebugInfo,
-                        indexDirectoryPath, operation, mappingContext, termIndex, useRecoverySource))
+                        indexDirectoryPath, operation, mappingContext, singleTermIndex, useRecoverySource))
                     .subscribeOn(LUCENE_IO_SCHEDULER), 1, 1)
-                .doFinally(sig -> termIndex.close());
+                .doFinally(sig -> singleTermIndex.close());
         }
 
         // Round-robin partition into N worker buckets. We materialize per-worker lists up
@@ -259,11 +262,12 @@ public class LuceneReader {
             final LuceneLeafReader workerReader = workerReaders.get(w);
             final List<Integer> bucket = workerBuckets.get(w);
             final int workerId = w;
+            final SegmentTermIndex workerTermIndex = workerTermIndexes.get(w);
             workerFluxes.add(
                 Flux.fromIterable(bucket)
                     .concatMap(docIdx -> Mono.fromCallable(() -> readOneDocBlocking(
                             workerReader, docIdx, segmentDocBase, getSegmentReaderDebugInfo,
-                            indexDirectoryPath, operation, mappingContext, termIndex, useRecoverySource))
+                            indexDirectoryPath, operation, mappingContext, workerTermIndex, useRecoverySource))
                         .subscribeOn(LUCENE_IO_SCHEDULER))
                     .filter(java.util.Objects::nonNull)
                     .doOnSubscribe(s -> log.atDebug().setMessage("worker {} subscribing on segment {} ({} docs)")
@@ -284,7 +288,7 @@ public class LuceneReader {
         return Flux.mergeOrdered(
                 java.util.Comparator.comparingInt((LuceneDocumentChange c) -> c.luceneDocNumber),
                 workerFluxArray)
-            .doFinally(sig -> termIndex.close());
+            .doFinally(sig -> workerTermIndexes.forEach(SegmentTermIndex::close));
     }
 
     /**
