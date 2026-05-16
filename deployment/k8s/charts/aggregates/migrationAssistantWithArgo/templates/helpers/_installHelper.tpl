@@ -26,9 +26,11 @@
 {{- end }}
                   --timeout {{ default "300" $chart.timeout }}s \
                   --set global.managedBy="{{ $root.Release.Name }}" \
-                  $VALUE_PARAM \
 {{- if or $chart.waitForInstallation $forceWait }}
+                  $VALUE_PARAM \
                   --wait
+{{- else }}
+                  $VALUE_PARAM
 {{- end }}
               }
               retry 2 15 "helm upgrade --install {{ $name }}" -- do_install_{{ $name | replace "-" "_" }}

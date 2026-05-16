@@ -224,9 +224,11 @@ spec:
           {{- if eq $name "ack-cloudwatch-controller" }}
                     --set aws.region="{{ $.Values.aws.region }}" \
           {{- end }}
-                    $VALUE_PARAM \
           {{- if $chart.waitForInstallation }}
+                    $VALUE_PARAM \
                     --wait
+          {{- else }}
+                    $VALUE_PARAM
           {{- end }}
                 }
                 retry 2 15 "helm upgrade --install {{ $name }}" -- do_install_{{ $name | replace "-" "_" }}
