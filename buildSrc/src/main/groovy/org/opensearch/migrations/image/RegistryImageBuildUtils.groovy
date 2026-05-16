@@ -13,13 +13,14 @@ class RegistryImageBuildUtils {
         final String hostUrl      // For Jib, which runs in the JVM directly (e.g., localhost:5001)
         final String containerUrl // For BuildKit, which runs in a container (e.g., docker-registry:5000)
 
-        Registry(String rawUrl, String localContainerUrl=null) {
+        Registry(String rawUrl, String localContainerUrl="docker-registry:5000") {
             this.hostUrl = rawUrl
-            // BuildKit runs in a container, Jib in the JVM. They usually push to the same URL,
-            // but when the caller is targeting an in-cluster registry exposed via NodePort or
-            // port-forward, BuildKit needs the service DNS instead. Caller passes that override
-            // via -PlocalContainerRegistryEndpoint=...; otherwise both endpoints match.
-            this.containerUrl = localContainerUrl ?: rawUrl
+            // Keep the host-visible endpoint for Jib, but make the container-visible endpoint explicit.
+            if (rawUrl.startsWith("localhost:")) {
+                this.containerUrl = localContainerUrl
+            } else {
+                this.containerUrl = rawUrl
+            }
         }
 
         String getRegistryDomain() { hostUrl.split('/')[0] }
