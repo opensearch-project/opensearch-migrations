@@ -231,6 +231,20 @@ spec:
                   name: migrations-default-s3-config
                   key: ENDPOINT_HTTP
                   optional: true
+            # Symmetric with the RFS bulk-load pod (see documentBulkLoad.ts) so
+            # `console backfill dlq …` and `_augment_status_with_dlq` resolve the
+            # SAME bucket/region the RFS writes to. Required for the workflow
+            # status count to equal the persisted DLQ contents.
+            - name: MIGRATIONS_DEFAULT_S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: BUCKET_NAME
+            - name: MIGRATIONS_DEFAULT_S3_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: AWS_REGION
             {{- end }}
             {{- if index .Values.conditionalPackageInstalls "cert-manager" }}
             - name: PROXY_DEFAULT_AWS_REGION
@@ -269,6 +283,13 @@ spec:
           volumeMounts:
             - name: workflow-schema
               mountPath: /root/schema
+            # Per-RFS-run DLQ pointer patched by the document-bulk-load workflow
+            # (see orchestrationSpecs/.../documentBulkLoad.ts). Kubelet refreshes
+            # this mount within ~60s when the ConfigMap is patched, so
+            # `console backfill dlq …` always resolves to the latest session.
+            - name: rfs-dlq-current-session
+              mountPath: /etc/rfs-dlq
+              readOnly: true
     {{- if $sharedLogsVolumeEnabled }}
             - name: shared-logs
               mountPath: /shared-logs-output
@@ -276,6 +297,13 @@ spec:
       volumes:
         - name: workflow-schema
           emptyDir: {}
+        - name: rfs-dlq-current-session
+          configMap:
+            name: rfs-dlq-current-session
+            # optional: the ConfigMap doesn't exist until the first bulk-load
+            # workflow runs; before then `console backfill dlq …` will report
+            # "no session" and the user can pass --session manually.
+            optional: true
     {{- if $sharedLogsVolumeEnabled  }}
         - name: shared-logs
           persistentVolumeClaim:

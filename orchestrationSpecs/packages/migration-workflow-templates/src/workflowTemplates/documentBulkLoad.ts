@@ -57,8 +57,19 @@ function makeParamsDict(
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
     options: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>,
     sessionName: BaseExpression<string>,
+    workflowUid: BaseExpression<string>,
     sourceEndpoint?: BaseExpression<string>
 ) {
+    const repoConfig = expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig");
+    // Issue #2975: enable the durable S3 DLQ on every EKS bulk-load pod. We reuse the
+    // snapshot's S3 region/role/endpoint to avoid inventing a new credentials path. When
+    // --dlq-s3-bucket is not supplied the Java side falls back to the deployment-
+    // provisioned default bucket (migrations-default-<account>-<stage>-<region>) read
+    // from the MIGRATIONS_DEFAULT_S3_BUCKET env var injected into the RFS pod below.
+    const dlqParams = expr.makeDict({
+        dlqS3Prefix: expr.literal("rfs-dlq/"),
+        dlqSessionId: workflowUid
+    });
     const base = expr.mergeDicts(
         expr.mergeDicts(
             expr.mergeDicts(
@@ -68,15 +79,18 @@ function makeParamsDict(
             expr.omit(expr.deserializeRecord(options), ...ARGO_RFS_WORKFLOW_OPTION_KEYS)
         ),
         expr.mergeDicts(
-            expr.makeDict({
-                snapshotName: expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
-                sourceVersion: sourceVersion,
-                sessionName: sessionName,
-                luceneDir: "/tmp",
-                cleanLocalDirs: true
-            }),
+            expr.mergeDicts(
+                expr.makeDict({
+                    snapshotName: expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
+                    sourceVersion: sourceVersion,
+                    sessionName: sessionName,
+                    luceneDir: "/tmp",
+                    cleanLocalDirs: true
+                }),
+                dlqParams
+            ),
             makeRepoParamDict(
-                expr.omit(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), "s3RoleArn"),
+                expr.omit(repoConfig, "s3RoleArn"),
                 true)
         )
     );
@@ -96,6 +110,28 @@ function makeParamsDict(
 
 function getRfsDeploymentName(sessionName: BaseExpression<string>) {
     return expr.concat(sessionName, expr.literal("-rfs"));
+}
+
+// Per-run pointer that lets the migration-console pod resolve the current DLQ
+// session without restarting between workflow runs. The console mounts this
+// ConfigMap at /etc/rfs-dlq (see deployment/.../migrationConsole.yaml); kubelet
+// refreshes the mount within ~60s after each patch, so `console backfill dlq …`
+// always reads the most recent run's session id. The fixed object name means
+// successive workflow runs overwrite (rather than accumulate) the pointer —
+// historical sessions remain inspectable via `--session <old-uid>` from S3.
+const DLQ_SESSION_CONFIGMAP_NAME = "rfs-dlq-current-session";
+
+function makeDlqSessionConfigMap(sessionId: BaseExpression<string>) {
+    return {
+        apiVersion: "v1",
+        kind: "ConfigMap",
+        metadata: {name: DLQ_SESSION_CONFIGMAP_NAME},
+        data: {
+            session_id: makeStringTypeProxy(sessionId),
+            // Must stay in sync with dlqS3Prefix in makeParamsDict above.
+            prefix: "rfs-dlq/"
+        }
+    };
 }
 
 function getRfsDeploymentManifest
@@ -140,10 +176,27 @@ function getRfsDeploymentManifest
         env: [
             ...getTargetHttpAuthCredsEnvVars(args.targetBasicCredsSecretNameOrEmpty),
             ...getCoordinatorHttpAuthCredsEnvVars(args.coordinatorBasicCredsSecretNameOrEmpty),
-            // We don't have a mechanism to scrape these off disk so need to disable this to avoid filling up the disk
+            // Issue #2975: terminal RFS document failures now go to a durable S3 DLQ
+            // (see RFS/.../reindexer/dlq). The previous OFF override turned off the
+            // pod-local FailedRequests log because no durable replacement existed; we
+            // can now keep the in-pod logger at WARN as a local-dev safety net. The
+            // S3 sink is enabled by providing --dlq-s3-bucket inside rfsJsonConfig, or
+            // (by default) by falling back to MIGRATIONS_DEFAULT_S3_BUCKET below, which
+            // resolves to the migrations-default-<account>-<stage>-<region> bucket that
+            // the deployment provisions. Per-pod session id comes from the workflow.
+            {
+                name: "MIGRATIONS_DEFAULT_S3_BUCKET",
+                valueFrom: {
+                    configMapKeyRef: {
+                        name: "migrations-default-s3-config",
+                        key: "BUCKET_NAME",
+                        optional: true
+                    }
+                }
+            },
             {
                 name: "FAILED_REQUESTS_LOGGER_LEVEL",
-                value: "OFF"
+                value: "WARN"
             },
             {
                 name: "CONSOLE_LOG_FORMAT",
@@ -231,9 +284,24 @@ touch /tmp/phase-output.txt
 status_json=$(console --config-file=/config/migration_services.yaml --json backfill status --deep-check)
 status=$(echo "$status_json" | jq -r '.status')
 
+# DLQ fields are appended by the console CLI's _augment_status_with_dlq when the
+# RFS DLQ is configured (see middleware/dlq.py and cli.py). They are absent if
+# the deployment isn't running the DLQ — keep the suffix empty in that case so
+# legacy operators see no change in the status output format.
+dlq_loc=$(echo "$status_json" | jq -r '.dlq_location // empty')
+dlq_count=$(echo "$status_json" | jq -r '.failed_document_count // empty')
+dlq_suffix=""
+if [[ -n "$dlq_loc" ]]; then
+    if [[ -n "$dlq_count" && "$dlq_count" != "null" ]]; then
+        dlq_suffix="; DLQ: $dlq_count failed doc(s) at $dlq_loc"
+    else
+        dlq_suffix="; DLQ location: $dlq_loc (count unavailable)"
+    fi
+fi
+
 # Check if initializing
 if [[ "$status" == "Pending" ]]; then
-    echo "Shards are initializing" > /tmp/status-output.txt
+    echo "Shards are initializing$dlq_suffix" > /tmp/status-output.txt
 else
     eval "$(echo "$status_json" | jq -r '
       @sh "pct=\(.percentage_completed // 0)
@@ -243,8 +311,8 @@ else
       complete=\(.shard_complete // 0)
       total=\(.shard_total // 0)"
     ')"
-    printf "complete: %.2f%%, ETA: %s; shards in-progress: %d; remaining: %d; shards complete/total: %d/%d\\n" \
-           "$pct" "$eta" "$progress" "$waiting" "$complete" "$total" > /tmp/status-output.txt
+    printf "complete: %.2f%%, ETA: %s; shards in-progress: %d; remaining: %d; shards complete/total: %d/%d%s\\n" \
+           "$pct" "$eta" "$progress" "$waiting" "$complete" "$total" "$dlq_suffix" > /tmp/status-output.txt
 fi
 
 # Check completion status - exit 0 only if complete, otherwise exit 1
@@ -410,6 +478,12 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             b.inputs.snapshotConfig,
                             b.inputs.documentBackfillConfig,
                             b.inputs.sessionName,
+                            // Use the Argo workflow UID (NOT the CRD UID) as the DLQ
+                            // session id: each workflow submission gets a fresh Workflow
+                            // CR with a new metadata.uid, so re-runs against the same
+                            // SnapshotMigration land under a new session=<...>/ prefix
+                            // and inspection commands see only the current run's failures.
+                            expr.getWorkflowValue("uid"),
                             b.inputs.sourceEndpoint)
                     )),
                     resources: expr.serialize(expr.jsonPathStrict(b.inputs.documentBackfillConfig, "resources")),
@@ -422,6 +496,20 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                 })
             )
         )
+    )
+
+
+    // Patches the rfs-dlq-current-session ConfigMap with this run's
+    // {{workflow.uid}} so the migration-console mount picks up the new session
+    // id without a pod restart. Idempotent: `apply` overwrites the same name.
+    .addTemplate("publishDlqSession", t => t
+        .addResourceTask(b => b
+            .setDefinition({
+                action: "apply",
+                setOwnerReference: false,
+                manifest: makeDlqSessionConfigMap(expr.getWorkflowValue("uid"))
+            }))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 
@@ -440,6 +528,10 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
 
         .addSteps(b => b
+            // Patch the per-run DLQ pointer ConfigMap before any RFS pod starts so
+            // the console can resolve the new session id as soon as failures appear.
+            .addStep("publishDlqSession", INTERNAL, "publishDlqSession", c =>
+                c.register({}))
             .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
                 c.register({
                     ...selectInputsForRegister(b, c)
