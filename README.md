@@ -65,19 +65,14 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
   <th>OpenSearch 2.x</th>
   <th>OpenSearch 3.x</th>
 </tr>
-<tr><td>Elasticsearch 1.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
-<tr><td>Elasticsearch 2.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
-<tr><td>Elasticsearch 5.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
-<tr><td>Elasticsearch 6.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
-<tr><td>Elasticsearch 7.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>Elasticsearch 1.x–2.x*</td><td>✅</td><td>✅</td><td>✅</td></tr>
+<tr><td>Elasticsearch 5.x–7.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
 <tr><td>Elasticsearch 8.x</td><td></td><td>✅</td><td>✅</td></tr>
-<tr><td>OpenSearch 1.x</td><td>✅</td><td>✅</td><td>✅</td></tr>
-<tr><td>OpenSearch 2.x</td><td></td><td>✅</td><td>✅</td></tr>
-<tr><td>OpenSearch 3.x</td><td></td><td></td><td>🔜 <a href="https://github.com/orgs/opensearch-project/projects/229?pane=issue&itemId=117495207">link</a></td></tr>
-<tr><td>Apache Solr 8.x–9.x*</td><td></td><td></td><td>✅</td></tr>
+<tr><td>OpenSearch 1.x–2.x</td><td></td><td>✅</td><td>✅</td></tr>
+<tr><td>Apache Solr 6.x–9.x*</td><td></td><td></td><td>✅</td></tr>
 </table>
 
-\* Backfill only — Capture and Replay is not supported for Solr sources.
+\* Backfill only — Capture and Replay is not supported for these source versions.
 
 Note that testing is done on specific minor versions, but any minor versions within a listed major version are expected to work.
 
