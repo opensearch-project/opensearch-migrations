@@ -56,10 +56,11 @@ export KUBE_CONTEXT="${KUBE_CONTEXT:-minikube}"
 wait_for_cluster_dns
 LOCAL_REGISTRY_PORT="${LOCAL_REGISTRY_PORT:-30500}"
 MINIKUBE_IP="$(minikube ip)"
+# Same address for build pushes, in-cluster pulls, and host-side pokes — the
+# docker-registry NodePort. setup_build_backend exports BUILD_REGISTRY_ENDPOINT
+# and BUILD_CONTAINER_REGISTRY_ENDPOINT after it provisions the registry.
 LOCAL_REGISTRY="${MINIKUBE_IP}:${LOCAL_REGISTRY_PORT}"
-BUILD_REGISTRY_ENDPOINT="${BUILD_REGISTRY_ENDPOINT:-localhost:5001}"
 export USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-true}"
-export BUILD_CONTAINER_REGISTRY_ENDPOINT="${BUILD_CONTAINER_REGISTRY_ENDPOINT:-docker-registry:5000}"
 export BUILDKIT_HELM_ARGS="${BUILDKIT_HELM_ARGS:-"--set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0"}"
 POST_MA_INSTALL_HOOK="${POST_MA_INSTALL_HOOK:-wait_for_ma_runtime}"
 POST_TC_INSTALL_HOOK="${POST_TC_INSTALL_HOOK:-wait_for_test_clusters}"

@@ -13,16 +13,13 @@ class RegistryImageBuildUtils {
         final String hostUrl      // For Jib, which runs in the JVM directly (e.g., localhost:5001)
         final String containerUrl // For BuildKit, which runs in a container (e.g., docker-registry:5000)
 
-        Registry(String rawUrl, String localContainerUrl="docker-registry:5000") {
+        Registry(String rawUrl, String localContainerUrl=null) {
             this.hostUrl = rawUrl
-            // Keep the host-visible endpoint for Jib, but make the container-visible endpoint explicit.
-            // Treat localhost ports and the cluster's docker-registry NodePort (30500) as the same
-            // local registry so in-cluster builders use service DNS instead of bouncing through NodePort.
-            if (rawUrl.startsWith("localhost:") || rawUrl.endsWith(":30500")) {
-                this.containerUrl = localContainerUrl
-            } else {
-                this.containerUrl = rawUrl
-            }
+            // BuildKit runs in a container, Jib in the JVM. They usually push to the same URL,
+            // but when the caller is targeting an in-cluster registry exposed via NodePort or
+            // port-forward, BuildKit needs the service DNS instead. Caller passes that override
+            // via -PlocalContainerRegistryEndpoint=...; otherwise both endpoints match.
+            this.containerUrl = localContainerUrl ?: rawUrl
         }
 
         String getRegistryDomain() { hostUrl.split('/')[0] }
@@ -59,11 +56,7 @@ class RegistryImageBuildUtils {
         if (override != null && !override.isEmpty()) {
             return override.toBoolean() ? "http" : "https"
         }
-        // Local minikube docker-registry is exposed via NodePort 30500 over plain HTTP.
-        if (registryHost.startsWith("localhost") || registryHost.endsWith(":30500")) {
-            return "http"
-        }
-        return "https"
+        return registryHost.startsWith("localhost") ? "http" : "https"
     }
 
     /**

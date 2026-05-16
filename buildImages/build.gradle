@@ -2,11 +2,13 @@ import org.opensearch.migrations.image.RegistryImageBuildUtils
 import org.opensearch.migrations.image.RegistryImageBuildUtils.Registry
 import org.opensearch.migrations.image.PullThroughCacheHelper
 
-def publishedUrl = rootProject.findProperty('registryEndpoint') ?: System.getenv('REGISTRY_ENDPOINT') ?: 'localhost:5001'
+def publishedUrl = rootProject.findProperty('registryEndpoint') ?: 'localhost:5001'
 def intermediateUrl = rootProject.findProperty('intermediateRegistry') ?: publishedUrl
 
+// Optional override for the in-cluster URL BuildKit pods should use to reach the registry,
+// when -PregistryEndpoint points at a NodePort or port-forward instead of the cluster service.
 def localContainerRegistryEndpoint =
-        rootProject.findProperty('localContainerRegistryEndpoint')?.toString() ?: 'docker-registry:5000'
+        rootProject.findProperty('localContainerRegistryEndpoint')?.toString()
 
 def publishedRegistry = new Registry(publishedUrl.toString(), localContainerRegistryEndpoint)
 def intermediateRegistry = new Registry(intermediateUrl.toString(), localContainerRegistryEndpoint)

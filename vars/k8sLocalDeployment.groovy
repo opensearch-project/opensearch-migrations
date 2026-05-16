@@ -110,7 +110,15 @@ def call(Map config = [:]) {
                             sh "helm --kube-context=minikube uninstall buildkit -n buildkit 2>/dev/null || true"
                             sh "USE_LOCAL_REGISTRY=true KUBE_CONTEXT=minikube BUILDKIT_HELM_ARGS='--set buildkitd.maxParallelism=16 --set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0' sh -c '. ./buildImages/backends/k8sHostedBuildkit.sh && setup_build_backend'"
                             def pullThroughCacheEndpoint = sh(script: 'bash -l -c \'echo -n $ECR_PULL_THROUGH_ENDPOINT\'', returnStdout: true).trim()
-                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 -Pbuilder=builder-minikube -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
+                            sh """
+                                . /tmp/k8s-build-backend.env
+                                ./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 \\
+                                    -Pbuilder=builder-minikube \\
+                                    -PregistryEndpoint="\${BUILD_REGISTRY_ENDPOINT}" \\
+                                    -PlocalContainerRegistryEndpoint="\${BUILD_CONTAINER_REGISTRY_ENDPOINT}" \\
+                                    -DregistryAllowInsecure=true \\
+                                    -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}
+                            """
                             sh "docker buildx rm builder-minikube 2>/dev/null || true"
                             sh "helm --kube-context=minikube uninstall buildkit -n buildkit 2>/dev/null || true"
                         }
@@ -134,8 +142,14 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
                                 sh "kubectl config unset current-context || true"
-                                def registryIp = sh(script: "kubectl --context=minikube get svc -n buildkit docker-registry -o jsonpath='{.spec.clusterIP}'", returnStdout: true).trim()
-                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='${registryIp}:5000/' --kube-context=minikube"
+                                // Same registry address everywhere: gradle pushed to node_ip:30500
+                                // (the docker-registry NodePort), so we deploy from there too. The
+                                // NodePort is reachable from in-cluster pods and the host alike.
+                                def registryEndpoint = sh(
+                                    script: ". /tmp/k8s-build-backend.env && printf %s \"\${BUILD_REGISTRY_ENDPOINT}\"",
+                                    returnStdout: true
+                                ).trim()
+                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='${registryEndpoint}/' --kube-context=minikube"
                             }
                         }
                     }
