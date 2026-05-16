@@ -101,7 +101,8 @@ spec:
       protocol: TCP
       port: 1234
       targetPort: 1234
-  type: ClusterIP
+      nodePort: 31234
+  type: NodePort
 ---
 apiVersion: v1
 kind: Pod

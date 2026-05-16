@@ -127,30 +127,25 @@ ensure_k8s_buildx_builder() {
       "${BUILDKIT_RESOURCE_OPTS[@]}" \
       ${BUILDKIT_IMAGE:+--driver-opt="image=${BUILDKIT_IMAGE}"}
   else
-    echo "Detected local K8s, using remote driver with port-forwards"
+    echo "Detected local K8s, using remote driver via NodePort"
     echo "Waiting for buildkitd pod..."
     kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} wait --for=condition=ready pod -l app=buildkitd -n "${namespace}" --timeout=120s
 
-    # Kill any stale port-forward processes from previous runs. After a helm
-    # uninstall/reinstall cycle the old process points at a deleted pod and
-    # will never recover — its connection attempt fails with:
-    #   "pod not found ("buildkitd_buildkit")"
-    # Always start a fresh port-forward against the current pod.
-    pkill -f "kubectl port-forward.*buildkitd.*1234:1234" 2>/dev/null || true
-    sleep 1
+    # Use NodePort (31234) to reach buildkitd directly — no port-forward needed.
+    local node_ip
+    node_ip=$(kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+    local buildkit_endpoint="${node_ip}:31234"
 
-    echo "Starting buildkit port-forward..."
-    nohup kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} port-forward -n "${namespace}" svc/buildkitd 1234:1234 > /tmp/buildkit-forward.log 2>&1 &
-
-    echo "Waiting for buildkit port-forward to be ready..."
-    for i in $(seq 1 30); do
-      if (echo >/dev/tcp/localhost/1234) 2>/dev/null; then
-        echo "buildkit endpoint reachable"
+    echo "Waiting for buildkit endpoint at ${buildkit_endpoint}..."
+    for i in $(seq 1 60); do
+      if (echo >/dev/tcp/"${node_ip}"/31234) 2>/dev/null; then
+        echo "buildkit endpoint reachable at ${buildkit_endpoint}"
         break
       fi
-      if [[ "${i}" -eq 30 ]]; then
-        echo "ERROR: buildkit endpoint not reachable at localhost:1234 after 30s" >&2
-        cat /tmp/buildkit-forward.log 2>/dev/null || true
+      if [[ "${i}" -eq 60 ]]; then
+        echo "ERROR: buildkit endpoint not reachable at ${buildkit_endpoint} after 60s" >&2
+        kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get svc -n "${namespace}" >&2 || true
+        kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get pods -n "${namespace}" >&2 || true
         exit 1
       fi
       sleep 1
@@ -159,7 +154,7 @@ ensure_k8s_buildx_builder() {
     docker buildx create \
       --name="${builder_name}" \
       --driver=remote \
-      tcp://localhost:1234
+      "tcp://${buildkit_endpoint}"
   fi
 
   docker buildx use "${builder_name}"
