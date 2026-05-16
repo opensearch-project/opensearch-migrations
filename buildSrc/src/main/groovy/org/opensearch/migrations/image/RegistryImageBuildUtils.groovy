@@ -16,7 +16,9 @@ class RegistryImageBuildUtils {
         Registry(String rawUrl, String localContainerUrl="docker-registry:5000") {
             this.hostUrl = rawUrl
             // Keep the host-visible endpoint for Jib, but make the container-visible endpoint explicit.
-            if (rawUrl.startsWith("localhost:")) {
+            // Treat localhost ports and the cluster's docker-registry NodePort (30500) as the same
+            // local registry so in-cluster builders use service DNS instead of bouncing through NodePort.
+            if (rawUrl.startsWith("localhost:") || rawUrl.endsWith(":30500")) {
                 this.containerUrl = localContainerUrl
             } else {
                 this.containerUrl = rawUrl
@@ -57,7 +59,11 @@ class RegistryImageBuildUtils {
         if (override != null && !override.isEmpty()) {
             return override.toBoolean() ? "http" : "https"
         }
-        return registryHost.startsWith("localhost") ? "http" : "https"
+        // Local minikube docker-registry is exposed via NodePort 30500 over plain HTTP.
+        if (registryHost.startsWith("localhost") || registryHost.endsWith(":30500")) {
+            return "http"
+        }
+        return "https"
     }
 
     /**
