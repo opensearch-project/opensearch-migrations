@@ -514,15 +514,39 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .log();
         } else if (observation.hasSegmentEnd()) {
             var rrPair = accum.getRrPair();
-            assert rrPair.requestData.hasInProgressSegment();
+            assert rrPair.requestData != null && rrPair.requestData.hasInProgressSegment() :
+                "SegmentEnd received but no in-progress request segment for "
+                + accum.trafficChannelKey + ". This indicates a missing ReadSegment "
+                + "or a malformed observation sequence in the capture stream.";
             rrPair.requestData.finalizeRequestSegments(timestamp);
         } else if (observation.hasRequestDropped()) {
             requestCounter.decrementAndGet();
             handleDroppedRequestForAccumulation(accum);
+        } else if (observation.hasWrite() || observation.hasWriteSegment()) {
+            return handleWriteDuringReadState(accum, observation, trafficStreamKey, timestamp);
         } else {
             return Optional.empty();
         }
         return Optional.of(CONNECTION_STATUS.ALIVE);
+    }
+
+    private Optional<CONNECTION_STATUS> handleWriteDuringReadState(
+        @NonNull Accumulation accum,
+        TrafficObservation observation,
+        @NonNull ITrafficStreamKey trafficStreamKey,
+        Instant timestamp
+    ) {
+        log.atWarn().setMessage("Received a write observation while in ACCUMULATING_READS state "
+            + "for {}. This indicates the capture proxy emitted a premature EOM or the "
+            + "stream has malformed observation ordering. Transitioning to ACCUMULATING_WRITES.")
+            .addArgument(accum.trafficChannelKey)
+            .log();
+        if (accum.hasRrPair()) {
+            handleEndOfRequest(accum);
+        } else {
+            accum.state = Accumulation.State.ACCUMULATING_WRITES;
+        }
+        return handleObservationForWriteState(accum, observation, trafficStreamKey, timestamp);
     }
 
     private Optional<CONNECTION_STATUS> handleObservationForWriteState(
@@ -564,7 +588,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .log();
         } else if (observation.hasSegmentEnd()) {
             var rrPair = accum.getRrPair();
-            assert rrPair.responseData.hasInProgressSegment();
+            assert rrPair.responseData != null && rrPair.responseData.hasInProgressSegment() :
+                "SegmentEnd received but no in-progress response segment for "
+                + accum.trafficChannelKey + ". This indicates a missing WriteSegment "
+                + "or a malformed observation sequence in the capture stream.";
             rrPair.responseData.finalizeRequestSegments(timestamp);
         } else if (observation.hasRead() || observation.hasReadSegment()) {
             rotateAccumulationOnReadIfNecessary(connectionId, accum);
@@ -617,7 +644,16 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var rrPair = rrPairWithCallback.pair;
         var httpMessage = rrPair.requestData;
         assert (httpMessage != null);
-        assert (!httpMessage.hasInProgressSegment());
+        assert (!httpMessage.hasInProgressSegment()) :
+            "Request has in-progress segment data at end-of-request for " + accumulation.trafficChannelKey
+            + ". This indicates a malformed capture stream missing a SegmentEnd.";
+        if (httpMessage.hasInProgressSegment()) {
+            log.atWarn().setMessage("Finalizing request with in-progress segment data for {}. "
+                + "This indicates a malformed capture stream missing a SegmentEnd.")
+                .addArgument(accumulation.trafficChannelKey)
+                .log();
+            httpMessage.finalizeRequestSegments(httpMessage.getLastPacketTimestamp());
+        }
         boolean isResumedConnection = accumulation.getIndexOfCurrentRequest() == 0 && accumulation.isResumedConnection;
         log.atDebug().setMessage("handleEndOfRequest for {} requestIdx={} resumed={} requestBytes={}")
             .addArgument(accumulation.trafficChannelKey)
