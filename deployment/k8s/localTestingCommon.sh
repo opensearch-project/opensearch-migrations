@@ -95,6 +95,7 @@ build_local_images() {
   gradlew ":buildImages:buildImagesToRegistry_${platform}" \
     -Pbuilder="${builder_name}" \
     -PregistryEndpoint="${BUILD_REGISTRY_ENDPOINT}" \
+    -DregistryAllowInsecure=true \
     "${gradle_args[@]}"
 }
 
