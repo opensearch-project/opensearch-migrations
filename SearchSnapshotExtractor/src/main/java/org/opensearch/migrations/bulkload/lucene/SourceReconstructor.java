@@ -45,9 +45,7 @@ public class SourceReconstructor {
         if (fieldName.startsWith("_")) {
             return true;
         }
-        // Only skip copy_to targets (index-time duplicates that never appear in original _source).
-        // Do NOT skip source-excluded fields — those need reconstruction (that's the whole point).
-        if (mappingContext != null && mappingContext.isCopyToTarget(fieldName)) {
+        if (mappingContext != null && mappingContext.isSourceExcluded(fieldName)) {
             return true;
         }
         if (!fieldName.contains(".")) {
@@ -535,19 +533,11 @@ public class SourceReconstructor {
                 if (hasNested(target, sourceField)) {
                     continue;
                 }
-                // Skip internal fields (_id, etc.) but NOT source-excluded fields —
-                // source-excluded copy_to sources are the primary reverse-derivation use case.
-                if (sourceField.startsWith("_")) {
+                if (sourceField.startsWith("_") || mappingContext.isSourceExcluded(sourceField)) {
                     continue;
                 }
-                // Skip reverse-derivation for source fields that have no Lucene footprint
-                // (index:false AND doc_values:false) AND are not source-excluded. Such fields
-                // exist only in _source — if absent from the seed, the doc genuinely didn't
-                // have that field. But source-excluded fields need reconstruction via their
-                // copy_to targets even if they themselves have no index/dv.
                 FieldMappingInfo sourceMapping = mappingContext.getFieldInfo(sourceField);
-                if (sourceMapping != null && !sourceMapping.indexed() && !sourceMapping.docValues()
-                        && !mappingContext.isSourceExcluded(sourceField)) {
+                if (sourceMapping != null && !sourceMapping.indexed() && !sourceMapping.docValues()) {
                     continue;
                 }
                 List<String> rankedTargets = mappingContext.getCopyToTargets(sourceField);

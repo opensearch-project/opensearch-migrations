@@ -2101,28 +2101,24 @@ class SourceReconstructorTest {
     }
 
     @Test
-    void sourceExcludedCopyToSource_reverseDerivesFromTarget() throws IOException {
-        // body.main.raw (index:false, copy_to: body.main.content) is the source field
-        // that appeared in the original _source. body.main.content is the copy_to TARGET
-        // (indexed, searchable). Reverse-derivation reads from the target and writes into the
-        // source — so attrvals appears in the output, not content.
+    void sourceExcludedFields_neverAppearInReconstructedSource() throws IOException {
+        // body.* and title are in _source.excludes — they must NOT appear in the
+        // reconstructed output even when their values are recoverable from the inverted
+        // index or via reverse-derivation from copy_to targets.
         var reader = mock(LuceneLeafReader.class);
         when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
-        // body.main.content is indexed — tier-3 fallback recovers analyzed tokens from it
         when(reader.getValueFromPointsOrTerms(
                 org.mockito.ArgumentMatchers.eq(0),
                 org.mockito.ArgumentMatchers.eq("body.main.content"),
                 org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
                 org.mockito.ArgumentMatchers.any()))
             .thenReturn(Optional.of(new RecoveredValue.TextTerm("lucy here few questions")));
-        // title is a directly indexed text field (not a copy_to target) — recovers directly
         when(reader.getValueFromPointsOrTerms(
                 org.mockito.ArgumentMatchers.eq(0),
                 org.mockito.ArgumentMatchers.eq("title"),
                 org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
                 org.mockito.ArgumentMatchers.any()))
             .thenReturn(Optional.of(new RecoveredValue.TextTerm("bishops corner ltd buyout")));
-        // Default: nothing else recoverable
         when(reader.getValueFromPointsOrTerms(
                 org.mockito.ArgumentMatchers.anyInt(),
                 org.mockito.ArgumentMatchers.argThat(s ->
@@ -2133,24 +2129,17 @@ class SourceReconstructorTest {
 
         var ctx = copyToWithSourceExcludesContext();
 
-        // Partial seed: only non-excluded fields present (e.g. gcid)
         String seed = "{\"gcid\":\"abc123\"}";
         String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
         JsonNode tree = MAPPER.readTree(merged);
 
-        // body.main.raw gets the value via reverse-derivation from body.main.content
-        assertEquals("lucy here few questions",
-            tree.path("body").path("main").path("raw").asText(),
-            "body.main.raw must be reverse-derived from copy_to target: " + merged);
+        // body.* is source-excluded — must NOT appear
+        assertTrue(tree.path("body").isMissingNode(),
+            "body.* fields are source-excluded and must not appear in output: " + merged);
 
-        // body.main.content must NOT appear — it's a copy_to target, never in original _source
-        assertTrue(tree.path("body").path("main").path("content").isMissingNode(),
-            "body.main.content (copy_to target) must not appear in output: " + merged);
-
-        // title is directly recoverable (not a copy_to target, just source-excluded)
-        assertEquals("bishops corner ltd buyout",
-            tree.path("title").asText(),
-            "title must be reconstructed directly from inverted index: " + merged);
+        // title is source-excluded — must NOT appear
+        assertTrue(tree.path("title").isMissingNode(),
+            "title is source-excluded and must not appear in output: " + merged);
 
         // Seed fields preserved
         assertEquals("abc123", tree.path("gcid").asText());
