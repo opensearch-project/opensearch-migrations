@@ -74,14 +74,17 @@ ensure_k8s_local_registry() {
   echo "Waiting for docker-registry deployment to be available..."
   kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} rollout status deployment/docker-registry -n buildkit --timeout=120s
 
-  # Kill any stale port-forward processes from previous runs. After a helm
-  # uninstall/reinstall cycle the old process points at a deleted pod and
-  # will never recover, so we must start a fresh one.
+  # Reach the registry via NodePort (30500) directly. Port-forwarding silently
+  # dies after helm uninstall/reinstall cycles (the stale process points at a
+  # deleted pod) and Jib then pushes into a black hole, leaving downstream
+  # deployments stuck in ImagePullBackOff. NodePort has none of that race.
   pkill -f "kubectl port-forward.*docker-registry.*5001:5000" 2>/dev/null || true
-  sleep 1
 
-  echo "Starting registry port-forward..."
-  nohup kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} port-forward -n buildkit svc/docker-registry 5001:5000 > /tmp/registry-forward.log 2>&1 &
+  local registry_node_ip
+  registry_node_ip=$(kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+  REGISTRY_ENDPOINT="${registry_node_ip}:30500"
+  export REGISTRY_ENDPOINT
+  echo "Registry endpoint reachable at ${REGISTRY_ENDPOINT}"
 }
 
 ensure_k8s_buildx_builder() {

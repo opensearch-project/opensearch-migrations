@@ -2,7 +2,7 @@ import org.opensearch.migrations.image.RegistryImageBuildUtils
 import org.opensearch.migrations.image.RegistryImageBuildUtils.Registry
 import org.opensearch.migrations.image.PullThroughCacheHelper
 
-def publishedUrl = rootProject.findProperty('registryEndpoint') ?: 'localhost:5001'
+def publishedUrl = rootProject.findProperty('registryEndpoint') ?: System.getenv('REGISTRY_ENDPOINT') ?: 'localhost:5001'
 def intermediateUrl = rootProject.findProperty('intermediateRegistry') ?: publishedUrl
 
 def localContainerRegistryEndpoint =
