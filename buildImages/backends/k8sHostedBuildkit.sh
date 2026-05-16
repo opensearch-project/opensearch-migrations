@@ -32,14 +32,27 @@ ensure_port_forward() {
   local host_port="$3"
   local svc_port="$4"
 
-  pkill -f "kubectl port-forward.*${service}.*${host_port}:${svc_port}" 2>/dev/null || true
+  # SIGKILL any prior forward and wait for it to release the port before
+  # starting a new one. Without this the new kubectl loses the bind race,
+  # exits silently, and we end up probing the *old* zombie forward — which
+  # routes to a deleted pod after the buildkit helm uninstall/reinstall and
+  # leaves docker buildx hanging on the first connection.
+  pkill -KILL -f "kubectl port-forward.*${service}.*${host_port}:${svc_port}" 2>/dev/null || true
+  local i
+  for i in $(seq 1 30); do
+    (echo >/dev/tcp/localhost/"${host_port}") 2>/dev/null || break
+    sleep 1
+  done
+  if (echo >/dev/tcp/localhost/"${host_port}") 2>/dev/null; then
+    echo "ERROR: port localhost:${host_port} still in use after pkill, refusing to start a racing port-forward" >&2
+    return 1
+  fi
 
   set_k8s_context_args
   nohup kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
     port-forward -n "${namespace}" "svc/${service}" "${host_port}:${svc_port}" \
     > "/tmp/${service}-${host_port}.log" 2>&1 &
 
-  local i
   for i in $(seq 1 60); do
     if (echo >/dev/tcp/localhost/"${host_port}") 2>/dev/null; then
       echo "Port-forward localhost:${host_port} -> ${service}:${svc_port} ready"
