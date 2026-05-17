@@ -7,6 +7,7 @@ preserving any migration CRD-owned resources.
 import logging
 import subprocess
 import click
+import time
 
 from ..models.utils import ExitCode, load_k8s_config, get_current_namespace
 from ..models.workflow_config_store import WorkflowConfigStore
@@ -110,8 +111,14 @@ def _remove_existing_workflow(workflow_name, namespace):
     hidden=True,
     help='Name of the workflow to replace if it already exists'
 )
+@click.option(
+    '--unique-run-nonce',
+    default=str(int(time.time())),
+    hidden=True,
+    help='id that gets appended to downstream as uniqueRunNonce arg (and is appended to some naming such as snapshotName downstream)'
+)
 @click.pass_context
-def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workflow_name):
+def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workflow_name, unique_run_nonce):
     """Submit a migration workflow using the config processor.
 
     If a workflow already exists, it is automatically stopped, deleted, and
@@ -152,7 +159,10 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
         try:
             submit_result = runner.submit_workflow(
                 config_yaml,
-                ["--workflow-name", workflow_name],
+                [
+                    "--workflow-name", workflow_name,
+                    "--unique-run-nonce", unique_run_nonce
+                ],
             )
 
             workflow_name = submit_result.get('workflow_name', 'unknown')

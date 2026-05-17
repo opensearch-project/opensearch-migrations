@@ -5,6 +5,8 @@ First make sure your docker runtime is already up. See notes below in case youre
 
 In `buildImages/scripts` you will find a bunch of scripts helping with local minikube setup / commands.
 - `fillLocalRegistry.sh`: setup of local registry and building of needed images and pushing to that local registry
+  - for faster update times comment out all unneeded images in `build.gradle` testBuildKitProjects array. 
+    e.g if you work only on solr source tests, you can comment all other images out.
 - `startMinikube.sh`: script to startup local minikube
 - `startMinikubeAndDeployCharts.sh`: combines `startMinikube.sh` with chart deployments
 - `updateArgoWorkflowTempate.sh`: simply updates `clusterWorkflows.yaml` in case changes were made to it and need update  
@@ -21,7 +23,7 @@ Then you would run tests via:
   - find the ip by which minikube has access to the host to allow pulling images from the locally deployed registry: 
     - either from host via: `HOST_IP_FROM_MINIKUBE=$(minikube ssh -- ip route 2>/dev/null | awk '/default/ {print $3}' | tr -d '\r')`
     - or in minikube: `export HOST_IP_FROM_MINIKUBE=$(ip route 2>/dev/null | awk '/default/ {print $3}' | tr -d '\r')`
-  - in the mac (if you determined HOST_IP_FROM_MINIKUBE on host, replace below placeholder withh respective ip or set env var in minikube after ssh into it)
+  - in the migration console shell (if you determined HOST_IP_FROM_MINIKUBE on host, replace below placeholder withh respective ip or set env var in minikube after ssh into it)
     ```
     pipenv run pytest /root/lib/integ_test/integ_test/ma_workflow_test.py --unique_id 12345 --config_file_path "/config/migration_services.yaml" --test_ids "0001" --source_version "SOLR_6.6" --target_version "OS_2.19" --image_registry_prefix "$HOST_IP_FROM_MINIKUBE:5001/"
     ```
@@ -29,6 +31,15 @@ Then you would run tests via:
 Alternatively you can start tests without ssh into the micrationConsole via:
 - from libraries/testAutomation/testAutomation folder (see test_runner.py):  `pipenv run app --test-ids=0001 --source-version=ES_7.10 --target-version=OS_2.19 --registry-prefix [your reachable docker registry ip]:[docker registry port]/`
   - append `--delete-only` for deletion of test related resources
+
+For updates after changes:
+- if all is running and you make changes to `clusterWorkflows.yaml` or migrationConsole in general:
+  - `fillLocalRegistry.sh`
+  - `redeployMigrationConsole.sh` 
+    - try `deleteMigrationConsolePod.sh` first 
+    - (just deleting the pod such that it restarts should be enough if ImagePullPolicy = 'Always', yet if minikube cache provides old image, might need to run `redeployMigrationConsole.sh` )
+- run tests as described above 
+
 
 For changes made to the cluster templates, note a few points about the setup:
 The argo workflows are installed via `installWorkflows.yaml`, which is run in two scenarios:
@@ -47,7 +58,7 @@ update them without touching the other setup with: `kubectl apply -f ../migratio
 
 ### NOTES
 - if you touch the regexes that do version checks in javascript, you might need to update the jest snapshot:
-  - `cd orchestrationSpecs/packages/schemas`
+  - `cd orchestrationSpecs/packages/[relevant-subfolder]` (where relevant-subfolder relates to folder where changes were made, such as `schemas` or others)
   - `npm test -- --updateSnapshot`
 - port forward for solr access: `kubectl port-forward [solr-pod-name] 8983:8983 -n ma`
   - ClusterVersionDetector detectSolrVersion call in workflow uses `curl -X get http://localhost:8983/solr/admin/info/system?wt=json`

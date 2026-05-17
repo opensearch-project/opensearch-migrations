@@ -17,7 +17,11 @@ RUN set -eux; \
       su-exec \
       tini \
       tzdata \
-      zip;
+      zip \
+      dcron \
+      aws-cli \
+      inotify-tools \
+      util-linux;
 
 RUN --mount=type=cache,target=/var/cache/downloads,sharing=locked \
   set -eux; \

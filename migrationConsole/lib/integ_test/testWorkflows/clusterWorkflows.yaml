@@ -1875,6 +1875,26 @@ spec:
                           value: "false"
                         - name: ZK_CREATE_CHROOT
                           value: "true"
+                        - name: AWS_ACCESS_KEY_ID
+                          value: "test"
+                        - name: AWS_SECRET_ACCESS_KEY
+                          value: "test"
+                        - name: S3_BUCKET_NAME
+                          valueFrom:
+                            configMapKeyRef:
+                              name: migrations-default-s3-config
+                              key: BUCKET_NAME
+                        - name: S3_REGION
+                          valueFrom:
+                            configMapKeyRef:
+                              name: migrations-default-s3-config
+                              key: AWS_REGION
+                        - name: S3_ENDPOINT
+                          valueFrom:
+                            configMapKeyRef:
+                              name: migrations-default-s3-config
+                              key: ENDPOINT_HTTP
+                              optional: true
                       command: ["bash", "-c"]
                       args:
                         - |
@@ -1889,6 +1909,37 @@ spec:
                           echo "Found suffix: $SUFFIX"
                           mkdir -p "/var/solr/data/$SUFFIX/source1_testsnapshot_1" "/$SUFFIX"
                           ln -s "/var/solr/data/$SUFFIX/source1_testsnapshot_1" "/$SUFFIX/source1_testsnapshot_1"
+            
+                          # setting up direct sync to s3 on file system change in the backup storage.
+                          # Since Solr 6 and 7 do not bring a s3 backup implementation, we simulate this 
+                          # with file sync for now (might change later to variant without s3 involvement).
+                          AWS_LOC=$(which aws)
+                          cat > /tmp/sync_script.sh << EOF
+                          
+                          NEEDS_SYNC=0
+                          
+                          run_sync() {
+                              flock -n /tmp/s3_sync.lock bash -c "
+                                  echo 'Running backup sync job to s3'
+                                  $AWS_LOC s3 sync /var/solr/data/${SUFFIX} s3://${S3_BUCKET_NAME}/${SUFFIX} \
+                                      --endpoint-url '${S3_ENDPOINT}' \
+                                      --region '${S3_REGION:-us-east-2}' \
+                                      --no-verify-ssl
+                              " && NEEDS_SYNC=0 || NEEDS_SYNC=1
+                          }
+                        
+                          while inotifywait -r -q -e modify,create,move /var/solr/data/${SUFFIX}; do
+                              run_sync
+                              if [ \$NEEDS_SYNC -eq 1 ]; then
+                                  echo "Changes detected during sync, re-syncing..."
+                                  run_sync
+                              fi
+                          done >> /proc/1/fd/1 2>&1 &
+                          EOF
+                          echo "Backup sync script to s3 localstack"
+                          cat /tmp/sync_script.sh
+                          chmod +x /tmp/sync_script.sh
+                          /tmp/sync_script.sh &
             
                           echo "Starting up solr"
                           exec solr -f -force -cloud -DzkRun &

@@ -12,6 +12,31 @@ fi
 CONFIG_FILENAME=$1
 shift  # Remove first argument, leaving any additional args in $@
 
+# we copy the remaining args here since we wanna extract particular args which empties $@
+# and pass "${ALL_ARGS[@]}" below instead of $@
+# NOTE: RUN_NONCE will be added in below workflow and gets appended in create-or-get-snapshot.yaml
+# to the snapshotName as inputs.parameters.sourceLabel + '_' + inputs.parameters.snapshotPrefix + '_' + inputs.parameters.uniqueRunNonce
+# which for Solr versions <= 7 we can not have generated randomly since solr cluster needs to know the snapshot name
+# upfront to avoid no-dir error
+# NOTE that unique-run-nonce is not part of the parameters to be passed below to INITIALIZE_CMD, thus we filter it out
+# here
+RUN_NONCE="$(date +%s)"
+ALL_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --unique-run-nonce)
+            RUN_NONCE="$2"
+            shift 2
+            ;;
+        *)
+            new_args+=("$1")
+            shift
+            ;;
+    esac
+done
+echo "Used runNonce: $RUN_NONCE"
+
+
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${NODEJS:=node}"
@@ -25,13 +50,11 @@ TEMP_DIR=$(mktemp -d)
 # Ensure cleanup on exit
 trap "rm -rf $TEMP_DIR" EXIT
 
-UUID="$(date +%s)"
-echo "Generated unique uniqueRunNonce: $UUID"
 
 WORKFLOW_NAME="migration-workflow"
 
 echo "Running configuration conversion..."
-$INITIALIZE_CMD --user-config $CONFIG_FILENAME --output-dir $TEMP_DIR --workflow-name "$WORKFLOW_NAME" $@
+$INITIALIZE_CMD --user-config $CONFIG_FILENAME --output-dir $TEMP_DIR --workflow-name "$WORKFLOW_NAME" "${ALL_ARGS[@]}"
 
 echo "Applying Kubernetes resources..."
 if [ -x "$TEMP_DIR/handleK8sResources.sh" ]; then
@@ -62,7 +85,7 @@ spec:
   arguments:
     parameters:
       - name: uniqueRunNonce
-        value: "$UUID"
+        value: "$RUN_NONCE"
       - name: approval-config
         value: "approval-config-0"
       - name: config
