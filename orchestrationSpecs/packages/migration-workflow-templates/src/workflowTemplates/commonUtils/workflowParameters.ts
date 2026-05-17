@@ -7,11 +7,20 @@ export const CommonWorkflowParameters = {
     workflowScriptsRoot: defineParam({expression: "/root/workflows/.workflowScripts"})
 } as const;
 
-export function workflowScriptPath(
+export const WORKFLOW_SCRIPTS_ROOT_ENV = "WORKFLOW_SCRIPTS_ROOT";
+
+export function workflowScriptRootEnvVars(
     workflowScriptsRoot: BaseExpression<string>,
+) {
+    return {
+        [WORKFLOW_SCRIPTS_ROOT_ENV]: workflowScriptsRoot
+    } as const;
+}
+
+export function workflowScriptCommand(
     scriptName: string
-): BaseExpression<string> {
-    return expr.concat(workflowScriptsRoot, expr.literal(`/${scriptName}`));
+): string {
+    return `exec "\${${WORKFLOW_SCRIPTS_ROOT_ENV}}/${scriptName}"`;
 }
 
 export function workflowIdentityEnvVars() {

@@ -147,6 +147,10 @@
             {
               "name": "WORKFLOW_UID",
               "value": "{{workflow.uid}}"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
             }
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -166,7 +170,7 @@
             "-lc"
           ],
           "args": [
-            "{{='exec '+workflow.parameters.workflowScriptsRoot+'/addApprovalGateOwnerReferences.sh'}}"
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/addApprovalGateOwnerReferences.sh\""
           ]
         },
         "metadata": {
@@ -288,6 +292,10 @@
             {
               "name": "WORKFLOW_NAME",
               "value": "{{workflow.name}}"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
             }
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -307,7 +315,7 @@
             "-lc"
           ],
           "args": [
-            "{{='exec '+workflow.parameters.workflowScriptsRoot+'/cleanupApprovalGates.sh'}}"
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/cleanupApprovalGates.sh\""
           ]
         },
         "metadata": {

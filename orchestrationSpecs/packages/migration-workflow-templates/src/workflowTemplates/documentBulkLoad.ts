@@ -36,7 +36,7 @@ import {
     setupTransformsForContainerForMode,
     TransformVolumeMode
 } from "./commonUtils/containerFragments";
-import {CommonWorkflowParameters, workflowIdentityEnvVars, workflowScriptPath} from "./commonUtils/workflowParameters";
+import {CommonWorkflowParameters, workflowIdentityEnvVars, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict, makeRfsCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
@@ -294,14 +294,11 @@ const documentBulkLoadBaseBuilder = WorkflowBuilder.create({
                 CONSOLE_IMAGE_PULL_POLICY: c.inputs.imageMigrationConsolePullPolicy,
                 FROM_SNAPSHOT_MIGRATION_LABEL: c.inputs.fromSnapshotMigrationK8sLabel,
                 CONSOLE_CONFIG_BASE64: expr.toBase64(expr.asString(c.inputs.consoleConfigContents)),
-                WORKFLOW_SCRIPTS_ROOT: t.inputs.workflowParameters.workflowScriptsRoot,
                 RFS_MONITOR_WORKFLOW_UID_LABEL: expr.literal(RFS_MONITOR_WORKFLOW_UID_LABEL),
-                RFS_MONITOR_SESSION_LABEL: expr.literal(RFS_MONITOR_SESSION_LABEL)
+                RFS_MONITOR_SESSION_LABEL: expr.literal(RFS_MONITOR_SESSION_LABEL),
+                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
             })
-            .addArgs([expr.concat(
-                expr.literal("exec "),
-                workflowScriptPath(t.inputs.workflowParameters.workflowScriptsRoot, "applyRfsMonitorCronJob.sh")
-            )])
+            .addArgs([workflowScriptCommand("applyRfsMonitorCronJob.sh")])
         )
         .addRetryParameters({
             limit: "5",

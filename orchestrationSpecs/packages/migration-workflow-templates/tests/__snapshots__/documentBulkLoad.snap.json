@@ -135,16 +135,16 @@
               "value": "{{=toBase64(inputs.parameters.consoleConfigContents)}}"
             },
             {
-              "name": "WORKFLOW_SCRIPTS_ROOT",
-              "value": "{{workflow.parameters.workflowScriptsRoot}}"
-            },
-            {
               "name": "RFS_MONITOR_WORKFLOW_UID_LABEL",
               "value": "migrations.opensearch.org/rfs-monitor-workflow-uid"
             },
             {
               "name": "RFS_MONITOR_SESSION_LABEL",
               "value": "migrations.opensearch.org/rfs-monitor-session"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
             }
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -164,7 +164,7 @@
             "-lc"
           ],
           "args": [
-            "{{='exec '+workflow.parameters.workflowScriptsRoot+'/applyRfsMonitorCronJob.sh'}}"
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/applyRfsMonitorCronJob.sh\""
           ]
         },
         "metadata": {

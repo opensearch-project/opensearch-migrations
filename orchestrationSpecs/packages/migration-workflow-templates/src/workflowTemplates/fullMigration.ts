@@ -39,7 +39,7 @@ import {MetadataMigration} from "./metadataMigration";
 import {CreateOrGetSnapshot} from "./createOrGetSnapshot";
 import {ResourceManagement} from "./resourceManagement";
 
-import {CommonWorkflowParameters, workflowScriptPath} from "./commonUtils/workflowParameters";
+import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {SetupKafka} from "./setupKafka";
 import {SetupCapture} from "./setupCapture";
@@ -107,12 +107,12 @@ export const FullMigration = WorkflowBuilder.create({
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
             .addCommand(["/bin/bash", "-lc"])
-            .addEnvVar("WORKFLOW_NAME", expr.getWorkflowValue("name"))
-            .addEnvVar("WORKFLOW_UID", expr.getWorkflowValue("uid"))
-            .addArgs([expr.concat(
-                expr.literal("exec "),
-                workflowScriptPath(t.inputs.workflowParameters.workflowScriptsRoot, "addApprovalGateOwnerReferences.sh")
-            )])
+            .addEnvVarsFromRecord({
+                WORKFLOW_NAME: expr.getWorkflowValue("name"),
+                WORKFLOW_UID: expr.getWorkflowValue("uid"),
+                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
+            })
+            .addArgs([workflowScriptCommand("addApprovalGateOwnerReferences.sh")])
         )
         .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )
@@ -124,11 +124,11 @@ export const FullMigration = WorkflowBuilder.create({
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
             .addCommand(["/bin/bash", "-lc"])
-            .addEnvVar("WORKFLOW_NAME", expr.getWorkflowValue("name"))
-            .addArgs([expr.concat(
-                expr.literal("exec "),
-                workflowScriptPath(t.inputs.workflowParameters.workflowScriptsRoot, "cleanupApprovalGates.sh")
-            )])
+            .addEnvVarsFromRecord({
+                WORKFLOW_NAME: expr.getWorkflowValue("name"),
+                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
+            })
+            .addArgs([workflowScriptCommand("cleanupApprovalGates.sh")])
         )
         .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )

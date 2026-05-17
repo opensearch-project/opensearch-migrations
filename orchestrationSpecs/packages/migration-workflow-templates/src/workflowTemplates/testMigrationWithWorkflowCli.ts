@@ -10,7 +10,7 @@ import {
     DEFAULT_RESOURCES,
 } from "@opensearch-migrations/schemas";
 
-import {CommonWorkflowParameters, workflowScriptPath} from "./commonUtils/workflowParameters";
+import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {K8S_RESOURCE_RETRY_STRATEGY, CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
@@ -39,11 +39,11 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/bash", "-lc"])
             .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
-            .addEnvVar("MIGRATION_CONFIG_BASE64", cb.inputs.migrationConfigBase64)
-            .addArgs([expr.concat(
-                expr.literal("exec "),
-                workflowScriptPath(t.inputs.workflowParameters.workflowScriptsRoot, "configureAndSubmitWorkflow.sh")
-            )])
+            .addEnvVarsFromRecord({
+                MIGRATION_CONFIG_BASE64: cb.inputs.migrationConfigBase64,
+                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
+            })
+            .addArgs([workflowScriptCommand("configureAndSubmitWorkflow.sh")])
         )
         .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )
@@ -55,10 +55,10 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/bash", "-lc"])
             .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
-            .addArgs([expr.concat(
-                expr.literal("exec "),
-                workflowScriptPath(t.inputs.workflowParameters.workflowScriptsRoot, "monitorWorkflow.sh")
-            )])
+            .addEnvVarsFromRecord({
+                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
+            })
+            .addArgs([workflowScriptCommand("monitorWorkflow.sh")])
             // Monitor script exit codes:
             // - Exit 0: Workflow is in terminal state (Succeeded or Failed) - stop retrying
             // - Exit 1: Workflow still running - retry monitoring
@@ -88,11 +88,11 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             .addImageInfo(cb.inputs.imageMigrationConsoleLocation, cb.inputs.imageMigrationConsolePullPolicy)
             .addCommand(["/bin/bash", "-lc"])
             .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
-            .addEnvVar("MONITOR_RESULT", cb.inputs.monitorResult)
-            .addArgs([expr.concat(
-                expr.literal("exec "),
-                workflowScriptPath(t.inputs.workflowParameters.workflowScriptsRoot, "evaluateWorkflowResult.sh")
-            )])
+            .addEnvVarsFromRecord({
+                MONITOR_RESULT: cb.inputs.monitorResult,
+                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
+            })
+            .addArgs([workflowScriptCommand("evaluateWorkflowResult.sh")])
         )
         .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )

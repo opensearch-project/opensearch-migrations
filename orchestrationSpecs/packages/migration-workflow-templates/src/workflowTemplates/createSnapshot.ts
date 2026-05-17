@@ -20,7 +20,7 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 import {makeRepoParamDict} from "./metadataMigration";
 
-import {CommonWorkflowParameters, workflowIdentityEnvVars, workflowScriptPath} from "./commonUtils/workflowParameters";
+import {CommonWorkflowParameters, workflowIdentityEnvVars, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeClusterParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
@@ -153,14 +153,11 @@ export const CreateSnapshot = WorkflowBuilder.create({
                 SOURCE_LABEL: b.inputs.sourceK8sLabel,
                 SNAPSHOT_LABEL: b.inputs.snapshotK8sLabel,
                 CONSOLE_CONFIG_BASE64: expr.toBase64(expr.asString(b.inputs.configContents)),
-                WORKFLOW_SCRIPTS_ROOT: t.inputs.workflowParameters.workflowScriptsRoot,
                 SNAPSHOT_MONITOR_WORKFLOW_UID_LABEL: expr.literal(SNAPSHOT_MONITOR_WORKFLOW_UID_LABEL),
-                SNAPSHOT_MONITOR_SESSION_LABEL: expr.literal(SNAPSHOT_MONITOR_SESSION_LABEL)
+                SNAPSHOT_MONITOR_SESSION_LABEL: expr.literal(SNAPSHOT_MONITOR_SESSION_LABEL),
+                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
             })
-            .addArgs([expr.concat(
-                expr.literal("exec "),
-                workflowScriptPath(t.inputs.workflowParameters.workflowScriptsRoot, "applySnapshotMonitorCronJob.sh")
-            )])
+            .addArgs([workflowScriptCommand("applySnapshotMonitorCronJob.sh")])
         )
         .addRetryParameters({
             limit: "5", retryPolicy: "Always",

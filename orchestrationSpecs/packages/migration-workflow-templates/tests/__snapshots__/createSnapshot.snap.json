@@ -245,16 +245,16 @@
               "value": "{{=toBase64(inputs.parameters.configContents)}}"
             },
             {
-              "name": "WORKFLOW_SCRIPTS_ROOT",
-              "value": "{{workflow.parameters.workflowScriptsRoot}}"
-            },
-            {
               "name": "SNAPSHOT_MONITOR_WORKFLOW_UID_LABEL",
               "value": "migrations.opensearch.org/snapshot-monitor-workflow-uid"
             },
             {
               "name": "SNAPSHOT_MONITOR_SESSION_LABEL",
               "value": "migrations.opensearch.org/snapshot-monitor-session"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
             }
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -274,7 +274,7 @@
             }
           },
           "args": [
-            "{{='exec '+workflow.parameters.workflowScriptsRoot+'/applySnapshotMonitorCronJob.sh'}}"
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/applySnapshotMonitorCronJob.sh\""
           ]
         },
         "metadata": {

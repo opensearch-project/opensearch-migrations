@@ -53,6 +53,10 @@
             {
               "name": "MIGRATION_CONFIG_BASE64",
               "value": "{{inputs.parameters.migrationConfigBase64}}"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
             }
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -72,7 +76,7 @@
             }
           },
           "args": [
-            "{{='exec '+workflow.parameters.workflowScriptsRoot+'/configureAndSubmitWorkflow.sh'}}"
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/configureAndSubmitWorkflow.sh\""
           ]
         },
         "metadata": {
@@ -106,7 +110,12 @@
           ]
         },
         "container": {
-          "env": [],
+          "env": [
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
+            }
+          ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "command": [
@@ -124,7 +133,7 @@
             }
           },
           "args": [
-            "{{='exec '+workflow.parameters.workflowScriptsRoot+'/monitorWorkflow.sh'}}"
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/monitorWorkflow.sh\""
           ]
         },
         "metadata": {
@@ -181,6 +190,10 @@
             {
               "name": "MONITOR_RESULT",
               "value": "{{inputs.parameters.monitorResult}}"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
             }
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -200,7 +213,7 @@
             }
           },
           "args": [
-            "{{='exec '+workflow.parameters.workflowScriptsRoot+'/evaluateWorkflowResult.sh'}}"
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/evaluateWorkflowResult.sh\""
           ]
         },
         "metadata": {

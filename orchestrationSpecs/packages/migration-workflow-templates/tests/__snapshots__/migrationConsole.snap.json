@@ -160,6 +160,10 @@
             {
               "name": "MIGRATION_CONSOLE_COMMAND",
               "value": "{{inputs.parameters.command}}"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
             }
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -179,7 +183,7 @@
             }
           },
           "args": [
-            "{{='exec '+workflow.parameters.workflowScriptsRoot+'/runMigrationConsoleCommand.sh'}}"
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/runMigrationConsoleCommand.sh\""
           ]
         },
         "metadata": {

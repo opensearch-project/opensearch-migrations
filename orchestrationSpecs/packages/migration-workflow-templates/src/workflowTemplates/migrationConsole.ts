@@ -24,7 +24,7 @@ import {
     TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
 
-import {CommonWorkflowParameters, workflowScriptPath} from "./commonUtils/workflowParameters";
+import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 
@@ -123,12 +123,12 @@ export const MigrationConsole = WorkflowBuilder.create({
             .addEnvVarsFromRecord(getTargetHttpAuthCreds(
                 expr.dig(expr.deserializeRecord(c.inputs.configContents), ["target_cluster", "authConfig", "basic", "secretName"], "")))
             .addResources(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI)
-            .addEnvVar("CONFIG_CONTENTS_BASE64", expr.toBase64(expr.asString(c.inputs.configContents)))
-            .addEnvVar("MIGRATION_CONSOLE_COMMAND", c.inputs.command)
-            .addArgs([expr.concat(
-                expr.literal("exec "),
-                workflowScriptPath(t.inputs.workflowParameters.workflowScriptsRoot, "runMigrationConsoleCommand.sh")
-            )])
+            .addEnvVarsFromRecord({
+                CONFIG_CONTENTS_BASE64: expr.toBase64(expr.asString(c.inputs.configContents)),
+                MIGRATION_CONSOLE_COMMAND: c.inputs.command,
+                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
+            })
+            .addArgs([workflowScriptCommand("runMigrationConsoleCommand.sh")])
             .addPodMetadata(({inputs}) => ({
                 labels: {
                     'migrations.opensearch.org/source': inputs.sourceK8sLabel,
