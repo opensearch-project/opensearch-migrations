@@ -10,7 +10,12 @@ import {
     DEFAULT_RESOURCES,
 } from "@opensearch-migrations/schemas";
 
-import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
+import {
+    CommonWorkflowParameters,
+    DEFAULT_WORKFLOW_SCRIPTS_ROOT,
+    workflowScriptCommand,
+    workflowScriptRootEnvVars
+} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {K8S_RESOURCE_RETRY_STRATEGY, CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
@@ -33,6 +38,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
         // Currently using base64 as a workaround for passing complex JSON through Argo workflow parameters.
         // Consider using ConfigMaps or a dedicated typed parameter passing mechanism instead.
         .addRequiredInput("migrationConfigBase64", typeToken<string>())
+        .addOptionalInput("workflowScriptsRoot", () => DEFAULT_WORKFLOW_SCRIPTS_ROOT)
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addContainer(cb => cb
@@ -41,7 +47,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
             .addEnvVarsFromRecord({
                 MIGRATION_CONFIG_BASE64: cb.inputs.migrationConfigBase64,
-                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
+                ...workflowScriptRootEnvVars(cb.inputs.workflowScriptsRoot)
             })
             .addArgs([workflowScriptCommand("configureAndSubmitWorkflow.sh")])
         )
@@ -49,6 +55,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
     )
 
     .addTemplate("monitorWorkflow", t => t
+        .addOptionalInput("workflowScriptsRoot", () => DEFAULT_WORKFLOW_SCRIPTS_ROOT)
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addContainer(cb => cb
@@ -56,7 +63,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             .addCommand(["/bin/bash", "-lc"])
             .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
             .addEnvVarsFromRecord({
-                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
+                ...workflowScriptRootEnvVars(cb.inputs.workflowScriptsRoot)
             })
             .addArgs([workflowScriptCommand("monitorWorkflow.sh")])
             // Monitor script exit codes:
@@ -82,6 +89,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
 
     .addTemplate("evaluateWorkflowResult", t => t
         .addRequiredInput("monitorResult", typeToken<string>())
+        .addOptionalInput("workflowScriptsRoot", () => DEFAULT_WORKFLOW_SCRIPTS_ROOT)
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addContainer(cb => cb
@@ -90,7 +98,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
             .addEnvVarsFromRecord({
                 MONITOR_RESULT: cb.inputs.monitorResult,
-                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
+                ...workflowScriptRootEnvVars(cb.inputs.workflowScriptsRoot)
             })
             .addArgs([workflowScriptCommand("evaluateWorkflowResult.sh")])
         )

@@ -1,10 +1,12 @@
 import {BaseExpression, defineParam, expr} from "@opensearch-migrations/argo-workflow-builders";
 
+export const DEFAULT_WORKFLOW_SCRIPTS_ROOT = "/root/workflows/.workflowScripts";
+
 export const CommonWorkflowParameters = {
     s3SnapshotConfigMap: defineParam({expression: "s3-snapshot-config"}),
     imageConfigMapName: defineParam({expression: "migration-image-config"}),
     approvalConfigMapName: defineParam({expression: "approval-config"}),
-    workflowScriptsRoot: defineParam({expression: "/root/workflows/.workflowScripts"})
+    workflowScriptsRoot: defineParam({expression: DEFAULT_WORKFLOW_SCRIPTS_ROOT})
 } as const;
 
 export const WORKFLOW_SCRIPTS_ROOT_ENV = "WORKFLOW_SCRIPTS_ROOT";
