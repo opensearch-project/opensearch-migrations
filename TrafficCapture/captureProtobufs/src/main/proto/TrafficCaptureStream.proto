@@ -43,6 +43,19 @@ message EndOfMessageIndication {
 }
 message RequestIntentionallyDropped {}
 
+// HTTP/1.1 interim 1xx responses (e.g. 100 Continue, 102 Processing, 103
+// Early Hints) sent by the server during the request phase, before the
+// final response. These are part of HTTP/1.1 flow control and arrive on
+// the wire while reads are still being accumulated. They are captured for
+// audit and byte-fidelity but should NOT terminate the request phase or
+// be treated as the response. They go between Reads and the EOM.
+message InterimResponseObservation {
+  bytes data = 1;
+}
+message InterimResponseSegmentObservation {
+  bytes data = 2;
+}
+
 message TrafficObservation {
   google.protobuf.Timestamp ts = 1;
   oneof Capture {
@@ -64,6 +77,9 @@ message TrafficObservation {
     EndOfMessageIndication endOfMessageIndicator = 15;
 
     RequestIntentionallyDropped requestDropped = 16;
+
+    InterimResponseObservation interimResponse = 17;
+    InterimResponseSegmentObservation interimResponseSegment = 18;
   }
 }
 

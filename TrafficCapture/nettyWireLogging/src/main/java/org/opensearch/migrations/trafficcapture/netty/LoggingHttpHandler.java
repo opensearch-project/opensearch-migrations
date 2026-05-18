@@ -271,6 +271,28 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+        var bb = (ByteBuf) msg;
+
+        // A Write may arrive while we are still in the IRequestContext (i.e. before
+        // the request has been fully parsed and EOM emitted). This happens in two cases:
+        //   1. An HTTP/1.1 interim 1xx response (e.g. "HTTP/1.1 100 Continue") — flow
+        //      control, not the actual response. Capture as InterimResponse so the
+        //      stream's invariant Read* EOM Write* EOM is preserved.
+        //   2. A real final response (e.g. "HTTP/1.1 417 Expectation Failed") sent
+        //      because the server rejected the request based on its headers — this
+        //      IS the actual response and must be captured as Write.
+        //
+        // Distinguish by inspecting the status line's leading byte after "HTTP/1.x ":
+        // a '1' digit indicates a 1xx interim response.
+        if (messageContext instanceof IWireCaptureContexts.IRequestContext
+                && looksLikeInterim1xxResponse(bb)) {
+            if (getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
+                trafficOffloader.addInterimResponseEvent(Instant.now(), bb);
+            }
+            super.write(ctx, msg, promise);
+            return;
+        }
+
         IWireCaptureContexts.IResponseContext responseContext;
         if (!(messageContext instanceof IWireCaptureContexts.IResponseContext)) {
             messageContext = responseContext = messageContext.createResponseContext();
@@ -278,13 +300,37 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             responseContext = (IWireCaptureContexts.IResponseContext) messageContext;
         }
 
-        var bb = (ByteBuf) msg;
         if (getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
             trafficOffloader.addWriteEvent(Instant.now(), bb);
         }
         responseContext.onBytesWritten(bb.readableBytes());
 
         super.write(ctx, msg, promise);
+    }
+
+    /**
+     * Peek at the start of the response bytes to detect an HTTP/1.x 1xx status line
+     * (e.g. "HTTP/1.1 100 Continue", "HTTP/1.1 102 Processing", "HTTP/1.1 103 Early Hints").
+     * Returns false if the buffer is empty, doesn't start with "HTTP/", or has a non-1xx status.
+     * Note: 101 Switching Protocols is technically 1xx but transitions to a different protocol —
+     * we still treat it as interim for capture purposes since it is sent before any application
+     * response bytes; if needed this can be refined later.
+     */
+    private static boolean looksLikeInterim1xxResponse(ByteBuf bb) {
+        // We need at least "HTTP/1.x N" = 10 bytes to inspect the status digit.
+        if (bb.readableBytes() < 10) {
+            return false;
+        }
+        int rIdx = bb.readerIndex();
+        // Bytes 0-4: "HTTP/"
+        if (bb.getByte(rIdx) != 'H' || bb.getByte(rIdx + 1) != 'T'
+                || bb.getByte(rIdx + 2) != 'T' || bb.getByte(rIdx + 3) != 'P'
+                || bb.getByte(rIdx + 4) != '/') {
+            return false;
+        }
+        // Byte 9 is the first status digit (after "HTTP/1.1 ").
+        // We don't strictly check the version digits to allow HTTP/1.0 / HTTP/1.1.
+        return bb.getByte(rIdx + 9) == '1';
     }
 
     @Override

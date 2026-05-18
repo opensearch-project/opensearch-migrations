@@ -8,6 +8,7 @@ import java.util.List;
 
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
@@ -33,6 +34,17 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
     HttpMessageAndTimestamp requestData;
     @Getter
     HttpMessageAndTimestamp responseData;
+    /**
+     * Bytes of any HTTP/1.1 interim 1xx responses (e.g. 100 Continue) that the
+     * source server sent during the request phase. Captured for audit / byte-fidelity.
+     * The replayer does NOT replay these directly — its HTTP client negotiates 100-Continue
+     * with the target server independently — but they are preserved on the pair so
+     * downstream consumers (tuple writers, audit tooling) can see what the source sent.
+     */
+    @Getter
+    RawPackets interimResponseData;
+    /** In-progress segmented interim response bytes pending finalization on SegmentEnd. */
+    private java.io.ByteArrayOutputStream currentInterimResponseSegmentBytes;
     @NonNull
     final ISourceTrafficChannelKey firstTrafficStreamKeyForRequest;
     List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
@@ -113,6 +125,35 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         responseData.setLastPacketTimestamp(packetTimeStamp);
     }
 
+    /** Append a complete interim 1xx response observation. */
+    public void addInterimResponseData(byte[] data) {
+        if (interimResponseData == null) {
+            interimResponseData = new RawPackets();
+        }
+        interimResponseData.add(data);
+    }
+
+    /** Append a segment of an interim 1xx response that spans multiple traffic stream chunks. */
+    public void addInterimResponseSegment(byte[] data) {
+        if (currentInterimResponseSegmentBytes == null) {
+            currentInterimResponseSegmentBytes = new java.io.ByteArrayOutputStream();
+        }
+        currentInterimResponseSegmentBytes.write(data, 0, data.length);
+    }
+
+    public boolean hasInProgressInterimResponseSegment() {
+        return currentInterimResponseSegmentBytes != null;
+    }
+
+    /** Finalize segmented interim response bytes onto the pair. */
+    public void finalizeInterimResponseSegments() {
+        if (currentInterimResponseSegmentBytes == null) {
+            return;
+        }
+        addInterimResponseData(currentInterimResponseSegmentBytes.toByteArray());
+        currentInterimResponseSegmentBytes = null;
+    }
+
     public void holdTrafficStream(ITrafficStreamKey trafficStreamKey) {
         if (trafficStreamKeysBeingHeld == null) {
             trafficStreamKeysBeingHeld = new ArrayList<>();
@@ -138,12 +179,13 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         RequestResponsePacketPair that = (RequestResponsePacketPair) o;
         return Objects.equal(requestData, that.requestData)
             && Objects.equal(responseData, that.responseData)
+            && Objects.equal(interimResponseData, that.interimResponseData)
             && Objects.equal(trafficStreamKeysBeingHeld, that.trafficStreamKeysBeingHeld);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(requestData, responseData, trafficStreamKeysBeingHeld);
+        return Objects.hashCode(requestData, responseData, interimResponseData, trafficStreamKeysBeingHeld);
     }
 
     @Override
@@ -151,6 +193,9 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         final StringBuilder sb = new StringBuilder("RequestResponsePacketPair{");
         sb.append("\n requestData=").append(requestData);
         sb.append("\n responseData=").append(responseData);
+        if (interimResponseData != null && !interimResponseData.isEmpty()) {
+            sb.append("\n interimResponseData=").append(interimResponseData);
+        }
         sb.append('}');
         return sb.toString();
     }

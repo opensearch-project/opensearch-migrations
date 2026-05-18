@@ -22,6 +22,15 @@ public interface IChannelConnectionCaptureListener<T> {
 
     default void addWriteEvent(Instant timestamp, ByteBuf buffer) throws IOException {}
 
+    /**
+     * Captures bytes of an HTTP/1.1 interim 1xx response (e.g. 100 Continue,
+     * 102 Processing, 103 Early Hints) that arrives during the request phase.
+     * These are flow-control signals and are recorded for audit/byte-fidelity
+     * but must not be conflated with the final response written to the client
+     * after the request EOM.
+     */
+    default void addInterimResponseEvent(Instant timestamp, ByteBuf buffer) throws IOException {}
+
     default void addFlushEvent(Instant timestamp) throws IOException {}
 
     default void addChannelRegisteredEvent(Instant timestamp) throws IOException {}

@@ -514,8 +514,22 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .log();
         } else if (observation.hasSegmentEnd()) {
             var rrPair = accum.getRrPair();
-            assert rrPair.requestData.hasInProgressSegment();
-            rrPair.requestData.finalizeRequestSegments(timestamp);
+            // SegmentEnd may be terminating either a ReadSegment chain or an
+            // InterimResponseSegment chain (both arrive during ACCUMULATING_READS).
+            if (rrPair.hasInProgressInterimResponseSegment()) {
+                rrPair.finalizeInterimResponseSegments();
+            } else {
+                assert rrPair.requestData.hasInProgressSegment();
+                rrPair.requestData.finalizeRequestSegments(timestamp);
+            }
+        } else if (observation.hasInterimResponse()) {
+            // 1xx interim response sent during the request phase (e.g. 100 Continue).
+            // Capture for audit but do not disrupt the request accumulation.
+            var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey, originTimestamp);
+            rrPair.addInterimResponseData(observation.getInterimResponse().getData().toByteArray());
+        } else if (observation.hasInterimResponseSegment()) {
+            var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey, originTimestamp);
+            rrPair.addInterimResponseSegment(observation.getInterimResponseSegment().getData().toByteArray());
         } else if (observation.hasRequestDropped()) {
             requestCounter.decrementAndGet();
             handleDroppedRequestForAccumulation(accum);
