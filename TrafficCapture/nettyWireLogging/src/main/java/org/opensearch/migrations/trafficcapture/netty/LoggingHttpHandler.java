@@ -279,11 +279,13 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         var bb = (ByteBuf) msg;
 
-        // A 1xx interim response (e.g. "100 Continue") arriving during the request phase
-        // is flow control, not the final response — capture it separately to preserve the
-        // Read* EOM Write* invariant. 4xx/5xx rejections sent before the body, and 101
-        // Switching Protocols, are real final responses and fall through to the Write path.
-        if (messageContext instanceof IWireCaptureContexts.IRequestContext
+        // A 1xx interim response (e.g. "100 Continue", "102 Processing", "103 Early Hints") is
+        // flow control / hint information — not the final response. Capture it separately so
+        // the stream's Read* EOM Write* invariant is preserved. Interims may arrive in any
+        // phase before the final response starts: during request transmission, after EOM
+        // while waiting, or during a long-running blocking operation. 101 Switching Protocols
+        // and 4xx/5xx rejections fall through to the normal Write path.
+        if (!(messageContext instanceof IWireCaptureContexts.IResponseContext)
                 && looksLikeInterim1xxResponse(bb)) {
             if (getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
                 trafficOffloader.addInterimResponseEvent(Instant.now(), bb);

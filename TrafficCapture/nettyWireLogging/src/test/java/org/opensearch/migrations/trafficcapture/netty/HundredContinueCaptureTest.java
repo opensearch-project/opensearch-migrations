@@ -197,6 +197,34 @@ public class HundredContinueCaptureTest {
     }
 
     @Test
+    public void processing_102_afterBodyBeforeFinalResponse_isInterim() {
+        // Body fully sent, EOM fires, THEN server emits 102 Processing during long-running work.
+        var obs = capture(
+            Step.in(REQ_HEADERS_EXPECT), Step.in(REQ_BODY),
+            Step.out(PROCESSING_102),
+            Step.out(FINAL_200));
+        Assertions.assertTrue(allInterims(obs).contains("102 Processing"),
+            () -> "102 sent after EOM must be InterimResponse: " + obs);
+        Assertions.assertFalse(allWrites(obs).contains("102"),
+            () -> "102 must not appear as Write: " + obs);
+    }
+
+    @Test
+    public void multipleInterims_acrossBodyBoundary_allCapturedAsInterim() {
+        // 100 Continue before body, 103 Early Hints after body but before final.
+        var obs = capture(
+            Step.in(REQ_HEADERS_EXPECT), Step.out(CONTINUE_100),
+            Step.in(REQ_BODY),
+            Step.out(EARLY_HINTS_103_A),
+            Step.out(FINAL_200));
+        var interims = allInterims(obs);
+        Assertions.assertTrue(interims.contains("100 Continue") && interims.contains("103 Early Hints"),
+            () -> "both interim responses must be captured (one before body, one after): " + obs);
+        Assertions.assertFalse(allWrites(obs).contains("103"),
+            () -> "103 after EOM must not appear as Write: " + obs);
+    }
+
+    @Test
     public void requestAfterHundredContinue_isCapturedCleanly() {
         var obs = capture(
             Step.in(REQ_HEADERS_EXPECT), Step.out(CONTINUE_100),

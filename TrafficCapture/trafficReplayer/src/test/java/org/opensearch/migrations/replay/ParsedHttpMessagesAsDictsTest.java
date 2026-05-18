@@ -85,6 +85,93 @@ class ParsedHttpMessagesAsDictsTest extends InstrumentationTest {
 
     @SuppressWarnings("unchecked")
     @Test
+    void multipleInterimsPerTargetResponseAreAllRendered() {
+        // Single attempt, two interim responses (e.g. two 103 Early Hints) before the final.
+        var tsKey = PojoTrafficStreamKeyAndContext.build("n", "c", 0,
+            rootContext::createTrafficStreamContextForTest);
+        var sourcePair = new RequestResponsePacketPair(tsKey, Instant.EPOCH, 0, 0);
+        sourcePair.addRequestData(Instant.EPOCH, REQ.getBytes(StandardCharsets.UTF_8));
+        sourcePair.addResponseData(Instant.EPOCH, RESP_200.getBytes(StandardCharsets.UTF_8));
+
+        var targetRequest = new ByteBufList();
+        targetRequest.add(Unpooled.wrappedBuffer(REQ.getBytes(StandardCharsets.UTF_8)));
+        var targetResponsePackets = new ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>>();
+        targetResponsePackets.add(new AbstractMap.SimpleEntry<>(Instant.now(),
+            RESP_200.getBytes(StandardCharsets.UTF_8)));
+        var earlyHints1 = "HTTP/1.1 103 Early Hints\r\nLink: </a.css>; rel=preload\r\n\r\n";
+        var earlyHints2 = "HTTP/1.1 103 Early Hints\r\nLink: </b.js>; rel=preload\r\n\r\n";
+        var interimPackets = List.of(
+            earlyHints1.getBytes(StandardCharsets.UTF_8),
+            earlyHints2.getBytes(StandardCharsets.UTF_8));
+        var aggregated = new AggregatedRawResponse(null, interimPackets, RESP_200.length(),
+            Duration.ofMillis(10), targetResponsePackets, null);
+        var transformedList = new TransformedTargetRequestAndResponseList(targetRequest,
+            HttpRequestTransformationStatus.skipped(), aggregated);
+
+        try (var ctx = rootContext.getTestTupleContext()) {
+            var tuple = new SourceTargetCaptureTuple(ctx, sourcePair, transformedList, null);
+            var map = new ParsedHttpMessagesAsDicts(tuple).toTupleMap(tuple);
+            var targetResponses = (List<Map<String, Object>>) map.get("targetResponses");
+            var nestedInterims = (List<Map<String, Object>>) targetResponses.get(0).get("interimResponses");
+            Assertions.assertEquals(2, nestedInterims.size(), () -> "expected two interim responses: " + map);
+            Assertions.assertEquals(103, nestedInterims.get(0).get(ParsedHttpMessagesAsDicts.STATUS_CODE_KEY));
+            Assertions.assertEquals(103, nestedInterims.get(1).get(ParsedHttpMessagesAsDicts.STATUS_CODE_KEY));
+        } finally {
+            targetRequest.release();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void retryAttemptsEachCarryTheirOwnInterimResponses() {
+        // Two retry attempts: attempt 1 has a 100 Continue, attempt 2 has none.
+        var tsKey = PojoTrafficStreamKeyAndContext.build("n", "c", 0,
+            rootContext::createTrafficStreamContextForTest);
+        var sourcePair = new RequestResponsePacketPair(tsKey, Instant.EPOCH, 0, 0);
+        sourcePair.addRequestData(Instant.EPOCH, REQ.getBytes(StandardCharsets.UTF_8));
+        sourcePair.addResponseData(Instant.EPOCH, RESP_200.getBytes(StandardCharsets.UTF_8));
+
+        var targetRequest = new ByteBufList();
+        targetRequest.add(Unpooled.wrappedBuffer(REQ.getBytes(StandardCharsets.UTF_8)));
+
+        var attempt1Packets = new ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>>();
+        attempt1Packets.add(new AbstractMap.SimpleEntry<>(Instant.now(),
+            "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n".getBytes(StandardCharsets.UTF_8)));
+        var attempt1Interims = List.of(INTERIM_100.getBytes(StandardCharsets.UTF_8));
+        var attempt1 = new AggregatedRawResponse(null, attempt1Interims, 64,
+            Duration.ofMillis(5), attempt1Packets, null);
+
+        var attempt2Packets = new ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>>();
+        attempt2Packets.add(new AbstractMap.SimpleEntry<>(Instant.now(),
+            RESP_200.getBytes(StandardCharsets.UTF_8)));
+        var attempt2 = new AggregatedRawResponse(null, RESP_200.length(),
+            Duration.ofMillis(8), attempt2Packets, null);
+
+        var transformedList = new TransformedTargetRequestAndResponseList(targetRequest,
+            HttpRequestTransformationStatus.skipped(), attempt1, attempt2);
+
+        try (var ctx = rootContext.getTestTupleContext()) {
+            var tuple = new SourceTargetCaptureTuple(ctx, sourcePair, transformedList, null);
+            var map = new ParsedHttpMessagesAsDicts(tuple).toTupleMap(tuple);
+            var targetResponses = (List<Map<String, Object>>) map.get("targetResponses");
+            Assertions.assertEquals(2, targetResponses.size());
+
+            // Attempt 1 has its own interim list.
+            var attempt1Interim = (List<Map<String, Object>>) targetResponses.get(0).get("interimResponses");
+            Assertions.assertNotNull(attempt1Interim, () -> "attempt 1 should carry its interim: " + map);
+            Assertions.assertEquals(1, attempt1Interim.size());
+            Assertions.assertEquals(100, attempt1Interim.get(0).get(ParsedHttpMessagesAsDicts.STATUS_CODE_KEY));
+
+            // Attempt 2 has none — interim key must be absent (not leak from attempt 1).
+            Assertions.assertFalse(targetResponses.get(1).containsKey("interimResponses"),
+                () -> "attempt 2 must not contain interim from attempt 1: " + map);
+        } finally {
+            targetRequest.release();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
     void noInterimResponsesProducesNoInterimKeys() {
         var tsKey = PojoTrafficStreamKeyAndContext.build("n", "c", 0,
             rootContext::createTrafficStreamContextForTest);
