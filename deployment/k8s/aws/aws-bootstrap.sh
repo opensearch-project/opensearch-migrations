@@ -551,12 +551,6 @@ fi
 
 # --- CFN deployment (optional) ---
 if [[ "$deploy_cfn" == "true" ]]; then
-  if ! command -v tac &>/dev/null; then
-    echo "Missing required tool: tac (used for CloudFormation event streaming)" >&2
-    echo "On macOS, install with: brew install coreutils" >&2
-    exit 1
-  fi
-
   # Determine template source
   if [[ "$build" == "true" ]]; then
     echo "Building CloudFormation templates from source..."
@@ -648,7 +642,7 @@ if [[ "$deploy_cfn" == "true" ]]; then
     while true; do
       aws cloudformation describe-stack-events --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
         --query 'StackEvents[].[EventId,Timestamp,ResourceStatus,ResourceType,LogicalResourceId,ResourceStatusReason]' \
-        --output text 2>/dev/null | tac | while IFS=$'\t' read -r eid ts status rtype logical reason; do
+        --output text 2>/dev/null | awk '{a[NR]=$0} END{for(i=NR;i;i--) print a[i]}' | while IFS=$'\t' read -r eid ts status rtype logical reason; do
           grep -qxF "$eid" "$seen_file" 2>/dev/null && continue
           echo "$eid" >> "$seen_file"
           [[ "$reason" == "None" ]] && reason=""
