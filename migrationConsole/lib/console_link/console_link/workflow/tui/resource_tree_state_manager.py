@@ -146,8 +146,12 @@ class ResourceTreeStateManager:
     def _add_resource(self, parent: TreeNode, resource: ResourceNode) -> None:
         """Add a resource node with its details and workflow subtree."""
         from console_link.workflow.commands.crd_utils import DISPLAY_NAMES
+        from console_link.workflow.resource_tree import DISPLAY_PHASES
         symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
-        label = f"[{color}]{symbol} {resource.name} ({resource.phase})[/{color}]"
+        if resource.phase in DISPLAY_PHASES:
+            label = f"[{color}]{symbol} {resource.name} ({resource.phase})[/{color}]"
+        else:
+            label = f"[{color}]{symbol} {resource.name}[/{color}]"
         resource_path = f"{DISPLAY_NAMES.get(resource.plural, resource.plural)}.{resource.name}"
         resource_node = parent.add(label, data={
             'id': f'resource:{resource.name}',

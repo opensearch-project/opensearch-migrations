@@ -259,10 +259,17 @@ def _render_group(parent_tree, group: ResourceGroup) -> None:
         _render_resource(group_node, resource)
 
 
+# Phases shown in the resource label (settled states)
+DISPLAY_PHASES = {'Ready', 'Completed', 'Failed', 'Error'}
+
+
 def _render_resource(parent_node, resource: ResourceNode) -> None:
     """Render a single resource node with its children."""
     symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
-    label = f"[{color}]{symbol} {resource.name} ({resource.phase})[/{color}]"
+    if resource.phase in DISPLAY_PHASES:
+        label = f"[{color}]{symbol} {resource.name} ({resource.phase})[/{color}]"
+    else:
+        label = f"[{color}]{symbol} {resource.name}[/{color}]"
     node = parent_node.add(label)
     _add_resource_details(node, resource)
     for child in resource.children:
