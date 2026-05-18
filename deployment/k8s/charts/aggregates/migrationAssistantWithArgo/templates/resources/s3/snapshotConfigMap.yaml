@@ -8,6 +8,7 @@ metadata:
     workflows.argoproj.io/configmap-type: Parameter
 data:
   AWS_REGION: {{ .Values.aws.region }}
+  USE_LOCAL_STACK: {{ .Values.defaultBucketConfiguration.useLocalStack | quote }}
   {{- if .Values.defaultBucketConfiguration.useLocalStack }}
   ENDPOINT: "localstack://{{ .Values.defaultBucketConfiguration.endpoint }}.{{ .Release.Namespace }}.svc.cluster.local:4566"
   ENDPOINT_HTTP: "http://{{ .Values.defaultBucketConfiguration.endpoint }}.{{ .Release.Namespace }}.svc.cluster.local:4566"

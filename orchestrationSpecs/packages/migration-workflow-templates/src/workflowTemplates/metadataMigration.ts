@@ -10,8 +10,10 @@ import {
 } from "@opensearch-migrations/schemas";
 import {
     BaseExpression, configMapKey,
+    ContainerBuilder,
+    defineParam,
     defineRequiredParam,
-    expr, FunctionExpression, InputParameterSource, InputParametersRecord, InputParamsToExpressions,
+    expr, FunctionExpression, InputParamDef, InputParameterSource, InputParametersRecord, InputParamsToExpressions,
     INTERNAL, PlainObject,
     selectInputsForRegister,
     Serialized,
@@ -30,6 +32,7 @@ import {
     getSourceTargetPathAndSnapshotAndMigrationIndex
 } from "./commonUtils/configContextPathConstructors";
 import {ResourceManagement} from "./resourceManagement";
+import {getTransformsPresence, TRANSFORMS_MOUNT_PATH} from "./commonUtils/containerFragments";
 
 const METADATA_OUTPUT_PATH = "/tmp/outputs/metadata-output.log";
 
@@ -181,91 +184,211 @@ function makeApprovalCheck<
     ]);
 }
 
-export const MetadataMigration = WorkflowBuilder.create({
+const runMetadataInputs = {
+    commandMode: defineRequiredParam<"evaluate" | "migrate">(),
+    sourceVersion: defineRequiredParam<string>(),
+    targetConfig: defineRequiredParam<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
+    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),
+    metadataMigrationConfig: defineRequiredParam<z.infer<typeof ARGO_METADATA_OPTIONS>>(),
+    sourceEndpoint: defineParam<string>({expression: expr.literal("")}),
+    ...makeRequiredImageParametersForKeys(["MigrationConsole"]),
+    sourceK8sLabel: defineRequiredParam<string>(),
+    targetK8sLabel: defineRequiredParam<string>(),
+    snapshotK8sLabel: defineRequiredParam<string>(),
+    fromSnapshotMigrationK8sLabel: defineRequiredParam<string>(),
+    crdName: defineRequiredParam<string>(),
+    crdUid: defineRequiredParam<string>(),
+    resourceCreationTimestamp: defineRequiredParam<string>(),
+    workflowCreationTimestamp: defineParam<string>({expression: expr.getWorkflowValue("creationTimestamp")}),
+    workflowUid: defineParam<string>({expression: expr.getWorkflowValue("uid")})
+};
+
+type MetadataTransformsMode = "none" | "image" | "configMap";
+
+const metadataMigrationBaseBuilder = WorkflowBuilder.create({
     k8sResourceName: "metadata-migration",
     serviceAccountName: "argo-workflow-executor"
 })
 
-    .addParams(CommonWorkflowParameters)
+    .addParams(CommonWorkflowParameters);
 
+function makeMetadataTaskK8sLabel(commandMode: BaseExpression<"evaluate" | "migrate">) {
+    return expr.ternary(
+        expr.equals(commandMode, expr.literal("evaluate")),
+        expr.literal("metadataEvaluate"),
+        expr.literal("metadataMigrate")
+    );
+}
 
-    .addTemplate("runMetadata", t => t
-        .addRequiredInput("commandMode", typeToken<"evaluate" | "migrate">())
-        .addRequiredInput("sourceVersion", typeToken<string>())
-        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
-        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
-        .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof ARGO_METADATA_OPTIONS>>())
-        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addRequiredInput("sourceK8sLabel", typeToken<string>())
-        .addRequiredInput("targetK8sLabel", typeToken<string>())
-        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
-        .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
-        .addRequiredInput("crdName", typeToken<string>())
-        .addRequiredInput("crdUid", typeToken<string>())
-        .addRequiredInput("resourceCreationTimestamp", typeToken<string>())
-        .addOptionalInput("workflowCreationTimestamp", c => expr.getWorkflowValue("creationTimestamp"))
-        .addOptionalInput("workflowUid", c => expr.getWorkflowValue("uid"))
-        .addOptionalInput("taskK8sLabel", c => expr.ternary(
-            expr.equals(c.inputParameters.commandMode, expr.literal("evaluate")),
-            expr.literal("metadataEvaluate"),
-            expr.literal("metadataMigrate")
-        ))
+function makeMetadataVolumes(
+    inputs: InputParamsToExpressions<typeof runMetadataInputs, InputParameterSource>,
+    transformsMode: MetadataTransformsMode
+) {
+    const baseVolumes = {
+        'test-creds': {
+            configMap: {
+                name: expr.literal("localstack-test-creds"),
+                optional: true
+            },
+            mountPath: "/config/credentials",
+            readOnly: true
+        }
+    };
 
-        .addContainer(b => b
-            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
-            .addVolumesFromRecord({
-                'test-creds': {
-                    configMap: {
-                        name: expr.literal("localstack-test-creds"),
-                        optional: true
-                    },
-                    mountPath: "/config/credentials",
-                    readOnly: true
-                }
-            })
-            .addEnvVar("AWS_SHARED_CREDENTIALS_FILE",
-                expr.ternary(
-                    expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
-                    expr.literal("/config/credentials/configuration"),
-                    expr.literal(""))
-            )
-            .addEnvVar("JDK_JAVA_OPTIONS",
-                expr.dig(expr.deserializeRecord(b.inputs.metadataMigrationConfig), ["jvmArgs"], "")
-            )
-            .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(b.inputs.targetConfig)))
-            .addResources(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI)
-            .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
-            .addArgs([
-                b.inputs.commandMode,
-                expr.literal("---INLINE-JSON"),
-                expr.asString(expr.serialize(
-                    makeParamsDict(b.inputs.sourceVersion, b.inputs.targetConfig, b.inputs.snapshotConfig, b.inputs.metadataMigrationConfig,
-                        b.inputs.sourceEndpoint
+    if (transformsMode === "none") {
+        return baseVolumes;
+    }
+
+    if (transformsMode === "image") {
+        return {
+            ...baseVolumes,
+            'user-transforms': {
+                image: {
+                    reference: expr.dig(expr.deserializeRecord(inputs.metadataMigrationConfig), ["transformsImage"], ""),
+                    pullPolicy: expr.dig(
+                        expr.deserializeRecord(inputs.metadataMigrationConfig),
+                        ["transformsImagePullPolicy"],
+                        "IfNotPresent"
                     )
-                ))
-            ])
-            .addArtifactOutput("metadataOutput", METADATA_OUTPUT_PATH, {
-                s3Key: makeMetadataOutputS3Key(
-                    b.inputs.crdName,
-                    b.inputs.crdUid,
-                    b.inputs.resourceCreationTimestamp,
-                    b.inputs.taskK8sLabel,
-                    b.inputs.workflowCreationTimestamp,
-                    b.inputs.workflowUid
-                )
-            })
-            .addPodMetadata(({inputs}) => ({
-                labels: {
-                    'migrations.opensearch.org/source': inputs.sourceK8sLabel,
-                    'migrations.opensearch.org/target': inputs.targetK8sLabel,
-                    'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
-                    'migrations.opensearch.org/from-snapshot-migration': inputs.fromSnapshotMigrationK8sLabel,
-                    'migrations.opensearch.org/task': inputs.taskK8sLabel
-                }
-            }))
+                },
+                mountPath: TRANSFORMS_MOUNT_PATH,
+                readOnly: true
+            }
+        };
+    }
+
+    return {
+        ...baseVolumes,
+        'user-transforms': {
+            configMap: {
+                name: expr.dig(expr.deserializeRecord(inputs.metadataMigrationConfig), ["transformsConfigMap"], "")
+            },
+            mountPath: TRANSFORMS_MOUNT_PATH,
+            readOnly: true
+        }
+    };
+}
+
+type RunMetadataTemplateInputDefs = typeof runMetadataInputs & {
+    taskK8sLabel: InputParamDef<string, false>;
+};
+
+function buildMetadataContainer<
+    B extends ContainerBuilder<any, RunMetadataTemplateInputDefs, {}, {}, {}, any>
+>(
+    builder: B,
+    transformsMode: MetadataTransformsMode
+) {
+    const {inputs} = builder;
+    return builder
+        .addImageInfo(inputs.imageMigrationConsoleLocation, inputs.imageMigrationConsolePullPolicy)
+        .addVolumesFromRecord(makeMetadataVolumes(inputs, transformsMode))
+        .addEnvVar("AWS_SHARED_CREDENTIALS_FILE",
+            expr.ternary(
+                expr.dig(expr.deserializeRecord(inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
+                expr.literal("/config/credentials/configuration"),
+                expr.literal(""))
         )
-        .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
+        .addEnvVar("JDK_JAVA_OPTIONS",
+            expr.dig(expr.deserializeRecord(inputs.metadataMigrationConfig), ["jvmArgs"], "")
+        )
+        .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(inputs.targetConfig)))
+        .addResources(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI)
+        .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
+        .addArgs([
+            inputs.commandMode,
+            expr.literal("---INLINE-JSON"),
+            expr.asString(expr.serialize(
+                makeParamsDict(inputs.sourceVersion, inputs.targetConfig, inputs.snapshotConfig, inputs.metadataMigrationConfig,
+                    inputs.sourceEndpoint
+                )
+            ))
+        ])
+        .addArtifactOutput("metadataOutput", METADATA_OUTPUT_PATH, {
+            s3Key: makeMetadataOutputS3Key(
+                inputs.crdName,
+                inputs.crdUid,
+                inputs.resourceCreationTimestamp,
+                inputs.taskK8sLabel,
+                inputs.workflowCreationTimestamp,
+                inputs.workflowUid
+            )
+        })
+        .addPodMetadata(({inputs}) => ({
+            labels: {
+                'migrations.opensearch.org/source': inputs.sourceK8sLabel,
+                'migrations.opensearch.org/target': inputs.targetK8sLabel,
+                'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
+                'migrations.opensearch.org/from-snapshot-migration': inputs.fromSnapshotMigrationK8sLabel,
+                'migrations.opensearch.org/task': inputs.taskK8sLabel
+            }
+        }));
+}
+
+function addMetadataTransformTemplates(builder: typeof metadataMigrationBaseBuilder) {
+    return builder
+        .addTemplate("runMetadataNoTransforms", t => t
+            .addInputsFromRecord(runMetadataInputs)
+            .addOptionalInput("taskK8sLabel", c => makeMetadataTaskK8sLabel(c.inputParameters.commandMode))
+            .addContainer(b => buildMetadataContainer(b, "none"))
+            .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
+        )
+        .addTemplate("runMetadataWithImageTransforms", t => t
+            .addInputsFromRecord(runMetadataInputs)
+            .addOptionalInput("taskK8sLabel", c => makeMetadataTaskK8sLabel(c.inputParameters.commandMode))
+            .addContainer(b => buildMetadataContainer(b, "image"))
+        )
+        .addTemplate("runMetadataWithConfigMapTransforms", t => t
+            .addInputsFromRecord(runMetadataInputs)
+            .addOptionalInput("taskK8sLabel", c => makeMetadataTaskK8sLabel(c.inputParameters.commandMode))
+            .addContainer(b => buildMetadataContainer(b, "configMap"))
+        );
+}
+
+export const MetadataMigration = addMetadataTransformTemplates(metadataMigrationBaseBuilder)
+    .addTemplate("runMetadata", t => t
+        .addInputsFromRecord(runMetadataInputs)
+        .addOptionalInput("taskK8sLabel", c => makeMetadataTaskK8sLabel(c.inputParameters.commandMode))
+        .addSteps(b => {
+            const metadataMigrationConfig =
+                expr.cast(expr.deserializeRecord(b.inputs.metadataMigrationConfig)).to<Record<string, PlainObject>>();
+            const transformsImage = expr.dig(metadataMigrationConfig as any, ["transformsImage"], "") as BaseExpression<string>;
+            const transformsConfigMap = expr.dig(metadataMigrationConfig as any, ["transformsConfigMap"], "") as BaseExpression<string>;
+            const {hasImage, hasConfigMapOnly, hasNone} =
+                getTransformsPresence(transformsImage, transformsConfigMap);
+
+            return b
+                .addStep("withImageTransforms", INTERNAL, "runMetadataWithImageTransforms", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        sourceEndpoint: b.inputs.sourceEndpoint,
+                        workflowCreationTimestamp: b.inputs.workflowCreationTimestamp,
+                        workflowUid: b.inputs.workflowUid,
+                        taskK8sLabel: b.inputs.taskK8sLabel
+                    }),
+                    {when: {templateExp: hasImage}}
+                )
+                .addStep("withConfigMapTransforms", INTERNAL, "runMetadataWithConfigMapTransforms", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        sourceEndpoint: b.inputs.sourceEndpoint,
+                        workflowCreationTimestamp: b.inputs.workflowCreationTimestamp,
+                        workflowUid: b.inputs.workflowUid,
+                        taskK8sLabel: b.inputs.taskK8sLabel
+                    }),
+                    {when: {templateExp: hasConfigMapOnly}}
+                )
+                .addStep("withoutTransforms", INTERNAL, "runMetadataNoTransforms", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        sourceEndpoint: b.inputs.sourceEndpoint,
+                        workflowCreationTimestamp: b.inputs.workflowCreationTimestamp,
+                        workflowUid: b.inputs.workflowUid,
+                        taskK8sLabel: b.inputs.taskK8sLabel
+                    }),
+                    {when: {templateExp: hasNone}}
+                );
+        })
     )
 
 

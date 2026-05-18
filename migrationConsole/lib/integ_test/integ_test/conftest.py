@@ -27,6 +27,7 @@ from .test_cases.cdc_tests import *
 from .test_cases.cdc_generate_data_tests import *
 from .test_cases.cdc_mixed_operations_tests import *
 from .test_cases.cdc_simple_bulk_e2e_tests import *
+from .test_cases.mountable_transform_tests import *
 from .test_cases.cdc_aoss_tests import *
 from .test_cases.aoss_collection_tests import *
 from .test_cases.solr_tests import *
@@ -69,6 +70,10 @@ def pytest_addoption(parser):
                      help="Speedup factor for traffic replayer (default: 20)")
     parser.addoption("--observed_packet_timeout", type=int, default=30,
                      help="Observed packet connection timeout for traffic replayer (default: 30)")
+    parser.addoption("--transform_image_basic", action="store", default="",
+                     help="Digest-pinned transform image containing the basic transform fixture bank")
+    parser.addoption("--transform_image_sequence", action="store", default="",
+                     help="Digest-pinned transform image containing the sequence transform fixture bank")
 
 
 def pytest_configure(config):
@@ -101,11 +106,15 @@ def pytest_generate_tests(metafunc):
         image_registry_prefix = metafunc.config.getoption("image_registry_prefix")
         speedup_factor = metafunc.config.getoption("speedup_factor")
         observed_packet_timeout = metafunc.config.getoption("observed_packet_timeout")
+        transform_image_basic = metafunc.config.getoption("transform_image_basic")
+        transform_image_sequence = metafunc.config.getoption("transform_image_sequence")
         user_args = MATestUserArguments(source_version=source_version, target_version=target_version,
                                         target_type=target_type, unique_id=unique_id, reuse_clusters=reuse_clusters,
                                         image_registry_prefix=image_registry_prefix,
                                         speedup_factor=speedup_factor,
-                                        observed_packet_timeout=observed_packet_timeout)
+                                        observed_packet_timeout=observed_packet_timeout,
+                                        transform_image_basic=transform_image_basic,
+                                        transform_image_sequence=transform_image_sequence)
         test_cases_param = _generate_test_cases(user_args=user_args, test_ids_list=test_ids_list)
         metafunc.config.test_summary["expected"] = len(test_cases_param)
         if not test_cases_param and not test_ids_list:

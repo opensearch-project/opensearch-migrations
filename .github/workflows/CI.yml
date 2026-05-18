@@ -290,6 +290,26 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
+  mountable-transforms-k8s-test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up kind cluster
+        uses: helm/kind-action@v1.14.0
+        with:
+          version: v0.31.0
+          cluster_name: mountable-transforms
+          node_image: kindest/node:v1.35.1
+          config: deployment/k8s/tests/kindImageVolumeConfig.yaml
+          wait: 120s
+      - name: Run mountable transforms image volume smoke test
+        env:
+          KIND_CLUSTER_NAME: mountable-transforms
+          KUBE_CONTEXT: kind-mountable-transforms
+          KIND_REGISTRY_PORT: "5002"
+        run: deployment/k8s/tests/mountableTransformsImageVolumeTest.sh
+
   link-checker:
     runs-on: ubuntu-22.04
 
@@ -474,6 +494,7 @@ jobs:
       - gradle-tests
       - link-checker
       - node-tests
+      - mountable-transforms-k8s-test
       - python-lint
       - gradle-extended-check
       - gradle-build-macos

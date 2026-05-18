@@ -22,7 +22,23 @@ public class PythonTransformer extends GraalTransformer {
     }
 
     public PythonTransformer(String script, Object bindings, Path venvPath) {
-        super(LANGUAGE_ID, script, bindings, createContextBuilder(venvPath));
+        this(script, bindings, venvPath, null);
+    }
+
+    public PythonTransformer(String script, Object bindings, Path venvPath, Path scriptParentPath) {
+        super(LANGUAGE_ID, withScriptParentOnPath(script, scriptParentPath), bindings, createContextBuilder(venvPath));
+    }
+
+    private static String withScriptParentOnPath(String script, Path scriptParentPath) {
+        if (scriptParentPath == null) {
+            return script;
+        }
+        var escapedPath = scriptParentPath.toString()
+            .replace("\\", "\\\\")
+            .replace("'", "\\'");
+        return "import sys\n"
+            + "sys.path.insert(0, '" + escapedPath + "')\n"
+            + script;
     }
 
     private static Context.Builder createContextBuilder(Path venvPath) {

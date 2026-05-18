@@ -260,6 +260,12 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
                     var decoderResult = (HttpMessageDecoderResult) decoderResultLoose;
                     trafficOffloader.addEndOfFirstLineIndicator(decoderResult.initialLineLength());
                     trafficOffloader.addEndOfHeadersIndicator(decoderResult.headerSize());
+                } else {
+                    log.atWarn().setMessage("HttpRequest decoder result was not an HttpMessageDecoderResult "
+                        + "(was {}). EOM will have -1 for firstLineByteLength and headersByteLength. "
+                        + "This may indicate a missing header in PassThruHttpHeaders.")
+                        .addArgument(() -> decoderResultLoose.getClass().getName())
+                        .log();
                 }
                 trafficOffloader.commitEndOfHttpMessageIndicator(timestamp);
             }
