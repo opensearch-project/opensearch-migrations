@@ -689,6 +689,6 @@ export function main(args = process.argv.slice(2)) {
     throw new Error("Usage: generate-migration-resources (--crds|--vaps) [--output <path>] | --all --output-dir <path>");
 }
 
-if (require.main === module) {
+if (require.main === module && !process.env.SUPPRESS_AUTO_LOAD) {
     main();
 }

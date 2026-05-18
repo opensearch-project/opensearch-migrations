@@ -368,12 +368,44 @@ export class MigrationInitializer {
     }
 
     private sanitizeResourceName(value: string): string {
-        const sanitized = value
-            .toLowerCase()
-            .replace(/[^a-z0-9.-]+/g, '-')
-            .replace(/^[^a-z0-9]+/, '')
-            .replace(/[^a-z0-9]+$/, '');
-        return sanitized || 'migration';
+        const sanitizedChars: string[] = [];
+        let previousWasReplacement = false;
+
+        for (const char of value.toLowerCase()) {
+            const code = char.charCodeAt(0);
+            const isAlphaNumeric =
+                (code >= 97 && code <= 122) ||
+                (code >= 48 && code <= 57);
+            const isAllowedPunctuation = char === '.' || char === '-';
+
+            if (isAlphaNumeric || isAllowedPunctuation) {
+                if (sanitizedChars.length === 0 && !isAlphaNumeric) {
+                    continue;
+                }
+                sanitizedChars.push(char);
+                previousWasReplacement = false;
+                continue;
+            }
+
+            if (sanitizedChars.length > 0 && !previousWasReplacement) {
+                sanitizedChars.push('-');
+                previousWasReplacement = true;
+            }
+        }
+
+        while (sanitizedChars.length > 0) {
+            const char = sanitizedChars[sanitizedChars.length - 1];
+            const code = char.charCodeAt(0);
+            const isAlphaNumeric =
+                (code >= 97 && code <= 122) ||
+                (code >= 48 && code <= 57);
+            if (isAlphaNumeric) {
+                break;
+            }
+            sanitizedChars.pop();
+        }
+
+        return sanitizedChars.join('') || 'migration';
     }
 
     private isoWeek(date: Date): string {

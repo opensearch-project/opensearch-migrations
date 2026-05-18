@@ -247,6 +247,17 @@ describe('migration initializer CRD resource generation', () => {
         }
     });
 
+    it('sanitizes MigrationRun names without regex backtracking on slash-heavy workflow names', async () => {
+        const initializer = new MigrationInitializer();
+        const migrationRun = (initializer as any).migrationRunMetadata({
+            runNumber: 52,
+            timestamp: new Date('2026-05-18T11:44:15Z'),
+        }, `///Team/Workflow${'/'.repeat(2048)}Name///`);
+
+        expect(migrationRun.name).toBe('team-workflow-name-run-52');
+        expect(migrationRun.workflowName).toBe(`///Team/Workflow${'/'.repeat(2048)}Name///`);
+    });
+
     it('omits labels and label-based cleanup when no workflow name provided', async () => {
         const config: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
