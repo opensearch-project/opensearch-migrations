@@ -11,9 +11,6 @@ from .tree_utils import (
     get_node_input_parameter, get_step_rich_label, is_approval_node, get_node_phase,
 )
 
-# Steps that have viewable output artifacts (keep in sync with PATCH_OUTPUT_STEPS in workflow_manage_app.py)
-OUTPUT_STEPS = {'patchMetadataEvaluateOutput', 'patchMetadataMigrateOutput'}
-
 
 # Sections and their resource groups
 # Each section contains (list of plurals, display name) tuples
@@ -297,9 +294,6 @@ def _should_show_step(step: Dict[str, Any]) -> bool:
     if step.get('live_check'):
         return True
     if is_approval_node(step) and phase == 'Running':
-        return True
-    display_name = (step.get('display_name') or '').split('(')[0].strip()
-    if display_name in OUTPUT_STEPS:
         return True
     return False
 
