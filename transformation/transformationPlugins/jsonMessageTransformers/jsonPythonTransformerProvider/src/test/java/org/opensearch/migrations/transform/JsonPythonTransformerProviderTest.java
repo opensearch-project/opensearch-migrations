@@ -26,6 +26,13 @@ public class JsonPythonTransformerProviderTest {
         "        return document\n" +
         "    return transform\n" +
         "main";
+    private static final String CONTEXT_PYTHON_TRANSFORM =
+        "def main(context):\n" +
+        "    def transform(document):\n" +
+        "        document['configured'] = context['configured']\n" +
+        "        return document\n" +
+        "    return transform\n" +
+        "main";
     private static final Map<String, String> TEST_DOC = Map.of(
         "name", "test-doc",
         "type", "document");
@@ -85,15 +92,28 @@ public class JsonPythonTransformerProviderTest {
     @Test
     public void testCreateTransformer_missingBindings() {
         var config = Map.of(
-            "initializationScript", "");
-        var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
-        assertThat(exception.getMessage(), containsString("Configuration missing required key: bindingsObject."));
+            "initializationScript", SIMPLE_PYTHON_TRANSFORM);
+        var transformer = provider.createTransformer(config);
+        var result = (Map) transformer.transformJson(new HashMap<>(TEST_DOC));
+
+        assertThat(result.getOrDefault("modified", null), equalTo(true));
+    }
+
+    @Test
+    public void testCreateTransformer_objectBindings() {
+        var config = Map.of(
+            "bindingsObject", Map.of("configured", "from-object"),
+            "initializationScript", CONTEXT_PYTHON_TRANSFORM);
+        var transformer = provider.createTransformer(config);
+        var result = (Map) transformer.transformJson(new HashMap<>(TEST_DOC));
+
+        assertThat(result.getOrDefault("configured", null), equalTo("from-object"));
     }
 
     @Test
     public void testCreateTransformer_invalidBindings() {
         var config = Map.of(
-            "bindingsObject", Map.of(),
+            "bindingsObject", "{",
             "initializationScript", "");
         var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
         assertThat(exception.getMessage(), containsString("Failed to parse the bindingsObject."));
@@ -168,6 +188,35 @@ public class JsonPythonTransformerProviderTest {
             "initializationResourcePath", "test-transform.py");
         var exception = assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
         assertThat(exception.getMessage(), containsString("Unable to use both parameters at the same time"));
+    }
+
+    @Test
+    public void testCreateTransformer_scriptFileCanImportSiblingModule() throws Exception {
+        var tempDir = Files.createTempDirectory("json-python-transform-siblings");
+        var helperFile = tempDir.resolve("helper.py");
+        var entryFile = tempDir.resolve("entry.py");
+        try {
+            Files.writeString(helperFile,
+                "def mark(document):\n" +
+                "    document['from_helper'] = True\n" +
+                "    return document\n");
+            Files.writeString(entryFile,
+                "from helper import mark\n\n" +
+                "def main(context):\n" +
+                "    return mark\n" +
+                "main");
+
+            var config = Map.of(
+                "initializationScriptFile", entryFile.toString());
+            var transformer = provider.createTransformer(config);
+            var result = (Map) transformer.transformJson(new HashMap<>(TEST_DOC));
+
+            assertThat(result.getOrDefault("from_helper", null), equalTo(true));
+        } finally {
+            Files.deleteIfExists(entryFile);
+            Files.deleteIfExists(helperFile);
+            Files.deleteIfExists(tempDir);
+        }
     }
 
     @Test

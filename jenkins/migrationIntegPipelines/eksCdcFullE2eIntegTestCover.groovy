@@ -21,4 +21,4 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
 // This ensures the GenericTrigger regex stays in sync with the actual job name
 // (e.g., main-* vs pr-*) across runs.
 def jobNameOverride = params.JOB_NAME_OVERRIDE ?: env.JOB_BASE_NAME ?: ''
-eksCdcIntegPipeline(jobName: jobNameOverride ?: null, gitBranchDefault: gitBranch, defaultTestIds: '0031,0032,0033,0040', defaultStageId: 'esoscdc')
+eksCdcIntegPipeline(jobName: jobNameOverride ?: null, gitBranchDefault: gitBranch, defaultTestIds: '0031,0032,0033,0040,0041', defaultStageId: 'esoscdc')

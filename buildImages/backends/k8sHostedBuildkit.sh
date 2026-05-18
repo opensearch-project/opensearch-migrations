@@ -74,11 +74,14 @@ ensure_k8s_local_registry() {
   echo "Waiting for docker-registry deployment to be available..."
   kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} rollout status deployment/docker-registry -n buildkit --timeout=120s
 
-  if ! pgrep -f "kubectl port-forward.*docker-registry.*5001:5000" >/dev/null; then
-    nohup kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} port-forward -n buildkit svc/docker-registry 5001:5000 > /tmp/registry-forward.log 2>&1 &
-  else
-    echo "registry port-forward already running"
-  fi
+  # Kill any stale port-forward processes from previous runs. After a helm
+  # uninstall/reinstall cycle the old process points at a deleted pod and
+  # will never recover, so we must start a fresh one.
+  pkill -f "kubectl port-forward.*docker-registry.*5001:5000" 2>/dev/null || true
+  sleep 1
+
+  echo "Starting registry port-forward..."
+  nohup kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} port-forward -n buildkit svc/docker-registry 5001:5000 > /tmp/registry-forward.log 2>&1 &
 }
 
 ensure_k8s_buildx_builder() {
@@ -128,12 +131,16 @@ ensure_k8s_buildx_builder() {
     echo "Waiting for buildkitd pod..."
     kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} wait --for=condition=ready pod -l app=buildkitd -n "${namespace}" --timeout=120s
 
-    if ! pgrep -f "kubectl port-forward.*buildkitd.*1234:1234" >/dev/null; then
-      echo "Starting buildkit port-forward..."
-      nohup kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} port-forward -n "${namespace}" svc/buildkitd 1234:1234 > /tmp/buildkit-forward.log 2>&1 &
-    else
-      echo "buildkit port-forward already running"
-    fi
+    # Kill any stale port-forward processes from previous runs. After a helm
+    # uninstall/reinstall cycle the old process points at a deleted pod and
+    # will never recover — its connection attempt fails with:
+    #   "pod not found ("buildkitd_buildkit")"
+    # Always start a fresh port-forward against the current pod.
+    pkill -f "kubectl port-forward.*buildkitd.*1234:1234" 2>/dev/null || true
+    sleep 1
+
+    echo "Starting buildkit port-forward..."
+    nohup kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} port-forward -n "${namespace}" svc/buildkitd 1234:1234 > /tmp/buildkit-forward.log 2>&1 &
 
     echo "Waiting for buildkit port-forward to be ready..."
     for i in $(seq 1 30); do

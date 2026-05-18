@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
@@ -30,6 +31,7 @@ import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
+import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
@@ -204,7 +206,8 @@ public class TrafficReplayer {
         String inputFilename;
         @Parameter(
             required = false,
-            names = {"-t", PACKET_TIMEOUT_SECONDS_PARAMETER_NAME, "--packetTimeoutSeconds" },
+            names = {"-t", PACKET_TIMEOUT_SECONDS_PARAMETER_NAME, "--packetTimeoutSeconds",
+                "--observedPacketConnectionTimeout" },
             arity = 1,
             description = "assume that connections were terminated after this many "
                 + "seconds of inactivity observed in the captured stream")
@@ -218,7 +221,7 @@ public class TrafficReplayer {
         double speedupFactor = 1.0;
         @Parameter(
             required = false,
-            names = { LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME,  "--lookaheadTimeWindow" },
+            names = { LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME,  "--lookaheadTimeWindow", "--lookaheadTimeSeconds" },
             arity = 1,
             description = "Number of seconds of data that will be buffered.")
         int lookaheadTimeSeconds = 400;
@@ -238,7 +241,8 @@ public class TrafficReplayer {
         // https://github.com/opensearch-project/opensearch-java/blob/main/java-client/src/main/java/org/opensearch/client/transport/httpclient5/ApacheHttpClient5TransportBuilder.java#L49-L54
         @Parameter(
             required = false,
-            names = { "--target-response-timeout", "--targetResponseTimeout" },
+            names = { "--target-response-timeout", "--targetResponseTimeout",
+                "--targetServerResponseTimeoutSeconds" },
             arity = 1,
             description = "Seconds to wait before timing out a replayed request to the target.")
         int targetServerResponseTimeoutSeconds = 150;
@@ -273,7 +277,8 @@ public class TrafficReplayer {
         String kafkaTrafficGroupId;
         @Parameter(
             required = false,
-            names = { "--kafka-traffic-enable-msk-auth", "--kafkaTrafficEnabledMskAuth" },
+            names = { "--kafka-traffic-enable-msk-auth", "--kafkaTrafficEnabledMskAuth",
+                "--kafkaTrafficEnableMSKAuth" },
             arity = 0,
             description = "Legacy flag that enables MSK IAM auth. Prefer --kafkaAuthType=msk-iam")
         Boolean kafkaTrafficEnableMSKAuth;
@@ -699,7 +704,10 @@ public class TrafficReplayer {
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
-            var tupleWriter = createS3TupleWriterIfConfigured(params);
+            var tupleWriter = createS3TupleWriterIfConfigured(
+                params,
+                () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig)
+            );
             if (tupleWriter != null) {
                 tr.setupRunAndWaitForReplayWithShutdownChecks(
                     Duration.ofSeconds(params.observedPacketConnectionTimeout),
@@ -736,7 +744,10 @@ public class TrafficReplayer {
         }
     }
 
-    private static ThreadLocalTupleWriter createS3TupleWriterIfConfigured(Parameters params) {
+    private static ThreadLocalTupleWriter createS3TupleWriterIfConfigured(
+        Parameters params,
+        Supplier<IJsonTransformer> tupleTransformerSupplier
+    ) {
         if (params.tupleS3Bucket == null || params.tupleS3Bucket.isEmpty()) {
             return null;
         }
@@ -763,7 +774,8 @@ public class TrafficReplayer {
                 params.tupleMaxFileSizeMb * 1024L * 1024L,
                 Duration.ofSeconds(params.tupleMaxBufferSeconds),
                 params.tupleMaxPerFile
-            )
+            ),
+            tupleTransformerSupplier
         );
     }
 
