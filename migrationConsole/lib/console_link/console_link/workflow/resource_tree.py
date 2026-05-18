@@ -314,14 +314,35 @@ def _has_notable_steps(steps: List[Dict[str, Any]]) -> bool:
     return False
 
 
+def _step_timestamp(step: Dict[str, Any]) -> str:
+    """Get the display timestamp for sorting (finished_at or started_at)."""
+    return step.get('finished_at') or step.get('started_at') or ''
+
+
 def _add_workflow_subtree(parent_node, steps: List[Dict[str, Any]]) -> None:
     """Render only notable workflow steps under a resource."""
     notable = _collect_notable_steps(steps)
     if not notable:
         return
+    # Add the most recent succeeded step for transition context
+    last_succeeded = _find_last_succeeded(steps)
+    if last_succeeded and last_succeeded not in notable:
+        notable.append(last_succeeded)
+    notable.sort(key=_step_timestamp)
     workflow_node = parent_node.add("Workflow progress:")
     for step in notable:
         _render_workflow_step(workflow_node, step)
+
+
+def _find_last_succeeded(steps: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Find the most recently completed step (by finished_at) among top-level steps only."""
+    best = None
+    for step in steps:
+        phase = get_node_phase(step) if 'phase' in step else ''
+        if phase in ('Succeeded', 'Checked'):
+            if not best or (step.get('finished_at') or '') > (best.get('finished_at') or ''):
+                best = step
+    return best
 
 
 def _collect_notable_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -348,7 +369,7 @@ def _render_workflow_step(parent_node, step: Dict[str, Any]) -> None:
         for line in value.strip().split('\n'):
             if line.strip():
                 node.add(f"[cyan]{line.strip()}[/cyan]")
-    for child in _collect_notable_steps(step.get('children', [])):
+    for child in sorted(_collect_notable_steps(step.get('children', [])), key=_step_timestamp):
         _render_workflow_step(node, child)
 
 
