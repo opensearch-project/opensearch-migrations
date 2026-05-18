@@ -125,12 +125,13 @@ public class InterimResponseAccumulatorTest extends InstrumentationTest {
     }
 
     /**
-     * If an InterimResponse arrives during ACCUMULATING_WRITES (a malformed
-     * traffic stream), the accumulator should not throw and should not corrupt
-     * the response data. We log a warning and ignore the interim observation.
+     * An InterimResponse observed during ACCUMULATING_WRITES is malformed — 1xx
+     * interim responses can only arrive during the request phase. The accumulator
+     * must throw a MalformedTrafficStreamException to surface the corruption rather
+     * than silently producing an incorrect replay.
      */
     @Test
-    void interimResponseDuringWritesDoesNotCrashOrCorruptResponse() {
+    void interimResponseDuringWritesThrowsMalformedException() {
         var t = Instant.now();
         var trafficStream = TrafficStream.newBuilder()
             .setConnectionId("test-conn-malformed")
@@ -147,95 +148,46 @@ public class InterimResponseAccumulatorTest extends InstrumentationTest {
                 .setWrite(WriteObservation.newBuilder()
                     .setData(ByteString.copyFrom("HTTP/1.1 200 OK\r\n\r\nbody",
                         StandardCharsets.UTF_8))))
-            // Malformed: an InterimResponse in the middle of writes (should not occur naturally
-            // post-fix, but legacy captures or buggy proxies may have produced this).
+            // Malformed: an InterimResponse in the middle of writes
             .addSubStream(TrafficObservation.newBuilder().setTs(ts(t.plusMillis(25)))
                 .setInterimResponse(InterimResponseObservation.newBuilder()
                     .setData(ByteString.copyFrom("HTTP/1.1 100 Continue\r\n\r\n",
                         StandardCharsets.UTF_8))))
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(t.plusMillis(30)))
-                .setClose(CloseObservation.getDefaultInstance()))
             .build();
 
-        // Must not throw
-        var pairs = Assertions.assertDoesNotThrow(() -> runAccumulator(trafficStream),
-            "InterimResponse during ACCUMULATING_WRITES must not crash the accumulator");
-
-        Assertions.assertEquals(1, pairs.size());
-        var pair = pairs.get(0);
-        // Response data is what was actually written (the 200 OK), not corrupted by interim
-        var responseStr = new String(
-            pair.getResponseData().packetBytes.stream().reduce(new byte[0], InterimResponseAccumulatorTest::concat),
-            StandardCharsets.UTF_8);
-        Assertions.assertTrue(responseStr.startsWith("HTTP/1.1 200 OK"),
-            "Response should be the 200 OK, got: " + responseStr);
+        var ex = Assertions.assertThrows(MalformedTrafficStreamException.class,
+            () -> runAccumulator(trafficStream),
+            "InterimResponse during ACCUMULATING_WRITES must throw MalformedTrafficStreamException");
+        Assertions.assertTrue(ex.getMessage().contains("ACCUMULATING_WRITES"),
+            "Exception message should identify the offending state. Got: " + ex.getMessage());
     }
 
     /**
-     * If an InterimResponse arrives in WAITING_FOR_NEXT_READ_CHUNK state (between
-     * requests on a keep-alive connection), it should be silently ignored — the
-     * server has no request-in-flight to send 1xx for at that point. This is
-     * malformed data; we should not crash.
+     * An InterimResponse arriving as the FIRST observation in a fresh stream
+     * (initial state WAITING_FOR_NEXT_READ_CHUNK, before any request) is malformed —
+     * the server has no request in flight to send 1xx for. The accumulator must
+     * throw rather than silently accept stray data.
      */
     @Test
-    void interimResponseInWaitingStateIsIgnoredSafely() {
+    void interimResponseInWaitingStateThrowsMalformedException() {
         var t = Instant.now();
         var trafficStream = TrafficStream.newBuilder()
             .setConnectionId("test-conn-waiting-interim")
             .setNodeId("test-node")
             .setNumberOfThisLastChunk(0)
-            // First request completes normally
+            // No prior request — accumulation starts in WAITING_FOR_NEXT_READ_CHUNK.
+            // Stray InterimResponse before any Read is malformed.
             .addSubStream(TrafficObservation.newBuilder().setTs(ts(t))
-                .setRead(ReadObservation.newBuilder()
-                    .setData(ByteString.copyFrom("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n",
-                        StandardCharsets.UTF_8))))
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(t.plusMillis(10)))
-                .setEndOfMessageIndicator(EndOfMessageIndication.newBuilder()
-                    .setFirstLineByteLength(14).setHeadersByteLength(18)))
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(t.plusMillis(20)))
-                .setWrite(WriteObservation.newBuilder()
-                    .setData(ByteString.copyFrom("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
-                        StandardCharsets.UTF_8))))
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(t.plusMillis(30)))
-                .setEndOfMessageIndicator(EndOfMessageIndication.newBuilder()
-                    .setFirstLineByteLength(15).setHeadersByteLength(20)))
-            // Stray InterimResponse in WAITING_FOR_NEXT_READ_CHUNK state (malformed)
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(t.plusMillis(40)))
                 .setInterimResponse(InterimResponseObservation.newBuilder()
                     .setData(ByteString.copyFrom("HTTP/1.1 100 Continue\r\n\r\n",
                         StandardCharsets.UTF_8))))
-            // Second request follows
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(t.plusMillis(50)))
-                .setRead(ReadObservation.newBuilder()
-                    .setData(ByteString.copyFrom("GET /two HTTP/1.1\r\nHost: localhost\r\n\r\n",
-                        StandardCharsets.UTF_8))))
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(t.plusMillis(60)))
-                .setEndOfMessageIndicator(EndOfMessageIndication.newBuilder()
-                    .setFirstLineByteLength(18).setHeadersByteLength(18)))
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(t.plusMillis(70)))
-                .setWrite(WriteObservation.newBuilder()
-                    .setData(ByteString.copyFrom("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
-                        StandardCharsets.UTF_8))))
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(t.plusMillis(80)))
-                .setEndOfMessageIndicator(EndOfMessageIndication.newBuilder()
-                    .setFirstLineByteLength(15).setHeadersByteLength(20)))
             .build();
 
-        var pairs = Assertions.assertDoesNotThrow(() -> runAccumulator(trafficStream));
-
-        // Both requests should be successfully reconstructed despite the stray
-        // InterimResponse in between.
-        Assertions.assertEquals(2, pairs.size(),
-            "Both requests should be reconstructed; the stray InterimResponse should be ignored");
-
-        var firstReq = new String(
-            pairs.get(0).getRequestData().packetBytes.stream().reduce(new byte[0], InterimResponseAccumulatorTest::concat),
-            StandardCharsets.UTF_8);
-        Assertions.assertTrue(firstReq.contains("GET /"));
-        var secondReq = new String(
-            pairs.get(1).getRequestData().packetBytes.stream().reduce(new byte[0], InterimResponseAccumulatorTest::concat),
-            StandardCharsets.UTF_8);
-        Assertions.assertTrue(secondReq.contains("GET /two"));
+        var ex = Assertions.assertThrows(MalformedTrafficStreamException.class,
+            () -> runAccumulator(trafficStream),
+            "InterimResponse in WAITING_FOR_NEXT_READ_CHUNK must throw MalformedTrafficStreamException");
+        Assertions.assertTrue(ex.getMessage().contains("WAITING_FOR_NEXT_READ_CHUNK"),
+            "Exception message should identify the offending state. Got: " + ex.getMessage());
     }
 
     @Test

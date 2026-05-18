@@ -419,6 +419,13 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             // ignore everything until we hit an EOM
             return Optional.of(CONNECTION_STATUS.ALIVE);
         } else if (accum.state == Accumulation.State.WAITING_FOR_NEXT_READ_CHUNK) {
+            if (observation.hasInterimResponse() || observation.hasInterimResponseSegment()) {
+                throw new MalformedTrafficStreamException(
+                    "InterimResponse observed in WAITING_FOR_NEXT_READ_CHUNK state for "
+                        + accum.trafficChannelKey + ". 1xx interim responses can only arrive "
+                        + "during the request phase (ACCUMULATING_READS). This indicates "
+                        + "a corrupted or invalid traffic stream.");
+            }
             // already processed EOMs above. Be on the lookout to ignore writes
             if (!(observation.hasRead() || observation.hasReadSegment())) {
                 return Optional.of(CONNECTION_STATUS.ALIVE);
@@ -588,6 +595,14 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     ) {
         if (accum.state != Accumulation.State.ACCUMULATING_WRITES) {
             return Optional.empty();
+        }
+
+        if (observation.hasInterimResponse() || observation.hasInterimResponseSegment()) {
+            throw new MalformedTrafficStreamException(
+                "InterimResponse observed in ACCUMULATING_WRITES state for "
+                    + accum.trafficChannelKey + ". 1xx interim responses can only arrive "
+                    + "during the request phase (ACCUMULATING_READS), not after the "
+                    + "request EOM. This indicates a corrupted or invalid traffic stream.");
         }
 
         var connectionId = trafficStreamKey.getConnectionId();
