@@ -279,17 +279,10 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         var bb = (ByteBuf) msg;
 
-        // A Write may arrive while we are still in the IRequestContext (i.e. before
-        // the request has been fully parsed and EOM emitted). This happens in two cases:
-        //   1. An HTTP/1.1 interim 1xx response (e.g. "HTTP/1.1 100 Continue") — flow
-        //      control, not the actual response. Capture as InterimResponse so the
-        //      stream's invariant Read* EOM Write* EOM is preserved.
-        //   2. A real final response (e.g. "HTTP/1.1 417 Expectation Failed") sent
-        //      because the server rejected the request based on its headers — this
-        //      IS the actual response and must be captured as Write.
-        //
-        // Distinguish by inspecting the status line's leading byte after "HTTP/1.x ":
-        // a '1' digit indicates a 1xx interim response.
+        // A 1xx interim response (e.g. "100 Continue") arriving during the request phase
+        // is flow control, not the final response — capture it separately to preserve the
+        // Read* EOM Write* invariant. 4xx/5xx rejections sent before the body, and 101
+        // Switching Protocols, are real final responses and fall through to the Write path.
         if (messageContext instanceof IWireCaptureContexts.IRequestContext
                 && looksLikeInterim1xxResponse(bb)) {
             if (getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
@@ -314,41 +307,21 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         super.write(ctx, msg, promise);
     }
 
-    /**
-     * Peek at the start of the response bytes to detect an HTTP/1.x interim response.
-     * Interim responses are 1xx status codes that arrive during the request phase and
-     * are followed by additional response data:
-     *   - 100 Continue
-     *   - 102 Processing (WebDAV)
-     *   - 103 Early Hints
-     *
-     * NOT considered interim:
-     *   - 101 Switching Protocols — this is the FINAL HTTP response on the connection;
-     *     subsequent bytes are a different protocol (WebSocket, HTTP/2, etc.) and not HTTP.
-     *
-     * Returns false if the buffer is empty, doesn't start with "HTTP/", or doesn't have
-     * a 1xx status (excluding 101). Detection is purely based on the leading bytes; we
-     * don't fully parse the status line.
-     */
+    // Matches "HTTP/1.x 1NN " in the buffer prefix. Excludes 101 Switching Protocols,
+    // which is a final HTTP response that hands the connection to another protocol.
     private static boolean looksLikeInterim1xxResponse(ByteBuf bb) {
-        // We need at least "HTTP/1.x NNN" = 12 bytes to inspect the 3-digit status code.
         if (bb.readableBytes() < 12) {
             return false;
         }
-        int rIdx = bb.readerIndex();
-        // Bytes 0-4: "HTTP/"
-        if (bb.getByte(rIdx) != 'H' || bb.getByte(rIdx + 1) != 'T'
-                || bb.getByte(rIdx + 2) != 'T' || bb.getByte(rIdx + 3) != 'P'
-                || bb.getByte(rIdx + 4) != '/') {
+        int r = bb.readerIndex();
+        if (bb.getByte(r) != 'H' || bb.getByte(r + 1) != 'T' || bb.getByte(r + 2) != 'T'
+                || bb.getByte(r + 3) != 'P' || bb.getByte(r + 4) != '/') {
             return false;
         }
-        // Bytes 9-11 are the 3-digit status code (after "HTTP/1.1 ").
-        // We don't strictly check the version digits to allow HTTP/1.0 / HTTP/1.1.
-        if (bb.getByte(rIdx + 9) != '1') {
+        if (bb.getByte(r + 9) != '1') {
             return false;
         }
-        // Exclude 101 Switching Protocols — it ends HTTP processing on this connection.
-        return !(bb.getByte(rIdx + 10) == '0' && bb.getByte(rIdx + 11) == '1');
+        return !(bb.getByte(r + 10) == '0' && bb.getByte(r + 11) == '1');
     }
 
     @Override

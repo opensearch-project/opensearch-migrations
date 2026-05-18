@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -34,17 +35,9 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
     HttpMessageAndTimestamp requestData;
     @Getter
     HttpMessageAndTimestamp responseData;
-    /**
-     * Bytes of any HTTP/1.1 interim 1xx responses (e.g. 100 Continue) that the
-     * source server sent during the request phase. Captured for audit / byte-fidelity.
-     * The replayer does NOT replay these directly — its HTTP client negotiates 100-Continue
-     * with the target server independently — but they are preserved on the pair so
-     * downstream consumers (tuple writers, audit tooling) can see what the source sent.
-     */
     @Getter
     RawPackets interimResponseData;
-    /** In-progress segmented interim response bytes pending finalization on SegmentEnd. */
-    private java.io.ByteArrayOutputStream currentInterimResponseSegmentBytes;
+    private ByteArrayOutputStream currentInterimResponseSegmentBytes;
     @NonNull
     final ISourceTrafficChannelKey firstTrafficStreamKeyForRequest;
     List<ITrafficStreamKey> trafficStreamKeysBeingHeld;
@@ -125,7 +118,6 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         responseData.setLastPacketTimestamp(packetTimeStamp);
     }
 
-    /** Append a complete interim 1xx response observation. */
     public void addInterimResponseData(byte[] data) {
         if (interimResponseData == null) {
             interimResponseData = new RawPackets();
@@ -133,10 +125,9 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         interimResponseData.add(data);
     }
 
-    /** Append a segment of an interim 1xx response that spans multiple traffic stream chunks. */
     public void addInterimResponseSegment(byte[] data) {
         if (currentInterimResponseSegmentBytes == null) {
-            currentInterimResponseSegmentBytes = new java.io.ByteArrayOutputStream();
+            currentInterimResponseSegmentBytes = new ByteArrayOutputStream();
         }
         currentInterimResponseSegmentBytes.write(data, 0, data.length);
     }
@@ -145,7 +136,6 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         return currentInterimResponseSegmentBytes != null;
     }
 
-    /** Finalize segmented interim response bytes onto the pair. */
     public void finalizeInterimResponseSegments() {
         if (currentInterimResponseSegmentBytes == null) {
             return;

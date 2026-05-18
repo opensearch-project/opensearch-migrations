@@ -421,10 +421,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         } else if (accum.state == Accumulation.State.WAITING_FOR_NEXT_READ_CHUNK) {
             if (observation.hasInterimResponse() || observation.hasInterimResponseSegment()) {
                 throw new MalformedTrafficStreamException(
-                    "InterimResponse observed in WAITING_FOR_NEXT_READ_CHUNK state for "
-                        + accum.trafficChannelKey + ". 1xx interim responses can only arrive "
-                        + "during the request phase (ACCUMULATING_READS). This indicates "
-                        + "a corrupted or invalid traffic stream.");
+                    "InterimResponse in WAITING_FOR_NEXT_READ_CHUNK for " + accum.trafficChannelKey);
             }
             // already processed EOMs above. Be on the lookout to ignore writes
             if (!(observation.hasRead() || observation.hasReadSegment())) {
@@ -555,10 +552,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             .log();
     }
 
-    /**
-     * SegmentEnd during ACCUMULATING_READS may terminate either a ReadSegment chain
-     * or an InterimResponseSegment chain (both arrive during the request phase).
-     */
+    // SegmentEnd in this state may terminate a ReadSegment chain OR an InterimResponseSegment chain.
     private static void handleSegmentEndDuringReads(Accumulation accum, Instant timestamp) {
         var rrPair = accum.getRrPair();
         if (rrPair.hasInProgressInterimResponseSegment()) {
@@ -569,10 +563,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
     }
 
-    /**
-     * Append a 1xx interim response observation (or segment) onto the
-     * RequestResponsePacketPair without disrupting request accumulation state.
-     */
     private static void handleInterimResponseObservation(
         Accumulation accum,
         TrafficObservation observation,
@@ -599,10 +589,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
 
         if (observation.hasInterimResponse() || observation.hasInterimResponseSegment()) {
             throw new MalformedTrafficStreamException(
-                "InterimResponse observed in ACCUMULATING_WRITES state for "
-                    + accum.trafficChannelKey + ". 1xx interim responses can only arrive "
-                    + "during the request phase (ACCUMULATING_READS), not after the "
-                    + "request EOM. This indicates a corrupted or invalid traffic stream.");
+                "InterimResponse in ACCUMULATING_WRITES for " + accum.trafficChannelKey);
         }
 
         var connectionId = trafficStreamKey.getConnectionId();
