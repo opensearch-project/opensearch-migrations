@@ -86,6 +86,8 @@ describe('MigrationConfigTransformer validation', () => {
         }
     };
 
+    const cloneBaseConfig = () => JSON.parse(JSON.stringify(baseConfig));
+
     it('should reject rogue key at top level', () => {
         const configWithRogueKey = {
             ...baseConfig,
@@ -148,6 +150,133 @@ describe('MigrationConfigTransformer validation', () => {
         expect(() => {
             transformer.validateInput(baseConfig);
         }).not.toThrow();
+    });
+
+    it('should lower transform pipelines into provider configs with mounted script paths', async () => {
+        const config = cloneBaseConfig();
+        config.transformsSources = {
+            "my-transforms": {
+                image: "example.com/transforms@sha256:abc123"
+            }
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [
+            {
+                metadataMigrationConfig: {
+                    transformsSource: "my-transforms",
+                    metadataTransforms: {
+                        language: "javascript",
+                        bindingsObject: {scope: "metadata"}
+                    }
+                },
+                documentBackfillConfig: {
+                    transformsSource: "my-transforms",
+                    documentTransforms: [
+                        {
+                            language: "python",
+                            file: "custom/document.py"
+                        }
+                    ]
+                }
+            }
+        ];
+        config.traffic.replayers.replay1.replayerConfig = {
+            transformsSource: "my-transforms",
+            requestTransforms: {
+                language: "javascript"
+            },
+            tupleTransforms: [
+                {
+                    language: "python",
+                    bindingsObject: {format: "tuple"}
+                }
+            ]
+        };
+
+        const result = await transformer.processFromObject(config);
+
+        const snapshotMigration = result.snapshotMigrations[0];
+        expect(snapshotMigration.metadataMigrationConfig).toMatchObject({
+            transformsImage: "example.com/transforms@sha256:abc123",
+            transformsImagePullPolicy: "IfNotPresent",
+            transformsConfigMap: ""
+        });
+        expect(JSON.parse(snapshotMigration.metadataMigrationConfig!.transformerConfig!)).toEqual([
+            {
+                JsonJSTransformerProvider: {
+                    initializationScriptFile: "/transforms/metadata.js",
+                    bindingsObject: JSON.stringify({scope: "metadata"})
+                }
+            }
+        ]);
+        expect(snapshotMigration.documentBackfillConfig).toMatchObject({
+            transformsImage: "example.com/transforms@sha256:abc123",
+            transformsImagePullPolicy: "IfNotPresent",
+            transformsConfigMap: ""
+        });
+        expect(JSON.parse(snapshotMigration.documentBackfillConfig!.docTransformerConfig!)).toEqual([
+            {
+                JsonPythonTransformerProvider: {
+                    initializationScriptFile: "/transforms/custom/document.py",
+                    bindingsObject: JSON.stringify({})
+                }
+            }
+        ]);
+
+        const replayerConfig = result.trafficReplays[0].replayerConfig;
+        expect(replayerConfig).toMatchObject({
+            transformsImage: "example.com/transforms@sha256:abc123",
+            transformsImagePullPolicy: "IfNotPresent",
+            transformsConfigMap: ""
+        });
+        expect(JSON.parse(replayerConfig.transformerConfig!)).toEqual([
+            {
+                JsonJSTransformerProvider: {
+                    initializationScriptFile: "/transforms/request.js",
+                    bindingsObject: JSON.stringify({})
+                }
+            }
+        ]);
+        expect(JSON.parse(replayerConfig.tupleTransformerConfig!)).toEqual([
+            {
+                JsonPythonTransformerProvider: {
+                    initializationScriptFile: "/transforms/tuple.py",
+                    bindingsObject: JSON.stringify({format: "tuple"})
+                }
+            }
+        ]);
+    });
+
+    it('should reject transform pipelines without a transformsSource', () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [
+            {
+                metadataMigrationConfig: {
+                    metadataTransforms: {
+                        language: "javascript"
+                    }
+                }
+            }
+        ];
+
+        expect(() => transformer.validateInput(config))
+            .toThrow(/'transformsSource' is required when transform pipelines are configured/);
+    });
+
+    it('should reject unknown transform source references', () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [
+            {
+                metadataMigrationConfig: {
+                    transformsSource: "missing",
+                    metadataTransforms: {
+                        language: "javascript"
+                    }
+                }
+            }
+        ];
+
+        expect(() => transformer.validateInput(config))
+            .toThrow(/Unknown transformsSource 'missing'/);
     });
 
     it('should normalize workflow-managed Kafka auth and drop empty kafkaTopic placeholders before AJV validation', () => {

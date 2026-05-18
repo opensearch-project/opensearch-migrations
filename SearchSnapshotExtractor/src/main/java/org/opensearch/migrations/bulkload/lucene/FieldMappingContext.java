@@ -190,6 +190,7 @@ public class FieldMappingContext {
             recordFieldType(fullPath, fieldDef);
             recordCopyToEdges(fullPath, fieldDef);
 
+
             // Handle nested properties
             JsonNode nestedProps = fieldDef.path(PROPERTIES);
             if (!nestedProps.isMissingNode()) {
@@ -239,6 +240,7 @@ public class FieldMappingContext {
         }
         return targets;
     }
+
 
     public FieldMappingInfo getFieldInfo(String fieldName) {
         return fieldMappings.get(fieldName);

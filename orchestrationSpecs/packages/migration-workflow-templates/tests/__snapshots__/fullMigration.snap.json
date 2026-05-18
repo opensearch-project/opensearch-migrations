@@ -1517,6 +1517,9 @@
               "name": "replayerOptions"
             },
             {
+              "name": "useLocalStack"
+            },
+            {
               "name": "name"
             },
             {
@@ -1736,6 +1739,10 @@
                   {
                     "name": "replayerOptions",
                     "value": "{{inputs.parameters.replayerOptions}}"
+                  },
+                  {
+                    "name": "useLocalStack",
+                    "value": "{{inputs.parameters.useLocalStack}}"
                   },
                   {
                     "name": "imageTrafficReplayerLocation",
@@ -2250,6 +2257,10 @@
                   {
                     "name": "replayerOptions",
                     "value": "{{=item['replayerConfig']}}"
+                  },
+                  {
+                    "name": "useLocalStack",
+                    "value": "{{=sprig.dig('useLocalStack', false, fromJSON(item['replayerConfig']))}}"
                   },
                   {
                     "name": "groupName_view",

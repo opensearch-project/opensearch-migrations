@@ -284,6 +284,7 @@ public class RfsMigrateDocuments {
                 "for ES 5.x multi-type index migrations. Default: false")
         public boolean emitDocType = false;
 
+
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
 

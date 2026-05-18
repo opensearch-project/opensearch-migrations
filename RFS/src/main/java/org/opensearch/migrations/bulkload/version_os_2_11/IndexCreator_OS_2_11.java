@@ -208,6 +208,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             return;
         }
 
+
         var unsupportedMappingParams = invalidResponse.getUnsupportedMappingParameters();
 
         if (!unsupportedMappingParams.isEmpty()) {

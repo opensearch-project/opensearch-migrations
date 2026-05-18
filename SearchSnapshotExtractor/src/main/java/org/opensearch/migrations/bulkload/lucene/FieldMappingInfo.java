@@ -45,6 +45,7 @@ public record FieldMappingInfo(
             ? fieldMapping.get("position_increment_gap").asInt(100)
             : 100;
 
+
         // constant_keyword stores its value in the mapping, not in the segment
         String constantValue = "constant_keyword".equals(typeStr) && fieldMapping.has("value")
             ? fieldMapping.get("value").asText()

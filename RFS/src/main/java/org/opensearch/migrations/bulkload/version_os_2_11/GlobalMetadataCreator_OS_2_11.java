@@ -239,6 +239,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         return Set.of();
     }
 
+
     private void removeUnsupportedMappingParams(String templateName, ObjectNode templateBody, Set<String> params) {
         // Legacy templates: mappings at top level; index/component templates: mappings under "template"
         var mappings = templateBody.get("mappings");

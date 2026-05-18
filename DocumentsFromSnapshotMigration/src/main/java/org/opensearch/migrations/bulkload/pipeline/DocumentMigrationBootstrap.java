@@ -107,6 +107,7 @@ public class DocumentMigrationBootstrap {
     @Builder.Default
     private final boolean emitDocType = false;
 
+
     // Index metadata factory for reading mappings (needed for sourceless migration)
     @Builder.Default
     private final IndexMetadata.Factory indexMetadataFactory = null;

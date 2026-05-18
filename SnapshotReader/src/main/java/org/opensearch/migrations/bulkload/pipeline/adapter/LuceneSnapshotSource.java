@@ -58,6 +58,7 @@ public class LuceneSnapshotSource implements DocumentSource {
 
     private final LuceneAdapter luceneAdapter;
 
+
     private LuceneSnapshotSource(Builder builder) {
         this.extractor = builder.extractor;
         this.snapshotName = builder.snapshotName;
@@ -125,6 +126,7 @@ public class LuceneSnapshotSource implements DocumentSource {
             this.emitDocType = emitDocType;
             return this;
         }
+
 
         public LuceneSnapshotSource build() {
             return new LuceneSnapshotSource(this);

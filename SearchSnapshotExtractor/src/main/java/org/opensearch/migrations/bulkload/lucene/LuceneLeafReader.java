@@ -78,6 +78,7 @@ public interface LuceneLeafReader {
      */
     default void initDocValueIterators(Iterable<DocValueFieldInfo> fields) throws IOException {}
 
+
     default Object getNumericValue(int docId, String fieldName) throws IOException { return null; }
     default Object getSortedValue(int docId, String fieldName) throws IOException { return null; }
     default Object getSortedSetValues(int docId, String fieldName) throws IOException { return null; }
