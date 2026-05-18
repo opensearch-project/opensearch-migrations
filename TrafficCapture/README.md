@@ -305,6 +305,20 @@ $ cat /shared-logs-output/traffic-replayer-default/*/tuples/tuples.log | jq
 
 </details>
 
+##### HTTP/1.1 1xx interim responses
+
+When the source or target server emits an HTTP/1.1 1xx interim response (for example
+`100 Continue`, `102 Processing`, or `103 Early Hints`), the bytes are captured separately
+from the final response so the request/response pairing remains correct:
+
+- `sourceInterimResponses` — a top-level array of interim response dicts seen from the
+  source server (only present when at least one was captured).
+- `targetResponses[i].interimResponses` — interim responses seen on each target retry
+  attempt, nested inside that attempt's response entry.
+
+`101 Switching Protocols` is treated as a final response (it ends HTTP processing on the
+connection) and continues to appear under `sourceResponse`/`targetResponses`.
+
 ### Capture Kafka Offloader
 
 The Capture Kafka Offloader will act as a Kafka Producer for offloading captured traffic logs to the configured Kafka cluster.
