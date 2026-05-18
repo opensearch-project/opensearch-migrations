@@ -100,7 +100,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addSteps(b => b.addStepGroup(c => c)))
 
 
-    .addTemplate("addApprovalGateOwnerReferences", t => t
+    .addTemplate("initializeRunMetadata", t => t
         .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
         .addContainer(b => b
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
@@ -111,10 +111,20 @@ set -euo pipefail
 
 selector='migrations.opensearch.org/workflow={{workflow.name}}'
 patch='{"metadata":{"ownerReferences":[{"apiVersion":"argoproj.io/v1alpha1","kind":"Workflow","name":"{{workflow.name}}","uid":"{{workflow.uid}}"}]}}'
+migration_run_name="{{workflow.name}}-run-{{workflow.parameters.migrationRunNumber}}"
 
 kubectl get approvalgates.migrations.opensearch.org -l "$selector" -o name \\
   | xargs -r -n 1 kubectl patch --type merge -p "$patch" \\
   || { echo "ERROR: failed to patch one or more approvalgate ownerReferences" >&2; exit 1; }
+
+kubectl label migrationruns.migrations.opensearch.org "$migration_run_name" \\
+  "migrations.opensearch.org/workflow-uid={{workflow.uid}}" \\
+  --overwrite=true
+
+kubectl patch migrationruns.migrations.opensearch.org "$migration_run_name" \\
+  --subresource=status \\
+  --type=merge \\
+  -p '{"status":{"workflowUid":"{{workflow.uid}}","workflowCreationTimestamp":"{{workflow.creationTimestamp}}"}}'
 `])
         )
         .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
@@ -135,7 +145,6 @@ kubectl delete approvalgates.migrations.opensearch.org \\
         )
         .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )
-
 
     // ── Section 1: Kafka Clusters ────────────────────────────────────────
 
@@ -679,7 +688,7 @@ kubectl delete approvalgates.migrations.opensearch.org \\
         .addInputsFromRecord(defaultImagesMap(t.inputs.workflowParameters.imageConfigMapName))
 
         .addSteps(b => b.addStepGroup(g => g
-            .addStep("addApprovalGateOwnerReferences", INTERNAL, "addApprovalGateOwnerReferences", c =>
+            .addStep("initializeRunMetadata", INTERNAL, "initializeRunMetadata", c =>
                 c.register({})
             )
             .addStep("createKafka", INTERNAL, "setupSingleKafkaCluster", c =>

@@ -20,6 +20,10 @@
         {
           "name": "approvalConfigMapName",
           "value": "approval-config"
+        },
+        {
+          "name": "migrationRunNumber",
+          "value": "0"
         }
       ]
     },
@@ -749,8 +753,8 @@
                     "value": "{{inputs.parameters.kafkaTopicName}}"
                   },
                   {
-                    "name": "workflowUid",
-                    "value": "{{workflow.uid}}"
+                    "name": "migrationRunNumber",
+                    "value": "{{workflow.parameters.migrationRunNumber}}"
                   },
                   {
                     "name": "ownerUid",

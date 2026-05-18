@@ -10,6 +10,10 @@ import * as path from "path";
 import {scrapeApprovals} from "./formatApprovals";
 import {setNamesInUserConfig} from "./migrationConfigTransformer";
 import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaphoreUtils';
+import {
+    buildResolvedMigrationResources,
+    ResolvedMigrationResources,
+} from "./resolvedMigrationResources";
 
 type WorkflowConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 type KafkaClusterConfig = NonNullable<WorkflowConfig["kafkaClusters"]>[number];
@@ -18,6 +22,11 @@ type SnapshotConfig = WorkflowConfig["snapshots"][number];
 type SnapshotItemConfig = SnapshotConfig["createSnapshotConfig"][number];
 type SnapshotMigrationConfig = WorkflowConfig["snapshotMigrations"][number];
 type ReplayConfig = WorkflowConfig["trafficReplays"][number];
+
+type MigrationRunOptions = {
+    runNumber: number;
+    timestamp?: Date;
+};
 
 // const a: KafkaClusterConfig = { vers };
 // const b: WorkflowConfig = { snapshotMigrations: [{ label: "" }] }
@@ -36,6 +45,7 @@ const CRD_KIND_TO_PLURAL: Record<string, string> = {
     CapturedTraffic: 'capturedtraffics',
     DataSnapshot: 'datasnapshots',
     KafkaCluster: 'kafkaclusters',
+    MigrationRun: 'migrationruns',
     SnapshotMigration: 'snapshotmigrations',
     TrafficReplay: 'trafficreplays',
 };
@@ -53,29 +63,53 @@ export class MigrationInitializer {
     /**
      * Generate output files including workflow config, approval ConfigMaps, and concurrency ConfigMaps with semaphores
      */
-    async generateOutputFiles(workflows: WorkflowConfig, outputDir: string, userConfig: any, workflowName?: string): Promise<void> {
-        const bundle = await this.generateMigrationBundle(userConfig, workflowName);
+    async generateOutputFiles(
+        workflows: WorkflowConfig,
+        outputDir: string,
+        userConfig: any,
+        workflowName: string | undefined,
+        migrationRunOptions: MigrationRunOptions,
+    ): Promise<void> {
+        const bundle = this.generateMigrationBundleFromWorkflowConfig(workflows, userConfig, workflowName, migrationRunOptions);
         await this.writeBundleToFiles(bundle, outputDir);
     }
 
     /**
      * Generate all migration artifacts from user config
      */
-    async generateMigrationBundle(userConfig: any, workflowName?: string) {
+    async generateMigrationBundle(userConfig: any, workflowName: string | undefined, migrationRunOptions: MigrationRunOptions) {
         // Transform user config to workflow config
         const workflows = await this.transformer.processFromObject(userConfig);
-        
+        return this.generateMigrationBundleFromWorkflowConfig(workflows, userConfig, workflowName, migrationRunOptions);
+    }
+
+    private generateMigrationBundleFromWorkflowConfig(
+        workflows: WorkflowConfig,
+        userConfig: any,
+        workflowName?: string,
+        migrationRunOptions?: MigrationRunOptions,
+    ) {
+        if (migrationRunOptions?.runNumber === undefined) {
+            throw new Error("Migration run number is required when generating migration resources.");
+        }
         // Generate ConfigMaps
         const approvalConfigMaps = this.generateApprovalConfigMaps(userConfig);
         const concurrencyConfigMaps = this.generateConcurrencyConfigMaps(userConfig);
-        const crdResources = this.generateCRDResources(workflows, workflowName);
+        const resolvedMigrationResources = buildResolvedMigrationResources(workflows, workflowName);
+        const customMigrationResources = this.generateCustomMigrationResources(
+            workflows,
+            workflowName,
+            resolvedMigrationResources,
+            migrationRunOptions
+        );
         const warnings = this.generateWarnings(workflows);
         
         return {
             workflows,
+            resolvedMigrationResources,
             approvalConfigMaps,
             concurrencyConfigMaps,
-            crdResources,
+            customMigrationResources,
             warnings
         };
     }
@@ -89,12 +123,16 @@ export class MigrationInitializer {
         // 1. Write workflow configuration
         const workflowPath = path.join(outputDir, 'workflowMigration.config.yaml');
         await fs.writeFile(workflowPath, JSON.stringify(bundle.workflows, null, 2));
+        await fs.writeFile(
+            path.join(outputDir, 'resolvedMigrationResources.json'),
+            JSON.stringify(bundle.resolvedMigrationResources, null, 2)
+        );
 
         // 2. Write individual resource files and the handler script
         const resourcesDir = path.join(outputDir, 'resources');
         await fs.mkdir(resourcesDir, { recursive: true });
 
-        const allItems = bundle.crdResources.items || [];
+        const allItems = bundle.customMigrationResources.items || [];
         const configMapItems = [
             ...(bundle.approvalConfigMaps.items || []),
             ...(bundle.concurrencyConfigMaps.items || []),
@@ -315,6 +353,11 @@ export class MigrationInitializer {
     static readonly OUTPUT_LABEL_MIGRATION = 'migrations.opensearch.org/from-snapshot-migration';
     static readonly OUTPUT_LABEL_TASK = 'migrations.opensearch.org/task';
     static readonly OUTPUT_LABEL_KAFKA_CLUSTER = 'migrations.opensearch.org/kafka-cluster';
+    static readonly WORKFLOW_NAME_LABEL = 'migrations.opensearch.org/workflow-name';
+    static readonly RUN_NUMBER_LABEL = 'migrations.opensearch.org/run-number';
+    static readonly RUN_YEAR_LABEL = 'migrations.opensearch.org/year';
+    static readonly RUN_MONTH_LABEL = 'migrations.opensearch.org/month';
+    static readonly RUN_WEEK_LABEL = 'migrations.opensearch.org/week';
     static readonly WORKFLOW_LABEL = 'workflows.argoproj.io/workflow';
     static readonly STRIMZI_CLUSTER_LABEL = 'strimzi.io/cluster';
     static readonly CRD_GROUP = 'migrations.opensearch.org';
@@ -322,6 +365,47 @@ export class MigrationInitializer {
 
     private makeCrdName(...labels: string[]): string {
         return labels.join('-');
+    }
+
+    private sanitizeResourceName(value: string): string {
+        const sanitized = value
+            .toLowerCase()
+            .replace(/[^a-z0-9.-]+/g, '-')
+            .replace(/^[^a-z0-9]+/, '')
+            .replace(/[^a-z0-9]+$/, '');
+        return sanitized || 'migration';
+    }
+
+    private isoWeek(date: Date): string {
+        const utcDate = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+        const day = utcDate.getUTCDay() || 7;
+        utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day);
+        const yearStart = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 1));
+        const week = Math.ceil((((utcDate.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+        return String(week).padStart(2, '0');
+    }
+
+    private migrationRunMetadata(options: MigrationRunOptions, workflowName?: string) {
+        const timestamp = options.timestamp ?? new Date();
+        const runNumber = options.runNumber;
+        const resolvedWorkflowName = workflowName ?? 'migration';
+        return {
+            workflowName: resolvedWorkflowName,
+            runNumber,
+            timestamp,
+            name: `${this.sanitizeResourceName(resolvedWorkflowName)}-run-${runNumber}`,
+            correlationLabels: {
+                [MigrationInitializer.WORKFLOW_NAME_LABEL]: resolvedWorkflowName,
+                [MigrationInitializer.RUN_NUMBER_LABEL]: String(runNumber),
+            },
+            labels: {
+                [MigrationInitializer.WORKFLOW_NAME_LABEL]: resolvedWorkflowName,
+                [MigrationInitializer.RUN_NUMBER_LABEL]: String(runNumber),
+                [MigrationInitializer.RUN_YEAR_LABEL]: String(timestamp.getUTCFullYear()),
+                [MigrationInitializer.RUN_MONTH_LABEL]: String(timestamp.getUTCMonth() + 1).padStart(2, '0'),
+                [MigrationInitializer.RUN_WEEK_LABEL]: this.isoWeek(timestamp),
+            }
+        };
     }
 
     private makeApprovalGateResource(nameParts: string[], labels?: Record<string, string>) {
@@ -337,14 +421,24 @@ export class MigrationInitializer {
         };
     }
 
-    private generateCRDResources(workflows: WorkflowConfig, workflowName?: string) {
+    private generateCustomMigrationResources(
+        workflows: WorkflowConfig,
+        workflowName: string | undefined,
+        resolvedMigrationResources: ResolvedMigrationResources,
+        migrationRunOptions: MigrationRunOptions,
+    ) {
         const CRD_API_VERSION = MigrationInitializer.CRD_API_VERSION;
+        const migrationRun = this.migrationRunMetadata(migrationRunOptions, workflowName);
         const baseGateLabels: Record<string, string> = workflowName
-            ? { [MigrationInitializer.APPROVAL_GATE_LABEL_KEY]: workflowName }
-            : {};
-        const baseResourceLabels: Record<string, string> = workflowName
-            ? { [MigrationInitializer.WORKFLOW_LABEL]: workflowName }
-            : {};
+            ? {
+                [MigrationInitializer.APPROVAL_GATE_LABEL_KEY]: workflowName,
+                ...migrationRun.correlationLabels,
+            }
+            : migrationRun.correlationLabels;
+        const baseResourceLabels: Record<string, string> = {
+            ...(workflowName ? { [MigrationInitializer.WORKFLOW_LABEL]: workflowName } : {}),
+            ...migrationRun.correlationLabels,
+        };
         // Merge baseGateLabels with the per-gate context labels.
         const gateLabels = (extra: Record<string, string | undefined>) => {
             const merged: Record<string, string> = { ...baseGateLabels };
@@ -353,7 +447,28 @@ export class MigrationInitializer {
             }
             return merged;
         };
-        const items: any[] = [];
+        const items: any[] = [{
+            apiVersion: CRD_API_VERSION,
+            kind: 'MigrationRun',
+            metadata: {
+                name: migrationRun.name,
+                labels: {
+                    ...(workflowName ? { [MigrationInitializer.WORKFLOW_LABEL]: workflowName } : {}),
+                    ...migrationRun.labels,
+                },
+            },
+            spec: {
+                workflowName: migrationRun.workflowName,
+                runNumber: migrationRun.runNumber,
+                timestamp: migrationRun.timestamp.toISOString(),
+                resolvedConfig: resolvedMigrationResources,
+            },
+        }];
+        const specsByResource = new Map<string, Record<string, unknown>>(
+            resolvedMigrationResources.resources
+                .map(resource => [`${resource.kind}:${resource.name}`, resource.parameters])
+        );
+        const specFor = (kind: string, name: string) => specsByResource.get(`${kind}:${name}`) ?? {};
 
         // KafkaCluster resources from workflow-managed Kafka clusters
         for (const kafkaCluster of (workflows.kafkaClusters ?? []) as KafkaClusterConfig[]) {
@@ -367,7 +482,7 @@ export class MigrationInitializer {
                         [MigrationInitializer.STRIMZI_CLUSTER_LABEL]: kafkaCluster.name,
                     },
                 },
-                spec: {},
+                spec: specFor('KafkaCluster', kafkaCluster.name),
                 status: { phase: 'Initialized', configChecksum: '' }
             });
 
@@ -401,7 +516,7 @@ export class MigrationInitializer {
                         [MigrationInitializer.OUTPUT_LABEL_KAFKA_CLUSTER]: proxy.kafkaConfig.label,
                     }
                 },
-                spec: { dependsOn: [proxy.kafkaConfig.label] },
+                spec: specFor('CapturedTraffic', topicCrName),
                 status: { phase: 'Initialized', configChecksum: '' }
             });
 
@@ -417,7 +532,7 @@ export class MigrationInitializer {
                         [MigrationInitializer.OUTPUT_LABEL_TASK]: 'captureProxy',
                     }
                 },
-                spec: { dependsOn: [topicCrName] },
+                spec: specFor('CaptureProxy', proxy.name),
                 status: { phase: 'Initialized', configChecksum: '' }
             });
 
@@ -454,7 +569,7 @@ export class MigrationInitializer {
                             [MigrationInitializer.GATE_LABEL_SNAPSHOT]: item.label,
                         }
                     },
-                    spec: { dependsOn: (item.dependsOnProxySetups ?? []).map(dep => dep.name) },
+                    spec: specFor('DataSnapshot', this.makeCrdName(snapshot.sourceConfig.label, item.label)),
                     status: { phase: 'Initialized', configChecksum: '' }
                 });
             }
@@ -481,8 +596,7 @@ export class MigrationInitializer {
                         [MigrationInitializer.OUTPUT_LABEL_MIGRATION]: migration.migrationLabel,
                     }
                 },
-                spec: {
-                },
+                spec: specFor('SnapshotMigration', snapshotMigrationName),
                 status: { phase: 'Initialized', configChecksum: '' }
             });
 
@@ -526,13 +640,7 @@ export class MigrationInitializer {
                         [MigrationInitializer.OUTPUT_LABEL_TASK]: 'trafficReplayer',
                     }
                 },
-                spec: {
-                    dependsOn: [
-                        replay.fromProxy,
-                        ...((replay.dependsOnSnapshotMigrations ?? []) as ReplayConfig["dependsOnSnapshotMigrations"]).map(dep =>
-                            this.makeCrdName(dep.source, replay.toTarget.label, dep.snapshot, dep.migrationLabel))
-                    ]
-                },
+                spec: specFor('TrafficReplay', replay.name),
                 status: { phase: 'Initialized', configChecksum: '' }
             });
 
@@ -569,8 +677,8 @@ export class MigrationInitializer {
         return warnings;
     }
 
-    generateApprovalGateCleanupScript(crdResources: { items: any[] }): string | null {
-        const gates = crdResources.items.filter((item: any) => item.kind === 'ApprovalGate');
+    generateApprovalGateCleanupScript(customMigrationResources: { items: any[] }): string | null {
+        const gates = customMigrationResources.items.filter((item: any) => item.kind === 'ApprovalGate');
         if (gates.length === 0) return null;
 
         const plural = `approvalgates.${MigrationInitializer.CRD_GROUP}`;

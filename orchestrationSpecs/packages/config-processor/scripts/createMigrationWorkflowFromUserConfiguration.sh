@@ -25,13 +25,23 @@ TEMP_DIR=$(mktemp -d)
 # Ensure cleanup on exit
 trap "rm -rf $TEMP_DIR" EXIT
 
-UUID="$(date +%s)"
-echo "Generated unique uniqueRunNonce: $UUID"
+if [ -n "${EPOCHREALTIME:-}" ]; then
+    RUN_SECONDS="${EPOCHREALTIME%.*}"
+    RUN_MICROS="${EPOCHREALTIME#*.}"
+    RUN_NUMBER="${RUN_SECONDS}${RUN_MICROS:0:3}"
+else
+    RUN_NUMBER="$(date +%s%3N 2>/dev/null || true)"
+    case "$RUN_NUMBER" in
+        ''|*[!0-9]*) RUN_NUMBER="$(date +%s)000" ;;
+    esac
+fi
+UUID="$RUN_NUMBER"
+echo "Using migration run number: $RUN_NUMBER"
 
 WORKFLOW_NAME="migration-workflow"
 
 echo "Running configuration conversion..."
-$INITIALIZE_CMD --user-config $CONFIG_FILENAME --output-dir $TEMP_DIR --workflow-name "$WORKFLOW_NAME" $@
+$INITIALIZE_CMD --user-config $CONFIG_FILENAME --output-dir $TEMP_DIR --workflow-name "$WORKFLOW_NAME" --run-number "$RUN_NUMBER" $@
 
 echo "Applying Kubernetes resources..."
 if [ -x "$TEMP_DIR/handleK8sResources.sh" ]; then
@@ -50,11 +60,16 @@ if [ -f "$TEMP_DIR/warnings.json" ]; then
     "$NODEJS" -e "JSON.parse(require('fs').readFileSync('$TEMP_DIR/warnings.json','utf8')).forEach(w=>console.log('INIT_WARNING: '+w))" >&2
 fi
 
-cat <<EOF | kubectl create -f -
+kubectl create -f - <<EOF
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
 metadata:
   name: $WORKFLOW_NAME
+  labels:
+    migrations.opensearch.org/workflow-name: "$WORKFLOW_NAME"
+    migrations.opensearch.org/run-number: "$RUN_NUMBER"
+  annotations:
+    migrations.opensearch.org/migration-run: "$WORKFLOW_NAME-run-$RUN_NUMBER"
 spec:
   workflowTemplateRef:
     name: full-migration
@@ -63,6 +78,8 @@ spec:
     parameters:
       - name: uniqueRunNonce
         value: "$UUID"
+      - name: migrationRunNumber
+        value: "$RUN_NUMBER"
       - name: approval-config
         value: "approval-config-0"
       - name: config

@@ -625,11 +625,13 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
     enableSourcelessMigrations: z.boolean().default(false).optional()
         .describe("Enable migration of indices that have _source disabled or partially filtered (includes/excludes). " +
             "When enabled, document backfill will reconstruct documents from stored fields and doc_values. " +
-            "Without this flag, metadata migration will fail if any selected index has _source disabled or partially filtered."),
+            "Without this flag, metadata migration will fail if any selected index has _source disabled or partially filtered.")
+        .changeRestriction('impossible'),
     useRecoverySource: z.boolean().default(false).optional()
         .describe("When enabled, treat the _recovery_source stored field (present in ES 7+ / OpenSearch snapshots " +
             "with soft-deletes) as _source. This field is transient and may not be present for all documents, " +
-            "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient."),
+            "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
+        .changeRestriction('impossible'),
 }).describe("Process-level options for the metadata migration command, controlling which metadata is migrated and how it is transformed.");
 
 export const USER_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(USER_METADATA_WORKFLOW_OPTIONS);

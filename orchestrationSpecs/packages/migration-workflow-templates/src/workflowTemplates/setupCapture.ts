@@ -688,7 +688,7 @@ export const SetupCapture = WorkflowBuilder.create({
                 c.register({
                     clusterName: b.inputs.kafkaClusterName,
                     topicName: b.inputs.kafkaTopicName,
-                    workflowUid: expr.getWorkflowValue("uid"),
+                    migrationRunNumber: t.inputs.workflowParameters.migrationRunNumber,
                     ownerUid: b.inputs.kafkaClusterOwnerUid,
                     sourceLabel: b.inputs.sourceK8sLabel,
                     partitions: b.inputs.topicPartitions,

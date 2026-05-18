@@ -23,6 +23,10 @@
           "value": "approval-config"
         },
         {
+          "name": "migrationRunNumber",
+          "value": "0"
+        },
+        {
           "name": "monitor-retry-limit",
           "value": "33"
         }

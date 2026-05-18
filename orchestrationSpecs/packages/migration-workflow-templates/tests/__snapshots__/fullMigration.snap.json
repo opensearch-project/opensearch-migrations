@@ -22,6 +22,10 @@
         {
           "name": "approvalConfigMapName",
           "value": "approval-config"
+        },
+        {
+          "name": "migrationRunNumber",
+          "value": "0"
         }
       ]
     },
@@ -39,7 +43,7 @@
         }
       },
       {
-        "name": "addapprovalgateownerreferences",
+        "name": "initializerunmetadata",
         "inputs": {
           "parameters": [
             {
@@ -153,7 +157,7 @@
             "-lc"
           ],
           "args": [
-            "\nset -euo pipefail\n\nselector='migrations.opensearch.org/workflow={{workflow.name}}'\npatch='{\"metadata\":{\"ownerReferences\":[{\"apiVersion\":\"argoproj.io/v1alpha1\",\"kind\":\"Workflow\",\"name\":\"{{workflow.name}}\",\"uid\":\"{{workflow.uid}}\"}]}}'\n\nkubectl get approvalgates.migrations.opensearch.org -l \"$selector\" -o name \\\n  | xargs -r -n 1 kubectl patch --type merge -p \"$patch\" \\\n  || { echo \"ERROR: failed to patch one or more approvalgate ownerReferences\" >&2; exit 1; }\n"
+            "\nset -euo pipefail\n\nselector='migrations.opensearch.org/workflow={{workflow.name}}'\npatch='{\"metadata\":{\"ownerReferences\":[{\"apiVersion\":\"argoproj.io/v1alpha1\",\"kind\":\"Workflow\",\"name\":\"{{workflow.name}}\",\"uid\":\"{{workflow.uid}}\"}]}}'\nmigration_run_name=\"{{workflow.name}}-run-{{workflow.parameters.migrationRunNumber}}\"\n\nkubectl get approvalgates.migrations.opensearch.org -l \"$selector\" -o name \\\n  | xargs -r -n 1 kubectl patch --type merge -p \"$patch\" \\\n  || { echo \"ERROR: failed to patch one or more approvalgate ownerReferences\" >&2; exit 1; }\n\nkubectl label migrationruns.migrations.opensearch.org \"$migration_run_name\" \\\n  \"migrations.opensearch.org/workflow-uid={{workflow.uid}}\" \\\n  --overwrite=true\n\nkubectl patch migrationruns.migrations.opensearch.org \"$migration_run_name\" \\\n  --subresource=status \\\n  --type=merge \\\n  -p '{\"status\":{\"workflowUid\":\"{{workflow.uid}}\",\"workflowCreationTimestamp\":\"{{workflow.creationTimestamp}}\"}}'\n"
           ]
         },
         "metadata": {
@@ -1907,11 +1911,11 @@
         "steps": [
           [
             {
-              "template": "addapprovalgateownerreferences",
+              "template": "initializerunmetadata",
               "arguments": {
                 "parameters": []
               },
-              "name": "addApprovalGateOwnerReferences"
+              "name": "initializeRunMetadata"
             },
             {
               "template": "setupsinglekafkacluster",

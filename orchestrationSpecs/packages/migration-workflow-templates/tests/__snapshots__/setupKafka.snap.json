@@ -20,6 +20,10 @@
         {
           "name": "approvalConfigMapName",
           "value": "approval-config"
+        },
+        {
+          "name": "migrationRunNumber",
+          "value": "0"
         }
       ]
     },
@@ -35,7 +39,7 @@
               "name": "nodePoolSpec"
             },
             {
-              "name": "workflowUid"
+              "name": "migrationRunNumber"
             },
             {
               "name": "ownerUid"
@@ -43,7 +47,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaNodePool\nmetadata:\n  name: dual-role\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.clusterName}}\"\nspec: {{=fromJSON(inputs.parameters.nodePoolSpec)}}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaNodePool\nmetadata:\n  name: dual-role\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{inputs.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.clusterName}}\"\nspec: {{=fromJSON(inputs.parameters.nodePoolSpec)}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -71,7 +75,7 @@
               "name": "kafkaSpec"
             },
             {
-              "name": "workflowUid"
+              "name": "migrationRunNumber"
             },
             {
               "name": "ownerUid"
@@ -79,7 +83,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{=fromJSON(inputs.parameters.kafkaSpec)}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{inputs.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{=fromJSON(inputs.parameters.kafkaSpec)}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.listeners"
@@ -115,7 +119,7 @@
               "name": "kafkaSpec"
             },
             {
-              "name": "workflowUid"
+              "name": "migrationRunNumber"
             },
             {
               "name": "ownerUid"
@@ -123,7 +127,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{=fromJSON(inputs.parameters.kafkaSpec)}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{inputs.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{=fromJSON(inputs.parameters.kafkaSpec)}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.listeners"
@@ -162,7 +166,7 @@
               "name": "clusterConfig"
             },
             {
-              "name": "workflowUid"
+              "name": "migrationRunNumber"
             },
             {
               "name": "ownerUid"
@@ -185,8 +189,8 @@
                     "value": "{{=toJSON(sprig.merge(sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"listeners\", [sprig.dict(\"name\", 'plain', \"port\", 9092, \"type\", 'internal', \"tls\", false), sprig.dict(\"name\", 'tls', \"port\", 9093, \"type\", 'internal', \"tls\", true)]), sprig.dig('clusterSpecOverrides', 'kafka', sprig.dict(), fromJSON(inputs.parameters.clusterConfig))))}}"
                   },
                   {
-                    "name": "workflowUid",
-                    "value": "{{inputs.parameters.workflowUid}}"
+                    "name": "migrationRunNumber",
+                    "value": "{{inputs.parameters.migrationRunNumber}}"
                   },
                   {
                     "name": "ownerUid",
@@ -212,8 +216,8 @@
                     "value": "{{=toJSON(sprig.merge(sprig.dict(\"version\", inputs.parameters.version, \"metadataVersion\", '4.0-IV3', \"listeners\", [sprig.dict(\"name\", 'tls', \"port\", 9093, \"type\", 'internal', \"tls\", true, \"authentication\", sprig.dict(\"type\", 'scram-sha-512'))]), sprig.dig('clusterSpecOverrides', 'kafka', sprig.dict(), fromJSON(inputs.parameters.clusterConfig))))}}"
                   },
                   {
-                    "name": "workflowUid",
-                    "value": "{{inputs.parameters.workflowUid}}"
+                    "name": "migrationRunNumber",
+                    "value": "{{inputs.parameters.migrationRunNumber}}"
                   },
                   {
                     "name": "ownerUid",
@@ -247,7 +251,7 @@
               "name": "topicName"
             },
             {
-              "name": "workflowUid"
+              "name": "migrationRunNumber"
             },
             {
               "name": "ownerUid"
@@ -267,7 +271,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.clusterName}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceLabel}}\"\nspec:\n  partitions: {{inputs.parameters.partitions}}\n  replicas: {{inputs.parameters.replicas}}\n  config: {{=fromJSON(inputs.parameters.topicConfig)}}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{inputs.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.clusterName}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceLabel}}\"\nspec:\n  partitions: {{inputs.parameters.partitions}}\n  replicas: {{inputs.parameters.replicas}}\n  config: {{=fromJSON(inputs.parameters.topicConfig)}}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.topicName"
@@ -303,7 +307,7 @@
               "name": "userSpec"
             },
             {
-              "name": "workflowUid"
+              "name": "migrationRunNumber"
             },
             {
               "name": "ownerUid"
@@ -311,7 +315,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaUser\nmetadata:\n  name: \"{{=inputs.parameters.clusterName+'-migration-app'}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    workflows.argoproj.io/run-uid: \"{{inputs.parameters.workflowUid}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.clusterName}}\"\nspec: {{=fromJSON(inputs.parameters.userSpec)}}\n",
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaUser\nmetadata:\n  name: \"{{=inputs.parameters.clusterName+'-migration-app'}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{inputs.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.clusterName}}\"\nspec: {{=fromJSON(inputs.parameters.userSpec)}}\n",
           "action": "apply",
           "setOwnerReference": false,
           "successCondition": "status.conditions"
@@ -362,8 +366,8 @@
                     "value": "{{=toJSON(sprig.dig('nodePoolSpecOverrides', sprig.dict(), fromJSON(inputs.parameters.clusterConfig)))}}"
                   },
                   {
-                    "name": "workflowUid",
-                    "value": "{{workflow.uid}}"
+                    "name": "migrationRunNumber",
+                    "value": "{{workflow.parameters.migrationRunNumber}}"
                   },
                   {
                     "name": "ownerUid",
@@ -392,8 +396,8 @@
                     "value": "{{inputs.parameters.clusterConfig}}"
                   },
                   {
-                    "name": "workflowUid",
-                    "value": "{{workflow.uid}}"
+                    "name": "migrationRunNumber",
+                    "value": "{{workflow.parameters.migrationRunNumber}}"
                   },
                   {
                     "name": "ownerUid",
@@ -419,8 +423,8 @@
                     "value": "{{=toJSON(sprig.dict(\"authentication\", sprig.dict(\"type\", sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)))))}}"
                   },
                   {
-                    "name": "workflowUid",
-                    "value": "{{workflow.uid}}"
+                    "name": "migrationRunNumber",
+                    "value": "{{workflow.parameters.migrationRunNumber}}"
                   },
                   {
                     "name": "ownerUid",

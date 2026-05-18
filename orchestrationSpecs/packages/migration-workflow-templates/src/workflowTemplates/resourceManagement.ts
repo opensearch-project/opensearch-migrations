@@ -31,7 +31,9 @@ import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 const SECONDS_IN_DAYS = 24 * 3600;
 const LONGEST_POSSIBLE_MIGRATION = 365 * SECONDS_IN_DAYS;
 const CRD_API_VERSION = "migrations.opensearch.org/v1alpha1";
-const RUN_UID_LABEL = "workflows.argoproj.io/run-uid";
+const RUN_NUMBER_LABEL = "migrations.opensearch.org/run-number";
+const APPROVED_DURING_RUN_ANNOTATION = "migrations.opensearch.org/approved-during-run";
+const MIGRATION_RUN_NUMBER_VALUE = "{{workflow.parameters.migrationRunNumber}}";
 const WORKFLOW_LABEL = "workflows.argoproj.io/workflow";
 const SOURCE_LABEL = "migrations.opensearch.org/source";
 const TARGET_LABEL = "migrations.opensearch.org/target";
@@ -131,7 +133,7 @@ function buildPatchOutputTemplate<ParentWorkflowScope extends WorkflowAndTemplat
                                 s3Key: "{{inputs.parameters.s3Key}}",
                                 resourceUid: "{{inputs.parameters.resourceUid}}",
                                 workflowName: "{{workflow.name}}",
-                                workflowUid: "{{workflow.uid}}",
+                                migrationRunNumber: MIGRATION_RUN_NUMBER_VALUE,
                                 workflowCreationTimestamp: "{{workflow.creationTimestamp}}",
                                 configChecksum: "{{inputs.parameters.configChecksum}}"
                             }
@@ -154,7 +156,7 @@ function makeKafkaClusterManifest(
             name: makeStringTypeProxy(expr.get(kc, "name")),
             labels: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                 [STRIMZI_CLUSTER_LABEL]: makeStringTypeProxy(expr.get(kc, "name")),
             }
         },
@@ -204,7 +206,7 @@ function makeCapturedTrafficManifest(
             name: makeStringTypeProxy(topicCrName),
             labels: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                 [SOURCE_LABEL]: makeStringTypeProxy(sourceLabel),
                 [KAFKA_CLUSTER_LABEL]: makeStringTypeProxy(kafkaClusterName),
             }
@@ -246,7 +248,7 @@ function makeCaptureProxyManifest(
             name: makeStringTypeProxy(proxyName),
             labels: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                 [SOURCE_LABEL]: makeStringTypeProxy(expr.dig(config, ["sourceConfig", "label"], "")),
                 [TASK_LABEL]: "captureProxy",
             }
@@ -270,7 +272,7 @@ function makeSnapshotMigrationManifest(
             name: makeStringTypeProxy(resourceName),
             labels: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                 [SOURCE_LABEL]: makeStringTypeProxy(expr.get(config, "sourceLabel")),
                 [TARGET_LABEL]: makeStringTypeProxy(expr.dig(config, ["targetConfig", "label"], expr.literal(""))),
                 [SNAPSHOT_LABEL]: makeStringTypeProxy(expr.dig(config, ["snapshotConfig", "label"], expr.literal(""))),
@@ -351,7 +353,7 @@ function makeTrafficReplayManifest(
             name: makeStringTypeProxy(name),
             labels: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                 [SOURCE_LABEL]: makeStringTypeProxy(sourceLabel),
                 [TARGET_LABEL]: makeStringTypeProxy(targetLabel),
                 [TASK_LABEL]: "trafficReplayer",
@@ -443,7 +445,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                         name: b.inputs.resourceName,
                         labels: {
                             [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                            [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                            [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                             [SOURCE_LABEL]: makeStringTypeProxy(b.inputs.sourceLabel),
                             [SNAPSHOT_LABEL]: makeStringTypeProxy(expr.get(snapshotItemConfig, "label")),
                         }
@@ -537,8 +539,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     metadata: {
                         name: b.inputs.resourceName,
                         annotations: {
-                            "migrations.opensearch.org/approved-by-run":
-                                makeStringTypeProxy(expr.getWorkflowValue("uid"))
+                            [APPROVED_DURING_RUN_ANNOTATION]: MIGRATION_RUN_NUMBER_VALUE
                         }
                     }
                 }
