@@ -149,9 +149,9 @@ class ResourceTreeStateManager:
         from console_link.workflow.resource_tree import DISPLAY_PHASES
         symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
         if resource.phase in DISPLAY_PHASES:
-            label = f"[{color}]{symbol} {resource.name} ({resource.phase})[/{color}]"
+            label = f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold] [{color}]({resource.phase})[/{color}]"
         else:
-            label = f"[{color}]{symbol} {resource.name}[/{color}]"
+            label = f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold]"
         resource_path = f"{DISPLAY_NAMES.get(resource.plural, resource.plural)}.{resource.name}"
         resource_node = parent.add(label, data={
             'id': f'resource:{resource.name}',
@@ -184,7 +184,7 @@ class ResourceTreeStateManager:
         if not notable:
             return
         wf_node = resource_node.add(
-            "[bold]Workflow progress:[/bold]",
+            "Workflow progress:",
             data={'id': f'workflow:{resource.name}'})
         for step in notable:
             self._add_workflow_step(wf_node, step)

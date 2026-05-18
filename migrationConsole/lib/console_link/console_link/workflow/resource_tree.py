@@ -267,9 +267,9 @@ def _render_resource(parent_node, resource: ResourceNode) -> None:
     """Render a single resource node with its children."""
     symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
     if resource.phase in DISPLAY_PHASES:
-        label = f"[{color}]{symbol} {resource.name} ({resource.phase})[/{color}]"
+        label = f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold] [{color}]({resource.phase})[/{color}]"
     else:
-        label = f"[{color}]{symbol} {resource.name}[/{color}]"
+        label = f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold]"
     node = parent_node.add(label)
     _add_resource_details(node, resource)
     for child in resource.children:
@@ -319,7 +319,7 @@ def _add_workflow_subtree(parent_node, steps: List[Dict[str, Any]]) -> None:
     notable = _collect_notable_steps(steps)
     if not notable:
         return
-    workflow_node = parent_node.add("[bold]Workflow progress:[/bold]")
+    workflow_node = parent_node.add("Workflow progress:")
     for step in notable:
         _render_workflow_step(workflow_node, step)
 
