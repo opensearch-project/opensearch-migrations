@@ -133,6 +133,7 @@ COPY nodeStaging/migrationResources /root/migrationResources
 ENV MIGRATION_RESOURCES_DIR=/root/migrationResources
 
 COPY nodeStaging/workflowTemplates /root/workflows
+RUN chmod +x /root/workflows/.workflowScripts/*.sh
 COPY workflowConfigToServicesConfig.jq /root/
 ENV WORKFLOW_CONFIG_JQ_SCRIPT=/root/workflowConfigToServicesConfig.jq
 

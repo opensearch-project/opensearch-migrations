@@ -24,6 +24,10 @@
         {
           "name": "migrationRunNumber",
           "value": "0"
+        },
+        {
+          "name": "workflowScriptsRoot",
+          "value": "/root/workflows/.workflowScripts"
         }
       ]
     },
@@ -152,13 +156,25 @@
                   "optional": true
                 }
               }
+            },
+            {
+              "name": "CONFIG_CONTENTS_BASE64",
+              "value": "{{=toBase64(inputs.parameters.configContents)}}"
+            },
+            {
+              "name": "MIGRATION_CONSOLE_COMMAND",
+              "value": "{{inputs.parameters.command}}"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
             }
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "command": [
-            "/bin/sh",
-            "-c"
+            "/bin/bash",
+            "-lc"
           ],
           "resources": {
             "limits": {
@@ -171,7 +187,7 @@
             }
           },
           "args": [
-            "\nset -e -x\n\n# Save pod name to output path\necho $HOSTNAME > /tmp/podname\n\necho File contents...\n \nbase64 -d > /config/migration_services.yaml_ << EOF\n{{=toBase64(inputs.parameters.configContents)}}\nEOF\n\ncat /config/migration_services.yaml_ |\njq -f workflowConfigToServicesConfig.jq > /config/migration_services.yaml\n\necho file dump\necho ---\nexport MIGRATION_USE_SERVICES_YAML_CONFIG=true\ncat /config/migration_services.yaml\necho ---\n\n{{inputs.parameters.command}}\n"
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/runMigrationConsoleCommand.sh\""
           ]
         },
         "metadata": {

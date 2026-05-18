@@ -9,6 +9,11 @@ import {
     USER_RFS_PROCESS_OPTIONS,
     USER_RFS_WORKFLOW_OPTIONS,
 } from "./userSchemas";
+import {
+    ARGO_METADATA_OPTIONS,
+    ARGO_REPLAYER_OPTIONS,
+    ARGO_RFS_OPTIONS,
+} from "./argoSchemas";
 
 export type ChangeRestriction = "safe" | "gated" | "impossible";
 export type ResourceLifecycle = "longRunning" | "terminal" | "approvalGate";
@@ -29,6 +34,7 @@ interface SchemaProjection {
     resourceKind: string;
     sourceSchema: string;
     schema: z.ZodObject<any>;
+    policySchemas?: readonly z.ZodObject<any>[];
     prefix?: string;
 }
 
@@ -65,8 +71,9 @@ const SCHEMA_PROJECTIONS: readonly SchemaProjection[] = [
     },
     {
         resourceKind: "TrafficReplay",
-        sourceSchema: "USER_REPLAYER_OPTIONS",
-        schema: USER_REPLAYER_OPTIONS,
+        sourceSchema: "ARGO_REPLAYER_OPTIONS",
+        schema: ARGO_REPLAYER_OPTIONS,
+        policySchemas: [USER_REPLAYER_OPTIONS],
     },
     {
         resourceKind: "DataSnapshot",
@@ -75,20 +82,16 @@ const SCHEMA_PROJECTIONS: readonly SchemaProjection[] = [
     },
     {
         resourceKind: "SnapshotMigration",
-        sourceSchema: "USER_METADATA_OPTIONS",
-        schema: USER_METADATA_OPTIONS,
+        sourceSchema: "ARGO_METADATA_OPTIONS",
+        schema: ARGO_METADATA_OPTIONS,
+        policySchemas: [USER_METADATA_OPTIONS],
         prefix: "metadataMigration",
     },
     {
         resourceKind: "SnapshotMigration",
-        sourceSchema: "USER_RFS_WORKFLOW_OPTIONS",
-        schema: USER_RFS_WORKFLOW_OPTIONS,
-        prefix: "documentBackfill",
-    },
-    {
-        resourceKind: "SnapshotMigration",
-        sourceSchema: "USER_RFS_PROCESS_OPTIONS",
-        schema: USER_RFS_PROCESS_OPTIONS,
+        sourceSchema: "ARGO_RFS_OPTIONS",
+        schema: ARGO_RFS_OPTIONS,
+        policySchemas: [USER_RFS_WORKFLOW_OPTIONS, USER_RFS_PROCESS_OPTIONS],
         prefix: "documentBackfill",
     },
 ] as const;
@@ -137,10 +140,22 @@ function fieldMeta(fieldSchema: z.ZodTypeAny): FieldMeta | undefined {
     return fieldSchema.meta() as FieldMeta | undefined;
 }
 
+function projectedFieldMeta(projection: SchemaProjection, fieldName: string, fieldSchema: z.ZodTypeAny): FieldMeta | undefined {
+    const directMeta = fieldMeta(fieldSchema);
+    if (directMeta) {
+        return directMeta;
+    }
+    return projection.policySchemas
+        ?.map(policySchema => policySchema.shape[fieldName] as z.ZodTypeAny | undefined)
+        .filter((schema): schema is z.ZodTypeAny => schema !== undefined)
+        .map(fieldMeta)
+        .find((meta): meta is FieldMeta => meta !== undefined);
+}
+
 export function collectProjectedFields(): ProjectedField[] {
     const schemaFields = SCHEMA_PROJECTIONS.flatMap(projection =>
         Object.entries(projection.schema.shape).map(([fieldName, fieldSchema]) => {
-            const meta = fieldMeta(fieldSchema as z.ZodTypeAny);
+            const meta = projectedFieldMeta(projection, fieldName, fieldSchema as z.ZodTypeAny);
             return {
                 resourceKind: projection.resourceKind,
                 specPath: [prefixedFieldName(projection.prefix, fieldName)],

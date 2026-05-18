@@ -22,6 +22,8 @@ spec:
         value: "migration-image-config"
       - name: monitor-retry-limit
         value: "33"  # Default ~30 min, use 900 for ~15 hours
+      - name: transforms-sources
+        value: "{}"
 
   templates:
     - name: main
@@ -31,6 +33,8 @@ spec:
             description: "Array of source cluster configs with snapshot-and-migration-configs"
           - name: target-config
             description: "Target cluster configuration JSON"
+          - name: transforms-sources
+            default: "{}"
           - name: imageMigrationConsoleLocation
             valueFrom:
               configMapKeyRef:
@@ -50,6 +54,8 @@ spec:
                   value: "{{inputs.parameters.source-configs}}"
                 - name: target-config
                   value: "{{inputs.parameters.target-config}}"
+                - name: transforms-sources
+                  value: "{{inputs.parameters.transforms-sources}}"
                 - name: imageMigrationConsoleLocation
                   value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
                 - name: imageMigrationConsolePullPolicy
@@ -73,6 +79,7 @@ spec:
         parameters:
           - name: source-configs
           - name: target-config
+          - name: transforms-sources
           - name: imageMigrationConsoleLocation
           - name: imageMigrationConsolePullPolicy
           - name: s3Region
@@ -109,6 +116,7 @@ spec:
             
             SOURCE_CONFIGS='{{inputs.parameters.source-configs}}'
             TARGET_CONFIG='{{inputs.parameters.target-config}}'
+            TRANSFORMS_SOURCES='{{inputs.parameters.transforms-sources}}'
             S3_REGION='{{inputs.parameters.s3Region}}'
             S3_ENDPOINT='{{inputs.parameters.s3Endpoint}}'
             S3_BUCKET='{{inputs.parameters.s3BucketName}}'
@@ -217,12 +225,14 @@ spec:
               --argjson sources "$SOURCE_CLUSTERS" \
               --argjson target "$TARGET_TRANSFORMED" \
               --argjson snapshotConfigs "$SNAPSHOT_CONFIGS" \
+              --argjson transformsSources "$TRANSFORMS_SOURCES" \
               '{
                 "skipApprovals": true,
                 "sourceClusters": $sources,
                 "targetClusters": {
                   "target1": $target
                 },
+                "transformsSources": $transformsSources,
                 "snapshotMigrationConfigs": [{
                   "fromSource": "source1",
                   "toTarget": "target1",

@@ -1,5 +1,7 @@
 import {
+    ARGO_METADATA_OPTIONS,
     ARGO_REPLAYER_OPTIONS,
+    ARGO_RFS_OPTIONS,
     DENORMALIZED_S3_REPO_CONFIG,
     DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
     OVERALL_MIGRATION_CONFIG,
@@ -10,6 +12,8 @@ import {
     FieldMeta, ChecksumDependency,
     USER_PROXY_PROCESS_OPTIONS, USER_PROXY_WORKFLOW_OPTIONS,
     USER_RFS_PROCESS_OPTIONS,
+    TRANSFORMS_SOURCE,
+    TRANSFORM_PIPELINE,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -219,6 +223,114 @@ function defaultProxyTlsConfig(proxyName: string) {
     };
 }
 
+type TransformSourceMap = Record<string, z.infer<typeof TRANSFORMS_SOURCE>>;
+type TransformPipeline = z.infer<typeof TRANSFORM_PIPELINE>;
+type TransformKind = "metadata" | "document" | "request" | "tuple";
+
+const TRANSFORMS_MOUNT_PATH = "/transforms";
+const PROVIDER_BY_LANGUAGE = {
+    javascript: "JsonJSTransformerProvider",
+    python: "JsonPythonTransformerProvider",
+} as const;
+
+function resolveTransformsSource(
+    sourceName: string | undefined,
+    transformSources: TransformSourceMap
+) {
+    if (!sourceName) {
+        return {};
+    }
+
+    const source = transformSources[sourceName];
+    if (!source) {
+        throw new Error(`Transforms source '${sourceName}' not found in transformsSources`);
+    }
+
+    if ("image" in source) {
+        return {transformsImage: source.image};
+    }
+    return {transformsConfigMap: source.configMap};
+}
+
+function defaultTransformFile(kind: TransformKind, language: TransformPipeline[number]["language"]) {
+    const extension = language === "javascript" ? "js" : "py";
+    return `${kind}.${extension}`;
+}
+
+function mountedTransformPath(relativeFile: string) {
+    return `${TRANSFORMS_MOUNT_PATH}/${relativeFile}`;
+}
+
+function lowerTransformPipeline(
+    pipeline: TransformPipeline | undefined,
+    kind: TransformKind
+) {
+    if (pipeline === undefined || pipeline.length === 0) {
+        return undefined;
+    }
+
+    return JSON.stringify(pipeline.map(transform => {
+        const providerName = PROVIDER_BY_LANGUAGE[transform.language];
+        const relativeFile = transform.file ?? defaultTransformFile(kind, transform.language);
+        return {
+            [providerName]: {
+                initializationScriptFile: mountedTransformPath(relativeFile),
+                bindingsObject: JSON.stringify(transform.bindingsObject ?? {}),
+            }
+        };
+    }));
+}
+
+function prepareMetadataConfig(
+    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["metadataMigrationConfig"],
+    transformSources: TransformSourceMap
+) {
+    if (config === undefined) {
+        return undefined;
+    }
+
+    const {transformsSource, metadataTransforms, ...rest} = config;
+    const generatedConfig = lowerTransformPipeline(metadataTransforms, "metadata");
+    return ARGO_METADATA_OPTIONS.parse({
+        ...rest,
+        ...resolveTransformsSource(transformsSource, transformSources),
+        ...(generatedConfig === undefined ? {} : {transformerConfig: generatedConfig}),
+    });
+}
+
+function prepareDocumentBackfillConfig(
+    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"],
+    transformSources: TransformSourceMap
+) {
+    if (config === undefined) {
+        return undefined;
+    }
+
+    const {transformsSource, documentTransforms, ...rest} = config;
+    const generatedConfig = lowerTransformPipeline(documentTransforms, "document");
+    return ARGO_RFS_OPTIONS.parse({
+        ...rest,
+        ...resolveTransformsSource(transformsSource, transformSources),
+        ...(generatedConfig === undefined ? {} : {docTransformerConfig: generatedConfig}),
+    });
+}
+
+function prepareReplayerConfig(
+    config: NonNullable<NonNullable<z.infer<typeof OVERALL_MIGRATION_CONFIG>["traffic"]>["replayers"][string]["replayerConfig"]> | undefined,
+    transformSources: TransformSourceMap
+) {
+    const {transformsSource, requestTransforms, tupleTransforms, ...rest} = config ?? {};
+    const generatedRequestConfig = lowerTransformPipeline(requestTransforms, "request");
+    const generatedTupleConfig = lowerTransformPipeline(tupleTransforms, "tuple");
+
+    return ARGO_REPLAYER_OPTIONS.parse({
+        ...rest,
+        ...resolveTransformsSource(transformsSource, transformSources),
+        ...(generatedRequestConfig === undefined ? {} : {transformerConfig: generatedRequestConfig}),
+        ...(generatedTupleConfig === undefined ? {} : {tupleTransformerConfig: generatedTupleConfig}),
+    });
+}
+
 function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["traffic"] {
     // Drop user-schema sentinel placeholders that are equivalent to omission so
     // AJV validates the canonical user config rather than Zod's empty-string defaults.
@@ -421,10 +533,17 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     ...dep,
                     configChecksum: proxyChecksumForSnapshot.get(dep.name) ?? '',
                 }));
+                const sourceConnectionIdentity =
+                    MigrationConfigTransformer.clusterConnectionIdentity(s.sourceConfig as Record<string, unknown>);
                 return {
                     ...item,
                     dependsOnProxySetups: enrichedDeps,
-                    configChecksum: cs(item.config, item.repo, ...enrichedDeps.map(d => d.configChecksum)),
+                    configChecksum: cs(
+                        sourceConnectionIdentity,
+                        item.config,
+                        item.repo,
+                        ...enrichedDeps.map(d => d.configChecksum)
+                    ),
                 };
             }),
         }));
@@ -436,19 +555,48 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         }
 
         const migrationsWithChecksums = snapshotMigrations.map(m => {
+            const snapshotConfigChecksum = snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '';
+            const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                label: m.sourceLabel,
+                version: m.sourceVersion,
+                endpoint: m.sourceEndpoint,
+                allowInsecure: m.sourceAllowInsecure,
+                authConfig: m.sourceAuth,
+            });
+            const targetConnectionIdentity =
+                MigrationConfigTransformer.clusterConnectionIdentity(m.targetConfig as Record<string, unknown>);
             const replayerMaterialPart = m.documentBackfillConfig
                 ? csDep(RFS_SCHEMA, m.documentBackfillConfig as Record<string, unknown>, 'replayer')
                 : '';
+            const workloadIdentityMaterialPart = m.documentBackfillConfig
+                ? MigrationConfigTransformer.checksumForChangeRestriction(
+                    RFS_SCHEMA,
+                    m.documentBackfillConfig as Record<string, unknown>,
+                    'impossible'
+                )
+                : '';
             return {
                 ...m,
-                snapshotConfigChecksum: snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '',
+                snapshotConfigChecksum,
                 configChecksum: cs(
+                    sourceConnectionIdentity,
                     m.metadataMigrationConfig ?? {},
                     m.documentBackfillConfig ?? {},
                     m.targetConfig,
-                    snapshotChecksums.get([m.sourceLabel, m.label].join('-'))
+                    snapshotConfigChecksum,
+                    m.snapshotNameResolution,
+                    m.snapshotConfig
                 ),
                 checksumForReplayer: cs(m.targetConfig, replayerMaterialPart),
+                workloadIdentityChecksum: cs(
+                    sourceConnectionIdentity,
+                    targetConnectionIdentity,
+                    m.snapshotNameResolution,
+                    m.snapshotConfig,
+                    snapshotConfigChecksum,
+                    m.migrationLabel,
+                    workloadIdentityMaterialPart
+                ),
             };
         });
 
@@ -682,15 +830,26 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     : { dataSnapshotResourceName: globallyUniqueSnapshotName };
 
                 for (const migration of autoLabelMigrations(migrations)) {
+                    const metadataMigrationConfig = prepareMetadataConfig(
+                        migration.metadataMigrationConfig,
+                        userConfig.transformsSources ?? {}
+                    );
+                    const documentBackfillConfig = prepareDocumentBackfillConfig(
+                        migration.documentBackfillConfig,
+                        userConfig.transformsSources ?? {}
+                    );
                     results.push({
                         label: snapshotName,
                         migrationLabel: migration.label,
                         snapshotNameResolution,
                         snapshotConfigChecksum: '',
-                        metadataMigrationConfig: migration.metadataMigrationConfig,
-                        documentBackfillConfig: migration.documentBackfillConfig,
+                        metadataMigrationConfig,
+                        documentBackfillConfig,
                         sourceVersion: sourceCluster.version || "",
                         sourceLabel: fromSource,
+                        ...(sourceCluster.endpoint ? {sourceEndpoint: sourceCluster.endpoint} : {}),
+                        ...(sourceCluster.allowInsecure !== undefined ? {sourceAllowInsecure: sourceCluster.allowInsecure} : {}),
+                        ...(sourceCluster.authConfig ? {sourceAuth: sourceCluster.authConfig} : {}),
                         targetConfig: { ...targetCluster, label: toTarget },
                         snapshotConfig: {
                             label: snapshotName,
@@ -725,7 +884,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             }
 
             const topic = proxy.kafkaTopic || replayer.fromProxy;
-            const replayerConfig = ARGO_REPLAYER_OPTIONS.parse(replayer.replayerConfig ?? {});
+            const replayerConfig = prepareReplayerConfig(
+                replayer.replayerConfig,
+                userConfig.transformsSources ?? {}
+            );
 
             return {
                 name: [replayer.fromProxy, replayer.toTarget, name].join('-'),
@@ -771,6 +933,37 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             }
         }
         return MigrationConfigTransformer.configChecksum(picked, ...upstreamChecksums);
+    }
+
+    /**
+     * Pick only fields whose schema annotation matches a change restriction.
+     * Used for stable workload identity, where gated fields must not create
+     * parallel Kubernetes workloads.
+     */
+    static checksumForChangeRestriction(
+        schema: z.ZodObject<any>,
+        data: Record<string, unknown>,
+        restriction: NonNullable<FieldMeta["changeRestriction"]>,
+        ...upstreamChecksums: (string | undefined)[]
+    ): string {
+        const picked: Record<string, unknown> = {};
+        for (const [key, fieldSchema] of Object.entries(schema.shape)) {
+            const meta = (fieldSchema as z.ZodType).meta() as FieldMeta | undefined;
+            if (meta?.changeRestriction === restriction) {
+                picked[key] = data[key];
+            }
+        }
+        return MigrationConfigTransformer.configChecksum(picked, ...upstreamChecksums);
+    }
+
+    static clusterConnectionIdentity(clusterConfig: Record<string, unknown>): Record<string, unknown> {
+        return {
+            label: clusterConfig.label,
+            version: clusterConfig.version,
+            endpoint: clusterConfig.endpoint ?? "",
+            allowInsecure: clusterConfig.allowInsecure ?? false,
+            authConfig: clusterConfig.authConfig ?? {},
+        };
     }
 
     static configChecksum(...parts: unknown[]): string {

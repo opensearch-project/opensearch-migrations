@@ -86,6 +86,8 @@ describe('MigrationConfigTransformer validation', () => {
         }
     };
 
+    const cloneBaseConfig = () => JSON.parse(JSON.stringify(baseConfig));
+
     it('should reject rogue key at top level', () => {
         const configWithRogueKey = {
             ...baseConfig,
@@ -148,6 +150,187 @@ describe('MigrationConfigTransformer validation', () => {
         expect(() => {
             transformer.validateInput(baseConfig);
         }).not.toThrow();
+    });
+
+    it('should lower transform pipelines into provider configs with mounted script paths', async () => {
+        const config = cloneBaseConfig();
+        config.transformsSources = {
+            "my-transforms": {
+                image: "example.com/transforms@sha256:abc123"
+            }
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [
+            {
+                metadataMigrationConfig: {
+                    transformsSource: "my-transforms",
+                    metadataTransforms: {
+                        language: "javascript",
+                        bindingsObject: {scope: "metadata"}
+                    }
+                },
+                documentBackfillConfig: {
+                    transformsSource: "my-transforms",
+                    documentTransforms: [
+                        {
+                            language: "python",
+                            file: "custom/document.py"
+                        }
+                    ]
+                }
+            }
+        ];
+        config.traffic.replayers.replay1.replayerConfig = {
+            transformsSource: "my-transforms",
+            requestTransforms: {
+                language: "javascript"
+            },
+            tupleTransforms: [
+                {
+                    language: "python",
+                    bindingsObject: {format: "tuple"}
+                }
+            ]
+        };
+
+        const result = await transformer.processFromObject(config);
+
+        const snapshotMigration = result.snapshotMigrations[0];
+        expect(snapshotMigration.metadataMigrationConfig).toMatchObject({
+            transformsImage: "example.com/transforms@sha256:abc123",
+            transformsImagePullPolicy: "IfNotPresent",
+            transformsConfigMap: ""
+        });
+        expect(JSON.parse(snapshotMigration.metadataMigrationConfig!.transformerConfig!)).toEqual([
+            {
+                JsonJSTransformerProvider: {
+                    initializationScriptFile: "/transforms/metadata.js",
+                    bindingsObject: JSON.stringify({scope: "metadata"})
+                }
+            }
+        ]);
+        expect(snapshotMigration.documentBackfillConfig).toMatchObject({
+            transformsImage: "example.com/transforms@sha256:abc123",
+            transformsImagePullPolicy: "IfNotPresent",
+            transformsConfigMap: ""
+        });
+        expect(JSON.parse(snapshotMigration.documentBackfillConfig!.docTransformerConfig!)).toEqual([
+            {
+                JsonPythonTransformerProvider: {
+                    initializationScriptFile: "/transforms/custom/document.py",
+                    bindingsObject: JSON.stringify({})
+                }
+            }
+        ]);
+
+        const replayerConfig = result.trafficReplays[0].replayerConfig;
+        expect(replayerConfig).toMatchObject({
+            transformsImage: "example.com/transforms@sha256:abc123",
+            transformsImagePullPolicy: "IfNotPresent",
+            transformsConfigMap: ""
+        });
+        expect(JSON.parse(replayerConfig.transformerConfig!)).toEqual([
+            {
+                JsonJSTransformerProvider: {
+                    initializationScriptFile: "/transforms/request.js",
+                    bindingsObject: JSON.stringify({})
+                }
+            }
+        ]);
+        expect(JSON.parse(replayerConfig.tupleTransformerConfig!)).toEqual([
+            {
+                JsonPythonTransformerProvider: {
+                    initializationScriptFile: "/transforms/tuple.py",
+                    bindingsObject: JSON.stringify({format: "tuple"})
+                }
+            }
+        ]);
+    });
+
+    it('should reject transform pipelines without a transformsSource', () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [
+            {
+                metadataMigrationConfig: {
+                    metadataTransforms: {
+                        language: "javascript"
+                    }
+                }
+            }
+        ];
+
+        expect(() => transformer.validateInput(config))
+            .toThrow(/'transformsSource' is required when transform pipelines are configured/);
+    });
+
+    it('should reject unknown transform source references', () => {
+        const config = cloneBaseConfig();
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [
+            {
+                metadataMigrationConfig: {
+                    transformsSource: "missing",
+                    metadataTransforms: {
+                        language: "javascript"
+                    }
+                }
+            }
+        ];
+
+        expect(() => transformer.validateInput(config))
+            .toThrow(/Unknown transformsSource 'missing'/);
+    });
+
+    it('should keep workload identity stable across gated RFS changes only', async () => {
+        const withBackfill = JSON.parse(JSON.stringify(baseConfig));
+        withBackfill.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {
+            maxConnections: 4,
+        };
+
+        const gatedChange = JSON.parse(JSON.stringify(withBackfill));
+        gatedChange.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig.maxConnections = 5;
+
+        const impossibleChange = JSON.parse(JSON.stringify(withBackfill));
+        impossibleChange.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig.indexAllowlist = [
+            "logs-*",
+        ];
+
+        const baselineMigration = (await transformer.processFromObject(withBackfill)).snapshotMigrations[0];
+        const gatedMigration = (await transformer.processFromObject(gatedChange)).snapshotMigrations[0];
+        const impossibleMigration = (await transformer.processFromObject(impossibleChange)).snapshotMigrations[0];
+
+        expect(gatedMigration.configChecksum).not.toEqual(baselineMigration.configChecksum);
+        expect(gatedMigration.workloadIdentityChecksum).toEqual(baselineMigration.workloadIdentityChecksum);
+        expect(impossibleMigration.workloadIdentityChecksum).not.toEqual(baselineMigration.workloadIdentityChecksum);
+    });
+
+    it('should include source connection changes in snapshot and migration identity', async () => {
+        const sourceEndpointChange = JSON.parse(JSON.stringify(baseConfig));
+        sourceEndpointChange.sourceClusters.source1.endpoint = "https://alternate-source:9200";
+
+        const baseline = await transformer.processFromObject(baseConfig);
+        const changed = await transformer.processFromObject(sourceEndpointChange);
+
+        const baselineSnapshot = baseline.snapshots[0].createSnapshotConfig[0];
+        const changedSnapshot = changed.snapshots[0].createSnapshotConfig[0];
+        const baselineMigration = baseline.snapshotMigrations[0];
+        const changedMigration = changed.snapshotMigrations[0];
+
+        expect(changedSnapshot.configChecksum).not.toEqual(baselineSnapshot.configChecksum);
+        expect(changedMigration.sourceEndpoint).toBe("https://alternate-source:9200");
+        expect(changedMigration.snapshotConfigChecksum).not.toEqual(baselineMigration.snapshotConfigChecksum);
+        expect(changedMigration.configChecksum).not.toEqual(baselineMigration.configChecksum);
+        expect(changedMigration.workloadIdentityChecksum).not.toEqual(baselineMigration.workloadIdentityChecksum);
+    });
+
+    it('should include target connection changes in snapshot migration workload identity', async () => {
+        const targetEndpointChange = JSON.parse(JSON.stringify(baseConfig));
+        targetEndpointChange.targetClusters.target1.endpoint = "https://alternate-target:9200";
+
+        const baselineMigration = (await transformer.processFromObject(baseConfig)).snapshotMigrations[0];
+        const changedMigration = (await transformer.processFromObject(targetEndpointChange)).snapshotMigrations[0];
+
+        expect(changedMigration.targetConfig.label).toBe(baselineMigration.targetConfig.label);
+        expect(changedMigration.configChecksum).not.toEqual(baselineMigration.configChecksum);
+        expect(changedMigration.workloadIdentityChecksum).not.toEqual(baselineMigration.workloadIdentityChecksum);
     });
 
     it('should normalize workflow-managed Kafka auth and drop empty kafkaTopic placeholders before AJV validation', () => {

@@ -59,6 +59,24 @@ class JsonCommandLineParserTest {
         public ConnectionArgs connectionArgs = new ConnectionArgs();
     }
 
+    static class RequestTransformArgs {
+        @Parameter(names = {"--transformer-config", "--transformerConfig"})
+        public String transformerConfig;
+    }
+
+    static class TupleTransformArgs {
+        @Parameter(names = {"--tuple-transformer-config", "--tupleTransformerConfig"})
+        public String transformerConfig;
+    }
+
+    static class ReplayerTransformArgs {
+        @ParametersDelegate
+        public RequestTransformArgs requestTransformArgs = new RequestTransformArgs();
+
+        @ParametersDelegate
+        public TupleTransformArgs tupleTransformArgs = new TupleTransformArgs();
+    }
+
     @Parameters(commandNames = "migrate")
     static class MigrateCommand {
         @Parameter(names = {"--source"})
@@ -218,6 +236,22 @@ class JsonCommandLineParserTest {
         Assertions.assertEquals("db.example.com", args.connectionArgs.host);
         Assertions.assertEquals(9300, args.connectionArgs.port);
         Assertions.assertEquals("admin", args.connectionArgs.username);
+    }
+
+    @Test
+    void testDuplicateDelegateFieldNameUsesFirstFieldNameAliasAndExplicitLaterAlias() throws Exception {
+        ReplayerTransformArgs args = new ReplayerTransformArgs();
+
+        JsonCommandLineParser parser = JsonCommandLineParser.newBuilder()
+            .addObject(args)
+            .build();
+
+        String json = "{\"transformerConfig\":\"request-config\","
+            + "\"tupleTransformerConfig\":\"tuple-config\"}";
+        parser.parse(new String[]{"---INLINE-JSON", json});
+
+        Assertions.assertEquals("request-config", args.requestTransformArgs.transformerConfig);
+        Assertions.assertEquals("tuple-config", args.tupleTransformArgs.transformerConfig);
     }
 
     @Test
@@ -732,9 +766,9 @@ class JsonCommandLineParserTest {
             .addObject(args)
             .build();
 
-        String json = "{\"stringVal\":\"test\",\"intVal\":42,\"integerVal\":100," +
-            "\"longVal\":1000000,\"doubleVal\":3.14159,\"floatVal\":2.71," +
-            "\"booleanVal\":true}";
+        String json = "{\"string\":\"test\",\"int\":42,\"integer\":100," +
+            "\"long\":1000000,\"double\":3.14159,\"float\":2.71," +
+            "\"boolean\":true}";
         parser.parse(new String[]{"---INLINE-JSON", json});
 
         Assertions.assertEquals("test", args.stringVal);

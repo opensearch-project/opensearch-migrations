@@ -17,9 +17,10 @@ rules:
     resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
-  # Namespace-scoped batch jobs for metadata migration execution
+  # Namespace-scoped batch jobs (metadata migration) and cronjobs
+  # (RFS-completion monitor — see rfsDoneCronJob design doc).
   - apiGroups: ["batch"]
-    resources: ["jobs"]
+    resources: ["jobs", "cronjobs"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
 
   # Add permissions for Argo workflows

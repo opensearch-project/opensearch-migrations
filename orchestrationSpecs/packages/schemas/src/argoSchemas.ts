@@ -89,6 +89,12 @@ function makeOptionalDefaultedFieldsRequired<T extends z.ZodTypeAny>(schema: T):
     return schema;
 }
 
+const TRANSFORMS_RESOLVED_FIELDS = {
+    transformsImage: z.string().default("").optional(),
+    transformsImagePullPolicy: z.enum(["Always", "Never", "IfNotPresent"]).default("IfNotPresent"),
+    transformsConfigMap: z.string().default("").optional(),
+} as const;
+
 export const NAMED_KAFKA_CLUSTER_CONFIG = z.object({
     name: z.string(),
     version: z.string(),
@@ -133,11 +139,19 @@ export const DYNAMIC_SNAPSHOT_CONFIG =
     }));
 
 export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_METADATA_OPTIONS.omit({skipEvaluateApproval: true, skipMigrateApproval: true})
+    USER_METADATA_OPTIONS.omit({
+        skipEvaluateApproval: true,
+        skipMigrateApproval: true,
+        transformsSource: true,
+        metadataTransforms: true,
+    }).extend(TRANSFORMS_RESOLVED_FIELDS)
 );
 export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_METADATA_OPTIONS.pick({
     jvmArgs: true,
     loggingConfigurationOverrideConfigMap: true,
+    transformsImage: true,
+    transformsImagePullPolicy: true,
+    transformsConfigMap: true,
 }));
 
 export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
@@ -149,7 +163,11 @@ export const ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_CREATE_
 }));
 
 export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_RFS_OPTIONS.in.omit({skipApproval: true})
+    USER_RFS_OPTIONS.in.omit({
+        skipApproval: true,
+        transformsSource: true,
+        documentTransforms: true,
+    }).extend(TRANSFORMS_RESOLVED_FIELDS)
 );
 export const ARGO_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_RFS_OPTIONS.pick({
     podReplicas: true,
@@ -157,6 +175,9 @@ export const ARGO_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_RFS_OPTIONS.pick({
     loggingConfigurationOverrideConfigMap: true,
     useTargetClusterForWorkCoordination: true,
     resources: true,
+    transformsImage: true,
+    transformsImagePullPolicy: true,
+    transformsConfigMap: true,
 }));
 
 export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
@@ -171,13 +192,21 @@ export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pic
 }));
 
 export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_REPLAYER_OPTIONS
+    USER_REPLAYER_OPTIONS.omit({
+        transformsSource: true,
+        requestTransforms: true,
+        tupleTransforms: true,
+    }).extend(TRANSFORMS_RESOLVED_FIELDS)
 );
 export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_REPLAYER_OPTIONS.pick({
     jvmArgs: true,
     loggingConfigurationOverrideConfigMap: true,
     podReplicas: true,
+    useLocalStack: true,
     resources: true,
+    transformsImage: true,
+    transformsImagePullPolicy: true,
+    transformsConfigMap: true,
 }));
 
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({
@@ -218,6 +247,7 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     sourceAuth: z.any().optional(),
     configChecksum: z.string(),
     checksumForReplayer: z.string(),
+    workloadIdentityChecksum: z.string(),
     resourceUid: z.string(),
 });
 
@@ -257,6 +287,7 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
         configChecksum: z.string(),
     })),
     configChecksum: z.string(),
+    resourceUid: z.string(),
 });
 
 export const ENRICHED_SNAPSHOT_MIGRATION_FILTER = SNAPSHOT_MIGRATION_FILTER.extend({
@@ -301,6 +332,14 @@ export const ARGO_MIGRATION_CONFIG = z.object({
 });
 
 function makePreEnrichMigrationConfigSchema() {
+    const preEnrichCreateSnapshotsConfig = DENORMALIZED_CREATE_SNAPSHOTS_CONFIG.extend({
+        createSnapshotConfig: z.array(
+            PER_SOURCE_CREATE_SNAPSHOTS_CONFIG.extend({
+                resourceUid: z.string().optional(),
+            })
+        ).min(1),
+    });
+
     return ARGO_MIGRATION_CONFIG.extend({
         kafkaClusters: z.array(
             makeResourceUidOptional(NAMED_KAFKA_CLUSTER_CONFIG)
@@ -308,6 +347,7 @@ function makePreEnrichMigrationConfigSchema() {
         proxies: z.array(
             makeResourceUidOptional(DENORMALIZED_PROXY_CONFIG)
         ).default([]),
+        snapshots: z.array(preEnrichCreateSnapshotsConfig).default([]),
         snapshotMigrations: z.array(
             makeResourceUidOptional(SNAPSHOT_MIGRATION_CONFIG)
         ).default([]),
