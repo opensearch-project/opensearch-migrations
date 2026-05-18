@@ -309,16 +309,24 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     }
 
     /**
-     * Peek at the start of the response bytes to detect an HTTP/1.x 1xx status line
-     * (e.g. "HTTP/1.1 100 Continue", "HTTP/1.1 102 Processing", "HTTP/1.1 103 Early Hints").
-     * Returns false if the buffer is empty, doesn't start with "HTTP/", or has a non-1xx status.
-     * Note: 101 Switching Protocols is technically 1xx but transitions to a different protocol —
-     * we still treat it as interim for capture purposes since it is sent before any application
-     * response bytes; if needed this can be refined later.
+     * Peek at the start of the response bytes to detect an HTTP/1.x interim response.
+     * Interim responses are 1xx status codes that arrive during the request phase and
+     * are followed by additional response data:
+     *   - 100 Continue
+     *   - 102 Processing (WebDAV)
+     *   - 103 Early Hints
+     *
+     * NOT considered interim:
+     *   - 101 Switching Protocols — this is the FINAL HTTP response on the connection;
+     *     subsequent bytes are a different protocol (WebSocket, HTTP/2, etc.) and not HTTP.
+     *
+     * Returns false if the buffer is empty, doesn't start with "HTTP/", or doesn't have
+     * a 1xx status (excluding 101). Detection is purely based on the leading bytes; we
+     * don't fully parse the status line.
      */
     private static boolean looksLikeInterim1xxResponse(ByteBuf bb) {
-        // We need at least "HTTP/1.x N" = 10 bytes to inspect the status digit.
-        if (bb.readableBytes() < 10) {
+        // We need at least "HTTP/1.x NNN" = 12 bytes to inspect the 3-digit status code.
+        if (bb.readableBytes() < 12) {
             return false;
         }
         int rIdx = bb.readerIndex();
@@ -328,9 +336,13 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
                 || bb.getByte(rIdx + 4) != '/') {
             return false;
         }
-        // Byte 9 is the first status digit (after "HTTP/1.1 ").
+        // Bytes 9-11 are the 3-digit status code (after "HTTP/1.1 ").
         // We don't strictly check the version digits to allow HTTP/1.0 / HTTP/1.1.
-        return bb.getByte(rIdx + 9) == '1';
+        if (bb.getByte(rIdx + 9) != '1') {
+            return false;
+        }
+        // Exclude 101 Switching Protocols — it ends HTTP processing on this connection.
+        return !(bb.getByte(rIdx + 10) == '0' && bb.getByte(rIdx + 11) == '1');
     }
 
     @Override

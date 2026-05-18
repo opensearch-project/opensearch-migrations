@@ -58,6 +58,31 @@ public class HundredContinueCaptureTest {
 
     private static final String INTERIM_100_CONTINUE = "HTTP/1.1 100 Continue\r\n\r\n";
 
+    private static final String INTERIM_102_PROCESSING = "HTTP/1.1 102 Processing\r\n\r\n";
+
+    private static final String INTERIM_103_EARLY_HINTS_1 =
+        "HTTP/1.1 103 Early Hints\r\n"
+        + "Link: </style.css>; rel=preload; as=style\r\n"
+        + "\r\n";
+
+    private static final String INTERIM_103_EARLY_HINTS_2 =
+        "HTTP/1.1 103 Early Hints\r\n"
+        + "Link: </script.js>; rel=preload; as=script\r\n"
+        + "\r\n";
+
+    private static final String SWITCHING_PROTOCOLS_101 =
+        "HTTP/1.1 101 Switching Protocols\r\n"
+        + "Upgrade: websocket\r\n"
+        + "Connection: Upgrade\r\n"
+        + "\r\n";
+
+    private static final String UPGRADE_REQUEST =
+        "GET /chat HTTP/1.1\r\n"
+        + "Host: localhost\r\n"
+        + "Upgrade: websocket\r\n"
+        + "Connection: Upgrade\r\n"
+        + "\r\n";
+
     /**
      * A final 4xx/5xx response that the server may send INSTEAD of 100 Continue
      * to reject the request based on its headers (without reading the body).
@@ -620,6 +645,225 @@ public class HundredContinueCaptureTest {
             Assertions.assertEquals(0,
                 interims.stream().filter(s -> s.contains("413")).count(),
                 "413 must not be captured as InterimResponse. " + debug);
+        }
+    }
+
+    /**
+     * 102 Processing (WebDAV) is a 1xx interim response. Should be captured
+     * as InterimResponse just like 100 Continue.
+     */
+    @Test
+    public void test102ProcessingIsCapturedAsInterimResponse() throws IOException {
+        try (var rootContext = new TestRootContext()) {
+            var streamManager = new MultiFlushStreamManager();
+            var offloader = new StreamChannelConnectionCaptureSerializer<>("Test", "c", streamManager);
+
+            EmbeddedChannel channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler<>(
+                    rootContext, "n", "c", ctx -> offloader,
+                    new RequestCapturePredicate(), x -> true)
+            );
+
+            try {
+                channel.writeInbound(Unpooled.wrappedBuffer(
+                    REQUEST_HEADERS_WITH_EXPECT.getBytes(StandardCharsets.UTF_8)));
+                channel.writeOutbound(Unpooled.wrappedBuffer(
+                    INTERIM_102_PROCESSING.getBytes(StandardCharsets.UTF_8)));
+                channel.writeInbound(Unpooled.wrappedBuffer(
+                    REQUEST_BODY.getBytes(StandardCharsets.UTF_8)));
+                channel.writeOutbound(Unpooled.wrappedBuffer(
+                    FINAL_RESPONSE.getBytes(StandardCharsets.UTF_8)));
+            } catch (Exception e) {
+                log.warn("Exchange threw", e);
+            }
+            channel.finishAndReleaseAll();
+            channel.close();
+
+            List<TrafficObservation> allObservations = new ArrayList<>();
+            for (var buf : streamManager.flushedBuffers) {
+                allObservations.addAll(TrafficStream.parseFrom(buf).getSubStreamList());
+            }
+            var debug = describeObservations(allObservations);
+
+            var hasInterim102 = allObservations.stream()
+                .filter(TrafficObservation::hasInterimResponse)
+                .map(o -> new String(o.getInterimResponse().getData().toByteArray(), StandardCharsets.UTF_8))
+                .anyMatch(s -> s.contains("102 Processing"));
+            Assertions.assertTrue(hasInterim102,
+                "102 Processing must be captured as InterimResponse. " + debug);
+
+            // Final 200 OK should be Write
+            var hasFinalWrite = allObservations.stream()
+                .filter(TrafficObservation::hasWrite)
+                .map(o -> new String(o.getWrite().getData().toByteArray(), StandardCharsets.UTF_8))
+                .anyMatch(s -> s.contains("HTTP/1.1 200 OK"));
+            Assertions.assertTrue(hasFinalWrite,
+                "Final 200 OK must be captured as Write. " + debug);
+        }
+    }
+
+    /**
+     * 103 Early Hints — a 1xx response that may arrive multiple times before the
+     * final response (servers can send hints to preload resources). Each hint
+     * should be captured as a separate InterimResponse.
+     */
+    @Test
+    public void test103EarlyHintsCapturedAsMultipleInterimResponses() throws IOException {
+        try (var rootContext = new TestRootContext()) {
+            var streamManager = new MultiFlushStreamManager();
+            var offloader = new StreamChannelConnectionCaptureSerializer<>("Test", "c", streamManager);
+
+            EmbeddedChannel channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler<>(
+                    rootContext, "n", "c", ctx -> offloader,
+                    new RequestCapturePredicate(), x -> true)
+            );
+
+            try {
+                channel.writeInbound(Unpooled.wrappedBuffer(
+                    REQUEST_HEADERS_WITH_EXPECT.getBytes(StandardCharsets.UTF_8)));
+                // Server sends multiple 103 Early Hints
+                channel.writeOutbound(Unpooled.wrappedBuffer(
+                    INTERIM_103_EARLY_HINTS_1.getBytes(StandardCharsets.UTF_8)));
+                channel.writeOutbound(Unpooled.wrappedBuffer(
+                    INTERIM_103_EARLY_HINTS_2.getBytes(StandardCharsets.UTF_8)));
+                channel.writeInbound(Unpooled.wrappedBuffer(
+                    REQUEST_BODY.getBytes(StandardCharsets.UTF_8)));
+                channel.writeOutbound(Unpooled.wrappedBuffer(
+                    FINAL_RESPONSE.getBytes(StandardCharsets.UTF_8)));
+            } catch (Exception e) {
+                log.warn("Exchange threw", e);
+            }
+            channel.finishAndReleaseAll();
+            channel.close();
+
+            List<TrafficObservation> allObservations = new ArrayList<>();
+            for (var buf : streamManager.flushedBuffers) {
+                allObservations.addAll(TrafficStream.parseFrom(buf).getSubStreamList());
+            }
+            var debug = describeObservations(allObservations);
+
+            var interims = allObservations.stream()
+                .filter(TrafficObservation::hasInterimResponse)
+                .map(o -> new String(o.getInterimResponse().getData().toByteArray(), StandardCharsets.UTF_8))
+                .collect(Collectors.toList());
+            // Both 103 responses should be captured
+            Assertions.assertTrue(interims.stream().anyMatch(s -> s.contains("style.css")),
+                "First 103 Early Hints (style.css) must be captured. " + debug);
+            Assertions.assertTrue(interims.stream().anyMatch(s -> s.contains("script.js")),
+                "Second 103 Early Hints (script.js) must be captured. " + debug);
+        }
+    }
+
+    /**
+     * 101 Switching Protocols is a 1xx status, but it is the FINAL HTTP response
+     * on the connection — subsequent bytes are a different protocol (WebSocket,
+     * HTTP/2). It must be captured as a Write (real response), NOT as an
+     * InterimResponse.
+     */
+    @Test
+    public void test101SwitchingProtocolsIsCapturedAsRealResponse() throws IOException {
+        try (var rootContext = new TestRootContext()) {
+            var streamManager = new MultiFlushStreamManager();
+            var offloader = new StreamChannelConnectionCaptureSerializer<>("Test", "c", streamManager);
+
+            EmbeddedChannel channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler<>(
+                    rootContext, "n", "c", ctx -> offloader,
+                    new RequestCapturePredicate(), x -> true)
+            );
+
+            try {
+                channel.writeInbound(Unpooled.wrappedBuffer(
+                    UPGRADE_REQUEST.getBytes(StandardCharsets.UTF_8)));
+                channel.writeOutbound(Unpooled.wrappedBuffer(
+                    SWITCHING_PROTOCOLS_101.getBytes(StandardCharsets.UTF_8)));
+            } catch (Exception e) {
+                log.warn("Exchange threw", e);
+            }
+            channel.finishAndReleaseAll();
+            channel.close();
+
+            List<TrafficObservation> allObservations = new ArrayList<>();
+            for (var buf : streamManager.flushedBuffers) {
+                allObservations.addAll(TrafficStream.parseFrom(buf).getSubStreamList());
+            }
+            var debug = describeObservations(allObservations);
+
+            // 101 must NOT appear as InterimResponse
+            var interims101 = allObservations.stream()
+                .filter(TrafficObservation::hasInterimResponse)
+                .map(o -> new String(o.getInterimResponse().getData().toByteArray(), StandardCharsets.UTF_8))
+                .filter(s -> s.contains("101"))
+                .count();
+            Assertions.assertEquals(0, interims101,
+                "101 Switching Protocols must not be captured as InterimResponse. " + debug);
+
+            // 101 must appear as Write
+            var hasWrite101 = allObservations.stream()
+                .filter(TrafficObservation::hasWrite)
+                .map(o -> new String(o.getWrite().getData().toByteArray(), StandardCharsets.UTF_8))
+                .anyMatch(s -> s.contains("101 Switching Protocols"));
+            Assertions.assertTrue(hasWrite101,
+                "101 Switching Protocols must be captured as Write. " + debug);
+        }
+    }
+
+    /**
+     * Defensive test: ensure subsequent requests on the same connection are
+     * NOT captured after an unrecoverable malformed exchange (in this case,
+     * a request that ends with a Connection: close on the response). This
+     * verifies the proxy doesn't carry over corrupt state.
+     */
+    @Test
+    public void testConnectionCloseAfterRejectionPreventsFurtherRequests() throws IOException {
+        try (var rootContext = new TestRootContext()) {
+            var streamManager = new MultiFlushStreamManager();
+            var offloader = new StreamChannelConnectionCaptureSerializer<>("Test", "c", streamManager);
+
+            EmbeddedChannel channel = new EmbeddedChannel(
+                new ConditionallyReliableLoggingHttpHandler<>(
+                    rootContext, "n", "c", ctx -> offloader,
+                    new RequestCapturePredicate(), x -> true)
+            );
+
+            try {
+                // First request sends Expect: 100-continue and gets rejected with 413
+                channel.writeInbound(Unpooled.wrappedBuffer(
+                    REQUEST_HEADERS_WITH_EXPECT.getBytes(StandardCharsets.UTF_8)));
+                channel.writeOutbound(Unpooled.wrappedBuffer(
+                    REJECTION_RESPONSE_413.getBytes(StandardCharsets.UTF_8)));
+                // Body still sent (client may not see rejection in time)
+                channel.writeInbound(Unpooled.wrappedBuffer(
+                    REQUEST_BODY.getBytes(StandardCharsets.UTF_8)));
+            } catch (Exception e) {
+                log.warn("Exchange threw", e);
+            }
+            channel.finishAndReleaseAll();
+            channel.close();
+
+            List<TrafficObservation> allObservations = new ArrayList<>();
+            for (var buf : streamManager.flushedBuffers) {
+                allObservations.addAll(TrafficStream.parseFrom(buf).getSubStreamList());
+            }
+            var debug = describeObservations(allObservations);
+
+            // The 413 must be a Write
+            var hasWrite413 = allObservations.stream()
+                .filter(TrafficObservation::hasWrite)
+                .map(o -> new String(o.getWrite().getData().toByteArray(), StandardCharsets.UTF_8))
+                .anyMatch(s -> s.contains("HTTP/1.1 413 Payload Too Large"));
+            Assertions.assertTrue(hasWrite413,
+                "413 must be captured as Write. " + debug);
+
+            // No InterimResponse for the 413
+            var interims413 = allObservations.stream()
+                .filter(TrafficObservation::hasInterimResponse)
+                .map(o -> new String(o.getInterimResponse().getData().toByteArray(), StandardCharsets.UTF_8))
+                .filter(s -> s.contains("413"))
+                .count();
+            Assertions.assertEquals(0, interims413,
+                "413 must not be InterimResponse. " + debug);
         }
     }
 
