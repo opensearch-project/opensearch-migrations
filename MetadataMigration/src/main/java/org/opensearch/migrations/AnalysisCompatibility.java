@@ -60,8 +60,11 @@ public class AnalysisCompatibility {
             UnboundVersionMatchers.isGreaterOrEqualES_7_X.or(UnboundVersionMatchers.anyOS);
     private static final Predicate<Version> TARGET_OS = UnboundVersionMatchers.anyOS;
     // Solr is a possible source. Rules that target Solr add it to the source matcher.
-    private static final Predicate<Version> SOLR_OR_BELOW_ES7 =
-            UnboundVersionMatchers.anySolr.or(UnboundVersionMatchers.isBelowES_7_X);
+    // SOLR_OR_BELOW_ES8 covers ES 7 as a source because ES 7 clusters can contain
+    // indices originally created under ES 6 (restored from snapshots) that still carry
+    // legacy ES 6 analysis names.
+    private static final Predicate<Version> SOLR_OR_BELOW_ES8 =
+            UnboundVersionMatchers.anySolr.or(UnboundVersionMatchers.isBelowES_8_X);
     private static final Predicate<Version> SOLR_ANY = UnboundVersionMatchers.anySolr;
     // Only ES 8+ removes some legacy aliases for new indices; OS still tolerates them
     // (with a warning), but we still strip them defensively for OS targets.
@@ -80,27 +83,31 @@ public class AnalysisCompatibility {
             // ──────────────────── Token filters ────────────────────
             // The legacy "standard" token filter was a no-op even in ES 5; deprecated 6.5; rejected on
             // new indices in ES 7.0; fully removed in ES 8.0. OS rejects from 1.0 onward.
+            // Source includes ES 7 because ES 7 clusters can restore ES 6 snapshots that carry this name.
             new Rule(FILTER, "standard", null,
-                    UnboundVersionMatchers.isBelowES_7_X, TARGET_ES_7_OR_OS),
+                    UnboundVersionMatchers.isBelowES_8_X, TARGET_ES_7_OR_OS),
 
             // delimited_payload_filter → delimited_payload  (renamed in ES 6.2; rejected on
             // new ES 7.0+ indices; OS 2.0 fully removed registration)
+            // Source includes ES 7 because ES 7 clusters can restore ES 6 snapshots that carry this name.
             new Rule(FILTER, "delimited_payload_filter", DELIMITED_PAYLOAD,
-                    UnboundVersionMatchers.isBelowES_7_X, TARGET_ES_7_OR_OS),
+                    UnboundVersionMatchers.isBelowES_8_X, TARGET_ES_7_OR_OS),
             new Rule(FILTER, "analysis_delimited_payload_filter", DELIMITED_PAYLOAD,
-                    UnboundVersionMatchers.isBelowES_7_X, TARGET_ES_7_OR_OS),
+                    UnboundVersionMatchers.isBelowES_8_X, TARGET_ES_7_OR_OS),
 
             // camelCase aliases for ngram/edge_ngram filters: deprecated ES 6.4; rejected on new
             // indices since ES 7.0 (alias still registered for read-compat through 7.x). OS rejects
             // them on new-index creation everywhere. Solr also emits the camelCase form.
-            new Rule(FILTER, "nGram", "ngram", SOLR_OR_BELOW_ES7, TARGET_ES_7_OR_OS),
-            new Rule(FILTER, "edgeNGram", "edge_ngram", SOLR_OR_BELOW_ES7, TARGET_ES_7_OR_OS),
+            // Source includes ES 7 (SOLR_OR_BELOW_ES8) because ES 7 clusters can hold ES 6 restored indices.
+            new Rule(FILTER, "nGram", "ngram", SOLR_OR_BELOW_ES8, TARGET_ES_7_OR_OS),
+            new Rule(FILTER, "edgeNGram", "edge_ngram", SOLR_OR_BELOW_ES8, TARGET_ES_7_OR_OS),
 
             // ─────────────────────── Tokenizers ─────────────────────
             // camelCase aliases for ngram/edge_ngram tokenizers: deprecated ES 7.6; rejected on new
             // indices in ES 8.0. OS treats them as deprecated and rejects on new indices everywhere.
-            new Rule(TOKENIZER, "nGram", "ngram", SOLR_OR_BELOW_ES7, TARGET_ES_7_OR_OS),
-            new Rule(TOKENIZER, "edgeNGram", "edge_ngram", SOLR_OR_BELOW_ES7, TARGET_ES_7_OR_OS),
+            // Source includes ES 7 because ES 7 natively used nGram/edgeNGram before they were deprecated.
+            new Rule(TOKENIZER, "nGram", "ngram", SOLR_OR_BELOW_ES8, TARGET_ES_7_OR_OS),
+            new Rule(TOKENIZER, "edgeNGram", "edge_ngram", SOLR_OR_BELOW_ES8, TARGET_ES_7_OR_OS),
 
             // PathHierarchy (camelCase tokenizer): deprecated by OS in 2.12, slated for removal in
             // 4.0, but harmless to rewrite preemptively. Targets: any OS. Solr's
@@ -111,7 +118,8 @@ public class AnalysisCompatibility {
             // ───────────────────── Char filters ─────────────────────
             // htmlStrip (camelCase) was a pre-configured alias deprecated in ES 6.3; rejected on new
             // ES 7.x indices and gone in 8.0. Solr emits the same camelCase form.
-            new Rule(CHAR_FILTER, "htmlStrip", "html_strip", SOLR_OR_BELOW_ES7, TARGET_ES_7_OR_OS),
+            // Source includes ES 7 because ES 7 clusters can restore ES 6 snapshots that carry this name.
+            new Rule(CHAR_FILTER, "htmlStrip", "html_strip", SOLR_OR_BELOW_ES8, TARGET_ES_7_OR_OS),
             new Rule(CHAR_FILTER, "patternReplace", "pattern_replace", SOLR_ANY, TARGET_ES_7_OR_OS),
 
             // ─────────────────────── Solr camelCase → OS snake_case ───────────────────────
