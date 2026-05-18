@@ -74,20 +74,24 @@ class AnalysisCompatibilityTest {
     }
 
     @Test
-    void es7ToOs2_doesNotApplyEs6Rules() throws Exception {
-        // Source is already ES 7+, so it shouldn't have produced the legacy names; the
-        // ES 6 rules should not apply (rule's source matcher is "below ES 7").
+    void es7ToOs2_appliesEs6LegacyRules() throws Exception {
+        // ES 7 clusters can hold indices originally created on ES 6 (restored from snapshots),
+        // so the ES 6-era legacy rules must fire when source is ES 7.
         var src = Version.fromString("ES 7.17.0");
         var tgt = Version.fromString("OS 2.19.0");
         var json = AnalysisCompatibility.buildContextJsonOrNull(src, tgt);
-        if (json != null) {
-            var ctx = parse(json);
-            // standard filter should not be in removed list
-            for (JsonNode n : ctx.path("removed").path("filter")) {
-                assertThat("ES 7 → OS 2 should not strip 'standard' filter", n.asText(),
-                    org.hamcrest.Matchers.not(equalTo("standard")));
-            }
-        }
+        assertThat(json, notNullValue());
+        var ctx = parse(json);
+        assertThat("ES 7 source → OS 2: must remove legacy 'standard' filter",
+            arrayContains(ctx.path("removed").path("filter"), "standard"), is(true));
+        assertThat(ctx.path("renames").path("filter").path("delimited_payload_filter").asText(),
+            equalTo("delimited_payload"));
+        assertThat(ctx.path("renames").path("filter").path("nGram").asText(), equalTo("ngram"));
+        assertThat(ctx.path("renames").path("filter").path("edgeNGram").asText(), equalTo("edge_ngram"));
+        assertThat(ctx.path("renames").path("tokenizer").path("nGram").asText(), equalTo("ngram"));
+        assertThat(ctx.path("renames").path("tokenizer").path("edgeNGram").asText(), equalTo("edge_ngram"));
+        assertThat(ctx.path("renames").path("char_filter").path("htmlStrip").asText(),
+            equalTo("html_strip"));
     }
 
     @Test
@@ -143,22 +147,25 @@ class AnalysisCompatibilityTest {
 
     @Test
     void sameVersionEs7_hasRulesFor_returnsFalse() {
-        // ES 7.10 → ES 7.10: The PathHierarchy rule (source: v->true, target: TARGET_OS) does NOT
-        // match an ES target. But standard_html_strip (source: v->true, target: TARGET_OS) also
-        // requires an OS target. No rule has ES 7 as both valid source AND target, so hasRulesFor
-        // should return false.
+        // ES 7.10 → ES 7.10: isBelowES_8_X matches ES 7 as a source, but TARGET_ES_7_OR_OS
+        // would also match ES 7.10 as a target — so rules DO fire here (standard, nGram, etc.).
+        // However PathHierarchy and standard_html_strip only target OS, not ES. The ES-below-8
+        // rules targeting ES 7+ DO fire. So hasRulesFor returns true.
         var v = Version.fromString("ES 7.10.0");
-        assertThat("ES 7.10 → ES 7.10 has no applicable rules", AnalysisCompatibility.hasRulesFor(v, v), is(false));
+        assertThat("ES 7.10 → ES 7.10 has applicable rules (below-ES-8 source, ES-7+ target)",
+            AnalysisCompatibility.hasRulesFor(v, v), is(true));
     }
 
     @Test
-    void sameVersionEs7_buildContextJsonOrNull_returnsNull() {
-        // ES 7.10 as both source and target. Source matchers requiring "below ES 7" fail because
-        // ES 7.10 is not below ES 7. Source matchers for Solr fail because flavor is ES.
-        // The only rules with v->true source are PathHierarchy and standard_html_strip, but
-        // their target matcher is TARGET_OS, which does not match ES 7.10.
+    void sameVersionEs7_buildContextJsonOrNull_nonNull() throws Exception {
+        // ES 7.10 as both source and target: isBelowES_8_X matches ES 7 as source,
+        // and TARGET_ES_7_OR_OS matches ES 7 as target, so the ES-6-legacy rules fire.
         var v = Version.fromString("ES 7.10.0");
-        assertThat(AnalysisCompatibility.buildContextJsonOrNull(v, v), nullValue());
+        var json = AnalysisCompatibility.buildContextJsonOrNull(v, v);
+        assertThat(json, notNullValue());
+        var ctx = parse(json);
+        assertThat("ES 7 → ES 7: legacy 'standard' filter must be removed",
+            arrayContains(ctx.path("removed").path("filter"), "standard"), is(true));
     }
 
     @Test
@@ -321,14 +328,16 @@ class AnalysisCompatibilityTest {
     }
 
     @Test
-    void es7ToEs7_returnsNull() {
-        // ES 7.10 → ES 7.17: source is ES 7 (not below ES 7, not Solr), and target is ES not OS.
-        // No rule's source matcher accepts ES 7 AND target matcher accepts ES 7 simultaneously,
-        // except PathHierarchy (source v->true) and standard_html_strip (source v->true),
-        // but both target OS only.
+    void es7ToEs7_returnsNonNull() throws Exception {
+        // ES 7.10 → ES 7.17: isBelowES_8_X matches ES 7 as source, TARGET_ES_7_OR_OS matches
+        // ES 7 as target, so ES-6-legacy rules (standard, delimited_payload_filter, nGram, htmlStrip) fire.
         var src = Version.fromString("ES 7.10.0");
         var tgt = Version.fromString("ES 7.17.0");
-        assertThat(AnalysisCompatibility.buildContextJsonOrNull(src, tgt), nullValue());
+        var json = AnalysisCompatibility.buildContextJsonOrNull(src, tgt);
+        assertThat(json, notNullValue());
+        var ctx = parse(json);
+        assertThat(arrayContains(ctx.path("removed").path("filter"), "standard"), is(true));
+        assertThat(ctx.path("renames").path("filter").path("nGram").asText(), equalTo("ngram"));
     }
 
     @Test
@@ -339,10 +348,11 @@ class AnalysisCompatibilityTest {
     }
 
     @Test
-    void hasRulesFor_es7ToEs7_returnsFalse() {
+    void hasRulesFor_es7ToEs7_returnsTrue() {
+        // ES 7 source is below ES 8, so isBelowES_8_X matches; ES 7 target matches TARGET_ES_7_OR_OS.
         var src = Version.fromString("ES 7.10.0");
         var tgt = Version.fromString("ES 7.17.0");
-        assertThat(AnalysisCompatibility.hasRulesFor(src, tgt), is(false));
+        assertThat(AnalysisCompatibility.hasRulesFor(src, tgt), is(true));
     }
 
     // ───────────────────── Solr source scenarios ─────────────────────
@@ -431,7 +441,7 @@ class AnalysisCompatibilityTest {
         assertThat(tokenizerRenames.path("uax29URLEmail").asText(), equalTo("uax_url_email"));
         assertThat(tokenizerRenames.path("simplePattern").asText(), equalTo("simple_pattern"));
         assertThat(tokenizerRenames.path("simplePatternSplit").asText(), equalTo("simple_pattern_split"));
-        // nGram/edgeNGram also fire for Solr (SOLR_OR_BELOW_ES7 includes anySolr)
+        // nGram/edgeNGram also fire for Solr (SOLR_OR_BELOW_ES8 includes anySolr)
         assertThat(tokenizerRenames.path("nGram").asText(), equalTo("ngram"));
         assertThat(tokenizerRenames.path("edgeNGram").asText(), equalTo("edge_ngram"));
         // pathHierarchy (lowercase) is Solr-only
@@ -455,7 +465,7 @@ class AnalysisCompatibilityTest {
 
     @Test
     void solrToOs_includesNgramFilterRenames() throws Exception {
-        // Solr is in SOLR_OR_BELOW_ES7, so nGram/edgeNGram filter rules should also fire
+        // Solr is in SOLR_OR_BELOW_ES8, so nGram/edgeNGram filter rules should also fire
         var src = Version.fromString("SOLR 9.0.0");
         var tgt = Version.fromString("OS 2.19.0");
         var ctx = parse(AnalysisCompatibility.buildContextJsonOrNull(src, tgt));
@@ -552,12 +562,12 @@ class AnalysisCompatibilityTest {
                 entry.getValue().isObject(), is(true)));
     }
 
-    // ───────────────────── ES 7 → OS (PathHierarchy only, no ES6 rules) ─────────────────────
+    // ───────────────────── ES 7 → OS (ES6 legacy rules apply because ES 7 can hold ES 6 restored indices) ─────────────────────
 
     @Test
-    void es7ToOs_onlyPathHierarchyAndStandardHtmlStripApply() throws Exception {
-        // ES 7.17 → OS 2.19: source is ES 7 (not below 7, not Solr).
-        // Only rules with source v->true fire: PathHierarchy and standard_html_strip.
+    void es7ToOs_appliesEs6LegacyRulesAndPathHierarchy() throws Exception {
+        // ES 7.17 → OS 2.19: ES 7 source is below ES 8, so isBelowES_8_X source rules fire in
+        // addition to the v->true rules (PathHierarchy, standard_html_strip).
         var src = Version.fromString("ES 7.17.0");
         var tgt = Version.fromString("OS 2.19.0");
         var json = AnalysisCompatibility.buildContextJsonOrNull(src, tgt);
@@ -571,13 +581,17 @@ class AnalysisCompatibilityTest {
         // standard_html_strip removal is present
         assertThat(arrayContains(ctx.path("removed").path("analyzer"), "standard_html_strip"), is(true));
 
-        // No filter removals (standard filter not removed because source is ES 7, not below ES 7)
-        assertThat(ctx.path("removed").path("filter").isMissingNode()
-            || ctx.path("removed").path("filter").isEmpty(), is(true));
-
-        // No filter renames (delimited_payload_filter, nGram, edgeNGram all require source below ES 7)
-        assertThat(ctx.path("renames").path("filter").isMissingNode()
-            || ctx.path("renames").path("filter").isEmpty(), is(true));
+        // ES 6-legacy filter rules also fire
+        assertThat("standard filter must be removed for ES 7 source",
+            arrayContains(ctx.path("removed").path("filter"), "standard"), is(true));
+        assertThat(ctx.path("renames").path("filter").path("delimited_payload_filter").asText(),
+            equalTo("delimited_payload"));
+        assertThat(ctx.path("renames").path("filter").path("nGram").asText(), equalTo("ngram"));
+        assertThat(ctx.path("renames").path("filter").path("edgeNGram").asText(), equalTo("edge_ngram"));
+        assertThat(ctx.path("renames").path("tokenizer").path("nGram").asText(), equalTo("ngram"));
+        assertThat(ctx.path("renames").path("tokenizer").path("edgeNGram").asText(), equalTo("edge_ngram"));
+        assertThat(ctx.path("renames").path("char_filter").path("htmlStrip").asText(),
+            equalTo("html_strip"));
     }
 
     // ───────────────────── ES 5 → ES 7 (early source version) ─────────────────────
