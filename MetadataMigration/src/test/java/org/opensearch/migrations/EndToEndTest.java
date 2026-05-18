@@ -1,9 +1,11 @@
 package org.opensearch.migrations;
 
 import java.io.File;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -371,6 +373,139 @@ class EndToEndTest extends BaseMigrationTest {
                 analyzeRes.getKey(), equalTo(200));
             assertThat("_analyze response must NOT mention the removed standard filter",
                 analyzeRes.getValue(), not(containsString("standard] token filter has been removed")));
+        }
+    }
+
+    /**
+     * Regression test for ES 6 index with legacy analysis names, restored into ES 7, then migrated to OS.
+     *
+     * ES 6 accepts nGram/edgeNGram as direct built-in references in analyzer definitions and
+     * the legacy "standard" token filter. These names are rejected by OS on new index creation.
+     * When such an index is restored into ES 7 (snapshot restore), ES 7 holds the index with
+     * the legacy names intact — and the migration source cluster is ES 7.
+     *
+     * Before the fix (isBelowES_7_X -> isBelowES_8_X in source predicates), the preemptive
+     * analysis-compat transform was silently skipped for ES 7 sources, so migration to OS
+     * would fail with "Unknown tokenizer/filter" or "removed token filter" errors.
+     */
+    @Test
+    @SneakyThrows
+    void es6IndexRestoredIntoEs7_migratesLegacyAnalyzersToOs() {
+        var legacyRepo = "legacy_repo";
+        var legacySnapshot = "legacy_snap";
+        var indexName = "es6-ngram-standard-analysis";
+        // Two separate local dirs: one for the ES 6 snapshot, one for the ES 7 snapshot.
+        var es6SnapshotDir = Files.createTempDirectory("es6-snap-").toFile();
+        var es7SnapshotDir = Files.createTempDirectory("es7-snap-").toFile();
+
+        // Phase 1: Create the index on ES 6 where legacy names are still valid.
+        try (final var es6Cluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23)) {
+            es6Cluster.start();
+            var es6Ops = new org.opensearch.migrations.bulkload.http.ClusterOperations(es6Cluster);
+
+            // Index uses nGram/edgeNGram as direct built-in references and the legacy "standard"
+            // token filter — all accepted by ES 6, all rejected by OS on new index creation.
+            var indexBody = "{" +
+                "  \"settings\": {" +
+                "    \"index\": {" +
+                "      \"number_of_shards\": 1," +
+                "      \"number_of_replicas\": 0," +
+                "      \"analysis\": {" +
+                "        \"analyzer\": {" +
+                "          \"legacy_analyzer\": {" +
+                "            \"type\": \"custom\"," +
+                "            \"tokenizer\": \"nGram\"," +
+                "            \"filter\": [\"standard\", \"lowercase\", \"edgeNGram\"]" +
+                "          }" +
+                "        }" +
+                "      }" +
+                "    }" +
+                "  }," +
+                "  \"mappings\": {" +
+                "    \"" + es6Ops.defaultDocType() + "\": {" +
+                "      \"properties\": {" +
+                "        \"body\": { \"type\": \"text\", \"analyzer\": \"legacy_analyzer\" }" +
+                "      }" +
+                "    }" +
+                "  }" +
+                "}";
+            es6Ops.createIndex(indexName, indexBody);
+            es6Ops.createDocument(indexName, "1", "{ \"body\": \"hello world\" }");
+            es6Ops.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, legacyRepo);
+            es6Ops.takeSnapshot(legacyRepo, legacySnapshot, indexName);
+            es6Cluster.copySnapshotData(es6SnapshotDir.toString());
+        }
+
+        // Phase 2: Restore the ES 6 snapshot into ES 7 (the upgrade scenario),
+        // then take a new snapshot from ES 7 to use as the migration source.
+        //
+        // We use a sub-path /tmp/snapshots/restore_repo for the ES 6 restore so that the
+        // createSnapshot utility (which writes to /tmp/snapshots directly) doesn't collide
+        // with the ES 6 snapshot files.
+        var restoreRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR + "/restore_repo";
+        try (
+            final var es7Cluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
+            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
+        ) {
+            CompletableFuture.allOf(
+                CompletableFuture.runAsync(es7Cluster::start),
+                CompletableFuture.runAsync(targetCluster::start)
+            ).join();
+
+            // Copy ES 6 snapshot data into the restore sub-directory with proper ownership.
+            es7Cluster.putSnapshotData(es6SnapshotDir.toString(), restoreRepoPath);
+
+            var es7Ops = new org.opensearch.migrations.bulkload.http.ClusterOperations(es7Cluster);
+            es7Ops.createSnapshotRepository(restoreRepoPath, legacyRepo);
+            es7Ops.restoreSnapshot(legacyRepo, legacySnapshot);
+
+            // ES 7 now holds the index with the legacy ES 6 analysis names.
+            // createSnapshot creates its repo at CLUSTER_SNAPSHOT_DIR (not the sub-path),
+            // so there is no file-format collision.
+            var migrateSnapshotName = "es7_migrate_snap";
+            createSnapshot(es7Cluster, migrateSnapshotName, SnapshotTestContext.factory().noOtelTracking());
+            es7Cluster.copySnapshotData(es7SnapshotDir.toString());
+
+            this.sourceCluster = es7Cluster;
+            this.targetCluster = targetCluster;
+            // Initialize targetOperations for the assertions below (sourceOperations not needed).
+            this.targetOperations = new org.opensearch.migrations.bulkload.http.ClusterOperations(targetCluster);
+
+            var arguments = prepareSnapshotMigrationArgs(migrateSnapshotName, es7SnapshotDir.toString());
+            arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
+
+            MigrationItemResult metaResult = executeMigration(arguments, MetadataCommands.MIGRATE);
+            log.info(metaResult.asCliOutput());
+            assertThat("Metadata migration must succeed when ES 7 source holds ES 6 legacy analysis names",
+                metaResult.getExitCode(), equalTo(0));
+            assertThat(getNames(getSuccessfulResults(metaResult.getItems().getIndexes())), hasItems(indexName));
+
+            // Verify the analyzer references on the target are rewritten to snake_case
+            var settingsRes = targetOperations.get("/" + indexName + "/_settings");
+            assertThat(settingsRes.getValue(), settingsRes.getKey(), equalTo(200));
+            var settings = settingsRes.getValue();
+            assertThat("nGram tokenizer reference must be rewritten to ngram on OS target",
+                settings, containsString("ngram"));
+            assertThat("edgeNGram filter reference must be rewritten to edge_ngram on OS target",
+                settings, containsString("edge_ngram"));
+            assertThat("lowercase must survive", settings, containsString("lowercase"));
+
+            // Confirm the target index actually accepts document indexing
+            var indexDocRes = targetOperations.put(
+                "/" + indexName + "/_doc/test-post-migrate?refresh=true",
+                "{ \"body\": \"Post-migration ingest test\" }"
+            );
+            assertThat("Indexing must succeed — analyzer chain must be valid on OS target. Response: "
+                    + indexDocRes.getValue(),
+                indexDocRes.getKey(), equalTo(201));
+
+            // Confirm the analyzer is usable end-to-end via _analyze
+            var analyzeRes = targetOperations.post(
+                "/" + indexName + "/_analyze",
+                "{ \"analyzer\": \"legacy_analyzer\", \"text\": \"Hello\" }"
+            );
+            assertThat("_analyze must succeed on OS target. Response: " + analyzeRes.getValue(),
+                analyzeRes.getKey(), equalTo(200));
         }
     }
 
