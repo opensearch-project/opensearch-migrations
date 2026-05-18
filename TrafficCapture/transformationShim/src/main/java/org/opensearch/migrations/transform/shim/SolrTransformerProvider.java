@@ -78,9 +78,10 @@ public class SolrTransformerProvider extends ScriptTransformerProvider {
     @Override
     @SuppressWarnings("unchecked")
     protected IJsonTransformer buildTransformer(
-            String script, Object bindingsObject, Map<String, Object> config) throws IOException {
+            ScriptTransformerProvider.ResolvedScript script, Object bindingsObject, Map<String, Object> config)
+            throws IOException {
         var mergedBindings = mergeBindings(bindingsObject, config);
-        return new JavascriptTransformer(JS_POLYFILL + script, mergedBindings);
+        return new JavascriptTransformer(JS_POLYFILL + script.source(), mergedBindings);
     }
 
     @SuppressWarnings("unchecked")

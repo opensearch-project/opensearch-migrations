@@ -25,7 +25,7 @@
     },
     "templates": [
       {
-        "name": "runmetadata",
+        "name": "runmetadatanotransforms",
         "inputs": {
           "parameters": [
             {
@@ -137,7 +137,7 @@
           "args": [
             "{{inputs.parameters.commandMode}}",
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], \"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], \"s3LocalDir\", '/tmp')))), sprig.dict(\"outputFile\", '/tmp/outputs/metadata-output.log', \"allowExistingIndexes\", true)), ((0 == len(inputs.parameters.sourceEndpoint)) ? (sprig.dict()) : (sprig.dict(\"sourceHost\", inputs.parameters.sourceEndpoint, \"sourceVersion\", inputs.parameters.sourceVersion)))))}}"
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'transformsImage', 'transformsImagePullPolicy', 'transformsConfigMap')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], \"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], \"s3LocalDir\", '/tmp')))), sprig.dict(\"outputFile\", '/tmp/outputs/metadata-output.log', \"allowExistingIndexes\", true)), ((0 == len(inputs.parameters.sourceEndpoint)) ? (sprig.dict()) : (sprig.dict(\"sourceHost\", inputs.parameters.sourceEndpoint, \"sourceVersion\", inputs.parameters.sourceVersion)))))}}"
           ],
           "volumeMounts": [
             {
@@ -191,6 +191,668 @@
               }
             }
           ]
+        }
+      },
+      {
+        "name": "runmetadatawithimagetransforms",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "commandMode"
+            },
+            {
+              "name": "sourceVersion"
+            },
+            {
+              "name": "targetConfig"
+            },
+            {
+              "name": "snapshotConfig"
+            },
+            {
+              "name": "metadataMigrationConfig"
+            },
+            {
+              "name": "sourceEndpoint",
+              "value": ""
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "sourceK8sLabel"
+            },
+            {
+              "name": "targetK8sLabel"
+            },
+            {
+              "name": "snapshotK8sLabel"
+            },
+            {
+              "name": "fromSnapshotMigrationK8sLabel"
+            },
+            {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
+            },
+            {
+              "name": "resourceCreationTimestamp"
+            },
+            {
+              "name": "workflowCreationTimestamp",
+              "value": "{{workflow.creationTimestamp}}"
+            },
+            {
+              "name": "workflowUid",
+              "value": "{{workflow.uid}}"
+            },
+            {
+              "name": "taskK8sLabel",
+              "value": "{{=((inputs.parameters.commandMode == 'evaluate') ? ('metadataEvaluate') : ('metadataMigrate'))}}"
+            }
+          ]
+        },
+        "container": {
+          "env": [
+            {
+              "name": "AWS_SHARED_CREDENTIALS_FILE",
+              "value": "{{=((sprig.dig('repoConfig', 'useLocalStack', false, fromJSON(inputs.parameters.snapshotConfig))) ? ('/config/credentials/configuration') : (''))}}"
+            },
+            {
+              "name": "JDK_JAVA_OPTIONS",
+              "value": "{{=sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.metadataMigrationConfig))}}"
+            },
+            {
+              "name": "TARGET_USERNAME",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig))))}}",
+                  "key": "username",
+                  "optional": true
+                }
+              }
+            },
+            {
+              "name": "TARGET_PASSWORD",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig))))}}",
+                  "key": "password",
+                  "optional": true
+                }
+              }
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "1800Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "1800Mi"
+            }
+          },
+          "command": [
+            "/root/metadataMigration/bin/MetadataMigration"
+          ],
+          "args": [
+            "{{inputs.parameters.commandMode}}",
+            "---INLINE-JSON",
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'transformsImage', 'transformsImagePullPolicy', 'transformsConfigMap')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], \"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], \"s3LocalDir\", '/tmp')))), sprig.dict(\"outputFile\", '/tmp/outputs/metadata-output.log', \"allowExistingIndexes\", true)), ((0 == len(inputs.parameters.sourceEndpoint)) ? (sprig.dict()) : (sprig.dict(\"sourceHost\", inputs.parameters.sourceEndpoint, \"sourceVersion\", inputs.parameters.sourceVersion)))))}}"
+          ],
+          "volumeMounts": [
+            {
+              "name": "test-creds",
+              "mountPath": "/config/credentials",
+              "readOnly": true
+            },
+            {
+              "name": "user-transforms",
+              "mountPath": "/transforms",
+              "readOnly": true
+            }
+          ]
+        },
+        "metadata": {
+          "labels": {
+            "migrations.opensearch.org/source": "{{inputs.parameters.sourceK8sLabel}}",
+            "migrations.opensearch.org/target": "{{inputs.parameters.targetK8sLabel}}",
+            "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotK8sLabel}}",
+            "migrations.opensearch.org/from-snapshot-migration": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}",
+            "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}"
+          },
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "volumes": [
+          {
+            "name": "test-creds",
+            "configMap": {
+              "name": "localstack-test-creds",
+              "optional": true
+            }
+          },
+          {
+            "name": "user-transforms",
+            "image": {
+              "reference": "{{=sprig.dig('transformsImage', '', fromJSON(inputs.parameters.metadataMigrationConfig))}}",
+              "pullPolicy": "{{=sprig.dig('transformsImagePullPolicy', 'IfNotPresent', fromJSON(inputs.parameters.metadataMigrationConfig))}}"
+            }
+          }
+        ],
+        "outputs": {
+          "parameters": [],
+          "artifacts": [
+            {
+              "name": "metadataOutput",
+              "path": "/tmp/outputs/metadata-output.log",
+              "archive": {
+                "none": {}
+              },
+              "s3": {
+                "key": "{{='migration-outputs/snapshotmigration/'+inputs.parameters.crdName+'/'+inputs.parameters.resourceCreationTimestamp+'_'+inputs.parameters.crdUid+'/'+inputs.parameters.taskK8sLabel+'/'+inputs.parameters.workflowCreationTimestamp+'_'+inputs.parameters.workflowUid+'.log'}}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "runmetadatawithconfigmaptransforms",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "commandMode"
+            },
+            {
+              "name": "sourceVersion"
+            },
+            {
+              "name": "targetConfig"
+            },
+            {
+              "name": "snapshotConfig"
+            },
+            {
+              "name": "metadataMigrationConfig"
+            },
+            {
+              "name": "sourceEndpoint",
+              "value": ""
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "sourceK8sLabel"
+            },
+            {
+              "name": "targetK8sLabel"
+            },
+            {
+              "name": "snapshotK8sLabel"
+            },
+            {
+              "name": "fromSnapshotMigrationK8sLabel"
+            },
+            {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
+            },
+            {
+              "name": "resourceCreationTimestamp"
+            },
+            {
+              "name": "workflowCreationTimestamp",
+              "value": "{{workflow.creationTimestamp}}"
+            },
+            {
+              "name": "workflowUid",
+              "value": "{{workflow.uid}}"
+            },
+            {
+              "name": "taskK8sLabel",
+              "value": "{{=((inputs.parameters.commandMode == 'evaluate') ? ('metadataEvaluate') : ('metadataMigrate'))}}"
+            }
+          ]
+        },
+        "container": {
+          "env": [
+            {
+              "name": "AWS_SHARED_CREDENTIALS_FILE",
+              "value": "{{=((sprig.dig('repoConfig', 'useLocalStack', false, fromJSON(inputs.parameters.snapshotConfig))) ? ('/config/credentials/configuration') : (''))}}"
+            },
+            {
+              "name": "JDK_JAVA_OPTIONS",
+              "value": "{{=sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.metadataMigrationConfig))}}"
+            },
+            {
+              "name": "TARGET_USERNAME",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig))))}}",
+                  "key": "username",
+                  "optional": true
+                }
+              }
+            },
+            {
+              "name": "TARGET_PASSWORD",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.targetConfig))))}}",
+                  "key": "password",
+                  "optional": true
+                }
+              }
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "1800Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "1800Mi"
+            }
+          },
+          "command": [
+            "/root/metadataMigration/bin/MetadataMigration"
+          ],
+          "args": [
+            "{{inputs.parameters.commandMode}}",
+            "---INLINE-JSON",
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'transformsImage', 'transformsImagePullPolicy', 'transformsConfigMap')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], \"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], \"s3LocalDir\", '/tmp')))), sprig.dict(\"outputFile\", '/tmp/outputs/metadata-output.log', \"allowExistingIndexes\", true)), ((0 == len(inputs.parameters.sourceEndpoint)) ? (sprig.dict()) : (sprig.dict(\"sourceHost\", inputs.parameters.sourceEndpoint, \"sourceVersion\", inputs.parameters.sourceVersion)))))}}"
+          ],
+          "volumeMounts": [
+            {
+              "name": "test-creds",
+              "mountPath": "/config/credentials",
+              "readOnly": true
+            },
+            {
+              "name": "user-transforms",
+              "mountPath": "/transforms",
+              "readOnly": true
+            }
+          ]
+        },
+        "metadata": {
+          "labels": {
+            "migrations.opensearch.org/source": "{{inputs.parameters.sourceK8sLabel}}",
+            "migrations.opensearch.org/target": "{{inputs.parameters.targetK8sLabel}}",
+            "migrations.opensearch.org/snapshot": "{{inputs.parameters.snapshotK8sLabel}}",
+            "migrations.opensearch.org/from-snapshot-migration": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}",
+            "migrations.opensearch.org/task": "{{inputs.parameters.taskK8sLabel}}"
+          },
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "volumes": [
+          {
+            "name": "test-creds",
+            "configMap": {
+              "name": "localstack-test-creds",
+              "optional": true
+            }
+          },
+          {
+            "name": "user-transforms",
+            "configMap": {
+              "name": "{{=sprig.dig('transformsConfigMap', '', fromJSON(inputs.parameters.metadataMigrationConfig))}}"
+            }
+          }
+        ],
+        "outputs": {
+          "parameters": [],
+          "artifacts": [
+            {
+              "name": "metadataOutput",
+              "path": "/tmp/outputs/metadata-output.log",
+              "archive": {
+                "none": {}
+              },
+              "s3": {
+                "key": "{{='migration-outputs/snapshotmigration/'+inputs.parameters.crdName+'/'+inputs.parameters.resourceCreationTimestamp+'_'+inputs.parameters.crdUid+'/'+inputs.parameters.taskK8sLabel+'/'+inputs.parameters.workflowCreationTimestamp+'_'+inputs.parameters.workflowUid+'.log'}}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "runmetadata",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "commandMode"
+            },
+            {
+              "name": "sourceVersion"
+            },
+            {
+              "name": "targetConfig"
+            },
+            {
+              "name": "snapshotConfig"
+            },
+            {
+              "name": "metadataMigrationConfig"
+            },
+            {
+              "name": "sourceEndpoint",
+              "value": ""
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            },
+            {
+              "name": "sourceK8sLabel"
+            },
+            {
+              "name": "targetK8sLabel"
+            },
+            {
+              "name": "snapshotK8sLabel"
+            },
+            {
+              "name": "fromSnapshotMigrationK8sLabel"
+            },
+            {
+              "name": "crdName"
+            },
+            {
+              "name": "crdUid"
+            },
+            {
+              "name": "resourceCreationTimestamp"
+            },
+            {
+              "name": "workflowCreationTimestamp",
+              "value": "{{workflow.creationTimestamp}}"
+            },
+            {
+              "name": "workflowUid",
+              "value": "{{workflow.uid}}"
+            },
+            {
+              "name": "taskK8sLabel",
+              "value": "{{=((inputs.parameters.commandMode == 'evaluate') ? ('metadataEvaluate') : ('metadataMigrate'))}}"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "template": "runmetadatawithimagetransforms",
+              "when": "{{=!(0 == len(sprig.dig('transformsImage', '', fromJSON(inputs.parameters.metadataMigrationConfig))))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "commandMode",
+                    "value": "{{inputs.parameters.commandMode}}"
+                  },
+                  {
+                    "name": "sourceVersion",
+                    "value": "{{inputs.parameters.sourceVersion}}"
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}"
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}"
+                  },
+                  {
+                    "name": "metadataMigrationConfig",
+                    "value": "{{inputs.parameters.metadataMigrationConfig}}"
+                  },
+                  {
+                    "name": "sourceEndpoint",
+                    "value": "{{inputs.parameters.sourceEndpoint}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceK8sLabel}}"
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetK8sLabel}}"
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{inputs.parameters.snapshotK8sLabel}}"
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
+                  },
+                  {
+                    "name": "resourceCreationTimestamp",
+                    "value": "{{inputs.parameters.resourceCreationTimestamp}}"
+                  },
+                  {
+                    "name": "workflowCreationTimestamp",
+                    "value": "{{inputs.parameters.workflowCreationTimestamp}}"
+                  },
+                  {
+                    "name": "workflowUid",
+                    "value": "{{inputs.parameters.workflowUid}}"
+                  },
+                  {
+                    "name": "taskK8sLabel",
+                    "value": "{{inputs.parameters.taskK8sLabel}}"
+                  }
+                ]
+              },
+              "name": "withImageTransforms"
+            }
+          ],
+          [
+            {
+              "template": "runmetadatawithconfigmaptransforms",
+              "when": "{{=!(!(0 == len(sprig.dig('transformsImage', '', fromJSON(inputs.parameters.metadataMigrationConfig))))) && !(0 == len(sprig.dig('transformsConfigMap', '', fromJSON(inputs.parameters.metadataMigrationConfig))))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "commandMode",
+                    "value": "{{inputs.parameters.commandMode}}"
+                  },
+                  {
+                    "name": "sourceVersion",
+                    "value": "{{inputs.parameters.sourceVersion}}"
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}"
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}"
+                  },
+                  {
+                    "name": "metadataMigrationConfig",
+                    "value": "{{inputs.parameters.metadataMigrationConfig}}"
+                  },
+                  {
+                    "name": "sourceEndpoint",
+                    "value": "{{inputs.parameters.sourceEndpoint}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceK8sLabel}}"
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetK8sLabel}}"
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{inputs.parameters.snapshotK8sLabel}}"
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
+                  },
+                  {
+                    "name": "resourceCreationTimestamp",
+                    "value": "{{inputs.parameters.resourceCreationTimestamp}}"
+                  },
+                  {
+                    "name": "workflowCreationTimestamp",
+                    "value": "{{inputs.parameters.workflowCreationTimestamp}}"
+                  },
+                  {
+                    "name": "workflowUid",
+                    "value": "{{inputs.parameters.workflowUid}}"
+                  },
+                  {
+                    "name": "taskK8sLabel",
+                    "value": "{{inputs.parameters.taskK8sLabel}}"
+                  }
+                ]
+              },
+              "name": "withConfigMapTransforms"
+            }
+          ],
+          [
+            {
+              "template": "runmetadatanotransforms",
+              "when": "{{=!(!(0 == len(sprig.dig('transformsImage', '', fromJSON(inputs.parameters.metadataMigrationConfig))))) && !(!(0 == len(sprig.dig('transformsConfigMap', '', fromJSON(inputs.parameters.metadataMigrationConfig)))))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "commandMode",
+                    "value": "{{inputs.parameters.commandMode}}"
+                  },
+                  {
+                    "name": "sourceVersion",
+                    "value": "{{inputs.parameters.sourceVersion}}"
+                  },
+                  {
+                    "name": "targetConfig",
+                    "value": "{{inputs.parameters.targetConfig}}"
+                  },
+                  {
+                    "name": "snapshotConfig",
+                    "value": "{{inputs.parameters.snapshotConfig}}"
+                  },
+                  {
+                    "name": "metadataMigrationConfig",
+                    "value": "{{inputs.parameters.metadataMigrationConfig}}"
+                  },
+                  {
+                    "name": "sourceEndpoint",
+                    "value": "{{inputs.parameters.sourceEndpoint}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "sourceK8sLabel",
+                    "value": "{{inputs.parameters.sourceK8sLabel}}"
+                  },
+                  {
+                    "name": "targetK8sLabel",
+                    "value": "{{inputs.parameters.targetK8sLabel}}"
+                  },
+                  {
+                    "name": "snapshotK8sLabel",
+                    "value": "{{inputs.parameters.snapshotK8sLabel}}"
+                  },
+                  {
+                    "name": "fromSnapshotMigrationK8sLabel",
+                    "value": "{{inputs.parameters.fromSnapshotMigrationK8sLabel}}"
+                  },
+                  {
+                    "name": "crdName",
+                    "value": "{{inputs.parameters.crdName}}"
+                  },
+                  {
+                    "name": "crdUid",
+                    "value": "{{inputs.parameters.crdUid}}"
+                  },
+                  {
+                    "name": "resourceCreationTimestamp",
+                    "value": "{{inputs.parameters.resourceCreationTimestamp}}"
+                  },
+                  {
+                    "name": "workflowCreationTimestamp",
+                    "value": "{{inputs.parameters.workflowCreationTimestamp}}"
+                  },
+                  {
+                    "name": "workflowUid",
+                    "value": "{{inputs.parameters.workflowUid}}"
+                  },
+                  {
+                    "name": "taskK8sLabel",
+                    "value": "{{inputs.parameters.taskK8sLabel}}"
+                  }
+                ]
+              },
+              "name": "withoutTransforms"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
         }
       },
       {

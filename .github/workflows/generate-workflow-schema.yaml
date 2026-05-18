@@ -80,7 +80,7 @@ jobs:
         uses: helm/kind-action@v1.14.0
         with:
           cluster_name: generate-workflow-schema
-          node_image: kindest/node:v1.33.1
+          node_image: kindest/node:v1.35.0
 
       - name: Build migration console image to local registry
         run: |
@@ -127,7 +127,14 @@ jobs:
       - name: Dump schema generation diagnostics
         if: ${{ failure() }}
         run: |
-          kubectl --context kind-generate-workflow-schema get pods -A
+          kubectl --context kind-generate-workflow-schema get nodes -o wide || true
+          kubectl --context kind-generate-workflow-schema get pods -A -o wide || true
+          helm --kube-context kind-generate-workflow-schema -n ma list --all || true
+          helm --kube-context kind-generate-workflow-schema -n ma status ma || true
+          kubectl --context kind-generate-workflow-schema -n ma get jobs,pods,events || true
+          kubectl --context kind-generate-workflow-schema -n ma describe job ma-helm-installer || true
+          kubectl --context kind-generate-workflow-schema -n ma logs job/ma-helm-installer --all-containers --tail=-1 || true
+          kubectl --context kind-generate-workflow-schema -n ma get configmap ma-installation-notes -o yaml || true
           kubectl --context kind-generate-workflow-schema -n ma describe statefulset migration-console || true
           kubectl --context kind-generate-workflow-schema -n ma describe pod migration-console-0 || true
           kubectl --context kind-generate-workflow-schema -n ma logs migration-console-0 -c workflow-schema-generator || true

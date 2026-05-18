@@ -290,11 +290,15 @@ spec:
         !has(oldObject.spec.kafkaTrafficPropertyFile) || !has(object.spec.kafkaTrafficPropertyFile) ||
         object.spec.kafkaTrafficPropertyFile == oldObject.spec.kafkaTrafficPropertyFile
       message: "Impossible: kafkaTrafficPropertyFile cannot be changed. Delete and recreate the replayer."
-    # Gated: auth, transformer, and tuple transformer fields
+    # Gated: auth, transform source mount, transformer, and tuple transformer fields
     - expression: |
         (
           (!has(object.spec.removeAuthHeader) || !has(oldObject.spec.removeAuthHeader) ||
            object.spec.removeAuthHeader == oldObject.spec.removeAuthHeader) &&
+          (!has(object.spec.transformsImage) || !has(oldObject.spec.transformsImage) ||
+           object.spec.transformsImage == oldObject.spec.transformsImage) &&
+          (!has(object.spec.transformsConfigMap) || !has(oldObject.spec.transformsConfigMap) ||
+           object.spec.transformsConfigMap == oldObject.spec.transformsConfigMap) &&
           (!has(object.spec.transformerConfig) || !has(oldObject.spec.transformerConfig) ||
            object.spec.transformerConfig == oldObject.spec.transformerConfig) &&
           (!has(object.spec.transformerConfigEncoded) || !has(oldObject.spec.transformerConfigEncoded) ||
@@ -316,12 +320,17 @@ spec:
            object.metadata.labels['workflows.argoproj.io/run-uid'])
       messageExpression: |
         "Gated changes detected on TrafficReplay fields [" +
-        ["removeAuthHeader", "transformerConfig", "transformerConfigEncoded",
+        ["removeAuthHeader", "transformsImage", "transformsConfigMap",
+         "transformerConfig", "transformerConfigEncoded",
          "transformerConfigFile", "tupleTransformerConfig",
          "tupleTransformerConfigBase64", "tupleTransformerConfigFile"
         ].filter(f,
           (f == "removeAuthHeader" && (has(object.spec.removeAuthHeader) != has(oldObject.spec.removeAuthHeader) ||
             (has(object.spec.removeAuthHeader) && object.spec.removeAuthHeader != oldObject.spec.removeAuthHeader))) ||
+          (f == "transformsImage" && (has(object.spec.transformsImage) != has(oldObject.spec.transformsImage) ||
+            (has(object.spec.transformsImage) && object.spec.transformsImage != oldObject.spec.transformsImage))) ||
+          (f == "transformsConfigMap" && (has(object.spec.transformsConfigMap) != has(oldObject.spec.transformsConfigMap) ||
+            (has(object.spec.transformsConfigMap) && object.spec.transformsConfigMap != oldObject.spec.transformsConfigMap))) ||
           (f == "transformerConfig" && (has(object.spec.transformerConfig) != has(oldObject.spec.transformerConfig) ||
             (has(object.spec.transformerConfig) && object.spec.transformerConfig != oldObject.spec.transformerConfig))) ||
           (f == "transformerConfigEncoded" && (has(object.spec.transformerConfigEncoded) != has(oldObject.spec.transformerConfigEncoded) ||
@@ -383,6 +392,16 @@ spec:
       message: "Impossible: SnapshotMigration identity fields cannot be changed. Delete and recreate."
     # Impossible: USER_METADATA_PROCESS_OPTIONS fields marked impossible
     - expression: |
+        (!has(oldObject.spec.metadataMigrationTransformsImage) || !has(object.spec.metadataMigrationTransformsImage) ||
+         object.spec.metadataMigrationTransformsImage == oldObject.spec.metadataMigrationTransformsImage) &&
+        (!has(oldObject.spec.metadataMigrationTransformsConfigMap) || !has(object.spec.metadataMigrationTransformsConfigMap) ||
+         object.spec.metadataMigrationTransformsConfigMap == oldObject.spec.metadataMigrationTransformsConfigMap) &&
+        (!has(oldObject.spec.metadataMigrationTransformerConfigBase64) || !has(object.spec.metadataMigrationTransformerConfigBase64) ||
+         object.spec.metadataMigrationTransformerConfigBase64 == oldObject.spec.metadataMigrationTransformerConfigBase64) &&
+        (!has(oldObject.spec.metadataMigrationTransformerConfig) || !has(object.spec.metadataMigrationTransformerConfig) ||
+         object.spec.metadataMigrationTransformerConfig == oldObject.spec.metadataMigrationTransformerConfig) &&
+        (!has(oldObject.spec.metadataMigrationTransformerConfigFile) || !has(object.spec.metadataMigrationTransformerConfigFile) ||
+         object.spec.metadataMigrationTransformerConfigFile == oldObject.spec.metadataMigrationTransformerConfigFile) &&
         (!has(oldObject.spec.metadataMigrationEnableSourcelessMigrations) || !has(object.spec.metadataMigrationEnableSourcelessMigrations) ||
          object.spec.metadataMigrationEnableSourcelessMigrations == oldObject.spec.metadataMigrationEnableSourcelessMigrations) &&
         (!has(oldObject.spec.metadataMigrationUseRecoverySource) || !has(object.spec.metadataMigrationUseRecoverySource) ||
@@ -390,6 +409,10 @@ spec:
       message: "Impossible: SnapshotMigration metadata migration fields cannot be changed. Delete and recreate."
     # Impossible: USER_RFS_PROCESS_OPTIONS fields marked impossible
     - expression: |
+        (!has(oldObject.spec.documentBackfillTransformsImage) || !has(object.spec.documentBackfillTransformsImage) ||
+         object.spec.documentBackfillTransformsImage == oldObject.spec.documentBackfillTransformsImage) &&
+        (!has(oldObject.spec.documentBackfillTransformsConfigMap) || !has(object.spec.documentBackfillTransformsConfigMap) ||
+         object.spec.documentBackfillTransformsConfigMap == oldObject.spec.documentBackfillTransformsConfigMap) &&
         (!has(oldObject.spec.documentBackfillIndexAllowlist) || !has(object.spec.documentBackfillIndexAllowlist) ||
          object.spec.documentBackfillIndexAllowlist == oldObject.spec.documentBackfillIndexAllowlist) &&
         (!has(oldObject.spec.documentBackfillAllowLooseVersionMatching) || !has(object.spec.documentBackfillAllowLooseVersionMatching) ||

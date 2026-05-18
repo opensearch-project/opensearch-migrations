@@ -11,7 +11,7 @@ public class JsonJSTransformerProvider extends ScriptTransformerProvider {
 
     @Override
     protected IJsonTransformer buildTransformer(
-            String script, Object bindingsObject, Map<String, Object> config) {
-        return new JavascriptTransformer(script, bindingsObject);
+            ResolvedScript script, Object bindingsObject, Map<String, Object> config) {
+        return new JavascriptTransformer(script.source(), bindingsObject);
     }
 }

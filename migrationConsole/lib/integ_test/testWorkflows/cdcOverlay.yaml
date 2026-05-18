@@ -28,6 +28,16 @@ spec:
           - name: observedPacketTimeout
           - name: imageMigrationConsoleLocation
           - name: imageMigrationConsolePullPolicy
+          - name: replayer-config-overrides
+            default: "{}"
+          - name: tupleS3Region
+            default: ""
+          - name: useLocalStack
+            default: "false"
+          - name: tupleS3Endpoint
+            default: ""
+          - name: tupleS3BucketName
+            default: ""
       container:
         image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
         imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
@@ -36,9 +46,20 @@ spec:
           - |
             set -e
             BASE_CONFIG=$(echo "{{inputs.parameters.baseConfigBase64}}" | base64 -d)
+            REPLAYER_CONFIG_OVERRIDES='{{inputs.parameters.replayer-config-overrides}}'
+            TUPLE_S3_REGION='{{inputs.parameters.tupleS3Region}}'
+            USE_LOCAL_STACK='{{inputs.parameters.useLocalStack}}'
+            TUPLE_S3_ENDPOINT='{{inputs.parameters.tupleS3Endpoint}}'
+            TUPLE_S3_BUCKET='{{inputs.parameters.tupleS3BucketName}}'
 
             # Overlay CDC traffic config with capture enabled from start.
-            CDC_CONFIG=$(echo "$BASE_CONFIG" | jq '. + {
+            CDC_CONFIG=$(echo "$BASE_CONFIG" | jq \
+              --arg tupleS3Bucket "$TUPLE_S3_BUCKET" \
+              --arg tupleS3Region "$TUPLE_S3_REGION" \
+              --argjson useLocalStack "$USE_LOCAL_STACK" \
+              --arg tupleS3Endpoint "$TUPLE_S3_ENDPOINT" \
+              --argjson replayerOverrides "$REPLAYER_CONFIG_OVERRIDES" \
+              '. + {
               "kafkaClusterConfiguration": {
                 "default": {
                   "autoCreate": {}
@@ -61,10 +82,18 @@ spec:
                     "dependsOnSnapshotMigrations": [
                       {"source": "source1", "snapshot": "testsnapshot"}
                     ],
-                    "replayerConfig": {
+                    "replayerConfig": ({
                       "observedPacketConnectionTimeout": {{inputs.parameters.observedPacketTimeout}},
-                      "speedupFactor": {{inputs.parameters.speedupFactor}}
+                      "speedupFactor": {{inputs.parameters.speedupFactor}},
+                      "useLocalStack": $useLocalStack
                     }
+                    + (if $tupleS3Bucket != "" then {
+                        "tupleS3Bucket": $tupleS3Bucket,
+                        "tupleS3Region": $tupleS3Region,
+                        "tupleS3Prefix": "tuples/"
+                      } else {} end)
+                    + (if $tupleS3Endpoint != "" then {"tupleS3Endpoint": $tupleS3Endpoint} else {} end)
+                    + $replayerOverrides)
                   }
                 }
               }
