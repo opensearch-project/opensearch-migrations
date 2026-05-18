@@ -640,6 +640,7 @@ if [[ "$deploy_cfn" == "true" ]]; then
     seen_file=$(mktemp)
     trap "rm -f '$seen_file'" RETURN
     while true; do
+      # awk reverses the event list (oldest-first) — portable substitute for `tac`, which isn't in the BSD userland on macOS.
       aws cloudformation describe-stack-events --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
         --query 'StackEvents[].[EventId,Timestamp,ResourceStatus,ResourceType,LogicalResourceId,ResourceStatusReason]' \
         --output text 2>/dev/null | awk '{a[NR]=$0} END{for(i=NR;i;i--) print a[i]}' | while IFS=$'\t' read -r eid ts status rtype logical reason; do
