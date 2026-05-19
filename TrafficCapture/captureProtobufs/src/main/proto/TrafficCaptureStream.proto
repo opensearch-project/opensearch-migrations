@@ -43,6 +43,113 @@ message EndOfMessageIndication {
 }
 message RequestIntentionallyDropped {}
 
+// ---------- HTTP/2 observations (RFC 0001) ----------
+
+enum Http2FrameType {
+  H2_DATA = 0;
+  H2_HEADERS = 1;
+  H2_PRIORITY = 2;
+  H2_RST_STREAM = 3;
+  H2_SETTINGS = 4;
+  H2_PUSH_PROMISE = 5;
+  H2_PING = 6;
+  H2_GOAWAY = 7;
+  H2_WINDOW_UPDATE = 8;
+  H2_CONTINUATION = 9;
+}
+
+message Http2HeaderField {
+  bytes name = 1;
+  bytes value = 2;
+  bool sensitive = 3;
+}
+
+message Http2HeadersPayload {
+  repeated Http2HeaderField fields = 1;     // already HPACK-decoded
+  bool endStream = 2;
+  bool endHeaders = 3;
+  uint32 dependsOnStreamId = 4;             // optional; PRIORITY embedded in HEADERS
+  uint32 weight = 5;
+  bool exclusive = 6;
+}
+
+message Http2DataPayload {
+  bytes data = 1;
+  bool endStream = 2;
+  uint32 padLength = 3;
+}
+
+message Http2SettingsPayload {
+  bool ack = 1;
+  map<uint32, uint32> settings = 2;         // setting id -> value
+}
+
+message Http2WindowUpdatePayload {
+  uint32 increment = 1;
+}
+
+message Http2RstStreamPayload {
+  uint32 errorCode = 1;
+}
+
+message Http2GoAwayPayload {
+  uint32 lastStreamId = 1;
+  uint32 errorCode = 2;
+  bytes debugData = 3;
+}
+
+message Http2PingPayload {
+  bytes opaqueData = 1;
+  bool ack = 2;
+}
+
+message Http2PushPromisePayload {
+  uint32 promisedStreamId = 1;
+  repeated Http2HeaderField fields = 2;
+}
+
+message Http2PriorityPayload {
+  uint32 dependsOnStreamId = 1;
+  uint32 weight = 2;
+  bool exclusive = 3;
+}
+
+message Http2ContinuationPayload {
+  bytes headerBlockFragment = 1;
+  bool endHeaders = 2;
+}
+
+// One H2 frame as observed by the proxy. streamId of 0 means a connection-scoped frame
+// (SETTINGS, PING, GOAWAY, WINDOW_UPDATE@conn). rawFrame is the original 9-byte-header
+// + payload bytes for forensics. The decoded payload variant is set when the proxy
+// successfully parsed the frame; otherwise truncated=true and payload is empty.
+message Http2FrameObservation {
+  uint32 streamId = 1;
+  Http2FrameType type = 2;
+  uint32 flags = 3;
+  bytes rawFrame = 4;
+  oneof payload {
+    Http2HeadersPayload headers = 5;
+    Http2DataPayload data = 6;
+    Http2SettingsPayload settings = 7;
+    Http2WindowUpdatePayload windowUpdate = 8;
+    Http2RstStreamPayload rstStream = 9;
+    Http2GoAwayPayload goAway = 10;
+    Http2PingPayload ping = 11;
+    Http2PushPromisePayload pushPromise = 12;
+    Http2PriorityPayload priority = 13;
+    Http2ContinuationPayload continuation = 14;
+  }
+  bool truncated = 15;
+}
+
+// Emitted once per connection after TLS handshake + ALPN selection. negotiatedProtocol
+// is the ALPN string ("h2", "http/1.1") or empty string if no ALPN was negotiated.
+message AlpnNegotiationObservation {
+  string negotiatedProtocol = 1;
+  string offeredByClient = 2;
+}
+
 message TrafficObservation {
   google.protobuf.Timestamp ts = 1;
   oneof Capture {
@@ -64,6 +171,10 @@ message TrafficObservation {
     EndOfMessageIndication endOfMessageIndicator = 15;
 
     RequestIntentionallyDropped requestDropped = 16;
+
+    // ---- HTTP/2 observations (RFC 0001) ----
+    Http2FrameObservation http2Frame = 17;
+    AlpnNegotiationObservation alpn = 18;
   }
 }
 
@@ -78,4 +189,11 @@ message TrafficStream {
     int32 number = 3;
     int32 numberOfThisLastChunk = 4;
   }
+
+  // ---- HTTP/2 envelope fields (RFC 0001) ----
+  // captureFormatVersion: empty or "v1" => H1-only capture; "v2" => may contain H2 frame observations.
+  string captureFormatVersion = 8;
+  // negotiatedAlpn: stamped on every TrafficStream record for fast filtering and mid-stream
+  // resume after Kafka rebalance. Values: "h2", "http/1.1", or empty.
+  string negotiatedAlpn = 9;
 }
