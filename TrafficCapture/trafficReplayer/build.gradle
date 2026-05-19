@@ -18,6 +18,7 @@ plugins {
 
 dependencies {
     implementation project(':TrafficCapture:captureProtobufs')
+    implementation project(':TrafficCapture:nettyWireLogging')
     implementation project(':TrafficCapture:tupleSink')
     implementation project(':coreUtilities')
     implementation project(':awsUtilities')

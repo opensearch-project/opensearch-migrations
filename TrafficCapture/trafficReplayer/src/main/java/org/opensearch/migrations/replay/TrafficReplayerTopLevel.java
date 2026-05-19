@@ -93,8 +93,17 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
 
     private final AtomicReference<TextTrackedFuture<Void>> allRemainingWorkFutureOrShutdownSignalRef;
     protected final ClientConnectionPool clientConnectionPool;
+    /** Target URI — used for H2 dispatch when {@link #targetProtocolFactory} is set. */
+    private final URI targetUri;
     private final AtomicReference<Error> shutdownReasonRef;
     private final AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
+    /**
+     * RFC 0001 §8.5 — when set, the replayer dispatches H2 requests via this factory's
+     * shared multiplexed parent connection. Set by {@link TrafficReplayer#main} when
+     * {@code --targetEnableHttp2} is on.
+     */
+    @lombok.Setter
+    private org.opensearch.migrations.replay.datahandlers.TargetProtocolFactory targetProtocolFactory;
 
     public TrafficReplayerTopLevel(
         IRootReplayerContext context,
@@ -129,6 +138,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry(errorClassifier))
         );
         this.clientConnectionPool = clientConnectionPool;
+        this.targetUri = serverUri;
         allRemainingWorkFutureOrShutdownSignalRef = new AtomicReference<>();
         shutdownReasonRef = new AtomicReference<>();
         shutdownFutureRef = new AtomicReference<>();
@@ -223,7 +233,14 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     ) throws InterruptedException, ExecutionException {
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
-            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout)
+            (replaySession, ctx) -> {
+                if (targetProtocolFactory != null) {
+                    var c = targetProtocolFactory.create(
+                        targetUri, replaySession, ctx, targetServerResponseTimeout);
+                    if (c != null) return c;
+                }
+                return new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout);
+            }
         );
         var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
         this.currentReplayEngine.set(replayEngine);

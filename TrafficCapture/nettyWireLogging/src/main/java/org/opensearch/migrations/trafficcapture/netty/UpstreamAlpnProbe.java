@@ -1,4 +1,4 @@
-package org.opensearch.migrations.trafficcapture.proxyserver;
+package org.opensearch.migrations.trafficcapture.netty;
 
 import javax.net.ssl.SSLEngine;
 

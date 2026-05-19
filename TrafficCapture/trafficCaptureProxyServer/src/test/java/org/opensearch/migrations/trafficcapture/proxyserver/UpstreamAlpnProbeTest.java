@@ -5,6 +5,8 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 
+import org.opensearch.migrations.trafficcapture.netty.UpstreamAlpnProbe;
+
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;

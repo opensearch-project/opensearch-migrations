@@ -36,6 +36,7 @@ import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaConfig.KafkaParameters;
 import org.opensearch.migrations.trafficcapture.netty.HeaderValueFilteringCapturePredicate;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
+import org.opensearch.migrations.trafficcapture.netty.UpstreamAlpnProbe;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.HeaderAdderHandler;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.HeaderRemoverHandler;

@@ -159,6 +159,14 @@ public class TrafficReplayer {
             arity = 0, description = "Do not check the server's certificate")
         boolean allowInsecureConnections;
         @Parameter(
+            required = false,
+            names = { "--targetEnableHttp2", "--target-enable-http2" },
+            arity = 0,
+            description = "Negotiate HTTP/2 via ALPN with the target cluster. When set, the replayer "
+                + "opens one shared H2 parent connection per target authority and multiplexes all "
+                + "requests on it via Netty Http2StreamChannelBootstrap. Default: false (HTTP/1.1).")
+        public boolean targetEnableHttp2;
+        @Parameter(
                 names = {ArgNameConstants.TARGET_USERNAME_ARG_CAMEL_CASE, ArgNameConstants.TARGET_USERNAME_ARG_KEBAB_CASE },
                 description = "Username to use for basic auth with the target cluster/domain",
                 required = false)
@@ -664,6 +672,16 @@ public class TrafficReplayer {
                 orderedRequestTracker,
                 errorClassifier
             );
+            // RFC 0001 §8.5 — wire the H2 dispatch factory when the operator opted in. The factory
+            // probes upstream ALPN once per authority and, when the cached ALPN is h2, returns
+            // multiplexed stream consumers sharing a single parent connection.
+            if (params.targetEnableHttp2) {
+                var protocolFactory =
+                    org.opensearch.migrations.replay.datahandlers.TargetProtocolFactory.forTarget(
+                        uri, true, params.allowInsecureConnections,
+                        java.time.Duration.ofSeconds(params.targetServerResponseTimeoutSeconds));
+                tr.setTargetProtocolFactory(protocolFactory);
+            }
             log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
                     " serverResponseTimeout={}s observedPacketConnectionTimeout={}s" +
                     " targetUri={} numClientThreads={}")
