@@ -5,6 +5,7 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id 'io.freefair.lombok'
+    id 'java-test-fixtures'
 }
 
 dependencies {
@@ -31,4 +32,7 @@ dependencies {
 
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
+
+    testFixturesImplementation libs.netty.codec.http2
+    testFixturesImplementation libs.netty.buffer
 }
