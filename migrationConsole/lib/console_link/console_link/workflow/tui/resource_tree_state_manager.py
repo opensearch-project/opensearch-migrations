@@ -197,8 +197,11 @@ class ResourceTreeStateManager:
 
     def _add_workflow_step(self, parent: TreeNode, step: Dict) -> None:
         """Add a workflow step node (carries Argo dict for interactions)."""
-        from console_link.workflow.resource_tree import _collect_notable_steps, _step_timestamp
-        label = get_step_rich_label(step, status_output=None, show_approval_name=False)
+        from console_link.workflow.resource_tree import (
+            _collect_notable_steps, _step_timestamp, _maybe_rewrite_wait_step,
+        )
+        display_step = _maybe_rewrite_wait_step(step)
+        label = get_step_rich_label(display_step, status_output=None, show_approval_name=False)
         node = parent.add(label, data=step)
         live_check = step.get('live_check')
         if live_check and live_check.get('success') and 'value' in live_check:

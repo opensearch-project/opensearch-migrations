@@ -352,9 +352,29 @@ def _collect_notable_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return result
 
 
+def _maybe_rewrite_wait_step(step: Dict[str, Any]) -> Dict[str, Any]:
+    """Rewrite waitFor steps to show the resource being waited on."""
+    if is_approval_node(step):
+        return step
+    display_name = step.get('display_name', '')
+    base_name = display_name.split('(')[0].strip() if '(' in display_name else display_name
+    if not base_name.startswith('waitFor'):
+        return step
+    resource_name = get_node_input_parameter(step, 'resourceName')
+    if resource_name and resource_name.strip():
+        rewritten = step.copy()
+        rewritten['display_name'] = f"Waiting for: {resource_name}"
+        return rewritten
+    # No resourceName — strip the loop parameters but keep the base name
+    rewritten = step.copy()
+    rewritten['display_name'] = base_name
+    return rewritten
+
+
 def _render_workflow_step(parent_node, step: Dict[str, Any]) -> None:
     """Recursively render a workflow step node using the same formatting as workflow status."""
-    label = get_step_rich_label(step, status_output=None, show_approval_name=False)
+    display_step = _maybe_rewrite_wait_step(step)
+    label = get_step_rich_label(display_step, status_output=None, show_approval_name=False)
     node = parent_node.add(label)
     # Show live check results if present (from LiveCheckProcessor)
     live_check = step.get('live_check')
