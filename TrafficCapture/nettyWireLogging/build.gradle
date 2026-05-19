@@ -9,11 +9,14 @@ plugins {
 
 dependencies {
     implementation project(':TrafficCapture:captureOffloader')
+    implementation project(':TrafficCapture:captureProtobufs')
     implementation project(':coreUtilities')
     api            libs.netty.buffer
     api            libs.netty.codec.http
+    api            libs.netty.codec.http2
     api            libs.netty.handler
 
+    implementation libs.protobuf.java
     implementation libs.slf4j.api
 
     testImplementation project(':TrafficCapture:captureProtobufs')
