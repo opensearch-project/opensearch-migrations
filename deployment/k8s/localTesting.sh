@@ -47,6 +47,10 @@ minikube -p "${MINIKUBE_PROFILE}" config set memory $MINIKUBE_MEMORY_SIZE
 # hosts.toml that connect_cluster_to_registry_network writes is honored.
 print_step "Recreating minikube on containerd"
 minikube -p "${MINIKUBE_PROFILE}" delete >/dev/null 2>&1 || true
+# `minikube delete` sometimes leaves the docker network behind with its
+# 192.168.49.0/24 subnet, which makes the next `minikube start` fail with
+# "address already in use". Drop it; minikube recreates it on start.
+docker network rm "${MINIKUBE_PROFILE}" >/dev/null 2>&1 || true
 minikube -p "${MINIKUBE_PROFILE}" start \
   --driver=docker \
   --container-runtime=containerd \

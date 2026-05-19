@@ -64,6 +64,10 @@ def call(Map config = [:]) {
                     // Docker, so they survive `minikube delete` and image layers are reused.
                     timeout(time: 10, unit: 'MINUTES') {
                         sh 'minikube delete || true'
+                        // minikube delete sometimes leaves the "minikube" docker network behind
+                        // with its 192.168.49.0/24 subnet; drop it so the next start can recreate
+                        // it without "address already in use".
+                        sh 'docker network rm minikube 2>/dev/null || true'
                         sh 'minikube start --driver=docker --container-runtime=containerd'
                     }
                 }
