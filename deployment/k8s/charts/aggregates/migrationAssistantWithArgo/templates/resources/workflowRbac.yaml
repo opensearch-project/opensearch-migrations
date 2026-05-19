@@ -50,6 +50,7 @@ rules:
                 "captureproxies",     "captureproxies/status",
                 "datasnapshots",      "datasnapshots/status",
                 "kafkaclusters",      "kafkaclusters/status",
+                "migrationruns",      "migrationruns/status",
                 "snapshotmigrations", "snapshotmigrations/status",
                 "trafficreplays",     "trafficreplays/status"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
