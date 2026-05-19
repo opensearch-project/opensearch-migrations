@@ -343,7 +343,12 @@ class Environment:
         elif "autoCreate" in cluster_config:
             auto_config = cluster_config["autoCreate"]
             auth_config = auto_config.get("auth") or {}
-            auth_type = auth_config.get("type", "")
+            # Mirror the workflow transformer's secure-by-default auth policy
+            # (DEFAULT_WORKFLOW_MANAGED_KAFKA_AUTH in migrationConfigTransformer.ts).
+            # When the user-config omits auth on an autoCreate cluster, the
+            # workflow deploys Strimzi with scram-sha-512 + a single "tls"
+            # listener; the console must read it the same way.
+            auth_type = auth_config.get("type") or "scram-sha-512"
             if auth_type == "scram-sha-512":
                 password, ca_cert_path = cls._resolve_strimzi_scram_credentials(cluster_name)
                 bootstrap = cls._resolve_strimzi_bootstrap(cluster_name, "tls")

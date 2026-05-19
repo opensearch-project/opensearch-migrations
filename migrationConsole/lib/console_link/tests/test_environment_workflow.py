@@ -111,8 +111,12 @@ def test_get_source_cluster_from_workflow_config_attaches_proxy():
     assert cluster.proxy.endpoint == "https://capture-proxy:9201"
 
 
-@patch.object(Environment, '_resolve_strimzi_bootstrap', return_value="default-kafka-bootstrap.ma.svc:9092")
-def test_get_kafka_from_workflow_config_autocreate_default_cluster(mock_bootstrap):
+@patch.object(Environment, '_resolve_strimzi_bootstrap', return_value="default-kafka-bootstrap.ma.svc:9093")
+@patch.object(Environment, '_resolve_strimzi_scram_credentials', return_value=("test-password", "/tmp/fake-ca.crt"))
+def test_get_kafka_from_workflow_config_autocreate_default_cluster(mock_creds, mock_bootstrap):
+    # When the user omits auth on an autoCreate cluster, the workflow's
+    # transform-time policy resolves it to scram-sha-512 (single "tls"
+    # listener on 9093). The console must read it the same way.
     config = {
         "kafkaClusterConfiguration": {
             "default": {
@@ -130,9 +134,9 @@ def test_get_kafka_from_workflow_config_autocreate_default_cluster(mock_bootstra
 
     kafka = Environment._get_kafka_from_workflow_config(config)
 
-    assert isinstance(kafka, StandardKafka)
-    assert kafka.brokers == "default-kafka-bootstrap.ma.svc:9092"
-    mock_bootstrap.assert_called_once_with("default", "plain")
+    assert isinstance(kafka, ScramKafka)
+    assert kafka.brokers == "default-kafka-bootstrap.ma.svc:9093"
+    mock_bootstrap.assert_called_once_with("default", "tls")
 
 
 def test_get_kafka_from_workflow_config_existing_cluster_uses_reference():
@@ -192,6 +196,32 @@ def test_get_kafka_from_workflow_config_autocreate_scram(mock_creds, mock_bootst
     assert kafka.password == "test-password"
     mock_creds.assert_called_once_with("default")
     mock_bootstrap.assert_called_once_with("default", "tls")
+
+
+@patch.object(Environment, '_resolve_strimzi_bootstrap', return_value="default-kafka-bootstrap.ma.svc:9092")
+def test_get_kafka_from_workflow_config_autocreate_explicit_none_auth(mock_bootstrap):
+    # Explicit auth.type: "none" still selects the plain listener on 9092,
+    # matching the workflow transformer when the user opts out of SCRAM.
+    config = {
+        "kafkaClusterConfiguration": {
+            "default": {
+                "autoCreate": {
+                    "auth": {"type": "none"}
+                }
+            }
+        },
+        "traffic": {
+            "proxies": {
+                "capture-proxy": {"source": "source"}
+            }
+        }
+    }
+
+    kafka = Environment._get_kafka_from_workflow_config(config)
+
+    assert isinstance(kafka, StandardKafka)
+    assert kafka.brokers == "default-kafka-bootstrap.ma.svc:9092"
+    mock_bootstrap.assert_called_once_with("default", "plain")
 
 
 @patch('console_link.environment.WorkflowConfigStore')
