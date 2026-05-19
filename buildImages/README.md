@@ -1,7 +1,7 @@
 # Building Images Locally
 This guide walks through the local image-build options for this repo. Image-build orchestration lives under [backends](backends), with two supported modes:
 
-- `dockerHostedBuildkit.sh`: BuildKit and the registry run as Docker containers on the host. Used by both `deployment/k8s/kindTesting.sh` (kind) and `deployment/k8s/localTesting.sh` (minikube). Both flows share the same `docker-registry` container on `local-migrations-network` at `localhost:5001`, so the buildkit cache and image layers are reused across them.
+- `dockerHostedBuildkit.sh`: BuildKit and the registry run as Docker containers on the host. Used by both `deployment/k8s/kindTesting.sh` (kind) and `deployment/k8s/localTesting.sh` (minikube). Both flows share the same `docker-registry` container on `local-migrations-network` at `localhost:5001` for host-side pushes; pods reference images by the in-cluster name `docker-registry:5000`. The buildkit cache and image layers are reused across kind and minikube.
 - `eksKubernetesBuildkit.sh`: cloud-Kubernetes path (EKS / GKE / AKS), used by `deployment/k8s/aws/aws-bootstrap.sh`. Spins up amd64 + arm64 buildkit Pods directly via `docker buildx --driver=kubernetes` on the cluster's build-nodepool.
 
 The deployment scripts source the backend they need directly. This README describes the Docker-hosted path; for the cloud-Kubernetes path, see [README-K8s.md](README-K8s.md).
@@ -55,7 +55,7 @@ Or customized to use a specific registry endpoint
 
 ### How kind and minikube reach the same registry
 
-Each cluster's nodes are joined to `local-migrations-network` (`docker network connect`) and a containerd `hosts.toml` is written into each node so that `localhost:5001` mirrors to `http://docker-registry:5000`. That way `kubectl ... images.X.repository=localhost:5001/...` works identically on both clusters and there are no `kubectl port-forward`s, NodePorts, or `--insecure-registry` flags involved. The shared helper is `connect_cluster_to_registry_network` in `dockerHostedBuildkit.sh`.
+Each cluster's nodes are joined to `local-migrations-network` (`docker network connect`) so containers in the cluster can resolve `docker-registry:5000` via Docker's bridge DNS. Pods reference images by that in-cluster name. On kind (containerd), `connect_cluster_to_registry_network` writes a `hosts.toml` so the plain-HTTP endpoint is accepted; on minikube (cri-dockerd), `--insecure-registry=docker-registry:5000` does the same job at the dockerd level. Host-side `docker buildx` push goes to `localhost:5001` (the bind-mounted host port), so the pushed image and the pulled image refer to the same registry by two URLs.
 
 ## Using EKS (using the cloud-Kubernetes BuildKit backend)
 

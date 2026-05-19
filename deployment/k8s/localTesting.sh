@@ -43,17 +43,21 @@ minikube -p "${MINIKUBE_PROFILE}" config set memory $MINIKUBE_MEMORY_SIZE
 # Always recreate the cluster. The shared docker-hosted registry/buildkit
 # containers and their volumes live on host Docker, so they survive
 # `minikube delete` and the buildkit cache + registry images are reused.
-# containerd runtime is required so the per-node /etc/containerd/certs.d
-# hosts.toml that connect_cluster_to_registry_network writes is honored.
-print_step "Recreating minikube on containerd"
+# Use minikube's default cri-dockerd runtime + bridge CNI: the alternative
+# (containerd) makes minikube install kindnet, which pulls a docker.io image
+# at every cluster start and breaks under Docker Hub rate limits in CI.
+# `--insecure-registry=docker-registry:5000` lets dockerd accept plain HTTP
+# from our in-cluster registry name.
+print_step "Recreating minikube"
 minikube -p "${MINIKUBE_PROFILE}" delete >/dev/null 2>&1 || true
 # `minikube delete` sometimes leaves the docker network behind with its
 # 192.168.49.0/24 subnet, which makes the next `minikube start` fail with
 # "address already in use". Drop it; minikube recreates it on start.
 docker network rm "${MINIKUBE_PROFILE}" >/dev/null 2>&1 || true
+set_docker_hosted_defaults
 minikube -p "${MINIKUBE_PROFILE}" start \
   --driver=docker \
-  --container-runtime=containerd \
+  --insecure-registry="${EXTERNAL_REGISTRY_NAME}:5000" \
   --extra-config=kubelet.authentication-token-webhook=true \
   --extra-config=kubelet.authorization-mode=Webhook \
   --extra-config=scheduler.bind-address=0.0.0.0 \
@@ -74,9 +78,10 @@ fi
 export KUBE_CONTEXT="${KUBE_CONTEXT:-${MINIKUBE_PROFILE}}"
 wait_for_cluster_dns
 
-set_docker_hosted_defaults
-LOCAL_REGISTRY="localhost:${EXTERNAL_REGISTRY_PORT}"
-BUILD_REGISTRY_ENDPOINT="${BUILD_REGISTRY_ENDPOINT:-${LOCAL_REGISTRY}}"
+# In-cluster pulls use the docker-network DNS name; the host's `docker buildx`
+# push goes to the bind-mounted localhost port. Same registry, two URLs.
+LOCAL_REGISTRY="${EXTERNAL_REGISTRY_NAME}:5000"
+BUILD_REGISTRY_ENDPOINT="${BUILD_REGISTRY_ENDPOINT:-localhost:${EXTERNAL_REGISTRY_PORT}}"
 export USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-true}"
 POST_MA_INSTALL_HOOK="${POST_MA_INSTALL_HOOK:-wait_for_ma_runtime}"
 POST_TC_INSTALL_HOOK="${POST_TC_INSTALL_HOOK:-wait_for_test_clusters}"

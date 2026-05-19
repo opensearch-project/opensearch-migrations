@@ -10,8 +10,10 @@ KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-ma}"
 KIND_CONTEXT="${KIND_CONTEXT:-kind-${KIND_CLUSTER_NAME}}"
 KIND_CONFIG_FILE="${KIND_CONFIG_FILE:-${MIGRATIONS_REPO_ROOT_DIR}/deployment/k8s/kindClusterConfig.yaml}"
 set_docker_hosted_defaults
-LOCAL_REGISTRY="${LOCAL_REGISTRY:-localhost:${EXTERNAL_REGISTRY_PORT}}"
-BUILD_REGISTRY_ENDPOINT="${BUILD_REGISTRY_ENDPOINT:-${LOCAL_REGISTRY}}"
+# In-cluster pulls use the docker-network DNS name; the host's `docker buildx`
+# push goes to the bind-mounted localhost port. Same registry, two URLs.
+LOCAL_REGISTRY="${LOCAL_REGISTRY:-${EXTERNAL_REGISTRY_NAME}:5000}"
+BUILD_REGISTRY_ENDPOINT="${BUILD_REGISTRY_ENDPOINT:-localhost:${EXTERNAL_REGISTRY_PORT}}"
 export KUBE_CONTEXT="${KUBE_CONTEXT:-${KIND_CONTEXT}}"
 
 require_command kind
@@ -22,11 +24,6 @@ require_command helm
 DOCKER_CONTEXT_NAME="$(docker context show 2>/dev/null || true)"
 echo "Using docker context: ${DOCKER_CONTEXT_NAME:-default}"
 echo "kind will use the docker-compatible runtime exposed by that context."
-
-if [[ "${USE_LOCAL_REGISTRY:-true}" == "true" && "${LOCAL_REGISTRY}" != "localhost:${EXTERNAL_REGISTRY_PORT}" ]]; then
-  echo "This script expects LOCAL_REGISTRY=localhost:${EXTERNAL_REGISTRY_PORT} so kind's containerd mirror matches ${KIND_CONFIG_FILE}." >&2
-  exit 1
-fi
 
 if kind get clusters | grep -qx "${KIND_CLUSTER_NAME}"; then
   echo "kind cluster ${KIND_CLUSTER_NAME} already exists, skipping create"
@@ -57,7 +54,7 @@ metadata:
   namespace: kube-public
 data:
   localRegistryHosting.v1: |
-    host: "localhost:${EXTERNAL_REGISTRY_PORT}"
+    host: "${EXTERNAL_REGISTRY_NAME}:5000"
     help: "https://kind.sigs.k8s.io/docs/user/local-registry/"
 EOF
 fi

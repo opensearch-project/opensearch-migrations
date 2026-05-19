@@ -59,16 +59,21 @@ def call(Map config = [:]) {
 
             stage('Recreate Minikube') {
                 steps {
-                    // Always recreate on containerd. The shared docker-hosted registry/buildkit
-                    // containers and their registry-data + buildkit-cache volumes live on host
-                    // Docker, so they survive `minikube delete` and image layers are reused.
+                    // Always recreate. The shared docker-hosted registry/buildkit containers
+                    // and their registry-data + buildkit-cache volumes live on host Docker,
+                    // so they survive `minikube delete` and image layers are reused.
+                    // Use minikube's default cri-dockerd runtime + bridge CNI: forcing
+                    // containerd makes minikube install kindnet, which pulls a docker.io
+                    // image at every cluster start and breaks under Docker Hub rate limits
+                    // in CI. `--insecure-registry=docker-registry:5000` lets dockerd accept
+                    // plain HTTP from our in-cluster registry name.
                     timeout(time: 10, unit: 'MINUTES') {
                         sh 'minikube delete || true'
                         // minikube delete sometimes leaves the "minikube" docker network behind
                         // with its 192.168.49.0/24 subnet; drop it so the next start can recreate
                         // it without "address already in use".
                         sh 'docker network rm minikube 2>/dev/null || true'
-                        sh 'minikube start --driver=docker --container-runtime=containerd'
+                        sh 'minikube start --driver=docker --insecure-registry=docker-registry:5000'
                     }
                 }
             }
@@ -79,7 +84,7 @@ def call(Map config = [:]) {
                         script {
                             sh "kubectl config unset current-context || true"
                             // Bring up the docker-hosted registry/buildkit, then attach the minikube node
-                            // container to the same docker network so containerd can pull localhost:5001.
+                            // container to the same docker network so dockerd can pull docker-registry:5000.
                             sh '''
                                 set -eu
                                 . ./buildImages/backends/dockerHostedBuildkit.sh
@@ -114,7 +119,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
                                 sh "kubectl config unset current-context || true"
-                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='localhost:5001/' --kube-context=minikube"
+                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5000/' --kube-context=minikube"
                             }
                         }
                     }

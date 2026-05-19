@@ -117,9 +117,10 @@ ensure_registry_container() {
 }
 
 # Connect a Kubernetes cluster's docker network to the registry's network and
-# install a containerd hosts.toml on every node so localhost:${EXTERNAL_REGISTRY_PORT}
-# routes to http://${EXTERNAL_REGISTRY_NAME}:5000. Lets kind and minikube share the
-# same docker-hosted registry container without insecure-registry flags or NodePorts.
+# install a containerd hosts.toml on every node so pulls of
+# ${EXTERNAL_REGISTRY_NAME}:5000 are served over plain HTTP (the registry
+# container has no TLS). Pods reference images by that in-cluster name, which
+# the node container resolves via Docker's bridge DNS.
 # Args: <cluster-docker-network> <node-container-name>...
 connect_cluster_to_registry_network() {
   local cluster_network="$1"
@@ -138,12 +139,12 @@ connect_cluster_to_registry_network() {
     docker network connect "${cluster_network}" "${EXTERNAL_REGISTRY_NAME}"
   fi
 
-  local registry_dir="/etc/containerd/certs.d/localhost:${EXTERNAL_REGISTRY_PORT}"
+  local registry_dir="/etc/containerd/certs.d/${EXTERNAL_REGISTRY_NAME}:5000"
   local node
   for node in "${nodes[@]}"; do
     docker exec "${node}" mkdir -p "${registry_dir}"
     cat <<EOF | docker exec -i "${node}" cp /dev/stdin "${registry_dir}/hosts.toml"
-[host."http://${EXTERNAL_REGISTRY_NAME}:5000"]
+server = "http://${EXTERNAL_REGISTRY_NAME}:5000"
 EOF
   done
 }
