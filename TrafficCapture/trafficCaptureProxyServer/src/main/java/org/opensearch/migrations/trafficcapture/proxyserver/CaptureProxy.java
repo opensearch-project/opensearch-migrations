@@ -314,10 +314,29 @@ public class CaptureProxy {
 
     protected static SslContext loadBacksideSslContext(URI serverUri, boolean allowInsecureConnections)
         throws SSLException {
+        return loadBacksideSslContext(serverUri, allowInsecureConnections, false);
+    }
+
+    /**
+     * Build the SSL context for backside (proxy → upstream) connections. When
+     * {@code enableHttp2} is true, the context advertises ALPN with {@code h2,http/1.1}
+     * so the upstream picks the same protocol the client picked. Per RFC 0001 §7.5.
+     */
+    protected static SslContext loadBacksideSslContext(URI serverUri, boolean allowInsecureConnections,
+                                                        boolean enableHttp2)
+        throws SSLException {
         if (serverUri.getScheme().equalsIgnoreCase("https")) {
             var sslContextBuilder = SslContextBuilder.forClient();
             if (allowInsecureConnections) {
                 sslContextBuilder.trustManager(InsecureTrustManagerFactory.INSTANCE);
+            }
+            if (enableHttp2) {
+                sslContextBuilder.applicationProtocolConfig(new io.netty.handler.ssl.ApplicationProtocolConfig(
+                    io.netty.handler.ssl.ApplicationProtocolConfig.Protocol.ALPN,
+                    io.netty.handler.ssl.ApplicationProtocolConfig.SelectorFailureBehavior.NO_ADVERTISE,
+                    io.netty.handler.ssl.ApplicationProtocolConfig.SelectedListenerFailureBehavior.ACCEPT,
+                    io.netty.handler.ssl.ApplicationProtocolNames.HTTP_2,
+                    io.netty.handler.ssl.ApplicationProtocolNames.HTTP_1_1));
             }
             return sslContextBuilder.build();
         } else {
@@ -423,7 +442,7 @@ public class CaptureProxy {
                 : Duration.parse(params.destinationConnectionPoolTimeout);
             var backsideConnectionPool = new BacksideConnectionPool(
                 backsideUri,
-                loadBacksideSslContext(backsideUri, params.allowInsecureConnectionsToBackside),
+                loadBacksideSslContext(backsideUri, params.allowInsecureConnectionsToBackside, params.enableHttp2),
                 params.destinationConnectionPoolSize,
                 pooledConnectionTimeout
             );
