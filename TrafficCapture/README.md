@@ -316,8 +316,25 @@ from the final response so the request/response pairing remains correct:
 - `targetResponses[i].interimResponses` — interim responses seen on each target retry
   attempt, nested inside that attempt's response entry.
 
+Each interim response dict has the same shape as a normal response dict (headers,
+`HTTP-Version`, `Status-Code`, `Reason-Phrase`); `response_time_ms` is omitted because
+interim responses do not have a measurable transaction latency.
+
 `101 Switching Protocols` is treated as a final response (it ends HTTP processing on the
 connection) and continues to appear under `sourceResponse`/`targetResponses`.
+
+###### Transformations and interim responses
+
+- **Request transformers** (transformers that mutate the request being sent to the target)
+  are unaffected. Interim responses are not replayed from the captured source data; the
+  replayer's HTTP client negotiates `Expect: 100-continue` with the target server based on
+  the captured request headers, and any interim responses the target returns are recorded
+  on the target side automatically.
+- **Tuple transformers** (transformers that mutate the entire tuple JSON before logging)
+  can read, redact, or drop interim responses using normal JSON path operations on the
+  `sourceInterimResponses` array and `targetResponses[i].interimResponses` arrays.
+  Existing tuple transformers continue to work without changes — interim response fields
+  are additive and ignored by transformers that don't reference them.
 
 ### Capture Kafka Offloader
 
