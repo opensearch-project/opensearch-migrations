@@ -310,7 +310,6 @@ jobs:
           KIND_REGISTRY_PORT: "5002"
         run: deployment/k8s/tests/mountableTransformsImageVolumeTest.sh
 
-
   link-checker:
     runs-on: ubuntu-22.04
 

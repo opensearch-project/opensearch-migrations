@@ -336,6 +336,8 @@ spec:
                   type: string
                 documentBackfillServerGeneratedIds:
                   type: string
+                documentBackfillEmitDocType:
+                  type: string
                 documentBackfillAllowedDocExceptionTypes:
                   type: array
                   items:

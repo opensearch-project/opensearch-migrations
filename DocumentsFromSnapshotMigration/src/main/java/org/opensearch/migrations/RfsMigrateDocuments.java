@@ -125,6 +125,12 @@ public class RfsMigrateDocuments {
         NEVER   // Always preserve source IDs
     }
 
+    public enum EmitDocTypeMode {
+        AUTO, // Emit _type only when source is ES <= 6 and a doc transformer is configured
+        ON,   // Always emit _type into bulk action-line metadata
+        OFF   // Never emit _type
+    }
+
     public static class Args {
         /** Default maximum documents per bulk batch. */
         static final int DEFAULT_MAX_DOCS_PER_BATCH = Integer.MAX_VALUE;
@@ -279,11 +285,11 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
             names = { "--emit-doc-type" },
-            description = "Optional. When true, propagates the ES _type field into bulk action-line metadata. " +
-                "Required when using type-mapping transformers (e.g. TypeMappingSanitizationTransformerProvider) " +
-                "for ES 5.x multi-type index migrations. Default: false")
-        public boolean emitDocType = false;
-
+            description = "Optional. Controls whether the ES _type field is propagated into bulk action-line metadata. " +
+                "AUTO (default): emit _type only when the source is ES 6 or older AND a document transformer is " +
+                "configured (e.g. TypeMappingSanitizationTransformerProvider for multi-type indices). " +
+                "ON: always emit _type. OFF: never emit _type.")
+        public EmitDocTypeMode emitDocType = EmitDocTypeMode.AUTO;
 
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
@@ -524,6 +530,9 @@ public class RfsMigrateDocuments {
             ? null
             : () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
 
+        boolean emitDocType = resolveEmitDocType(
+            arguments.emitDocType, arguments.sourceVersion, docTransformerConfig);
+
         if (arguments.sourceVersion != null && arguments.sourceVersion.getFlavor() == Flavor.SOLR) {
             runSolrBackupMigration(arguments, targetClient, docTransformerSupplier, useServerGeneratedIds, context);
             return;
@@ -631,7 +640,7 @@ public class RfsMigrateDocuments {
                 arguments.experimental.experimentalDeltaMode,
                 arguments.experimental.enableSourcelessMigrations,
                 arguments.experimental.useRecoverySource,
-                arguments.emitDocType);
+                emitDocType);
             cleanShutdownCompleted.set(true);
             if (status == CompletionStatus.NOTHING_DONE) {
                 log.atInfo().setMessage("Work exists but none available to this worker. Exiting with exit code " + NO_WORK_AVAILABLE_EXIT_CODE).log();
@@ -688,6 +697,31 @@ public class RfsMigrateDocuments {
             .addArgument(calculateTotalRetryWindowSeconds(completionRetryConfig))
             .log();
         return completionRetryConfig;
+    }
+
+    /**
+     * Resolve {@link EmitDocTypeMode} to a boolean. AUTO enables _type emission only when the
+     * source is ES 6 or older AND a document transformer is configured — the combination that
+     * exercises type-mapping transformers (e.g. TypeMappingSanitizationTransformerProvider) on
+     * multi-type indices.
+     */
+    static boolean resolveEmitDocType(EmitDocTypeMode mode, Version sourceVersion, String docTransformerConfig) {
+        return switch (mode) {
+            case ON -> true;
+            case OFF -> false;
+            case AUTO -> {
+                boolean isLegacyEs = sourceVersion != null
+                    && sourceVersion.getFlavor() == Flavor.ELASTICSEARCH
+                    && sourceVersion.getMajor() <= 6;
+                boolean hasCustomTransformer = docTransformerConfig != null;
+                boolean enable = isLegacyEs && hasCustomTransformer;
+                if (enable) {
+                    log.atInfo().setMessage("Auto-enabling --emit-doc-type for {} with custom transformer")
+                        .addArgument(sourceVersion).log();
+                }
+                yield enable;
+            }
+        };
     }
 
     /**
