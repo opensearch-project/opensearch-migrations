@@ -98,7 +98,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     private final AtomicReference<Error> shutdownReasonRef;
     private final AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
     /**
-     * RFC 0001 §8.5 — when set, the replayer dispatches H2 requests via this factory's
+     * — when set, the replayer dispatches H2 requests via this factory's
      * shared multiplexed parent connection. Set by {@link TrafficReplayer#main} when
      * {@code --targetEnableHttp2} is on.
      */

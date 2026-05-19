@@ -15,7 +15,7 @@ public class RootWireLoggingContext extends RootOtelContext implements IRootWire
     public final WireCaptureContexts.BlockingContext.MetricInstruments blockingInstruments;
     public final WireCaptureContexts.WaitingForResponseContext.MetricInstruments waitingForResponseInstruments;
     public final WireCaptureContexts.ResponseContext.MetricInstruments responseInstruments;
-    /** RFC 0001 §7.7 — HTTP/2 capture-path metrics. */
+    /** — HTTP/2 capture-path metrics. */
     public final H2MetricInstruments h2Instruments;
 
     public RootWireLoggingContext(OpenTelemetry openTelemetry, IContextTracker contextTracker) {

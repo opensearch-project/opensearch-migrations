@@ -14,7 +14,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * RFC 0001 T3.3 — coverage for {@link PerStreamGateHandler} per-stream lifecycle.
+ * — coverage for {@link PerStreamGateHandler} per-stream lifecycle.
  *
  * <p>Verifies:
  * <ul>

@@ -28,8 +28,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Verifies that captures produced by older (v1) capture proxies — which never set
  * {@code captureFormatVersion} or {@code negotiatedAlpn} on the {@link TrafficStream}
- * envelope — continue to drive the H1 accumulator path identically after RFC 0001
- * schema changes.
+ * envelope — continue to drive the H1 accumulator path identically after  * schema changes.
  *
  * <p>The v1 wire format and the H1 portion of the v2 wire format are byte-identical:
  * proto3's open-set field default for unset {@code string} is the empty string. A v1

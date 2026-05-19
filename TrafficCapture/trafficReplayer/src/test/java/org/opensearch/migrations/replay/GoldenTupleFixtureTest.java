@@ -23,7 +23,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * RFC 0001 T11.3 — golden tuple fixtures.
+ * — golden tuple fixtures.
  *
  * <p>Drives canonical H2 fixtures through the accumulator and asserts the resulting
  * RequestResponsePacketPair carries the expected tuple metadata (sourceProtocol +
@@ -69,7 +69,7 @@ class GoldenTupleFixtureTest extends InstrumentationTest {
                 @NonNull IReplayContexts.ITrafficStreamsLifecycleContext c) {}
     }
 
-    /** Build a "tuple-like" map with just the protocol + streamId fields surfaced by T7.2. */
+    /** Build a "tuple-like" map with just the protocol + streamId fields surfaced by. */
     private static Map<String, Object> goldenLike(RequestResponsePacketPair pair) {
         var m = new LinkedHashMap<String, Object>();
         if (pair.getSourceProtocol() != null) m.put("sourceProtocol", pair.getSourceProtocol());
@@ -141,7 +141,7 @@ class GoldenTupleFixtureTest extends InstrumentationTest {
         accumulator.accept(new PojoTrafficStreamAndKey(stream,
                 PojoTrafficStreamKeyAndContext.build(stream, rootContext::createTrafficStreamContextForTest)));
 
-        // Per T5.2 semantics: both stream 1 and stream 3 had complete request sides
+        // Per semantics: both stream 1 and stream 3 had complete request sides
         // (HEADERS endStream), so both fire onRequestReceived. The response continuation
         // only fires for stream 1 (which got a real response on the wire).
         var pairs = cbs.pairs;

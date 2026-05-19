@@ -317,8 +317,7 @@ Fields:
 - Output goes to stdout. Log messages go to stderr (via slf4j, same as existing behavior).
 
 
-## HTTP/2 support (RFC 0001)
-
+## HTTP/2 support 
 The replayer can consume v2-format captures (HTTP/2-aware) when started with
 `-Dreplayer.h2.enabled=true`. Without this flag, encountering a v2 capture
 fails fast with a clear error pointing at the version mismatch — this avoids
@@ -333,15 +332,14 @@ substream sniffing when ALPN is empty. The H2 path:
 
 1. Per-stream state in `H2Accumulation.liveStreams` keyed by H2 streamId.
 2. `addH2Observation` dispatches by frame type — HEADERS, DATA, RST_STREAM,
-   GOAWAY, SETTINGS — per RFC 0001 §8.2.
-3. When a stream completes, `H2ToH1ObjectAdapter` converts the H2 stream into
+   GOAWAY, SETTINGS — per 3. When a stream completes, `H2ToH1ObjectAdapter` converts the H2 stream into
    `DefaultHttpRequest` + `HttpContent*` + `LastHttpContent` so the existing
    `HttpJsonTransformingConsumer` pipeline runs unchanged.
 
 ### Boundary adapter (`H2ToH1ObjectAdapter`)
 
 The adapter is the only component that crosses the capture/transformation
-boundary. It implements every row of the RFC 0001 §8.4 mapping table:
+boundary. It implements every row of the mapping table:
 pseudo-header normalization, `:authority` → `Host:`, cookie crumb folding,
 CRLF rejection, trailers reattached to `LastHttpContent`. JSON transformers
 are protocol-agnostic by virtue of this conversion.
@@ -350,15 +348,13 @@ are protocol-agnostic by virtue of this conversion.
 
 `RequestResponsePacketPair.ReconstructionStatus` gains `RESET_BY_PEER`,
 `GOAWAY_DROPPED`, `MALFORMED`, `UNSUPPORTED`, `TRUNCATED` for H2-specific
-edge cases per RFC 0001 §9.
-
+edge cases per 
 ### Limitations (current build)
 
 - The replayer's *target* side does not yet speak H2; H2 captures are replayed
-  to H1 targets via the adapter. Native H2 target support is RFC 0001 Phase 6
-  (T6.1–T6.4) and not yet implemented.
+  to H1 targets via the adapter. Native H2 target support is   (–) and not yet implemented.
 - Stream-completion → `onRequestReceived` callback wiring is a stub; full
-  per-stream emission lands with T5.2.
-- No fixture-driven integration tests yet (RFC 0001 Phase 11).
+  per-stream emission lands with.
+- No fixture-driven integration tests yet ().
 
 See `docs/rfcs/0001-http2-trafficcapture.md` for the full design.

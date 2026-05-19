@@ -7,7 +7,7 @@ import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
 
 /**
- * RFC 0001 §7.7 — OpenTelemetry counters / histograms for the HTTP/2 capture path.
+ * — OpenTelemetry counters / histograms for the HTTP/2 capture path.
  *
  * <p>One instance per {@link RootWireLoggingContext}. Wire by passing the {@code Meter}
  * obtained from the OTel SDK; the context already does this for the H1 metrics.

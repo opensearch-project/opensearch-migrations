@@ -23,7 +23,7 @@ import io.netty.util.AsciiString;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Minimal-parse HTTP/2 frame sniffer (RFC 0001 §7.3).
+ * Minimal-parse HTTP/2 frame sniffer ().
  *
  * <p>The handler sits in the Netty pipeline between the {@link io.netty.handler.ssl.SslHandler}
  * and the byte-forwarding handler. It parses the 9-byte H2 frame header to identify frame
@@ -34,7 +34,7 @@ import lombok.extern.slf4j.Slf4j;
  * the capture serializer. Bytes forwarded downstream are byte-identical retained slices of the
  * input buffer — no re-encoding occurs.
  *
- * <p>Per LLD §7.3, the sniffer is a transparent forwarder: it inspects HEADERS only enough to
+ * <p>Per, the sniffer is a transparent forwarder: it inspects HEADERS only enough to
  * fire a gating signal (via {@code onHeadersForGating}) for mutating-method streams that
  * the per-stream gate must hold; it does not buffer DATA or rewrite frames.
  *

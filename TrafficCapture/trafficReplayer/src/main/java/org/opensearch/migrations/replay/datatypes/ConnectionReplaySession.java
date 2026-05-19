@@ -54,7 +54,7 @@ public class ConnectionReplaySession {
     /**
      * When true, this session uses a multiplex-capable transport (e.g. HTTP/2). The orchestrator
      * fires every scheduled task immediately at its {@code atTime} rather than chaining each
-     * task to the previous one's completion. RFC 0001 §8.5: H2 streams are independent on the
+     * task to the previous one's completion. H2 streams are independent on the
      * wire, so there's no protocol-level reason to serialize them.
      */
     @Setter

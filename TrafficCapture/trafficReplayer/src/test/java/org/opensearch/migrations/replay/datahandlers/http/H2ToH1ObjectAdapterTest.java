@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * RFC 0001 §8.4 — coverage for {@link H2ToH1ObjectAdapter}. One test per row of the
+ * — coverage for {@link H2ToH1ObjectAdapter}. One test per row of the
  * pseudo-header / forbidden-header mapping table, plus end-to-end conversion.
  */
 class H2ToH1ObjectAdapterTest {

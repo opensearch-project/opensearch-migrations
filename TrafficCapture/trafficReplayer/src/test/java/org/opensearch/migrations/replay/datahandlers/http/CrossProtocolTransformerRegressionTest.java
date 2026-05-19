@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * RFC 0001 T5.3 — cross-protocol regression: an H2-shaped request, when run through the
+ * — cross-protocol regression: an H2-shaped request, when run through the
  * H2ToH1ObjectAdapter and serialized back to bytes via Netty's HttpRequestEncoder, must
  * be processed by the existing HttpJsonTransformingConsumer pipeline byte-for-byte
  * identically to how an equivalent H1 request would be processed.

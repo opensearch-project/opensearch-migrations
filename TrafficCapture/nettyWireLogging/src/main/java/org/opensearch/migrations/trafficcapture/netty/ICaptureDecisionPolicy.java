@@ -6,7 +6,7 @@ import io.netty.handler.codec.http2.Http2Headers;
 /**
  * Capture decision policy: evaluates per-request whether the proxy should capture, drop, or
  * otherwise treat traffic. Two flavors of input — the existing H1 path provides
- * {@link HttpRequest}, the H2 path (RFC 0001 \u00a77.3) provides a streamId + decoded
+ * {@link HttpRequest}, the H2 path provides a streamId + decoded
  * {@link Http2Headers}.
  *
  * <p>Implementations should be stateless and thread-safe; they are called from the Netty event

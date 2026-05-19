@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * Phase 2 (RFC 0001) coverage for {@link HeaderValueFilteringCapturePredicate#forH2Stream}.
+ * for {@link HeaderValueFilteringCapturePredicate#forH2Stream}.
  * Mirrors the H1 test cases for the same predicate and additionally locks in pseudo-header
  * mapping behavior.
  */

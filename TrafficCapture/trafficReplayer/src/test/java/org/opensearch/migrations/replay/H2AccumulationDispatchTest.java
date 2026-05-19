@@ -33,7 +33,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * RFC 0001 Phase 4 — coverage for the H2 dispatch + per-stream lifecycle on the
+ * — coverage for the H2 dispatch + per-stream lifecycle on the
  * replayer accumulator. Verifies:
  * <ul>
  *   <li>H2 envelope routes to {@link H2Accumulation} via {@link CapturedTrafficToHttpTransactionAccumulator}</li>
@@ -44,7 +44,7 @@ import org.junit.jupiter.api.Test;
  *   <li>SETTINGS update connection state</li>
  * </ul>
  *
- * <p>The H2 accumulator path doesn't yet emit RequestResponsePacketPair callbacks (T5.2 wires
+ * <p>The H2 accumulator path doesn't yet emit RequestResponsePacketPair callbacks (wires
  * the adapter); these tests exercise state mutation via the public dispatch surface.
  */
 class H2AccumulationDispatchTest extends InstrumentationTest {

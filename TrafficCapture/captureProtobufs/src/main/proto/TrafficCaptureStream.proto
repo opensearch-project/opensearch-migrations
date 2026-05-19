@@ -43,7 +43,7 @@ message EndOfMessageIndication {
 }
 message RequestIntentionallyDropped {}
 
-// ---------- HTTP/2 observations (RFC 0001) ----------
+// ---------- HTTP/2 observations ----------
 
 enum Http2FrameType {
   H2_DATA = 0;
@@ -172,7 +172,7 @@ message TrafficObservation {
 
     RequestIntentionallyDropped requestDropped = 16;
 
-    // ---- HTTP/2 observations (RFC 0001) ----
+    // ---- HTTP/2 observations ----
     Http2FrameObservation http2Frame = 17;
     AlpnNegotiationObservation alpn = 18;
   }
@@ -190,7 +190,7 @@ message TrafficStream {
     int32 numberOfThisLastChunk = 4;
   }
 
-  // ---- HTTP/2 envelope fields (RFC 0001) ----
+  // ---- HTTP/2 envelope fields ----
   // captureFormatVersion: empty or "v1" => H1-only capture; "v2" => may contain H2 frame observations.
   string captureFormatVersion = 8;
   // negotiatedAlpn: stamped on every TrafficStream record for fast filtering and mid-stream

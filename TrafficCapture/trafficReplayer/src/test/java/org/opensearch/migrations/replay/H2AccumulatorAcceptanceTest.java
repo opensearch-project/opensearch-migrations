@@ -20,7 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * RFC 0001 T4.6 — fixture-driven acceptance for the H2 accumulator dispatch path.
+ * — fixture-driven acceptance for the H2 accumulator dispatch path.
  *
  * <p>Each test runs a programmatically-generated {@link H2FixtureGenerator} fixture
  * through the H2-aware accumulator and asserts the dispatch behavior. These tests

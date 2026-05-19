@@ -24,7 +24,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * RFC 0001 T3.5 — Phase 3 acceptance: H2 client → proxy → upstream end-to-end.
+ * —: H2 client → proxy → upstream end-to-end.
  *
  * <p>This test drives the assembled H2 proxy pipeline (sniffer + per-stream gate +
  * forwarder) with realistic H2 traffic and asserts:
@@ -37,7 +37,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p>Uses {@link EmbeddedChannel} rather than a full TLS/ALPN end-to-end stack — the ALPN
  * negotiation, SslContext, and proxy startup paths are already covered by their own
- * tests (T2.2, T2.3, T3.2). This test exercises the configured pipeline as a whole.
+ * tests (,, ). This test exercises the configured pipeline as a whole.
  */
 class H2EndToEndPipelineTest {
 
@@ -61,25 +61,25 @@ class H2EndToEndPipelineTest {
         var channel = new EmbeddedChannel();
         initializer.invokeConfigureH2Pipeline(channel, "test-conn-h2-e2e");
 
-        // Phase 1: client opens connection with PREFACE + SETTINGS
+        // client opens connection with PREFACE + SETTINGS
         channel.writeInbound(Unpooled.wrappedBuffer(WireFixtures.PREFACE));
         channel.writeInbound(Unpooled.wrappedBuffer(WireFixtures.settingsDefault()));
 
-        // Phase 2: stream 1 = POST /_bulk (mutating, should gate)
+        // stream 1 = POST /_bulk (mutating, should gate)
         var postHeaders = new DefaultHttp2Headers().method("POST").path("/_bulk")
                 .scheme("https").authority("h");
         var postFrame = WireFixtures.headersFrame(1,
                 WireFixtures.FLAG_END_HEADERS, postHeaders);
         channel.writeInbound(Unpooled.wrappedBuffer(postFrame));
 
-        // Phase 3: stream 3 = GET /_search (non-mutating, should pass through)
+        // stream 3 = GET /_search (non-mutating, should pass through)
         var getHeaders = new DefaultHttp2Headers().method("GET").path("/_search")
                 .scheme("https").authority("h");
         var getFrame = WireFixtures.headersFrame(3,
                 WireFixtures.FLAG_END_HEADERS | WireFixtures.FLAG_END_STREAM, getHeaders);
         channel.writeInbound(Unpooled.wrappedBuffer(getFrame));
 
-        // Phase 4: DATA on stream 1 (mutating body, should be queued behind gate)
+        // DATA on stream 1 (mutating body, should be queued behind gate)
         var postDataFrame = WireFixtures.dataFrame(1, WireFixtures.FLAG_END_STREAM,
                 "{\"index\":{}}\n".getBytes());
         channel.writeInbound(Unpooled.wrappedBuffer(postDataFrame));
@@ -99,7 +99,7 @@ class H2EndToEndPipelineTest {
             forwardedSoFar.release();
         }
 
-        // Phase 5: commit — gate releases the held frames.
+        // commit — gate releases the held frames.
         commitFuture.complete(null);
         channel.runPendingTasks();
         var afterCommit = drainInbound(channel);

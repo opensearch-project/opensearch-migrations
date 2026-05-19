@@ -50,7 +50,7 @@ import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * RFC 0001 T6.2 — H2 target consumer.
+ * — H2 target consumer.
  *
  * <p>Accepts H1-shape bytes via {@link #consumeBytes(ByteBuf)}, parses them locally to
  * extract the request line + headers + body, opens an {@link Http2StreamChannel} on a
@@ -64,7 +64,7 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>This is a lightweight implementation suitable for one logical request per consumer
  * instance — the {@link ConnectionReplaySession}-level multiplexing across many
- * consumers (T6.3) is the responsibility of the session orchestrator.
+ * consumers  is the responsibility of the session orchestrator.
  */
 @Slf4j
 public class H2NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<AggregatedRawResponse>, AutoCloseable {

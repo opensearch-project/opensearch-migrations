@@ -13,7 +13,7 @@ import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Per-stream offload-blocking gate (RFC 0001 §7.4).
+ * Per-stream offload-blocking gate ().
  *
  * <p>Sits between {@link H2FrameSnifferHandler} and the byte-forwarding handler. For each H2
  * stream, holds inbound frames (HEADERS, DATA, WINDOW_UPDATE) until the offload commit

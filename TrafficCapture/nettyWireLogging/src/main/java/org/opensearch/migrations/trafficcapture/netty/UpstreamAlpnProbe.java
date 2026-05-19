@@ -23,7 +23,7 @@ import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * RFC 0001 T3.2 — startup ALPN probe of the upstream.
+ * — startup ALPN probe of the upstream.
  *
  * <p>{@link #probe(URI, boolean, Duration)} opens one TLS connection to the upstream
  * advertising both {@code h2} and {@code http/1.1} via ALPN, observes which protocol

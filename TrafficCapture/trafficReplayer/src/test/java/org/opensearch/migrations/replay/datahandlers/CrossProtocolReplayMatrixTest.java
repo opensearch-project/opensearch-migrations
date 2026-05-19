@@ -51,7 +51,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /**
- * RFC 0001 T6.4 — cross-protocol replay matrix.
+ * — cross-protocol replay matrix.
  *
  * <p>The 4 combinations:
  * <ul>
@@ -63,7 +63,7 @@ import org.junit.jupiter.api.Timeout;
  *
  * <p>For "H2 capture" we use {@link H2ToH1ObjectAdapter} to convert an H2
  * stream-state into H1 wire bytes, then feed those bytes to the consumer. That
- * matches the actual replayer flow (T5.2): H2 streams are materialized as H1
+ * matches the actual replayer flow : H2 streams are materialized as H1
  * objects and then re-serialized for the existing transformer pipeline.
  */
 class CrossProtocolReplayMatrixTest {

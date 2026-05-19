@@ -64,7 +64,7 @@ public interface IChannelConnectionCaptureListener<T> {
 
     default void cancelCaptureForCurrentRequest(Instant timestamp) throws IOException {}
 
-    // ---- HTTP/2 capture API (RFC 0001) ----
+    // ---- HTTP/2 capture API ----
 
     /**
      * Called once per connection after the TLS handshake completes and ALPN has selected a

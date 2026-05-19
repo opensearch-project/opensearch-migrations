@@ -36,7 +36,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /**
- * RFC 0001 T6.2 — coverage for {@link H2NettyPacketToHttpConsumer}.
+ * — coverage for {@link H2NettyPacketToHttpConsumer}.
  *
  * <p>TDD scope: the consumer accepts H1-shape bytes via {@code consumeBytes}, opens an
  * H2 stream toward a target H2 endpoint, sends the request as HEADERS+DATA frames, and

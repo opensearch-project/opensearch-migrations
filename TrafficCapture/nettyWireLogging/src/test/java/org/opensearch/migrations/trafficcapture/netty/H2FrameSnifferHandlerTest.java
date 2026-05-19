@@ -26,7 +26,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * Phase 2 (RFC 0001 T2.5) unit coverage for {@link H2FrameSnifferHandler}.
+ * Phase 2  unit coverage for {@link H2FrameSnifferHandler}.
  *
  * <p>Drives the cumulator FSM with deterministic byte sequences (split mid-frame, split
  * mid-header, etc.) and asserts the captured observations + the byte-identical forwarded

@@ -186,7 +186,7 @@ public class CaptureProxy {
             names = { "--enableHttp2" },
             arity = 0,
             description = "Negotiate HTTP/2 via ALPN with both clients and the upstream server, and capture H2 "
-                + "frame-level traffic using the format defined in RFC 0001. Default: false (HTTP/1.1 only).")
+                + "frame-level traffic using the format defined in. Default: false (HTTP/1.1 only).")
         public boolean enableHttp2;
         @Parameter(required = false,
             names = { "--http2MaxConcurrentStreams" },
@@ -321,8 +321,7 @@ public class CaptureProxy {
     /**
      * Build the SSL context for backside (proxy → upstream) connections. When
      * {@code enableHttp2} is true, the context advertises ALPN with {@code h2,http/1.1}
-     * so the upstream picks the same protocol the client picked. Per RFC 0001 §7.5.
-     */
+     * so the upstream picks the same protocol the client picked. Per      */
     protected static SslContext loadBacksideSslContext(URI serverUri, boolean allowInsecureConnections,
                                                         boolean enableHttp2)
         throws SSLException {
@@ -361,8 +360,7 @@ public class CaptureProxy {
      *
      * <p>When {@code enableHttp2} is true, the returned SSL context advertises ALPN with
      * {@code h2} and {@code http/1.1} (in that order); otherwise no ALPN is configured and
-     * the proxy speaks HTTP/1.1 to clients regardless of what they advertise. Per RFC 0001 §7.1.
-     */
+     * the proxy speaks HTTP/1.1 to clients regardless of what they advertise. Per      */
     protected static Supplier<SSLEngine> loadSslEngineFromPem(
         String certChainPath, String keyPath, String trustCertPath, boolean requireClientAuth, boolean enableHttp2
     ) throws SSLException {
@@ -429,7 +427,7 @@ public class CaptureProxy {
         var params = parseArgs(args);
         var backsideUri = convertStringToUri(params.backsideUriString);
 
-        // T3.2 — when --enableHttp2 is set, probe the upstream's ALPN to confirm it speaks h2.
+        // when --enableHttp2 is set, probe the upstream's ALPN to confirm it speaks h2.
         // If not, downgrade to advertising http/1.1-only to clients (avoids a runtime failure mode
         // where the client picks h2 but the upstream rejects). Probe failures are logged but do
         // not block startup — the proxy continues with the configured advertisement.
@@ -475,7 +473,7 @@ public class CaptureProxy {
                 .pathPattern(params.suppressUriPath)
                 .methodAndPathPattern(params.suppressMethodAndPath)
                 .suppressCaptureHeaderPairs(convertPairListToMap(params.suppressCaptureHeaderPairs));
-            // T2.8: when --enableHttp2 is set, the proxy is expected to capture H2 traffic; do NOT
+            // when --enableHttp2 is set, the proxy is expected to capture H2 traffic; do NOT
             // apply the legacy H1-protocol guard that drops captures whose first line matches
             // "HTTP/2.*". When the flag is off, preserve the historical behavior so any H2 client
             // that slipped past ALPN (we don't advertise it) still has its capture suppressed

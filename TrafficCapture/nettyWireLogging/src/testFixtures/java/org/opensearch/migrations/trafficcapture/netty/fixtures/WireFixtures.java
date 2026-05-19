@@ -9,7 +9,7 @@ import io.netty.handler.codec.http2.Http2Connection;
 import io.netty.handler.codec.http2.Http2Headers;
 
 /**
- * RFC 0001 §11 — wire-level byte fixtures for HTTP/2 frame sniffer tests.
+ * — wire-level byte fixtures for HTTP/2 frame sniffer tests.
  *
  * <p>Each method returns a raw byte sequence representing one or more H2 frames as they
  * would appear on the wire. Used by {@code H2FrameSnifferHandlerTest} and any future

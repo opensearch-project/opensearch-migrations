@@ -376,7 +376,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     /**
-     * RFC 0001 §8.1 protocol dispatch. Decides between {@link Accumulation} (H1) and
+     * protocol dispatch. Decides between {@link Accumulation} (H1) and
      * {@link H2Accumulation} based on the {@code negotiatedAlpn} envelope field, falling back
      * to {@code captureFormatVersion} and finally to substream sniffing.
      *
@@ -690,13 +690,13 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     /**
-     * RFC 0001 §8.2 — frame-table dispatch for HTTP/2 observations. Implements per-frame
+     * — frame-table dispatch for HTTP/2 observations. Implements per-frame
      * type handling on an {@link H2Accumulation} — HEADERS / DATA / RST_STREAM / GOAWAY /
      * SETTINGS / others. Connection-scoped frames (streamId=0) update connection state;
      * stream-scoped frames update the per-stream accumulation.
      *
      * <p>This is a minimal implementation that establishes the dispatch surface; full
-     * lifecycle handling (per RFC 0001 §8.2 table) is filled out across subsequent
+     * lifecycle handling (per table) is filled out across subsequent
      * commits as fixtures land.
      */
     private CONNECTION_STATUS addH2Observation(
@@ -813,7 +813,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     /**
-     * RFC 0001 T5.2 — fire {@code onRequestReceived} when an H2 stream's request side completes.
+     * — fire {@code onRequestReceived} when an H2 stream's request side completes.
      * Each H2 stream gets its own {@link RequestResponsePacketPair} (multiplexing means
      * we can't reuse the connection-level pair on Accumulation — that would collide across
      * concurrent streams). The context for that pair is built from the connection-level
@@ -832,7 +832,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     firstTs,
                     accum.startingSourceRequestIndex,
                     requestIndex);
-            // T7.2 surface: tag the pair with H2 protocol identity for tuple JSON visibility.
+            // surface: tag the pair with H2 protocol identity for tuple JSON visibility.
             rrPair.setSourceProtocolAndStream("HTTP/2.0", stream.streamId);
             var requestMessage = new HttpMessageAndTimestamp(firstTs);
             try {
@@ -863,7 +863,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     }
 
     /**
-     * RFC 0001 T5.2 — fire the response continuation when the response side of an H2 stream
+     * — fire the response continuation when the response side of an H2 stream
      * completes. Sets {@code completionStatus} on the in-flight RRP and accepts it via the
      * stored consumer.
      */

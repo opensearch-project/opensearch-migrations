@@ -140,7 +140,7 @@ public class ParsedHttpMessagesAsDicts {
         map.put("targetResponses", targetResponseList);
         var key = tuple.getRequestKey();
         map.put("connectionId", key.getTrafficStreamKey().getConnectionId() + "." + key.getSourceRequestIndex());
-        // RFC 0001 §8.6 — surface H2 protocol + streamId fields when present (additive, null-safe).
+        // — surface H2 protocol + streamId fields when present (additive, null-safe).
         if (tuple.sourcePair != null) {
             if (tuple.sourcePair.getSourceProtocol() != null) {
                 map.put("sourceProtocol", tuple.sourcePair.getSourceProtocol());

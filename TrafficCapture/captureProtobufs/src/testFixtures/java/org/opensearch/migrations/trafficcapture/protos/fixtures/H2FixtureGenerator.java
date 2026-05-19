@@ -20,7 +20,7 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
 
 /**
- * RFC 0001 §11 — programmatic fixture generator for HTTP/2 capture scenarios. Builds
+ * — programmatic fixture generator for HTTP/2 capture scenarios. Builds
  * deterministic {@link TrafficStream} protos so downstream tests can exercise the
  * accumulator + adapter without booting a real proxy + H2 client.
  *

@@ -39,7 +39,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /**
- * RFC 0001 T6.3 — verifies H2MultiplexedConsumerFactory issues N concurrent requests
+ * — verifies H2MultiplexedConsumerFactory issues N concurrent requests
  * on a single shared parent H2 connection, with each request opening its own
  * stream sub-channel. Each request must complete independently.
  */

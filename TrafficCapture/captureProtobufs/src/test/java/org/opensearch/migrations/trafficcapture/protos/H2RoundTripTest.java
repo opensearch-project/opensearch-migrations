@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Round-trip serialization of every HTTP/2 observation variant introduced by RFC 0001.
+ * Round-trip serialization of every HTTP/2 observation variant introduced by.
  * Each test builds a populated proto message, encodes to bytes, decodes back, and asserts
  * field-level equality. Protects against accidental tag reuse, type changes, or oneof
  * regressions in TrafficCaptureStream.proto.

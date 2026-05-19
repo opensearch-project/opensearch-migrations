@@ -49,7 +49,7 @@ import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * RFC 0001 T6.3 — multiplexes many concurrent H2 requests on a single shared parent
+ * — multiplexes many concurrent H2 requests on a single shared parent
  * H2 connection. Each call to {@link #createConsumer()} returns a lightweight
  * per-request consumer that opens its own H2 stream sub-channel via
  * {@link Http2StreamChannelBootstrap}; the shared parent connection is the only

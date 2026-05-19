@@ -10,10 +10,10 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * RFC 0001 T6.1 — coverage for {@link TargetProtocolFactory} dispatch + ALPN cache.
+ * — coverage for {@link TargetProtocolFactory} dispatch + ALPN cache.
  *
  * <p>The current implementation is a skeleton (always returns the H1 consumer). These tests
- * lock in the ALPN-cache contract so the future T6.2 wiring can drop in.
+ * lock in the ALPN-cache contract so the future wiring can drop in.
  */
 class TargetProtocolFactoryTest {
 

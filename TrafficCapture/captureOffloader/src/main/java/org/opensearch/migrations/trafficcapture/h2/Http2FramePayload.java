@@ -15,7 +15,7 @@ import io.netty.buffer.ByteBuf;
  * {@link org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureListener#addH2FrameRead}
  * and {@link org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureListener#addH2FrameWrite}.
  *
- * <p>RFC 0001 (HTTP/2 TrafficCapture LLD §6.1).
+ * <p>(HTTP/2 TrafficCapture ).
  */
 public sealed interface Http2FramePayload
         permits Http2FramePayload.Http2HeadersPayloadView,

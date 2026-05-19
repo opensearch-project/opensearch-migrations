@@ -25,13 +25,13 @@ import io.netty.util.AsciiString;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * RFC 0001 §8.4.1 — converts a completed {@link H2Accumulation.StreamState} into a sequence
+ * — converts a completed {@link H2Accumulation.StreamState} into a sequence
  * of Netty H1 {@link HttpObject}s ({@code DefaultHttpRequest} / {@code DefaultHttpResponse}
  * + {@code HttpContent}* + {@code LastHttpContent}). The output is fed unchanged into the
  * existing {@link HttpJsonTransformingConsumer} pipeline; downstream JSON transformers
  * never know the source was H2.
  *
- * <p>Mapping rules implemented from RFC 0001 §8.4 table:
+ * <p>Mapping rules implemented from table:
  * <ul>
  *   <li>{@code :method} → request line method (required, otherwise MalformedH2RequestException)</li>
  *   <li>{@code :path} → request line target (required, except CONNECT)</li>

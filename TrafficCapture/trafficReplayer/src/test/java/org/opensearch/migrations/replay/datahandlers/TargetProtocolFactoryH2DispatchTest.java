@@ -36,8 +36,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /**
- * RFC 0001 — verifies TargetProtocolFactory ACTUALLY dispatches to the H2 consumer when
- * the target negotiates h2 (the wiring step that completes T6.2 + T6.4 plumbing in
+ * — verifies TargetProtocolFactory ACTUALLY dispatches to the H2 consumer when
+ * the target negotiates h2 (the wiring step that completes + plumbing in
  * production).
  *
  * <p>This test boots a real Netty H2 echo server, points the factory at it with

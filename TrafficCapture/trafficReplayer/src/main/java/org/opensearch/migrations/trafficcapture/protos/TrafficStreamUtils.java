@@ -20,14 +20,13 @@ public class TrafficStreamUtils {
     /**
      * captureFormatVersion sentinel for the schema that may contain HTTP/2 frame observations
      * and ALPN observations. Set by capture proxies built with HTTP/2 support; consumed by
-     * H2-aware replayers. RFC 0001 §5/D5.
-     */
+     * H2-aware replayers.      */
     public static final String CAPTURE_FORMAT_VERSION_V2 = "v2";
 
     /**
      * System property toggling whether this JVM is permitted to consume v2 (HTTP/2-capable)
      * captures. Defaults to {@code false} until the replayer's H2 accumulator path lands
-     * (Phase 4 of RFC 0001). When the property is unset / false, encountering a v2 capture
+     * . When the property is unset / false, encountering a v2 capture
      * triggers a fail-fast error to avoid silently misinterpreting H2 frames as H1 bytes.
      */
     public static final String H2_SUPPORT_SYSTEM_PROPERTY = "replayer.h2.enabled";
@@ -35,7 +34,7 @@ public class TrafficStreamUtils {
     /**
      * Returns true when the running replayer was built / configured with HTTP/2 capture
      * support enabled. Currently driven by the {@link #H2_SUPPORT_SYSTEM_PROPERTY} system
-     * property; will be flipped to default-true after Phase 4 of RFC 0001 lands.
+     * property; will be flipped to default-true after lands.
      */
     public static boolean isH2SupportEnabled() {
         return Boolean.parseBoolean(System.getProperty(H2_SUPPORT_SYSTEM_PROPERTY, "false"));
@@ -45,7 +44,7 @@ public class TrafficStreamUtils {
      * Validates the {@code captureFormatVersion} envelope field against the running
      * replayer's capabilities. Empty or "v1" always passes. "v2" requires the H2 support
      * flag (see {@link #isH2SupportEnabled()}); otherwise an {@link UnsupportedCaptureFormatException}
-     * is thrown with a message pointing at RFC 0001 and the toggle.
+     * is thrown with a message pointing at and the toggle.
      *
      * <p>An unrecognized value is treated as a hard failure too: the replayer should not
      * silently accept a future schema it doesn't understand.

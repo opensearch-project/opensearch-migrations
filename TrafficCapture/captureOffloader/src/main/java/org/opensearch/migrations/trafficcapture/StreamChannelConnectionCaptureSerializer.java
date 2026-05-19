@@ -622,7 +622,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         }
     }
 
-    // ---- HTTP/2 capture API (RFC 0001 §6.1) ----
+    // ---- HTTP/2 capture API () ----
 
     @Override
     public void addAlpnNegotiatedEvent(Instant timestamp, String negotiatedProtocol, String offeredByClient)
@@ -659,7 +659,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             populatePayload(builder, payload);
         }
         var observation = builder.build();
-        // Per RFC 0001 §6.1.1: do not segment H2 frames. If the whole observation won't fit in
+        // Per do not segment H2 frames. If the whole observation won't fit in
         // the current TrafficStream we rotate. If it won't fit in a fresh stream either, we mark
         // the observation truncated and emit only the metadata + rawFrame omitted.
         var serializedSize = TrafficObservation.newBuilder()

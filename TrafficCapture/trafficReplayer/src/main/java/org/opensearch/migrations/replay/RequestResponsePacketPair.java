@@ -27,15 +27,15 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         CLOSED_PREMATURELY,
         /** Connection closed due to Kafka partition reassignment — not a source-side close. */
         TRAFFIC_SOURCE_READER_INTERRUPTED,
-        /** RFC 0001 §9: H2 stream terminated by RST_STREAM from peer. */
+        /** H2 stream terminated by RST_STREAM from peer. */
         RESET_BY_PEER,
-        /** RFC 0001 §9: H2 stream orphaned by GOAWAY (streamId > lastStreamId). */
+        /** H2 stream orphaned by GOAWAY (streamId > lastStreamId). */
         GOAWAY_DROPPED,
-        /** RFC 0001 §9: H2 capture failed validation (CRLF in header value, missing :method, etc.). */
+        /** H2 capture failed validation (CRLF in header value, missing:method, etc.). */
         MALFORMED,
-        /** RFC 0001 §9: H2 stream uses an unsupported feature (CONNECT method, server PUSH_PROMISE). */
+        /** H2 stream uses an unsupported feature (CONNECT method, server PUSH_PROMISE). */
         UNSUPPORTED,
-        /** RFC 0001 §6.1.1: H2 frame exceeded maxTrafficBufferSize and was emitted with payload omitted. */
+        /** H2 frame exceeded maxTrafficBufferSize and was emitted with payload omitted. */
         TRUNCATED
     }
 
@@ -68,13 +68,13 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         requestOrResponseAccumulationContext = httpTransactionContext.createRequestAccumulationContext();
     }
 
-    /** RFC 0001 §8.6 — wire-protocol of the source side: "HTTP/1.1" or "HTTP/2.0". Null when unknown. */
+    /** — wire-protocol of the source side: "HTTP/1.1" or "HTTP/2.0". Null when unknown. */
     @Getter
     private String sourceProtocol;
-    /** RFC 0001 §8.6 — H2 stream id on the source side; null for H1 / unknown. */
+    /** — H2 stream id on the source side; null for H1 / unknown. */
     @Getter
     private Integer sourceStreamId;
-    /** RFC 0001 §8.6 — H2 stream id on the target side; null for H1 / unknown. */
+    /** — H2 stream id on the target side; null for H1 / unknown. */
     @Getter
     private Integer targetStreamId;
 

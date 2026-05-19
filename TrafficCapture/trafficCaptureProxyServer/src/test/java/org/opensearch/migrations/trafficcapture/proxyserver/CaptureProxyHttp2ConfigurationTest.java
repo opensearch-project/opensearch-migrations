@@ -14,12 +14,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Phase 2 (RFC 0001) configuration tests for the {@code --enableHttp2} flag and its
+ * tests for the {@code --enableHttp2} flag and its
  * interaction with the legacy HTTP/2 capture-suppression default.
  *
  * <p>This test class is intentionally process-local: it does not stand up a Netty proxy.
  * It only validates the parameter wiring and SSL-context construction, which is the
- * narrow contract of T2.1, T2.2, and T2.8 in the implementation plan.
+ * narrow contract of,, and in the implementation plan.
  */
 public class CaptureProxyHttp2ConfigurationTest {
 

@@ -15,7 +15,7 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * RFC 0001 §8.5 — selection / caching of the target wire protocol per target URI.
+ * — selection / caching of the target wire protocol per target URI.
  *
  * <p>Two modes:
  * <ul>

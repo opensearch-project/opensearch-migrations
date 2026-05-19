@@ -24,7 +24,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * RFC 0001 T2.7 — verifies the H2 proxy pipeline assembled by
+ * — verifies the H2 proxy pipeline assembled by
  * {@link ProxyChannelInitializer#configureH2Pipeline} routes inbound H2 frames through the
  * sniffer (capturing observations) before forwarding them to the next handler.
  *

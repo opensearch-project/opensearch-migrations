@@ -22,12 +22,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * RFC 0001 T5.2 — verifies the H2 accumulator's stream-completion path drives
+ * — verifies the H2 accumulator's stream-completion path drives
  * {@code onRequestReceived} for each completed H2 stream.
  *
  * <p>Each H2 stream produces one logical {@link RequestResponsePacketPair}. The pair
  * carries the H2 protocol identity (sourceProtocol="HTTP/2.0", sourceStreamId=N) so
- * the tuple JSON output (T7.2) can surface them.
+ * the tuple JSON output  can surface them.
  */
 class H2StreamCallbackEmissionTest extends InstrumentationTest {
 

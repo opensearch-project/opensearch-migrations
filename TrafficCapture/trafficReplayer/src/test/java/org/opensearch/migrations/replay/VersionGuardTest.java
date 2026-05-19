@@ -26,7 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Verifies the RFC 0001 §5/D5 fail-fast rule: an H2-unaware replayer must reject v2 captures
+ * Verifies the fail-fast rule: an H2-unaware replayer must reject v2 captures
  * with a clear error rather than silently misinterpreting H2 frames as H1 bytes.
  *
  * <p>The guard is keyed off the {@code replayer.h2.enabled} system property. Until Phase 4

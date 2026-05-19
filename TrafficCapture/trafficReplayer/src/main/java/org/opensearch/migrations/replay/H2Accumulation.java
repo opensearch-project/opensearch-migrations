@@ -17,7 +17,7 @@ import io.netty.buffer.Unpooled;
 import lombok.NonNull;
 
 /**
- * Replayer-side accumulation state for an HTTP/2 connection (RFC 0001 §8.1).
+ * Replayer-side accumulation state for an HTTP/2 connection ().
  *
  * <p>Unlike {@link Accumulation} (the H1 path), an H2 connection multiplexes many
  * concurrent streams. State is keyed by streamId in {@link #liveStreams}. The H1
@@ -74,7 +74,7 @@ public class H2Accumulation extends Accumulation {
         public boolean isReset() { return resetErrorCode != null; }
     }
 
-    /** Per-stream lifecycle phases (RFC 0001 §8.2). */
+    /** Per-stream lifecycle phases (). */
     public enum LifecyclePhase {
         RECEIVING_HEADERS,
         RECEIVING_BODY,

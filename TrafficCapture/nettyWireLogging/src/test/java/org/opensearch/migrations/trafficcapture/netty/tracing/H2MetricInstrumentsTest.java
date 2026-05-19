@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * RFC 0001 §7.7 — verifies the {@link H2MetricInstruments} are correctly constructed
+ * — verifies the {@link H2MetricInstruments} are correctly constructed
  * by {@link RootWireLoggingContext} and emit OTel metrics with the documented names
  * and attribute keys.
  */

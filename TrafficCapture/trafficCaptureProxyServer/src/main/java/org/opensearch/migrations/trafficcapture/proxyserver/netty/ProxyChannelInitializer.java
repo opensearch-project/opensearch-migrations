@@ -30,7 +30,7 @@ import lombok.extern.slf4j.Slf4j;
  * <p><b>Pipeline shape</b>: when ALPN selects {@code http/1.1} (or no ALPN was negotiated),
  * the pipeline is configured by {@link #configureH1Pipeline}, mirroring the historical
  * behavior. When ALPN selects {@code h2}, {@link #configureH2Pipeline} is invoked instead;
- * Phase 2 of RFC 0001 stubs that path out, Phase 3 wires the per-stream gate.
+ * stubs that path out, the per-stream gate.
  *
  * <p><b>Deferred configuration</b>: when the channel has TLS but the SSL context advertises
  * ALPN, the pipeline is initially populated with only an {@link SslHandler} +
@@ -110,8 +110,8 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
     }
 
     /**
-     * Hook called once per connection after ALPN selection. Phase 2 emits no observation
-     * here; T2.7 wires this through {@link IConnectionCaptureFactory} so the
+     * Hook called once per connection after ALPN selection. no observation
+     * here; wires this through {@link IConnectionCaptureFactory} so the
      * {@code AlpnNegotiationObservation} lands in the capture stream before any frame.
      */
     protected void onAlpnNegotiated(ChannelHandlerContext ctx, String negotiatedProtocol, String connectionId) {
@@ -149,7 +149,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
     }
 
     /**
-     * H2 pipeline (RFC 0001 §7.3 minimal-parse tee):
+     * H2 pipeline (minimal-parse tee):
      * <ol>
      *   <li>{@link H2FrameSnifferHandler} — parses frame boundaries, emits per-frame
      *       {@code Http2FrameObservation}s via the per-connection capture serializer, and
@@ -219,11 +219,11 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
 
     /**
      * Subclass hook fired when the sniffer decodes a HEADERS frame on the client→proxy side.
-     * T3.3 ({@code PerStreamGateHandler}) will subscribe here to identify mutating-method
+     * ({@code PerStreamGateHandler}) will subscribe here to identify mutating-method
      * streams that need to be gated. Default: no-op.
      */
     protected void onH2HeadersForGating(int streamId, io.netty.handler.codec.http2.Http2Headers headers) {
-        // Wired in T3.3 via PerStreamGateHandler subscription.
+        // Wired in via PerStreamGateHandler subscription.
     }
 
     /**

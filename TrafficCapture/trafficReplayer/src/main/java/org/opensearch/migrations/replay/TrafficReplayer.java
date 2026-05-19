@@ -672,7 +672,7 @@ public class TrafficReplayer {
                 orderedRequestTracker,
                 errorClassifier
             );
-            // RFC 0001 §8.5 — wire the H2 dispatch factory when the operator opted in. The factory
+            // — wire the H2 dispatch factory when the operator opted in. The factory
             // probes upstream ALPN once per authority and, when the cached ALPN is h2, returns
             // multiplexed stream consumers sharing a single parent connection.
             if (params.targetEnableHttp2) {

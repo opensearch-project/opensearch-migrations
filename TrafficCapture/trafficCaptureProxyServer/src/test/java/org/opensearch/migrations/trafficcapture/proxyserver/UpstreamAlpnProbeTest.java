@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /**
- * RFC 0001 T3.2 — startup ALPN probe of the upstream.
+ * — startup ALPN probe of the upstream.
  *
  * <p>The probe opens one TLS connection to the upstream, observes the ALPN protocol
  * the upstream selects, then closes. The result is used by the proxy startup path:

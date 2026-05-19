@@ -17,7 +17,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 /**
- * RFC 0001 T2.6 \u2014 verifies the serializer round-trips H2 frame and ALPN observations through
+ * \u2014 verifies the serializer round-trips H2 frame and ALPN observations through
  * the offload path. Builds an InMemory capture factory, drives a small synthetic H2 sequence
  * (ALPN, SETTINGS, HEADERS, DATA, RST_STREAM), then parses the resulting {@link TrafficStream}
  * bytes and asserts the observation tags + payload contents.
