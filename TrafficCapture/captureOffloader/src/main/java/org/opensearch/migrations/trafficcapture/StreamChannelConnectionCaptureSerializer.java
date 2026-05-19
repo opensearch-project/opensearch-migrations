@@ -86,6 +86,19 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     private int firstLineByteLength = -1;
     private int headersByteLength = -1;
     private boolean streamHasBeenClosed;
+    /**
+     * Negotiated ALPN protocol for this connection (e.g. "h2", "http/1.1"). Set by
+     * {@link #addAlpnNegotiatedEvent} and stamped on every {@link TrafficStream} envelope
+     * thereafter for fast filtering on the consumer side. Empty when ALPN was not
+     * negotiated (legacy H1 connections).
+     */
+    private String negotiatedAlpn = "";
+    /**
+     * Capture format version. Empty when only H1 observations are recorded; set to "v2"
+     * the moment any HTTP/2 observation is emitted (which can only happen when the
+     * proxy was started with --enableHttp2). Determines the consumer-side dispatch.
+     */
+    private String captureFormatVersion = "";
 
     private final StreamLifecycleManager<T> streamManager;
     private final String nodeIdString;
@@ -146,6 +159,18 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
                     TrafficStream.LASTOBSERVATIONWASUNTERMINATEDREAD_FIELD_NUMBER,
                     readObservationsAreWaitingForEom
                 );
+            }
+            // Stamp v2 envelope fields when this serializer has observed an HTTP/2 ALPN.
+            // For H1-only connections both fields stay empty so the wire format is byte-
+            // identical to the legacy v1 capture (proto3 default-empty strings are not
+            // serialized at all).
+            if (!captureFormatVersion.isEmpty()) {
+                currentCodedOutputStream.writeString(
+                    TrafficStream.CAPTUREFORMATVERSION_FIELD_NUMBER, captureFormatVersion);
+            }
+            if (!negotiatedAlpn.isEmpty()) {
+                currentCodedOutputStream.writeString(
+                    TrafficStream.NEGOTIATEDALPN_FIELD_NUMBER, negotiatedAlpn);
             }
             return currentCodedOutputStreamHolderOrNull;
         }
@@ -627,6 +652,13 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     @Override
     public void addAlpnNegotiatedEvent(Instant timestamp, String negotiatedProtocol, String offeredByClient)
             throws IOException {
+        // Cache so subsequent TrafficStream envelopes carry the ALPN string. We always
+        // mark v2 once an ALPN observation lands — indicating the proxy was running with
+        // --enableHttp2, regardless of which protocol the client picked. v2 + alpn=http/1.1
+        // is a valid combination (H1 connection on an H2-capable proxy) and exercises the
+        // replayer's H1 dispatch path on a v2 envelope.
+        this.negotiatedAlpn = negotiatedProtocol == null ? "" : negotiatedProtocol;
+        this.captureFormatVersion = "v2";
         var alpn = AlpnNegotiationObservation.newBuilder()
                 .setNegotiatedProtocol(negotiatedProtocol == null ? "" : negotiatedProtocol)
                 .setOfferedByClient(offeredByClient == null ? "" : offeredByClient)

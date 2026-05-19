@@ -50,7 +50,11 @@ public class H2Accumulation extends Accumulation {
         final List<ByteBuf> responseBody = new ArrayList<>();
         List<Http2HeaderField> responseTrailers;
         Instant requestFirstFrameTs;
+        /** Wire-level timestamp of the request's last frame (END_STREAM on the request side). */
+        Instant requestLastFrameTs;
         Instant responseFirstFrameTs;
+        /** Wire-level timestamp of the response's last frame (END_STREAM on the response side). */
+        Instant responseLastFrameTs;
         boolean clientEndStream;
         boolean serverEndStream;
         Long resetErrorCode; // RST_STREAM, null when not reset
@@ -85,6 +89,10 @@ public class H2Accumulation extends Accumulation {
         public List<ByteBuf> getResponseBody() { return responseBody; }
         public List<Http2HeaderField> getResponseTrailers() { return responseTrailers; }
         public void setResponseTrailers(List<Http2HeaderField> trailers) { this.responseTrailers = trailers; }
+        public Instant getRequestFirstFrameTs() { return requestFirstFrameTs; }
+        public Instant getRequestLastFrameTs() { return requestLastFrameTs; }
+        public Instant getResponseFirstFrameTs() { return responseFirstFrameTs; }
+        public Instant getResponseLastFrameTs() { return responseLastFrameTs; }
 
         public boolean isComplete() {
             return clientEndStream && serverEndStream;

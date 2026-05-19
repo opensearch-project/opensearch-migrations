@@ -88,6 +88,33 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         this.targetStreamId = streamId;
     }
 
+    /** Wire-level timestamp when the request's first frame was observed at the source. */
+    @Getter
+    private Instant sourceRequestFirstFrameTs;
+    /** Wire-level timestamp when the request's last frame was observed at the source. */
+    @Getter
+    private Instant sourceRequestLastFrameTs;
+    /** Wire-level timestamp when the response's first frame was observed at the source. */
+    @Getter
+    private Instant sourceResponseFirstFrameTs;
+    /** Wire-level timestamp when the response's last frame was observed at the source. */
+    @Getter
+    private Instant sourceResponseLastFrameTs;
+
+    /**
+     * Stamp wire-level timestamps captured on the source connection so the replayer's
+     * scheduler can reconstruct the happens-before relations between requests on the
+     * same source connection. Used to decide chained vs. concurrent dispatch when
+     * replaying H2-multiplexed traffic at any speedup factor.
+     */
+    public void setSourceWireTimestamps(Instant requestFirst, Instant requestLast,
+                                         Instant responseFirst, Instant responseLast) {
+        this.sourceRequestFirstFrameTs = requestFirst;
+        this.sourceRequestLastFrameTs = requestLast;
+        this.sourceResponseFirstFrameTs = responseFirst;
+        this.sourceResponseLastFrameTs = responseLast;
+    }
+
     @NonNull
     ISourceTrafficChannelKey getBeginningTrafficStreamKey() {
         return firstTrafficStreamKeyForRequest;

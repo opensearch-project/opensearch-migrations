@@ -760,14 +760,15 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                                   org.opensearch.migrations.trafficcapture.protos.Http2FrameObservation frame,
                                   java.time.Instant timestamp) {
         var stream = accum.getOrCreateStream(streamId);
-        if (stream.requestFirstFrameTs == null) {
-            stream.requestFirstFrameTs = timestamp;
-        }
         var headers = frame.getHeaders();
         // Distinguish request- vs response-direction by presence of :status pseudo-header.
         boolean isResponse = headers.getFieldsList().stream()
             .anyMatch(f -> ":status".equals(f.getName().toStringUtf8()));
         if (isResponse) {
+            if (stream.responseFirstFrameTs == null) {
+                stream.responseFirstFrameTs = timestamp;
+            }
+            stream.responseLastFrameTs = timestamp;
             H2Accumulation.applyHeadersToResponse(stream, headers);
             if (headers.getEndStream()) {
                 stream.serverEndStream = true;
@@ -777,6 +778,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 stream.phase = H2Accumulation.LifecyclePhase.RECEIVING_RESPONSE_BODY;
             }
         } else {
+            if (stream.requestFirstFrameTs == null) {
+                stream.requestFirstFrameTs = timestamp;
+            }
+            stream.requestLastFrameTs = timestamp;
             H2Accumulation.applyHeadersToRequest(stream, headers);
             if (headers.getEndStream()) {
                 stream.clientEndStream = true;
@@ -795,6 +800,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var data = frame.getData();
         var bytes = data.getData().toByteArray();
         if (stream.phase == H2Accumulation.LifecyclePhase.RECEIVING_RESPONSE_BODY) {
+            stream.responseLastFrameTs = timestamp;
             stream.responseBody.add(io.netty.buffer.Unpooled.wrappedBuffer(bytes));
             if (data.getEndStream()) {
                 stream.serverEndStream = true;
@@ -802,6 +808,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 maybeEmitResponse(stream);
             }
         } else {
+            stream.requestLastFrameTs = timestamp;
             stream.requestBody.add(io.netty.buffer.Unpooled.wrappedBuffer(bytes));
             if (data.getEndStream()) {
                 stream.clientEndStream = true;
@@ -833,6 +840,13 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     requestIndex);
             // tag the pair with H2 protocol identity for tuple JSON visibility.
             rrPair.setSourceProtocolAndStream("HTTP/2.0", stream.streamId);
+            // Wire-level timestamps so the orchestrator can reconstruct happens-before
+            // and decide chained vs concurrent dispatch on the target side.
+            rrPair.setSourceWireTimestamps(
+                stream.requestFirstFrameTs,
+                stream.requestLastFrameTs,
+                stream.responseFirstFrameTs,
+                stream.responseLastFrameTs);
             var requestMessage = buildH2RequestMessage(stream, firstTs);
             rrPair.requestData = requestMessage;
             // Capture the request context BEFORE rotating to response gathering, mirroring the
@@ -903,6 +917,12 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             if (stream.inFlightPair.responseData == null) {
                 stream.inFlightPair.responseData = buildH2ResponseMessage(stream);
             }
+            // Refresh wire-time stamps now that the response side has fully landed.
+            stream.inFlightPair.setSourceWireTimestamps(
+                stream.requestFirstFrameTs,
+                stream.requestLastFrameTs,
+                stream.responseFirstFrameTs,
+                stream.responseLastFrameTs);
             stream.responseContinuation.accept(stream.inFlightPair);
         } finally {
             stream.responseContinuation = null;
