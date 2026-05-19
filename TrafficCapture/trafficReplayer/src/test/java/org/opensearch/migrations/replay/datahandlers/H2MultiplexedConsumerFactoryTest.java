@@ -4,8 +4,9 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-
-import org.opensearch.migrations.replay.AggregatedRawResponse;
+import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.Unpooled;
@@ -13,12 +14,14 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.EventLoopGroup;
+import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.http2.DefaultHttp2DataFrame;
 import io.netty.handler.codec.http2.DefaultHttp2Headers;
 import io.netty.handler.codec.http2.DefaultHttp2HeadersFrame;
+import io.netty.handler.codec.http2.Http2DataFrame;
 import io.netty.handler.codec.http2.Http2Frame;
 import io.netty.handler.codec.http2.Http2FrameCodec;
 import io.netty.handler.codec.http2.Http2FrameCodecBuilder;
@@ -36,16 +39,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /**
- * RFC 0001 T6.2 — coverage for {@link H2NettyPacketToHttpConsumer}.
- *
- * <p>TDD scope: the consumer accepts H1-shape bytes via {@code consumeBytes}, opens an
- * H2 stream toward a target H2 endpoint, sends the request as HEADERS+DATA frames, and
- * returns the response as {@link AggregatedRawResponse}.
- *
- * <p>Tests boot an in-process Netty H2 echo server (TLS+ALPN, self-signed cert) and
- * drive the consumer against it.
+ * RFC 0001 T6.3 — verifies H2MultiplexedConsumerFactory issues N concurrent requests
+ * on a single shared parent H2 connection, with each request opening its own
+ * stream sub-channel. Each request must complete independently.
  */
-class H2NettyPacketToHttpConsumerTest {
+class H2MultiplexedConsumerFactoryTest {
 
     private EventLoopGroup serverBoss;
     private EventLoopGroup serverWorker;
@@ -58,10 +56,6 @@ class H2NettyPacketToHttpConsumerTest {
         if (serverBoss != null) serverBoss.shutdownGracefully().sync();
     }
 
-    /**
-     * Boot a TLS+ALPN H2 server that echoes a 200 with body "ok-h2-response" on every stream.
-     * Returns the bound port.
-     */
     private int bootH2EchoServer() throws Exception {
         var ssc = new SelfSignedCertificate();
         SslContext ctx = SslContextBuilder.forServer(ssc.certificate(), ssc.privateKey())
@@ -72,10 +66,8 @@ class H2NettyPacketToHttpConsumerTest {
                         ApplicationProtocolNames.HTTP_2,
                         ApplicationProtocolNames.HTTP_1_1))
                 .build();
-
         serverBoss = new NioEventLoopGroup(1);
-        serverWorker = new NioEventLoopGroup(1);
-
+        serverWorker = new NioEventLoopGroup(2);
         var b = new ServerBootstrap()
                 .group(serverBoss, serverWorker)
                 .channel(NioServerSocketChannel.class)
@@ -108,52 +100,79 @@ class H2NettyPacketToHttpConsumerTest {
         return ((InetSocketAddress) serverChannel.localAddress()).getPort();
     }
 
-    /** Per-stream handler on the server side: replies 200 with a fixed body once headers arrive. */
-    static class EchoH2StreamHandler extends io.netty.channel.SimpleChannelInboundHandler<Http2Frame> {
+    static class EchoH2StreamHandler extends SimpleChannelInboundHandler<Http2Frame> {
+        private DefaultHttp2Headers reqHeaders;
+
         @Override
         protected void channelRead0(ChannelHandlerContext ctx, Http2Frame frame) {
             if (frame instanceof Http2HeadersFrame hf) {
-                var respHeaders = new DefaultHttp2Headers().status("200")
-                        .add("content-type", "text/plain");
-                ctx.writeAndFlush(new DefaultHttp2HeadersFrame(respHeaders, false));
-                ctx.writeAndFlush(new DefaultHttp2DataFrame(
-                        Unpooled.copiedBuffer("ok-h2-response", StandardCharsets.UTF_8),
-                        true));
+                reqHeaders = (DefaultHttp2Headers) hf.headers();
+                if (hf.isEndStream()) {
+                    sendResponse(ctx, "echo-no-body");
+                }
+            } else if (frame instanceof Http2DataFrame df) {
+                var body = df.content().toString(StandardCharsets.UTF_8);
+                if (df.isEndStream()) {
+                    sendResponse(ctx, "echo-" + body);
+                }
             }
+        }
+
+        private void sendResponse(ChannelHandlerContext ctx, String body) {
+            var respHeaders = new DefaultHttp2Headers().status("200")
+                    .add("content-type", "text/plain");
+            ctx.writeAndFlush(new DefaultHttp2HeadersFrame(respHeaders, false));
+            ctx.writeAndFlush(new DefaultHttp2DataFrame(
+                    Unpooled.copiedBuffer(body, StandardCharsets.UTF_8), true));
         }
     }
 
     @Test
-    @Timeout(20)
-    void postRequest_throughH2Consumer_receives200Response() throws Exception {
+    @Timeout(30)
+    void tenConcurrentRequests_completeIndependently() throws Exception {
         int port = bootH2EchoServer();
         var targetUri = URI.create("https://127.0.0.1:" + port);
-
-        var consumer = new H2NettyPacketToHttpConsumer(
-                targetUri, /*allowInsecure*/ true, Duration.ofSeconds(5));
+        var factory = new H2MultiplexedConsumerFactory(targetUri,
+                /*allowInsecure*/ true, Duration.ofSeconds(15));
         try {
-            // Send a minimal H1-shape POST as bytes.
-            var requestBytes = ("POST /_bulk HTTP/1.1\r\n"
-                    + "Host: 127.0.0.1:" + port + "\r\n"
-                    + "Content-Type: application/x-ndjson\r\n"
-                    + "Content-Length: 16\r\n"
-                    + "\r\n"
-                    + "{\"index\":{}}\n{}\n").getBytes(StandardCharsets.UTF_8);
-            consumer.consumeBytes(Unpooled.wrappedBuffer(requestBytes)).get();
-            var response = consumer.finalizeRequest().get();
+            factory.open();
 
-            Assertions.assertNotNull(response, "response must not be null");
-            Assertions.assertNotNull(response.getRawResponse(),
-                    "rawResponse (HttpResponse) must be set");
-            Assertions.assertEquals(200, response.getRawResponse().status().code(),
-                    "echo server returns 200");
-            // Body must contain our fixed echo body.
-            var bodyBuf = response.getResponseAsByteBuf();
-            var bodyStr = bodyBuf.toString(StandardCharsets.UTF_8);
-            Assertions.assertTrue(bodyStr.contains("ok-h2-response"),
-                    "response body must contain echo string, was: " + bodyStr);
+            int n = 10;
+            var futures = new ArrayList<CompletableFuture<String>>();
+            for (int i = 0; i < n; i++) {
+                int idx = i;
+                var consumer = factory.createConsumer();
+                var requestBytes = ("POST /req" + idx + " HTTP/1.1\r\n"
+                        + "Host: 127.0.0.1\r\n"
+                        + "Content-Type: text/plain\r\n"
+                        + "Content-Length: " + ("body" + idx).length() + "\r\n"
+                        + "\r\n"
+                        + "body" + idx).getBytes(StandardCharsets.UTF_8);
+                var f = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        consumer.consumeBytes(Unpooled.wrappedBuffer(requestBytes)).get();
+                        var response = consumer.finalizeRequest().get();
+                        return response.getResponseAsByteBuf().toString(StandardCharsets.UTF_8);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    } finally {
+                        if (consumer instanceof AutoCloseable ac) {
+                            try { ac.close(); } catch (Exception ignored) {}
+                        }
+                    }
+                });
+                futures.add(f);
+            }
+            CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new))
+                    .get(20, TimeUnit.SECONDS);
+
+            for (int i = 0; i < n; i++) {
+                var body = futures.get(i).get();
+                Assertions.assertTrue(body.contains("echo-body" + i),
+                        "request " + i + " body should round-trip: " + body);
+            }
         } finally {
-            consumer.close();
+            factory.close();
         }
     }
 }

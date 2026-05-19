@@ -277,7 +277,7 @@ public class H2NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Ag
             } else if (frame instanceof Http2DataFrame df) {
                 var content = df.content();
                 accumulatedBody.writeBytes(content.duplicate());
-                df.release();
+                // SimpleChannelInboundHandler auto-releases; do NOT call df.release() here.
                 if (df.isEndStream()) {
                     finalizeResponse(ctx);
                 }
