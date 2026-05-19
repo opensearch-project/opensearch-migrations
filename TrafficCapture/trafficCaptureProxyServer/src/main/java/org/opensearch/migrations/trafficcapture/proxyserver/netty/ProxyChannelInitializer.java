@@ -154,13 +154,11 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
      *   <li>{@link H2FrameSnifferHandler} — parses frame boundaries, emits per-frame
      *       {@code Http2FrameObservation}s via the per-connection capture serializer, and
      *       forwards bytes byte-identically.</li>
+     *   <li>{@link org.opensearch.migrations.trafficcapture.netty.PerStreamGateHandler}
+     *       — holds inbound frames for mutating-method streams until offload commit.</li>
      *   <li>{@link FrontsideHandler} — forwards bytes to the upstream pool, identical to
      *       the H1 path.</li>
      * </ol>
-     *
-     * <p>Per-stream gating ({@code PerStreamGateHandler}) lands in T3.3 between the sniffer
-     * and the forwarder. Until then, mutating-method streams are NOT held — the offload
-     * guarantee from the H1 path doesn't apply yet to H2 traffic.
      *
      * <p>The capture serializer is created lazily here (one per connection) so it can emit
      * the {@code AlpnNegotiationObservation} synchronously before the first frame.
@@ -178,15 +176,45 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
             log.atWarn().setCause(e).setMessage("Failed to record ALPN observation for connectionId={}")
                 .addArgument(connectionId).log();
         }
-        // Read direction (client → proxy): sniff frames, emit observations, forward verbatim.
+        // Per-stream gate sits between the sniffer and the forwarder. The sniffer fires
+        // onH2HeadersForGating into the gate; gated streams' frames are queued by the gate
+        // until the offload commit future resolves.
+        var serializerForGate = serializer;
+        var gate = new org.opensearch.migrations.trafficcapture.netty.PerStreamGateHandler(
+            this::shouldGuaranteeMessageOffloadingForH2,
+            (streamId, headers) -> {
+                try {
+                    return serializerForGate.flushCommitAndResetStream(false);
+                } catch (IOException e) {
+                    var f = new java.util.concurrent.CompletableFuture<>();
+                    f.completeExceptionally(e);
+                    return f;
+                }
+            });
+        // Read direction (client → proxy): sniff frames, emit observations, route via gate.
         pipeline.addLast("H2FrameSniffer-read",
             new H2FrameSnifferHandler(serializer,
                 /*isClientToProxyDirection*/ true,
-                this::onH2HeadersForGating,
+                (streamId, headers) -> {
+                    onH2HeadersForGating(streamId, headers);
+                    gate.onHeadersForStream(ctx, streamId, headers);
+                },
                 /*maxHeaderListSize*/ 8192L,
                 /*maxHeaderTableSize*/ 4096L));
+        pipeline.addLast("PerStreamGate", gate);
         afterCaptureHandlerInstalled(pipeline, connectionId);
         pipeline.addLast(new FrontsideHandler(backsideConnectionPool));
+    }
+
+    /**
+     * Decide whether an H2 stream should be gated. Default: gate POST/PUT/DELETE/PATCH
+     * (mutating methods), the same set used for H1 in {@link #shouldGuaranteeMessageOffloading}.
+     */
+    protected boolean shouldGuaranteeMessageOffloadingForH2(io.netty.handler.codec.http2.Http2Headers headers) {
+        if (headers == null || headers.method() == null) return false;
+        var m = headers.method();
+        return "POST".contentEquals(m) || "PUT".contentEquals(m)
+            || "DELETE".contentEquals(m) || "PATCH".contentEquals(m);
     }
 
     /**
