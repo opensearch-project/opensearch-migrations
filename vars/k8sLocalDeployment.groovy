@@ -59,21 +59,28 @@ def call(Map config = [:]) {
 
             stage('Check Minikube Status') {
                 steps {
-                    timeout(time: 5, unit: 'MINUTES') {
+                    timeout(time: 10, unit: 'MINUTES') {
                         script {
+                            // The shared docker-hosted registry backend writes containerd hosts.toml on
+                            // the minikube node; cri-dockerd ignores those, so the cluster MUST be on
+                            // the containerd runtime. If a stale cluster from before this change is on
+                            // cri-dockerd, recreate it.
                             def status = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
-                            if (status == "Running") {
-                                echo "✅ Minikube is running"
+                            def runtime = ''
+                            if (status == 'Running') {
+                                runtime = sh(script: "docker exec minikube cat /etc/crictl.yaml 2>/dev/null | awk -F': ' '/runtime-endpoint/ {print \$2}'", returnStdout: true).trim()
+                            }
+                            def needsRecreate = (status != 'Running') || !runtime.contains('containerd')
+                            if (needsRecreate) {
+                                echo "Recreating minikube (status='${status}', runtime='${runtime}') so the cluster runs on the containerd runtime"
+                                sh(script: 'minikube delete || true')
+                                sh(script: 'minikube start --driver=docker --container-runtime=containerd')
                             } else {
-                                echo "Minikube is not running, status: " + status
-                                sh(script: "minikube delete", returnStdout: true)
-                                sh(script: "minikube start", returnStdout: true)
-                                def status2 = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
-                                if (status2 == "Running") {
-                                    echo "✅ Minikube was started as is running"
-                                } else {
-                                    error("❌ Minikube failed to start")
-                                }
+                                echo "✅ Minikube is running on containerd"
+                            }
+                            def status2 = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
+                            if (status2 != 'Running') {
+                                error("❌ Minikube failed to reach Running, current status: ${status2}")
                             }
                         }
                     }

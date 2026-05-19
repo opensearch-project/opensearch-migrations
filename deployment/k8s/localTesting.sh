@@ -40,15 +40,28 @@ echo "Setting minikube config to use ${MINIKUBE_CPU_COUNT} CPUs and ${MINIKUBE_M
 minikube -p "${MINIKUBE_PROFILE}" config set cpus $MINIKUBE_CPU_COUNT
 minikube -p "${MINIKUBE_PROFILE}" config set memory $MINIKUBE_MEMORY_SIZE
 
+# containerd runtime is required so the per-node /etc/containerd/certs.d
+# hosts.toml that connect_cluster_to_registry_network writes is honored.
+# cri-dockerd (the minikube < 1.39 default) routes pulls through dockerd,
+# which would need a separate insecure-registry config and never mirrors
+# localhost:5001 to docker-registry:5000. If a pre-existing cluster is on
+# cri-dockerd, recreate it.
+needs_recreate=false
 if minikube -p "${MINIKUBE_PROFILE}" status --format='{{.Host}}' 2>/dev/null | grep -q Running; then
-  echo "minikube is already running, skipping start"
+  current_runtime="$(docker exec "${MINIKUBE_PROFILE}" cat /etc/crictl.yaml 2>/dev/null | awk -F': ' '/runtime-endpoint/ {print $2}' || true)"
+  if [[ "${current_runtime}" == *containerd* ]]; then
+    echo "minikube is already running on containerd, skipping start"
+  else
+    echo "minikube is running but on '${current_runtime:-unknown}'; recreating on containerd"
+    needs_recreate=true
+  fi
 else
+  needs_recreate=true
+fi
+
+if [[ "${needs_recreate}" == true ]]; then
   print_step "Starting minikube"
-  # containerd runtime is required so the per-node /etc/containerd/certs.d
-  # hosts.toml that connect_cluster_to_registry_network writes is honored.
-  # cri-dockerd (the minikube < 1.39 default) routes pulls through dockerd,
-  # which would need a separate insecure-registry config and never mirrors
-  # localhost:5001 to docker-registry:5000.
+  minikube -p "${MINIKUBE_PROFILE}" delete >/dev/null 2>&1 || true
   minikube -p "${MINIKUBE_PROFILE}" start \
     --driver=docker \
     --container-runtime=containerd \
