@@ -115,7 +115,8 @@ def _remove_existing_workflow(workflow_name, namespace):
     '--unique-run-nonce',
     default=str(int(time.time())),
     hidden=True,
-    help='id that gets appended to downstream as uniqueRunNonce arg (and is appended to some naming such as snapshotName downstream)'
+    help='id that gets appended to downstream as uniqueRunNonce arg (and is appended to some naming such as '
+         'snapshotName downstream)'
 )
 @click.pass_context
 def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workflow_name, unique_run_nonce):
