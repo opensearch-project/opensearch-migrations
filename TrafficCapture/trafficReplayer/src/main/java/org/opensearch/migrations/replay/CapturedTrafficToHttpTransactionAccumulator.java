@@ -773,6 +773,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             if (headers.getEndStream()) {
                 stream.serverEndStream = true;
                 stream.phase = H2Accumulation.LifecyclePhase.CLOSED;
+                maybeEmitResponse(accum, stream);
             } else {
                 stream.phase = H2Accumulation.LifecyclePhase.RECEIVING_RESPONSE_BODY;
             }
@@ -781,6 +782,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             if (headers.getEndStream()) {
                 stream.clientEndStream = true;
                 stream.phase = H2Accumulation.LifecyclePhase.AWAITING_RESPONSE;
+                maybeEmitRequest(accum, stream, timestamp);
             } else {
                 stream.phase = H2Accumulation.LifecyclePhase.RECEIVING_BODY;
             }
@@ -798,13 +800,150 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             if (data.getEndStream()) {
                 stream.serverEndStream = true;
                 stream.phase = H2Accumulation.LifecyclePhase.CLOSED;
+                maybeEmitResponse(accum, stream);
             }
         } else {
             stream.requestBody.add(io.netty.buffer.Unpooled.wrappedBuffer(bytes));
             if (data.getEndStream()) {
                 stream.clientEndStream = true;
                 stream.phase = H2Accumulation.LifecyclePhase.AWAITING_RESPONSE;
+                maybeEmitRequest(accum, stream, timestamp);
             }
+        }
+    }
+
+    /**
+     * RFC 0001 T5.2 — fire {@code onRequestReceived} when an H2 stream's request side completes.
+     * Each H2 stream gets its own {@link RequestResponsePacketPair} (multiplexing means
+     * we can't reuse the connection-level pair on Accumulation — that would collide across
+     * concurrent streams). The context for that pair is built from the connection-level
+     * traffic-stream context.
+     */
+    private void maybeEmitRequest(H2Accumulation accum, H2Accumulation.StreamState stream, java.time.Instant ts) {
+        if (stream.requestEmitted) return;
+        stream.requestEmitted = true;
+        try {
+            var firstTs = stream.requestFirstFrameTs == null ? ts : stream.requestFirstFrameTs;
+            // Per-stream RRP: distinct from accum.getOrCreateTransactionPair to avoid collisions
+            // when many streams are in flight on the same connection.
+            int requestIndex = accum.getIndexOfCurrentRequest() + stream.streamId;
+            var rrPair = new RequestResponsePacketPair(
+                    accum.trafficChannelKey,
+                    firstTs,
+                    accum.startingSourceRequestIndex,
+                    requestIndex);
+            // T7.2 surface: tag the pair with H2 protocol identity for tuple JSON visibility.
+            rrPair.setSourceProtocolAndStream("HTTP/2.0", stream.streamId);
+            var requestMessage = new HttpMessageAndTimestamp(firstTs);
+            try {
+                var bytes = serializeH2RequestToH1Bytes(stream);
+                if (bytes.length > 0) requestMessage.add(bytes);
+            } catch (Exception e) {
+                log.atWarn().setCause(e).setMessage(
+                        "Failed to serialize H2 stream {} as H1 bytes; emitting empty request body")
+                    .addArgument(stream.streamId).log();
+            }
+            rrPair.requestData = requestMessage;
+            // Capture the request context BEFORE rotating to response gathering, mirroring the
+            // H1 path's handleEndOfRequest sequence. The wrapped consumer access
+            // rrPair.getResponseContext() once the response side resolves — that requires the
+            // pair to already be in response context.
+            var requestCtx = rrPair.getRequestContext();
+            rrPair.rotateRequestGatheringToResponse();
+            stream.inFlightPair = rrPair;
+            boolean isResumed = accum.getIndexOfCurrentRequest() == 0 && accum.isResumedConnection;
+            stream.responseContinuation = listener.onRequestReceived(
+                    requestCtx, requestMessage, isResumed);
+        } catch (Exception e) {
+            log.atWarn().setCause(e).setMessage(
+                    "H2 onRequestReceived emission failed for streamId={}; stream marked CLOSED")
+                .addArgument(stream.streamId).log();
+            stream.phase = H2Accumulation.LifecyclePhase.CLOSED;
+        }
+    }
+
+    /**
+     * RFC 0001 T5.2 — fire the response continuation when the response side of an H2 stream
+     * completes. Sets {@code completionStatus} on the in-flight RRP and accepts it via the
+     * stored consumer.
+     */
+    private void maybeEmitResponse(H2Accumulation accum, H2Accumulation.StreamState stream) {
+        if (stream.responseContinuation == null || stream.inFlightPair == null) {
+            // Either the request side never emitted (e.g. RST_STREAM mid-body) or already drained.
+            return;
+        }
+        try {
+            stream.inFlightPair.completionStatus = stream.isReset()
+                    ? RequestResponsePacketPair.ReconstructionStatus.RESET_BY_PEER
+                    : RequestResponsePacketPair.ReconstructionStatus.COMPLETE;
+            // Append the response bytes for visibility (best-effort — not byte-exact since H2
+            // responses originally weren't on H1 wire).
+            if (stream.inFlightPair.responseData == null) {
+                var responseTs = stream.responseFirstFrameTs == null
+                        ? stream.requestFirstFrameTs : stream.responseFirstFrameTs;
+                stream.inFlightPair.responseData = new HttpMessageAndTimestamp(
+                        responseTs == null ? java.time.Instant.now() : responseTs);
+                try {
+                    var bytes = serializeH2ResponseToH1Bytes(stream);
+                    if (bytes.length > 0) stream.inFlightPair.responseData.add(bytes);
+                } catch (Exception e) {
+                    log.atTrace().setCause(e).setMessage(
+                            "H2 response serialization failed for streamId={}")
+                        .addArgument(stream.streamId).log();
+                }
+            }
+            stream.responseContinuation.accept(stream.inFlightPair);
+        } finally {
+            stream.responseContinuation = null;
+            stream.inFlightPair = null;
+        }
+    }
+
+    private static byte[] serializeH2RequestToH1Bytes(H2Accumulation.StreamState stream) {
+        var objects = org.opensearch.migrations.replay.datahandlers.http.H2ToH1ObjectAdapter.toH1RequestObjects(stream);
+        return serializeH1RequestObjects(objects);
+    }
+
+    private static byte[] serializeH2ResponseToH1Bytes(H2Accumulation.StreamState stream) {
+        var objects = org.opensearch.migrations.replay.datahandlers.http.H2ToH1ObjectAdapter.toH1ResponseObjects(stream);
+        return serializeH1ResponseObjects(objects);
+    }
+
+    private static byte[] serializeH1RequestObjects(java.util.List<io.netty.handler.codec.http.HttpObject> objects) {
+        var ec = new io.netty.channel.embedded.EmbeddedChannel(new io.netty.handler.codec.http.HttpRequestEncoder());
+        return drainEncoded(ec, objects);
+    }
+
+    private static byte[] serializeH1ResponseObjects(java.util.List<io.netty.handler.codec.http.HttpObject> objects) {
+        var ec = new io.netty.channel.embedded.EmbeddedChannel(new io.netty.handler.codec.http.HttpResponseEncoder());
+        return drainEncoded(ec, objects);
+    }
+
+    private static byte[] drainEncoded(io.netty.channel.embedded.EmbeddedChannel ec,
+                                        java.util.List<io.netty.handler.codec.http.HttpObject> objects) {
+        try {
+            for (var o : objects) ec.writeOutbound(o);
+            ec.flushOutbound();
+            var pieces = new java.util.ArrayList<byte[]>();
+            int total = 0;
+            Object next;
+            while ((next = ec.readOutbound()) != null) {
+                var buf = (io.netty.buffer.ByteBuf) next;
+                var arr = new byte[buf.readableBytes()];
+                buf.readBytes(arr);
+                buf.release();
+                pieces.add(arr);
+                total += arr.length;
+            }
+            var combined = new byte[total];
+            int off = 0;
+            for (var a : pieces) {
+                System.arraycopy(a, 0, combined, off, a.length);
+                off += a.length;
+            }
+            return combined;
+        } finally {
+            ec.finishAndReleaseAll();
         }
     }
 

@@ -48,6 +48,22 @@ public class H2Accumulation extends Accumulation {
         public boolean clientEndStream;
         public boolean serverEndStream;
         public Long resetErrorCode; // RST_STREAM, null when not reset
+        /**
+         * Set after onRequestReceived has fired for this stream. Holds the response continuation
+         * so the response side can be delivered on the same callback chain. Stays null until the
+         * request is fully received.
+         */
+        public java.util.function.Consumer<RequestResponsePacketPair> responseContinuation;
+        /**
+         * Set when {@link #responseContinuation} is set; the in-flight pair the H2 dispatch
+         * builds incrementally and hands off to {@code onRequestReceived}'s consumer.
+         */
+        public RequestResponsePacketPair inFlightPair;
+        /**
+         * True once the request side has been emitted via the callback. Prevents duplicate
+         * fires on subsequent HEADERS / DATA observations for the same stream.
+         */
+        public boolean requestEmitted;
 
         public StreamState(int streamId) { this.streamId = streamId; }
 
