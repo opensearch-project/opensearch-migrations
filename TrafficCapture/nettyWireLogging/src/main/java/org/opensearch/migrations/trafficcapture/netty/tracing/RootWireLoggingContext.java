@@ -15,6 +15,8 @@ public class RootWireLoggingContext extends RootOtelContext implements IRootWire
     public final WireCaptureContexts.BlockingContext.MetricInstruments blockingInstruments;
     public final WireCaptureContexts.WaitingForResponseContext.MetricInstruments waitingForResponseInstruments;
     public final WireCaptureContexts.ResponseContext.MetricInstruments responseInstruments;
+    /** RFC 0001 §7.7 — HTTP/2 capture-path metrics. */
+    public final H2MetricInstruments h2Instruments;
 
     public RootWireLoggingContext(OpenTelemetry openTelemetry, IContextTracker contextTracker) {
         this(openTelemetry, contextTracker, SCOPE_NAME);
@@ -28,6 +30,7 @@ public class RootWireLoggingContext extends RootOtelContext implements IRootWire
         blockingInstruments = WireCaptureContexts.BlockingContext.makeMetrics(meter);
         waitingForResponseInstruments = WireCaptureContexts.WaitingForResponseContext.makeMetrics(meter);
         responseInstruments = WireCaptureContexts.ResponseContext.makeMetrics(meter);
+        h2Instruments = new H2MetricInstruments(meter);
     }
 
     @Override

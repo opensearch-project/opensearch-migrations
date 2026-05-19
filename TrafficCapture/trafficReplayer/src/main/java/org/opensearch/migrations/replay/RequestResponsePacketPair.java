@@ -68,6 +68,26 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         requestOrResponseAccumulationContext = httpTransactionContext.createRequestAccumulationContext();
     }
 
+    /** RFC 0001 §8.6 — wire-protocol of the source side: "HTTP/1.1" or "HTTP/2.0". Null when unknown. */
+    @Getter
+    private String sourceProtocol;
+    /** RFC 0001 §8.6 — H2 stream id on the source side; null for H1 / unknown. */
+    @Getter
+    private Integer sourceStreamId;
+    /** RFC 0001 §8.6 — H2 stream id on the target side; null for H1 / unknown. */
+    @Getter
+    private Integer targetStreamId;
+
+    /** Sets H2 source identity on this pair. Setter (rather than constructor arg) keeps the H1 path unchanged. */
+    public void setSourceProtocolAndStream(String protocol, Integer streamId) {
+        this.sourceProtocol = protocol;
+        this.sourceStreamId = streamId;
+    }
+
+    public void setTargetStreamId(Integer streamId) {
+        this.targetStreamId = streamId;
+    }
+
     @NonNull
     ISourceTrafficChannelKey getBeginningTrafficStreamKey() {
         return firstTrafficStreamKeyForRequest;
