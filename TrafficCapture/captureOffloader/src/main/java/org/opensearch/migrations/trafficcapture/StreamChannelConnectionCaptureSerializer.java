@@ -9,10 +9,17 @@ import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.IntStream;
 
+import org.opensearch.migrations.trafficcapture.protos.AlpnNegotiationObservation;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
+import org.opensearch.migrations.trafficcapture.protos.Http2DataPayload;
+import org.opensearch.migrations.trafficcapture.protos.Http2FrameObservation;
+import org.opensearch.migrations.trafficcapture.protos.Http2FrameType;
+import org.opensearch.migrations.trafficcapture.protos.Http2HeaderField;
+import org.opensearch.migrations.trafficcapture.protos.Http2HeadersPayload;
+import org.opensearch.migrations.trafficcapture.protos.Http2WindowUpdatePayload;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadSegmentObservation;
 import org.opensearch.migrations.trafficcapture.protos.RequestIntentionallyDropped;
@@ -22,6 +29,7 @@ import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.trafficcapture.protos.WriteSegmentObservation;
 
 import com.google.protobuf.ByteOutput;
+import com.google.protobuf.ByteString;
 import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.Timestamp;
@@ -29,6 +37,8 @@ import com.google.protobuf.WireFormat;
 import io.netty.buffer.ByteBuf;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+
+import org.opensearch.migrations.trafficcapture.h2.Http2FramePayload;
 
 /**
  * This class serves as a generic serializer. Its primary function is to take ByteBuffer data,
@@ -611,6 +621,194 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
                 minExpectedSpaceAfterObservation
             );
         }
+    }
+
+    // ---- HTTP/2 capture API (RFC 0001 §6.1) ----
+
+    @Override
+    public void addAlpnNegotiatedEvent(Instant timestamp, String negotiatedProtocol, String offeredByClient)
+            throws IOException {
+        var alpn = AlpnNegotiationObservation.newBuilder()
+                .setNegotiatedProtocol(negotiatedProtocol == null ? "" : negotiatedProtocol)
+                .setOfferedByClient(offeredByClient == null ? "" : offeredByClient)
+                .build();
+        emitObservationViaProto(timestamp, TrafficObservation.ALPN_FIELD_NUMBER, alpn);
+    }
+
+    @Override
+    public void addH2FrameRead(Instant timestamp, int streamId, Http2FrameType type, int flags,
+                                ByteBuf rawFrame, Http2FramePayload payload) throws IOException {
+        emitH2Frame(timestamp, streamId, type, flags, rawFrame, payload);
+    }
+
+    @Override
+    public void addH2FrameWrite(Instant timestamp, int streamId, Http2FrameType type, int flags,
+                                 ByteBuf rawFrame, Http2FramePayload payload) throws IOException {
+        emitH2Frame(timestamp, streamId, type, flags, rawFrame, payload);
+    }
+
+    private void emitH2Frame(Instant timestamp, int streamId, Http2FrameType type, int flags,
+                              ByteBuf rawFrame, Http2FramePayload payload) throws IOException {
+        var builder = Http2FrameObservation.newBuilder()
+                .setStreamId(streamId)
+                .setType(type)
+                .setFlags(flags);
+        if (rawFrame != null && rawFrame.readableBytes() > 0) {
+            builder.setRawFrame(ByteString.copyFrom(rawFrame.duplicate().nioBuffer()));
+        }
+        if (payload != null) {
+            populatePayload(builder, payload);
+        }
+        var observation = builder.build();
+        // Per RFC 0001 §6.1.1: do not segment H2 frames. If the whole observation won't fit in
+        // the current TrafficStream we rotate. If it won't fit in a fresh stream either, we mark
+        // the observation truncated and emit only the metadata + rawFrame omitted.
+        var serializedSize = TrafficObservation.newBuilder()
+                .setTs(toProtoTimestamp(timestamp))
+                .setHttp2Frame(observation)
+                .build()
+                .getSerializedSize();
+        var spaceLeft = currentOutputStreamWriteableSpaceLeft();
+        if (spaceLeft != -1 && spaceLeft < serializedSize + 16 /* tag + length overhead */) {
+            flushCommitAndResetStream(false);
+            spaceLeft = currentOutputStreamWriteableSpaceLeft();
+            if (spaceLeft != -1 && spaceLeft < serializedSize + 16) {
+                log.atWarn().setMessage(
+                        "H2 frame size {} exceeds TrafficStream buffer; emitting truncated observation")
+                    .addArgument(serializedSize).log();
+                observation = Http2FrameObservation.newBuilder()
+                        .setStreamId(streamId)
+                        .setType(type)
+                        .setFlags(flags)
+                        .setTruncated(true)
+                        .build();
+            }
+        }
+        emitObservationViaProto(timestamp, TrafficObservation.HTTP2FRAME_FIELD_NUMBER, observation);
+    }
+
+    private static void populatePayload(Http2FrameObservation.Builder builder, Http2FramePayload payload) {
+        if (payload instanceof Http2FramePayload.Http2HeadersPayloadView h) {
+            var hp = Http2HeadersPayload.newBuilder()
+                    .setEndStream(h.endStream())
+                    .setEndHeaders(h.endHeaders())
+                    .setDependsOnStreamId(h.dependsOnStreamId())
+                    .setWeight(h.weight())
+                    .setExclusive(h.exclusive());
+            for (var f : h.fields()) {
+                hp.addFields(Http2HeaderField.newBuilder()
+                        .setName(ByteString.copyFrom(f.name()))
+                        .setValue(ByteString.copyFrom(f.value()))
+                        .setSensitive(f.sensitive()));
+            }
+            builder.setHeaders(hp);
+        } else if (payload instanceof Http2FramePayload.Http2DataPayloadView d) {
+            var dp = Http2DataPayload.newBuilder()
+                    .setEndStream(d.endStream())
+                    .setPadLength(d.padLength());
+            if (d.data() != null && d.data().readableBytes() > 0) {
+                dp.setData(ByteString.copyFrom(d.data().duplicate().nioBuffer()));
+            }
+            builder.setData(dp);
+        } else if (payload instanceof Http2FramePayload.Http2SettingsPayloadView s) {
+            var sp = org.opensearch.migrations.trafficcapture.protos.Http2SettingsPayload.newBuilder()
+                    .setAck(s.ack());
+            for (var entry : s.settings().entrySet()) {
+                sp.putSettings(entry.getKey(), entry.getValue().intValue());
+            }
+            builder.setSettings(sp);
+        } else if (payload instanceof Http2FramePayload.Http2WindowUpdatePayloadView w) {
+            builder.setWindowUpdate(Http2WindowUpdatePayload.newBuilder().setIncrement(w.increment()));
+        } else if (payload instanceof Http2FramePayload.Http2RstStreamPayloadView r) {
+            builder.setRstStream(
+                org.opensearch.migrations.trafficcapture.protos.Http2RstStreamPayload.newBuilder()
+                        .setErrorCode((int) r.errorCode()));
+        } else if (payload instanceof Http2FramePayload.Http2GoAwayPayloadView g) {
+            var gp = org.opensearch.migrations.trafficcapture.protos.Http2GoAwayPayload.newBuilder()
+                    .setLastStreamId(g.lastStreamId())
+                    .setErrorCode((int) g.errorCode());
+            if (g.debugData() != null && g.debugData().readableBytes() > 0) {
+                gp.setDebugData(ByteString.copyFrom(g.debugData().duplicate().nioBuffer()));
+            }
+            builder.setGoAway(gp);
+        } else if (payload instanceof Http2FramePayload.Http2PingPayloadView p) {
+            var pp = org.opensearch.migrations.trafficcapture.protos.Http2PingPayload.newBuilder()
+                    .setAck(p.ack());
+            if (p.opaqueData() != null && p.opaqueData().readableBytes() > 0) {
+                pp.setOpaqueData(ByteString.copyFrom(p.opaqueData().duplicate().nioBuffer()));
+            }
+            builder.setPing(pp);
+        } else if (payload instanceof Http2FramePayload.Http2PushPromisePayloadView pp) {
+            var ppp = org.opensearch.migrations.trafficcapture.protos.Http2PushPromisePayload.newBuilder()
+                    .setPromisedStreamId(pp.promisedStreamId());
+            for (var f : pp.fields()) {
+                ppp.addFields(Http2HeaderField.newBuilder()
+                        .setName(ByteString.copyFrom(f.name()))
+                        .setValue(ByteString.copyFrom(f.value()))
+                        .setSensitive(f.sensitive()));
+            }
+            builder.setPushPromise(ppp);
+        } else if (payload instanceof Http2FramePayload.Http2PriorityPayloadView pr) {
+            builder.setPriority(
+                org.opensearch.migrations.trafficcapture.protos.Http2PriorityPayload.newBuilder()
+                        .setDependsOnStreamId(pr.dependsOnStreamId())
+                        .setWeight(pr.weight())
+                        .setExclusive(pr.exclusive()));
+        } else if (payload instanceof Http2FramePayload.Http2ContinuationPayloadView c) {
+            var cp = org.opensearch.migrations.trafficcapture.protos.Http2ContinuationPayload.newBuilder()
+                    .setEndHeaders(c.endHeaders());
+            if (c.headerBlockFragment() != null && c.headerBlockFragment().readableBytes() > 0) {
+                cp.setHeaderBlockFragment(
+                    ByteString.copyFrom(c.headerBlockFragment().duplicate().nioBuffer()));
+            }
+            builder.setContinuation(cp);
+        } else if (payload instanceof Http2FramePayload.Http2TruncatedPayloadView) {
+            builder.setTruncated(true);
+        }
+    }
+
+    private static Timestamp toProtoTimestamp(Instant t) {
+        return Timestamp.newBuilder()
+                .setSeconds(t.getEpochSecond())
+                .setNanos(t.getNano())
+                .build();
+    }
+
+    /**
+     * Generic emission helper for any whole-message proto observation: builds a
+     * {@link TrafficObservation} containing it, computes size, ensures stream space, and writes.
+     */
+    private void emitObservationViaProto(Instant timestamp, int captureFieldNumber,
+                                          com.google.protobuf.MessageLite payload) throws IOException {
+        var observation = TrafficObservation.newBuilder().setTs(toProtoTimestamp(timestamp));
+        switch (captureFieldNumber) {
+            case TrafficObservation.HTTP2FRAME_FIELD_NUMBER:
+                observation.setHttp2Frame((Http2FrameObservation) payload);
+                break;
+            case TrafficObservation.ALPN_FIELD_NUMBER:
+                observation.setAlpn((AlpnNegotiationObservation) payload);
+                break;
+            default:
+                throw new IllegalArgumentException("Unsupported observation tag: " + captureFieldNumber);
+        }
+        var built = observation.build();
+        var observationContentSize = built.getSerializedSize() - getSizeOfTimestamp(timestamp)
+                - CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, getSizeOfTimestamp(timestamp))
+                + CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, getSizeOfTimestamp(timestamp))
+                + getSizeOfTimestamp(timestamp);
+        // Simplification: just check whether the whole serialized observation message fits.
+        int wireLen = built.getSerializedSize();
+        flushIfNeeded(CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(
+                wireLen, numFlushesSoFar + 1));
+
+        // Write: TrafficStream.subStream tag + length-delimited TrafficObservation bytes.
+        writeTrafficStreamTag(TrafficStream.SUBSTREAM_FIELD_NUMBER);
+        getOrCreateCodedOutputStream().writeUInt32NoTag(wireLen);
+        built.writeTo(getOrCreateCodedOutputStream());
+    }
+
+    private static int getSizeOfTimestamp(Instant t) {
+        return CodedOutputStreamSizeUtil.getSizeOfTimestamp(t);
     }
 
     private static class ByteOutputGatheringByteChannel implements GatheringByteChannel {
