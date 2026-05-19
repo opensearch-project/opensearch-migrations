@@ -142,17 +142,28 @@ public class RequestTransformerAndSender<T> {
             // read buffer horizons aren't set after the transformation work finishes, but after the packets
             // are fully handled
             return requestReadyFuture.thenCompose(
-                transformedRequest -> replayEngine.scheduleRequest(
-                    ctx,
-                    start,
-                    end,
-                    transformedRequest.transformedOutput.numByteBufs(),
-                    transformedRequest.transformedOutput,
-                    getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture,
-                        arr -> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx)),
-                    effectiveQuiescentDuration,
-                    effectiveWireTimes
-                ),
+                transformedRequest -> {
+                    if (transformedRequest.transformedOutput == null) {
+                        @SuppressWarnings("unchecked")
+                        var filtered = (TrackedFuture<String, T>) TextTrackedFuture.completedFuture(
+                            (T) new TransformedTargetRequestAndResponseList(
+                                null, transformedRequest.transformationStatus),
+                            () -> "request filtered - skipping target send"
+                        );
+                        return filtered;
+                    }
+                    return replayEngine.scheduleRequest(
+                        ctx,
+                        start,
+                        end,
+                        transformedRequest.transformedOutput.numByteBufs(),
+                        transformedRequest.transformedOutput,
+                        getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture,
+                            arr -> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx)),
+                        effectiveQuiescentDuration,
+                        effectiveWireTimes
+                    );
+                },
                 () -> "transitioning transformed packets onto the wire"
             );
         } catch (Exception e) {
