@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.IntStream;
 
+import org.opensearch.migrations.trafficcapture.h2.Http2FramePayload;
 import org.opensearch.migrations.trafficcapture.protos.AlpnNegotiationObservation;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
@@ -37,8 +38,6 @@ import com.google.protobuf.WireFormat;
 import io.netty.buffer.ByteBuf;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-
-import org.opensearch.migrations.trafficcapture.h2.Http2FramePayload;
 
 /**
  * This class serves as a generic serializer. Its primary function is to take ByteBuffer data,

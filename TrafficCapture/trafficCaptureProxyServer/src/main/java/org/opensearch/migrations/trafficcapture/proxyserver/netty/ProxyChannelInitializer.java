@@ -5,8 +5,10 @@ import javax.net.ssl.SSLEngine;
 import java.io.IOException;
 import java.util.function.Supplier;
 
+import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpHandler;
+import org.opensearch.migrations.trafficcapture.netty.H2FrameSnifferHandler;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
 
@@ -147,16 +149,62 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
     }
 
     /**
-     * H2 pipeline: stubbed in Phase 2 (RFC 0001 T2.3). T2.7 fills this in with the
-     * minimal-parse sniffer + per-stream gate. Until then the connection is closed
-     * with an explanatory exception so an H2 client never sees ambiguous behavior.
+     * H2 pipeline (RFC 0001 §7.3 minimal-parse tee):
+     * <ol>
+     *   <li>{@link H2FrameSnifferHandler} — parses frame boundaries, emits per-frame
+     *       {@code Http2FrameObservation}s via the per-connection capture serializer, and
+     *       forwards bytes byte-identically.</li>
+     *   <li>{@link FrontsideHandler} — forwards bytes to the upstream pool, identical to
+     *       the H1 path.</li>
+     * </ol>
+     *
+     * <p>Per-stream gating ({@code PerStreamGateHandler}) lands in T3.3 between the sniffer
+     * and the forwarder. Until then, mutating-method streams are NOT held — the offload
+     * guarantee from the H1 path doesn't apply yet to H2 traffic.
+     *
+     * <p>The capture serializer is created lazily here (one per connection) so it can emit
+     * the {@code AlpnNegotiationObservation} synchronously before the first frame.
      */
-    protected void configureH2Pipeline(ChannelHandlerContext ctx, String connectionId) {
-        log.atWarn().setMessage(
-                "ALPN negotiated h2 for connectionId={}, but the H2 pipeline is not yet wired in this build. "
-                    + "Closing connection. (RFC 0001 T2.7 will land the H2 pipeline.)")
-            .addArgument(connectionId).log();
-        ctx.close();
+    protected void configureH2Pipeline(ChannelHandlerContext ctx, String connectionId) throws IOException {
+        var pipeline = ctx.pipeline();
+        var serializer = createH2CaptureSerializer(connectionId);
+        try {
+            serializer.addAlpnNegotiatedEvent(
+                java.time.Instant.now(),
+                io.netty.handler.ssl.ApplicationProtocolNames.HTTP_2,
+                io.netty.handler.ssl.ApplicationProtocolNames.HTTP_2 + ","
+                    + io.netty.handler.ssl.ApplicationProtocolNames.HTTP_1_1);
+        } catch (IOException e) {
+            log.atWarn().setCause(e).setMessage("Failed to record ALPN observation for connectionId={}")
+                .addArgument(connectionId).log();
+        }
+        // Read direction (client → proxy): sniff frames, emit observations, forward verbatim.
+        pipeline.addLast("H2FrameSniffer-read",
+            new H2FrameSnifferHandler(serializer,
+                /*isClientToProxyDirection*/ true,
+                this::onH2HeadersForGating,
+                /*maxHeaderListSize*/ 8192L,
+                /*maxHeaderTableSize*/ 4096L));
+        afterCaptureHandlerInstalled(pipeline, connectionId);
+        pipeline.addLast(new FrontsideHandler(backsideConnectionPool));
+    }
+
+    /**
+     * Subclass hook fired when the sniffer decodes a HEADERS frame on the client→proxy side.
+     * T3.3 ({@code PerStreamGateHandler}) will subscribe here to identify mutating-method
+     * streams that need to be gated. Default: no-op.
+     */
+    protected void onH2HeadersForGating(int streamId, io.netty.handler.codec.http2.Http2Headers headers) {
+        // Wired in T3.3 via PerStreamGateHandler subscription.
+    }
+
+    /**
+     * Build the per-connection capture serializer for the H2 path. Subclasses may override
+     * to wire alternate capture sinks (e.g., test in-memory factories).
+     */
+    protected IChannelConnectionCaptureSerializer<T> createH2CaptureSerializer(String connectionId) throws IOException {
+        var parentContext = rootContext.createConnectionContext(connectionId, /*nodeId*/ "");
+        return connectionCaptureFactory.createOffloader(parentContext);
     }
 
     /**

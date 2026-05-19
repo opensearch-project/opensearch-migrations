@@ -1,6 +1,5 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
-import java.io.IOException;
 import java.net.SocketAddress;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -16,8 +15,8 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http2.DefaultHttp2Connection;
-import io.netty.handler.codec.http2.DefaultHttp2HeadersEncoder;
 import io.netty.handler.codec.http2.DefaultHttp2Headers;
+import io.netty.handler.codec.http2.DefaultHttp2HeadersEncoder;
 import io.netty.handler.codec.http2.Http2Connection;
 import io.netty.handler.codec.http2.Http2Headers;
 import io.netty.util.ResourceLeakDetector;
