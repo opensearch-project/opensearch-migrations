@@ -289,6 +289,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
 
         var yetToBeSequencedTrafficStream = trafficStreamAndKey.getStream();
+        TrafficStreamUtils.requireSupportedCaptureFormatVersion(yetToBeSequencedTrafficStream);
         log.atDebug().setMessage("accept() trafficStream: {} state={}")
             .addArgument(() -> summarizeTrafficStream(yetToBeSequencedTrafficStream))
             .addArgument(() -> {
@@ -388,14 +389,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             .addArgument(observation)
             .addArgument(accum.state)
             .log();
-        // RFC 0001 v1.6 fail-fast guard: this accumulator only understands the v1 H1 wire format.
-        // A v2 capture that contains HTTP/2 frame observations or ALPN observations indicates the
-        // capture proxy is producing data that requires a Phase-4-aware H2 accumulator, which has
-        // not yet been implemented. Refuse to silently drop these observations — any other behavior
-        // partially accumulates the connection and produces misleading replay output.
-        if (observation.hasHttp2Frame() || observation.hasAlpn()) {
-            throw new UnsupportedV2CaptureException(trafficStreamKey, observation);
-        }
         var timestamp = TrafficStreamUtils.instantFromProtoTimestamp(observation.getTs());
         liveStreams.expireOldEntries(trafficStreamKey, accum, timestamp);
 
@@ -411,21 +404,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     .log();
                 return CONNECTION_STATUS.ALIVE;
             });
-    }
-
-    /**
-     * Thrown when this H1-only accumulator encounters a TrafficObservation that requires
-     * the H2 accumulator implemented in Phase 4 of RFC 0001. Fails the affected
-     * connection rather than silently dropping observations.
-     */
-    public static class UnsupportedV2CaptureException extends RuntimeException {
-        public UnsupportedV2CaptureException(ITrafficStreamKey key, TrafficObservation observation) {
-            super("Connection " + key + " contains an HTTP/2 observation ("
-                    + observation.getCaptureCase()
-                    + "), but this replayer build does not yet include the H2 accumulator. "
-                    + "Either downgrade the capture proxy to disable --enableHttp2, or upgrade "
-                    + "to a replayer build that includes RFC 0001 Phase 4 changes.");
-        }
     }
 
     private Optional<CONNECTION_STATUS> handleObservationForSkipState(
