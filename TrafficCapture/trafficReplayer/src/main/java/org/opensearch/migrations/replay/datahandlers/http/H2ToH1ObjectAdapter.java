@@ -152,8 +152,7 @@ public final class H2ToH1ObjectAdapter {
         if (CONNECTION_SPECIFIC_HEADERS.contains(AsciiString.cached(name))) return true;
         if ("transfer-encoding".equals(name) && "chunked".equalsIgnoreCase(value)) return true;
         if ("te".equals(name) && !"trailers".equalsIgnoreCase(value)) return true;
-        if ("host".equals(name) && haveAuthority) return true; // :authority wins
-        return false;
+        return "host".equals(name) && haveAuthority; // :authority wins
     }
 
     private static void foldCookieCrumbs(DefaultHttpHeaders headers) {

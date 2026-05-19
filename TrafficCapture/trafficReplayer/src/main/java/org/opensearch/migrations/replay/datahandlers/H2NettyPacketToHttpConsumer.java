@@ -322,5 +322,17 @@ public class H2NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Ag
         }
     }
 
-    private record ParsedRequest(HttpRequest request, ByteBuf body) {}
+    /** Parsed H1 request: line + headers + accumulated body bytes. */
+    private static final class ParsedRequest {
+        final HttpRequest request;
+        final ByteBuf body;
+
+        ParsedRequest(HttpRequest request, ByteBuf body) {
+            this.request = request;
+            this.body = body;
+        }
+
+        HttpRequest request() { return request; }
+        ByteBuf body() { return body; }
+    }
 }

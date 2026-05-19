@@ -193,7 +193,19 @@ public class H2MultiplexedConsumerFactory implements AutoCloseable {
             }
         }
 
-        private record Parsed(HttpRequest request, ByteBuf body) {}
+        /** Parsed H1 request: line + headers + accumulated body bytes. */
+        private static final class Parsed {
+            final HttpRequest request;
+            final ByteBuf body;
+
+            Parsed(HttpRequest request, ByteBuf body) {
+                this.request = request;
+                this.body = body;
+            }
+
+            HttpRequest request() { return request; }
+            ByteBuf body() { return body; }
+        }
 
         private Parsed parseBufferedH1() {
             var ec = new io.netty.channel.embedded.EmbeddedChannel(new HttpRequestDecoder());
