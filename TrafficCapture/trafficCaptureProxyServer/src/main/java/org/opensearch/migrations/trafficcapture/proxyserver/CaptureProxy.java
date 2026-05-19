@@ -428,6 +428,29 @@ public class CaptureProxy {
         var params = parseArgs(args);
         var backsideUri = convertStringToUri(params.backsideUriString);
 
+        // T3.2 — when --enableHttp2 is set, probe the upstream's ALPN to confirm it speaks h2.
+        // If not, downgrade to advertising http/1.1-only to clients (avoids a runtime failure mode
+        // where the client picks h2 but the upstream rejects). Probe failures are logged but do
+        // not block startup — the proxy continues with the configured advertisement.
+        boolean effectiveEnableHttp2 = params.enableHttp2;
+        if (params.enableHttp2 && "https".equalsIgnoreCase(backsideUri.getScheme())) {
+            try {
+                var negotiated = UpstreamAlpnProbe.probe(
+                        backsideUri,
+                        params.allowInsecureConnectionsToBackside,
+                        java.time.Duration.ofSeconds(10));
+                var advertise = UpstreamAlpnProbe.decideClientAdvertisement(true, negotiated);
+                effectiveEnableHttp2 = advertise.contains(io.netty.handler.ssl.ApplicationProtocolNames.HTTP_2);
+                log.atInfo().setMessage("Upstream ALPN probe: negotiated={}, effectiveEnableHttp2={}")
+                    .addArgument(negotiated).addArgument(effectiveEnableHttp2).log();
+            } catch (Exception e) {
+                log.atWarn().setCause(e).setMessage(
+                    "Upstream ALPN probe failed for {}; proceeding with --enableHttp2 as configured")
+                    .addArgument(backsideUri).log();
+            }
+        }
+        params.enableHttp2 = effectiveEnableHttp2;
+
         var ctx = new RootCaptureContext(
             RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "capture",
                 ProcessHelpers.getNodeInstanceName()),
