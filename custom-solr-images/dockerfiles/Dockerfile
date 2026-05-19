@@ -1,7 +1,7 @@
 FROM amazoncorretto:8-alpine
 
-ARG SOLR_VERSION=6.6.6
-ARG SOLR_SHA1=1dfd3de06c8e6554c42e69f49573b563125da5a1
+ARG SOLR_VERSION=6.6.0
+ARG SOLR_SHA1=ab74116e049cfb603b84226e13d0f7c51de9aa23
 ENV SOLR_HOME=/var/solr/data
 ENV PATH=/opt/solr/bin:$PATH
 ENV LANG=C.UTF-8
@@ -25,14 +25,14 @@ RUN set -eux; \
 
 RUN --mount=type=cache,target=/var/cache/downloads,sharing=locked \
   set -eux; \
-  TARBALL=/var/cache/downloads/solr-${SOLR_VERSION}.tgz; \
-  [ -s "$TARBALL" ] || curl -fsSLo "$TARBALL" \
-    "https://archive.apache.org/dist/lucene/solr/${SOLR_VERSION}/solr-${SOLR_VERSION}.tgz"; \
-  echo "${SOLR_SHA1}  $TARBALL" | sha1sum -c -; \
+  ZIPFILE=/var/cache/downloads/solr-${SOLR_VERSION}.zip; \
+  [ -s "$ZIPFILE" ] || curl -fsSLo "$ZIPFILE" \
+    "https://artifacts.alfresco.com/nexus/content/repositories/public/org/apache/solr/solr/${SOLR_VERSION}/solr-${SOLR_VERSION}.zip"; \
+  echo "${SOLR_SHA1}  $ZIPFILE" | sha1sum -c -; \
   mkdir -p /var/solr; \
   groupadd -r -g 8983 solr; \
   useradd  -r -u 8983 -g solr -m -d "${SOLR_HOME}" -s /bin/bash solr; \
-  tar -xzf "$TARBALL" -C /opt; \
+  unzip "$ZIPFILE" -d /opt; \
   mv "/opt/solr-${SOLR_VERSION}" /opt/solr; \
   cp /opt/solr/server/solr/solr.xml /opt/solr/server/solr-template.solr.xml; \
   cp /opt/solr/server/solr/zoo.cfg  /opt/solr/server/solr-template.zoo.cfg; \
