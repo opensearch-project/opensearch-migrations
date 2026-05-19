@@ -33,6 +33,8 @@ spec:
       - name: replayer-config
         value: |
           {"batchSize": 1000, "concurrency": 4}
+      - name: transforms-sources
+        value: "{}"
       - name: skip-cleanup
         value: "false"
       # Registry prefix for custom ES images (e.g. "localhost:5000/" for minikube)
@@ -132,6 +134,8 @@ spec:
                   value: "{{workflow.parameters.snapshot-and-migration-configs}}"
                 - name: replayer-config
                   value: "{{workflow.parameters.replayer-config}}"
+                - name: transforms-sources
+                  value: "{{workflow.parameters.transforms-sources}}"
                 - name: imageMigrationConsoleLocation
                   valueFrom:
                     configMapKeyRef:
@@ -260,6 +264,7 @@ spec:
           - name: target-config
           - name: snapshot-and-migration-configs
           - name: replayer-config
+          - name: transforms-sources
           - name: imageMigrationConsoleLocation
           - name: imageMigrationConsolePullPolicy
           - name: s3Region
@@ -297,6 +302,7 @@ spec:
             SOURCE_CONFIG='{{inputs.parameters.source-config}}'
             TARGET_CONFIG='{{inputs.parameters.target-config}}'
             SNAPSHOT_MIGRATION_CONFIGS='{{inputs.parameters.snapshot-and-migration-configs}}'
+            TRANSFORMS_SOURCES='{{inputs.parameters.transforms-sources}}'
             S3_REGION='{{inputs.parameters.s3Region}}'
             S3_ENDPOINT='{{inputs.parameters.s3Endpoint}}'
             S3_BUCKET='{{inputs.parameters.s3BucketName}}'
@@ -342,6 +348,7 @@ spec:
               --argjson source "$SOURCE_WITH_REPO" \
               --argjson target "$TARGET_CONFIG" \
               --argjson snapshotConfigs "$SNAPSHOT_EXTRACT_CONFIGS" \
+              --argjson transformsSources "$TRANSFORMS_SOURCES" \
               '{
                 "skipApprovals": true,
                 "sourceClusters": {
@@ -350,6 +357,7 @@ spec:
                 "targetClusters": {
                   "target1": $target
                 },
+                "transformsSources": $transformsSources,
                 "snapshotMigrationConfigs": [{
                   "fromSource": "source1",
                   "toTarget": "target1",

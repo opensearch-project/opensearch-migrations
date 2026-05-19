@@ -556,6 +556,7 @@ kubectl delete approvalgates.migrations.opensearch.org \\
         .addRequiredInput("fromProxyConfigChecksum", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
+        .addRequiredInput("useLocalStack", typeToken<boolean>())
         .addRequiredInput("name", typeToken<string>())
         .addRequiredInput("resourceUid", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
@@ -657,6 +658,7 @@ kubectl delete approvalgates.migrations.opensearch.org \\
                     resolvedKafkaAuthType: c.steps.readKafkaConnectionProfile.outputs.authType,
                     name: b.inputs.name,
                     ownerUid: b.inputs.resourceUid,
+                    useLocalStack: b.inputs.useLocalStack,
                 }),
                 {when: c => ({templateExp: checksumNotDone(c.reconcileTrafficReplayResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
             )
@@ -835,6 +837,11 @@ kubectl delete approvalgates.migrations.opensearch.org \\
                         targetConfig: expr.get(c.item, "toTarget"),
                         replayerOptions: expr.get(c.item, "replayerConfig"),
                         resourceName: expr.get(c.item, "name"),
+                        useLocalStack: expr.dig(
+                            expr.deserializeRecord(expr.get(c.item, "replayerConfig")),
+                            ["useLocalStack"],
+                            false
+                        ),
                         groupName_view: expr.concat(
                             expr.get(c.item, "fromProxy"),
                             expr.literal(" → "),

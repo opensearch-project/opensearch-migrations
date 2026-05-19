@@ -61,7 +61,8 @@ class TestRunner:
     def __init__(self, k8s_service: K8sService, unique_id: str, test_ids: List[str], ma_chart_path: str,
                  combinations: List[Tuple[str, str]],
                  registry_prefix: str = "", values_file: str = None, skip_install: bool = False,
-                 speedup_factor: int = 20, observed_packet_timeout: int = 30) -> None:
+                 speedup_factor: int = 20, observed_packet_timeout: int = 30,
+                 transform_image_basic: str = "", transform_image_sequence: str = "") -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
         self.test_ids = test_ids
@@ -72,6 +73,8 @@ class TestRunner:
         self.skip_install = skip_install
         self.speedup_factor = speedup_factor
         self.observed_packet_timeout = observed_packet_timeout
+        self.transform_image_basic = transform_image_basic
+        self.transform_image_sequence = transform_image_sequence
 
     def _print_test_stats(self, report: TestReport) -> None:
         for test in report.tests:
@@ -178,6 +181,10 @@ class TestRunner:
             command_list.append("--reuse_clusters")
         if self.registry_prefix:
             command_list.append(f"--image_registry_prefix={self.registry_prefix}")
+        if self.transform_image_basic:
+            command_list.append(f"--transform_image_basic={self.transform_image_basic}")
+        if self.transform_image_sequence:
+            command_list.append(f"--transform_image_sequence={self.transform_image_sequence}")
         command_list.append(f"--speedup_factor={self.speedup_factor}")
         command_list.append(f"--observed_packet_timeout={self.observed_packet_timeout}")
         command_list.append("-s")
@@ -592,6 +599,18 @@ def parse_args() -> argparse.Namespace:
         default=30,
         help="Observed packet connection timeout for traffic replayer (default: 30)"
     )
+    parser.add_argument(
+        "--transform-image-basic",
+        type=str,
+        default="",
+        help="Digest-pinned transform image containing the basic transform fixture bank."
+    )
+    parser.add_argument(
+        "--transform-image-sequence",
+        type=str,
+        default="",
+        help="Digest-pinned transform image containing the sequence transform fixture bank."
+    )
     return parser.parse_args()
 
 
@@ -632,7 +651,9 @@ def main() -> None:
                              values_file=dev_values_file,
                              skip_install=args.skip_install,
                              speedup_factor=args.speedup_factor,
-                             observed_packet_timeout=args.observed_packet_timeout)
+                             observed_packet_timeout=args.observed_packet_timeout,
+                             transform_image_basic=args.transform_image_basic,
+                             transform_image_sequence=args.transform_image_sequence)
 
     if args.delete_only:
         fully_clean = test_runner.cleanup_deployment()
