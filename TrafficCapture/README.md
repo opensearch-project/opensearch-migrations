@@ -326,15 +326,23 @@ connection) and continues to appear under `sourceResponse`/`targetResponses`.
 ###### Transformations and interim responses
 
 - **Request transformers** (transformers that mutate the request being sent to the target)
-  are unaffected. Interim responses are not replayed from the captured source data; the
-  replayer's HTTP client negotiates `Expect: 100-continue` with the target server based on
-  the captured request headers, and any interim responses the target returns are recorded
-  on the target side automatically.
+  do not see interim responses — interims arrive after the transformer has already
+  produced the request bytes, and clients do not modify in-flight requests based on 1xx
+  responses (a 100 Continue unblocks body transmission, 103 Early Hints triggers
+  side-channel resource preloading, etc.). If a transformer alters the request body, the
+  `Content-Length` is re-derived automatically by the request pipeline; `Expect:
+  100-continue` is preserved by default and the replayer's HTTP client handles the
+  negotiation with the target server. A transformer that wants to drop the
+  100-continue handshake (e.g. because it has compressed the body to a size where the
+  pre-flight roundtrip is no longer worth it) can remove the `Expect` header explicitly.
 - **Tuple transformers** (transformers that mutate the entire tuple JSON before logging)
   can read, redact, or drop interim responses using normal JSON path operations on the
   `sourceInterimResponses` array and `targetResponses[i].interimResponses` arrays.
   Existing tuple transformers continue to work without changes — interim response fields
-  are additive and ignored by transformers that don't reference them.
+  are additive and ignored by transformers that don't reference them. Tuple transformers
+  are also a natural place to compare source vs target interim behavior (e.g. flag tuples
+  where the source received `100 Continue` but the target returned `417 Expectation
+  Failed`).
 
 ### Capture Kafka Offloader
 
