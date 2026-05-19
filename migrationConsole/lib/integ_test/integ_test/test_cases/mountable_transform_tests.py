@@ -10,6 +10,7 @@ from .cdc_base import (
     wait_for_pod_ready, wait_for_replayer_consuming,
     make_proxy_cluster,
 )
+from .ma_argo_test_base import ClusterVersionCombinationUnsupported
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,12 @@ class Test0041CdcFullE2eMountableTransforms(MATestBase):
     TUPLE_GLOB = "/s3/artifacts/tuples/**/tuples-*.log.gz"
 
     def __init__(self, user_args: MATestUserArguments):
+        if user_args.target_type == "AOSS":
+            raise ClusterVersionCombinationUnsupported(
+                user_args.source_version,
+                user_args.target_type,
+                "Mountable transform CDC E2E requires a provisioned target cluster",
+            )
         super().__init__(
             user_args=user_args,
             description="Full E2E: mountable transform images for metadata, backfill, request, and tuple transforms.",
