@@ -19,6 +19,7 @@ import org.opensearch.migrations.replay.datatypes.ChannelTaskType;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.scheduling.WireTimeAnchors;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 import org.opensearch.migrations.utils.TextTrackedFuture;
@@ -159,6 +160,18 @@ public class RequestSenderOrchestrator {
         ByteBufListProducer packetProducer,
         RetryVisitor<T> visitor
     ) {
+        return scheduleRequest(requestKey, ctx, start, interval, packetProducer, visitor, null);
+    }
+
+    public <T> TrackedFuture<String, T> scheduleRequest(
+        UniqueReplayerRequestKey requestKey,
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        Instant start,
+        Duration interval,
+        ByteBufListProducer packetProducer,
+        RetryVisitor<T> visitor,
+        WireTimeAnchors wireTimes
+    ) {
         var sessionNumber = requestKey.sourceRequestIndexSessionIdentifier;
         var channelInteractionNum = requestKey.getReplayerRequestIndex();
         var generation = requestKey.trafficStreamKey.getSourceGeneration();
@@ -179,7 +192,8 @@ public class RequestSenderOrchestrator {
                 start,
                 interval,
                 packetProducer,
-                visitor
+                visitor,
+                wireTimes
             )
         );
     }
@@ -271,11 +285,20 @@ public class RequestSenderOrchestrator {
         final var replaySession = clientConnectionPool.getCachedSession(ctx, sessionNumber, generation);
         return NettyFutureBinders.bindNettySubmitToTrackableFuture(replaySession.eventLoop)
             .getDeferredFutureThroughHandle((v, t) -> {
-                log.atTrace().setMessage("adding work item at slot {} for {} with {}")
+                log.atTrace().setMessage("adding work item at slot {} for {} with {} (multiplexed={})")
                     .addArgument(channelInteractionNumber)
                     .addArgument(replaySession::getChannelKeyContext)
                     .addArgument(replaySession.scheduleSequencer)
+                    .addArgument(replaySession::isMultiplexed)
                     .log();
+                if (replaySession.isMultiplexed()) {
+                    // Multiplexed (H2) path: bypass the per-session OnlineRadixSorter — the sorter's
+                    // contract is "slot N+1 doesn't run until slot N's workFuture completes", which
+                    // serializes everything on a single connection. H2 streams are independent on the
+                    // wire, so we drive each session-callback directly and let downstream wire-time
+                    // gates (SessionDependencyTracker) enforce the only ordering that matters.
+                    return onSessionCallback.apply(replaySession);
+                }
                 return replaySession.scheduleSequencer.addFutureForWork(
                     channelInteractionNumber,
                     f -> f.thenCompose(
@@ -292,7 +315,8 @@ public class RequestSenderOrchestrator {
         Instant startTime,
         Duration interval,
         ByteBufListProducer packetProducer,
-        RetryVisitor<T> visitor
+        RetryVisitor<T> visitor,
+        WireTimeAnchors wireTimes
     ) {
         var eventLoop = connectionReplaySession.eventLoop;
         var scheduledContext = ctx.createScheduledContext(startTime);
@@ -302,19 +326,81 @@ public class RequestSenderOrchestrator {
             channelInterationNum
         );
         packetProducer.retain();
+
+        // Wire-level dependency gate: when the source-side timing demands strict-serial dispatch
+        // (e.g. an H1 keep-alive request followed by another on the same source connection),
+        // register THIS request's anchors in the per-session tracker and obtain the predecessor's
+        // gate future. Only meaningful in the multiplexed path — the serial path already chains
+        // through the schedule/sequencer.
+        final CompletableFuture<Void> requestSentFuture = new CompletableFuture<>();
+        final CompletableFuture<Void> responseReceivedFuture = new CompletableFuture<>();
+        final CompletableFuture<?> dependencyGate;
+        if (connectionReplaySession.isMultiplexed() && wireTimes != null && !wireTimes.isEmpty()) {
+            dependencyGate = connectionReplaySession.getDependencyTracker().registerAndGetGate(
+                wireTimes.requestFirstFrame(),
+                wireTimes.requestLastFrame(),
+                wireTimes.responseLastFrame(),
+                requestSentFuture,
+                responseReceivedFuture
+            );
+            log.atDebug().setMessage("{} registered wire-time gate (done={}) for request startTime={} anchors={}")
+                .addArgument(diagnosticCtx)
+                .addArgument(dependencyGate::isDone)
+                .addArgument(startTime)
+                .addArgument(wireTimes)
+                .log();
+        } else {
+            dependencyGate = CompletableFuture.completedFuture(null);
+            // No predecessor dependency — complete both futures eagerly so any later registrants
+            // that look up THIS request as a predecessor see a completed gate immediately.
+            requestSentFuture.complete(null);
+            responseReceivedFuture.complete(null);
+        }
+
         return scheduleOnConnectionReplaySession(
             diagnosticCtx,
             connectionReplaySession,
             startTime,
-            new ChannelTask<>(ChannelTaskType.TRANSMIT, trigger -> trigger.thenCompose(voidVal -> {
-                scheduledContext.close();
-                final Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier =
-                    () -> packetConsumerFactory.apply(connectionReplaySession, ctx);
-                return sendRequestWithRetries(senderSupplier, eventLoop, packetProducer, startTime, initialRetryDelay,
-                    interval, visitor);
-            }, () -> "sending packets for request"))
+            new ChannelTask<>(ChannelTaskType.TRANSMIT, trigger -> trigger
+                .thenCompose(voidVal -> {
+                    // Gate the dispatch on the predecessor's wire-time future. If the gate is already
+                    // completed (no predecessor or concurrent classification) this is a no-op-fast-path.
+                    if (dependencyGate.isDone()) {
+                        return TextTrackedFuture.completedFuture(null,
+                            () -> "wire-time gate already satisfied");
+                    }
+                    var gateBinding = new TextTrackedFuture<Void>(() -> "awaiting wire-time predecessor gate");
+                    dependencyGate.whenComplete((v, t) -> {
+                        if (t != null) {
+                            // Predecessor failed — don't propagate the failure to successors; the
+                            // successor's request is independent on the target side. Log and continue.
+                            log.atDebug().setCause(t).setMessage(
+                                "{} predecessor gate completed exceptionally; dispatching anyway")
+                                .addArgument(diagnosticCtx).log();
+                        }
+                        gateBinding.future.complete(null);
+                    });
+                    return gateBinding;
+                }, () -> "awaiting wire-level dispatch dependency gate")
+                .thenCompose(voidVal -> {
+                    scheduledContext.close();
+                    final Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier =
+                        () -> packetConsumerFactory.apply(connectionReplaySession, ctx);
+                    return sendRequestWithRetries(senderSupplier, eventLoop, packetProducer, startTime,
+                        initialRetryDelay, interval, visitor);
+                }, () -> "sending packets for request"))
         )
-            .whenComplete((v,t) -> packetProducer.release(), () -> "waiting for request to be sent to release ByteBufListProducer");
+            .whenComplete((v, t) -> {
+                packetProducer.release();
+                // Signal predecessor-completion to anyone gating on this request. Both futures are
+                // signaled together because the orchestrator's workFuture completes only after the
+                // response side has fully landed — we don't currently have a finer-grained "request
+                // sent\" hook in this layer. The simplification is conservative: pipelined-shape
+                // successors gate on response-received instead of request-sent (more serial than
+                // strictly necessary, but never less serial).
+                if (!requestSentFuture.isDone()) requestSentFuture.complete(null);
+                if (!responseReceivedFuture.isDone()) responseReceivedFuture.complete(null);
+            }, () -> "waiting for request to be sent to release ByteBufListProducer");
     }
 
     private TrackedFuture<String, Void> scheduleCloseOnConnectionReplaySession(

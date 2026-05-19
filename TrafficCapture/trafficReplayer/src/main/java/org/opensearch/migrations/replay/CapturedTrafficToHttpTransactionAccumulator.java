@@ -170,8 +170,20 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             @NonNull HttpMessageAndTimestamp request,
             boolean isResumedConnection
         ) {
+            return onRequestReceived(requestCtx, request, isResumedConnection, null);
+        }
+
+        public Consumer<RequestResponsePacketPair> onRequestReceived(
+            IReplayContexts.IRequestAccumulationContext requestCtx,
+            @NonNull HttpMessageAndTimestamp request,
+            boolean isResumedConnection,
+            org.opensearch.migrations.replay.scheduling.WireTimeAnchors wireTimes
+        ) {
             requestCtx.close();
-            var innerCallback = underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope(), request, isResumedConnection);
+            var scope = requestCtx.getLogicalEnclosingScope();
+            var innerCallback = wireTimes == null
+                ? underlying.onRequestReceived(scope, request, isResumedConnection)
+                : underlying.onRequestReceived(scope, request, isResumedConnection, wireTimes);
             return rrpp -> {
                 rrpp.getResponseContext().close();
                 innerCallback.accept(rrpp);
@@ -858,7 +870,12 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             stream.inFlightPair = rrPair;
             boolean isResumed = accum.getIndexOfCurrentRequest() == 0 && accum.isResumedConnection;
             stream.responseContinuation = listener.onRequestReceived(
-                    requestCtx, requestMessage, isResumed);
+                    requestCtx, requestMessage, isResumed,
+                    new org.opensearch.migrations.replay.scheduling.WireTimeAnchors(
+                        stream.requestFirstFrameTs,
+                        stream.requestLastFrameTs,
+                        stream.responseFirstFrameTs,
+                        stream.responseLastFrameTs));
         } catch (Exception e) {
             log.atWarn().setCause(e).setMessage(
                     "H2 onRequestReceived emission failed for streamId={}; stream marked CLOSED")

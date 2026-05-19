@@ -20,6 +20,7 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
+import org.opensearch.migrations.replay.scheduling.WireTimeAnchors;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
@@ -112,6 +113,25 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             @NonNull HttpMessageAndTimestamp request,
             boolean isResumedConnection
         ) {
+            return onRequestReceivedInternal(ctx, request, isResumedConnection, null);
+        }
+
+        @Override
+        public Consumer<RequestResponsePacketPair> onRequestReceived(
+            @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
+            @NonNull HttpMessageAndTimestamp request,
+            boolean isResumedConnection,
+            @NonNull WireTimeAnchors wireTimes
+        ) {
+            return onRequestReceivedInternal(ctx, request, isResumedConnection, wireTimes);
+        }
+
+        private Consumer<RequestResponsePacketPair> onRequestReceivedInternal(
+            @NonNull IReplayContexts.IReplayerHttpTransactionContext ctx,
+            @NonNull HttpMessageAndTimestamp request,
+            boolean isResumedConnection,
+            WireTimeAnchors wireTimes
+        ) {
             // quiescentDuration is passed to ReplayEngine which applies it relative to the
             // time-shifted start, not relative to now
             var quiescentDurationForRequest = isResumedConnection ? quiescentDuration : null;
@@ -131,7 +151,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             );
 
             var allWorkFinishedForTransactionFuture =
-                sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey, finishedAccumulatingResponseFuture, quiescentDurationForRequest)
+                sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey, finishedAccumulatingResponseFuture,
+                        quiescentDurationForRequest, wireTimes)
                     .getDeferredFutureThroughHandle(
                         // TODO - what if finishedAccumulatingResponseFuture completed exceptionally?
                         (arr, httpRequestException) -> finishedAccumulatingResponseFuture.thenCompose(
@@ -159,7 +180,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             HttpMessageAndTimestamp request,
             UniqueReplayerRequestKey requestKey,
             TextTrackedFuture<RequestResponsePacketPair> finishedAccumulatingResponseFuture,
-            Duration quiescentDurationForRequest) {
+            Duration quiescentDurationForRequest,
+            WireTimeAnchors wireTimes) {
             var workDequeuedByLimiterFuture = new TextTrackedFuture<TrafficStreamLimiter.WorkItem>(
                 () -> "waiting for " + ctx + " to be queued and run through TrafficStreamLimiter"
             );
@@ -169,7 +191,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 .log();
             var wi = liveTrafficStreamLimiter.queueWork(1, ctx, workDequeuedByLimiterFuture.future::complete);
             var httpSentRequestFuture = workDequeuedByLimiterFuture.thenCompose(
-                    ignored -> transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx, quiescentDurationForRequest),
+                    ignored -> transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx,
+                        quiescentDurationForRequest, wireTimes),
                     () -> "Waiting to get response from target"
                 )
                 .whenComplete(
@@ -422,6 +445,18 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         IReplayContexts.IReplayerHttpTransactionContext ctx,
         Duration quiescentDurationForRequest
     ) {
+        return transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx,
+            quiescentDurationForRequest, null);
+    }
+
+    public TrackedFuture<String, TransformedTargetRequestAndResponseList> transformAndSendRequest(
+        ReplayEngine replayEngine,
+        HttpMessageAndTimestamp request,
+        TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        Duration quiescentDurationForRequest,
+        WireTimeAnchors wireTimes
+    ) {
         return transformAndSendRequest(
             inputRequestTransformerFactory,
             replayEngine,
@@ -430,7 +465,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             request.getFirstPacketTimestamp(),
             request.getLastPacketTimestamp(),
             request.packetBytes::stream,
-            quiescentDurationForRequest);
+            quiescentDurationForRequest,
+            wireTimes);
     }
 
     public TrackedFuture<String, TransformedTargetRequestAndResponseList> transformAndSendRequest(

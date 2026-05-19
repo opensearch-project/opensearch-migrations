@@ -178,7 +178,7 @@ public class ReplayEngine {
         ByteBufListProducer packetProducer,
         RequestSenderOrchestrator.RetryVisitor<T> retryVisitor
     ) {
-        return scheduleRequest(ctx, originalStart, originalEnd, numPackets, packetProducer, retryVisitor, null);
+        return scheduleRequest(ctx, originalStart, originalEnd, numPackets, packetProducer, retryVisitor, null, null);
     }
 
     public <T> TrackedFuture<String, T> scheduleRequest(
@@ -189,6 +189,20 @@ public class ReplayEngine {
         ByteBufListProducer packetProducer,
         RequestSenderOrchestrator.RetryVisitor<T> retryVisitor,
         Duration quiescentDurationForRequest
+    ) {
+        return scheduleRequest(ctx, originalStart, originalEnd, numPackets, packetProducer, retryVisitor,
+            quiescentDurationForRequest, null);
+    }
+
+    public <T> TrackedFuture<String, T> scheduleRequest(
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        Instant originalStart,
+        Instant originalEnd,
+        int numPackets,
+        ByteBufListProducer packetProducer,
+        RequestSenderOrchestrator.RetryVisitor<T> retryVisitor,
+        Duration quiescentDurationForRequest,
+        org.opensearch.migrations.replay.scheduling.WireTimeAnchors wireTimes
     ) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "request";
@@ -213,7 +227,8 @@ public class ReplayEngine {
             .addArgument(interval)
             .addArgument(numPackets)
             .log();
-        var result = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packetProducer, retryVisitor);
+        var result = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packetProducer,
+            retryVisitor, wireTimes);
         return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
     }
 
