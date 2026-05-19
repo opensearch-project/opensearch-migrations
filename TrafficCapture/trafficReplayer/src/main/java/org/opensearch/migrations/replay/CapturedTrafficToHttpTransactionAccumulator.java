@@ -372,7 +372,44 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .log();
         }
 
+        return createTypedAccumulation(streamWithKey, stream);
+    }
+
+    /**
+     * RFC 0001 §8.1 protocol dispatch. Decides between {@link Accumulation} (H1) and
+     * {@link H2Accumulation} based on the {@code negotiatedAlpn} envelope field, falling back
+     * to {@code captureFormatVersion} and finally to substream sniffing.
+     *
+     * <p>The default for unknown / empty fields is H1 (legacy behavior); a v2 record without
+     * an explicit ALPN string means the connection was H1 within a v2-capable proxy.
+     */
+    private Accumulation createTypedAccumulation(ITrafficStreamWithKey streamWithKey, TrafficStream stream) {
+        var alpn = stream.getNegotiatedAlpn();
+        var isH2 = "h2".equals(alpn) || (alpn.isEmpty() && hasH2Observation(stream));
+        if (isH2) {
+            log.atDebug().setMessage("Creating H2Accumulation for connectionId={} (alpn={})")
+                .addArgument(streamWithKey.getKey().getConnectionId()).addArgument(alpn).log();
+            return new H2Accumulation(streamWithKey.getKey(), stream, streamWithKey.isResumedConnection());
+        }
         return new Accumulation(streamWithKey.getKey(), stream, streamWithKey.isResumedConnection());
+    }
+
+    /**
+     * Substream sniff for protocol detection: scan the first ~16 observations for an ALPN
+     * observation or any H2 frame. If neither is found, classify as H1.
+     */
+    private static boolean hasH2Observation(TrafficStream stream) {
+        int limit = Math.min(16, stream.getSubStreamCount());
+        for (int i = 0; i < limit; i++) {
+            var sub = stream.getSubStream(i);
+            if (sub.hasAlpn() || sub.hasHttp2Frame()) {
+                return true;
+            }
+            if (sub.hasRead() || sub.hasWrite()) {
+                return false;
+            }
+        }
+        return false;
     }
 
     private enum CONNECTION_STATUS {
@@ -391,6 +428,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             .log();
         var timestamp = TrafficStreamUtils.instantFromProtoTimestamp(observation.getTs());
         liveStreams.expireOldEntries(trafficStreamKey, accum, timestamp);
+
+        if (accum instanceof H2Accumulation) {
+            return addH2Observation((H2Accumulation) accum, trafficStreamKey, observation, timestamp);
+        }
 
         return handleCloseObservationThatAffectEveryState(accum, observation, trafficStreamKey, timestamp).or(
             () -> handleObservationForSkipState(accum, observation)
@@ -646,6 +687,132 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         rrPairWithCallback.getFullDataContinuation().accept(rrPair);
         log.atTrace().setMessage("resetting for end of response").log();
         accumulation.resetForNextRequest();
+    }
+
+    /**
+     * RFC 0001 §8.2 — frame-table dispatch for HTTP/2 observations. Implements per-frame
+     * type handling on an {@link H2Accumulation} — HEADERS / DATA / RST_STREAM / GOAWAY /
+     * SETTINGS / others. Connection-scoped frames (streamId=0) update connection state;
+     * stream-scoped frames update the per-stream accumulation.
+     *
+     * <p>This is a minimal implementation that establishes the dispatch surface; full
+     * lifecycle handling (per RFC 0001 §8.2 table) is filled out across subsequent
+     * commits as fixtures land.
+     */
+    private CONNECTION_STATUS addH2Observation(
+        H2Accumulation accum,
+        ITrafficStreamKey trafficStreamKey,
+        TrafficObservation observation,
+        java.time.Instant timestamp
+    ) {
+        if (observation.hasAlpn()) {
+            // ALPN observation already drove the H2 dispatch decision; no-op here.
+            return CONNECTION_STATUS.ALIVE;
+        }
+        if (observation.hasClose() || observation.hasDisconnect()) {
+            return CONNECTION_STATUS.CLOSED;
+        }
+        if (!observation.hasHttp2Frame()) {
+            // Pass through other observation types (read/write at TLS layer should not appear
+            // for an H2 connection, but fail-soft).
+            return CONNECTION_STATUS.ALIVE;
+        }
+        var frame = observation.getHttp2Frame();
+        int streamId = frame.getStreamId();
+        switch (frame.getType()) {
+            case H2_HEADERS:
+                handleH2Headers(accum, streamId, frame, timestamp);
+                break;
+            case H2_DATA:
+                handleH2Data(accum, streamId, frame, timestamp);
+                break;
+            case H2_RST_STREAM:
+                handleH2RstStream(accum, streamId, frame);
+                break;
+            case H2_GOAWAY:
+                accum.goAwayLastStreamId = frame.getGoAway().getLastStreamId();
+                accum.goAwayErrorCode = (long) frame.getGoAway().getErrorCode();
+                break;
+            case H2_SETTINGS:
+                if (!frame.getSettings().getAck()) {
+                    var target = streamId == 0 ? accum.clientSettings : accum.serverSettings;
+                    target.putAll(frame.getSettings().getSettingsMap().entrySet().stream()
+                        .collect(java.util.stream.Collectors.toMap(java.util.Map.Entry::getKey,
+                            e -> Long.valueOf(e.getValue()))));
+                }
+                break;
+            case H2_WINDOW_UPDATE:
+            case H2_PING:
+            case H2_PRIORITY:
+            case H2_CONTINUATION:
+                // metric-only; no effect on logical request reconstruction
+                break;
+            case H2_PUSH_PROMISE:
+                log.atDebug().setMessage("Discarding PUSH_PROMISE on streamId={} (not replayable)")
+                    .addArgument(streamId).log();
+                break;
+            default:
+                break;
+        }
+        return CONNECTION_STATUS.ALIVE;
+    }
+
+    private void handleH2Headers(H2Accumulation accum, int streamId,
+                                  org.opensearch.migrations.trafficcapture.protos.Http2FrameObservation frame,
+                                  java.time.Instant timestamp) {
+        var stream = accum.getOrCreateStream(streamId);
+        if (stream.requestFirstFrameTs == null) {
+            stream.requestFirstFrameTs = timestamp;
+        }
+        var headers = frame.getHeaders();
+        // Distinguish request- vs response-direction by presence of :status pseudo-header.
+        boolean isResponse = headers.getFieldsList().stream()
+            .anyMatch(f -> ":status".equals(f.getName().toStringUtf8()));
+        if (isResponse) {
+            H2Accumulation.applyHeadersToResponse(stream, headers);
+            if (headers.getEndStream()) {
+                stream.serverEndStream = true;
+                stream.phase = H2Accumulation.LifecyclePhase.CLOSED;
+            } else {
+                stream.phase = H2Accumulation.LifecyclePhase.RECEIVING_RESPONSE_BODY;
+            }
+        } else {
+            H2Accumulation.applyHeadersToRequest(stream, headers);
+            if (headers.getEndStream()) {
+                stream.clientEndStream = true;
+                stream.phase = H2Accumulation.LifecyclePhase.AWAITING_RESPONSE;
+            } else {
+                stream.phase = H2Accumulation.LifecyclePhase.RECEIVING_BODY;
+            }
+        }
+    }
+
+    private void handleH2Data(H2Accumulation accum, int streamId,
+                               org.opensearch.migrations.trafficcapture.protos.Http2FrameObservation frame,
+                               java.time.Instant timestamp) {
+        var stream = accum.getOrCreateStream(streamId);
+        var data = frame.getData();
+        var bytes = data.getData().toByteArray();
+        if (stream.phase == H2Accumulation.LifecyclePhase.RECEIVING_RESPONSE_BODY) {
+            stream.responseBody.add(io.netty.buffer.Unpooled.wrappedBuffer(bytes));
+            if (data.getEndStream()) {
+                stream.serverEndStream = true;
+                stream.phase = H2Accumulation.LifecyclePhase.CLOSED;
+            }
+        } else {
+            stream.requestBody.add(io.netty.buffer.Unpooled.wrappedBuffer(bytes));
+            if (data.getEndStream()) {
+                stream.clientEndStream = true;
+                stream.phase = H2Accumulation.LifecyclePhase.AWAITING_RESPONSE;
+            }
+        }
+    }
+
+    private void handleH2RstStream(H2Accumulation accum, int streamId,
+                                    org.opensearch.migrations.trafficcapture.protos.Http2FrameObservation frame) {
+        var stream = accum.getOrCreateStream(streamId);
+        stream.resetErrorCode = (long) frame.getRstStream().getErrorCode();
+        stream.phase = H2Accumulation.LifecyclePhase.CLOSED;
     }
 
     public void close() {

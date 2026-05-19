@@ -26,7 +26,17 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         EXPIRED_PREMATURELY,
         CLOSED_PREMATURELY,
         /** Connection closed due to Kafka partition reassignment — not a source-side close. */
-        TRAFFIC_SOURCE_READER_INTERRUPTED
+        TRAFFIC_SOURCE_READER_INTERRUPTED,
+        /** RFC 0001 §9: H2 stream terminated by RST_STREAM from peer. */
+        RESET_BY_PEER,
+        /** RFC 0001 §9: H2 stream orphaned by GOAWAY (streamId > lastStreamId). */
+        GOAWAY_DROPPED,
+        /** RFC 0001 §9: H2 capture failed validation (CRLF in header value, missing :method, etc.). */
+        MALFORMED,
+        /** RFC 0001 §9: H2 stream uses an unsupported feature (CONNECT method, server PUSH_PROMISE). */
+        UNSUPPORTED,
+        /** RFC 0001 §6.1.1: H2 frame exceeded maxTrafficBufferSize and was emitted with payload omitted. */
+        TRUNCATED
     }
 
     @Getter
