@@ -430,7 +430,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         liveStreams.expireOldEntries(trafficStreamKey, accum, timestamp);
 
         if (accum instanceof H2Accumulation) {
-            return addH2Observation((H2Accumulation) accum, trafficStreamKey, observation, timestamp);
+            return addH2Observation((H2Accumulation) accum, observation, timestamp);
         }
 
         return handleCloseObservationThatAffectEveryState(accum, observation, trafficStreamKey, timestamp).or(
@@ -701,7 +701,6 @@ public class CapturedTrafficToHttpTransactionAccumulator {
      */
     private CONNECTION_STATUS addH2Observation(
         H2Accumulation accum,
-        ITrafficStreamKey trafficStreamKey,
         TrafficObservation observation,
         java.time.Instant timestamp
     ) {
@@ -773,7 +772,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             if (headers.getEndStream()) {
                 stream.serverEndStream = true;
                 stream.phase = H2Accumulation.LifecyclePhase.CLOSED;
-                maybeEmitResponse(accum, stream);
+                maybeEmitResponse(stream);
             } else {
                 stream.phase = H2Accumulation.LifecyclePhase.RECEIVING_RESPONSE_BODY;
             }
@@ -800,7 +799,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             if (data.getEndStream()) {
                 stream.serverEndStream = true;
                 stream.phase = H2Accumulation.LifecyclePhase.CLOSED;
-                maybeEmitResponse(accum, stream);
+                maybeEmitResponse(stream);
             }
         } else {
             stream.requestBody.add(io.netty.buffer.Unpooled.wrappedBuffer(bytes));
@@ -832,17 +831,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     firstTs,
                     accum.startingSourceRequestIndex,
                     requestIndex);
-            // surface: tag the pair with H2 protocol identity for tuple JSON visibility.
+            // tag the pair with H2 protocol identity for tuple JSON visibility.
             rrPair.setSourceProtocolAndStream("HTTP/2.0", stream.streamId);
-            var requestMessage = new HttpMessageAndTimestamp(firstTs);
-            try {
-                var bytes = serializeH2RequestToH1Bytes(stream);
-                if (bytes.length > 0) requestMessage.add(bytes);
-            } catch (Exception e) {
-                log.atWarn().setCause(e).setMessage(
-                        "Failed to serialize H2 stream {} as H1 bytes; emitting empty request body")
-                    .addArgument(stream.streamId).log();
-            }
+            var requestMessage = buildH2RequestMessage(stream, firstTs);
             rrPair.requestData = requestMessage;
             // Capture the request context BEFORE rotating to response gathering, mirroring the
             // H1 path's handleEndOfRequest sequence. The wrapped consumer access
@@ -862,12 +853,45 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
     }
 
+    /** Build an HttpMessageAndTimestamp for the response side of an H2 stream. Trace-only on
+     *  serialization failure: the response is best-effort visibility, not byte-exact. */
+    private HttpMessageAndTimestamp buildH2ResponseMessage(H2Accumulation.StreamState stream) {
+        var responseTs = stream.responseFirstFrameTs == null
+                ? stream.requestFirstFrameTs : stream.responseFirstFrameTs;
+        var responseMessage = new HttpMessageAndTimestamp(
+                responseTs == null ? java.time.Instant.now() : responseTs);
+        try {
+            var bytes = serializeH2ResponseToH1Bytes(stream);
+            if (bytes.length > 0) responseMessage.add(bytes);
+        } catch (Exception e) {
+            log.atTrace().setCause(e).setMessage(
+                    "H2 response serialization failed for streamId={}")
+                .addArgument(stream.streamId).log();
+        }
+        return responseMessage;
+    }
+
+    /** Build an HttpMessageAndTimestamp for the request side of an H2 stream, swallowing
+     *  serialization failures and emitting an empty body in the rare error case. */
+    private HttpMessageAndTimestamp buildH2RequestMessage(
+            H2Accumulation.StreamState stream, java.time.Instant firstTs) {
+        var requestMessage = new HttpMessageAndTimestamp(firstTs);
+        try {
+            var bytes = serializeH2RequestToH1Bytes(stream);
+            if (bytes.length > 0) requestMessage.add(bytes);
+        } catch (Exception e) {
+            log.atWarn().setCause(e).setMessage(
+                    "Failed to serialize H2 stream {} as H1 bytes; emitting empty request body")
+                .addArgument(stream.streamId).log();
+        }
+        return requestMessage;
+    }
+
     /**
-     * — fire the response continuation when the response side of an H2 stream
-     * completes. Sets {@code completionStatus} on the in-flight RRP and accepts it via the
-     * stored consumer.
+     * Fire the response continuation when the response side of an H2 stream completes. Sets
+     * {@code completionStatus} on the in-flight RRP and accepts it via the stored consumer.
      */
-    private void maybeEmitResponse(H2Accumulation accum, H2Accumulation.StreamState stream) {
+    private void maybeEmitResponse(H2Accumulation.StreamState stream) {
         if (stream.responseContinuation == null || stream.inFlightPair == null) {
             // Either the request side never emitted (e.g. RST_STREAM mid-body) or already drained.
             return;
@@ -876,21 +900,8 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             stream.inFlightPair.completionStatus = stream.isReset()
                     ? RequestResponsePacketPair.ReconstructionStatus.RESET_BY_PEER
                     : RequestResponsePacketPair.ReconstructionStatus.COMPLETE;
-            // Append the response bytes for visibility (best-effort — not byte-exact since H2
-            // responses originally weren't on H1 wire).
             if (stream.inFlightPair.responseData == null) {
-                var responseTs = stream.responseFirstFrameTs == null
-                        ? stream.requestFirstFrameTs : stream.responseFirstFrameTs;
-                stream.inFlightPair.responseData = new HttpMessageAndTimestamp(
-                        responseTs == null ? java.time.Instant.now() : responseTs);
-                try {
-                    var bytes = serializeH2ResponseToH1Bytes(stream);
-                    if (bytes.length > 0) stream.inFlightPair.responseData.add(bytes);
-                } catch (Exception e) {
-                    log.atTrace().setCause(e).setMessage(
-                            "H2 response serialization failed for streamId={}")
-                        .addArgument(stream.streamId).log();
-                }
+                stream.inFlightPair.responseData = buildH2ResponseMessage(stream);
             }
             stream.responseContinuation.accept(stream.inFlightPair);
         } finally {

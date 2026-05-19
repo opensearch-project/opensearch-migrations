@@ -65,28 +65,32 @@ public class HeaderValueFilteringCapturePredicate extends RequestCapturePredicat
         if (headers == null) {
             return CaptureDirective.CAPTURE;
         }
-        var methodValue = headers.method();
-        var pathValue = headers.path();
-        if (patternMatches(method, () -> methodValue == null ? "" : methodValue.toString())) {
+        if (h2PseudoHeaderMatchesAnyPattern(headers)
+                || h2HeadersMatchSuppressionMap(headers)) {
             return CaptureDirective.DROP;
-        }
-        if (patternMatches(path, () -> pathValue == null ? "" : pathValue.toString())) {
-            return CaptureDirective.DROP;
-        }
-        if (patternMatches(methodAndPathPattern,
-                () -> (methodValue == null ? "" : methodValue.toString())
-                    + " " + (pathValue == null ? "" : pathValue.toString()))) {
-            return CaptureDirective.DROP;
-        }
-        if (headerToPredicateRegexMap != null) {
-            for (var kvp : headerToPredicateRegexMap.entrySet()) {
-                var headerValue = headers.get(AsciiString.cached(kvp.getKey().toLowerCase(java.util.Locale.ROOT)));
-                if (headerValue != null && kvp.getValue().matcher(headerValue.toString()).matches()) {
-                    return CaptureDirective.DROP;
-                }
-            }
         }
         return CaptureDirective.CAPTURE;
+    }
+
+    private boolean h2PseudoHeaderMatchesAnyPattern(Http2Headers headers) {
+        var methodValue = headers.method();
+        var pathValue = headers.path();
+        var methodStr = methodValue == null ? "" : methodValue.toString();
+        var pathStr = pathValue == null ? "" : pathValue.toString();
+        return patternMatches(method, () -> methodStr)
+            || patternMatches(path, () -> pathStr)
+            || patternMatches(methodAndPathPattern, () -> methodStr + " " + pathStr);
+    }
+
+    private boolean h2HeadersMatchSuppressionMap(Http2Headers headers) {
+        if (headerToPredicateRegexMap == null) return false;
+        for (var kvp : headerToPredicateRegexMap.entrySet()) {
+            var headerValue = headers.get(AsciiString.cached(kvp.getKey().toLowerCase(java.util.Locale.ROOT)));
+            if (headerValue != null && kvp.getValue().matcher(headerValue.toString()).matches()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean patternMatches(Pattern pattern, Supplier<String> stringGetter) {

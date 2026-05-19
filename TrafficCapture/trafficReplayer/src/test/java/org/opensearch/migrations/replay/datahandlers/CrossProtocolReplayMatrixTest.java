@@ -194,15 +194,15 @@ class CrossProtocolReplayMatrixTest {
     /** Convert an H2 stream-state to H1 wire bytes via adapter + HttpRequestEncoder. */
     private static byte[] h2DerivedH1Bytes(String method, String path, String authority, byte[] body) {
         var s = new H2Accumulation.StreamState(1);
-        s.requestPseudoHeaders.put(":method", Unpooled.copiedBuffer(method.getBytes()));
-        s.requestPseudoHeaders.put(":path", Unpooled.copiedBuffer(path.getBytes()));
-        s.requestPseudoHeaders.put(":scheme", Unpooled.copiedBuffer("https".getBytes()));
-        s.requestPseudoHeaders.put(":authority", Unpooled.copiedBuffer(authority.getBytes()));
-        s.requestHeaderFields.add(Http2HeaderField.newBuilder()
+        s.getRequestPseudoHeaders().put(":method", Unpooled.copiedBuffer(method.getBytes()));
+        s.getRequestPseudoHeaders().put(":path", Unpooled.copiedBuffer(path.getBytes()));
+        s.getRequestPseudoHeaders().put(":scheme", Unpooled.copiedBuffer("https".getBytes()));
+        s.getRequestPseudoHeaders().put(":authority", Unpooled.copiedBuffer(authority.getBytes()));
+        s.getRequestHeaderFields().add(Http2HeaderField.newBuilder()
                 .setName(ByteString.copyFromUtf8("content-length"))
                 .setValue(ByteString.copyFromUtf8(String.valueOf(body.length)))
                 .build());
-        if (body.length > 0) s.requestBody.add(Unpooled.wrappedBuffer(body));
+        if (body.length > 0) s.getRequestBody().add(Unpooled.wrappedBuffer(body));
 
         List<HttpObject> objs = H2ToH1ObjectAdapter.toH1RequestObjects(s);
         var ec = new EmbeddedChannel(new HttpRequestEncoder());

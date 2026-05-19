@@ -687,83 +687,114 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     }
 
     private static void populatePayload(Http2FrameObservation.Builder builder, Http2FramePayload payload) {
-        if (payload instanceof Http2FramePayload.Http2HeadersPayloadView h) {
-            var hp = Http2HeadersPayload.newBuilder()
-                    .setEndStream(h.endStream())
-                    .setEndHeaders(h.endHeaders())
-                    .setDependsOnStreamId(h.dependsOnStreamId())
-                    .setWeight(h.weight())
-                    .setExclusive(h.exclusive());
-            for (var f : h.fields()) {
-                hp.addFields(Http2HeaderField.newBuilder()
-                        .setName(ByteString.copyFrom(f.name()))
-                        .setValue(ByteString.copyFrom(f.value()))
-                        .setSensitive(f.sensitive()));
-            }
-            builder.setHeaders(hp);
-        } else if (payload instanceof Http2FramePayload.Http2DataPayloadView d) {
-            var dp = Http2DataPayload.newBuilder()
-                    .setEndStream(d.endStream())
-                    .setPadLength(d.padLength());
-            if (d.data() != null && d.data().readableBytes() > 0) {
-                dp.setData(ByteString.copyFrom(d.data().duplicate().nioBuffer()));
-            }
-            builder.setData(dp);
-        } else if (payload instanceof Http2FramePayload.Http2SettingsPayloadView s) {
-            var sp = org.opensearch.migrations.trafficcapture.protos.Http2SettingsPayload.newBuilder()
-                    .setAck(s.ack());
-            for (var entry : s.settings().entrySet()) {
-                sp.putSettings(entry.getKey(), entry.getValue().intValue());
-            }
-            builder.setSettings(sp);
-        } else if (payload instanceof Http2FramePayload.Http2WindowUpdatePayloadView w) {
-            builder.setWindowUpdate(Http2WindowUpdatePayload.newBuilder().setIncrement(w.increment()));
-        } else if (payload instanceof Http2FramePayload.Http2RstStreamPayloadView r) {
-            builder.setRstStream(
+        // Pattern matching switch — each case delegates to a small helper to keep
+        // cognitive complexity below SonarQube's threshold.
+        switch (payload) {
+            case Http2FramePayload.Http2HeadersPayloadView h -> builder.setHeaders(buildHeadersPayload(h));
+            case Http2FramePayload.Http2DataPayloadView d -> builder.setData(buildDataPayload(d));
+            case Http2FramePayload.Http2SettingsPayloadView s -> builder.setSettings(buildSettingsPayload(s));
+            case Http2FramePayload.Http2WindowUpdatePayloadView w -> builder.setWindowUpdate(
+                Http2WindowUpdatePayload.newBuilder().setIncrement(w.increment()));
+            case Http2FramePayload.Http2RstStreamPayloadView r -> builder.setRstStream(
                 org.opensearch.migrations.trafficcapture.protos.Http2RstStreamPayload.newBuilder()
-                        .setErrorCode((int) r.errorCode()));
-        } else if (payload instanceof Http2FramePayload.Http2GoAwayPayloadView g) {
-            var gp = org.opensearch.migrations.trafficcapture.protos.Http2GoAwayPayload.newBuilder()
-                    .setLastStreamId(g.lastStreamId())
-                    .setErrorCode((int) g.errorCode());
-            if (g.debugData() != null && g.debugData().readableBytes() > 0) {
-                gp.setDebugData(ByteString.copyFrom(g.debugData().duplicate().nioBuffer()));
-            }
-            builder.setGoAway(gp);
-        } else if (payload instanceof Http2FramePayload.Http2PingPayloadView p) {
-            var pp = org.opensearch.migrations.trafficcapture.protos.Http2PingPayload.newBuilder()
-                    .setAck(p.ack());
-            if (p.opaqueData() != null && p.opaqueData().readableBytes() > 0) {
-                pp.setOpaqueData(ByteString.copyFrom(p.opaqueData().duplicate().nioBuffer()));
-            }
-            builder.setPing(pp);
-        } else if (payload instanceof Http2FramePayload.Http2PushPromisePayloadView pp) {
-            var ppp = org.opensearch.migrations.trafficcapture.protos.Http2PushPromisePayload.newBuilder()
-                    .setPromisedStreamId(pp.promisedStreamId());
-            for (var f : pp.fields()) {
-                ppp.addFields(Http2HeaderField.newBuilder()
-                        .setName(ByteString.copyFrom(f.name()))
-                        .setValue(ByteString.copyFrom(f.value()))
-                        .setSensitive(f.sensitive()));
-            }
-            builder.setPushPromise(ppp);
-        } else if (payload instanceof Http2FramePayload.Http2PriorityPayloadView pr) {
-            builder.setPriority(
+                    .setErrorCode((int) r.errorCode()));
+            case Http2FramePayload.Http2GoAwayPayloadView g -> builder.setGoAway(buildGoAwayPayload(g));
+            case Http2FramePayload.Http2PingPayloadView p -> builder.setPing(buildPingPayload(p));
+            case Http2FramePayload.Http2PushPromisePayloadView pp -> builder.setPushPromise(
+                buildPushPromisePayload(pp));
+            case Http2FramePayload.Http2PriorityPayloadView pr -> builder.setPriority(
                 org.opensearch.migrations.trafficcapture.protos.Http2PriorityPayload.newBuilder()
-                        .setDependsOnStreamId(pr.dependsOnStreamId())
-                        .setWeight(pr.weight())
-                        .setExclusive(pr.exclusive()));
-        } else if (payload instanceof Http2FramePayload.Http2ContinuationPayloadView c) {
-            var cp = org.opensearch.migrations.trafficcapture.protos.Http2ContinuationPayload.newBuilder()
-                    .setEndHeaders(c.endHeaders());
-            if (c.headerBlockFragment() != null && c.headerBlockFragment().readableBytes() > 0) {
-                cp.setHeaderBlockFragment(
-                    ByteString.copyFrom(c.headerBlockFragment().duplicate().nioBuffer()));
-            }
-            builder.setContinuation(cp);
-        } else if (payload instanceof Http2FramePayload.Http2TruncatedPayloadView) {
-            builder.setTruncated(true);
+                    .setDependsOnStreamId(pr.dependsOnStreamId())
+                    .setWeight(pr.weight())
+                    .setExclusive(pr.exclusive()));
+            case Http2FramePayload.Http2ContinuationPayloadView c -> builder.setContinuation(
+                buildContinuationPayload(c));
+            case Http2FramePayload.Http2TruncatedPayloadView ignored -> builder.setTruncated(true);
+            default -> { /* unknown payload — leave the builder as-is so the consumer can decide. */ }
         }
+    }
+
+    private static Http2HeadersPayload.Builder buildHeadersPayload(
+            Http2FramePayload.Http2HeadersPayloadView h) {
+        var hp = Http2HeadersPayload.newBuilder()
+                .setEndStream(h.endStream())
+                .setEndHeaders(h.endHeaders())
+                .setDependsOnStreamId(h.dependsOnStreamId())
+                .setWeight(h.weight())
+                .setExclusive(h.exclusive());
+        for (var f : h.fields()) {
+            hp.addFields(toProtoHeaderField(f));
+        }
+        return hp;
+    }
+
+    private static Http2DataPayload.Builder buildDataPayload(Http2FramePayload.Http2DataPayloadView d) {
+        var dp = Http2DataPayload.newBuilder()
+                .setEndStream(d.endStream())
+                .setPadLength(d.padLength());
+        if (d.data() != null && d.data().readableBytes() > 0) {
+            dp.setData(ByteString.copyFrom(d.data().duplicate().nioBuffer()));
+        }
+        return dp;
+    }
+
+    private static org.opensearch.migrations.trafficcapture.protos.Http2SettingsPayload.Builder
+    buildSettingsPayload(Http2FramePayload.Http2SettingsPayloadView s) {
+        var sp = org.opensearch.migrations.trafficcapture.protos.Http2SettingsPayload.newBuilder()
+                .setAck(s.ack());
+        for (var entry : s.settings().entrySet()) {
+            sp.putSettings(entry.getKey(), entry.getValue().intValue());
+        }
+        return sp;
+    }
+
+    private static org.opensearch.migrations.trafficcapture.protos.Http2GoAwayPayload.Builder
+    buildGoAwayPayload(Http2FramePayload.Http2GoAwayPayloadView g) {
+        var gp = org.opensearch.migrations.trafficcapture.protos.Http2GoAwayPayload.newBuilder()
+                .setLastStreamId(g.lastStreamId())
+                .setErrorCode((int) g.errorCode());
+        if (g.debugData() != null && g.debugData().readableBytes() > 0) {
+            gp.setDebugData(ByteString.copyFrom(g.debugData().duplicate().nioBuffer()));
+        }
+        return gp;
+    }
+
+    private static org.opensearch.migrations.trafficcapture.protos.Http2PingPayload.Builder
+    buildPingPayload(Http2FramePayload.Http2PingPayloadView p) {
+        var pp = org.opensearch.migrations.trafficcapture.protos.Http2PingPayload.newBuilder()
+                .setAck(p.ack());
+        if (p.opaqueData() != null && p.opaqueData().readableBytes() > 0) {
+            pp.setOpaqueData(ByteString.copyFrom(p.opaqueData().duplicate().nioBuffer()));
+        }
+        return pp;
+    }
+
+    private static org.opensearch.migrations.trafficcapture.protos.Http2PushPromisePayload.Builder
+    buildPushPromisePayload(Http2FramePayload.Http2PushPromisePayloadView pp) {
+        var ppp = org.opensearch.migrations.trafficcapture.protos.Http2PushPromisePayload.newBuilder()
+                .setPromisedStreamId(pp.promisedStreamId());
+        for (var f : pp.fields()) {
+            ppp.addFields(toProtoHeaderField(f));
+        }
+        return ppp;
+    }
+
+    private static org.opensearch.migrations.trafficcapture.protos.Http2ContinuationPayload.Builder
+    buildContinuationPayload(Http2FramePayload.Http2ContinuationPayloadView c) {
+        var cp = org.opensearch.migrations.trafficcapture.protos.Http2ContinuationPayload.newBuilder()
+                .setEndHeaders(c.endHeaders());
+        if (c.headerBlockFragment() != null && c.headerBlockFragment().readableBytes() > 0) {
+            cp.setHeaderBlockFragment(
+                ByteString.copyFrom(c.headerBlockFragment().duplicate().nioBuffer()));
+        }
+        return cp;
+    }
+
+    private static Http2HeaderField.Builder toProtoHeaderField(Http2FramePayload.HeaderField f) {
+        return Http2HeaderField.newBuilder()
+                .setName(ByteString.copyFrom(f.name()))
+                .setValue(ByteString.copyFrom(f.value()))
+                .setSensitive(f.sensitive());
     }
 
     private static Timestamp toProtoTimestamp(Instant t) {
@@ -791,11 +822,8 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
                 throw new IllegalArgumentException("Unsupported observation tag: " + captureFieldNumber);
         }
         var built = observation.build();
-        var observationContentSize = built.getSerializedSize() - getSizeOfTimestamp(timestamp)
-                - CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, getSizeOfTimestamp(timestamp))
-                + CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, getSizeOfTimestamp(timestamp))
-                + getSizeOfTimestamp(timestamp);
-        // Simplification: just check whether the whole serialized observation message fits.
+        // Single-call size lookup (was previously computed two ways for sanity-check; the
+        // ad-hoc check is gone now — protobuf's getSerializedSize is the source of truth).
         int wireLen = built.getSerializedSize();
         flushIfNeeded(CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(
                 wireLen, numFlushesSoFar + 1));

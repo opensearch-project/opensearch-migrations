@@ -112,7 +112,14 @@ public class H2MultiplexedConsumerFactory implements AutoCloseable {
                                     c.pipeline().addLast(Http2FrameCodecBuilder.forClient().build());
                                     c.pipeline().addLast(new Http2MultiplexHandler(
                                             new ChannelInitializer<Channel>() {
-                                                @Override protected void initChannel(Channel ignored) {}
+                                                @Override
+                                                protected void initChannel(Channel ignored) {
+                                                    // Per-stream sub-channel pipeline is wired by the
+                                                    // StreamConsumer's Http2StreamChannelBootstrap when
+                                                    // a request opens a stream. The parent channel
+                                                    // initializer here is intentionally a no-op so each
+                                                    // stream gets a fresh, isolated pipeline.
+                                                }
                                             }));
                                     handshakeFuture.complete(null);
                                 } else {
@@ -265,31 +272,48 @@ public class H2MultiplexedConsumerFactory implements AutoCloseable {
         @Override
         protected void channelRead0(ChannelHandlerContext ctx, Http2Frame frame) {
             if (frame instanceof Http2HeadersFrame hf) {
-                if (h1Response == null) {
-                    int statusCode = 500;
-                    var statusValue = hf.headers().status();
-                    if (statusValue != null) {
-                        try { statusCode = Integer.parseInt(statusValue.toString()); }
-                        catch (NumberFormatException ignored) {}
-                    }
-                    h1Response = new DefaultHttpResponse(HttpVersion.HTTP_1_1,
-                            HttpResponseStatus.valueOf(statusCode));
-                    for (var e : hf.headers()) {
-                        var name = e.getKey().toString();
-                        if (name.startsWith(":")) continue;
-                        h1Response.headers().add(name, e.getValue().toString());
-                    }
-                    responseBuilder.addHttpParsedResponseObject(h1Response);
-                }
-                if (hf.isEndStream()) finalize0(ctx);
+                handleHeadersFrame(hf);
             } else if (frame instanceof Http2DataFrame df) {
-                accumulatedBody.writeBytes(df.content().duplicate());
-                // SimpleChannelInboundHandler auto-releases; do NOT call df.release() here.
-                if (df.isEndStream()) finalize0(ctx);
+                handleDataFrame(df);
             }
         }
 
-        private void finalize0(ChannelHandlerContext ctx) {
+        private void handleHeadersFrame(Http2HeadersFrame hf) {
+            if (h1Response == null) {
+                h1Response = buildH1ResponseFromHeaders(hf);
+                responseBuilder.addHttpParsedResponseObject(h1Response);
+            }
+            if (hf.isEndStream()) finalizeResponse();
+        }
+
+        private void handleDataFrame(Http2DataFrame df) {
+            accumulatedBody.writeBytes(df.content().duplicate());
+            // SimpleChannelInboundHandler auto-releases; do NOT call df.release() here.
+            if (df.isEndStream()) finalizeResponse();
+        }
+
+        private static DefaultHttpResponse buildH1ResponseFromHeaders(Http2HeadersFrame hf) {
+            int statusCode = 500;
+            var statusValue = hf.headers().status();
+            if (statusValue != null) {
+                try {
+                    statusCode = Integer.parseInt(statusValue.toString());
+                } catch (NumberFormatException ignored) {
+                    // Non-numeric :status is malformed per RFC 7540 §8.1.2.4; fall through with 500
+                    // so the response still has a status line.
+                }
+            }
+            var resp = new DefaultHttpResponse(HttpVersion.HTTP_1_1,
+                    HttpResponseStatus.valueOf(statusCode));
+            for (var e : hf.headers()) {
+                var name = e.getKey().toString();
+                if (name.startsWith(":")) continue;
+                resp.headers().add(name, e.getValue().toString());
+            }
+            return resp;
+        }
+
+        private void finalizeResponse() {
             if (responseFuture.isDone()) return;
             var bodyBytes = new byte[accumulatedBody.readableBytes()];
             accumulatedBody.readBytes(bodyBytes);

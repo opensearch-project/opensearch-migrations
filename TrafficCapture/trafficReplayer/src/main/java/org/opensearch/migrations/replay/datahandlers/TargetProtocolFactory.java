@@ -40,6 +40,9 @@ public class TargetProtocolFactory implements AutoCloseable {
     /** Target ALPN cache: key is target URI authority, value is the negotiated protocol. */
     private final Map<String, String> alpnByAuthority = new ConcurrentHashMap<>();
 
+    /** ALPN protocol identifier for HTTP/1.1, used as the default fallback when probing fails. */
+    private static final String HTTP_1_1_PROTOCOL = "http/1.1";
+
     /** Per-authority H2 multiplex factory cache. Each value owns one parent H2 connection. */
     private final Map<String, H2MultiplexedConsumerFactory> h2FactoryByAuthority = new ConcurrentHashMap<>();
 
@@ -118,15 +121,15 @@ public class TargetProtocolFactory implements AutoCloseable {
                 var negotiated = UpstreamAlpnProbe.probe(targetUri, allowInsecure, timeout);
                 var authority = targetUri.getAuthority().toLowerCase(Locale.ROOT);
                 factory.alpnByAuthority.put(authority, negotiated == null || negotiated.isEmpty()
-                        ? "http/1.1" : negotiated);
+                        ? HTTP_1_1_PROTOCOL : negotiated);
                 log.atInfo().setMessage("Target {} ALPN probe: negotiated={}")
                     .addArgument(targetUri).addArgument(negotiated).log();
             } catch (Exception e) {
                 log.atWarn().setCause(e).setMessage(
-                        "Target {} ALPN probe failed; defaulting to http/1.1")
+                        "Target {} ALPN probe failed; defaulting to " + HTTP_1_1_PROTOCOL)
                     .addArgument(targetUri).log();
                 factory.alpnByAuthority.put(targetUri.getAuthority().toLowerCase(Locale.ROOT),
-                        "http/1.1");
+                        HTTP_1_1_PROTOCOL);
             }
         }
         return factory;
@@ -217,7 +220,10 @@ public class TargetProtocolFactory implements AutoCloseable {
         var key = authority + "|" + sessionId;
         var removed = h2FactoryBySession.remove(key);
         if (removed != null) {
-            try { removed.close(); } catch (Exception ignored) {}
+            try { removed.close(); } catch (Exception ignored) {
+                // Best-effort close on session end; if the close itself fails we have no
+                // recovery to attempt and the JVM exit will reclaim the underlying socket.
+            }
         }
     }
 
@@ -250,7 +256,7 @@ public class TargetProtocolFactory implements AutoCloseable {
      */
     private String resolveAlpn(URI targetUri) {
         if (forcedProtocol != null) return forcedProtocol;
-        if (!targetEnableHttp2) return "http/1.1";
+        if (!targetEnableHttp2) return HTTP_1_1_PROTOCOL;
         var authority = targetUri.getAuthority() == null ? targetUri.toString()
                 : targetUri.getAuthority().toLowerCase(Locale.ROOT);
         return alpnByAuthority.computeIfAbsent(authority, this::probeAlpn);
@@ -258,7 +264,7 @@ public class TargetProtocolFactory implements AutoCloseable {
 
     /** Test seam — overridden by tests; production wiring uses {@link #forTarget}. */
     protected String probeAlpn(@NonNull String authority) {
-        return "http/1.1";
+        return HTTP_1_1_PROTOCOL;
     }
 
     /** Force-set the cached protocol for a target authority. Useful for testing. */
@@ -269,11 +275,15 @@ public class TargetProtocolFactory implements AutoCloseable {
     @Override
     public void close() {
         for (var f : h2FactoryByAuthority.values()) {
-            try { f.close(); } catch (Exception ignored) {}
+            try { f.close(); } catch (Exception ignored) {
+                // Best-effort close at factory shutdown; see closeSession() for rationale.
+            }
         }
         h2FactoryByAuthority.clear();
         for (var f : h2FactoryBySession.values()) {
-            try { f.close(); } catch (Exception ignored) {}
+            try { f.close(); } catch (Exception ignored) {
+                // Best-effort close at factory shutdown; see closeSession() for rationale.
+            }
         }
         h2FactoryBySession.clear();
     }

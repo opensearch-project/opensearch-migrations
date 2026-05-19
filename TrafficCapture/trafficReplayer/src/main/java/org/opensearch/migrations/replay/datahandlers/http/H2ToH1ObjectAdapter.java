@@ -65,19 +65,19 @@ public final class H2ToH1ObjectAdapter {
      * or contains forbidden bytes.
      */
     public static List<HttpObject> toH1RequestObjects(H2Accumulation.StreamState s) {
-        var pseudo = s.requestPseudoHeaders;
+        var pseudo = s.getRequestPseudoHeaders();
         var methodPseudo = pseudo.get(":method");
         if (methodPseudo == null) {
-            throw new MalformedH2RequestException("missing :method on stream " + s.streamId);
+            throw new MalformedH2RequestException("missing :method on stream " + s.getStreamId());
         }
         String method = methodPseudo.toString(StandardCharsets.UTF_8);
         var pathPseudo = pseudo.get(":path");
         boolean isConnect = "CONNECT".equals(method);
         if (pathPseudo == null && !isConnect) {
-            throw new MalformedH2RequestException("missing :path on non-CONNECT stream " + s.streamId);
+            throw new MalformedH2RequestException("missing :path on non-CONNECT stream " + s.getStreamId());
         }
         if (pathPseudo != null && isConnect) {
-            throw new MalformedH2RequestException("CONNECT must not have :path on stream " + s.streamId);
+            throw new MalformedH2RequestException("CONNECT must not have :path on stream " + s.getStreamId());
         }
 
         var h1Headers = new DefaultHttpHeaders(true /* validate */);
@@ -87,7 +87,7 @@ public final class H2ToH1ObjectAdapter {
             h1Headers.set(HttpHeaderNames.HOST, authority.toString(StandardCharsets.UTF_8));
         }
 
-        applyRegularHeaders(s.requestHeaderFields, h1Headers, haveAuthority);
+        applyRegularHeaders(s.getRequestHeaderFields(), h1Headers, haveAuthority);
         foldCookieCrumbs(h1Headers);
 
         var req = new DefaultHttpRequest(
@@ -96,7 +96,7 @@ public final class H2ToH1ObjectAdapter {
                 pathPseudo == null ? "" : pathPseudo.toString(StandardCharsets.UTF_8),
                 h1Headers);
 
-        return assembleObjects(req, s.requestBody, s.requestTrailers);
+        return assembleObjects(req, s.getRequestBody(), s.getRequestTrailers());
     }
 
     /**
@@ -104,20 +104,20 @@ public final class H2ToH1ObjectAdapter {
      * but uses {@code :status} as the status code.
      */
     public static List<HttpObject> toH1ResponseObjects(H2Accumulation.StreamState s) {
-        var pseudo = s.responsePseudoHeaders;
+        var pseudo = s.getResponsePseudoHeaders();
         var statusPseudo = pseudo.get(":status");
         if (statusPseudo == null) {
-            throw new MalformedH2RequestException("missing :status on response stream " + s.streamId);
+            throw new MalformedH2RequestException("missing :status on response stream " + s.getStreamId());
         }
         int status;
         try {
             status = Integer.parseInt(statusPseudo.toString(StandardCharsets.UTF_8));
         } catch (NumberFormatException e) {
-            throw new MalformedH2RequestException("non-numeric :status on stream " + s.streamId);
+            throw new MalformedH2RequestException("non-numeric :status on stream " + s.getStreamId());
         }
 
         var h1Headers = new DefaultHttpHeaders(true);
-        applyRegularHeaders(s.responseHeaderFields, h1Headers, /*haveAuthority*/ false);
+        applyRegularHeaders(s.getResponseHeaderFields(), h1Headers, /*haveAuthority*/ false);
         foldCookieCrumbs(h1Headers);
 
         var resp = new DefaultHttpResponse(
@@ -125,7 +125,7 @@ public final class H2ToH1ObjectAdapter {
                 HttpResponseStatus.valueOf(status),
                 h1Headers);
 
-        return assembleObjects(resp, s.responseBody, s.responseTrailers);
+        return assembleObjects(resp, s.getResponseBody(), s.getResponseTrailers());
     }
 
     private static void applyRegularHeaders(List<Http2HeaderField> fields,
@@ -133,15 +133,27 @@ public final class H2ToH1ObjectAdapter {
         for (var f : fields) {
             String name = f.getName().toStringUtf8().toLowerCase(Locale.ROOT);
             String val = f.getValue().toStringUtf8();
-            if (CONNECTION_SPECIFIC_HEADERS.contains(AsciiString.cached(name))) continue;
-            if ("transfer-encoding".equals(name) && "chunked".equalsIgnoreCase(val)) continue;
-            if ("te".equals(name) && !"trailers".equalsIgnoreCase(val)) continue;
-            if ("host".equals(name) && haveAuthority) continue; // :authority wins
+            if (shouldSkipH2Header(name, val, haveAuthority)) {
+                continue;
+            }
             if (val.indexOf('\r') >= 0 || val.indexOf('\n') >= 0) {
                 throw new MalformedH2RequestException("CRLF in header value: " + name);
             }
             out.add(name, val);
         }
+    }
+
+    /**
+     * H2-to-H1 emission rules per RFC 7540 §8.1.2.2:
+     * connection-specific headers, chunked transfer-encoding, non-trailers TE, and Host
+     * (when :authority is present) all drop. Other headers pass through.
+     */
+    private static boolean shouldSkipH2Header(String name, String value, boolean haveAuthority) {
+        if (CONNECTION_SPECIFIC_HEADERS.contains(AsciiString.cached(name))) return true;
+        if ("transfer-encoding".equals(name) && "chunked".equalsIgnoreCase(value)) return true;
+        if ("te".equals(name) && !"trailers".equalsIgnoreCase(value)) return true;
+        if ("host".equals(name) && haveAuthority) return true; // :authority wins
+        return false;
     }
 
     private static void foldCookieCrumbs(DefaultHttpHeaders headers) {

@@ -30,11 +30,11 @@ class H2ToH1ObjectAdapterTest {
     }
 
     private static void putRequestPseudo(H2Accumulation.StreamState s, String name, String value) {
-        s.requestPseudoHeaders.put(name, Unpooled.copiedBuffer(value.getBytes()));
+        s.getRequestPseudoHeaders().put(name, Unpooled.copiedBuffer(value.getBytes()));
     }
 
     private static void putResponsePseudo(H2Accumulation.StreamState s, String name, String value) {
-        s.responsePseudoHeaders.put(name, Unpooled.copiedBuffer(value.getBytes()));
+        s.getResponsePseudoHeaders().put(name, Unpooled.copiedBuffer(value.getBytes()));
     }
 
     private static Http2HeaderField hf(String name, String value) {
@@ -68,9 +68,9 @@ class H2ToH1ObjectAdapterTest {
         putRequestPseudo(s, ":method", "POST");
         putRequestPseudo(s, ":path", "/_bulk");
         putRequestPseudo(s, ":authority", "localhost");
-        s.requestBody.add(Unpooled.wrappedBuffer("chunk-A".getBytes()));
-        s.requestBody.add(Unpooled.wrappedBuffer("chunk-B".getBytes()));
-        s.requestBody.add(Unpooled.wrappedBuffer("chunk-C".getBytes()));
+        s.getRequestBody().add(Unpooled.wrappedBuffer("chunk-A".getBytes()));
+        s.getRequestBody().add(Unpooled.wrappedBuffer("chunk-B".getBytes()));
+        s.getRequestBody().add(Unpooled.wrappedBuffer("chunk-C".getBytes()));
 
         var objects = H2ToH1ObjectAdapter.toH1RequestObjects(s);
         Assertions.assertEquals(4, objects.size(),
@@ -117,7 +117,7 @@ class H2ToH1ObjectAdapterTest {
         var s = newStreamState(1);
         putRequestPseudo(s, ":method", "GET");
         putRequestPseudo(s, ":path", "/");
-        s.requestHeaderFields.add(hf("x-injection", "value\r\nset-cookie: bad"));
+        s.getRequestHeaderFields().add(hf("x-injection", "value\r\nset-cookie: bad"));
         Assertions.assertThrows(H2ToH1ObjectAdapter.MalformedH2RequestException.class,
                 () -> H2ToH1ObjectAdapter.toH1RequestObjects(s));
     }
@@ -127,11 +127,11 @@ class H2ToH1ObjectAdapterTest {
         var s = newStreamState(1);
         putRequestPseudo(s, ":method", "GET");
         putRequestPseudo(s, ":path", "/");
-        s.requestHeaderFields.add(hf("connection", "keep-alive"));
-        s.requestHeaderFields.add(hf("keep-alive", "timeout=5"));
-        s.requestHeaderFields.add(hf("proxy-connection", "close"));
-        s.requestHeaderFields.add(hf("upgrade", "h2c"));
-        s.requestHeaderFields.add(hf("x-traceable", "yes"));
+        s.getRequestHeaderFields().add(hf("connection", "keep-alive"));
+        s.getRequestHeaderFields().add(hf("keep-alive", "timeout=5"));
+        s.getRequestHeaderFields().add(hf("proxy-connection", "close"));
+        s.getRequestHeaderFields().add(hf("upgrade", "h2c"));
+        s.getRequestHeaderFields().add(hf("x-traceable", "yes"));
 
         var objects = H2ToH1ObjectAdapter.toH1RequestObjects(s);
         var req = (DefaultHttpRequest) objects.get(0);
@@ -147,8 +147,8 @@ class H2ToH1ObjectAdapterTest {
         var s = newStreamState(1);
         putRequestPseudo(s, ":method", "GET");
         putRequestPseudo(s, ":path", "/");
-        s.requestHeaderFields.add(hf("transfer-encoding", "chunked"));
-        s.requestHeaderFields.add(hf("transfer-encoding", "identity"));
+        s.getRequestHeaderFields().add(hf("transfer-encoding", "chunked"));
+        s.getRequestHeaderFields().add(hf("transfer-encoding", "identity"));
         var objects = H2ToH1ObjectAdapter.toH1RequestObjects(s);
         var req = (DefaultHttpRequest) objects.get(0);
         var values = req.headers().getAll("transfer-encoding");
@@ -161,8 +161,8 @@ class H2ToH1ObjectAdapterTest {
         var s = newStreamState(1);
         putRequestPseudo(s, ":method", "GET");
         putRequestPseudo(s, ":path", "/");
-        s.requestHeaderFields.add(hf("te", "trailers"));
-        s.requestHeaderFields.add(hf("te", "gzip"));
+        s.getRequestHeaderFields().add(hf("te", "trailers"));
+        s.getRequestHeaderFields().add(hf("te", "gzip"));
         var objects = H2ToH1ObjectAdapter.toH1RequestObjects(s);
         var req = (DefaultHttpRequest) objects.get(0);
         var values = req.headers().getAll("te");
@@ -175,9 +175,9 @@ class H2ToH1ObjectAdapterTest {
         var s = newStreamState(1);
         putRequestPseudo(s, ":method", "GET");
         putRequestPseudo(s, ":path", "/");
-        s.requestHeaderFields.add(hf("cookie", "a=1"));
-        s.requestHeaderFields.add(hf("cookie", "b=2"));
-        s.requestHeaderFields.add(hf("cookie", "c=3"));
+        s.getRequestHeaderFields().add(hf("cookie", "a=1"));
+        s.getRequestHeaderFields().add(hf("cookie", "b=2"));
+        s.getRequestHeaderFields().add(hf("cookie", "c=3"));
         var objects = H2ToH1ObjectAdapter.toH1RequestObjects(s);
         var req = (DefaultHttpRequest) objects.get(0);
         Assertions.assertEquals("a=1; b=2; c=3", req.headers().get(HttpHeaderNames.COOKIE));
@@ -189,7 +189,7 @@ class H2ToH1ObjectAdapterTest {
         putRequestPseudo(s, ":method", "GET");
         putRequestPseudo(s, ":path", "/");
         putRequestPseudo(s, ":authority", "real-authority.example");
-        s.requestHeaderFields.add(hf("host", "fake-host.example"));
+        s.getRequestHeaderFields().add(hf("host", "fake-host.example"));
         var objects = H2ToH1ObjectAdapter.toH1RequestObjects(s);
         var req = (DefaultHttpRequest) objects.get(0);
         Assertions.assertEquals("real-authority.example", req.headers().get(HttpHeaderNames.HOST));
@@ -218,10 +218,10 @@ class H2ToH1ObjectAdapterTest {
         var s = newStreamState(1);
         putRequestPseudo(s, ":method", "POST");
         putRequestPseudo(s, ":path", "/_bulk");
-        s.requestBody.add(Unpooled.wrappedBuffer("body".getBytes()));
-        s.requestTrailers = new ArrayList<>(List.of(
+        s.getRequestBody().add(Unpooled.wrappedBuffer("body".getBytes()));
+        s.setRequestTrailers(new ArrayList<>(List.of(
                 hf("x-trailer", "after-body"),
-                hf("Trailer-Mixed-Case", "preserved-as-lowercase")));
+                hf("Trailer-Mixed-Case", "preserved-as-lowercase"))));
 
         var objects = H2ToH1ObjectAdapter.toH1RequestObjects(s);
         var last = (DefaultLastHttpContent) objects.get(objects.size() - 1);

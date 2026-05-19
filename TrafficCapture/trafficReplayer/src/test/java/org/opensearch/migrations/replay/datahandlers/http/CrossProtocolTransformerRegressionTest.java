@@ -37,13 +37,13 @@ class CrossProtocolTransformerRegressionTest extends InstrumentationTest {
                                                                 String authority, byte[] body,
                                                                 List<Http2HeaderField> regularHeaders) {
         var s = new H2Accumulation.StreamState(streamId);
-        s.requestPseudoHeaders.put(":method", Unpooled.copiedBuffer(method.getBytes(StandardCharsets.UTF_8)));
-        s.requestPseudoHeaders.put(":path", Unpooled.copiedBuffer(path.getBytes(StandardCharsets.UTF_8)));
-        s.requestPseudoHeaders.put(":scheme", Unpooled.copiedBuffer("https".getBytes(StandardCharsets.UTF_8)));
-        s.requestPseudoHeaders.put(":authority", Unpooled.copiedBuffer(authority.getBytes(StandardCharsets.UTF_8)));
-        if (regularHeaders != null) s.requestHeaderFields.addAll(regularHeaders);
+        s.getRequestPseudoHeaders().put(":method", Unpooled.copiedBuffer(method.getBytes(StandardCharsets.UTF_8)));
+        s.getRequestPseudoHeaders().put(":path", Unpooled.copiedBuffer(path.getBytes(StandardCharsets.UTF_8)));
+        s.getRequestPseudoHeaders().put(":scheme", Unpooled.copiedBuffer("https".getBytes(StandardCharsets.UTF_8)));
+        s.getRequestPseudoHeaders().put(":authority", Unpooled.copiedBuffer(authority.getBytes(StandardCharsets.UTF_8)));
+        if (regularHeaders != null) s.getRequestHeaderFields().addAll(regularHeaders);
         if (body != null && body.length > 0) {
-            s.requestBody.add(Unpooled.wrappedBuffer(body));
+            s.getRequestBody().add(Unpooled.wrappedBuffer(body));
         }
         return s;
     }

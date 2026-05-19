@@ -17,7 +17,7 @@ import io.netty.buffer.Unpooled;
 import lombok.NonNull;
 
 /**
- * Replayer-side accumulation state for an HTTP/2 connection ().
+ * Replayer-side accumulation state for an HTTP/2 connection.
  *
  * <p>Unlike {@link Accumulation} (the H1 path), an H2 connection multiplexes many
  * concurrent streams. State is keyed by streamId in {@link #liveStreams}. The H1
@@ -31,41 +31,60 @@ import lombok.NonNull;
  */
 public class H2Accumulation extends Accumulation {
 
-    /** Per-stream state for one logical HTTP/2 stream. */
+    /**
+     * Per-stream state for one logical HTTP/2 stream.
+     *
+     * <p>Fields are package-private (no modifier) by design: the accumulator dispatch in
+     * {@link CapturedTrafficToHttpTransactionAccumulator} (same package) mutates them
+     * directly during frame processing. Exposing accessors would just be ceremony.
+     */
     public static class StreamState {
-        public final int streamId;
-        public LifecyclePhase phase = LifecyclePhase.RECEIVING_HEADERS;
-        public Map<String, ByteBuf> requestPseudoHeaders = new HashMap<>();
-        public List<Http2HeaderField> requestHeaderFields = new ArrayList<>();
-        public List<ByteBuf> requestBody = new ArrayList<>();
-        public List<Http2HeaderField> requestTrailers;
-        public Map<String, ByteBuf> responsePseudoHeaders = new HashMap<>();
-        public List<Http2HeaderField> responseHeaderFields = new ArrayList<>();
-        public List<ByteBuf> responseBody = new ArrayList<>();
-        public List<Http2HeaderField> responseTrailers;
-        public Instant requestFirstFrameTs;
-        public Instant responseFirstFrameTs;
-        public boolean clientEndStream;
-        public boolean serverEndStream;
-        public Long resetErrorCode; // RST_STREAM, null when not reset
+        final int streamId;
+        LifecyclePhase phase = LifecyclePhase.RECEIVING_HEADERS;
+        final Map<String, ByteBuf> requestPseudoHeaders = new HashMap<>();
+        final List<Http2HeaderField> requestHeaderFields = new ArrayList<>();
+        final List<ByteBuf> requestBody = new ArrayList<>();
+        List<Http2HeaderField> requestTrailers;
+        final Map<String, ByteBuf> responsePseudoHeaders = new HashMap<>();
+        final List<Http2HeaderField> responseHeaderFields = new ArrayList<>();
+        final List<ByteBuf> responseBody = new ArrayList<>();
+        List<Http2HeaderField> responseTrailers;
+        Instant requestFirstFrameTs;
+        Instant responseFirstFrameTs;
+        boolean clientEndStream;
+        boolean serverEndStream;
+        Long resetErrorCode; // RST_STREAM, null when not reset
         /**
          * Set after onRequestReceived has fired for this stream. Holds the response continuation
          * so the response side can be delivered on the same callback chain. Stays null until the
          * request is fully received.
          */
-        public java.util.function.Consumer<RequestResponsePacketPair> responseContinuation;
+        java.util.function.Consumer<RequestResponsePacketPair> responseContinuation;
         /**
          * Set when {@link #responseContinuation} is set; the in-flight pair the H2 dispatch
          * builds incrementally and hands off to {@code onRequestReceived}'s consumer.
          */
-        public RequestResponsePacketPair inFlightPair;
+        RequestResponsePacketPair inFlightPair;
         /**
          * True once the request side has been emitted via the callback. Prevents duplicate
          * fires on subsequent HEADERS / DATA observations for the same stream.
          */
-        public boolean requestEmitted;
+        boolean requestEmitted;
 
         public StreamState(int streamId) { this.streamId = streamId; }
+
+        public int getStreamId() { return streamId; }
+        public LifecyclePhase getPhase() { return phase; }
+        public Map<String, ByteBuf> getRequestPseudoHeaders() { return requestPseudoHeaders; }
+        public List<Http2HeaderField> getRequestHeaderFields() { return requestHeaderFields; }
+        public List<ByteBuf> getRequestBody() { return requestBody; }
+        public List<Http2HeaderField> getRequestTrailers() { return requestTrailers; }
+        public void setRequestTrailers(List<Http2HeaderField> trailers) { this.requestTrailers = trailers; }
+        public Map<String, ByteBuf> getResponsePseudoHeaders() { return responsePseudoHeaders; }
+        public List<Http2HeaderField> getResponseHeaderFields() { return responseHeaderFields; }
+        public List<ByteBuf> getResponseBody() { return responseBody; }
+        public List<Http2HeaderField> getResponseTrailers() { return responseTrailers; }
+        public void setResponseTrailers(List<Http2HeaderField> trailers) { this.responseTrailers = trailers; }
 
         public boolean isComplete() {
             return clientEndStream && serverEndStream;
@@ -74,7 +93,7 @@ public class H2Accumulation extends Accumulation {
         public boolean isReset() { return resetErrorCode != null; }
     }
 
-    /** Per-stream lifecycle phases (). */
+    /** Per-stream lifecycle phases. */
     public enum LifecyclePhase {
         RECEIVING_HEADERS,
         RECEIVING_BODY,
@@ -85,15 +104,15 @@ public class H2Accumulation extends Accumulation {
     }
 
     /** Live per-stream accumulations keyed by H2 streamId. */
-    public final Map<Integer, StreamState> liveStreams = new HashMap<>();
+    final Map<Integer, StreamState> liveStreams = new HashMap<>();
 
     /** GOAWAY watermark — streams with id > this are orphaned. -1 means no GOAWAY received. */
-    public int goAwayLastStreamId = -1;
-    public Long goAwayErrorCode;
+    int goAwayLastStreamId = -1;
+    Long goAwayErrorCode;
 
     /** Most recently observed client / server SETTINGS for forensics. */
-    public Map<Integer, Long> clientSettings = new HashMap<>();
-    public Map<Integer, Long> serverSettings = new HashMap<>();
+    final Map<Integer, Long> clientSettings = new HashMap<>();
+    final Map<Integer, Long> serverSettings = new HashMap<>();
 
     public H2Accumulation(@NonNull ITrafficStreamKey key, TrafficStream ts, boolean isResumedConnection) {
         super(key, ts, isResumedConnection);
@@ -117,6 +136,11 @@ public class H2Accumulation extends Accumulation {
             s.phase = LifecyclePhase.CLOSED;
         }
     }
+
+    public int getGoAwayLastStreamId() { return goAwayLastStreamId; }
+    public Long getGoAwayErrorCode() { return goAwayErrorCode; }
+    public Map<Integer, Long> getClientSettings() { return clientSettings; }
+    public Map<Integer, Long> getServerSettings() { return serverSettings; }
 
     /**
      * Convert proto Http2HeadersPayload → an in-memory representation on a StreamState.
