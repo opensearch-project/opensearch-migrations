@@ -30,6 +30,8 @@ spec:
           - name: imageMigrationConsolePullPolicy
           - name: replayer-config-overrides
             default: "{}"
+          - name: proxy-config-overrides
+            default: "{}"
           - name: tupleS3Region
             default: ""
           - name: useLocalStack
@@ -47,6 +49,7 @@ spec:
             set -e
             BASE_CONFIG=$(echo "{{inputs.parameters.baseConfigBase64}}" | base64 -d)
             REPLAYER_CONFIG_OVERRIDES='{{inputs.parameters.replayer-config-overrides}}'
+            PROXY_CONFIG_OVERRIDES='{{inputs.parameters.proxy-config-overrides}}'
             TUPLE_S3_REGION='{{inputs.parameters.tupleS3Region}}'
             USE_LOCAL_STACK='{{inputs.parameters.useLocalStack}}'
             TUPLE_S3_ENDPOINT='{{inputs.parameters.tupleS3Endpoint}}'
@@ -59,6 +62,7 @@ spec:
               --argjson useLocalStack "$USE_LOCAL_STACK" \
               --arg tupleS3Endpoint "$TUPLE_S3_ENDPOINT" \
               --argjson replayerOverrides "$REPLAYER_CONFIG_OVERRIDES" \
+              --argjson proxyOverrides "$PROXY_CONFIG_OVERRIDES" \
               '. + {
               "kafkaClusterConfiguration": {
                 "default": {
@@ -69,10 +73,10 @@ spec:
                 "proxies": {
                   "capture-proxy": {
                     "source": "source1",
-                    "proxyConfig": {
+                    "proxyConfig": ({
                       "listenPort": 9201,
                       "noCapture": false
-                    }
+                    } + $proxyOverrides)
                   }
                 },
                 "replayers": {

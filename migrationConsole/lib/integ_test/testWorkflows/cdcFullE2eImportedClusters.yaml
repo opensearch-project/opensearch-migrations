@@ -30,6 +30,8 @@ spec:
         value: "{}"
       - name: replayer-config-overrides
         value: "{}"
+      - name: proxy-config-overrides
+        value: "{}"
 
   templates:
     - name: main
@@ -40,6 +42,8 @@ spec:
           - name: transforms-sources
             default: "{}"
           - name: replayer-config-overrides
+            default: "{}"
+          - name: proxy-config-overrides
             default: "{}"
           - name: tupleS3Region
             valueFrom:
@@ -111,6 +115,8 @@ spec:
                   value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                 - name: replayer-config-overrides
                   value: "{{inputs.parameters.replayer-config-overrides}}"
+                - name: proxy-config-overrides
+                  value: "{{inputs.parameters.proxy-config-overrides}}"
                 - name: tupleS3Region
                   value: "{{inputs.parameters.tupleS3Region}}"
                 - name: useLocalStack

@@ -66,6 +66,14 @@ CDC_MIGRATION_COMBINATIONS = (
     build_combinations([ElasticsearchV8_X], [OpensearchV2_X, OpensearchV3_X])
 )
 
+# HTTP/2 CDC migration matrix: source-and-target both speak HTTP/2 over ALPN.
+# OS 3.x is the canonical OS-source HTTP/2 endpoint we test today; the H2 capture
+# path is exercised end-to-end on a single source-target pair to keep the test
+# runtime reasonable while still proving the wire-level path works.
+H2_CDC_MIGRATION_COMBINATIONS = build_combinations(
+    [OpensearchV3_X], [OpensearchV3_X]
+)
+
 
 def is_incoming_version_supported(limiting_version: ClusterVersion, incoming_version: ClusterVersion):
     if (limiting_version.cluster_type == incoming_version.cluster_type and
