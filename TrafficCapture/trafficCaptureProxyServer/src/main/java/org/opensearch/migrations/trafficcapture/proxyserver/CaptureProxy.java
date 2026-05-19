@@ -182,6 +182,34 @@ public class CaptureProxy {
             arity = 1,
             description = "Name of the topic to write captured traffic to.")
         public String kafakTopicName = KafkaCaptureFactory.DEFAULT_TOPIC_NAME_FOR_TRAFFIC;
+        @Parameter(required = false,
+            names = { "--enableHttp2" },
+            arity = 0,
+            description = "Negotiate HTTP/2 via ALPN with both clients and the upstream server, and capture H2 "
+                + "frame-level traffic using the format defined in RFC 0001. Default: false (HTTP/1.1 only).")
+        public boolean enableHttp2;
+        @Parameter(required = false,
+            names = { "--http2MaxConcurrentStreams" },
+            arity = 1,
+            description = "Maximum concurrent HTTP/2 streams advertised to clients via SETTINGS_MAX_CONCURRENT_STREAMS. "
+                + "Only used when --enableHttp2 is set. Default: 100.")
+        public int http2MaxConcurrentStreams = 100;
+        @Parameter(required = false,
+            names = { "--http2InitialWindowSize" },
+            arity = 1,
+            description = "Initial flow-control window size advertised to clients via SETTINGS_INITIAL_WINDOW_SIZE. "
+                + "Bounds per-stream buffering for offload-gated requests. Default: 65535.")
+        public int http2InitialWindowSize = 65535;
+        @Parameter(required = false,
+            names = { "--http2MaxHeaderListSize" },
+            arity = 1,
+            description = "Maximum decoded header-list size for the HPACK decoder. Default: 8192.")
+        public int http2MaxHeaderListSize = 8192;
+        @Parameter(required = false,
+            names = { "--http2MaxHeaderTableSize" },
+            arity = 1,
+            description = "Maximum HPACK dynamic-table size. Default: 4096.")
+        public int http2MaxHeaderTableSize = 4096;
         @ParametersDelegate
         public KafkaParameters kafkaParameters = new KafkaParameters();
     }
@@ -299,11 +327,25 @@ public class CaptureProxy {
     }
 
     /**
-     * Load an SSLEngine supplier from PEM files directly via Netty, without requiring the OpenSearch security plugin.
-     * This is the preferred path for K8s deployments where cert-manager provides PEM-encoded secrets.
+     * Backward-compatible overload — calls the 5-arg variant with {@code enableHttp2=false}
+     * (the legacy behavior). Existing callers in tests and external integrations keep working.
      */
     protected static Supplier<SSLEngine> loadSslEngineFromPem(
         String certChainPath, String keyPath, String trustCertPath, boolean requireClientAuth
+    ) throws SSLException {
+        return loadSslEngineFromPem(certChainPath, keyPath, trustCertPath, requireClientAuth, false);
+    }
+
+    /**
+     * Load an SSLEngine supplier from PEM files directly via Netty, without requiring the OpenSearch security plugin.
+     * This is the preferred path for K8s deployments where cert-manager provides PEM-encoded secrets.
+     *
+     * <p>When {@code enableHttp2} is true, the returned SSL context advertises ALPN with
+     * {@code h2} and {@code http/1.1} (in that order); otherwise no ALPN is configured and
+     * the proxy speaks HTTP/1.1 to clients regardless of what they advertise. Per RFC 0001 §7.1.
+     */
+    protected static Supplier<SSLEngine> loadSslEngineFromPem(
+        String certChainPath, String keyPath, String trustCertPath, boolean requireClientAuth, boolean enableHttp2
     ) throws SSLException {
         var builder = SslContextBuilder.forServer(new File(certChainPath), new File(keyPath));
         if (trustCertPath != null && !trustCertPath.isEmpty()) {
@@ -314,6 +356,14 @@ public class CaptureProxy {
         } else if (requireClientAuth) {
             throw new ParameterException(
                 "--sslTrustCertFile is required when --requireClientAuth is specified.");
+        }
+        if (enableHttp2) {
+            builder.applicationProtocolConfig(new io.netty.handler.ssl.ApplicationProtocolConfig(
+                io.netty.handler.ssl.ApplicationProtocolConfig.Protocol.ALPN,
+                io.netty.handler.ssl.ApplicationProtocolConfig.SelectorFailureBehavior.NO_ADVERTISE,
+                io.netty.handler.ssl.ApplicationProtocolConfig.SelectedListenerFailureBehavior.ACCEPT,
+                io.netty.handler.ssl.ApplicationProtocolNames.HTTP_2,
+                io.netty.handler.ssl.ApplicationProtocolNames.HTTP_1_1));
         }
         var sslContext = builder.build();
         return () -> sslContext.newEngine(ByteBufAllocator.DEFAULT);
@@ -333,7 +383,9 @@ public class CaptureProxy {
     /**
      * Build the SSL engine supplier based on the provided parameters.
      * Uses PEM files (--sslCertChainFile + --sslKeyFile) to load certs directly via Netty.
-     * Returns null when no TLS is configured.
+     * When {@code params.enableHttp2} is true, the SSL context advertises ALPN with h2 and
+     * http/1.1; otherwise ALPN is not configured (legacy behavior). Returns null when no
+     * TLS is configured.
      */
     protected static Supplier<SSLEngine> buildSslEngineSupplier(Parameters params) throws SSLException {
         boolean hasPemConfig = params.sslCertChainFilePath != null && !params.sslCertChainFilePath.isEmpty();
@@ -342,9 +394,10 @@ public class CaptureProxy {
             if (params.sslKeyFilePath == null || params.sslKeyFilePath.isEmpty()) {
                 throw new ParameterException("--sslKeyFile is required when --sslCertChainFile is specified.");
             }
-            log.info("Loading TLS from PEM files: cert={}, key={}", params.sslCertChainFilePath, params.sslKeyFilePath);
+            log.info("Loading TLS from PEM files: cert={}, key={}, http2={}",
+                params.sslCertChainFilePath, params.sslKeyFilePath, params.enableHttp2);
             return loadSslEngineFromPem(params.sslCertChainFilePath, params.sslKeyFilePath,
-                params.sslTrustCertFilePath, params.requireClientAuth);
+                params.sslTrustCertFilePath, params.requireClientAuth, params.enableHttp2);
         }
 
         return null;
@@ -375,13 +428,20 @@ public class CaptureProxy {
                 params.destinationConnectionPoolSize,
                 pooledConnectionTimeout
             );
-            var headerCapturePredicate = HeaderValueFilteringCapturePredicate.builder()
+            var headerCapturePredicateBuilder = HeaderValueFilteringCapturePredicate.builder()
                 .methodPattern(params.suppressMethod)
                 .pathPattern(params.suppressUriPath)
                 .methodAndPathPattern(params.suppressMethodAndPath)
-                .protocolPattern("HTTP/2.*")
-                .suppressCaptureHeaderPairs(convertPairListToMap(params.suppressCaptureHeaderPairs))
-                .build();
+                .suppressCaptureHeaderPairs(convertPairListToMap(params.suppressCaptureHeaderPairs));
+            // T2.8: when --enableHttp2 is set, the proxy is expected to capture H2 traffic; do NOT
+            // apply the legacy H1-protocol guard that drops captures whose first line matches
+            // "HTTP/2.*". When the flag is off, preserve the historical behavior so any H2 client
+            // that slipped past ALPN (we don't advertise it) still has its capture suppressed
+            // rather than emitted as malformed H1.
+            if (!params.enableHttp2) {
+                headerCapturePredicateBuilder.protocolPattern("HTTP/2.*");
+            }
+            var headerCapturePredicate = headerCapturePredicateBuilder.build();
             var proxyChannelInitializer =
                 buildProxyChannelInitializer(ctx, backsideConnectionPool, sslEngineSupplier, headerCapturePredicate,
                     params.headerOverrides, getConnectionCaptureFactory(params, ctx));
@@ -434,15 +494,12 @@ public class CaptureProxy {
             headerCapturePredicate
         ) {
             @Override
-            protected void initChannel(@NonNull SocketChannel ch) throws IOException {
-                super.initChannel(ch);
-                final var pipeline = ch.pipeline();
+            protected void afterCaptureHandlerInstalled(io.netty.channel.ChannelPipeline pipeline, String connectionId) {
                 int i = 0;
                 for (var kvp : headers) {
                     pipeline.addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "AddHeader-" + kvp.getKey(),
                         new HeaderAdderHandler(addBufs.get(i++)));
                 }
-
                 i = 0;
                 for (var kvp : headers) {
                     pipeline.addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "RemoveHeader-" + kvp.getKey(),
