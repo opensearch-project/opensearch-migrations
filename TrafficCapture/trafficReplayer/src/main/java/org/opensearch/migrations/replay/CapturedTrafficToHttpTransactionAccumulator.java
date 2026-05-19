@@ -170,8 +170,20 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             @NonNull HttpMessageAndTimestamp request,
             boolean isResumedConnection
         ) {
+            return onRequestReceived(requestCtx, request, isResumedConnection, null);
+        }
+
+        public Consumer<RequestResponsePacketPair> onRequestReceived(
+            IReplayContexts.IRequestAccumulationContext requestCtx,
+            @NonNull HttpMessageAndTimestamp request,
+            boolean isResumedConnection,
+            org.opensearch.migrations.replay.scheduling.WireTimeAnchors wireTimes
+        ) {
             requestCtx.close();
-            var innerCallback = underlying.onRequestReceived(requestCtx.getLogicalEnclosingScope(), request, isResumedConnection);
+            var scope = requestCtx.getLogicalEnclosingScope();
+            var innerCallback = wireTimes == null
+                ? underlying.onRequestReceived(scope, request, isResumedConnection)
+                : underlying.onRequestReceived(scope, request, isResumedConnection, wireTimes);
             return rrpp -> {
                 rrpp.getResponseContext().close();
                 innerCallback.accept(rrpp);
@@ -289,6 +301,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         }
 
         var yetToBeSequencedTrafficStream = trafficStreamAndKey.getStream();
+        TrafficStreamUtils.requireSupportedCaptureFormatVersion(yetToBeSequencedTrafficStream);
         log.atDebug().setMessage("accept() trafficStream: {} state={}")
             .addArgument(() -> summarizeTrafficStream(yetToBeSequencedTrafficStream))
             .addArgument(() -> {
@@ -371,7 +384,44 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .log();
         }
 
+        return createTypedAccumulation(streamWithKey, stream);
+    }
+
+    /**
+     * protocol dispatch. Decides between {@link Accumulation} (H1) and
+     * {@link H2Accumulation} based on the {@code negotiatedAlpn} envelope field, falling back
+     * to {@code captureFormatVersion} and finally to substream sniffing.
+     *
+     * <p>The default for unknown / empty fields is H1 (legacy behavior); a v2 record without
+     * an explicit ALPN string means the connection was H1 within a v2-capable proxy.
+     */
+    private Accumulation createTypedAccumulation(ITrafficStreamWithKey streamWithKey, TrafficStream stream) {
+        var alpn = stream.getNegotiatedAlpn();
+        var isH2 = "h2".equals(alpn) || (alpn.isEmpty() && hasH2Observation(stream));
+        if (isH2) {
+            log.atDebug().setMessage("Creating H2Accumulation for connectionId={} (alpn={})")
+                .addArgument(streamWithKey.getKey().getConnectionId()).addArgument(alpn).log();
+            return new H2Accumulation(streamWithKey.getKey(), stream, streamWithKey.isResumedConnection());
+        }
         return new Accumulation(streamWithKey.getKey(), stream, streamWithKey.isResumedConnection());
+    }
+
+    /**
+     * Substream sniff for protocol detection: scan the first ~16 observations for an ALPN
+     * observation or any H2 frame. If neither is found, classify as H1.
+     */
+    private static boolean hasH2Observation(TrafficStream stream) {
+        int limit = Math.min(16, stream.getSubStreamCount());
+        for (int i = 0; i < limit; i++) {
+            var sub = stream.getSubStream(i);
+            if (sub.hasAlpn() || sub.hasHttp2Frame()) {
+                return true;
+            }
+            if (sub.hasRead() || sub.hasWrite()) {
+                return false;
+            }
+        }
+        return false;
     }
 
     private enum CONNECTION_STATUS {
@@ -390,6 +440,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             .log();
         var timestamp = TrafficStreamUtils.instantFromProtoTimestamp(observation.getTs());
         liveStreams.expireOldEntries(trafficStreamKey, accum, timestamp);
+
+        if (accum instanceof H2Accumulation) {
+            return addH2Observation((H2Accumulation) accum, observation, timestamp);
+        }
 
         return handleCloseObservationThatAffectEveryState(accum, observation, trafficStreamKey, timestamp).or(
             () -> handleObservationForSkipState(accum, observation)
@@ -645,6 +699,307 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         rrPairWithCallback.getFullDataContinuation().accept(rrPair);
         log.atTrace().setMessage("resetting for end of response").log();
         accumulation.resetForNextRequest();
+    }
+
+    /**
+     * — frame-table dispatch for HTTP/2 observations. Implements per-frame
+     * type handling on an {@link H2Accumulation} — HEADERS / DATA / RST_STREAM / GOAWAY /
+     * SETTINGS / others. Connection-scoped frames (streamId=0) update connection state;
+     * stream-scoped frames update the per-stream accumulation.
+     *
+     * <p>This is a minimal implementation that establishes the dispatch surface; full
+     * lifecycle handling (per table) is filled out across subsequent
+     * commits as fixtures land.
+     */
+    private CONNECTION_STATUS addH2Observation(
+        H2Accumulation accum,
+        TrafficObservation observation,
+        java.time.Instant timestamp
+    ) {
+        if (observation.hasAlpn()) {
+            // ALPN observation already drove the H2 dispatch decision; no-op here.
+            return CONNECTION_STATUS.ALIVE;
+        }
+        if (observation.hasClose() || observation.hasDisconnect()) {
+            return CONNECTION_STATUS.CLOSED;
+        }
+        if (!observation.hasHttp2Frame()) {
+            // Pass through other observation types (read/write at TLS layer should not appear
+            // for an H2 connection, but fail-soft).
+            return CONNECTION_STATUS.ALIVE;
+        }
+        var frame = observation.getHttp2Frame();
+        int streamId = frame.getStreamId();
+        switch (frame.getType()) {
+            case H2_HEADERS:
+                handleH2Headers(accum, streamId, frame, timestamp);
+                break;
+            case H2_DATA:
+                handleH2Data(accum, streamId, frame, timestamp);
+                break;
+            case H2_RST_STREAM:
+                handleH2RstStream(accum, streamId, frame);
+                break;
+            case H2_GOAWAY:
+                accum.goAwayLastStreamId = frame.getGoAway().getLastStreamId();
+                accum.goAwayErrorCode = (long) frame.getGoAway().getErrorCode();
+                break;
+            case H2_SETTINGS:
+                if (!frame.getSettings().getAck()) {
+                    var target = streamId == 0 ? accum.clientSettings : accum.serverSettings;
+                    target.putAll(frame.getSettings().getSettingsMap().entrySet().stream()
+                        .collect(java.util.stream.Collectors.toMap(java.util.Map.Entry::getKey,
+                            e -> Long.valueOf(e.getValue()))));
+                }
+                break;
+            case H2_WINDOW_UPDATE:
+            case H2_PING:
+            case H2_PRIORITY:
+            case H2_CONTINUATION:
+                // metric-only; no effect on logical request reconstruction
+                break;
+            case H2_PUSH_PROMISE:
+                log.atDebug().setMessage("Discarding PUSH_PROMISE on streamId={} (not replayable)")
+                    .addArgument(streamId).log();
+                break;
+            default:
+                break;
+        }
+        return CONNECTION_STATUS.ALIVE;
+    }
+
+    private void handleH2Headers(H2Accumulation accum, int streamId,
+                                  org.opensearch.migrations.trafficcapture.protos.Http2FrameObservation frame,
+                                  java.time.Instant timestamp) {
+        var stream = accum.getOrCreateStream(streamId);
+        var headers = frame.getHeaders();
+        // Distinguish request- vs response-direction by presence of :status pseudo-header.
+        boolean isResponse = headers.getFieldsList().stream()
+            .anyMatch(f -> ":status".equals(f.getName().toStringUtf8()));
+        if (isResponse) {
+            if (stream.responseFirstFrameTs == null) {
+                stream.responseFirstFrameTs = timestamp;
+            }
+            stream.responseLastFrameTs = timestamp;
+            H2Accumulation.applyHeadersToResponse(stream, headers);
+            if (headers.getEndStream()) {
+                stream.serverEndStream = true;
+                stream.phase = H2Accumulation.LifecyclePhase.CLOSED;
+                maybeEmitResponse(stream);
+            } else {
+                stream.phase = H2Accumulation.LifecyclePhase.RECEIVING_RESPONSE_BODY;
+            }
+        } else {
+            if (stream.requestFirstFrameTs == null) {
+                stream.requestFirstFrameTs = timestamp;
+            }
+            stream.requestLastFrameTs = timestamp;
+            H2Accumulation.applyHeadersToRequest(stream, headers);
+            if (headers.getEndStream()) {
+                stream.clientEndStream = true;
+                stream.phase = H2Accumulation.LifecyclePhase.AWAITING_RESPONSE;
+                maybeEmitRequest(accum, stream, timestamp);
+            } else {
+                stream.phase = H2Accumulation.LifecyclePhase.RECEIVING_BODY;
+            }
+        }
+    }
+
+    private void handleH2Data(H2Accumulation accum, int streamId,
+                               org.opensearch.migrations.trafficcapture.protos.Http2FrameObservation frame,
+                               java.time.Instant timestamp) {
+        var stream = accum.getOrCreateStream(streamId);
+        var data = frame.getData();
+        var bytes = data.getData().toByteArray();
+        if (stream.phase == H2Accumulation.LifecyclePhase.RECEIVING_RESPONSE_BODY) {
+            stream.responseLastFrameTs = timestamp;
+            stream.responseBody.add(io.netty.buffer.Unpooled.wrappedBuffer(bytes));
+            if (data.getEndStream()) {
+                stream.serverEndStream = true;
+                stream.phase = H2Accumulation.LifecyclePhase.CLOSED;
+                maybeEmitResponse(stream);
+            }
+        } else {
+            stream.requestLastFrameTs = timestamp;
+            stream.requestBody.add(io.netty.buffer.Unpooled.wrappedBuffer(bytes));
+            if (data.getEndStream()) {
+                stream.clientEndStream = true;
+                stream.phase = H2Accumulation.LifecyclePhase.AWAITING_RESPONSE;
+                maybeEmitRequest(accum, stream, timestamp);
+            }
+        }
+    }
+
+    /**
+     * — fire {@code onRequestReceived} when an H2 stream's request side completes.
+     * Each H2 stream gets its own {@link RequestResponsePacketPair} (multiplexing means
+     * we can't reuse the connection-level pair on Accumulation — that would collide across
+     * concurrent streams). The context for that pair is built from the connection-level
+     * traffic-stream context.
+     */
+    private void maybeEmitRequest(H2Accumulation accum, H2Accumulation.StreamState stream, java.time.Instant ts) {
+        if (stream.requestEmitted) return;
+        stream.requestEmitted = true;
+        try {
+            var firstTs = stream.requestFirstFrameTs == null ? ts : stream.requestFirstFrameTs;
+            // Per-stream RRP: distinct from accum.getOrCreateTransactionPair to avoid collisions
+            // when many streams are in flight on the same connection.
+            int requestIndex = accum.getIndexOfCurrentRequest() + stream.streamId;
+            var rrPair = new RequestResponsePacketPair(
+                    accum.trafficChannelKey,
+                    firstTs,
+                    accum.startingSourceRequestIndex,
+                    requestIndex);
+            // tag the pair with H2 protocol identity for tuple JSON visibility.
+            rrPair.setSourceProtocolAndStream("HTTP/2.0", stream.streamId);
+            // Wire-level timestamps so the orchestrator can reconstruct happens-before
+            // and decide chained vs concurrent dispatch on the target side.
+            rrPair.setSourceWireTimestamps(
+                stream.requestFirstFrameTs,
+                stream.requestLastFrameTs,
+                stream.responseFirstFrameTs,
+                stream.responseLastFrameTs);
+            var requestMessage = buildH2RequestMessage(stream, firstTs);
+            rrPair.requestData = requestMessage;
+            // Capture the request context BEFORE rotating to response gathering, mirroring the
+            // H1 path's handleEndOfRequest sequence. The wrapped consumer access
+            // rrPair.getResponseContext() once the response side resolves — that requires the
+            // pair to already be in response context.
+            var requestCtx = rrPair.getRequestContext();
+            rrPair.rotateRequestGatheringToResponse();
+            stream.inFlightPair = rrPair;
+            boolean isResumed = accum.getIndexOfCurrentRequest() == 0 && accum.isResumedConnection;
+            stream.responseContinuation = listener.onRequestReceived(
+                    requestCtx, requestMessage, isResumed,
+                    new org.opensearch.migrations.replay.scheduling.WireTimeAnchors(
+                        stream.requestFirstFrameTs,
+                        stream.requestLastFrameTs,
+                        stream.responseFirstFrameTs,
+                        stream.responseLastFrameTs));
+        } catch (Exception e) {
+            log.atWarn().setCause(e).setMessage(
+                    "H2 onRequestReceived emission failed for streamId={}; stream marked CLOSED")
+                .addArgument(stream.streamId).log();
+            stream.phase = H2Accumulation.LifecyclePhase.CLOSED;
+        }
+    }
+
+    /** Build an HttpMessageAndTimestamp for the response side of an H2 stream. Trace-only on
+     *  serialization failure: the response is best-effort visibility, not byte-exact. */
+    private HttpMessageAndTimestamp buildH2ResponseMessage(H2Accumulation.StreamState stream) {
+        var responseTs = stream.responseFirstFrameTs == null
+                ? stream.requestFirstFrameTs : stream.responseFirstFrameTs;
+        var responseMessage = new HttpMessageAndTimestamp(
+                responseTs == null ? java.time.Instant.now() : responseTs);
+        try {
+            var bytes = serializeH2ResponseToH1Bytes(stream);
+            if (bytes.length > 0) responseMessage.add(bytes);
+        } catch (Exception e) {
+            log.atTrace().setCause(e).setMessage(
+                    "H2 response serialization failed for streamId={}")
+                .addArgument(stream.streamId).log();
+        }
+        return responseMessage;
+    }
+
+    /** Build an HttpMessageAndTimestamp for the request side of an H2 stream, swallowing
+     *  serialization failures and emitting an empty body in the rare error case. */
+    private HttpMessageAndTimestamp buildH2RequestMessage(
+            H2Accumulation.StreamState stream, java.time.Instant firstTs) {
+        var requestMessage = new HttpMessageAndTimestamp(firstTs);
+        try {
+            var bytes = serializeH2RequestToH1Bytes(stream);
+            if (bytes.length > 0) requestMessage.add(bytes);
+        } catch (Exception e) {
+            log.atWarn().setCause(e).setMessage(
+                    "Failed to serialize H2 stream {} as H1 bytes; emitting empty request body")
+                .addArgument(stream.streamId).log();
+        }
+        return requestMessage;
+    }
+
+    /**
+     * Fire the response continuation when the response side of an H2 stream completes. Sets
+     * {@code completionStatus} on the in-flight RRP and accepts it via the stored consumer.
+     */
+    private void maybeEmitResponse(H2Accumulation.StreamState stream) {
+        if (stream.responseContinuation == null || stream.inFlightPair == null) {
+            // Either the request side never emitted (e.g. RST_STREAM mid-body) or already drained.
+            return;
+        }
+        try {
+            stream.inFlightPair.completionStatus = stream.isReset()
+                    ? RequestResponsePacketPair.ReconstructionStatus.RESET_BY_PEER
+                    : RequestResponsePacketPair.ReconstructionStatus.COMPLETE;
+            if (stream.inFlightPair.responseData == null) {
+                stream.inFlightPair.responseData = buildH2ResponseMessage(stream);
+            }
+            // Refresh wire-time stamps now that the response side has fully landed.
+            stream.inFlightPair.setSourceWireTimestamps(
+                stream.requestFirstFrameTs,
+                stream.requestLastFrameTs,
+                stream.responseFirstFrameTs,
+                stream.responseLastFrameTs);
+            stream.responseContinuation.accept(stream.inFlightPair);
+        } finally {
+            stream.responseContinuation = null;
+            stream.inFlightPair = null;
+        }
+    }
+
+    private static byte[] serializeH2RequestToH1Bytes(H2Accumulation.StreamState stream) {
+        var objects = org.opensearch.migrations.replay.datahandlers.http.H2ToH1ObjectAdapter.toH1RequestObjects(stream);
+        return serializeH1RequestObjects(objects);
+    }
+
+    private static byte[] serializeH2ResponseToH1Bytes(H2Accumulation.StreamState stream) {
+        var objects = org.opensearch.migrations.replay.datahandlers.http.H2ToH1ObjectAdapter.toH1ResponseObjects(stream);
+        return serializeH1ResponseObjects(objects);
+    }
+
+    private static byte[] serializeH1RequestObjects(java.util.List<io.netty.handler.codec.http.HttpObject> objects) {
+        var ec = new io.netty.channel.embedded.EmbeddedChannel(new io.netty.handler.codec.http.HttpRequestEncoder());
+        return drainEncoded(ec, objects);
+    }
+
+    private static byte[] serializeH1ResponseObjects(java.util.List<io.netty.handler.codec.http.HttpObject> objects) {
+        var ec = new io.netty.channel.embedded.EmbeddedChannel(new io.netty.handler.codec.http.HttpResponseEncoder());
+        return drainEncoded(ec, objects);
+    }
+
+    private static byte[] drainEncoded(io.netty.channel.embedded.EmbeddedChannel ec,
+                                        java.util.List<io.netty.handler.codec.http.HttpObject> objects) {
+        try {
+            for (var o : objects) ec.writeOutbound(o);
+            ec.flushOutbound();
+            var pieces = new java.util.ArrayList<byte[]>();
+            int total = 0;
+            Object next;
+            while ((next = ec.readOutbound()) != null) {
+                var buf = (io.netty.buffer.ByteBuf) next;
+                var arr = new byte[buf.readableBytes()];
+                buf.readBytes(arr);
+                buf.release();
+                pieces.add(arr);
+                total += arr.length;
+            }
+            var combined = new byte[total];
+            int off = 0;
+            for (var a : pieces) {
+                System.arraycopy(a, 0, combined, off, a.length);
+                off += a.length;
+            }
+            return combined;
+        } finally {
+            ec.finishAndReleaseAll();
+        }
+    }
+
+    private void handleH2RstStream(H2Accumulation accum, int streamId,
+                                    org.opensearch.migrations.trafficcapture.protos.Http2FrameObservation frame) {
+        var stream = accum.getOrCreateStream(streamId);
+        stream.resetErrorCode = (long) frame.getRstStream().getErrorCode();
+        stream.phase = H2Accumulation.LifecyclePhase.CLOSED;
     }
 
     public void close() {

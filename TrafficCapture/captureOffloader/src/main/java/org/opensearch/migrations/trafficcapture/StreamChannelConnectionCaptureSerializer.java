@@ -9,10 +9,18 @@ import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.IntStream;
 
+import org.opensearch.migrations.trafficcapture.h2.Http2FramePayload;
+import org.opensearch.migrations.trafficcapture.protos.AlpnNegotiationObservation;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.EndOfSegmentsIndication;
+import org.opensearch.migrations.trafficcapture.protos.Http2DataPayload;
+import org.opensearch.migrations.trafficcapture.protos.Http2FrameObservation;
+import org.opensearch.migrations.trafficcapture.protos.Http2FrameType;
+import org.opensearch.migrations.trafficcapture.protos.Http2HeaderField;
+import org.opensearch.migrations.trafficcapture.protos.Http2HeadersPayload;
+import org.opensearch.migrations.trafficcapture.protos.Http2WindowUpdatePayload;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.ReadSegmentObservation;
 import org.opensearch.migrations.trafficcapture.protos.RequestIntentionallyDropped;
@@ -22,6 +30,7 @@ import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.trafficcapture.protos.WriteSegmentObservation;
 
 import com.google.protobuf.ByteOutput;
+import com.google.protobuf.ByteString;
 import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.Timestamp;
@@ -77,6 +86,19 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     private int firstLineByteLength = -1;
     private int headersByteLength = -1;
     private boolean streamHasBeenClosed;
+    /**
+     * Negotiated ALPN protocol for this connection (e.g. "h2", "http/1.1"). Set by
+     * {@link #addAlpnNegotiatedEvent} and stamped on every {@link TrafficStream} envelope
+     * thereafter for fast filtering on the consumer side. Empty when ALPN was not
+     * negotiated (legacy H1 connections).
+     */
+    private String negotiatedAlpn = "";
+    /**
+     * Capture format version. Empty when only H1 observations are recorded; set to "v2"
+     * the moment any HTTP/2 observation is emitted (which can only happen when the
+     * proxy was started with --enableHttp2). Determines the consumer-side dispatch.
+     */
+    private String captureFormatVersion = "";
 
     private final StreamLifecycleManager<T> streamManager;
     private final String nodeIdString;
@@ -137,6 +159,18 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
                     TrafficStream.LASTOBSERVATIONWASUNTERMINATEDREAD_FIELD_NUMBER,
                     readObservationsAreWaitingForEom
                 );
+            }
+            // Stamp v2 envelope fields when this serializer has observed an HTTP/2 ALPN.
+            // For H1-only connections both fields stay empty so the wire format is byte-
+            // identical to the legacy v1 capture (proto3 default-empty strings are not
+            // serialized at all).
+            if (!captureFormatVersion.isEmpty()) {
+                currentCodedOutputStream.writeString(
+                    TrafficStream.CAPTUREFORMATVERSION_FIELD_NUMBER, captureFormatVersion);
+            }
+            if (!negotiatedAlpn.isEmpty()) {
+                currentCodedOutputStream.writeString(
+                    TrafficStream.NEGOTIATEDALPN_FIELD_NUMBER, negotiatedAlpn);
             }
             return currentCodedOutputStreamHolderOrNull;
         }
@@ -611,6 +645,229 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
                 minExpectedSpaceAfterObservation
             );
         }
+    }
+
+    // ---- HTTP/2 capture API () ----
+
+    @Override
+    public void addAlpnNegotiatedEvent(Instant timestamp, String negotiatedProtocol, String offeredByClient)
+            throws IOException {
+        // Cache so subsequent TrafficStream envelopes carry the ALPN string. We always
+        // mark v2 once an ALPN observation lands — indicating the proxy was running with
+        // --enableHttp2, regardless of which protocol the client picked. v2 + alpn=http/1.1
+        // is a valid combination (H1 connection on an H2-capable proxy) and exercises the
+        // replayer's H1 dispatch path on a v2 envelope.
+        this.negotiatedAlpn = negotiatedProtocol == null ? "" : negotiatedProtocol;
+        this.captureFormatVersion = "v2";
+        var alpn = AlpnNegotiationObservation.newBuilder()
+                .setNegotiatedProtocol(negotiatedProtocol == null ? "" : negotiatedProtocol)
+                .setOfferedByClient(offeredByClient == null ? "" : offeredByClient)
+                .build();
+        emitObservationViaProto(timestamp, TrafficObservation.ALPN_FIELD_NUMBER, alpn);
+    }
+
+    @Override
+    public void addH2FrameRead(Instant timestamp, int streamId, Http2FrameType type, int flags,
+                                ByteBuf rawFrame, Http2FramePayload payload) throws IOException {
+        emitH2Frame(timestamp, streamId, type, flags, rawFrame, payload);
+    }
+
+    @Override
+    public void addH2FrameWrite(Instant timestamp, int streamId, Http2FrameType type, int flags,
+                                 ByteBuf rawFrame, Http2FramePayload payload) throws IOException {
+        emitH2Frame(timestamp, streamId, type, flags, rawFrame, payload);
+    }
+
+    private void emitH2Frame(Instant timestamp, int streamId, Http2FrameType type, int flags,
+                              ByteBuf rawFrame, Http2FramePayload payload) throws IOException {
+        var builder = Http2FrameObservation.newBuilder()
+                .setStreamId(streamId)
+                .setType(type)
+                .setFlags(flags);
+        if (rawFrame != null && rawFrame.readableBytes() > 0) {
+            builder.setRawFrame(ByteString.copyFrom(rawFrame.duplicate().nioBuffer()));
+        }
+        if (payload != null) {
+            populatePayload(builder, payload);
+        }
+        var observation = builder.build();
+        // Per do not segment H2 frames. If the whole observation won't fit in
+        // the current TrafficStream we rotate. If it won't fit in a fresh stream either, we mark
+        // the observation truncated and emit only the metadata + rawFrame omitted.
+        var serializedSize = TrafficObservation.newBuilder()
+                .setTs(toProtoTimestamp(timestamp))
+                .setHttp2Frame(observation)
+                .build()
+                .getSerializedSize();
+        var spaceLeft = currentOutputStreamWriteableSpaceLeft();
+        if (spaceLeft != -1 && spaceLeft < serializedSize + 16 /* tag + length overhead */) {
+            flushCommitAndResetStream(false);
+            spaceLeft = currentOutputStreamWriteableSpaceLeft();
+            if (spaceLeft != -1 && spaceLeft < serializedSize + 16) {
+                log.atWarn().setMessage(
+                        "H2 frame size {} exceeds TrafficStream buffer; emitting truncated observation")
+                    .addArgument(serializedSize).log();
+                observation = Http2FrameObservation.newBuilder()
+                        .setStreamId(streamId)
+                        .setType(type)
+                        .setFlags(flags)
+                        .setTruncated(true)
+                        .build();
+            }
+        }
+        emitObservationViaProto(timestamp, TrafficObservation.HTTP2FRAME_FIELD_NUMBER, observation);
+    }
+
+    private static void populatePayload(Http2FrameObservation.Builder builder, Http2FramePayload payload) {
+        // Pattern matching switch — each case delegates to a small helper to keep
+        // cognitive complexity below SonarQube's threshold.
+        switch (payload) {
+            case Http2FramePayload.Http2HeadersPayloadView h -> builder.setHeaders(buildHeadersPayload(h));
+            case Http2FramePayload.Http2DataPayloadView d -> builder.setData(buildDataPayload(d));
+            case Http2FramePayload.Http2SettingsPayloadView s -> builder.setSettings(buildSettingsPayload(s));
+            case Http2FramePayload.Http2WindowUpdatePayloadView w -> builder.setWindowUpdate(
+                Http2WindowUpdatePayload.newBuilder().setIncrement(w.increment()));
+            case Http2FramePayload.Http2RstStreamPayloadView r -> builder.setRstStream(
+                org.opensearch.migrations.trafficcapture.protos.Http2RstStreamPayload.newBuilder()
+                    .setErrorCode((int) r.errorCode()));
+            case Http2FramePayload.Http2GoAwayPayloadView g -> builder.setGoAway(buildGoAwayPayload(g));
+            case Http2FramePayload.Http2PingPayloadView p -> builder.setPing(buildPingPayload(p));
+            case Http2FramePayload.Http2PushPromisePayloadView pp -> builder.setPushPromise(
+                buildPushPromisePayload(pp));
+            case Http2FramePayload.Http2PriorityPayloadView pr -> builder.setPriority(
+                org.opensearch.migrations.trafficcapture.protos.Http2PriorityPayload.newBuilder()
+                    .setDependsOnStreamId(pr.dependsOnStreamId())
+                    .setWeight(pr.weight())
+                    .setExclusive(pr.exclusive()));
+            case Http2FramePayload.Http2ContinuationPayloadView c -> builder.setContinuation(
+                buildContinuationPayload(c));
+            case Http2FramePayload.Http2TruncatedPayloadView ignored -> builder.setTruncated(true);
+            default -> { /* unknown payload — leave the builder as-is so the consumer can decide. */ }
+        }
+    }
+
+    private static Http2HeadersPayload.Builder buildHeadersPayload(
+            Http2FramePayload.Http2HeadersPayloadView h) {
+        var hp = Http2HeadersPayload.newBuilder()
+                .setEndStream(h.endStream())
+                .setEndHeaders(h.endHeaders())
+                .setDependsOnStreamId(h.dependsOnStreamId())
+                .setWeight(h.weight())
+                .setExclusive(h.exclusive());
+        for (var f : h.fields()) {
+            hp.addFields(toProtoHeaderField(f));
+        }
+        return hp;
+    }
+
+    private static Http2DataPayload.Builder buildDataPayload(Http2FramePayload.Http2DataPayloadView d) {
+        var dp = Http2DataPayload.newBuilder()
+                .setEndStream(d.endStream())
+                .setPadLength(d.padLength());
+        if (d.data() != null && d.data().readableBytes() > 0) {
+            dp.setData(ByteString.copyFrom(d.data().duplicate().nioBuffer()));
+        }
+        return dp;
+    }
+
+    private static org.opensearch.migrations.trafficcapture.protos.Http2SettingsPayload.Builder
+    buildSettingsPayload(Http2FramePayload.Http2SettingsPayloadView s) {
+        var sp = org.opensearch.migrations.trafficcapture.protos.Http2SettingsPayload.newBuilder()
+                .setAck(s.ack());
+        for (var entry : s.settings().entrySet()) {
+            sp.putSettings(entry.getKey(), entry.getValue().intValue());
+        }
+        return sp;
+    }
+
+    private static org.opensearch.migrations.trafficcapture.protos.Http2GoAwayPayload.Builder
+    buildGoAwayPayload(Http2FramePayload.Http2GoAwayPayloadView g) {
+        var gp = org.opensearch.migrations.trafficcapture.protos.Http2GoAwayPayload.newBuilder()
+                .setLastStreamId(g.lastStreamId())
+                .setErrorCode((int) g.errorCode());
+        if (g.debugData() != null && g.debugData().readableBytes() > 0) {
+            gp.setDebugData(ByteString.copyFrom(g.debugData().duplicate().nioBuffer()));
+        }
+        return gp;
+    }
+
+    private static org.opensearch.migrations.trafficcapture.protos.Http2PingPayload.Builder
+    buildPingPayload(Http2FramePayload.Http2PingPayloadView p) {
+        var pp = org.opensearch.migrations.trafficcapture.protos.Http2PingPayload.newBuilder()
+                .setAck(p.ack());
+        if (p.opaqueData() != null && p.opaqueData().readableBytes() > 0) {
+            pp.setOpaqueData(ByteString.copyFrom(p.opaqueData().duplicate().nioBuffer()));
+        }
+        return pp;
+    }
+
+    private static org.opensearch.migrations.trafficcapture.protos.Http2PushPromisePayload.Builder
+    buildPushPromisePayload(Http2FramePayload.Http2PushPromisePayloadView pp) {
+        var ppp = org.opensearch.migrations.trafficcapture.protos.Http2PushPromisePayload.newBuilder()
+                .setPromisedStreamId(pp.promisedStreamId());
+        for (var f : pp.fields()) {
+            ppp.addFields(toProtoHeaderField(f));
+        }
+        return ppp;
+    }
+
+    private static org.opensearch.migrations.trafficcapture.protos.Http2ContinuationPayload.Builder
+    buildContinuationPayload(Http2FramePayload.Http2ContinuationPayloadView c) {
+        var cp = org.opensearch.migrations.trafficcapture.protos.Http2ContinuationPayload.newBuilder()
+                .setEndHeaders(c.endHeaders());
+        if (c.headerBlockFragment() != null && c.headerBlockFragment().readableBytes() > 0) {
+            cp.setHeaderBlockFragment(
+                ByteString.copyFrom(c.headerBlockFragment().duplicate().nioBuffer()));
+        }
+        return cp;
+    }
+
+    private static Http2HeaderField.Builder toProtoHeaderField(Http2FramePayload.HeaderField f) {
+        return Http2HeaderField.newBuilder()
+                .setName(ByteString.copyFrom(f.name()))
+                .setValue(ByteString.copyFrom(f.value()))
+                .setSensitive(f.sensitive());
+    }
+
+    private static Timestamp toProtoTimestamp(Instant t) {
+        return Timestamp.newBuilder()
+                .setSeconds(t.getEpochSecond())
+                .setNanos(t.getNano())
+                .build();
+    }
+
+    /**
+     * Generic emission helper for any whole-message proto observation: builds a
+     * {@link TrafficObservation} containing it, computes size, ensures stream space, and writes.
+     */
+    private void emitObservationViaProto(Instant timestamp, int captureFieldNumber,
+                                          com.google.protobuf.MessageLite payload) throws IOException {
+        var observation = TrafficObservation.newBuilder().setTs(toProtoTimestamp(timestamp));
+        switch (captureFieldNumber) {
+            case TrafficObservation.HTTP2FRAME_FIELD_NUMBER:
+                observation.setHttp2Frame((Http2FrameObservation) payload);
+                break;
+            case TrafficObservation.ALPN_FIELD_NUMBER:
+                observation.setAlpn((AlpnNegotiationObservation) payload);
+                break;
+            default:
+                throw new IllegalArgumentException("Unsupported observation tag: " + captureFieldNumber);
+        }
+        var built = observation.build();
+        // Single-call size lookup (was previously computed two ways for sanity-check; the
+        // ad-hoc check is gone now — protobuf's getSerializedSize is the source of truth).
+        int wireLen = built.getSerializedSize();
+        flushIfNeeded(CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(
+                wireLen, numFlushesSoFar + 1));
+
+        // Write: TrafficStream.subStream tag + length-delimited TrafficObservation bytes.
+        writeTrafficStreamTag(TrafficStream.SUBSTREAM_FIELD_NUMBER);
+        getOrCreateCodedOutputStream().writeUInt32NoTag(wireLen);
+        built.writeTo(getOrCreateCodedOutputStream());
+    }
+
+    private static int getSizeOfTimestamp(Instant t) {
+        return CodedOutputStreamSizeUtil.getSizeOfTimestamp(t);
     }
 
     private static class ByteOutputGatheringByteChannel implements GatheringByteChannel {

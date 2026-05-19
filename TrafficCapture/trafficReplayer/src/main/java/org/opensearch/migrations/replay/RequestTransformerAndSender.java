@@ -11,6 +11,7 @@ import org.opensearch.migrations.replay.datatypes.ByteBufListProducer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
+import org.opensearch.migrations.replay.scheduling.WireTimeAnchors;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.utils.TextTrackedFuture;
 import org.opensearch.migrations.utils.TrackedFuture;
@@ -98,7 +99,7 @@ public class RequestTransformerAndSender<T> {
         @NonNull Instant end,
         Supplier<Stream<byte[]>> packetsSupplier) {
         return transformAndSendRequest(inputRequestTransformerFactory, replayEngine,
-            finishedAccumulatingResponseFuture, ctx, start, end, packetsSupplier, null);
+            finishedAccumulatingResponseFuture, ctx, start, end, packetsSupplier, null, null);
     }
 
     public TrackedFuture<String, T> transformAndSendRequest(
@@ -110,6 +111,21 @@ public class RequestTransformerAndSender<T> {
         @NonNull Instant end,
         Supplier<Stream<byte[]>> packetsSupplier,
         Duration quiescentDurationForRequest) {
+        return transformAndSendRequest(inputRequestTransformerFactory, replayEngine,
+            finishedAccumulatingResponseFuture, ctx, start, end, packetsSupplier,
+            quiescentDurationForRequest, null);
+    }
+
+    public TrackedFuture<String, T> transformAndSendRequest(
+        PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
+        ReplayEngine replayEngine,
+        TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        @NonNull Instant start,
+        @NonNull Instant end,
+        Supplier<Stream<byte[]>> packetsSupplier,
+        Duration quiescentDurationForRequest,
+        WireTimeAnchors wireTimes) {
         try {
             var requestReadyFuture = replayEngine.scheduleTransformationWork(
                 ctx,
@@ -121,6 +137,7 @@ public class RequestTransformerAndSender<T> {
                 .addArgument(requestReadyFuture)
                 .log();
             final Duration effectiveQuiescentDuration = quiescentDurationForRequest;
+            final WireTimeAnchors effectiveWireTimes = wireTimes;
             // It might be safer to chain this work directly inside the scheduleWork call above so that the
             // read buffer horizons aren't set after the transformation work finishes, but after the packets
             // are fully handled
@@ -143,7 +160,8 @@ public class RequestTransformerAndSender<T> {
                         transformedRequest.transformedOutput,
                         getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture,
                             arr -> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx)),
-                        effectiveQuiescentDuration
+                        effectiveQuiescentDuration,
+                        effectiveWireTimes
                     );
                 },
                 () -> "transitioning transformed packets onto the wire"

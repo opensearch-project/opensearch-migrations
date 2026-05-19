@@ -140,6 +140,18 @@ public class ParsedHttpMessagesAsDicts {
         map.put("targetResponses", targetResponseList);
         var key = tuple.getRequestKey();
         map.put("connectionId", key.getTrafficStreamKey().getConnectionId() + "." + key.getSourceRequestIndex());
+        // — surface H2 protocol + streamId fields when present (additive, null-safe).
+        if (tuple.sourcePair != null) {
+            if (tuple.sourcePair.getSourceProtocol() != null) {
+                map.put("sourceProtocol", tuple.sourcePair.getSourceProtocol());
+            }
+            if (tuple.sourcePair.getSourceStreamId() != null) {
+                map.put("sourceStreamId", tuple.sourcePair.getSourceStreamId());
+            }
+            if (tuple.sourcePair.getTargetStreamId() != null) {
+                map.put("targetStreamId", tuple.sourcePair.getTargetStreamId());
+            }
+        }
         Optional.ofNullable(tuple.topLevelErrorCause).ifPresent(e -> map.put("error", e.toString()));
         map.put("numRequests", tuple.responseList.size());
         map.put("numErrors", tuple.responseList.stream().filter(r -> r.getErrorCause() != null).count());

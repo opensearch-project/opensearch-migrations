@@ -5,15 +5,19 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id 'io.freefair.lombok'
+    id 'java-test-fixtures'
 }
 
 dependencies {
     implementation project(':TrafficCapture:captureOffloader')
+    implementation project(':TrafficCapture:captureProtobufs')
     implementation project(':coreUtilities')
     api            libs.netty.buffer
     api            libs.netty.codec.http
+    api            libs.netty.codec.http2
     api            libs.netty.handler
 
+    implementation libs.protobuf.java
     implementation libs.slf4j.api
 
     testImplementation project(':TrafficCapture:captureProtobufs')
@@ -28,4 +32,7 @@ dependencies {
 
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
+
+    testFixturesImplementation libs.netty.codec.http2
+    testFixturesImplementation libs.netty.buffer
 }

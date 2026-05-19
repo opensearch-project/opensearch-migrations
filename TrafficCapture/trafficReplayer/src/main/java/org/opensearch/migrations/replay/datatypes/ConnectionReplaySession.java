@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay.datatypes;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
+import org.opensearch.migrations.replay.scheduling.SessionDependencyTracker;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.utils.OnlineRadixSorter;
 import org.opensearch.migrations.utils.TextTrackedFuture;
@@ -50,6 +51,30 @@ public class ConnectionReplaySession {
      */
     @Setter
     private volatile boolean cancelled = false;
+
+    /**
+     * When true, this session uses a multiplex-capable transport (e.g. HTTP/2). The orchestrator
+     * fires every scheduled task immediately at its {@code atTime} rather than chaining each
+     * task to the previous one's completion. H2 streams are independent on the
+     * wire, so there's no protocol-level reason to serialize them.
+     */
+    @Setter
+    private volatile boolean multiplexed = false;
+
+    public boolean isMultiplexed() { return multiplexed; }
+
+    /**
+     * Per-session wire-level dependency tracker. Records each request's wire-time anchors and
+     * the futures that signal request-sent and response-received on the target side, so the
+     * orchestrator can gate strictly-serial successors on a predecessor's completion future
+     * rather than only on the time-shifted {@code atTime}. Used by the multiplexed (H2) branch
+     * of {@code RequestSenderOrchestrator}.
+     *
+     * <p>Non-null and stable for the session's lifetime. Single-thread access from the session's
+     * event loop matches the tracker's documented threading model.
+     */
+    @Getter
+    private final SessionDependencyTracker dependencyTracker = new SessionDependencyTracker();
 
     @SneakyThrows
     public ConnectionReplaySession(

@@ -126,6 +126,58 @@ def call(Map config = [:]) {
                             }
                         }
 
+                        // OS_3.1 → OS_3.1 over HTTP/2 is exercised by a dedicated child job because
+                        // (a) the H2 test is keyed off requires_explicit_selection=True so it doesn't
+                        // run via the default matrix, and (b) OS→OS isn't part of the default source
+                        // × target sweep above. We add it here only when the user picked SOURCE='all',
+                        // OS_3.1, or unspecified, AND the targets include OS_3.1.
+                        def includeH2OsToOs = targetVersions.contains('OS_3.1') &&
+                            (sourceVersions == 'all' || sourceVersions == 'OS_3.1')
+                        if (includeH2OsToOs) {
+                            def h2DisplayName = 'OS_3.1 → OS_3.1 (HTTP/2)'
+                            def h2ChildJobName = childJobName.contains('main')
+                                ? 'main/main-opensearch-3-1-h2-k8s-local-test'
+                                : (childJobName.contains('pr-') ? 'pr-checks/pr-opensearch-3-1-h2-k8s-local-test'
+                                    : 'opensearch-3-1-h2-k8s-local-test')
+                            jobs[h2DisplayName] = {
+                                try {
+                                    def result = build(
+                                            job: h2ChildJobName,
+                                            parameters: [
+                                                    string(name: 'GIT_REPO_URL', value: params.GIT_REPO_URL),
+                                                    string(name: 'GIT_BRANCH', value: params.GIT_BRANCH),
+                                                    string(name: 'GIT_COMMIT', value: params.GIT_COMMIT)
+                                            ],
+                                            wait: true,
+                                            propagate: false
+                                    )
+                                    copyArtifacts(
+                                            projectName: h2ChildJobName,
+                                            selector: specific("${result.number}"),
+                                            filter: 'reports/**',
+                                            target: "libraries/testAutomation/reports",
+                                            flatten: true,
+                                            optional: true
+                                    )
+                                    results[h2DisplayName] = [
+                                            result  : result.result,
+                                            url     : result.absoluteUrl,
+                                            number  : result.number,
+                                            duration: result.duration
+                                    ]
+                                } catch (Exception e) {
+                                    echo "💥 ${h2DisplayName}: EXCEPTION - ${e.message}"
+                                    results[h2DisplayName] = [
+                                            result  : 'EXCEPTION',
+                                            url     : '',
+                                            number  : 0,
+                                            duration: 0,
+                                            error   : e.message
+                                    ]
+                                }
+                            }
+                        }
+
                         // Execute all jobs in parallel
                         parallel jobs
 

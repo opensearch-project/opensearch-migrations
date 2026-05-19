@@ -93,8 +93,17 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
 
     private final AtomicReference<TextTrackedFuture<Void>> allRemainingWorkFutureOrShutdownSignalRef;
     protected final ClientConnectionPool clientConnectionPool;
+    /** Target URI — used for H2 dispatch when {@link #targetProtocolFactory} is set. */
+    private final URI targetUri;
     private final AtomicReference<Error> shutdownReasonRef;
     private final AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
+    /**
+     * — when set, the replayer dispatches H2 requests via this factory's
+     * shared multiplexed parent connection. Set by {@link TrafficReplayer#main} when
+     * {@code --targetEnableHttp2} is on.
+     */
+    @lombok.Setter
+    private org.opensearch.migrations.replay.datahandlers.TargetProtocolFactory targetProtocolFactory;
 
     public TrafficReplayerTopLevel(
         IRootReplayerContext context,
@@ -129,6 +138,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry(errorClassifier))
         );
         this.clientConnectionPool = clientConnectionPool;
+        this.targetUri = serverUri;
         allRemainingWorkFutureOrShutdownSignalRef = new AtomicReference<>();
         shutdownReasonRef = new AtomicReference<>();
         shutdownFutureRef = new AtomicReference<>();
@@ -223,7 +233,24 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     ) throws InterruptedException, ExecutionException {
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
-            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout)
+            (replaySession, ctx) -> {
+                if (targetProtocolFactory != null) {
+                    // Per-source-session dispatch: each ConnectionReplaySession (one source connection)
+                    // gets its own target H2 parent connection. Within a session, requests multiplex
+                    // on the session's own parent. This preserves source-target connection topology
+                    // fidelity — N source H2 connections → N target H2 parents.
+                    var key = replaySession.getChannelKeyContext().getChannelKey();
+                    var sessionId = key.getNodeId() + "|" + key.getConnectionId()
+                        + "|" + replaySession.generation;
+                    var c = targetProtocolFactory.createForSession(
+                        targetUri, sessionId, replaySession, ctx, targetServerResponseTimeout);
+                    if (c != null) {
+                        replaySession.setMultiplexed(true);
+                        return c;
+                    }
+                }
+                return new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout);
+            }
         );
         var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
         this.currentReplayEngine.set(replayEngine);

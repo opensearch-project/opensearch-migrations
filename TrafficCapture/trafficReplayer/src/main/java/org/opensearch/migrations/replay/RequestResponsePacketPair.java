@@ -26,7 +26,17 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         EXPIRED_PREMATURELY,
         CLOSED_PREMATURELY,
         /** Connection closed due to Kafka partition reassignment — not a source-side close. */
-        TRAFFIC_SOURCE_READER_INTERRUPTED
+        TRAFFIC_SOURCE_READER_INTERRUPTED,
+        /** H2 stream terminated by RST_STREAM from peer. */
+        RESET_BY_PEER,
+        /** H2 stream orphaned by GOAWAY (streamId > lastStreamId). */
+        GOAWAY_DROPPED,
+        /** H2 capture failed validation (CRLF in header value, missing:method, etc.). */
+        MALFORMED,
+        /** H2 stream uses an unsupported feature (CONNECT method, server PUSH_PROMISE). */
+        UNSUPPORTED,
+        /** H2 frame exceeded maxTrafficBufferSize and was emitted with payload omitted. */
+        TRUNCATED
     }
 
     @Getter
@@ -56,6 +66,53 @@ public class RequestResponsePacketPair implements IRequestResponsePacketPair {
         var httpTransactionContext = startingAtTrafficStreamKey.getTrafficStreamsContext()
             .createHttpTransactionContext(requestKey, sourceTimestamp);
         requestOrResponseAccumulationContext = httpTransactionContext.createRequestAccumulationContext();
+    }
+
+    /** — wire-protocol of the source side: "HTTP/1.1" or "HTTP/2.0". Null when unknown. */
+    @Getter
+    private String sourceProtocol;
+    /** — H2 stream id on the source side; null for H1 / unknown. */
+    @Getter
+    private Integer sourceStreamId;
+    /** — H2 stream id on the target side; null for H1 / unknown. */
+    @Getter
+    private Integer targetStreamId;
+
+    /** Sets H2 source identity on this pair. Setter (rather than constructor arg) keeps the H1 path unchanged. */
+    public void setSourceProtocolAndStream(String protocol, Integer streamId) {
+        this.sourceProtocol = protocol;
+        this.sourceStreamId = streamId;
+    }
+
+    public void setTargetStreamId(Integer streamId) {
+        this.targetStreamId = streamId;
+    }
+
+    /** Wire-level timestamp when the request's first frame was observed at the source. */
+    @Getter
+    private Instant sourceRequestFirstFrameTs;
+    /** Wire-level timestamp when the request's last frame was observed at the source. */
+    @Getter
+    private Instant sourceRequestLastFrameTs;
+    /** Wire-level timestamp when the response's first frame was observed at the source. */
+    @Getter
+    private Instant sourceResponseFirstFrameTs;
+    /** Wire-level timestamp when the response's last frame was observed at the source. */
+    @Getter
+    private Instant sourceResponseLastFrameTs;
+
+    /**
+     * Stamp wire-level timestamps captured on the source connection so the replayer's
+     * scheduler can reconstruct the happens-before relations between requests on the
+     * same source connection. Used to decide chained vs. concurrent dispatch when
+     * replaying H2-multiplexed traffic at any speedup factor.
+     */
+    public void setSourceWireTimestamps(Instant requestFirst, Instant requestLast,
+                                         Instant responseFirst, Instant responseLast) {
+        this.sourceRequestFirstFrameTs = requestFirst;
+        this.sourceRequestLastFrameTs = requestLast;
+        this.sourceResponseFirstFrameTs = responseFirst;
+        this.sourceResponseLastFrameTs = responseLast;
     }
 
     @NonNull

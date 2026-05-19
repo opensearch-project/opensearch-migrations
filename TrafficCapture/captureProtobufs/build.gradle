@@ -5,10 +5,13 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id 'com.google.protobuf'
+    id 'java-test-fixtures'
 }
 
 dependencies {
     api libs.protobuf.java
+
+    testFixturesImplementation libs.protobuf.java
 }
 
 protobuf {

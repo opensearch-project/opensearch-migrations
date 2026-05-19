@@ -39,6 +39,17 @@ public class TimeToResponseFulfillmentFutureMap {
         return timeToRunnableMap.isEmpty() ? null : timeToRunnableMap.pop().startTime;
     }
 
+    /**
+     * Multiplexed-mode helper: remove an entry matching the given startTime regardless of
+     * its position in the deque. Multiplexed completion order is arbitrary so head-pop
+     * doesn't apply.
+     *
+     * @return true when an entry was removed
+     */
+    public boolean removeMatchingEntry(Instant startTime) {
+        return timeToRunnableMap.removeIf(fwp -> fwp.startTime.equals(startTime));
+    }
+
     public boolean isEmpty() {
         return timeToRunnableMap.isEmpty();
     }

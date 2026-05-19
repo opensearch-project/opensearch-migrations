@@ -315,3 +315,46 @@ Fields:
   parameter is only required when mode is `replay` (the default). Dump modes branch in
   `TrafficReplayer.main()` after creating the traffic source, skipping all replay setup.
 - Output goes to stdout. Log messages go to stderr (via slf4j, same as existing behavior).
+
+
+## HTTP/2 support 
+The replayer can consume v2-format captures (HTTP/2-aware) when started with
+`-Dreplayer.h2.enabled=true`. Without this flag, encountering a v2 capture
+fails fast with a clear error pointing at the version mismatch — this avoids
+silently misinterpreting H2 frames as H1 bytes.
+
+### Dispatch
+
+`CapturedTrafficToHttpTransactionAccumulator.createInitialAccumulation` decides
+between `Accumulation` (H1) and `H2Accumulation` based on the
+`negotiatedAlpn` envelope field on each `TrafficStream` record, falling back to
+substream sniffing when ALPN is empty. The H2 path:
+
+1. Per-stream state in `H2Accumulation.liveStreams` keyed by H2 streamId.
+2. `addH2Observation` dispatches by frame type — HEADERS, DATA, RST_STREAM,
+   GOAWAY, SETTINGS — per 3. When a stream completes, `H2ToH1ObjectAdapter` converts the H2 stream into
+   `DefaultHttpRequest` + `HttpContent*` + `LastHttpContent` so the existing
+   `HttpJsonTransformingConsumer` pipeline runs unchanged.
+
+### Boundary adapter (`H2ToH1ObjectAdapter`)
+
+The adapter is the only component that crosses the capture/transformation
+boundary. It implements every row of the mapping table:
+pseudo-header normalization, `:authority` → `Host:`, cookie crumb folding,
+CRLF rejection, trailers reattached to `LastHttpContent`. JSON transformers
+are protocol-agnostic by virtue of this conversion.
+
+### Status enum additions
+
+`RequestResponsePacketPair.ReconstructionStatus` gains `RESET_BY_PEER`,
+`GOAWAY_DROPPED`, `MALFORMED`, `UNSUPPORTED`, `TRUNCATED` for H2-specific
+edge cases per 
+### Limitations (current build)
+
+- The replayer's *target* side does not yet speak H2; H2 captures are replayed
+  to H1 targets via the adapter. Native H2 target support is   (–) and not yet implemented.
+- Stream-completion → `onRequestReceived` callback wiring is a stub; full
+  per-stream emission lands with.
+- No fixture-driven integration tests yet ().
+
+See `docs/rfcs/0001-http2-trafficcapture.md` for the full design.

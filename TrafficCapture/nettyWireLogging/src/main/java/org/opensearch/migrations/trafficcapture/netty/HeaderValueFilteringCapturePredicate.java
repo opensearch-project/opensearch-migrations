@@ -7,6 +7,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import io.netty.handler.codec.http.HttpRequest;
+import io.netty.handler.codec.http2.Http2Headers;
+import io.netty.util.AsciiString;
 import lombok.Builder;
 
 public class HeaderValueFilteringCapturePredicate extends RequestCapturePredicate {
@@ -45,6 +47,50 @@ public class HeaderValueFilteringCapturePredicate extends RequestCapturePredicat
             patternMatches(methodAndPathPattern, () -> request.method().name()+" "+request.uri()) ||
             headersMatch(request) ?
                 CaptureDirective.DROP : CaptureDirective.CAPTURE;
+    }
+
+    /**
+     * H2 evaluation: pseudo-headers ({@code :method}, {@code :path}, {@code :scheme},
+     * {@code :authority}) per RFC 7540 §8.1.2.3 are mapped onto the existing H1 filters,
+     * and regular H2 headers are evaluated against the same {@code suppressCaptureHeaderPairs}
+     * map.
+     *
+     * <p>The {@code protocolPattern} doesn't apply to H2 — there is no "HTTP/2.x" protocol
+     * line in H2 — so a configured pattern matching {@code HTTP/2.*} (the legacy guard) is
+     * a no-op here. That's intentional: when {@code --enableHttp2} is set the proxy strips
+     * the legacy pattern; when it isn't set the H2 pipeline isn't reached.
+     */
+    @Override
+    public CaptureDirective forH2Stream(int streamId, Http2Headers headers) {
+        if (headers == null) {
+            return CaptureDirective.CAPTURE;
+        }
+        if (h2PseudoHeaderMatchesAnyPattern(headers)
+                || h2HeadersMatchSuppressionMap(headers)) {
+            return CaptureDirective.DROP;
+        }
+        return CaptureDirective.CAPTURE;
+    }
+
+    private boolean h2PseudoHeaderMatchesAnyPattern(Http2Headers headers) {
+        var methodValue = headers.method();
+        var pathValue = headers.path();
+        var methodStr = methodValue == null ? "" : methodValue.toString();
+        var pathStr = pathValue == null ? "" : pathValue.toString();
+        return patternMatches(method, () -> methodStr)
+            || patternMatches(path, () -> pathStr)
+            || patternMatches(methodAndPathPattern, () -> methodStr + " " + pathStr);
+    }
+
+    private boolean h2HeadersMatchSuppressionMap(Http2Headers headers) {
+        if (headerToPredicateRegexMap == null) return false;
+        for (var kvp : headerToPredicateRegexMap.entrySet()) {
+            var headerValue = headers.get(AsciiString.cached(kvp.getKey().toLowerCase(java.util.Locale.ROOT)));
+            if (headerValue != null && kvp.getValue().matcher(headerValue.toString()).matches()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean patternMatches(Pattern pattern, Supplier<String> stringGetter) {

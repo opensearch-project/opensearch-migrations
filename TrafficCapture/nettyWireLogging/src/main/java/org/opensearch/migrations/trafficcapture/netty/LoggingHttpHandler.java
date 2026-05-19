@@ -161,6 +161,22 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         return messageContext.getLogicalEnclosingScope();
     }
 
+    /**
+     * Record that ALPN selected the given protocol on this connection. Stamps the
+     * {@link org.opensearch.migrations.trafficcapture.protos.TrafficStream} envelope
+     * fields {@code captureFormatVersion="v2"} and {@code negotiatedAlpn=protocol}, and
+     * emits an {@code AlpnNegotiationObservation} as the first observation on the stream.
+     *
+     * <p>Safe no-op when called multiple times — only the first stamp wins for the
+     * envelope; the proxy currently calls it exactly once per connection.
+     */
+    public void recordAlpnNegotiation(String negotiatedProtocol, String offeredByClient) throws IOException {
+        trafficOffloader.addAlpnNegotiatedEvent(
+            Instant.now(),
+            negotiatedProtocol == null ? "" : negotiatedProtocol,
+            offeredByClient == null ? "" : offeredByClient);
+    }
+
     private SimpleDecodedHttpRequestHandler getHandlerThatHoldsParsedHttpRequest() {
         return (SimpleDecodedHttpRequestHandler) httpDecoderChannel.pipeline().last();
     }
