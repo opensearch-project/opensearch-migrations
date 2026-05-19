@@ -193,7 +193,7 @@ case "$SNAPSHOT_DEEP_OUTPUT" in
 esac
 
 if [ -z "$status" ] && [ -z "$SNAPSHOT_DEEP_OUTPUT" ]; then
-    patch_snapshot_status "Running" "Unknown" "Snapshot status check is not available yet"
+    patch_snapshot_status "Pending" "Unknown" "Snapshot status check is not available yet"
     exit 0
 fi
 
@@ -215,5 +215,5 @@ if [ -z "$message" ]; then
     message="$(printf '%s' "${status_error:-${SNAPSHOT_DEEP_OUTPUT:-Snapshot is running}}" | head -c 1024)"
 fi
 
-patch_snapshot_status "Running" "Running" "$message"
+patch_snapshot_status "Pending" "Running" "$message"
 exit 0

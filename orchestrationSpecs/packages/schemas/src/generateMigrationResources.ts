@@ -142,10 +142,10 @@ function specPropertiesFor(resource: ResourceProjection): Record<string, YamlVal
 
 function statusSchemaFor(resource: ResourceProjection): Record<string, YamlValue> {
     const readyPhases = resource.lifecycle === "terminal"
-        ? ["Initialized", "Running", "Completed", "Deleting", "Error"]
+        ? ["Created", "Pending", "Completed", "Deleting", "Error"]
         : resource.lifecycle === "approvalGate"
-            ? ["Initialized", "Pending", "Approved", "Error"]
-            : ["Initialized", "Running", "Ready", "Deleting", "Error"];
+            ? ["Created", "Pending", "Approved", "Error"]
+            : ["Created", "Pending", "Ready", "Deleting", "Error"];
 
     const common: Record<string, YamlValue> = {
         phase: {type: "string", enum: readyPhases},
@@ -403,24 +403,26 @@ function policyFor(resource: ResourceProjection, fields: ProjectedField[]): stri
     const impossible = restrictedFields.filter(field => field.changeRestriction === "impossible");
     const gated = restrictedFields.filter(field => field.changeRestriction === "gated");
     const validations: string[] = [];
+    const firstPopulationAllowed =
+        "has(oldObject.status) && has(oldObject.status.phase) && oldObject.status.phase == 'Created'";
 
     for (const field of impossible) {
         validations.push(validationRule(
-            equalityExpression(field),
+            `(${firstPopulationAllowed}) ||\n(${equalityExpression(field)})`,
             `Impossible: ${field.specPath.join(".")} cannot be changed. Delete and recreate.`
         ));
     }
 
     for (const field of gated.filter(field => field.invariant === "nonDecreasing")) {
         validations.push(validationRule(
-            nonDecreasingExpression(field),
+            `(${firstPopulationAllowed}) ||\n(${nonDecreasingExpression(field)})`,
             `Impossible: ${field.specPath.join(".")} cannot decrease.`
         ));
     }
 
     if (gated.length > 0) {
         const gatedEquality = gated.map(equalityExpression).map(expr => `(${expr})`).join(" &&\n");
-        const expression = `(\n${indentBlock(gatedEquality, 2)}\n) ||\n(${indentBlock(approvalExpression(), 2)}\n)`;
+        const expression = `(${firstPopulationAllowed}) ||\n(\n${indentBlock(gatedEquality, 2)}\n) ||\n(${indentBlock(approvalExpression(), 2)}\n)`;
         validations.push(validationRule(
             expression,
             `Gated changes detected on ${resource.kind} fields: ${gated.map(field => field.specPath.join(".")).join(", ")}. Approve the corresponding ApprovalGate to proceed.`

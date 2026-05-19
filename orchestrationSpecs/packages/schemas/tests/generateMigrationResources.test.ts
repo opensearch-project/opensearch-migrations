@@ -67,7 +67,9 @@ describe("generated migration resources", () => {
         expect(vaps).toContain("resources: [\"datasnapshots\", \"snapshotmigrations\"]");
         expect(vaps).toContain("name: migrations-deleting-phase-guard-policy");
         expect(vaps).toContain("resources: [\"kafkaclusters\", \"capturedtraffics\", \"captureproxies\", \"datasnapshots\", \"snapshotmigrations\", \"trafficreplays\"]");
-        expect(crds).toContain("enum: [Initialized, Running, Completed, Deleting, Error]");
+        expect(crds).toContain("enum: [Created, Pending, Completed, Deleting, Error]");
+        expect(crds).toContain("enum: [Created, Pending, Ready, Deleting, Error]");
+        expect(vaps).toContain("oldObject.status.phase == 'Created'");
     });
 
     test("generates immutable MigrationRun history resources", () => {

@@ -449,7 +449,7 @@ export class MigrationInitializer {
                 ...(labels && Object.keys(labels).length > 0 && { labels }),
             },
             spec: {},
-            status: { phase: 'Initialized' }
+            status: { phase: 'Created' }
         };
     }
 
@@ -515,7 +515,7 @@ export class MigrationInitializer {
                     },
                 },
                 spec: specFor('KafkaCluster', kafkaCluster.name),
-                status: { phase: 'Initialized', configChecksum: '' }
+                status: { phase: 'Created', configChecksum: '' }
             });
 
             const kcLabels = gateLabels({
@@ -549,7 +549,7 @@ export class MigrationInitializer {
                     }
                 },
                 spec: specFor('CapturedTraffic', topicCrName),
-                status: { phase: 'Initialized', configChecksum: '' }
+                status: { phase: 'Created', configChecksum: '' }
             });
 
             // CaptureProxy: proxy deployment contract
@@ -565,7 +565,7 @@ export class MigrationInitializer {
                     }
                 },
                 spec: specFor('CaptureProxy', proxy.name),
-                status: { phase: 'Initialized', configChecksum: '' }
+                status: { phase: 'Created', configChecksum: '' }
             });
 
             // VAP retry gates
@@ -602,7 +602,7 @@ export class MigrationInitializer {
                         }
                     },
                     spec: specFor('DataSnapshot', this.makeCrdName(snapshot.sourceConfig.label, item.label)),
-                    status: { phase: 'Initialized', configChecksum: '' }
+                    status: { phase: 'Created', configChecksum: '' }
                 });
             }
         }
@@ -629,7 +629,7 @@ export class MigrationInitializer {
                     }
                 },
                 spec: specFor('SnapshotMigration', snapshotMigrationName),
-                status: { phase: 'Initialized', configChecksum: '' }
+                status: { phase: 'Created', configChecksum: '' }
             });
 
             const migLabels = gateLabels({
@@ -673,7 +673,7 @@ export class MigrationInitializer {
                     }
                 },
                 spec: specFor('TrafficReplay', replay.name),
-                status: { phase: 'Initialized', configChecksum: '' }
+                status: { phase: 'Created', configChecksum: '' }
             });
 
             // VAP retry gate for replay

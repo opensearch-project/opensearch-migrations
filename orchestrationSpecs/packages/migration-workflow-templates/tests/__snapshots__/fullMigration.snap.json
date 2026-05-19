@@ -391,6 +391,10 @@
                     "value": "{{inputs.parameters.kafkaClusterConfig}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{='kafkacluster.'+inputs.parameters.clusterName+'.vapretry'}}"
                   },
@@ -710,6 +714,10 @@
                   {
                     "name": "sourceLabel",
                     "value": "{{=fromJSON(inputs.parameters.sourceConfig)['label']}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
                   }
                 ]
               },
@@ -744,7 +752,7 @@
                 "name": "resource-management"
               },
               "withParam": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['dependsOnProxySetups']}}",
-              "when": "{{=!(steps.readSnapshotPhase.outputs.parameters.phase == 'Completed' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum) && !(steps.readSnapshotPhase.outputs.parameters.phase == 'Running' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=!(steps.readSnapshotPhase.outputs.parameters.phase == 'Completed' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum) && !(steps.readSnapshotPhase.outputs.parameters.phase == 'Pending' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -778,7 +786,7 @@
                 "template": "waitfordatasnapshot",
                 "name": "resource-management"
               },
-              "when": "{{=steps.readSnapshotPhase.outputs.parameters.phase == 'Running' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum}}",
+              "when": "{{=steps.readSnapshotPhase.outputs.parameters.phase == 'Pending' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum}}",
               "arguments": {
                 "parameters": [
                   {
@@ -812,7 +820,7 @@
                 "template": "createorgetsnapshot",
                 "name": "create-or-get-snapshot"
               },
-              "when": "{{=!(steps.readSnapshotPhase.outputs.parameters.phase == 'Completed') && !(steps.readSnapshotPhase.outputs.parameters.phase == 'Running' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
+              "when": "{{=!(steps.readSnapshotPhase.outputs.parameters.phase == 'Completed') && !(steps.readSnapshotPhase.outputs.parameters.phase == 'Pending' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -1340,6 +1348,10 @@
                     "value": "{{inputs.parameters.resourceName}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{='snapshotmigration.'+inputs.parameters.resourceName+'.vapretry'}}"
                   },
@@ -1651,6 +1663,10 @@
                   {
                     "name": "targetLabel",
                     "value": "{{=sprig.dig('label', '', fromJSON(inputs.parameters.targetConfig))}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
                   },
                   {
                     "name": "retryGateName",

@@ -140,6 +140,9 @@ describe('migration initializer CRD resource generation', () => {
         expect(getResource('MigrationRun', byKind('MigrationRun')[0])?.spec.resolvedConfig.resources).toEqual(
             bundle.resolvedMigrationResources.resources
         );
+        for (const item of resources.filter((item: any) => item.kind !== 'MigrationRun')) {
+            expect(item.status.phase).toBe('Created');
+        }
 
         expect(enrichScript).toContain(
             "data_snapshot_source_snap1=\"$(kubectl get datasnapshots.migrations.opensearch.org/source-snap1 -o jsonpath='{.metadata.uid}')\""

@@ -298,7 +298,9 @@ export function dryRunResourcePolicy(
     //
     // The dry run intentionally models only parameter update admission:
     // lifecycle guards such as lock-on-complete and deleting-phase checks depend
-    // on live CR status and are evaluated by Kubernetes at apply time.
+    // on live CR status and are evaluated by Kubernetes at apply time. The
+    // generated VAP also allows initial spec population while old phase is
+    // Created; historical comparisons are made after that initial population.
     for (const field of collectProjectedFields().filter(field => field.resourceKind === pending.kind)) {
             const previousHasValue = hasPath(previous.parameters, field.specPath);
             const pendingHasValue = hasPath(pending.parameters, field.specPath);

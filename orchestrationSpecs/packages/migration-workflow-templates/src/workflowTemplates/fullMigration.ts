@@ -151,6 +151,7 @@ export const FullMigration = WorkflowBuilder.create({
                 .addStep("reconcileKafkaClusterResource", ResourceManagement, "reconcileKafkaClusterResource", c =>
                     c.register({
                         kafkaClusterConfig: b.inputs.kafkaClusterConfig,
+                        configChecksum: b.inputs.configChecksum,
                         retryGateName: expr.concat(expr.literal("kafkacluster."), b.inputs.clusterName, expr.literal(".vapretry")),
                         retryGroupName_view: expr.concat(expr.literal("KafkaCluster: "), b.inputs.clusterName),
                     })
@@ -243,6 +244,7 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: b.inputs.resourceName,
                     snapshotItemConfig: b.inputs.snapshotItemConfig,
                     sourceLabel: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "label"),
+                    configChecksum: b.inputs.configChecksum,
                 }),
             )
             .addStep("readSnapshotPhase", ResourceManagement, "readResourcePhase", c =>
@@ -266,7 +268,7 @@ export const FullMigration = WorkflowBuilder.create({
                             expr.equals(c.readSnapshotPhase.outputs.configChecksum, b.inputs.configChecksum)
                         )),
                         expr.not(expr.and(
-                            expr.equals(c.readSnapshotPhase.outputs.phase, "Running"),
+                            expr.equals(c.readSnapshotPhase.outputs.phase, "Pending"),
                             expr.equals(c.readSnapshotPhase.outputs.configChecksum, b.inputs.configChecksum)
                         ))
                     )}),
@@ -280,7 +282,7 @@ export const FullMigration = WorkflowBuilder.create({
                     checksumField: expr.literal("checksumForSnapshotMigration"),
                 }),
                 {when: c => ({templateExp: expr.and(
-                    expr.equals(c.readSnapshotPhase.outputs.phase, "Running"),
+                    expr.equals(c.readSnapshotPhase.outputs.phase, "Pending"),
                     expr.equals(c.readSnapshotPhase.outputs.configChecksum, b.inputs.configChecksum)
                 )})}
             )
@@ -313,7 +315,7 @@ export const FullMigration = WorkflowBuilder.create({
                 {when: c => ({templateExp: expr.and(
                     expr.not(expr.equals(c.readSnapshotPhase.outputs.phase, "Completed")),
                     expr.not(expr.and(
-                        expr.equals(c.readSnapshotPhase.outputs.phase, "Running"),
+                        expr.equals(c.readSnapshotPhase.outputs.phase, "Pending"),
                         expr.equals(c.readSnapshotPhase.outputs.configChecksum, b.inputs.configChecksum)
                     ))
                 )})}
@@ -442,6 +444,7 @@ export const FullMigration = WorkflowBuilder.create({
                     return c.register({
                         snapshotMigrationConfig: b.inputs.snapshotMigrationConfig,
                         resourceName: b.inputs.resourceName,
+                        configChecksum: b.inputs.configChecksum,
                         retryGateName: expr.concat(expr.literal("snapshotmigration."), b.inputs.resourceName, expr.literal(".vapretry")),
                         retryGroupName_view: expr.concat(expr.literal("SnapshotMigration: "), b.inputs.resourceName),
                     });
@@ -598,6 +601,7 @@ export const FullMigration = WorkflowBuilder.create({
                     replayerOptions: b.inputs.replayerOptions,
                     sourceLabel: b.inputs.sourceLabel,
                     targetLabel: expr.dig(expr.deserializeRecord(b.inputs.targetConfig), ["label"], ""),
+                    configChecksum: b.inputs.configChecksum,
                     retryGateName: expr.concat(expr.literal("trafficreplay."), b.inputs.name, expr.literal(".vapretry")),
                     retryGroupName_view: expr.concat(expr.literal("TrafficReplay: "), b.inputs.name),
                 }),

@@ -125,7 +125,7 @@ seed_status_patch="$(jq -nc \
     --arg snapshotName "$SNAPSHOT_NAME" \
     --arg configChecksum "$CONFIG_CHECKSUM" \
     '{status:{
-        phase:"Running",
+        phase:"Pending",
         snapshotName:$snapshotName,
         configChecksum:$configChecksum,
         checksumForSnapshotMigration:$configChecksum,

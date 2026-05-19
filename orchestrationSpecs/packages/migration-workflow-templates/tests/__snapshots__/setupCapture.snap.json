@@ -701,6 +701,10 @@
                     "value": "{{inputs.parameters.topicConfig}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.topicConfigChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{='capturedtraffic.'+inputs.parameters.topicCrName+'.vapretry'}}"
                   },
@@ -840,6 +844,10 @@
                     "value": "{{inputs.parameters.topicCrName}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{='captureproxy.'+inputs.parameters.proxyName+'.vapretry'}}"
                   },
@@ -873,7 +881,7 @@
           [
             {
               "templateRef": {
-                "template": "patchcaptureproxyrunning",
+                "template": "patchcaptureproxypending",
                 "name": "resource-management"
               },
               "when": "{{=true && !(steps.reconcileCaptureProxyResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
@@ -885,11 +893,11 @@
                   },
                   {
                     "name": "phase",
-                    "value": "Running"
+                    "value": "Pending"
                   }
                 ]
               },
-              "name": "patchCaptureProxyRunning"
+              "name": "patchCaptureProxyPending"
             }
           ],
           [

@@ -379,11 +379,218 @@
         }
       },
       {
+        "name": "patchkafkaclusterpending",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: KafkaCluster\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchcapturedtrafficpending",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchcaptureproxypending",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CaptureProxy\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchdatasnapshotpending",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: DataSnapshot\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchsnapshotmigrationpending",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchtrafficreplaypending",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: TrafficReplay\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
         "name": "reconcilekafkaclusterresource",
         "inputs": {
           "parameters": [
             {
               "name": "kafkaClusterConfig"
+            },
+            {
+              "name": "configChecksum"
             },
             {
               "name": "retryGateName"
@@ -410,6 +617,25 @@
               "continueOn": {
                 "failed": true
               }
+            }
+          ],
+          [
+            {
+              "template": "patchkafkaclusterpending",
+              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=jsonpath(inputs.parameters.kafkaClusterConfig, '$.name')}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "markPending"
             }
           ],
           [
@@ -480,6 +706,10 @@
                     "value": "{{inputs.parameters.kafkaClusterConfig}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{inputs.parameters.retryGateName}}"
                   },
@@ -530,6 +760,9 @@
               "name": "sourceLabel"
             },
             {
+              "name": "configChecksum"
+            },
+            {
               "name": "retryGateName"
             },
             {
@@ -578,6 +811,25 @@
               "continueOn": {
                 "failed": true
               }
+            }
+          ],
+          [
+            {
+              "template": "patchcapturedtrafficpending",
+              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.topicCrName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "markPending"
             }
           ],
           [
@@ -672,6 +924,10 @@
                     "value": "{{inputs.parameters.topicConfig}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{inputs.parameters.retryGateName}}"
                   },
@@ -710,6 +966,9 @@
               "name": "topicCrName"
             },
             {
+              "name": "configChecksum"
+            },
+            {
               "name": "retryGateName"
             },
             {
@@ -742,6 +1001,25 @@
               "continueOn": {
                 "failed": true
               }
+            }
+          ],
+          [
+            {
+              "template": "patchcaptureproxypending",
+              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "markPending"
             }
           ],
           [
@@ -820,6 +1098,10 @@
                     "value": "{{inputs.parameters.topicCrName}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{inputs.parameters.retryGateName}}"
                   },
@@ -858,6 +1140,9 @@
               "name": "sourceLabel"
             },
             {
+              "name": "configChecksum"
+            },
+            {
               "name": "retryGroupName_view",
               "value": "Apply"
             }
@@ -888,6 +1173,25 @@
                 "failed": true
               }
             }
+          ],
+          [
+            {
+              "template": "patchdatasnapshotpending",
+              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "markPending"
+            }
           ]
         ],
         "outputs": {
@@ -910,6 +1214,9 @@
             },
             {
               "name": "resourceName"
+            },
+            {
+              "name": "configChecksum"
             },
             {
               "name": "retryGateName"
@@ -940,6 +1247,25 @@
               "continueOn": {
                 "failed": true
               }
+            }
+          ],
+          [
+            {
+              "template": "patchsnapshotmigrationpending",
+              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "markPending"
             }
           ],
           [
@@ -1014,6 +1340,10 @@
                     "value": "{{inputs.parameters.resourceName}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{inputs.parameters.retryGateName}}"
                   },
@@ -1064,6 +1394,9 @@
               "name": "targetLabel"
             },
             {
+              "name": "configChecksum"
+            },
+            {
               "name": "retryGateName"
             },
             {
@@ -1104,6 +1437,25 @@
               "continueOn": {
                 "failed": true
               }
+            }
+          ],
+          [
+            {
+              "template": "patchtrafficreplaypending",
+              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.name}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "markPending"
             }
           ],
           [
@@ -1190,6 +1542,10 @@
                     "value": "{{inputs.parameters.targetLabel}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{inputs.parameters.retryGateName}}"
                   },
@@ -1231,40 +1587,6 @@
         },
         "resource": {
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: KafkaCluster\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n",
-          "action": "patch",
-          "flags": [
-            "--type",
-            "merge",
-            "--subresource=status"
-          ]
-        },
-        "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
-          "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
-          }
-        },
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "patchcapturedtrafficrunning",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName"
-            },
-            {
-              "name": "phase"
-            }
-          ]
-        },
-        "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
           "action": "patch",
           "flags": [
             "--type",
@@ -1342,40 +1664,6 @@
         },
         "resource": {
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
-          "action": "patch",
-          "flags": [
-            "--type",
-            "merge",
-            "--subresource=status"
-          ]
-        },
-        "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
-          "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
-          }
-        },
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "patchcaptureproxyrunning",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName"
-            },
-            {
-              "name": "phase"
-            }
-          ]
-        },
-        "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CaptureProxy\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
           "action": "patch",
           "flags": [
             "--type",
