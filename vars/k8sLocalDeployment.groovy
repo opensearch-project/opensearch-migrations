@@ -57,54 +57,14 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Check Minikube Status') {
+            stage('Recreate Minikube') {
                 steps {
+                    // Always recreate on containerd. The shared docker-hosted registry/buildkit
+                    // containers and their registry-data + buildkit-cache volumes live on host
+                    // Docker, so they survive `minikube delete` and image layers are reused.
                     timeout(time: 10, unit: 'MINUTES') {
-                        script {
-                            // The shared docker-hosted registry backend writes containerd hosts.toml on
-                            // the minikube node; cri-dockerd ignores those, so the cluster MUST be on
-                            // the containerd runtime. If a stale cluster from before this change is on
-                            // cri-dockerd, recreate it.
-                            def status = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
-                            def runtime = ''
-                            if (status == 'Running') {
-                                runtime = sh(script: "docker exec minikube cat /etc/crictl.yaml 2>/dev/null | awk -F': ' '/runtime-endpoint/ {print \$2}'", returnStdout: true).trim()
-                            }
-                            def needsRecreate = (status != 'Running') || !runtime.contains('containerd')
-                            if (needsRecreate) {
-                                echo "Recreating minikube (status='${status}', runtime='${runtime}') so the cluster runs on the containerd runtime"
-                                sh(script: 'minikube delete || true')
-                                sh(script: 'minikube start --driver=docker --container-runtime=containerd')
-                            } else {
-                                echo "✅ Minikube is running on containerd"
-                            }
-                            def status2 = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
-                            if (status2 != 'Running') {
-                                error("❌ Minikube failed to reach Running, current status: ${status2}")
-                            }
-                        }
-                    }
-                }
-            }
-
-            stage('Cleanup Previous MA Deployment') {
-                steps {
-                    timeout(time: 3, unit: 'MINUTES') {
-                        script {
-                            sh "kubectl config unset current-context || true"
-                            sh """
-                                # Delete all webhook configurations first — stale webhooks can block all API calls
-                                kubectl --context=minikube delete mutatingwebhookconfigurations --all --ignore-not-found || true
-                                kubectl --context=minikube delete validatingwebhookconfigurations --all --ignore-not-found || true
-
-                                # Helm uninstall with --no-hooks to avoid failing pre-delete hooks on terminating namespaces
-                                helm --kube-context=minikube uninstall ma -n ma --no-hooks || true
-
-                                # Force-delete namespaces if they still exist
-                                kubectl --context=minikube delete namespace kyverno-ma --ignore-not-found --grace-period=0 || true
-                                kubectl --context=minikube delete namespace ma --ignore-not-found --grace-period=0 --force || true
-                            """
-                        }
+                        sh 'minikube delete || true'
+                        sh 'minikube start --driver=docker --container-runtime=containerd'
                     }
                 }
             }
@@ -128,7 +88,7 @@ def call(Map config = [:]) {
                             '''
                             def pullThroughCacheEndpoint = sh(script: 'bash -l -c \'echo -n $ECR_PULL_THROUGH_ENDPOINT\'', returnStdout: true).trim()
                             sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 -Pbuilder=builder-minikube -PregistryEndpoint=localhost:5001 -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
-                            sh "docker buildx rm builder-minikube 2>/dev/null || true"
+                            // Keep builder-minikube alive across runs so the buildkit cache persists.
                         }
                     }
                 }

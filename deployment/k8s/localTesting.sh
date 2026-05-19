@@ -40,36 +40,20 @@ echo "Setting minikube config to use ${MINIKUBE_CPU_COUNT} CPUs and ${MINIKUBE_M
 minikube -p "${MINIKUBE_PROFILE}" config set cpus $MINIKUBE_CPU_COUNT
 minikube -p "${MINIKUBE_PROFILE}" config set memory $MINIKUBE_MEMORY_SIZE
 
+# Always recreate the cluster. The shared docker-hosted registry/buildkit
+# containers and their volumes live on host Docker, so they survive
+# `minikube delete` and the buildkit cache + registry images are reused.
 # containerd runtime is required so the per-node /etc/containerd/certs.d
 # hosts.toml that connect_cluster_to_registry_network writes is honored.
-# cri-dockerd (the minikube < 1.39 default) routes pulls through dockerd,
-# which would need a separate insecure-registry config and never mirrors
-# localhost:5001 to docker-registry:5000. If a pre-existing cluster is on
-# cri-dockerd, recreate it.
-needs_recreate=false
-if minikube -p "${MINIKUBE_PROFILE}" status --format='{{.Host}}' 2>/dev/null | grep -q Running; then
-  current_runtime="$(docker exec "${MINIKUBE_PROFILE}" cat /etc/crictl.yaml 2>/dev/null | awk -F': ' '/runtime-endpoint/ {print $2}' || true)"
-  if [[ "${current_runtime}" == *containerd* ]]; then
-    echo "minikube is already running on containerd, skipping start"
-  else
-    echo "minikube is running but on '${current_runtime:-unknown}'; recreating on containerd"
-    needs_recreate=true
-  fi
-else
-  needs_recreate=true
-fi
-
-if [[ "${needs_recreate}" == true ]]; then
-  print_step "Starting minikube"
-  minikube -p "${MINIKUBE_PROFILE}" delete >/dev/null 2>&1 || true
-  minikube -p "${MINIKUBE_PROFILE}" start \
-    --driver=docker \
-    --container-runtime=containerd \
-    --extra-config=kubelet.authentication-token-webhook=true \
-    --extra-config=kubelet.authorization-mode=Webhook \
-    --extra-config=scheduler.bind-address=0.0.0.0 \
-    --extra-config=controller-manager.bind-address=0.0.0.0
-fi
+print_step "Recreating minikube on containerd"
+minikube -p "${MINIKUBE_PROFILE}" delete >/dev/null 2>&1 || true
+minikube -p "${MINIKUBE_PROFILE}" start \
+  --driver=docker \
+  --container-runtime=containerd \
+  --extra-config=kubelet.authentication-token-webhook=true \
+  --extra-config=kubelet.authorization-mode=Webhook \
+  --extra-config=scheduler.bind-address=0.0.0.0 \
+  --extra-config=controller-manager.bind-address=0.0.0.0
 
 # The shared docker-hosted backend joins the registry to the cluster's docker
 # network and writes a containerd hosts.toml on each node, so the docker-driver
