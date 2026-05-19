@@ -133,6 +133,22 @@ spec:
                   type: string
                 suppressMethodAndPath:
                   type: string
+                # HTTP/2 capture support (when supported by the proxy image)
+                enableHttp2:
+                  type: boolean
+                  description: "When true, the proxy negotiates ALPN with both clients and the upstream server, \n                                advertising h2 + http/1.1 and capturing H2 frame-level traffic. Default: false (H1 only)."
+                http2MaxConcurrentStreams:
+                  type: integer
+                  description: "Maximum concurrent H2 streams advertised to clients via SETTINGS_MAX_CONCURRENT_STREAMS. Default: 100."
+                http2InitialWindowSize:
+                  type: integer
+                  description: "Initial flow-control window advertised via SETTINGS_INITIAL_WINDOW_SIZE. Default: 65535."
+                http2MaxHeaderListSize:
+                  type: integer
+                  description: "Maximum decoded header-list size for the HPACK decoder. Default: 8192."
+                http2MaxHeaderTableSize:
+                  type: integer
+                  description: "Maximum HPACK dynamic-table size (RFC 7541 default). Default: 4096."
             status:
               type: object
               properties:

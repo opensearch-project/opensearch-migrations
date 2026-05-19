@@ -246,3 +246,61 @@ class ReplayerTests(unittest.TestCase):
         # Verify document created on source and target
         ops.check_doc_match(source_cluster=source_cluster, target_cluster=target_cluster, index_name=index_name,
                             doc_id=doc_id, test_case=self)
+
+    @pytest.mark.skipif(
+        "not config.getoption('--enable_http2_proxy', default=False)",
+        reason="H2 capture path requires the proxy to be deployed with enableHttp2=true. "
+               "Re-run the suite with --enable_http2_proxy after redeploying the chart."
+    )
+    def test_replayer_0009_http2EnabledRoundTrip(self):
+        """End-to-end H2 capture + replay smoke test.
+
+        When the capture proxy is deployed with enableHttp2=true, this test issues
+        an HTTP/2 request via httpx (TLS+ALPN h2) through the proxy and asserts
+        the target receives the equivalent document via the replayer's H2 dispatch path.
+
+        Pre-requisites (none guarded by code; operator-level setup):
+          - Source cluster supports HTTP/2 (OpenSearch 2.x with http.type netty4)
+          - CaptureProxy CRD spec has enableHttp2=true
+          - TrafficReplayer was started with --targetEnableHttp2 and --replayer.h2.enabled=true
+        """
+        try:
+            import httpx
+        except ImportError:
+            self.skipTest("httpx not installed; pip install httpx[http2] to enable this test")
+
+        source_cluster: Cluster = pytest.console_env.source_cluster
+        target_cluster: Cluster = pytest.console_env.target_cluster
+        index_name = f"test_replayer_0009_h2_{pytest.unique_id}"
+        doc_id = "replayer_0009_h2_doc"
+        body = {"protocol": "HTTP/2", "text": "http2-capture-replay-roundtrip"}
+
+        # 1. Issue PUT via H2 client (httpx with http2=True forces ALPN h2 on TLS)
+        with httpx.Client(http2=True, verify=not source_cluster.allow_insecure,
+                          timeout=30.0) as h2_client:
+            url = f"{source_cluster.endpoint}/{index_name}/_doc/{doc_id}"
+            auth = None
+            if source_cluster.auth_type == AuthMethod.BASIC_AUTH:
+                auth = (source_cluster.auth_details['username'],
+                        source_cluster.auth_details['password'])
+            response = h2_client.put(url, json=body, auth=auth)
+            self.assertEqual(response.status_code, HTTPStatus.CREATED,
+                             f"H2 PUT must succeed: {response.status_code} {response.text}")
+            # Confirm the negotiation actually used H2.
+            self.assertEqual(response.http_version, "HTTP/2",
+                             f"client must negotiate h2 with the proxy; got {response.http_version}")
+
+        # 2. Confirm document on source
+        ops.get_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id,
+                         expected_status_code=HTTPStatus.OK, test_case=self)
+
+        # 3. Wait for replay path to land it on target
+        ops.check_doc_match(source_cluster=source_cluster, target_cluster=target_cluster,
+                            index_name=index_name, doc_id=doc_id, test_case=self)
+
+        # 4. Cleanup
+        ops.delete_index(cluster=source_cluster, index_name=index_name)
+        ops.get_index(cluster=source_cluster, index_name=index_name,
+                      expected_status_code=HTTPStatus.NOT_FOUND, test_case=self)
+        ops.get_index(cluster=target_cluster, index_name=index_name,
+                      expected_status_code=HTTPStatus.NOT_FOUND, test_case=self)

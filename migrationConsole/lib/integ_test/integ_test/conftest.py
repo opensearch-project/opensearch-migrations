@@ -74,6 +74,10 @@ def pytest_addoption(parser):
                      help="Digest-pinned transform image containing the basic transform fixture bank")
     parser.addoption("--transform_image_sequence", action="store", default="",
                      help="Digest-pinned transform image containing the sequence transform fixture bank")
+    parser.addoption("--enable_http2_proxy", action="store_true", default=False,
+                     help="Enable H2-specific replayer tests. Requires the CaptureProxy CRD to be "
+                          "deployed with enableHttp2=true and the TrafficReplayer to be configured with "
+                          "--targetEnableHttp2 + -Dreplayer.h2.enabled=true.")
 
 
 def pytest_configure(config):
