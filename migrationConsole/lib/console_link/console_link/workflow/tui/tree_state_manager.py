@@ -79,7 +79,7 @@ class TreeStateManager:
             # Preserve expanded state and subtree data from existing children
             expanded_ids = {
                 child.data['id'] for child in parent_tree_node.children
-                if child.data and child.is_expanded
+                if child.data and 'id' in child.data and not child.data.get('is_ephemeral') and child.is_expanded
             }
             children_snapshot = list(parent_tree_node.children)
             for child in children_snapshot:
