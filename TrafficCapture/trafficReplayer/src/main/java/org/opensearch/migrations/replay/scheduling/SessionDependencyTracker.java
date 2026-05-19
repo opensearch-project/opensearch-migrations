@@ -67,19 +67,18 @@ public class SessionDependencyTracker {
             // Find the latest predecessor that imposes a dependency. Sweep most-recent
             // first; the first non-CONCURRENT classification wins because more recent
             // predecessors dominate older ones (transitively).
-            for (int i = tracked.size() - 1; i >= 0; i--) {
+            for (int i = tracked.size() - 1; i >= 0 && gate.isDone(); i--) {
                 var pred = tracked.get(i);
                 var dep = DispatchDependencyClassifier.classify(
                         pred.requestLastFrame, pred.responseLastFrame, requestFirstFrame);
-                if (dep == Dependency.AFTER_RESPONSE_RECEIVED) {
-                    gate = pred.responseReceivedFuture;
-                    break;
-                } else if (dep == Dependency.AFTER_REQUEST_SENT) {
-                    gate = pred.requestSentFuture;
-                    break;
+                // Concurrent predecessors don't gate: keep scanning. A still-earlier
+                // predecessor may still impose a dependency even if the most recent one
+                // overlapped this request. Stop on the first non-concurrent classification.
+                if (dep != Dependency.CONCURRENT) {
+                    gate = (dep == Dependency.AFTER_RESPONSE_RECEIVED)
+                            ? pred.responseReceivedFuture
+                            : pred.requestSentFuture;
                 }
-                // Concurrent — keep scanning. A still-earlier predecessor might impose a
-                // chained dependency even if the immediately-preceding one is concurrent.
             }
         }
         tracked.add(new TrackedRequest(
