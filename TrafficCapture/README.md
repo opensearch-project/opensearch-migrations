@@ -307,42 +307,13 @@ $ cat /shared-logs-output/traffic-replayer-default/*/tuples/tuples.log | jq
 
 ##### HTTP/1.1 1xx interim responses
 
-When the source or target server emits an HTTP/1.1 1xx interim response (for example
-`100 Continue`, `102 Processing`, or `103 Early Hints`), the bytes are captured separately
-from the final response so the request/response pairing remains correct:
+HTTP/1.1 1xx interim responses (`100 Continue`, `102 Processing`, `103 Early Hints`) are
+captured separately from the final response so the request/response pairing stays correct:
 
-- `sourceInterimResponses` — a top-level array of interim response dicts seen from the
-  source server (only present when at least one was captured).
-- `targetResponses[i].interimResponses` — interim responses seen on each target retry
-  attempt, nested inside that attempt's response entry.
+- `sourceInterimResponses` — top-level array of interims from the source server.
+- `targetResponses[i].interimResponses` — interims from each target retry attempt.
 
-Each interim response dict has the same shape as a normal response dict (headers,
-`HTTP-Version`, `Status-Code`, `Reason-Phrase`); `response_time_ms` is omitted because
-interim responses do not have a measurable transaction latency.
-
-`101 Switching Protocols` is treated as a final response (it ends HTTP processing on the
-connection) and continues to appear under `sourceResponse`/`targetResponses`.
-
-###### Transformations and interim responses
-
-- **Request transformers** (transformers that mutate the request being sent to the target)
-  do not see interim responses — interims arrive after the transformer has already
-  produced the request bytes, and clients do not modify in-flight requests based on 1xx
-  responses (a 100 Continue unblocks body transmission, 103 Early Hints triggers
-  side-channel resource preloading, etc.). If a transformer alters the request body, the
-  `Content-Length` is re-derived automatically by the request pipeline; `Expect:
-  100-continue` is preserved by default and the replayer's HTTP client handles the
-  negotiation with the target server. A transformer that wants to drop the
-  100-continue handshake (e.g. because it has compressed the body to a size where the
-  pre-flight roundtrip is no longer worth it) can remove the `Expect` header explicitly.
-- **Tuple transformers** (transformers that mutate the entire tuple JSON before logging)
-  can read, redact, or drop interim responses using normal JSON path operations on the
-  `sourceInterimResponses` array and `targetResponses[i].interimResponses` arrays.
-  Existing tuple transformers continue to work without changes — interim response fields
-  are additive and ignored by transformers that don't reference them. Tuple transformers
-  are also a natural place to compare source vs target interim behavior (e.g. flag tuples
-  where the source received `100 Continue` but the target returned `417 Expectation
-  Failed`).
+`101 Switching Protocols` is a final response and stays under `sourceResponse`/`targetResponses`.
 
 ### Capture Kafka Offloader
 
