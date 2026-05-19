@@ -28,6 +28,7 @@ dependencies {
     testImplementation project(':TrafficCapture:captureProtobufs')
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':TrafficCapture:captureOffloader'))
+    testImplementation testFixtures(project(path: ':TrafficCapture:nettyWireLogging'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation libs.toxiproxy
     testImplementation libs.testcontainers.junit.jupiter
