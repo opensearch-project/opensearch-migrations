@@ -60,21 +60,42 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "clusterSpecOverrides": {
                       "type": "object",
                       "additionalProperties": {
-                        "nullable": true
+                        "type": [
+                          "string",
+                          "number",
+                          "boolean",
+                          "object",
+                          "array",
+                          "null"
+                        ]
                       },
                       "description": "Optional overrides merged into the generated Strimzi Kafka.spec. Workflow-managed fields such as resource names, required listeners, and workflow-owned auth settings may be overwritten by the workflow."
                     },
                     "nodePoolSpecOverrides": {
                       "type": "object",
                       "additionalProperties": {
-                        "nullable": true
+                        "type": [
+                          "string",
+                          "number",
+                          "boolean",
+                          "object",
+                          "array",
+                          "null"
+                        ]
                       },
                       "description": "Optional overrides merged into the generated Strimzi KafkaNodePool.spec. Workflow-managed fields such as cluster labels may be overwritten by the workflow."
                     },
                     "topicSpecOverrides": {
                       "type": "object",
                       "additionalProperties": {
-                        "nullable": true
+                        "type": [
+                          "string",
+                          "number",
+                          "boolean",
+                          "object",
+                          "array",
+                          "null"
+                        ]
                       },
                       "description": "Optional overrides merged into generated Strimzi KafkaTopic.spec values for workflow-created topics."
                     }
@@ -430,7 +451,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "config": {
                           "type": "object",
                           "additionalProperties": {
-                            "nullable": true
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean",
+                              "object",
+                              "array",
+                              "null"
+                            ]
                           }
                         }
                       },
@@ -1148,6 +1176,23 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "useRecoverySource": {
                       "type": "boolean",
                       "default": false
+                    },
+                    "transformsImage": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "transformsImagePullPolicy": {
+                      "type": "string",
+                      "enum": [
+                        "Always",
+                        "Never",
+                        "IfNotPresent"
+                      ],
+                      "default": "IfNotPresent"
+                    },
+                    "transformsConfigMap": {
+                      "type": "string",
+                      "default": ""
                     }
                   }
                 },
@@ -1323,6 +1368,23 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "useRecoverySource": {
                       "type": "boolean",
                       "default": false
+                    },
+                    "transformsImage": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "transformsImagePullPolicy": {
+                      "type": "string",
+                      "enum": [
+                        "Always",
+                        "Never",
+                        "IfNotPresent"
+                      ],
+                      "default": "IfNotPresent"
+                    },
+                    "transformsConfigMap": {
+                      "type": "string",
+                      "default": ""
                     }
                   }
                 },
@@ -1488,7 +1550,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "type": "boolean"
                 },
                 "sourceAuth": {
-                  "nullable": true
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "object",
+                    "array",
+                    "null"
+                  ]
                 },
                 "configChecksum": {
                   "type": "string"
@@ -1626,7 +1695,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "config": {
                           "type": "object",
                           "additionalProperties": {
-                            "nullable": true
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean",
+                              "object",
+                              "array",
+                              "null"
+                            ]
                           }
                         }
                       },
@@ -1674,6 +1750,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "podReplicas": {
                       "type": "number",
                       "default": 1
+                    },
+                    "useLocalStack": {
+                      "type": "boolean",
+                      "default": false
                     },
                     "resources": {
                       "type": "object",
@@ -1818,6 +1898,25 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
                       "changeRestriction": "gated"
                     },
+                    "tupleS3Bucket": {
+                      "type": "string",
+                      "description": "S3 bucket for tuple output. When set, tuples are written directly to S3.",
+                      "changeRestriction": "gated"
+                    },
+                    "tupleS3Region": {
+                      "type": "string",
+                      "description": "AWS region for the tuple S3 bucket. Required when tupleS3Bucket is set.",
+                      "changeRestriction": "gated"
+                    },
+                    "tupleS3Prefix": {
+                      "type": "string",
+                      "default": "tuples/"
+                    },
+                    "tupleS3Endpoint": {
+                      "type": "string",
+                      "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?)?$",
+                      "default": ""
+                    },
                     "tupleMaxBufferSeconds": {
                       "type": "number",
                       "default": 60
@@ -1826,9 +1925,30 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 256
                     },
+                    "tupleMaxPerFile": {
+                      "type": "number",
+                      "default": 0
+                    },
                     "userAgent": {
                       "type": "string",
                       "description": "String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs."
+                    },
+                    "transformsImage": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "transformsImagePullPolicy": {
+                      "type": "string",
+                      "enum": [
+                        "Always",
+                        "Never",
+                        "IfNotPresent"
+                      ],
+                      "default": "IfNotPresent"
+                    },
+                    "transformsConfigMap": {
+                      "type": "string",
+                      "default": ""
                     }
                   }
                 },
@@ -2122,6 +2242,54 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
       },
       "default": {},
       "description": "Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'."
+    },
+    "transformsSources": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "image": {
+                "type": "string",
+                "minLength": 1,
+                "description": "OCI image reference (preferably with digest) whose root contains transform files. The workflow mounts the image at /transforms/. Build with deployment/k8s/package-transforms.sh."
+              },
+              "pullPolicy": {
+                "type": "string",
+                "enum": [
+                  "Always",
+                  "Never",
+                  "IfNotPresent"
+                ],
+                "default": "IfNotPresent",
+                "description": "Kubernetes image pull policy for the transforms image. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+              }
+            },
+            "required": [
+              "image"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "configMap": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Name of a pre-existing Kubernetes ConfigMap. Each key becomes a file in /transforms/."
+              }
+            },
+            "required": [
+              "configMap"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "description": "Source for user-defined transform files. Exactly one of 'image' or 'configMap'."
+      },
+      "default": {},
+      "description": "Named transform sources. Define once, reference by key in transform-eligible tool options."
     },
     "sourceClusters": {
       "type": "object",
@@ -2523,6 +2691,16 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "default": false,
                         "description": "When true, skips the manual approval gate after the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster."
                       },
+                      "transformsSource": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                        "description": "Key into top-level transformsSources. Mounts /transforms/ into the metadata migration pod.",
+                        "checksumFor": [
+                          "snapshot",
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
+                      },
                       "componentTemplateAllowlist": {
                         "type": "array",
                         "items": {
@@ -2593,6 +2771,51 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "transformerConfigFile": {
                         "type": "string",
                         "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                      },
+                      "metadataTransforms": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "language": {
+                              "type": "string",
+                              "enum": [
+                                "javascript",
+                                "python"
+                              ],
+                              "description": "Runtime for this transform script."
+                            },
+                            "file": {
+                              "type": "string",
+                              "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                              "description": "Script path relative to /transforms. Defaults by transform kind and language."
+                            },
+                            "bindingsObject": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": [
+                                  "string",
+                                  "number",
+                                  "boolean",
+                                  "object",
+                                  "array",
+                                  "null"
+                                ]
+                              },
+                              "default": {},
+                              "description": "Optional JSON object passed to the transform at initialization."
+                            }
+                          },
+                          "required": [
+                            "language"
+                          ]
+                        },
+                        "description": "Metadata transform pipeline. Generates the existing transformerConfig inline JSON option.",
+                        "checksumFor": [
+                          "snapshot",
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "enableSourcelessMigrations": {
                         "type": "boolean",
@@ -2696,6 +2919,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         ],
                         "description": "Kubernetes resource limits and requests for the RFS container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."
                       },
+                      "transformsSource": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                        "description": "Key into top-level transformsSources. Mounts /transforms/ into the RFS pod.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
+                      },
                       "indexAllowlist": {
                         "type": "array",
                         "items": {
@@ -2737,6 +2969,50 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "docTransformerConfigFile": {
                         "type": "string",
                         "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
+                      },
+                      "documentTransforms": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "language": {
+                              "type": "string",
+                              "enum": [
+                                "javascript",
+                                "python"
+                              ],
+                              "description": "Runtime for this transform script."
+                            },
+                            "file": {
+                              "type": "string",
+                              "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                              "description": "Script path relative to /transforms. Defaults by transform kind and language."
+                            },
+                            "bindingsObject": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": [
+                                  "string",
+                                  "number",
+                                  "boolean",
+                                  "object",
+                                  "array",
+                                  "null"
+                                ]
+                              },
+                              "default": {},
+                              "description": "Optional JSON object passed to the transform at initialization."
+                            }
+                          },
+                          "required": [
+                            "language"
+                          ]
+                        },
+                        "description": "Document transform pipeline. Generates the existing docTransformerConfig inline JSON option.",
                         "checksumFor": [
                           "replayer"
                         ],
@@ -3252,6 +3528,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "default": 1,
                     "description": "Number of replayer pod replicas in the Kubernetes Deployment. Each replica independently consumes from Kafka and replays traffic to the target."
                   },
+                  "useLocalStack": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "[Internal] Mount local test AWS credentials for LocalStack-backed tuple S3 output. Workflow-only testing hook; not passed to the replayer process and not intended for production use."
+                  },
                   "resources": {
                     "type": "object",
                     "nullable": true,
@@ -3312,6 +3593,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "requests"
                     ],
                     "description": "Kubernetes resource limits and requests for the replayer container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
+                  },
+                  "transformsSource": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                    "description": "Key into top-level transformsSources. Mounts /transforms/ into the replayer pod.",
+                    "changeRestriction": "impossible"
                   },
                   "kafkaTrafficEnableMSKAuth": {
                     "type": "boolean",
@@ -3392,6 +3679,47 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
                     "changeRestriction": "gated"
                   },
+                  "requestTransforms": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "language": {
+                          "type": "string",
+                          "enum": [
+                            "javascript",
+                            "python"
+                          ],
+                          "description": "Runtime for this transform script."
+                        },
+                        "file": {
+                          "type": "string",
+                          "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                          "description": "Script path relative to /transforms. Defaults by transform kind and language."
+                        },
+                        "bindingsObject": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean",
+                              "object",
+                              "array",
+                              "null"
+                            ]
+                          },
+                          "default": {},
+                          "description": "Optional JSON object passed to the transform at initialization."
+                        }
+                      },
+                      "required": [
+                        "language"
+                      ]
+                    },
+                    "description": "Request transform pipeline. Generates the existing transformerConfig inline JSON option.",
+                    "changeRestriction": "gated"
+                  },
                   "tupleTransformerConfig": {
                     "type": "string",
                     "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
@@ -3407,6 +3735,70 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
                     "changeRestriction": "gated"
                   },
+                  "tupleTransforms": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "language": {
+                          "type": "string",
+                          "enum": [
+                            "javascript",
+                            "python"
+                          ],
+                          "description": "Runtime for this transform script."
+                        },
+                        "file": {
+                          "type": "string",
+                          "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                          "description": "Script path relative to /transforms. Defaults by transform kind and language."
+                        },
+                        "bindingsObject": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean",
+                              "object",
+                              "array",
+                              "null"
+                            ]
+                          },
+                          "default": {},
+                          "description": "Optional JSON object passed to the transform at initialization."
+                        }
+                      },
+                      "required": [
+                        "language"
+                      ]
+                    },
+                    "description": "Tuple transform pipeline. Generates the existing tupleTransformerConfig inline JSON option.",
+                    "changeRestriction": "gated"
+                  },
+                  "tupleS3Bucket": {
+                    "type": "string",
+                    "description": "S3 bucket for tuple output. When set, tuples are written directly to S3.",
+                    "changeRestriction": "gated"
+                  },
+                  "tupleS3Region": {
+                    "type": "string",
+                    "description": "AWS region for the tuple S3 bucket. Required when tupleS3Bucket is set.",
+                    "changeRestriction": "gated"
+                  },
+                  "tupleS3Prefix": {
+                    "type": "string",
+                    "default": "tuples/",
+                    "description": "S3 key prefix for tuple objects.",
+                    "changeRestriction": "gated"
+                  },
+                  "tupleS3Endpoint": {
+                    "type": "string",
+                    "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?)?$",
+                    "default": "",
+                    "description": "Custom S3 endpoint URL for tuple output.",
+                    "changeRestriction": "gated"
+                  },
                   "tupleMaxBufferSeconds": {
                     "type": "number",
                     "default": 60,
@@ -3417,6 +3809,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "number",
                     "default": 256,
                     "description": "Maximum uncompressed size in MB before rotating a tuple file to S3.",
+                    "changeRestriction": "gated"
+                  },
+                  "tupleMaxPerFile": {
+                    "type": "number",
+                    "default": 0,
+                    "description": "Maximum number of tuples per S3 object. 0 means no count limit.",
                     "changeRestriction": "gated"
                   },
                   "userAgent": {

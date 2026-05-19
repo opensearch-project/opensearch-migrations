@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -28,12 +29,14 @@ public abstract class ScriptTransformerProvider implements IJsonTransformerProvi
     public static final String INLINE_SCRIPT_KEY = "initializationScript";
     public static final String BINDINGS_OBJECT = "bindingsObject";
 
+    public record ResolvedScript(String source, Path sourceFile) {}
+
     /** Human-readable language name for error messages (e.g. "JavaScript", "Python"). */
     protected abstract String getLanguageName();
 
     /** Create the language-specific transformer from resolved config values. */
     protected abstract IJsonTransformer buildTransformer(
-        String script, Object bindingsObject, Map<String, Object> config) throws IOException;
+        ResolvedScript script, Object bindingsObject, Map<String, Object> config) throws IOException;
 
     @Override
     public IJsonTransformer createTransformer(Object jsonConfig) {
@@ -49,7 +52,7 @@ public abstract class ScriptTransformerProvider implements IJsonTransformerProvi
 
     @SuppressWarnings("unchecked")
     protected Map<String, Object> validateConfig(Object jsonConfig) {
-        return validateAndExtractConfig(jsonConfig, new String[]{ BINDINGS_OBJECT });
+        return validateAndExtractConfig(jsonConfig, new String[]{});
     }
 
     @SuppressWarnings("unchecked")
@@ -70,16 +73,18 @@ public abstract class ScriptTransformerProvider implements IJsonTransformerProvi
         return config;
     }
 
-    protected String resolveScript(Map<String, Object> config) throws IOException {
+    protected ResolvedScript resolveScript(Map<String, Object> config) throws IOException {
         var exclusiveParams = List.of(SCRIPT_FILE_KEY, INLINE_SCRIPT_KEY, RESOURCE_PATH_KEY)
             .stream().map(k -> "\"" + k + "\"").collect(Collectors.joining(","));
 
         String script = null;
+        Path sourceFile = null;
 
         var scriptFile = (String) config.getOrDefault(SCRIPT_FILE_KEY, null);
         if (scriptFile != null) {
             try {
-                script = Files.readString(Path.of(scriptFile));
+                sourceFile = Path.of(scriptFile);
+                script = Files.readString(sourceFile);
             } catch (IOException ioe) {
                 throw new IllegalArgumentException(
                     "Failed to load script file '" + scriptFile + "'. " + getConfigUsageStr(), ioe);
@@ -115,15 +120,22 @@ public abstract class ScriptTransformerProvider implements IJsonTransformerProvi
             throw new IllegalArgumentException(
                 "One of {" + exclusiveParams + "} must be provided. " + getConfigUsageStr());
         }
-        return script;
+        return new ResolvedScript(script, sourceFile);
     }
 
     protected Object parseBindingsObject(Map<String, Object> config) {
+        if (!config.containsKey(BINDINGS_OBJECT) || config.get(BINDINGS_OBJECT) == null) {
+            return Collections.emptyMap();
+        }
+        var bindingsObject = config.get(BINDINGS_OBJECT);
+        if (!(bindingsObject instanceof String)) {
+            return bindingsObject;
+        }
         var objectMapper = new ObjectMapper();
         try {
-            String bindingsObjectString = (String) config.get(BINDINGS_OBJECT);
+            String bindingsObjectString = (String) bindingsObject;
             return objectMapper.readValue(bindingsObjectString, new TypeReference<>() {});
-        } catch (ClassCastException | JsonProcessingException e) {
+        } catch (JsonProcessingException e) {
             throw new IllegalArgumentException(
                 "Failed to parse the bindingsObject. " + getConfigUsageStr(), e);
         }
@@ -139,6 +151,6 @@ public abstract class ScriptTransformerProvider implements IJsonTransformerProvi
             + INLINE_SCRIPT_KEY + " is a string consisting of " + lang
             + " which defines a main function that takes in the " + BINDINGS_OBJECT
             + " and returns a transform function.\n"
-            + BINDINGS_OBJECT + " is a value which can be deserialized with Jackson ObjectMapper.";
+            + BINDINGS_OBJECT + " is optional and may be a JSON object or a string which can be deserialized with Jackson ObjectMapper.";
     }
 }

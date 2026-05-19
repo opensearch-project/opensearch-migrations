@@ -248,6 +248,10 @@ spec:
                   type: string
                 metadataMigrationLoggingConfigurationOverrideConfigMap:
                   type: string
+                metadataMigrationTransformsImage:
+                  type: string
+                metadataMigrationTransformsConfigMap:
+                  type: string
                 metadataMigrationSkipEvaluateApproval:
                   type: boolean
                 metadataMigrationSkipMigrateApproval:
@@ -290,6 +294,10 @@ spec:
                 documentBackfillJvmArgs:
                   type: string
                 documentBackfillLoggingConfigurationOverrideConfigMap:
+                  type: string
+                documentBackfillTransformsImage:
+                  type: string
+                documentBackfillTransformsConfigMap:
                   type: string
                 documentBackfillSkipApproval:
                   type: boolean
@@ -396,6 +404,10 @@ spec:
                 resources:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
+                transformsImage:
+                  type: string
+                transformsConfigMap:
+                  type: string
                 # Replayer CLI params
                 kafkaTrafficEnableMSKAuth:
                   type: boolean

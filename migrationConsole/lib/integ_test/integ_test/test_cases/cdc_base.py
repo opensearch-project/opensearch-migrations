@@ -85,7 +85,7 @@ def wait_for_replayer_consuming(namespace: str, timeout_seconds: int = 120, inte
     while time.time() - start < timeout_seconds:
         try:
             result = subprocess.run(
-                ["kubectl", "logs", "-l", REPLAYER_LABEL_SELECTOR, "-n", namespace, "--tail=5"],
+                ["kubectl", "logs", "-l", REPLAYER_LABEL_SELECTOR, "-n", namespace, "--tail=100"],
                 capture_output=True, text=True, timeout=15
             )
             for line in result.stdout.split("\n"):
@@ -95,10 +95,31 @@ def wait_for_replayer_consuming(namespace: str, timeout_seconds: int = 120, inte
         except Exception as e:
             logger.debug("Replayer log check failed: %s", e)
         time.sleep(interval)
+    log_replayer_diagnostics(namespace)
     raise TimeoutError(
         f"Replayer did not join Kafka consumer group within {timeout_seconds}s. "
         f"CDC docs sent after this point will not be replayed to target."
     )
+
+
+def log_replayer_diagnostics(namespace: str):
+    """Log replayer pod state and recent logs before a CDC wait times out."""
+    commands = [
+        ["get", "pods", "-l", REPLAYER_LABEL_SELECTOR, "-n", namespace, "-o", "wide"],
+        ["describe", "pods", "-l", REPLAYER_LABEL_SELECTOR, "-n", namespace],
+        ["logs", "-l", REPLAYER_LABEL_SELECTOR, "-n", namespace, "--tail=200"],
+        ["logs", "-l", REPLAYER_LABEL_SELECTOR, "-n", namespace, "--previous", "--tail=200"],
+    ]
+    for args in commands:
+        try:
+            result = subprocess.run(["kubectl", *args], capture_output=True, text=True, timeout=30)
+            command = "kubectl " + " ".join(args)
+            if result.stdout.strip():
+                logger.info("%s stdout:\n%s", command, result.stdout.strip())
+            if result.stderr.strip():
+                logger.info("%s stderr:\n%s", command, result.stderr.strip())
+        except Exception as e:
+            logger.info("Failed to collect replayer diagnostics for kubectl %s: %s", " ".join(args), e)
 
 
 def make_proxy_cluster(source_cluster):
