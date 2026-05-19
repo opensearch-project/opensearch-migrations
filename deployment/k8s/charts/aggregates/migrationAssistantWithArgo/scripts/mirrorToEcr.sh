@@ -171,16 +171,44 @@ mirror_charts_to_ecr() {
     echo "  Pulling $name $version from $repo..."
     # Redirect stdin from /dev/null so helm can never block on a credential
     # prompt — if auth is missing/expired we want a fast failure, not a hang.
-    if echo "$repo" | grep -q '^oci://'; then
-      helm pull "$repo/$name" --version "$version" </dev/null 2>/dev/null
-    else
-      helm pull "$name" --repo "$repo" --version "$version" </dev/null 2>/dev/null
+    #
+    # Retry transient failures (DNS hiccups, github.io 5xx, OCI registry
+    # blips) with exponential backoff. Without retries a single network blip
+    # aborts the entire bootstrap because the caller runs under `set -e`.
+    # Capture stderr to a temp file on the final attempt so the failure
+    # reason is visible in CI logs.
+    local _pull_err pulled=0 attempt
+    _pull_err=$(mktemp)
+    for attempt in 1 2 3 4 5; do
+      if echo "$repo" | grep -q '^oci://'; then
+        if helm pull "$repo/$name" --version "$version" </dev/null 2>"$_pull_err"; then
+          pulled=1; break
+        fi
+      else
+        if helm pull "$name" --repo "$repo" --version "$version" </dev/null 2>"$_pull_err"; then
+          pulled=1; break
+        fi
+      fi
+      if [ "$attempt" -lt 5 ]; then
+        local _sleep=$((5 * 2**(attempt-1)))  # 5s, 10s, 20s, 40s
+        echo "  ⚠️  pull attempt $attempt for $name failed; retrying in ${_sleep}s" >&2
+        sleep "$_sleep"
+      fi
+    done
+    if [ "$pulled" -ne 1 ]; then
+      echo "  ❌ FAILED to download $name $version after 5 attempts" >&2
+      sed 's/^/      /' "$_pull_err" >&2
+      rm -f "$_pull_err"
+      _chart_fail=1
+      continue
     fi
+    rm -f "$_pull_err"
 
     local tgz
     tgz=$(ls ${name}-*.tgz 2>/dev/null | head -1)
     if [ -z "$tgz" ]; then
-      echo "  ❌ FAILED to download $name $version" >&2
+      echo "  ❌ FAILED to download $name $version (no tarball produced)" >&2
+      _chart_fail=1
       continue
     fi
 
@@ -191,7 +219,11 @@ mirror_charts_to_ecr() {
     echo "  ✅ $name $version"
   done < "$_chartlist"
   rm -f "$_chartlist"
-  [ "$_chart_fail" -eq 0 ] || echo "⚠️  Some chart copies failed" >&2
+  if [ "$_chart_fail" -ne 0 ]; then
+    echo "" >&2
+    echo "❌ One or more chart copies failed (see ❌ markers above)" >&2
+    return 1
+  fi
 
   echo ""
   echo "=== Mirroring complete ==="
