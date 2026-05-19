@@ -97,11 +97,16 @@ class SolrOperationsLibrary(DefaultOperationsLibrary):
         if self._is_solr_cloud(cluster):
             solr_major = self._get_solr_major_version(cluster)
 
+            # SolrCloud: create a collection with specified topology.
+            # Uses the _default configset that ships with Solr.
+            #
             # Build the collection-creation URL with version-appropriate parameters.
             #
             # maxShardsPerNode: required on single-node clusters in 6.x–8.x to allow
             # num_shards > 1; the parameter was removed entirely in Solr 9.0 and
             # passing it causes a 400 error on 9.x+.
+            # Must be >= num_shards/num_nodes in Solr 8.x, otherwise
+            # creation fails on single-node clusters when num_shards > 1.
             #
             # collection.configName: the _default configset was introduced in Solr 7.0.
             # In Solr 6.x the equivalent is data_driven_schema_configs, which the
