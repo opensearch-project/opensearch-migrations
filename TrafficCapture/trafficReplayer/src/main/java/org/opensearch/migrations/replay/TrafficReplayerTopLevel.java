@@ -237,7 +237,12 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 if (targetProtocolFactory != null) {
                     var c = targetProtocolFactory.create(
                         targetUri, replaySession, ctx, targetServerResponseTimeout);
-                    if (c != null) return c;
+                    if (c != null) {
+                        // Mark the session multiplexed so RequestSenderOrchestrator fires each
+                        // request at its atTime independently rather than chaining.
+                        replaySession.setMultiplexed(true);
+                        return c;
+                    }
                 }
                 return new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout);
             }

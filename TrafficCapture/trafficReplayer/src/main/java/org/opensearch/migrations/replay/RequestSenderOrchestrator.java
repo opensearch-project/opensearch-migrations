@@ -343,15 +343,33 @@ public class RequestSenderOrchestrator {
         Instant atTime,
         ChannelTask<T> task
     ) {
-        log.atDebug().setMessage("{} scheduling {} at {}")
+        log.atDebug().setMessage("{} scheduling {} at {} (multiplexed={})")
             .addArgument(channelInteraction)
             .addArgument(task.kind)
             .addArgument(atTime)
+            .addArgument(channelFutureAndRequestSchedule.isMultiplexed())
             .log();
 
         var schedule = channelFutureAndRequestSchedule.schedule;
         var eventLoop = channelFutureAndRequestSchedule.eventLoop;
 
+        // Multiplexed (H2) path: fire each task at its own atTime, no chaining on previous.
+        // Tasks complete out of order; that's safe because each H2 stream is independent.
+        if (channelFutureAndRequestSchedule.isMultiplexed()) {
+            var workPointTrigger = schedule.appendTaskTrigger(atTime, task.kind).scheduleFuture;
+            var workFuture = task.getRunnable().apply(workPointTrigger);
+            // Bind THIS task's trigger to its own atTime — independent of any other in-flight task.
+            bindNettyScheduleToCompletableFuture(eventLoop, atTime, workPointTrigger.future);
+            // On completion, remove this entry from the schedule (no chaining: nobody is waiting).
+            workFuture.map(f -> f.whenComplete((v, t) -> {
+                // Best-effort removal; multiplexed mode doesn't enforce strict head-pop ordering
+                // because completions arrive in arbitrary order.
+                schedule.removeMatchingEntry(atTime);
+            }), () -> "");
+            return workFuture;
+        }
+
+        // Serial (H1) path — historical behavior.
         var wasEmpty = schedule.isEmpty();
         assert wasEmpty || !atTime.isBefore(schedule.peekFirstItem().startTime)
             : "Per-connection TrafficStream ordering should force a time ordering on incoming requests";
