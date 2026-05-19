@@ -107,12 +107,21 @@ def call(Map config = [:]) {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
                             sh "kubectl config unset current-context || true"
-                            sh "helm --kube-context=minikube uninstall buildkit -n buildkit 2>/dev/null || true"
-                            sh "USE_LOCAL_REGISTRY=true KUBE_CONTEXT=minikube BUILDKIT_HELM_ARGS='--set buildkitd.maxParallelism=16 --set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0' sh -c '. ./buildImages/backends/k8sHostedBuildkit.sh && setup_build_backend'"
+                            // Bring up the docker-hosted registry/buildkit, then attach the minikube node
+                            // container to the same docker network so containerd can pull localhost:5001.
+                            sh '''
+                                set -eu
+                                . ./buildImages/backends/dockerHostedBuildkit.sh
+                                KUBE_CONTEXT=minikube setup_build_backend
+                                mk_nodes=()
+                                while IFS= read -r node; do
+                                    [ -n "$node" ] && mk_nodes+=("$node")
+                                done < <(minikube node list 2>/dev/null | awk '{print $1}')
+                                connect_cluster_to_registry_network minikube "${mk_nodes[@]}"
+                            '''
                             def pullThroughCacheEndpoint = sh(script: 'bash -l -c \'echo -n $ECR_PULL_THROUGH_ENDPOINT\'', returnStdout: true).trim()
-                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 -Pbuilder=builder-minikube -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
+                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 -Pbuilder=builder-minikube -PregistryEndpoint=localhost:5001 -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
                             sh "docker buildx rm builder-minikube 2>/dev/null || true"
-                            sh "helm --kube-context=minikube uninstall buildkit -n buildkit 2>/dev/null || true"
                         }
                     }
                 }
@@ -134,8 +143,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
                                 sh "kubectl config unset current-context || true"
-                                def registryIp = sh(script: "kubectl --context=minikube get svc -n buildkit docker-registry -o jsonpath='{.spec.clusterIP}'", returnStdout: true).trim()
-                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='${registryIp}:5000/' --kube-context=minikube"
+                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='localhost:5001/' --kube-context=minikube"
                             }
                         }
                     }
