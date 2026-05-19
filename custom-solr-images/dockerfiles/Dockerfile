@@ -8,20 +8,20 @@ ENV LANG=C.UTF-8
 
 RUN set -eux; \
   apk add --no-cache \
+      aws-cli \
       bash \
       ca-certificates \
       curl \
+      dcron \
+      inotify-tools \
       lsof \
       procps \
       shadow \
       su-exec \
       tini \
       tzdata \
-      zip \
-      dcron \
-      aws-cli \
-      inotify-tools \
-      util-linux;
+      util-linux \
+      zip;
 
 RUN --mount=type=cache,target=/var/cache/downloads,sharing=locked \
   set -eux; \
