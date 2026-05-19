@@ -1,0 +1,23 @@
+services:
+  opensearch:
+    image: opensearchproject/opensearch:2.15.0
+    container_name: h2-opensearch
+    environment:
+      - cluster.name=h2-test
+      - node.name=h2-test-node
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - DISABLE_SECURITY_PLUGIN=true
+      - http.type=netty4
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
