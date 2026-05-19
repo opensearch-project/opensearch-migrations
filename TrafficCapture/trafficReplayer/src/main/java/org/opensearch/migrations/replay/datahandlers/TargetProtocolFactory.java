@@ -43,6 +43,17 @@ public class TargetProtocolFactory implements AutoCloseable {
     /** Per-authority H2 multiplex factory cache. Each value owns one parent H2 connection. */
     private final Map<String, H2MultiplexedConsumerFactory> h2FactoryByAuthority = new ConcurrentHashMap<>();
 
+    /**
+     * Per-(authority, sessionId) H2 multiplex factory cache. Each value owns one parent H2
+     * connection that is private to one source session. This preserves wire-level fidelity:
+     * if the source captured 15 distinct H2 connections, the replayer opens 15 distinct
+     * target H2 parents, one per source session.
+     *
+     * <p>Within a session, multiple requests share the session's parent (true H2 multiplexing
+     * — stream sub-channels on the same TCP connection).
+     */
+    private final Map<String, H2MultiplexedConsumerFactory> h2FactoryBySession = new ConcurrentHashMap<>();
+
     /** When set, ALPN probing is skipped and this protocol is always returned. Test hook. */
     private final String forcedProtocol;
 
@@ -127,9 +138,15 @@ public class TargetProtocolFactory implements AutoCloseable {
      * <p>When the cached ALPN for the target is {@code "h2"} AND {@code targetEnableHttp2}
      * is true, returns a per-request consumer minted from the shared
      * {@link H2MultiplexedConsumerFactory} for that target authority — so all H2 requests
-     * to the same authority share a single parent H2 connection.
+     * to the same authority multiplex on a single parent H2 connection.
      *
      * <p>Otherwise falls back to the supplied H1 {@link ConsumerFactory}.
+     *
+     * <p>NOTE: this overload aggregates ALL requests across ALL source sessions onto a single
+     * shared target parent. This is appropriate when source connection identity doesn't matter
+     * (e.g., synthetic load tests). For source→target connection-topology fidelity (replay
+     * preserves how many distinct H2 connections the source held), call
+     * {@link #createForSession} with the session's connectionId instead.
      */
     public IPacketFinalizingConsumer<AggregatedRawResponse> create(
             URI targetUri,
@@ -138,13 +155,76 @@ public class TargetProtocolFactory implements AutoCloseable {
             Duration timeout) {
         var protocol = resolveAlpn(targetUri);
         if (targetEnableHttp2 && "h2".equals(protocol)) {
+            // Prefer per-session dispatch when we have a session identity; falls back to
+            // per-authority sharing only when the caller has no session context.
+            if (session != null) {
+                var sid = sessionIdentityFor(session);
+                return getOrCreateH2FactoryForSession(targetUri, sid).createConsumer();
+            }
             var muxFactory = getOrCreateH2Factory(targetUri);
             log.atDebug().setMessage(
-                    "Dispatching to multiplexed H2 consumer for target={} (parent connection shared)")
+                    "Dispatching to multiplexed H2 consumer for target={} (parent connection shared across all sessions)")
                 .addArgument(targetUri).log();
             return muxFactory.createConsumer();
         }
         return h1Factory.create(session, ctx, timeout);
+    }
+
+    /**
+     * Per-session dispatch: each unique {@code sessionId} gets its own H2 parent connection.
+     * Within a session, requests multiplex on the session's parent. Across sessions,
+     * connections are kept separate.
+     *
+     * <p>Use this overload when source→target connection-topology fidelity matters: 15 source
+     * sessions map to 15 distinct target H2 parents, each carrying its session's request set.
+     */
+    public IPacketFinalizingConsumer<AggregatedRawResponse> createForSession(
+            URI targetUri,
+            String sessionId,
+            ConnectionReplaySession session,
+            IReplayContexts.IReplayerHttpTransactionContext ctx,
+            Duration timeout) {
+        var protocol = resolveAlpn(targetUri);
+        if (targetEnableHttp2 && "h2".equals(protocol)) {
+            return getOrCreateH2FactoryForSession(targetUri, sessionId).createConsumer();
+        }
+        return h1Factory.create(session, ctx, timeout);
+    }
+
+    private H2MultiplexedConsumerFactory getOrCreateH2FactoryForSession(URI targetUri, String sessionId) {
+        var authority = targetUri.getAuthority().toLowerCase(Locale.ROOT);
+        var key = authority + "|" + sessionId;
+        return h2FactoryBySession.computeIfAbsent(key, k -> {
+            var f = new H2MultiplexedConsumerFactory(targetUri, allowInsecure, h2ConsumerTimeout);
+            try {
+                f.open();
+                log.atDebug().setMessage("Opened per-session H2 parent for {} session={}")
+                    .addArgument(targetUri).addArgument(sessionId).log();
+            } catch (Exception e) {
+                log.atError().setCause(e).setMessage(
+                        "Failed to open per-session H2 parent for {} session={}")
+                    .addArgument(targetUri).addArgument(sessionId).log();
+                throw new RuntimeException(e);
+            }
+            return f;
+        });
+    }
+
+    /** Close the multiplex factory for one specific session. Call when the session ends so
+     * the per-session parent connection is released promptly rather than waiting for {@link #close()}. */
+    public void closeSession(URI targetUri, String sessionId) {
+        var authority = targetUri.getAuthority().toLowerCase(Locale.ROOT);
+        var key = authority + "|" + sessionId;
+        var removed = h2FactoryBySession.remove(key);
+        if (removed != null) {
+            try { removed.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    /** Derive a stable session identity from a ConnectionReplaySession's nodeId+connectionId+generation. */
+    private static String sessionIdentityFor(ConnectionReplaySession session) {
+        var key = session.getChannelKeyContext().getChannelKey();
+        return key.getNodeId() + "|" + key.getConnectionId() + "|" + session.generation;
     }
 
     private H2MultiplexedConsumerFactory getOrCreateH2Factory(URI targetUri) {
@@ -192,5 +272,9 @@ public class TargetProtocolFactory implements AutoCloseable {
             try { f.close(); } catch (Exception ignored) {}
         }
         h2FactoryByAuthority.clear();
+        for (var f : h2FactoryBySession.values()) {
+            try { f.close(); } catch (Exception ignored) {}
+        }
+        h2FactoryBySession.clear();
     }
 }

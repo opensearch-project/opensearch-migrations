@@ -235,11 +235,16 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             clientConnectionPool,
             (replaySession, ctx) -> {
                 if (targetProtocolFactory != null) {
-                    var c = targetProtocolFactory.create(
-                        targetUri, replaySession, ctx, targetServerResponseTimeout);
+                    // Per-source-session dispatch: each ConnectionReplaySession (one source connection)
+                    // gets its own target H2 parent connection. Within a session, requests multiplex
+                    // on the session's own parent. This preserves source-target connection topology
+                    // fidelity — N source H2 connections → N target H2 parents.
+                    var key = replaySession.getChannelKeyContext().getChannelKey();
+                    var sessionId = key.getNodeId() + "|" + key.getConnectionId()
+                        + "|" + replaySession.generation;
+                    var c = targetProtocolFactory.createForSession(
+                        targetUri, sessionId, replaySession, ctx, targetServerResponseTimeout);
                     if (c != null) {
-                        // Mark the session multiplexed so RequestSenderOrchestrator fires each
-                        // request at its atTime independently rather than chaining.
                         replaySession.setMultiplexed(true);
                         return c;
                     }
