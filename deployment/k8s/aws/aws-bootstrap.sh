@@ -533,7 +533,7 @@ check_existing_ma_release() {
 
 # Check required tools
 missing=0
-for cmd in jq kubectl; do
+for cmd in jq kubectl aws curl; do
   if ! command -v $cmd &>/dev/null; then
     echo "Missing required tool: $cmd"
     missing=1
@@ -640,9 +640,10 @@ if [[ "$deploy_cfn" == "true" ]]; then
     seen_file=$(mktemp)
     trap "rm -f '$seen_file'" RETURN
     while true; do
+      # awk reverses the event list (oldest-first) — portable substitute for `tac`, which isn't in the BSD userland on macOS.
       aws cloudformation describe-stack-events --stack-name "$cfn_stack_name" ${region:+--region "$region"} \
         --query 'StackEvents[].[EventId,Timestamp,ResourceStatus,ResourceType,LogicalResourceId,ResourceStatusReason]' \
-        --output text 2>/dev/null | tac | while IFS=$'\t' read -r eid ts status rtype logical reason; do
+        --output text 2>/dev/null | awk '{a[NR]=$0} END{for(i=NR;i;i--) print a[i]}' | while IFS=$'\t' read -r eid ts status rtype logical reason; do
           grep -qxF "$eid" "$seen_file" 2>/dev/null && continue
           echo "$eid" >> "$seen_file"
           [[ "$reason" == "None" ]] && reason=""
