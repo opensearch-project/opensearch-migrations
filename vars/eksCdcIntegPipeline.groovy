@@ -230,8 +230,17 @@ def call(Map config = [:]) {
                                             tag="transforms-${bank}-\${content_hash}"
                                             output=\$(deployment/k8s/package-transforms.sh "\${transforms_dir}" "${env.registryEndpoint}" "\${tag}")
                                             printf '%s\\n' "\${output}" >&2
-                                            pinned_ref=\$(printf '%s\\n' "\${output}" | grep -oE '[^[:space:]]+@sha256:[a-f0-9]{64}' | tail -n 1)
-                                            test -n "\${pinned_ref}"
+                                            # Parse the dedicated machine-readable line emitted by package-transforms.sh.
+                                            # Falling back to a generic regex over the whole output risks capturing
+                                            # surrounding YAML quotes, which then breaks downstream shell quoting.
+                                            pinned_ref=\$(printf '%s\\n' "\${output}" | sed -n 's/^PINNED_REF=//p' | tail -n 1)
+                                            if [ -z "\${pinned_ref}" ]; then
+                                                # Backwards-compatible fallback: extract bare digest-pinned ref and
+                                                # strip any surrounding quotes that the YAML example block adds.
+                                                pinned_ref=\$(printf '%s\\n' "\${output}" | grep -oE '[A-Za-z0-9._/:@-]+@sha256:[a-f0-9]{64}' | tail -n 1)
+                                            fi
+                                            test -n "\${pinned_ref}" || { echo 'failed to parse pinned image ref' >&2; exit 1; }
+                                            case "\${pinned_ref}" in *[!A-Za-z0-9._/:@-]*) echo "unexpected characters in pinned ref: \${pinned_ref}" >&2; exit 1 ;; esac
                                             printf '%s\\n' "\${pinned_ref}"
                                         """,
                                         returnStdout: true

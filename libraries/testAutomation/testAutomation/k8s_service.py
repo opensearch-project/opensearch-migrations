@@ -127,16 +127,31 @@ class K8sService:
         The command's output is written to log_file so Jenkins can tail it.
         On completion, the exit code is written to exit_code_file.
         """
+        # We construct two layers of shell:
+        #   outer: sh -c "nohup sh -c <INNER_QUOTED> > /dev/null 2>&1 &"
+        #   inner: <command_list...> > log 2>&1; echo $? > exit_code
+        # `shlex.quote` on each argv element makes the inner command safe at one
+        # level of shell parsing. We then need to ALSO quote the entire inner
+        # snippet so the outer `sh -c` passes it through unchanged. Naively
+        # wrapping the inner snippet in single quotes (e.g. `nohup sh -c '...'`)
+        # breaks as soon as any inner argv contains a `'`, because POSIX shells
+        # do not allow nested single quotes — the inner `'` ends the outer
+        # quoted region and any subsequent shlex output (e.g. a stray `"`) ends
+        # up parsed at the wrong level. That bug previously merged consecutive
+        # `--flag=value` args into one giant value when one of the values
+        # contained an unbalanced double quote.
         inner_cmd = " ".join(shlex.quote(arg) for arg in command_list)
         # Clean up stale files from any previous run
         self.exec_migration_console_cmd(
             command_list=["sh", "-c", f"rm -f {log_file} {exit_code_file}"],
             unbuffered=False)
+        inner_snippet = (
+            f"{inner_cmd} > {shlex.quote(log_file)} 2>&1; "
+            f"echo $? > {shlex.quote(exit_code_file)}"
+        )
         wrapper = (
-            f"nohup sh -c '"
-            f"{inner_cmd} > {log_file} 2>&1; "
-            f"echo $? > {exit_code_file}"
-            f"' > /dev/null 2>&1 &"
+            f"nohup sh -c {shlex.quote(inner_snippet)} "
+            f"> /dev/null 2>&1 &"
         )
         self.exec_migration_console_cmd(command_list=["sh", "-c", wrapper], unbuffered=False)
         time.sleep(2)
