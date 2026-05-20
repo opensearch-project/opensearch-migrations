@@ -281,8 +281,9 @@
           "setOwnerReference": false
         },
         "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
+          "limit": "3",
+          "retryPolicy": "Always",
+          "expression": "lastRetry.message matches 'failed calling webhook|no endpoints available|connection refused|context deadline exceeded|Client\\\\.Timeout exceeded|net/http: request canceled'",
           "backoff": {
             "duration": "10",
             "factor": "2",

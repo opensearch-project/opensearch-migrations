@@ -247,7 +247,10 @@ function resolveTransformsSource(
     }
 
     if ("image" in source) {
-        return {transformsImage: source.image};
+        return {
+            transformsImage: source.image,
+            transformsImagePullPolicy: source.pullPolicy ?? "IfNotPresent"
+        };
     }
     return {transformsConfigMap: source.configMap};
 }

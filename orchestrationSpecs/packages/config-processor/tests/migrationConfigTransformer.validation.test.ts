@@ -246,6 +246,53 @@ describe('MigrationConfigTransformer validation', () => {
         ]);
     });
 
+    it('should preserve transform image pull policy from transform sources', async () => {
+        const config = cloneBaseConfig();
+        config.transformsSources = {
+            "my-transforms": {
+                image: "example.com/transforms:latest",
+                pullPolicy: "Always"
+            }
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [
+            {
+                metadataMigrationConfig: {
+                    transformsSource: "my-transforms",
+                    metadataTransforms: {
+                        language: "javascript"
+                    }
+                },
+                documentBackfillConfig: {
+                    transformsSource: "my-transforms",
+                    documentTransforms: {
+                        language: "javascript"
+                    }
+                }
+            }
+        ];
+        config.traffic.replayers.replay1.replayerConfig = {
+            transformsSource: "my-transforms",
+            requestTransforms: {
+                language: "javascript"
+            }
+        };
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.snapshotMigrations[0].metadataMigrationConfig).toMatchObject({
+            transformsImage: "example.com/transforms:latest",
+            transformsImagePullPolicy: "Always"
+        });
+        expect(result.snapshotMigrations[0].documentBackfillConfig).toMatchObject({
+            transformsImage: "example.com/transforms:latest",
+            transformsImagePullPolicy: "Always"
+        });
+        expect(result.trafficReplays[0].replayerConfig).toMatchObject({
+            transformsImage: "example.com/transforms:latest",
+            transformsImagePullPolicy: "Always"
+        });
+    });
+
     it('should reject transform pipelines without a transformsSource', () => {
         const config = cloneBaseConfig();
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [

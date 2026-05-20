@@ -20,7 +20,7 @@ import {
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {SetupKafka} from "./setupKafka";
 import {z} from "zod";
-import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {CERT_MANAGER_WEBHOOK_RETRY_STRATEGY, K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {CONTAINER_NAMES} from "../containerNames";
 import {ResourceManagement} from "./resourceManagement";
 
@@ -474,7 +474,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     ownerUid: b.inputs.ownerUid,
                 })
             }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+        .addRetryParameters(CERT_MANAGER_WEBHOOK_RETRY_STRATEGY)
     )
 
 
