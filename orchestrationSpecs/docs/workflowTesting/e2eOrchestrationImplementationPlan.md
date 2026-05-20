@@ -94,7 +94,7 @@ Exit criteria:
 Current branch status:
 
 - `[x]` A noop-oriented runner exists and can write snapshots.
-- `[x]` Baseline and noop submissions use distinct workflow names, with tests covering deterministic and production suffix paths.
+- `[x]` Baseline and noop submissions use the default `migration-workflow` submit path, matching the user-visible `workflow submit --namespace <ns>` command.
 - `[x]` CLI runs with the built-in actor registry by default, and programmatic callers can add or omit actors.
 - `[x]` Minimal lifecycle actor registry exists; setup actors run before submission, teardown actors run from `finally`, and teardown failures are recorded as diagnostics.
 - `[x]` `create-basic-auth-secrets` setup actor reads basic-auth secret names from the baseline config and creates workflow-managed credentials from per-secret env vars declared in the scenario spec before configure/submit.
@@ -102,10 +102,11 @@ Current branch status:
 - `[x]` A live noop spec exists at `packages/e2e-orchestration-tests/tests/live-specs/fullMigrationNoop.test.yaml`.
 - `[x]` Snapshots include an ordered event history for setup, configure, submit, approve, wait, observe, cleanup, and teardown.
 - `[x]` Workflow CLI failures include stderr/stdout diagnostics in error snapshots.
-- `[x]` Each submitted run deletes and waits for both the outer submitted Argo workflow and the fixed inner `migration-workflow`; failure to confirm baseline cleanup stops the noop run before it can collide.
-- `[x]` Workflow names are unique, sanitized, and length-limited for Kubernetes/Argo naming constraints.
+- `[x]` Each submitted run deletes and waits for the default `migration-workflow` before and after submit; failure to confirm baseline cleanup stops the noop run before it can collide.
+- `[ ]` Optional generated workflow-name override is deferred until the workflow CLI and test framework can prove that path without diverging from normal user behavior.
 - `[x]` Noop and safe pass/fail assertions are wired into runner snapshots; gated and impossible case-plan assertions are wired in unit tests, with live validation still pending.
 - `[x]` Blocking checkpoint wait failures (`workflow-timeout`, `workflow-failed`, `phase-timeout`) now stop the case before the next plan step while preserving the failed run in the snapshot.
+- `[x]` Inner Argo workflow waits use a lightweight JSONPath status projection so large Argo workflow status payloads do not look like missing workflows or consume the full phase timeout.
 
 Get a real cluster-backed test running as early as possible, even if it covers only one safe/noop path and uses hardcoded scenario data. This is intentionally a vertical slice from the design document's "How A Test Case Runs" section, not the full framework.
 
@@ -113,7 +114,7 @@ Implement:
 
 - A CLI that accepts one spec path and one exact case name.
 - Submission of a baseline config using the existing config-processor path.
-- A generated unique workflow name for each submission, including the initial noop slice. Do not rely on the workflow CLI's default name.
+- Submission through the normal `workflow submit --namespace <ns>` path. Generated workflow-name override is out of scope for this slice.
 - Structural gate approval from the spec's `approvalGates`.
 - A basic phase-completion wait over observed CRD components. `Pending` must not be treated as terminal for ordinary topology components; approval-gate waiting should be handled separately.
 - A basic CRD observation dump after baseline.
@@ -124,11 +125,11 @@ Implement:
 Exit criteria:
 
 - `[x]` One local command submits `fullMigrationWithTraffic.wf.yaml`, approves structural gates, waits, resubmits unchanged config, and writes a snapshot or actionable error snapshot.
-- `[x]` Baseline and noop submissions have distinct workflow names in tests and live output.
+- `[x]` Baseline and noop submissions use the default `migration-workflow` name in tests and live output.
 - `[x]` A non-gate component in `Pending` does not satisfy phase completion.
 - `[x]` Failures still run teardown actors if configured.
 - `[x]` The snapshot shape matches the design document enough that later assertions can read it.
-- `[x]` Workflow names are sanitized/length-limited before broader matrix expansion.
+- `[ ]` Generated workflow-name sanitization/length-limiting is deferred until the optional override path returns.
 
 ### 3. Minimal Observation And Snapshot Model `[~]`
 
@@ -140,6 +141,7 @@ Current branch status:
 - `[x]` Case snapshots include operational event history and fatal command stderr/stdout.
 - `[x]` Raw Argo workflow phase and compact node diagnostics are captured on each checkpoint in the detail snapshot.
 - `[x]` Missing inner Argo workflow evidence uses a short appearance grace and records `workflow-missing`; it no longer consumes the full phase timeout before CRD checks can proceed.
+- `[x]` Large inner Argo workflow resources use lightweight status polling for checkpoint waits, with full workflow JSON still captured only as best-effort diagnostic evidence.
 - `[x]` CLI live runs emit lightweight progress lines for setup, configure, submit, checkpoints, approvals, resets, and cleanup.
 
 Stabilize the data captured by the thin live test.
@@ -164,7 +166,7 @@ Current branch status:
 
 - `[x]` `ComponentTopology` exists with cycle, missing-node, upstream/downstream, and independence tests.
 - `[x]` Temporary `ComponentTopologyResolver` exists for `fullMigrationWithTraffic.wf.yaml`.
-- `[x]` The temporary topology uses expected CRD graph semantics: `DataSnapshot` depends on `CaptureProxy`; `SnapshotMigration` has no `spec.dependsOn` edge.
+- `[x]` The temporary topology uses expected CRD graph semantics: `DataSnapshot` depends on `CaptureProxy`, and generated CRDs currently make `SnapshotMigration` depend on `DataSnapshot`.
 - `[x]` Generator-backed regression test derives topology from the real sample via `MigrationInitializer` and compares it to the hardcoded topology.
 - `[x]` `fullMigrationWithTraffic.wf.yaml` was adjusted so it validates with current schema rules (`removeAuthHeader` removed from the replayer config).
 - `[~]` Live/generated observed-topology comparison is not yet wired into runner output.
@@ -278,7 +280,7 @@ Running "too much" is acceptable for the next slice; avoid requiring an exact ca
 Sequence:
 
 1. Run setup actors.
-2. Submit baseline with a unique workflow name.
+2. Submit baseline through the normal default `migration-workflow` path.
 3. Approve structural gates from `approvalGates`.
 4. Wait for phase completion.
 5. Observe baseline.
@@ -292,7 +294,7 @@ Sequence:
 13. Run teardown actors.
 14. Write snapshot.
 
-This slice assumes the noop runner already has unique workflow names, teardown-on-failure, and component phase-completion semantics. Do not defer those basics until multi-case execution; otherwise the first live safe run may overwrite evidence or assert against unsettled resources.
+This slice assumes the noop runner already has mandatory teardown-on-failure and component phase-completion semantics. It intentionally uses the default `migration-workflow` name so live validation exercises the same command path users run manually.
 
 Define behavior from both CRD state deltas and Argo execution evidence:
 
@@ -317,6 +319,8 @@ Latest live validation note:
 
 - 2026-05-15 clean-cluster run used `kind-ma-workflow-clean` with image tag `workflow-tests-20260515` and `basicSnapshotNoop.test.yaml --noop-only`. The baseline reached the RFS path, created the RFS Deployment and coordinator, then failed to complete before timeout. Evidence: `SnapshotMigration/source-target-snap1-migration-0` stayed `Initialized` with `documentBackfill.phase=Pending`; coordinator restarted with `OOMKilled`/exit `137` under a `2Gi` limit; RFS worker retries failed first with coordinator DNS `NXDOMAIN` while the headless Service had only not-ready endpoints, then with `connection refused` while the coordinator was restarting. Treat this as the current SUT/live-environment blocker before gated/impossible live validation.
 - The same run exposed a harness issue where baseline timeout was logged and the runner continued into `noop-pre`; that is now fixed so checkpoint wait failures stop the case and write an error snapshot.
+- 2026-05-20 clean-cluster run used `kind-ma-workflow-e2e` with image tag `workflow-tests-20260520` and `basicSnapshotNoop.test.yaml --noop-only`. DataSnapshot and SnapshotMigration reached `Completed`, and the RFS coordinator came up with zero restarts under the current resource block. The run still failed because Argo marked `migration-workflow` `Failed` after `initializeRunMetadata` exited 1. Evidence from the failed pod showed the script looked for `migration-workflow-run-<runNumber>`, while the e2e runner's hidden workflow-name override created `<outerWorkflowName>-run-<runNumber>`. The runner now uses the default `migration-workflow` submit path; revalidate on a clean cluster before continuing to noop-pre/gated/impossible live validation.
+- 2026-05-20 clean-cluster rerun used `kind-ma-workflow-e2e-default` with image tag `workflow-tests-20260520-default` and `basicSnapshotNoop.test.yaml --noop-only`. Baseline completed in 4m44s, noop-pre completed in 39.857s, both Argo workflows reported `Succeeded`, DataSnapshot and SnapshotMigration reached `Completed`, and the case passed with zero diagnostics and zero violations. Snapshot output: `/tmp/e2e-orchestration-snapshots-ma-workflow-e2e-default-basic-noop-20260520/datasnapshot-source-snap1-noop.json`.
 
 ### 7. Matrix Expander And Mutator Registry `[~]`
 
@@ -502,7 +506,7 @@ Run all expanded cases in a spec. For the next slice, this starts with all expan
 Rules:
 
 - One case at a time in a namespace.
-- Reuse the unique workflow naming and mandatory teardown behavior established in the noop/safe slices.
+- Reuse the default `migration-workflow` submit path and mandatory teardown behavior established in the noop/safe slices.
 - Snapshot filename includes spec, subject, mutator, and response.
 - Process exit is nonzero if any case fails.
 - Noop-only execution is opt-in developer mode, not the default CLI behavior.

@@ -127,7 +127,6 @@ function makeRunnerTestDeps(opts: {
         return { components: factory(callCount) };
     };
 
-    let suffixSeq = 0;
     const deps: LiveRunnerDeps = {
         workflowCli,
         k8sClient,
@@ -146,7 +145,6 @@ function makeRunnerTestDeps(opts: {
         specPath: path.join(tmpDir, "test.yaml"),
         baselineConfigPath: baselinePath,
         outputDir: path.join(tmpDir, "snapshots"),
-        workflowNameSuffix: () => `s${++suffixSeq}`,
     };
     return { deps, calls, tmpDir };
 }

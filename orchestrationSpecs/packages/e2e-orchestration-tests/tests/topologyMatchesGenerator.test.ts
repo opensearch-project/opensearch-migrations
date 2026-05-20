@@ -55,12 +55,16 @@ async function deriveTopologyFromSample(): Promise<{
     // duplicate the schema-validation coverage that config-processor
     // owns.
     const initializer = new MigrationInitializer();
-    const bundle = await initializer.generateMigrationBundle(userConfig);
+    const bundle = await initializer.generateMigrationBundle(
+        userConfig,
+        "migration-workflow",
+        { runNumber: 1, timestamp: new Date("2026-01-01T00:00:00Z") },
+    );
     const items: Array<{
         kind?: string;
         metadata?: { name?: string };
         spec?: { dependsOn?: string[] };
-    }> = bundle.crdResources.items as any;
+    }> = bundle.customMigrationResources.items as any;
 
     // Build the reverse lookup: resource name → kind, so we can turn
     // the string refs in `spec.dependsOn` into typed ComponentIds.

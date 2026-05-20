@@ -757,7 +757,7 @@ At each phase, execution order is: **Actors → CRD state collection → Observe
 
 `ComponentTopologyResolver` creates a `ComponentTopology` from the baseline config, spec context, fixture metadata, and any independent deduction rules. The resulting graph must be stated in terms of expected CRD resources and expected CRD `spec.dependsOn` edges. It is not an Argo workflow parser, not a representation of user-config nesting, and not the source of truth for change classes. Fingerprint computation belongs to the migration framework; change-class truth comes from the transition trees.
 
-If a test needs to reason about ordering that is real in the workflow but not represented in CRD `spec.dependsOn`, model that separately. For example, a workflow step may wait for a snapshot before running a migration even when the `SnapshotMigration` CR itself has no `spec.dependsOn`; that sequencing is not a `ComponentTopology` edge.
+If a test needs to reason about ordering that is real in the workflow but not represented in CRD `spec.dependsOn`, model that separately. For example, a cleanup or status-patch step may run after the underlying CR reaches a terminal phase; that sequencing is not a `ComponentTopology` edge unless it appears in the generated CRD dependency graph.
 
 ### matrixExpander
 
@@ -933,7 +933,7 @@ Any behavioral difference between them is a bug.
 ## Constraints
 
 - One test case runs at a time.
-- Each submission should use a unique workflow name or generated name so automated cases do not collide with manual workflow usage in the same namespace.
+- The live runner submits through the default `migration-workflow` path while cases run one at a time, so automated validation exercises the same workflow CLI path users run manually. Generated workflow-name override is a later isolation feature, not part of the current baseline.
 - Teardown is mandatory before a test case is marked complete.
 - Mutators are validated against `WorkflowConfigSchema` at expansion time — invalid configs are rejected before any cluster is touched.
 

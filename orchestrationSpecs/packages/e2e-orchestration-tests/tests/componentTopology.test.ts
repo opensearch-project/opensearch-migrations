@@ -102,23 +102,22 @@ describe("componentTopologyResolver — fullMigrationWithTraffic", () => {
         );
     });
 
-    it("treats SnapshotMigration as independent of the proxy chain", () => {
+    it("places SnapshotMigration downstream of DataSnapshot", () => {
         const t = requireTopologyForBaseline("fullMigrationWithTraffic.wf.yaml");
-        // No dependsOn on SnapshotMigration means nothing upstream and
-        // nothing downstream for it.
-        expect([...t.upstreamOf(SNAP_MIGRATION)]).toEqual([]);
+        expect([...t.upstreamOf(SNAP_MIGRATION)].sort()).toEqual(
+            [DATA_SNAPSHOT, CAPTUREPROXY, CAPTURED, KAFKA].sort(),
+        );
         expect([...t.downstreamOf(SNAP_MIGRATION)]).toEqual([]);
 
-        // And every other component should consider it independent.
-        for (const c of [CAPTUREPROXY, KAFKA, CAPTURED, DATA_SNAPSHOT, REPLAY]) {
-            expect([...t.independentOf(c)]).toContain(SNAP_MIGRATION);
-        }
+        // The replay branch shares proxy-chain prerequisites with the
+        // snapshot branch, but has no path to or from SnapshotMigration.
+        expect([...t.independentOf(SNAP_MIGRATION)]).toEqual([REPLAY]);
     });
 
-    it("places DataSnapshot and TrafficReplay downstream of CaptureProxy", () => {
+    it("places snapshot/replay work downstream of CaptureProxy", () => {
         const t = requireTopologyForBaseline("fullMigrationWithTraffic.wf.yaml");
         expect([...t.downstreamOf(CAPTUREPROXY)].sort()).toEqual(
-            [DATA_SNAPSHOT, REPLAY].sort(),
+            [DATA_SNAPSHOT, SNAP_MIGRATION, REPLAY].sort(),
         );
     });
 
@@ -127,22 +126,22 @@ describe("componentTopologyResolver — fullMigrationWithTraffic", () => {
         expect([...t.upstreamOf(CAPTUREPROXY)].sort()).toEqual([CAPTURED, KAFKA].sort());
     });
 
-    it("cascades: mutating Kafka reaches every non-migration component", () => {
+    it("cascades: mutating Kafka reaches every downstream component", () => {
         const t = requireTopologyForBaseline("fullMigrationWithTraffic.wf.yaml");
         expect([...t.downstreamOf(KAFKA)].sort()).toEqual(
-            [CAPTURED, CAPTUREPROXY, DATA_SNAPSHOT, REPLAY].sort(),
+            [CAPTURED, CAPTUREPROXY, DATA_SNAPSHOT, SNAP_MIGRATION, REPLAY].sort(),
         );
-        expect([...t.independentOf(KAFKA)]).toEqual([SNAP_MIGRATION]);
+        expect([...t.independentOf(KAFKA)]).toEqual([]);
     });
 
-    it("DataSnapshot sits beside TrafficReplay, not downstream of it", () => {
+    it("DataSnapshot gates SnapshotMigration but sits beside TrafficReplay", () => {
         const t = requireTopologyForBaseline("fullMigrationWithTraffic.wf.yaml");
-        expect([...t.downstreamOf(DATA_SNAPSHOT)]).toEqual([]);
+        expect([...t.downstreamOf(DATA_SNAPSHOT)]).toEqual([SNAP_MIGRATION]);
         expect([...t.downstreamOf(REPLAY)]).toEqual([]);
         // DataSnapshot and TrafficReplay are independent of each other
         // (both depend on CaptureProxy, but not on each other).
         expect([...t.independentOf(DATA_SNAPSHOT)]).toEqual(
-            expect.arrayContaining([REPLAY, SNAP_MIGRATION]),
+            expect.arrayContaining([REPLAY]),
         );
     });
 

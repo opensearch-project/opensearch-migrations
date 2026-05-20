@@ -102,7 +102,7 @@ describe("WorkflowCli subcommands", () => {
         const r = recordingRunner();
         const cli = new WorkflowCli({ runner: r.runner, namespace: "ma" });
         cli.submit();
-        cli.submit({ wait: true, timeoutSeconds: 300, workflowName: "my-wf" });
+        cli.submit({ wait: true, timeoutSeconds: 300 });
         expect(r.calls[0].args).toEqual(["submit", "--namespace", "ma"]);
         expect(r.calls[1].args).toEqual([
             "submit",
@@ -111,8 +111,6 @@ describe("WorkflowCli subcommands", () => {
             "--wait",
             "--timeout",
             "300",
-            "--workflow-name",
-            "my-wf",
         ]);
     });
 

@@ -190,11 +190,10 @@ export class WorkflowCli {
     }
 
     /** `workflow submit --namespace <ns> [--wait --timeout <t>]`. */
-    submit(opts: { wait?: boolean; timeoutSeconds?: number; workflowName?: string } = {}): WorkflowCliRunResult {
+    submit(opts: { wait?: boolean; timeoutSeconds?: number } = {}): WorkflowCliRunResult {
         const args = ["submit", "--namespace", this.namespace];
         if (opts.wait) args.push("--wait");
         if (opts.timeoutSeconds != null) args.push("--timeout", String(opts.timeoutSeconds));
-        if (opts.workflowName) args.push("--workflow-name", opts.workflowName);
         return this.must(args, { timeoutMs: this.defaultTimeoutMs });
     }
 

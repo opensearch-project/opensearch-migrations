@@ -76,11 +76,6 @@ function makeRunnerTestDeps(overrides: Partial<LiveRunnerDeps> = {}): {
         fixtures: {},
     };
 
-    // Deterministic name suffix so assertions can pin the full
-    // workflow names.
-    let suffixSeq = 0;
-    const workflowNameSuffix = () => `s${++suffixSeq}`;
-
     const deps: LiveRunnerDeps = {
         workflowCli,
         k8sClient,
@@ -92,7 +87,6 @@ function makeRunnerTestDeps(overrides: Partial<LiveRunnerDeps> = {}): {
         specPath: path.join(tmpDir, "my.test.yaml"),
         baselineConfigPath: baselinePath,
         outputDir: path.join(tmpDir, "snapshots"),
-        workflowNameSuffix,
         ...overrides,
     };
     return { deps, calls, k8sCalls, tmpDir, baselinePath };
@@ -150,17 +144,15 @@ describe("runNoopCase — basic flow", () => {
         }
     });
 
-    it("deletes outer and inner workflow resources after each run", async () => {
+    it("deletes the default workflow resource before and after each run", async () => {
         const { deps, k8sCalls, tmpDir } = makeRunnerTestDeps();
         try {
             await runNoopCase(deps);
             const deletes = k8sCalls.filter((c) => c.args[0] === "delete");
             expect(deletes.map((c) => c.args.slice(0, 3))).toEqual([
                 ["delete", "workflows.argoproj.io", "migration-workflow"],
-                ["delete", "workflows.argoproj.io", "captureproxy-capture-proxy-noop-baseline-s1"],
                 ["delete", "workflows.argoproj.io", "migration-workflow"],
                 ["delete", "workflows.argoproj.io", "migration-workflow"],
-                ["delete", "workflows.argoproj.io", "captureproxy-capture-proxy-noop-noop-pre-s2"],
                 ["delete", "workflows.argoproj.io", "migration-workflow"],
             ]);
             for (const call of deletes) {
@@ -282,6 +274,13 @@ describe("runNoopCase — basic flow", () => {
                     const phase = getWorkflowCalls === 1 || getWorkflowCalls === 4
                         ? "Running"
                         : "Succeeded";
+                    if (args.includes("-o") && args.includes("jsonpath={.metadata.name}{\"\\n\"}{.status.phase}{\"\\n\"}{.status.message}{\"\\n\"}{.status.startedAt}{\"\\n\"}{.status.finishedAt}")) {
+                        return {
+                            stdout: `migration-workflow\n${phase}\n\n\n`,
+                            stderr: "",
+                            exitCode: 0,
+                        };
+                    }
                     return {
                         stdout: JSON.stringify({
                             metadata: { name: "migration-workflow" },
@@ -362,53 +361,18 @@ describe("runNoopCase — basic flow", () => {
     });
 });
 
-describe("runNoopCase — unique workflow names", () => {
-    it("uses distinct workflow names for baseline and noop-pre", async () => {
+describe("runNoopCase — workflow submit path", () => {
+    it("uses the default workflow submit path for each run", async () => {
         const { deps, calls, tmpDir } = makeRunnerTestDeps();
         try {
             await runNoopCase(deps);
             const submits = calls.filter((c) => c.args[0] === "submit");
-            expect(submits).toHaveLength(2);
-
-            const nameOf = (submitCall: { args: readonly string[] }) => {
-                const idx = submitCall.args.indexOf("--workflow-name");
-                return idx >= 0 ? submitCall.args[idx + 1] : undefined;
-            };
-
-            const names = submits.map(nameOf);
-            // Both present.
-            expect(names.every((n) => typeof n === "string" && n.length > 0)).toBe(true);
-            // Distinct.
-            expect(new Set(names).size).toBe(2);
-            // Start with the case-name + run-name convention so humans
-            // can tell which submission produced which workflow.
-            expect(names[0]).toMatch(/-baseline-/);
-            expect(names[1]).toMatch(/-noop-pre-/);
-            // And with the deterministic suffixer injected in makeRunnerTestDeps,
-            // distinct suffixes were actually drawn.
-            expect(names[0]).toMatch(/-s1$/);
-            expect(names[1]).toMatch(/-s2$/);
+            expect(submits.map((c) => c.args)).toEqual([
+                ["submit", "--namespace", "ma"],
+                ["submit", "--namespace", "ma"],
+            ]);
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
-        }
-    });
-
-    it("the real default suffix generator produces different names across runs", async () => {
-        // Use the production suffix (no workflowNameSuffix override) and
-        // run twice. Given a 3-byte random, collisions are one in 2^24;
-        // we still check against the more robust property that the two
-        // submissions within a single run are distinct.
-        const first = makeRunnerTestDeps({ workflowNameSuffix: undefined });
-        try {
-            await runNoopCase(first.deps);
-            const submits = first.calls.filter((c) => c.args[0] === "submit");
-            const names = submits.map((c) => {
-                const idx = c.args.indexOf("--workflow-name");
-                return c.args[idx + 1];
-            });
-            expect(new Set(names).size).toBe(2);
-        } finally {
-            fs.rmSync(first.tmpDir, { recursive: true, force: true });
         }
     });
 });
@@ -620,7 +584,6 @@ describe("runNoopCase — error paths", () => {
             const deletes = k8sCalls.filter((c) => c.args[0] === "delete");
             expect(deletes.map((c) => c.args.slice(0, 3))).toEqual([
                 ["delete", "workflows.argoproj.io", "migration-workflow"],
-                ["delete", "workflows.argoproj.io", "captureproxy-capture-proxy-noop-baseline-s1"],
                 ["delete", "workflows.argoproj.io", "migration-workflow"],
             ]);
         } finally {
@@ -832,10 +795,12 @@ describe("runWorkflowCasePlan — multi-checkpoint run steps", () => {
             ]);
 
             const deletes = k8sCalls.filter((c) => c.args[0] === "delete");
-            const mutatedOuterDeletes = deletes.filter((c) =>
-                c.args[2].startsWith("captureproxy-capture-proxy-gated-action-mutated-"),
-            );
-            expect(mutatedOuterDeletes).toHaveLength(1);
+            expect(deletes.map((c) => c.args.slice(0, 3))).toEqual([
+                ["delete", "workflows.argoproj.io", "migration-workflow"],
+                ["delete", "workflows.argoproj.io", "migration-workflow"],
+                ["delete", "workflows.argoproj.io", "migration-workflow"],
+                ["delete", "workflows.argoproj.io", "migration-workflow"],
+            ]);
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }

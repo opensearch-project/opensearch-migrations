@@ -42,7 +42,6 @@ import {
     ArgoWorkflowObservation,
 } from "./reportSchema";
 import { CaseReport, writeCaseSnapshot } from "./snapshotStore";
-import { sanitizeWorkflowName } from "./workflowName";
 import { Checkpoint, ComponentId, ObservedComponent, ScenarioSpec, Violation } from "./types";
 import { Actor, ActorContext, ActorRegistry } from "./actors";
 import { builtinActors } from "./builtinActors";
@@ -65,6 +64,9 @@ const ARGO_WORKFLOW_FAILURE_PHASES: ReadonlySet<string> = new Set([
     "Failed",
     "Error",
 ]);
+const ARGO_WORKFLOW_STATUS_JSONPATH =
+    `{.metadata.name}{"\\n"}{.status.phase}{"\\n"}{.status.message}{"\\n"}` +
+    `{.status.startedAt}{"\\n"}{.status.finishedAt}`;
 const DEFAULT_INNER_WORKFLOW_MISSING_GRACE_SECONDS = 30;
 
 export interface ReadClusterObservations {
@@ -92,12 +94,6 @@ export interface LiveRunnerDeps {
      * provide a deterministic implementation.
      */
     clock?: typeof realClock;
-    /**
-     * Suffix generator for workflow names. Tests inject a deterministic
-     * implementation so assertions can pin the full name. Production
-     * uses a short crypto-random hex string.
-     */
-    workflowNameSuffix?: () => string;
     /**
      * Registry of mutators available for matrix expansion. Optional —
      * only needed when running safe/gated/impossible cases.
@@ -518,8 +514,6 @@ export async function runWorkflowCasePlan(
     const clock = deps.clock ?? realClock;
     const startedAt = new Date(clock.now()).toISOString();
     const { caseName } = plan;
-    const suffixer =
-        deps.workflowNameSuffix ?? (() => crypto.randomBytes(3).toString("hex"));
     const diagnostics: string[] = [];
     const violations: Violation[] = [];
     const runs: Record<string, RunRecord> = {};
@@ -574,10 +568,8 @@ export async function runWorkflowCasePlan(
 
         let priorComponents: Readonly<Record<ComponentId, ObservedComponent>> | null = null;
         for (const step of plan.steps) {
-            const workflowName = sanitizeWorkflowName(
-                `${caseName}-${step.runName}-${suffixer()}`,
-            );
-            progress(deps, `[${caseName}] ${step.runName}: submit as ${workflowName}`);
+            const workflowName = INNER_MIGRATION_WORKFLOW_NAME;
+            progress(deps, `[${caseName}] ${step.runName}: submit ${workflowName}`);
             const diagnosticStart = diagnostics.length;
             const run = await runSubmittedWorkflow({
                 deps,
@@ -700,7 +692,7 @@ async function runSubmittedWorkflow(args: {
             deps,
             runName,
             workflowName,
-            deleteOuterWorkflow: false,
+            deleteSubmittedWorkflow: false,
             diagnostics,
             events,
             clock,
@@ -728,8 +720,8 @@ async function runSubmittedWorkflow(args: {
             clock,
             runName,
             "submit",
-            `workflow submit --namespace ${deps.namespace} --workflow-name ${workflowName}`,
-            () => deps.workflowCli.submit({ wait: false, workflowName }),
+            `workflow submit --namespace ${deps.namespace}`,
+            () => deps.workflowCli.submit({ wait: false }),
         );
         for (const gate of deps.spec.approvalGates) {
             progress(deps, `[${workflowName}] approve structural gate ${gate.approvePattern}`);
@@ -790,7 +782,7 @@ async function runSubmittedWorkflow(args: {
             deps,
             runName,
             workflowName,
-            deleteOuterWorkflow: attemptedSubmit,
+            deleteSubmittedWorkflow: attemptedSubmit,
             diagnostics,
             events,
             clock,
@@ -808,7 +800,7 @@ function cleanupWorkflowResources(args: {
     deps: LiveRunnerDeps;
     runName: string;
     workflowName: string;
-    deleteOuterWorkflow: boolean;
+    deleteSubmittedWorkflow: boolean;
     diagnostics: string[];
     events: CaseEvent[];
     clock: typeof realClock;
@@ -817,15 +809,15 @@ function cleanupWorkflowResources(args: {
         deps,
         runName,
         workflowName,
-        deleteOuterWorkflow,
+        deleteSubmittedWorkflow,
         diagnostics,
         events,
         clock,
     } = args;
-    const targets = [
-        ...(deleteOuterWorkflow ? [workflowName] : []),
+    const targets = Array.from(new Set([
+        ...(deleteSubmittedWorkflow ? [workflowName] : []),
         INNER_MIGRATION_WORKFLOW_NAME,
-    ];
+    ]));
     let ok = true;
 
     for (const name of targets) {
@@ -1506,9 +1498,35 @@ function readArgoWorkflowObservation(k8sClient: K8sClient): ArgoWorkflowObservat
         if (!workflow) return undefined;
         return extractArgoWorkflowObservation(workflow);
     } catch {
-        // Argo workflow evidence is diagnostic. Missing or malformed
-        // workflow data must not mask the CRD observation that drives
-        // pass/fail assertions.
+        // Full Argo workflow JSON can get large enough to exceed the default
+        // child_process stdout buffer. Keep checkpoint evidence useful by
+        // falling back to the lightweight status projection used by the wait
+        // loop.
+        return readArgoWorkflowStatus(k8sClient);
+    }
+}
+
+function readArgoWorkflowStatus(k8sClient: K8sClient): ArgoWorkflowObservation | undefined {
+    try {
+        const raw = k8sClient.getJsonPath(
+            ARGO_WORKFLOW_RESOURCE,
+            INNER_MIGRATION_WORKFLOW_NAME,
+            ARGO_WORKFLOW_STATUS_JSONPATH,
+        );
+        if (raw === null) return undefined;
+        const [name, phase, message, startedAt, finishedAt] = raw.split("\n");
+        if (!name && !phase) return undefined;
+        return {
+            name: name || INNER_MIGRATION_WORKFLOW_NAME,
+            phase: phase || undefined,
+            message: message || undefined,
+            startedAt: startedAt || undefined,
+            finishedAt: finishedAt || undefined,
+            nodes: [],
+        };
+    } catch {
+        // Workflow status is diagnostic. Missing or malformed workflow data
+        // must not mask the CRD observation that drives pass/fail assertions.
         return undefined;
     }
 }
@@ -1549,7 +1567,7 @@ async function waitForInnerWorkflowCompletion(
     let observedWorkflow = false;
 
     while (true) {
-        const workflow = readArgoWorkflowObservation(opts.k8sClient);
+        const workflow = readArgoWorkflowStatus(opts.k8sClient);
         lastPhase = workflow?.phase ?? "(missing)";
         if (workflow?.phase) {
             observedWorkflow = true;

@@ -55,13 +55,13 @@ export class TopologyResolverError extends Error {
  *     ▲           ▲
  *     │           │
  *  TrafficReplay   DataSnapshot:source-snap1
+ *                     ▲
+ *                     │
+ *                  SnapshotMigration:source-target-snap1-migration-0
  *
- *   SnapshotMigration:source-target-snap1-migration-0
- *     (spec.dependsOn is absent — independent of everything above)
- *
- * Only `SnapshotMigration` is truly independent of the proxy chain.
- * DataSnapshot does **not** gate SnapshotMigration — the migration runs
- * against whatever snapshot exists when it reconciles.
+ * `SnapshotMigration` depends on `DataSnapshot` in the generated CRD
+ * graph. It is still independent of the proxy chain except through the
+ * snapshot resource.
  */
 const FULL_MIGRATION_WITH_TRAFFIC: ComponentTopology = buildTopology({
     components: [
@@ -89,7 +89,10 @@ const FULL_MIGRATION_WITH_TRAFFIC: ComponentTopology = buildTopology({
             from: "trafficreplay:capture-proxy-target-replay1",
             to: "captureproxy:capture-proxy",
         },
-        // SnapshotMigration has no dependsOn — it is independent.
+        {
+            from: "snapshotmigration:source-target-snap1-migration-0",
+            to: "datasnapshot:source-snap1",
+        },
     ],
 });
 
@@ -99,8 +102,10 @@ const BASIC_SNAPSHOT_MIGRATION: ComponentTopology = buildTopology({
         "snapshotmigration:source-target-snap1-migration-0",
     ] as ComponentId[],
     edges: [
-        // SnapshotMigration has no dependsOn; it waits for the snapshot through
-        // workflow logic rather than a CRD dependency edge.
+        {
+            from: "snapshotmigration:source-target-snap1-migration-0",
+            to: "datasnapshot:source-snap1",
+        },
     ],
 });
 

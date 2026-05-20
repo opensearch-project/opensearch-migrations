@@ -6,7 +6,6 @@ export * from "./componentTopology";
 export * from "./componentTopologyResolver";
 export * from "./k8sClient";
 export * from "./workflowCli";
-export * from "./workflowName";
 export * from "./phaseCompletion";
 export * from "./actors";
 export * from "./builtinActors";

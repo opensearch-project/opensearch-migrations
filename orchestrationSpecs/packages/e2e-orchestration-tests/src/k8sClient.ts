@@ -122,6 +122,36 @@ export class K8sClient {
     }
 
     /**
+     * Read a small JSONPath projection from one resource. This is useful for
+     * very large resources such as Argo Workflows, whose full status can exceed
+     * child_process' default stdout buffer while a tiny status projection is
+     * still enough for polling.
+     */
+    getJsonPath(resource: string, name: string, jsonPath: string): string | null {
+        const res = this.runner(
+            [
+                "get",
+                resource,
+                name,
+                "-n",
+                this.namespace,
+                "-o",
+                `jsonpath=${jsonPath}`,
+                ...this.extraArgs,
+            ],
+        );
+        if (res.exitCode !== 0) {
+            if (/not\s*found/i.test(res.stderr)) return null;
+            throw new KubectlError(
+                `kubectl get ${resource}/${name} jsonpath failed`,
+                res.exitCode,
+                res.stderr,
+            );
+        }
+        return res.stdout;
+    }
+
+    /**
      * Delete a Kubernetes resource and wait for deletion to complete.
      * `--ignore-not-found` keeps cleanup idempotent across failed or
      * partially completed runs.

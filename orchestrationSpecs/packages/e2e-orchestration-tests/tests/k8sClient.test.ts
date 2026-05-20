@@ -93,6 +93,41 @@ describe("K8sClient.getOne", () => {
     });
 });
 
+describe("K8sClient.getJsonPath", () => {
+    it("returns a lightweight jsonpath projection", () => {
+        const client = new K8sClient({
+            namespace: "ma",
+            runner: fakeRunner({
+                "get workflows.argoproj.io migration-workflow -n ma -o jsonpath={.status.phase}": {
+                    stdout: "Succeeded",
+                },
+            }),
+        });
+        expect(client.getJsonPath(
+            "workflows.argoproj.io",
+            "migration-workflow",
+            "{.status.phase}",
+        )).toBe("Succeeded");
+    });
+
+    it("returns null on NotFound", () => {
+        const client = new K8sClient({
+            namespace: "ma",
+            runner: fakeRunner({
+                "get workflows.argoproj.io migration-workflow": {
+                    exitCode: 1,
+                    stderr: 'Error from server (NotFound): workflows.argoproj.io "migration-workflow" not found',
+                },
+            }),
+        });
+        expect(client.getJsonPath(
+            "workflows.argoproj.io",
+            "migration-workflow",
+            "{.status.phase}",
+        )).toBeNull();
+    });
+});
+
 describe("K8sClient.deleteResourceAndWait", () => {
     it("deletes a named resource with wait and ignore-not-found", () => {
         const calls: { args: readonly string[] }[] = [];
