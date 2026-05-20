@@ -65,6 +65,9 @@ public class SolrSnapshotCreator {
             // downstream reader expects (<baseLocation>/<snapshotName>/<collection>/...), we
             // set Solr's `location` to <baseLocation>/<snapshotName> and `name` to <collection>
             // so each call writes to a distinct subdirectory under the shared snapshot folder.
+            // NOTE: if on solr 6 or 7 (which both do not come with S3 backup config, but only local one out of the box),
+            // this requires the location to exist on the disk before  making the call otherwise this will throw
+            // Exception
             var asyncId = asyncIdFor(collection);
             var urlBuilder = new StringBuilder(String.format(
                 "%s/solr/admin/collections?action=BACKUP&name=%s&collection=%s&async=%s&wt=json",
