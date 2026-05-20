@@ -336,6 +336,10 @@
             {
               "name": "sortOrder_view",
               "value": "999"
+            },
+            {
+              "name": "resourceName",
+              "value": ""
             }
           ]
         },
@@ -473,6 +477,10 @@
             {
               "name": "sortOrder_view",
               "value": "999"
+            },
+            {
+              "name": "resourceName",
+              "value": ""
             },
             {
               "name": "imageMigrationConsoleLocation"
@@ -1540,6 +1548,10 @@
               "value": "999"
             },
             {
+              "name": "resourceName",
+              "value": ""
+            },
+            {
               "name": "dependsOnSnapshotMigrations"
             },
             {
@@ -1609,6 +1621,10 @@
               "arguments": {
                 "parameters": [
                   {
+                    "name": "resourceName",
+                    "value": "{{=item['source']+'-'+sprig.dig('label', '', fromJSON(inputs.parameters.targetConfig))+'-'+item['snapshot']+'-'+item['migrationLabel']}}"
+                  },
+                  {
                     "name": "configChecksum",
                     "value": "{{=sprig.dig('configChecksum', '', item)}}"
                   },
@@ -1619,10 +1635,6 @@
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  },
-                  {
-                    "name": "resourceName",
-                    "value": "{{=item['source']+'-'+sprig.dig('label', '', fromJSON(inputs.parameters.targetConfig))+'-'+item['snapshot']+'-'+item['migrationLabel']}}"
                   },
                   {
                     "name": "checksumField",
@@ -1643,6 +1655,10 @@
               "arguments": {
                 "parameters": [
                   {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.fromProxy}}"
+                  },
+                  {
                     "name": "configChecksum",
                     "value": "{{inputs.parameters.fromProxyConfigChecksum}}"
                   },
@@ -1653,10 +1669,6 @@
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  },
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.fromProxy}}"
                   },
                   {
                     "name": "checksumField",
@@ -1677,16 +1689,16 @@
               "arguments": {
                 "parameters": [
                   {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
                   },
                   {
                     "name": "imageMigrationConsolePullPolicy",
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  },
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.kafkaClusterName}}"
                   }
                 ]
               },
@@ -1947,6 +1959,10 @@
                     "value": "{{=sprig.dig('configChecksum', '', item)}}"
                   },
                   {
+                    "name": "resourceName",
+                    "value": "{{=item['name']}}"
+                  },
+                  {
                     "name": "groupName_view",
                     "value": "{{=item['name']}}"
                   },
@@ -2029,6 +2045,10 @@
                   },
                   {
                     "name": "groupName_view",
+                    "value": "{{=item['name']}}"
+                  },
+                  {
+                    "name": "resourceName",
                     "value": "{{=item['name']}}"
                   },
                   {
@@ -2257,6 +2277,10 @@
                   {
                     "name": "replayerOptions",
                     "value": "{{=item['replayerConfig']}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{=item['name']}}"
                   },
                   {
                     "name": "useLocalStack",
