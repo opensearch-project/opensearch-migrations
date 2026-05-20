@@ -24,7 +24,7 @@ import {
     TARGET_CLUSTER_CONFIG
 } from "@opensearch-migrations/schemas";
 
-import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {CommonWorkflowParameters, workflowScriptPath} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 
@@ -55,32 +55,6 @@ export const configComponentParameters = {
         description: "Target cluster configuration (JSON)"
     })
 };
-
-// TODO - once the migration console can load secrets from env variables,
-//  we'll want to just drop everything about the secrets for http auth
-const SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE = `
-set -e -x
-
-# Save pod name to output path
-echo $HOSTNAME > /tmp/podname
-
-echo File contents...
- 
-base64 -d > /config/migration_services.yaml_ << EOF
-{{FILE_CONTENTS}}
-EOF
-
-cat /config/migration_services.yaml_ |
-jq -f workflowConfigToServicesConfig.jq > /config/migration_services.yaml
-
-echo file dump
-echo ---
-export MIGRATION_USE_SERVICES_YAML_CONFIG=true
-cat /config/migration_services.yaml
-echo ---
-
-{{COMMAND}}
-`;
 
 function makeOptionalDict<
     T extends PlainObject,
@@ -143,18 +117,18 @@ export const MigrationConsole = WorkflowBuilder.create({
 
         .addContainer(c => c
             .addImageInfo(c.inputs.imageMigrationConsoleLocation, c.inputs.imageMigrationConsolePullPolicy)
-            .addCommand(["/bin/sh", "-c"])
+            .addCommand(["/bin/bash", "-lc"])
             .addEnvVarsFromRecord(getSourceHttpAuthCreds(
                 expr.dig(expr.deserializeRecord(c.inputs.configContents), ["source_cluster", "authConfig", "basic", "secretName"], "")))
             .addEnvVarsFromRecord(getTargetHttpAuthCreds(
                 expr.dig(expr.deserializeRecord(c.inputs.configContents), ["target_cluster", "authConfig", "basic", "secretName"], "")))
             .addResources(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI)
-            .addArgs([
-                expr.fillTemplate(SCRIPT_ARGS_FILL_CONFIG_AND_RUN_TEMPLATE, {
-                    "FILE_CONTENTS": expr.toBase64(expr.asString(c.inputs.configContents)),
-                    "COMMAND": c.inputs.command
-                })]
-            )
+            .addEnvVar("CONFIG_CONTENTS_BASE64", expr.toBase64(expr.asString(c.inputs.configContents)))
+            .addEnvVar("MIGRATION_CONSOLE_COMMAND", c.inputs.command)
+            .addArgs([expr.concat(
+                expr.literal("exec "),
+                workflowScriptPath(t.inputs.workflowParameters.workflowScriptsRoot, "runMigrationConsoleCommand.sh")
+            )])
             .addPodMetadata(({inputs}) => ({
                 labels: {
                     'migrations.opensearch.org/source': inputs.sourceK8sLabel,

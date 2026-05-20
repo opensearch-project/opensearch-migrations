@@ -20,64 +20,19 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 import {makeRepoParamDict} from "./metadataMigration";
 
-import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {CommonWorkflowParameters, workflowIdentityEnvVars, workflowScriptPath} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeClusterParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
-import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
+import {getSourceHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
-const checkScript = `
-  set -e
-  touch /tmp/status-output.txt
-  touch /tmp/phase-output.txt
-  
-  # Quick status check - if SUCCESS, we're done
-  status=$(console --config-file=/config/migration_services.yaml snapshot status)
-  if [ "$status" = "SUCCESS" ]; then
-    echo "Snapshot completed successfully" > /tmp/status-output.txt
-    exit 0
-  fi
+function getSnapshotDoneCronJobName(dataSnapshotName: BaseExpression<string>) {
+    return expr.concat(dataSnapshotName, expr.literal("-snapshot-done"));
+}
 
-  # If snapshot has permanently failed, stop retrying
-  if [ "$status" = "FAILED" ]; then
-    echo "Snapshot failed" > /tmp/status-output.txt
-    echo Failed > /tmp/phase-output.txt
-    exit 0
-  fi
-  
-  # Deep check and save output in case there was a race condition
-  deep_output=$(console --config-file=/config/migration_services.yaml snapshot status --deep-check)
-  
-  # Check if deep check also returned SUCCESS (snapshot completed during execution)
-  if [ "$deep_output" = "SUCCESS" ]; then
-    echo "Snapshot completed successfully" > /tmp/status-output.txt
-    exit 0
-  fi
-  
-  # Process deep check output with awk for in-progress snapshots
-  echo "$deep_output" | awk '
-    /Total shards:/ { total = $3 }
-    /Successful shards:/ { successful = $3 }
-    /Data processed:/ { data = $3; unit = $4 }
-    /Estimated time to completion:/ { 
-      sub(/.*: /, "");
-      eta = $0
-    }
-    END {
-      if (total) {
-        output = "Shards: " successful "/" total " | Data: " data " " unit
-        if (eta != "0h 0m 0s") {
-          output = output " | ETA: " eta
-        }
-        print output
-      }
-    }
-  ' > /tmp/status-output.txt
-  echo Checked > /tmp/phase-output.txt
-  
-  exit 1
-`.trim();
+const SNAPSHOT_MONITOR_WORKFLOW_UID_LABEL = "migrations.opensearch.org/snapshot-monitor-workflow-uid";
+const SNAPSHOT_MONITOR_SESSION_LABEL = "migrations.opensearch.org/snapshot-monitor-session";
 
 export function makeSourceParamDict(sourceConfig: BaseExpression<Serialized<z.infer<typeof CLUSTER_CONFIG>>>) {
     return makeClusterParamDict("source", sourceConfig);
@@ -172,40 +127,45 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )
 
-    .addTemplate("checkSnapshotStatusInternal", t => t
+    .addTemplate("applySnapshotDoneCronJob", t => t
         .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
+        .addRequiredInput("dataSnapshotName", typeToken<string>())
+        .addRequiredInput("dataSnapshotUid", typeToken<string>())
+        .addRequiredInput("snapshotName", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addRequiredInput("snapshotK8sLabel", typeToken<string>())
-        .addOptionalInput("taskK8sLabel", c => "snapshotStatusCheck")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addSteps(b => b
-            .addStep("checkSnapshotCompletion", MigrationConsole, "runMigrationCommandForStatus", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    command: checkScript
-                }))
+        .addContainer(b => b
+            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
+            .addCommand(["/bin/bash", "-lc"])
+            .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
+            .addEnvVar("CRONJOB_NAME", getSnapshotDoneCronJobName(b.inputs.dataSnapshotName))
+            .addEnvVarsFromRecord({
+                SESSION_NAME: b.inputs.dataSnapshotName,
+                ...workflowIdentityEnvVars(),
+                DATASNAPSHOT_NAME: b.inputs.dataSnapshotName,
+                DATASNAPSHOT_UID: b.inputs.dataSnapshotUid,
+                SNAPSHOT_NAME: b.inputs.snapshotName,
+                CONFIG_CHECKSUM: b.inputs.configChecksum,
+                CONSOLE_IMAGE: b.inputs.imageMigrationConsoleLocation,
+                CONSOLE_IMAGE_PULL_POLICY: b.inputs.imageMigrationConsolePullPolicy,
+                SOURCE_LABEL: b.inputs.sourceK8sLabel,
+                SNAPSHOT_LABEL: b.inputs.snapshotK8sLabel,
+                CONSOLE_CONFIG_BASE64: expr.toBase64(expr.asString(b.inputs.configContents)),
+                WORKFLOW_SCRIPTS_ROOT: t.inputs.workflowParameters.workflowScriptsRoot,
+                SNAPSHOT_MONITOR_WORKFLOW_UID_LABEL: expr.literal(SNAPSHOT_MONITOR_WORKFLOW_UID_LABEL),
+                SNAPSHOT_MONITOR_SESSION_LABEL: expr.literal(SNAPSHOT_MONITOR_SESSION_LABEL)
+            })
+            .addArgs([expr.concat(
+                expr.literal("exec "),
+                workflowScriptPath(t.inputs.workflowParameters.workflowScriptsRoot, "applySnapshotMonitorCronJob.sh")
+            )])
         )
         .addRetryParameters({
-            limit: "200", retryPolicy: "Always",
-            backoff: {duration: "5", factor: "2", cap: "300"}
+            limit: "5", retryPolicy: "Always",
+            backoff: {duration: "2", factor: "2", cap: "30"}
         })
-    )
-
-    .addTemplate("checkSnapshotStatus", t => t
-        .addRequiredInput("configContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
-        .addRequiredInput("sourceK8sLabel", typeToken<string>())
-        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
-        .addOptionalInput("groupName_view", c => "checks")
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addSteps(b => b
-            .addStep("runStatusChecks", INTERNAL, "checkSnapshotStatusInternal", c =>
-                c.register({
-                    ...selectInputsForRegister(b, c),
-                    configContents: b.inputs.configContents,
-                    sourceK8sLabel: b.inputs.sourceK8sLabel,
-                    snapshotK8sLabel: b.inputs.snapshotK8sLabel
-                }))
-        )
     )
 
 
@@ -216,6 +176,8 @@ export const CreateSnapshot = WorkflowBuilder.create({
         .addRequiredInput("semaphoreConfigMapName", typeToken<string>())
         .addRequiredInput("semaphoreKey", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("dataSnapshotName", typeToken<string>())
+        .addRequiredInput("dataSnapshotUid", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
@@ -231,24 +193,23 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     ...selectInputsForRegister(b, c)
                 }))
 
-            .addStep("waitForCompletion", INTERNAL, "checkSnapshotStatus", c =>
+            .addStep("applySnapshotDoneCronJob", INTERNAL, "applySnapshotDoneCronJob", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     configContents: c.steps.getConsoleConfig.outputs.configContents,
+                    dataSnapshotName: b.inputs.dataSnapshotName,
+                    dataSnapshotUid: b.inputs.dataSnapshotUid,
+                    snapshotName: expr.jsonPathStrict(b.inputs.snapshotConfig, "snapshotName"),
+                    configChecksum: b.inputs.configChecksum,
                     sourceK8sLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
                 }))
-            .addStep("patchDataSnapshotCompleted", ResourceManagement, "patchDataSnapshotCompleted", c =>
+            .addStep("waitForCompletion", ResourceManagement, "waitForDataSnapshot", c =>
                 c.register({
-                    resourceName: expr.concat(
-                        expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
-                        expr.literal("-"),
-                        expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
-                    ),
-                    phase: expr.literal("Completed"),
-                    snapshotName: expr.jsonPathStrict(b.inputs.snapshotConfig, "snapshotName"),
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.dataSnapshotName,
                     configChecksum: b.inputs.configChecksum,
-                    checksumForSnapshotMigration: b.inputs.configChecksum,
+                    checksumField: expr.literal("checksumForSnapshotMigration"),
                 }))
         )
         .addSynchronization(c => ({

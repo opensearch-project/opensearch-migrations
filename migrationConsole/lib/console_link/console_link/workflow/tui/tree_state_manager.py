@@ -5,7 +5,9 @@ from textual.widgets._tree import TreeNode, Tree
 from console_link.workflow.tree_utils import (
     get_step_status_output, get_step_rich_label,
     build_nested_workflow_tree, filter_tree_nodes,
-    overlay_approval_gate_status
+    overlay_approval_gate_status,
+    overlay_data_snapshot_creation_status,
+    overlay_snapshot_migration_backfill_status
 )
 
 
@@ -31,6 +33,8 @@ class TreeStateManager:
         self.tree.root.label = "[bold]Workflow Steps[/]"
         nodes = filter_tree_nodes(build_nested_workflow_tree(workflow_data))
         overlay_approval_gate_status(nodes, self._namespace)
+        overlay_data_snapshot_creation_status(nodes, self._namespace)
+        overlay_snapshot_migration_backfill_status(nodes, self._namespace)
         self._populate_recursive(self.tree.root, nodes)
         self.tree.root.expand_all()
 
@@ -39,6 +43,8 @@ class TreeStateManager:
         self._workflow_data = workflow_data
         nodes = filter_tree_nodes(build_nested_workflow_tree(workflow_data))
         overlay_approval_gate_status(nodes, self._namespace)
+        overlay_data_snapshot_creation_status(nodes, self._namespace)
+        overlay_snapshot_migration_backfill_status(nodes, self._namespace)
         self._update_recursive(self.tree.root, nodes)
 
     @staticmethod

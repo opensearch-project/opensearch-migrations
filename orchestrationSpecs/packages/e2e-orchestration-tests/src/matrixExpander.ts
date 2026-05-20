@@ -1,0 +1,76 @@
+/**
+ * matrixExpander — expand a spec's matrix selectors into concrete test
+ * cases by matching against registered mutators.
+ *
+ * This is the matrix expansion needed by the current safe mutation
+ * runner. Gated/impossible responses will add more case-plan shapes.
+ */
+
+import { ComponentId, MatrixSelector, Response, ScenarioSpec } from "./types";
+import { Mutator, MutatorRegistry } from "./fixtures/mutators";
+
+export interface ExpandedTestCase {
+    caseName: string;
+    subject: ComponentId;
+    mutator: Mutator;
+    /**
+     * Materiality-aware expected rerun set for mutation checkpoints.
+     * Topology still classifies upstream/downstream/independent
+     * relationships, but this set controls which components should
+     * actually re-run for the changed paths.
+     */
+    expectedRerunComponents: readonly ComponentId[];
+    changedPaths: readonly string[];
+    /** null for safe cases — no response action needed. */
+    response: Response | null;
+}
+
+/**
+ * Expand the spec's matrix into concrete test cases. Each selector
+ * is matched against the registry; each matching mutator produces one
+ * case per (pattern, mutator) pair.
+ *
+ * If `spec.matrix.select` is absent, a default safe selector with
+ * `subject-change` is used.
+ */
+export function expandCases(
+    spec: ScenarioSpec,
+    mutatorRegistry: MutatorRegistry,
+): ExpandedTestCase[] {
+    const subject = spec.matrix.subject as ComponentId;
+    const selectors: MatrixSelector[] = spec.matrix.select ?? [
+        { changeClass: "safe", patterns: ["subject-change"] },
+    ];
+
+    const cases: ExpandedTestCase[] = [];
+
+    for (const sel of selectors) {
+        for (const pattern of sel.patterns) {
+            const matches = mutatorRegistry.findBySubjectAndSelector(subject, {
+                changeClass: sel.changeClass,
+                pattern,
+            });
+            if (matches.length === 0) {
+                throw new Error(
+                    `matrix selector {changeClass: '${sel.changeClass}', pattern: '${pattern}'} ` +
+                    `matched zero mutators for subject '${subject}' — register a mutator or narrow the selector`,
+                );
+            }
+            for (const mutator of matches) {
+                const caseName = `${mutator.subject.replace(/:/g, "-")}-${pattern}-${mutator.name}`;
+                cases.push({
+                    caseName,
+                    subject,
+                    mutator,
+                    expectedRerunComponents: mutator.expectedRerunComponents ?? [mutator.subject],
+                    changedPaths: mutator.changedPaths,
+                    // Safe selectors have no response; gated/impossible
+                    // case plans will use sel.response.
+                    response: sel.response ?? null,
+                });
+            }
+        }
+    }
+
+    return cases;
+}

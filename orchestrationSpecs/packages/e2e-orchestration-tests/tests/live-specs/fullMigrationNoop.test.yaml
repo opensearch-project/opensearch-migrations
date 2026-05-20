@@ -1,0 +1,19 @@
+baseConfig: ../fixtures/fullMigrationWithTraffic.skipApprovals.wf.yaml
+phaseCompletionTimeoutSeconds: 600
+
+matrix:
+  subject: captureproxy:capture-proxy
+
+lifecycle:
+  setup: [create-basic-auth-secrets]
+  teardown: []
+
+fixtures:
+  basicAuthCredentials:
+    bySecretName:
+      source-creds:
+        usernameEnv: E2E_SOURCE_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_SOURCE_BASIC_AUTH_PASSWORD
+      target-creds:
+        usernameEnv: E2E_TARGET_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_TARGET_BASIC_AUTH_PASSWORD

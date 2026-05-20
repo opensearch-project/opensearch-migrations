@@ -23,5 +23,6 @@ generateTypes({
         { name: 'ResourceRequirements',    schemaKey: 'io.k8s.api.core.v1.ResourceRequirements' },
         { name: 'PodSpec',                 schemaKey: 'io.k8s.api.core.v1.PodSpec' },
         { name: 'ObjectMeta',              schemaKey: 'io.k8s.apimachinery.pkg.apis.meta.v1.ObjectMeta' },
+        { name: 'JobTemplateSpec',         schemaKey: 'io.k8s.api.batch.v1.JobTemplateSpec' },
     ],
 }).catch(console.error);

@@ -1,0 +1,283 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+import { ObservationBag, ObservationBagError, writeCaseSnapshot } from "../src/snapshotStore";
+import { CaseSnapshot } from "../src/reportSchema";
+
+describe("ObservationBag", () => {
+    it("stores and retrieves by observer+phase", () => {
+        const bag = new ObservationBag();
+        bag.record("target-indices", "baseline-complete", { docCount: 5 });
+        expect(bag.get("target-indices", "baseline-complete")).toEqual({ docCount: 5 });
+        expect(bag.has("target-indices", "baseline-complete")).toBe(true);
+        expect(bag.size()).toBe(1);
+    });
+
+    it("returns undefined for a missing key", () => {
+        const bag = new ObservationBag();
+        expect(bag.get("nope", "setup")).toBeUndefined();
+        expect(bag.has("nope", "setup")).toBe(false);
+    });
+
+    it("is append-only — duplicate writes throw", () => {
+        const bag = new ObservationBag();
+        bag.record("target-indices", "baseline-complete", { a: 1 });
+        expect(() =>
+            bag.record("target-indices", "baseline-complete", { a: 2 }),
+        ).toThrow(ObservationBagError);
+        // And the original value is preserved.
+        expect(bag.get("target-indices", "baseline-complete")).toEqual({ a: 1 });
+    });
+
+    it("distinguishes same observer at different phases", () => {
+        const bag = new ObservationBag();
+        bag.record("target-indices", "baseline-complete", { n: 1 });
+        bag.record("target-indices", "mutated-complete", { n: 2 });
+        expect(bag.keys()).toEqual(
+            expect.arrayContaining([
+                "target-indices@baseline-complete",
+                "target-indices@mutated-complete",
+            ]),
+        );
+    });
+
+    it("composes keys with the documented format", () => {
+        expect(ObservationBag.key("foo", "noop-pre-complete")).toBe(
+            "foo@noop-pre-complete",
+        );
+    });
+});
+
+const MIN_SNAPSHOT: CaseSnapshot = {
+    case: "proxy-subjectChange-numThreads",
+    specPath: "/tmp/specs/proxy-subjectChange.test.yaml",
+    outcome: "partial",
+    startedAt: "2025-01-01T00:00:00Z",
+    runs: {
+        baseline: {
+            name: "baseline",
+            checkpoints: [],
+        },
+    },
+    events: [],
+    checkers: [],
+    diagnostics: [],
+    violations: [],
+};
+
+describe("writeCaseSnapshot", () => {
+    let tmpDir: string;
+    beforeEach(() => {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-snap-"));
+    });
+    afterEach(() => {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it("writes a short report to <outputDir>/<case>.json and details beside it", () => {
+        const out = writeCaseSnapshot(MIN_SNAPSHOT, { outputDir: tmpDir });
+        expect(out).toBe(
+            path.resolve(tmpDir, "proxy-subjectChange-numThreads.json"),
+        );
+        const report = JSON.parse(fs.readFileSync(out, "utf8"));
+        expect(report.case).toBe("proxy-subjectChange-numThreads");
+        expect(report.outcome).toBe("partial");
+        expect(report.runCount).toBe(1);
+        expect(report.detailPath).toBe(
+            path.resolve(tmpDir, "proxy-subjectChange-numThreads.details.json"),
+        );
+        const details = JSON.parse(fs.readFileSync(report.detailPath, "utf8"));
+        expect(details.runs.baseline).toBeDefined();
+    });
+
+    it("adds case, run, and checkpoint durations to the short report", () => {
+        const snap: CaseSnapshot = {
+            ...MIN_SNAPSHOT,
+            startedAt: "2025-01-01T00:00:00.000Z",
+            finishedAt: "2025-01-01T00:00:05.000Z",
+            runs: {
+                baseline: {
+                    name: "baseline",
+                    checkpoints: [
+                        {
+                            checkpoint: "baseline-complete",
+                            observedAt: "2025-01-01T00:00:04.000Z",
+                            components: {},
+                            violations: [],
+                            argoWorkflow: {
+                                name: "migration-workflow",
+                                phase: "Succeeded",
+                                nodes: [],
+                            },
+                        },
+                    ],
+                },
+            },
+            events: [
+                {
+                    at: "2025-01-01T00:00:01.000Z",
+                    phase: "baseline",
+                    action: "configure",
+                    result: "ok",
+                },
+                {
+                    at: "2025-01-01T00:00:02.000Z",
+                    phase: "baseline-complete",
+                    action: "wait-workflow-completion",
+                    result: "ok",
+                    message: "waiting for migration-workflow",
+                },
+                {
+                    at: "2025-01-01T00:00:03.500Z",
+                    phase: "baseline-complete",
+                    action: "wait-workflow-completion",
+                    result: "ok",
+                    message: "migration-workflow Succeeded after 1500ms",
+                },
+                {
+                    at: "2025-01-01T00:00:03.700Z",
+                    phase: "baseline-complete",
+                    action: "wait-phase-completion",
+                    result: "ok",
+                    message: "ready after 200ms",
+                },
+                {
+                    at: "2025-01-01T00:00:04.500Z",
+                    phase: "baseline",
+                    action: "delete-workflow",
+                    result: "ok",
+                },
+            ],
+        };
+
+        const out = writeCaseSnapshot(snap, { outputDir: tmpDir });
+        const report = JSON.parse(fs.readFileSync(out, "utf8"));
+
+        expect(report.durationMs).toBe(5000);
+        expect(report.duration).toBe("5s");
+        expect(report.runs[0].durationMs).toBe(3500);
+        expect(report.runs[0].duration).toBe("3.5s");
+        expect(report.runs[0].checkpoints[0]).toMatchObject({
+            durationMs: 2000,
+            duration: "2s",
+            workflowWaitDurationMs: 1500,
+            workflowWaitDuration: "1.5s",
+            componentReadyWaitDurationMs: 200,
+            componentReadyWaitDuration: "200ms",
+        });
+    });
+
+    it("creates the output directory if needed", () => {
+        const nested = path.join(tmpDir, "a", "b", "c");
+        const out = writeCaseSnapshot(MIN_SNAPSHOT, { outputDir: nested });
+        expect(fs.existsSync(out)).toBe(true);
+    });
+
+    it("sanitises case names in the filename", () => {
+        const snap = { ...MIN_SNAPSHOT, case: "weird/name:with spaces?" };
+        const out = writeCaseSnapshot(snap, { outputDir: tmpDir, validate: false });
+        expect(path.basename(out)).not.toMatch(/[ ?:]/);
+    });
+
+    it("refuses to write an invalid snapshot when validate=true (default)", () => {
+        // Outcome 'never' isn't in the schema.
+        const bad = { ...MIN_SNAPSHOT, outcome: "never" } as unknown as CaseSnapshot;
+        expect(() => writeCaseSnapshot(bad, { outputDir: tmpDir })).toThrow(
+            /Refusing to write invalid snapshot/,
+        );
+    });
+
+    it("allows writing an invalid snapshot when validate=false", () => {
+        const bad = { ...MIN_SNAPSHOT, outcome: "never" } as unknown as CaseSnapshot;
+        const out = writeCaseSnapshot(bad, { outputDir: tmpDir, validate: false });
+        expect(fs.existsSync(out)).toBe(true);
+        const report = JSON.parse(fs.readFileSync(out, "utf8"));
+        expect(fs.existsSync(report.detailPath)).toBe(true);
+    });
+});
+
+describe("writeCaseSnapshot path safety", () => {
+    let tmpDir: string;
+    beforeEach(() => {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "e2e-snap-safe-"));
+    });
+    afterEach(() => {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it("refuses to escape outputDir via '../' in the case name", () => {
+        const snap = { ...MIN_SNAPSHOT, case: "../escapee" };
+        const out = writeCaseSnapshot(snap, { outputDir: tmpDir, validate: false });
+        // The sanitiser collapses '/' so the file stays inside tmpDir.
+        // (The filename may still start with '..' — that's fine since
+        // it's treated as a literal filename, not a path segment.)
+        expect(path.dirname(out)).toBe(path.resolve(tmpDir));
+        expect(path.basename(out)).not.toContain("/");
+        expect(path.basename(out)).not.toContain(path.sep);
+    });
+
+    it("flattens design-style nested names like 'foo/approve'", () => {
+        const snap = { ...MIN_SNAPSHOT, case: "proxy-subjectGatedChange-x/approve" };
+        const out = writeCaseSnapshot(snap, { outputDir: tmpDir, validate: false });
+        expect(path.dirname(out)).toBe(path.resolve(tmpDir));
+        expect(path.basename(out)).toBe("proxy-subjectGatedChange-x_approve.json");
+    });
+
+    it("rejects a case name that sanitises to an empty or dot value", () => {
+        const bad = { ...MIN_SNAPSHOT, case: "///" };
+        expect(() =>
+            writeCaseSnapshot(bad, { outputDir: tmpDir, validate: false }),
+        ).toThrow(/unsafe filename/);
+    });
+});
+
+describe("RunCheckpoint schema", () => {
+    const { RunCheckpointSchema } = require("../src/reportSchema") as typeof import("../src/reportSchema");
+
+    const base = {
+        checkpoint: "mutated-complete" as const,
+        observedAt: "2025-01-01T00:00:00Z",
+        violations: [],
+    };
+
+    it("requires map keys to match component.componentId", () => {
+        const bad = {
+            ...base,
+            components: {
+                "proxy:capture-proxy": {
+                    componentId: "kafka:wrong-id",
+                    phase: "Ready",
+                },
+            },
+        };
+        const result = RunCheckpointSchema.safeParse(bad);
+        expect(result.success).toBe(false);
+    });
+
+    it("accepts consistent map keys", () => {
+        const good = {
+            ...base,
+            components: {
+                "proxy:capture-proxy": {
+                    componentId: "proxy:capture-proxy",
+                    phase: "Ready",
+                },
+            },
+        };
+        expect(RunCheckpointSchema.safeParse(good).success).toBe(true);
+    });
+
+    it("rejects invalid ComponentId in map keys", () => {
+        const bad = {
+            ...base,
+            components: {
+                "NotAComponentId": {
+                    componentId: "NotAComponentId",
+                    phase: "Ready",
+                },
+            },
+        };
+        expect(RunCheckpointSchema.safeParse(bad).success).toBe(false);
+    });
+});

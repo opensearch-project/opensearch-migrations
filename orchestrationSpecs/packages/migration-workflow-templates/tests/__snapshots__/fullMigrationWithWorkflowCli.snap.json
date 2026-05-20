@@ -23,6 +23,10 @@
           "value": "approval-config"
         },
         {
+          "name": "workflowScriptsRoot",
+          "value": "/root/workflows/.workflowScripts"
+        },
+        {
           "name": "monitor-retry-limit",
           "value": "33"
         }
@@ -55,7 +59,7 @@
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "command": [
             "/bin/bash",
-            "-c"
+            "-lc"
           ],
           "resources": {
             "limits": {
@@ -68,7 +72,7 @@
             }
           },
           "args": [
-            "#!/bin/bash\n#\n# ============================================================================\n# WARNING: TEST HELPER SCRIPT - SHOULD BE MOVED TO SEPARATE PACKAGE\n# ============================================================================\n# This script is part of the test workflow infrastructure and creates a\n# logical dependency cycle:\n# - migration-workflow-templates package provides workflow templates\n# - workflow CLI (in migration console) depends on migration-workflow-templates\n# - This test script depends on workflow CLI\n#\n# TODO: Move test workflows and helpers to a separate package (e.g.,\n# migration-workflow-templates-test) to break this dependency cycle.\n# ============================================================================\n\nset -x\n\n# Write error details to /dev/termination-log so Argo surfaces the reason, not just the exit code\nfail() { echo \"$1\" | tee /dev/termination-log >&2; exit 1; }\n\nWORKFLOW_NAMESPACE=\"${WORKFLOW_NAMESPACE:-ma}\"\nMIGRATION_CONSOLE_POD=\"${MIGRATION_CONSOLE_POD:-migration-console-0}\"\n\nwait_for_console_pod() {\n  kubectl wait \\\n    --namespace \"$WORKFLOW_NAMESPACE\" \\\n    --for=condition=ready \"pod/$MIGRATION_CONSOLE_POD\" \\\n    --timeout=300s >/dev/null || fail \"migration-console pod '$MIGRATION_CONSOLE_POD' was not ready\"\n}\n\necho \"Building and submitting migration workflow...\"\nwait_for_console_pod\n\n# Decode base64 migration config from environment variable and write to file\necho \"$MIGRATION_CONFIG_BASE64\" | base64 -d > /tmp/migration_config.json\n\necho \"Migration config contents:\"\ncat /tmp/migration_config.json\n\necho \"Loading configuration from JSON...\"\nCONFIG_OUTPUT=$(\n  kubectl exec -i --namespace \"$WORKFLOW_NAMESPACE\" \"$MIGRATION_CONSOLE_POD\" -- \\\n    /bin/bash -lc 'workflow configure edit --stdin' < /tmp/migration_config.json 2>&1\n) || fail \"Configure failed: $CONFIG_OUTPUT\"\necho \"$CONFIG_OUTPUT\"\n\n# Submit workflow\necho \"Submitting workflow...\"\nWORKFLOW_OUTPUT=$(\n  kubectl exec --namespace \"$WORKFLOW_NAMESPACE\" \"$MIGRATION_CONSOLE_POD\" -- \\\n    /bin/bash -lc 'workflow submit' 2>&1\n) || fail \"Submit failed: $WORKFLOW_OUTPUT\"\necho \"Workflow submit output: $WORKFLOW_OUTPUT\"\n"
+            "{{='exec '+workflow.parameters.workflowScriptsRoot+'/configureAndSubmitWorkflow.sh'}}"
           ]
         },
         "metadata": {
@@ -107,7 +111,7 @@
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "command": [
             "/bin/bash",
-            "-c"
+            "-lc"
           ],
           "resources": {
             "limits": {
@@ -120,7 +124,7 @@
             }
           },
           "args": [
-            "#!/bin/bash\n#\n# ============================================================================\n# WARNING: TEST HELPER SCRIPT - SHOULD BE MOVED TO SEPARATE PACKAGE\n# ============================================================================\n# This script is part of the test workflow infrastructure and creates a\n# logical dependency cycle:\n# - migration-workflow-templates package provides workflow templates\n# - workflow CLI (in migration console) depends on migration-workflow-templates\n# - This test script depends on workflow CLI\n#\n# TODO: Move test workflows and helpers to a separate package (e.g.,\n# migration-workflow-templates-test) to break this dependency cycle.\n# ============================================================================\n\nset -e -x\n\nWORKFLOW_NAMESPACE=\"${WORKFLOW_NAMESPACE:-ma}\"\nMIGRATION_CONSOLE_POD=\"${MIGRATION_CONSOLE_POD:-migration-console-0}\"\n\nwait_for_console_pod() {\n  kubectl wait \\\n    --namespace \"$WORKFLOW_NAMESPACE\" \\\n    --for=condition=ready \"pod/$MIGRATION_CONSOLE_POD\" \\\n    --timeout=300s >/dev/null\n}\n\necho \"Checking workflow status\"\nwait_for_console_pod\n\nset +e\nSTATUS_OUTPUT=$(\n  kubectl exec --namespace \"$WORKFLOW_NAMESPACE\" \"$MIGRATION_CONSOLE_POD\" -- \\\n    /bin/bash -lc 'workflow status --workflow-name migration-workflow' 2>&1\n)\nSTATUS_EXIT_CODE=$?\nset -e\necho \"Status output:\"\necho \"$STATUS_OUTPUT\"\n\n# If the command failed (e.g., connection error), retry\nif [ $STATUS_EXIT_CODE -ne 0 ]; then\n    echo \"Failed to get workflow status (exit code: $STATUS_EXIT_CODE), will retry...\"\n    exit 1\nfi\n\n# Check if workflow is running or pending - retry\nif echo \"$STATUS_OUTPUT\" | grep -q \"Phase: Running\\|Phase: Pending\"; then\n    echo \"Workflow still running or pending, will retry...\"\n    exit 1\nfi\n\n# All other states are terminal (Succeeded, Failed, Suspended, Error, etc.)\necho \"Workflow is in terminal state\"\nmkdir -p /tmp/outputs\necho \"$STATUS_OUTPUT\" > /tmp/outputs/monitorResult\nexit 0\n"
+            "{{='exec '+workflow.parameters.workflowScriptsRoot+'/monitorWorkflow.sh'}}"
           ]
         },
         "metadata": {
@@ -183,7 +187,7 @@
           "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
           "command": [
             "/bin/bash",
-            "-c"
+            "-lc"
           ],
           "resources": {
             "limits": {
@@ -196,7 +200,7 @@
             }
           },
           "args": [
-            "\nset -e\necho \"Evaluating workflow result...\"\necho \"Monitor output: $MONITOR_RESULT\"\n\n# Check if the output contains \"Phase: Succeeded\"\nif echo \"$MONITOR_RESULT\" | grep -q \"Phase: Succeeded\"; then\n    echo \"Migration workflow completed successfully\"\n    exit 0\nelse\n    echo \"Migration workflow did not succeed\"\n    exit 1\nfi\n            "
+            "{{='exec '+workflow.parameters.workflowScriptsRoot+'/evaluateWorkflowResult.sh'}}"
           ]
         },
         "metadata": {
