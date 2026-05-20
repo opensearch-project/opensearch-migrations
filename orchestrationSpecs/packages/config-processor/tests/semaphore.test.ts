@@ -271,7 +271,7 @@ describe('semaphore configuration', () => {
         });
 
         // Test that initializer produces consistent semaphore keys between workflow and ConfigMap
-        const bundle = await initializer.generateMigrationBundle(config);
+        const bundle = await initializer.generateMigrationBundle(config, undefined, {runNumber: 1700000000000});
 
         // Extract semaphore keys from transformed workflow
         const workflowSemaphoreKeys = new Set();

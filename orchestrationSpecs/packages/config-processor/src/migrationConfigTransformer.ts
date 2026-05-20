@@ -533,10 +533,17 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     ...dep,
                     configChecksum: proxyChecksumForSnapshot.get(dep.name) ?? '',
                 }));
+                const sourceConnectionIdentity =
+                    MigrationConfigTransformer.clusterConnectionIdentity(s.sourceConfig as Record<string, unknown>);
                 return {
                     ...item,
                     dependsOnProxySetups: enrichedDeps,
-                    configChecksum: cs(item.config, item.repo, ...enrichedDeps.map(d => d.configChecksum)),
+                    configChecksum: cs(
+                        sourceConnectionIdentity,
+                        item.config,
+                        item.repo,
+                        ...enrichedDeps.map(d => d.configChecksum)
+                    ),
                 };
             }),
         }));
@@ -548,19 +555,48 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         }
 
         const migrationsWithChecksums = snapshotMigrations.map(m => {
+            const snapshotConfigChecksum = snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '';
+            const sourceConnectionIdentity = MigrationConfigTransformer.clusterConnectionIdentity({
+                label: m.sourceLabel,
+                version: m.sourceVersion,
+                endpoint: m.sourceEndpoint,
+                allowInsecure: m.sourceAllowInsecure,
+                authConfig: m.sourceAuth,
+            });
+            const targetConnectionIdentity =
+                MigrationConfigTransformer.clusterConnectionIdentity(m.targetConfig as Record<string, unknown>);
             const replayerMaterialPart = m.documentBackfillConfig
                 ? csDep(RFS_SCHEMA, m.documentBackfillConfig as Record<string, unknown>, 'replayer')
                 : '';
+            const workloadIdentityMaterialPart = m.documentBackfillConfig
+                ? MigrationConfigTransformer.checksumForChangeRestriction(
+                    RFS_SCHEMA,
+                    m.documentBackfillConfig as Record<string, unknown>,
+                    'impossible'
+                )
+                : '';
             return {
                 ...m,
-                snapshotConfigChecksum: snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '',
+                snapshotConfigChecksum,
                 configChecksum: cs(
+                    sourceConnectionIdentity,
                     m.metadataMigrationConfig ?? {},
                     m.documentBackfillConfig ?? {},
                     m.targetConfig,
-                    snapshotChecksums.get([m.sourceLabel, m.label].join('-'))
+                    snapshotConfigChecksum,
+                    m.snapshotNameResolution,
+                    m.snapshotConfig
                 ),
                 checksumForReplayer: cs(m.targetConfig, replayerMaterialPart),
+                workloadIdentityChecksum: cs(
+                    sourceConnectionIdentity,
+                    targetConnectionIdentity,
+                    m.snapshotNameResolution,
+                    m.snapshotConfig,
+                    snapshotConfigChecksum,
+                    m.migrationLabel,
+                    workloadIdentityMaterialPart
+                ),
             };
         });
 
@@ -811,6 +847,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                         documentBackfillConfig,
                         sourceVersion: sourceCluster.version || "",
                         sourceLabel: fromSource,
+                        ...(sourceCluster.endpoint ? {sourceEndpoint: sourceCluster.endpoint} : {}),
+                        ...(sourceCluster.allowInsecure !== undefined ? {sourceAllowInsecure: sourceCluster.allowInsecure} : {}),
+                        ...(sourceCluster.authConfig ? {sourceAuth: sourceCluster.authConfig} : {}),
                         targetConfig: { ...targetCluster, label: toTarget },
                         snapshotConfig: {
                             label: snapshotName,
@@ -894,6 +933,37 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             }
         }
         return MigrationConfigTransformer.configChecksum(picked, ...upstreamChecksums);
+    }
+
+    /**
+     * Pick only fields whose schema annotation matches a change restriction.
+     * Used for stable workload identity, where gated fields must not create
+     * parallel Kubernetes workloads.
+     */
+    static checksumForChangeRestriction(
+        schema: z.ZodObject<any>,
+        data: Record<string, unknown>,
+        restriction: NonNullable<FieldMeta["changeRestriction"]>,
+        ...upstreamChecksums: (string | undefined)[]
+    ): string {
+        const picked: Record<string, unknown> = {};
+        for (const [key, fieldSchema] of Object.entries(schema.shape)) {
+            const meta = (fieldSchema as z.ZodType).meta() as FieldMeta | undefined;
+            if (meta?.changeRestriction === restriction) {
+                picked[key] = data[key];
+            }
+        }
+        return MigrationConfigTransformer.configChecksum(picked, ...upstreamChecksums);
+    }
+
+    static clusterConnectionIdentity(clusterConfig: Record<string, unknown>): Record<string, unknown> {
+        return {
+            label: clusterConfig.label,
+            version: clusterConfig.version,
+            endpoint: clusterConfig.endpoint ?? "",
+            allowInsecure: clusterConfig.allowInsecure ?? false,
+            authConfig: clusterConfig.authConfig ?? {},
+        };
     }
 
     static configChecksum(...parts: unknown[]): string {
