@@ -419,6 +419,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             // ignore everything until we hit an EOM
             return Optional.of(CONNECTION_STATUS.ALIVE);
         } else if (accum.state == Accumulation.State.WAITING_FOR_NEXT_READ_CHUNK) {
+            if (observation.hasInterimResponse() || observation.hasInterimResponseSegment()) {
+                throw new MalformedTrafficStreamException(
+                    "InterimResponse in WAITING_FOR_NEXT_READ_CHUNK for " + accum.trafficChannelKey);
+            }
             // already processed EOMs above. Be on the lookout to ignore writes
             if (!(observation.hasRead() || observation.hasReadSegment())) {
                 return Optional.of(CONNECTION_STATUS.ALIVE);
@@ -482,40 +486,17 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var connectionId = trafficStreamKey.getConnectionId();
         var originTimestamp = TrafficStreamUtils.instantFromProtoTimestamp(observation.getTs());
         if (observation.hasRead()) {
-            if (!accum.hasRrPair()) {
-                requestCounter.incrementAndGet();
-            }
-            var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey, originTimestamp);
-            log.atTrace().setMessage("Adding request data for accum[{}]={}")
-                .addArgument(connectionId)
-                .addArgument(accum).log();
-            rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
-            log.atTrace().setMessage("Added request data for accum[{}]={}")
-                .addArgument(connectionId)
-                .addArgument(accum)
-                .log();
+            handleReadObservation(accum, observation, trafficStreamKey, timestamp, originTimestamp, connectionId);
         } else if (observation.hasEndOfMessageIndicator()) {
             assert accum.hasRrPair();
             handleEndOfRequest(accum);
         } else if (observation.hasReadSegment()) {
-            log.atTrace().setMessage("Adding request segment for accum[{}]={}")
-                .addArgument(connectionId).
-                addArgument(accum)
-                .log();
-            var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey, originTimestamp);
-            if (rrPair.requestData == null) {
-                rrPair.requestData = new HttpMessageAndTimestamp.Request(timestamp);
-                requestCounter.incrementAndGet();
-            }
-            rrPair.requestData.addSegment(observation.getReadSegment().getData().toByteArray());
-            log.atTrace().setMessage("Added request segment for accum[{}]={}")
-                .addArgument(connectionId)
-                .addArgument(accum)
-                .log();
+            handleReadSegmentObservation(
+                accum, observation, trafficStreamKey, timestamp, originTimestamp, connectionId);
         } else if (observation.hasSegmentEnd()) {
-            var rrPair = accum.getRrPair();
-            assert rrPair.requestData.hasInProgressSegment();
-            rrPair.requestData.finalizeRequestSegments(timestamp);
+            handleSegmentEndDuringReads(accum, timestamp);
+        } else if (observation.hasInterimResponse() || observation.hasInterimResponseSegment()) {
+            handleInterimResponseObservation(accum, observation, trafficStreamKey, originTimestamp);
         } else if (observation.hasRequestDropped()) {
             requestCounter.decrementAndGet();
             handleDroppedRequestForAccumulation(accum);
@@ -523,6 +504,77 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             return Optional.empty();
         }
         return Optional.of(CONNECTION_STATUS.ALIVE);
+    }
+
+    private void handleReadObservation(
+        Accumulation accum,
+        TrafficObservation observation,
+        ITrafficStreamKey trafficStreamKey,
+        Instant timestamp,
+        Instant originTimestamp,
+        String connectionId
+    ) {
+        if (!accum.hasRrPair()) {
+            requestCounter.incrementAndGet();
+        }
+        var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey, originTimestamp);
+        log.atTrace().setMessage("Adding request data for accum[{}]={}")
+            .addArgument(connectionId)
+            .addArgument(accum).log();
+        rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
+        log.atTrace().setMessage("Added request data for accum[{}]={}")
+            .addArgument(connectionId)
+            .addArgument(accum)
+            .log();
+    }
+
+    private void handleReadSegmentObservation(
+        Accumulation accum,
+        TrafficObservation observation,
+        ITrafficStreamKey trafficStreamKey,
+        Instant timestamp,
+        Instant originTimestamp,
+        String connectionId
+    ) {
+        log.atTrace().setMessage("Adding request segment for accum[{}]={}")
+            .addArgument(connectionId)
+            .addArgument(accum)
+            .log();
+        var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey, originTimestamp);
+        if (rrPair.requestData == null) {
+            rrPair.requestData = new HttpMessageAndTimestamp.Request(timestamp);
+            requestCounter.incrementAndGet();
+        }
+        rrPair.requestData.addSegment(observation.getReadSegment().getData().toByteArray());
+        log.atTrace().setMessage("Added request segment for accum[{}]={}")
+            .addArgument(connectionId)
+            .addArgument(accum)
+            .log();
+    }
+
+    // SegmentEnd in this state may terminate a ReadSegment chain OR an InterimResponseSegment chain.
+    private static void handleSegmentEndDuringReads(Accumulation accum, Instant timestamp) {
+        var rrPair = accum.getRrPair();
+        if (rrPair.hasInProgressInterimResponseSegment()) {
+            rrPair.finalizeInterimResponseSegments();
+        } else {
+            assert rrPair.requestData.hasInProgressSegment();
+            rrPair.requestData.finalizeRequestSegments(timestamp);
+        }
+    }
+
+    private static void handleInterimResponseObservation(
+        Accumulation accum,
+        TrafficObservation observation,
+        ITrafficStreamKey trafficStreamKey,
+        Instant originTimestamp
+    ) {
+        var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey, originTimestamp);
+        if (observation.hasInterimResponse()) {
+            rrPair.addInterimResponseData(observation.getInterimResponse().getData().toByteArray());
+        } else {
+            rrPair.addInterimResponseSegment(observation.getInterimResponseSegment().getData().toByteArray());
+        }
     }
 
     private Optional<CONNECTION_STATUS> handleObservationForWriteState(
@@ -533,6 +585,11 @@ public class CapturedTrafficToHttpTransactionAccumulator {
     ) {
         if (accum.state != Accumulation.State.ACCUMULATING_WRITES) {
             return Optional.empty();
+        }
+
+        if (observation.hasInterimResponse() || observation.hasInterimResponseSegment()) {
+            throw new MalformedTrafficStreamException(
+                "InterimResponse in ACCUMULATING_WRITES for " + accum.trafficChannelKey);
         }
 
         var connectionId = trafficStreamKey.getConnectionId();
