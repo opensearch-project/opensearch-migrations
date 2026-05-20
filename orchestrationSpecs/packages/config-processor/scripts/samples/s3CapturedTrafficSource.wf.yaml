@@ -1,14 +1,16 @@
-# Capture proxy without frontside TLS using an auto-created Strimzi Kafka cluster
-# with authentication explicitly disabled for the migration applications.
-# Use this variant when you want workflow-managed Kafka but do not want the
-# secure-by-default SCRAM behavior.
+# Bring-your-own captured traffic: replay from a previously-exported S3 dump.
+# No CaptureProxy is created — the workflow loads the gzipped TrafficStream
+# archive (kafkaExport.sh format) onto a Kafka topic exactly once, then the
+# replayer consumes from that topic.
+#
+# To swap in your own dump, change s3Uri / awsRegion to a bucket the
+# workflow's service account can read.
 kafkaClusterConfiguration:
   default:
     autoCreate:
       auth:
         type: "none"
-      # Sample-only overrides for local POC testing — single-broker, RF=1.
-      # Not safe for prod. These files are not packaged to the migration console.
+      # Single-broker, RF=1 — POC only, not safe for prod.
       clusterSpecOverrides:
         kafka:
           config:
@@ -33,6 +35,9 @@ kafkaClusterConfiguration:
           retention.ms: 604800000
           segment.bytes: 1073741824
 
+# No live source needed for replay — the dump captures it. We still declare
+# a source to satisfy schema requirements; sourceLabel inside s3Sources
+# carries the original-source label for downstream resource labeling.
 sourceClusters:
   source:
     endpoint: "https://elasticsearch-master-headless:9200"
@@ -53,13 +58,18 @@ targetClusters:
 snapshotMigrationConfigs: []
 
 traffic:
-  proxies:
-    capture-proxy:
-      source: "source"
-      proxyConfig:
-        listenPort: 9201
+  s3Sources:
+    dump:
+      s3Uri: "s3://byo-traffic/kafka_export_slice_10k.proto.gz"
+      awsRegion: "us-east-2"
+      # endpoint is for local LocalStack testing only — drop this line for
+      # real S3. With it set, the loader auto-mounts localstack-test-creds.
+      endpoint: "http://localstack.ma.svc.cluster.local:4566"
+      sourceLabel: "source"
 
   replayers:
     replay1:
-      fromCapturedTraffic: "capture-proxy"
+      fromCapturedTraffic: "dump"
       toTarget: "target"
+      replayerConfig:
+        speedupFactor: 30

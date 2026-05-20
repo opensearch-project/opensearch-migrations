@@ -196,6 +196,8 @@ function makeCapturedTrafficManifest(
     partitions: BaseExpression<Serialized<number>>,
     replicas: BaseExpression<Serialized<number>>,
     topicConfig: BaseExpression<Serialized<Record<string, any>>>,
+    sourceKind: BaseExpression<string>,
+    s3SourceUri: BaseExpression<string>,
 ) {
     return {
         apiVersion: CRD_API_VERSION,
@@ -209,6 +211,12 @@ function makeCapturedTrafficManifest(
                 [KAFKA_CLUSTER_LABEL]: makeStringTypeProxy(kafkaClusterName),
             }
         },
+        // s3SourceUri + sourceKind + loadStarted are routed through `apply` so
+        // that any change between submit attempts (e.g., user edits the URI in
+        // their config and resubmits) is caught by the CapturedTraffic VAP
+        // before any loader runs. The VAP rejects mutating s3SourceUri /
+        // sourceKind, so a resubmit pointed at a different file fails fast at
+        // admission, not after the loader pod has started writing partial data.
         spec: {
             dependsOn: [makeStringTypeProxy(kafkaClusterName)],
             kafkaClusterName: makeStringTypeProxy(kafkaClusterName),
@@ -216,6 +224,9 @@ function makeCapturedTrafficManifest(
             partitions: makeDirectTypeProxy(partitions),
             replicas: makeDirectTypeProxy(replicas),
             topicConfig: makeDirectTypeProxy(expr.deserializeRecord(topicConfig)),
+            sourceKind: makeStringTypeProxy(sourceKind),
+            s3SourceUri: makeStringTypeProxy(s3SourceUri),
+            loadStarted: true,
         }
     };
 }
@@ -393,6 +404,10 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("partitions", typeToken<number>())
         .addRequiredInput("replicas", typeToken<number>())
         .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
+        // sourceKind = "proxy" or "s3" — VAP-locked once the CR exists.
+        // s3SourceUri is empty for the proxy path, set for s3.
+        .addOptionalInput("sourceKind", c => "proxy")
+        .addOptionalInput("s3SourceUri", c => "")
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
@@ -404,7 +419,9 @@ export const ResourceManagement = WorkflowBuilder.create({
                     b.inputs.sourceLabel,
                     b.inputs.partitions,
                     b.inputs.replicas,
-                    b.inputs.topicConfig
+                    b.inputs.topicConfig,
+                    b.inputs.sourceKind,
+                    b.inputs.s3SourceUri,
                 )
             }))
         .addJsonPathOutput("currentConfigChecksum", "{.status.configChecksum}", typeToken<string>())
@@ -625,6 +642,8 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("retryGateName", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
+        .addOptionalInput("sourceKind", c => "proxy")
+        .addOptionalInput("s3SourceUri", c => "")
 
         .addSteps(b => b
             .addStep("tryApply", INTERNAL, "upsertCapturedTrafficResource", c =>
@@ -636,6 +655,8 @@ export const ResourceManagement = WorkflowBuilder.create({
                     partitions: b.inputs.partitions,
                     replicas: b.inputs.replicas,
                     topicConfig: b.inputs.topicConfig,
+                    sourceKind: b.inputs.sourceKind,
+                    s3SourceUri: b.inputs.s3SourceUri,
                 }),
                 {continueOn: {failed: true}}
             )
@@ -669,6 +690,8 @@ export const ResourceManagement = WorkflowBuilder.create({
                     partitions: b.inputs.partitions,
                     replicas: b.inputs.replicas,
                     topicConfig: b.inputs.topicConfig,
+                    sourceKind: b.inputs.sourceKind,
+                    s3SourceUri: b.inputs.s3SourceUri,
                     retryGateName: b.inputs.retryGateName,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),

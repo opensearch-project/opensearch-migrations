@@ -12,19 +12,17 @@
   },
   "snapshotMigrationConfigs": [],
   "traffic": {
-    "proxies": {
-      "proxy1": {
-        "source": "source",
-        "listenPort": 9201,
-        "proxyConfig": {
-          "listenPort": 9201
-        }
+    "s3Sources": {
+      "loaded-dump": {
+        "s3Uri": "s3://byo-traffic/kafka_export_slice_10k.proto.gz",
+        "awsRegion": "us-east-2",
+        "sourceLabel": "source"
       }
     },
     "replayers": {
       "replayer1": {
-        "fromCapturedTraffic": "proxy1",
-        "toTarget": "does-not-exist"
+        "fromCapturedTraffic": "loaded-dump",
+        "toTarget": "target"
       }
     }
   }

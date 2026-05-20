@@ -8,23 +8,37 @@
   "targetClusters": {
     "target": {
       "endpoint": "http://target:9200"
+    },
+    "target2": {
+      "endpoint": "http://target2:9200"
     }
   },
   "snapshotMigrationConfigs": [],
   "traffic": {
     "proxies": {
-      "proxy1": {
+      "p1": {
         "source": "source",
-        "listenPort": 9201,
+        "kafkaTopic": "shared-topic",
         "proxyConfig": {
           "listenPort": 9201
+        }
+      },
+      "p2": {
+        "source": "source",
+        "kafkaTopic": "shared-topic",
+        "proxyConfig": {
+          "listenPort": 9202
         }
       }
     },
     "replayers": {
-      "replayer1": {
-        "fromCapturedTraffic": "proxy1",
+      "r1": {
+        "fromCapturedTraffic": "p1",
         "toTarget": "target"
+      },
+      "r2": {
+        "fromCapturedTraffic": "p2",
+        "toTarget": "target2"
       }
     }
   }

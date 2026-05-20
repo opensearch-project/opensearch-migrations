@@ -126,6 +126,25 @@ spec:
         !has(oldObject.spec.topicName) || !has(object.spec.topicName) ||
         object.spec.topicName == oldObject.spec.topicName
       message: "Impossible: topicName cannot be changed. Delete and recreate."
+    # Impossible: sourceKind (proxy vs s3 is decided at create time)
+    - expression: |
+        !has(oldObject.spec.sourceKind) || !has(object.spec.sourceKind) ||
+        object.spec.sourceKind == oldObject.spec.sourceKind
+      message: "Impossible: sourceKind cannot be changed. Delete and recreate."
+    # Impossible: s3SourceUri (changing the source after a load would require a re-load,
+    # but re-loading would duplicate every record on the topic. Reset is the only path.)
+    - expression: |
+        !has(oldObject.spec.s3SourceUri) || !has(object.spec.s3SourceUri) ||
+        object.spec.s3SourceUri == oldObject.spec.s3SourceUri
+      message: "Impossible: s3SourceUri cannot be changed. Delete and recreate to load a different file."
+    # Impossible: loadStarted may only transition false->true. Once true, it stays true
+    # for the lifetime of the resource (and the resource itself locks once
+    # status.loadCompleted=true via the lock-on-complete policy).
+    - expression: |
+        !has(oldObject.spec.loadStarted) ||
+        oldObject.spec.loadStarted == false ||
+        (has(object.spec.loadStarted) && object.spec.loadStarted == true)
+      message: "Impossible: loadStarted cannot be unset once true. Delete and recreate."
     # Impossible: partition decrease
     - expression: |
         !has(oldObject.spec.partitions) || !has(object.spec.partitions) ||
@@ -465,14 +484,20 @@ spec:
     - apiGroups: ["migrations.opensearch.org"]
       apiVersions: ["v1alpha1"]
       operations: ["UPDATE"]
-      resources: ["datasnapshots", "snapshotmigrations"]
+      resources: ["datasnapshots", "snapshotmigrations", "capturedtraffics"]
   validations:
+    # DataSnapshot / SnapshotMigration: locked when phase reaches 'Completed'.
+    # CapturedTraffic uses loadCompleted=true to mean the same thing — that the
+    # writer (proxy or s3 loader) has committed records to the topic. Changing
+    # spec after that would invalidate the topic contents.
     - expression: |
         !has(oldObject.status) ||
-        !has(oldObject.status.phase) ||
-        oldObject.status.phase != 'Completed' ||
+        (
+          (!has(oldObject.status.phase) || oldObject.status.phase != 'Completed') &&
+          (!has(oldObject.status.loadCompleted) || oldObject.status.loadCompleted != true)
+        ) ||
         (object.spec == oldObject.spec)
-      message: "Consistency Guard: This resource is 'Completed'. The specification is permanently sealed to maintain provenance. Delete the resource to run a new job with these parameters."
+      message: "Consistency Guard: This resource has committed its work (phase=Completed or loadCompleted=true). The specification is permanently sealed to maintain provenance. Delete the resource to run a new job with these parameters."
 
 ---
 apiVersion: admissionregistration.k8s.io/v1

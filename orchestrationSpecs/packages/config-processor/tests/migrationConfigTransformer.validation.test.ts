@@ -76,7 +76,7 @@ describe('MigrationConfigTransformer validation', () => {
             },
             replayers: {
                 "replay1": {
-                    "fromProxy": "proxy1",
+                    "fromCapturedTraffic": "proxy1",
                     "toTarget": "target1"
                 }
             }
@@ -386,7 +386,7 @@ describe('MigrationConfigTransformer validation', () => {
                 ...baseConfig.traffic,
                 replayers: {
                     replay2: {
-                        fromProxy: "proxy1",
+                        fromCapturedTraffic: "proxy1",
                         toTarget: "target2",
                         dependsOnSnapshotMigrations: [
                             {source: "source1", snapshot: "snap1"}

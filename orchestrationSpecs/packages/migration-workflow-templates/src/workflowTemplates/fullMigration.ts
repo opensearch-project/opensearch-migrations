@@ -9,6 +9,7 @@ import {
     DENORMALIZED_CREATE_SNAPSHOTS_CONFIG,
     DENORMALIZED_PROXY_CONFIG,
     DENORMALIZED_REPLAY_CONFIG,
+    DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG,
     ENRICHED_SNAPSHOT_MIGRATION_FILTER,
     getZodKeys,
     NAMED_KAFKA_CLIENT_CONFIG,
@@ -42,6 +43,7 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {SetupKafka} from "./setupKafka";
 import {SetupCapture} from "./setupCapture";
+import {S3TrafficLoader} from "./s3TrafficLoader";
 import {Replayer} from "./replayer";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 
@@ -218,6 +220,49 @@ kubectl delete approvalgates.migrations.opensearch.org \\
                     topicReplicas: b.inputs.topicReplicas,
                     topicConfig: b.inputs.topicConfig,
                     sourceK8sLabel: expr.dig(expr.deserializeRecord(b.inputs.proxyConfig), ["sourceConfig", "label"], ""),
+                })
+            )
+        )
+    )
+
+
+    // ── Section 2b: S3 traffic sources ───────────────────────────────────
+    //
+    // Parallel to setupSingleProxy, but for one-time S3 → Kafka loads.
+    // Creates the same kind of CapturedTraffic CR (so the replayer wait is
+    // uniform) but does NOT stand up a CaptureProxy. The loader patches the
+    // CR to phase=Ready with loadCompleted=true on success.
+
+    .addTemplate("setupSingleS3Source", t => t
+        .addRequiredInput("loaderConfig", typeToken<z.infer<typeof DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG>>())
+        .addRequiredInput("kafkaClusterName", typeToken<string>())
+        .addRequiredInput("kafkaTopicName", typeToken<string>())
+        .addRequiredInput("topicCrName", typeToken<string>())
+        .addRequiredInput("kafkaClusterOwnerUid", typeToken<string>())
+        .addRequiredInput("topicPartitions", typeToken<number>())
+        .addRequiredInput("topicReplicas", typeToken<number>())
+        .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
+        .addOptionalInput("groupName_view", c => "S3 Source")
+        .addOptionalInput("sortOrder_view", c => 999)
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+
+        .addSteps(b => b
+            .addStep("setupS3Source", S3TrafficLoader, "reconcileCapturedTrafficAndLoad", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    loaderConfig: b.inputs.loaderConfig,
+                    kafkaClusterName: b.inputs.kafkaClusterName,
+                    kafkaTopicName: b.inputs.kafkaTopicName,
+                    topicCrName: b.inputs.topicCrName,
+                    kafkaClusterOwnerUid: b.inputs.kafkaClusterOwnerUid,
+                    configChecksum: expr.dig(expr.deserializeRecord(b.inputs.loaderConfig), ["configChecksum"], ""),
+                    topicConfigChecksum: expr.dig(expr.deserializeRecord(b.inputs.loaderConfig), ["topicConfigChecksum"], ""),
+                    checksumForSnapshot: expr.literal(""),
+                    checksumForReplayer: expr.dig(expr.deserializeRecord(b.inputs.loaderConfig), ["checksumForReplayer"], ""),
+                    topicPartitions: b.inputs.topicPartitions,
+                    topicReplicas: b.inputs.topicReplicas,
+                    topicConfig: b.inputs.topicConfig,
+                    sourceK8sLabel: expr.dig(expr.deserializeRecord(b.inputs.loaderConfig), ["sourceLabel"], ""),
                 })
             )
         )
@@ -550,8 +595,8 @@ kubectl delete approvalgates.migrations.opensearch.org \\
         .addRequiredInput("kafkaConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLIENT_CONFIG>>())
         .addRequiredInput("kafkaClusterName", typeToken<string>())
         .addRequiredInput("sourceLabel", typeToken<string>())
-        .addRequiredInput("fromProxy", typeToken<string>())
-        .addRequiredInput("fromProxyConfigChecksum", typeToken<string>())
+        .addRequiredInput("fromCapturedTraffic", typeToken<string>())
+        .addRequiredInput("fromCapturedTrafficConfigChecksum", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
         .addRequiredInput("name", typeToken<string>())
@@ -604,11 +649,16 @@ kubectl delete approvalgates.migrations.opensearch.org \\
                     )}),
                 }
             )
-            .addStep("waitForProxy", ResourceManagement, "waitForCaptureProxy", c =>
+            // Replayer waits on the CapturedTraffic CR (works uniformly for live
+            // proxy and S3 loader sources). The CR's name pattern is
+            // `<fromCapturedTraffic>-topic` (set up by setupSingleProxy /
+            // setupSingleS3Source). The checksum field threaded through is
+            // checksumForReplayer, which the producer side patches on Ready.
+            .addStep("waitForCapturedTraffic", ResourceManagement, "waitForCapturedTraffic", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    resourceName: b.inputs.fromProxy,
-                    configChecksum: b.inputs.fromProxyConfigChecksum,
+                    resourceName: expr.concat(b.inputs.fromCapturedTraffic, expr.literal("-topic")),
+                    configChecksum: b.inputs.fromCapturedTrafficConfigChecksum,
                     checksumField: expr.literal("checksumForReplayer"),
                 }),
                 {when: c => ({templateExp: checksumNotDone(c.reconcileTrafficReplayResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
@@ -774,6 +824,61 @@ kubectl delete approvalgates.migrations.opensearch.org \\
                         expr.get(expr.deserializeRecord(b.inputs.config), "proxies"))
                 }
             )
+            .addStep("createS3Source", INTERNAL, "setupSingleS3Source", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    loaderConfig: expr.serialize(expr.makeDict({
+                        name: expr.get(c.item, "name"),
+                        sourceLabel: expr.get(c.item, "sourceLabel"),
+                        s3Uri: expr.get(c.item, "s3Uri"),
+                        awsRegion: expr.get(c.item, "awsRegion"),
+                        endpoint: expr.dig(c.item, ["endpoint"], ""),
+                        kafkaConfig: expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        configChecksum: expr.dig(c.item, ["configChecksum"], ""),
+                        topicConfigChecksum: expr.dig(c.item, ["topicConfigChecksum"], ""),
+                        checksumForReplayer: expr.dig(c.item, ["checksumForReplayer"], ""),
+                        kafkaClusterName: expr.dig(
+                            expr.deserializeRecord(expr.get(c.item, "kafkaConfig")), ["label"], ""),
+                        resourceUid: expr.dig(c.item, ["resourceUid"], ""),
+                    })),
+                    kafkaClusterName: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["label"],
+                        ""
+                    ),
+                    kafkaTopicName: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["kafkaTopic"],
+                        ""
+                    ),
+                    topicCrName: expr.concat(expr.get(c.item, "name"), expr.literal("-topic")),
+                    kafkaClusterOwnerUid: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["clusterResourceUid"],
+                        ""
+                    ),
+                    topicPartitions: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["topicSpecOverrides", "partitions"],
+                        1
+                    ),
+                    topicReplicas: expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["topicSpecOverrides", "replicas"],
+                        1
+                    ),
+                    topicConfig: expr.serialize(expr.dig(
+                        expr.deserializeRecord(expr.get(c.item, "kafkaConfig")),
+                        ["topicSpecOverrides", "config"],
+                        expr.makeDict({})
+                    )),
+                    groupName_view: expr.get(c.item, "name"),
+                    sortOrder_view: expr.literal(2),
+                }), {
+                    loopWith: makeParameterLoop(
+                        expr.dig(expr.deserializeRecord(b.inputs.config), ["s3TrafficLoaders"], expr.literal([])))
+                }
+            )
             .addStep("createSnapshot", INTERNAL, "createSnapshotsForSource", c =>
                 c.register({
                         ...selectInputsForRegister(b, c),
@@ -830,7 +935,7 @@ kubectl delete approvalgates.migrations.opensearch.org \\
                         targetConfig: expr.get(c.item, "toTarget"),
                         replayerOptions: expr.get(c.item, "replayerConfig"),
                         groupName_view: expr.concat(
-                            expr.get(c.item, "fromProxy"),
+                            expr.get(c.item, "fromCapturedTraffic"),
                             expr.literal(" → "),
                             expr.dig(
                                 expr.deserializeRecord(expr.get(c.item, "toTarget")),

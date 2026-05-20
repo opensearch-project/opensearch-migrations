@@ -889,6 +889,28 @@ export const CAPTURE_CONFIG = z.object({
         .describe("Configuration for the capture proxy deployment and process options.")
 }).describe("Configuration for a single capture proxy instance, including its Kafka topic and source cluster binding.");
 
+export const S3_CAPTURED_TRAFFIC_SOURCE = z.object({
+    s3Uri: z.string()
+        .regex(/^s3:\/\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\/.+\.proto\.gz$/)
+        .describe("S3 URI of a gzipped traffic export produced by kafkaExport.sh. Format must be 's3://BUCKET/PATH/<file>.proto.gz'."),
+    awsRegion: z.string()
+        .describe("AWS region of the S3 bucket holding the export."),
+    endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)?/).default("").optional()
+        .describe("Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. " +
+            "LocalStack endpoints are automatically resolved to IP addresses during config transformation."),
+    kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
+        .describe("Label of the Kafka cluster to load captured traffic into. Must match a key in kafkaClusterConfiguration."),
+    kafkaTopic: z.string().regex(K8S_NAMING_PATTERN).default("").optional()
+        .describe("Kafka topic name to load captured traffic into. If empty, defaults to the s3Source name (the key in the s3Sources record)."),
+    sourceLabel: z.string()
+        .describe("Label of the source cluster this dump was originally captured from. " +
+            "Used for resource labeling. Does NOT need to match a sourceClusters key " +
+            "(the original source may be long gone by the time the dump is replayed)."),
+}).describe("Configuration for a one-time load of a previously captured traffic archive from S3 onto a Kafka topic. " +
+    "When set, the workflow does NOT stand up a CaptureProxy — replay reads from the loaded topic directly. " +
+    "The loader runs once per CapturedTraffic resource: re-runs are blocked by the resource lifecycle, " +
+    "and changing the s3Uri requires deleting the CapturedTraffic resource and re-running the workflow.");
+
 export const SNAPSHOT_MIGRATION_FILTER = z.object({
     source: z.string()
         .describe("Name of the source cluster. Must match a key in sourceClusters."),
@@ -897,28 +919,79 @@ export const SNAPSHOT_MIGRATION_FILTER = z.object({
 }).describe("Reference to a specific snapshot from a specific source cluster, used to express dependencies.");
 
 export const REPLAYER_CONFIG = z.object({
-    fromProxy: z.string()
-        .describe("Name of the capture proxy to replay traffic from. Must match a key in traffic.proxies."),
+    fromCapturedTraffic: z.string()
+        .describe("Name of the captured-traffic source to replay from. Must match a key in either traffic.proxies (live capture) or traffic.s3Sources (pre-recorded S3 dump)."),
     toTarget: z.string()
         .describe("Name of the target cluster to replay traffic to. Must match a key in targetClusters."),
     dependsOnSnapshotMigrations: z.array(SNAPSHOT_MIGRATION_FILTER).default([]).optional()
         .describe("List of snapshot migrations that must complete before this replayer starts. Ensures data consistency when replaying traffic that depends on backfilled data."),
     replayerConfig: USER_REPLAYER_OPTIONS.optional()
         .describe("Optional replayer configuration overrides. If omitted, replayer runs with schema defaults.")
-}).describe("Configuration for a single traffic replayer instance, binding a proxy's captured traffic to a target cluster.");
+}).describe("Configuration for a single traffic replayer instance, binding a captured-traffic source (live proxy or S3 dump) to a target cluster.");
 
 export const TRAFFIC_CONFIG = z.object({
-    proxies: z.record(z.string().regex(K8S_NAMING_PATTERN), CAPTURE_CONFIG)
-        .describe("Map of proxy names to their capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels."),
+    proxies: z.record(z.string().regex(K8S_NAMING_PATTERN), CAPTURE_CONFIG).default({}).optional()
+        .describe("Map of proxy names to their live-capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels."),
+    s3Sources: z.record(z.string().regex(K8S_NAMING_PATTERN), S3_CAPTURED_TRAFFIC_SOURCE).default({}).optional()
+        .describe("Map of pre-recorded traffic source names to their S3 archive configurations. " +
+            "Each entry triggers a one-time load from S3 onto a Kafka topic; no live capture proxy is created. " +
+            "Keys must not collide with traffic.proxies keys (replayer.fromCapturedTraffic resolves across both maps)."),
     replayers: z.record(z.string(), REPLAYER_CONFIG)
-        .describe("Map of replayer names to their replay configurations. Each replayer consumes from a proxy's Kafka topic and replays to a target cluster.")
+        .describe("Map of replayer names to their replay configurations. Each replayer consumes from a Kafka topic and replays to a target cluster.")
 }).superRefine((data, ctx) => {
-    for (const [name, rc] of Object.entries(data.replayers)) {
-        if (!(rc.fromProxy in data.proxies)) {
+    const proxies = data.proxies ?? {};
+    const s3Sources = data.s3Sources ?? {};
+    for (const name of Object.keys(s3Sources)) {
+        if (name in proxies) {
             ctx.addIssue({
                 code: z.ZodIssueCode.custom,
-                message: `Replayer '${name}' references unknown proxy '${rc.fromProxy}'. Available: ${Object.keys(data.proxies).join(', ')}`,
-                path: ['replayers', name, 'fromProxy']
+                message: `Name '${name}' is used in both traffic.proxies and traffic.s3Sources. Each captured-traffic source must have a unique name.`,
+                path: ['s3Sources', name]
+            });
+        }
+    }
+    // Two captured-traffic sources cannot land in the same Kafka topic on the
+    // same Kafka cluster. The effective topic is `kafkaTopic ?? sourceName`,
+    // so name collisions across sources, explicit-topic collisions, and any
+    // mix that maps to the same (cluster, topic) tuple all need to be caught.
+    // Without this, two producers would share one topic — any replayer reading
+    // that topic would interleave records from both, with no way to tell them
+    // apart, and `kafkaImport.sh`-style reloads would write into a topic the
+    // proxy is also feeding.
+    type Origin = { kind: 'proxy' | 's3Source'; name: string };
+    const claims = new Map<string, Origin>();
+    const recordClaim = (cluster: string, topic: string, origin: Origin, path: (string | number)[]) => {
+        const key = `${cluster}\0${topic}`;
+        const existing = claims.get(key);
+        if (existing) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `traffic.${origin.kind}s['${origin.name}'] targets kafka cluster '${cluster}' topic '${topic}', which is already claimed by traffic.${existing.kind}s['${existing.name}']. Each (kafka cluster, topic) tuple must have at most one producer.`,
+                path
+            });
+        } else {
+            claims.set(key, origin);
+        }
+    };
+    for (const [name, p] of Object.entries(proxies)) {
+        const cluster = p.kafka ?? "default";
+        const topic = (p.kafkaTopic && p.kafkaTopic !== "") ? p.kafkaTopic : name;
+        recordClaim(cluster, topic, { kind: 'proxy', name }, ['proxies', name, 'kafkaTopic']);
+    }
+    for (const [name, s3] of Object.entries(s3Sources)) {
+        const cluster = s3.kafka ?? "default";
+        const topic = (s3.kafkaTopic && s3.kafkaTopic !== "") ? s3.kafkaTopic : name;
+        recordClaim(cluster, topic, { kind: 's3Source', name }, ['s3Sources', name, 'kafkaTopic']);
+    }
+    for (const [name, rc] of Object.entries(data.replayers)) {
+        const inProxies = rc.fromCapturedTraffic in proxies;
+        const inS3 = rc.fromCapturedTraffic in s3Sources;
+        if (!inProxies && !inS3) {
+            const available = [...Object.keys(proxies), ...Object.keys(s3Sources)];
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Replayer '${name}' references unknown captured-traffic source '${rc.fromCapturedTraffic}'. Available (proxies + s3Sources): ${available.join(', ')}`,
+                path: ['replayers', name, 'fromCapturedTraffic']
             });
         }
     }
@@ -1134,7 +1207,10 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
         }
 
         if (data.traffic) {
-            for (const [proxyName, proxyConfig] of Object.entries(data.traffic.proxies)) {
+            const proxies = data.traffic.proxies ?? {};
+            const s3Sources = data.traffic.s3Sources ?? {};
+            const kafkaClusters = data.kafkaClusterConfiguration ?? {};
+            for (const [proxyName, proxyConfig] of Object.entries(proxies)) {
                 if (!(proxyConfig.source in data.sourceClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
@@ -1143,12 +1219,21 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                     });
                 }
                 const kafkaRef = proxyConfig.kafka;
-                const kafkaClusters = data.kafkaClusterConfiguration ?? {};
                 if (kafkaRef && Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
                         message: `Proxy '${proxyName}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}`,
                         path: ['traffic', 'proxies', proxyName, 'kafka']
+                    });
+                }
+            }
+            for (const [s3Name, s3Config] of Object.entries(s3Sources)) {
+                const kafkaRef = s3Config.kafka;
+                if (kafkaRef && Object.keys(kafkaClusters).length > 0 && !(kafkaRef in kafkaClusters)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        message: `s3Source '${s3Name}' references unknown kafka cluster '${kafkaRef}'. Available: ${Object.keys(kafkaClusters).join(', ')}`,
+                        path: ['traffic', 's3Sources', s3Name, 'kafka']
                     });
                 }
             }

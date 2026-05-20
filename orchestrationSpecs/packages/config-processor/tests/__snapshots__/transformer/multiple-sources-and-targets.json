@@ -263,7 +263,7 @@
   ],
   "trafficReplays": [
     {
-      "fromProxy": "proxyA",
+      "fromCapturedTraffic": "proxyA",
       "kafkaConfig": {
         "enableMSKAuth": false,
         "kafkaConnection": "",
@@ -283,7 +283,7 @@
       }
     },
     {
-      "fromProxy": "proxyB",
+      "fromCapturedTraffic": "proxyB",
       "kafkaConfig": {
         "enableMSKAuth": false,
         "kafkaConnection": "",

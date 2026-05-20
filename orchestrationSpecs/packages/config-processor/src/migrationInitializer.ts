@@ -440,6 +440,43 @@ export class MigrationInitializer {
             ));
         }
 
+        // CapturedTraffic resources from s3TrafficLoaders (no CaptureProxy peer:
+        // the dump is the producer). The CRD is created up-front so the UID
+        // enrichment script can wire it as the kafka topic's owner.
+        for (const loader of (workflows.s3TrafficLoaders ?? []) as Array<{name: string; sourceLabel?: string; kafkaConfig: {label: string}; s3Uri: string}>) {
+            const topicCrName = loader.name + '-topic';
+            const loaderSource = loader.sourceLabel;
+
+            items.push({
+                apiVersion: CRD_API_VERSION,
+                kind: 'CapturedTraffic',
+                metadata: {
+                    name: topicCrName,
+                    labels: {
+                        ...baseResourceLabels,
+                        ...(loaderSource && { [MigrationInitializer.GATE_LABEL_SOURCE]: loaderSource }),
+                        [MigrationInitializer.OUTPUT_LABEL_KAFKA_CLUSTER]: loader.kafkaConfig.label,
+                    }
+                },
+                spec: {
+                    dependsOn: [loader.kafkaConfig.label],
+                    sourceKind: 's3',
+                    loadStarted: true,
+                    s3SourceUri: loader.s3Uri,
+                },
+                status: { phase: 'Initialized', configChecksum: '' }
+            });
+
+            items.push(this.makeApprovalGateResource(
+                ['capturedtraffic', topicCrName, 'vapretry'],
+                gateLabels({
+                    [MigrationInitializer.GATE_LABEL_RESOURCE_KIND]: 'CapturedTraffic',
+                    [MigrationInitializer.GATE_LABEL_RESOURCE_NAME]: topicCrName,
+                    [MigrationInitializer.GATE_LABEL_SOURCE]: loaderSource,
+                })
+            ));
+        }
+
         // DataSnapshot resources from snapshots
         for (const snapshot of (workflows.snapshots ?? []) as SnapshotConfig[]) {
             for (const item of snapshot.createSnapshotConfig as SnapshotItemConfig[]) {
@@ -528,7 +565,7 @@ export class MigrationInitializer {
                 },
                 spec: {
                     dependsOn: [
-                        replay.fromProxy,
+                        replay.fromCapturedTraffic,
                         ...((replay.dependsOnSnapshotMigrations ?? []) as ReplayConfig["dependsOnSnapshotMigrations"]).map(dep =>
                             this.makeCrdName(dep.source, replay.toTarget.label, dep.snapshot, dep.migrationLabel))
                     ]
@@ -597,6 +634,7 @@ export class MigrationInitializer {
     private generateWorkflowUidEnrichmentScript(workflows: WorkflowConfig): string | null {
         const kafkaClusters = (workflows.kafkaClusters ?? []) as KafkaClusterConfig[];
         const proxies = workflows.proxies as ProxyConfig[];
+        const s3TrafficLoaders = (workflows.s3TrafficLoaders ?? []) as Array<{name: string}>;
         const snapshotMigrations = workflows.snapshotMigrations as SnapshotMigrationConfig[];
         const trafficReplays = workflows.trafficReplays as ReplayConfig[];
         const snapshotMigrationResources = snapshotMigrations.map(migration => ({
@@ -625,6 +663,15 @@ export class MigrationInitializer {
                     proxy.name,
                     shellVar('proxy', proxy.name)
                 )),
+            // S3 traffic loaders own a CapturedTraffic CR named <name>-topic
+            // (the same naming convention proxies use); we need the CR's UID
+            // to set ownerReferences on the KafkaTopic / etc. created underneath.
+            ...s3TrafficLoaders.map(loader =>
+                kubectlGetUid(
+                    'capturedtraffics.migrations.opensearch.org',
+                    `${loader.name}-topic`,
+                    shellVar('s3loader', loader.name)
+                )),
             ...snapshotMigrationResources.map(migration =>
                 kubectlGetUid(
                     'snapshotmigrations.migrations.opensearch.org',
@@ -642,6 +689,7 @@ export class MigrationInitializer {
         const uidMapArgs = [
             ...kafkaClusters.map(cluster => `  --arg ${shellVar('kafka', cluster.name)} "$${shellVar('kafka', cluster.name)}"`),
             ...proxies.map(proxy => `  --arg ${shellVar('proxy', proxy.name)} "$${shellVar('proxy', proxy.name)}"`),
+            ...s3TrafficLoaders.map(loader => `  --arg ${shellVar('s3loader', loader.name)} "$${shellVar('s3loader', loader.name)}"`),
             ...snapshotMigrationResources.map(migration =>
                 `  --arg ${shellVar('snapshot_migration', migration.name)} "$${shellVar('snapshot_migration', migration.name)}"`
             ),
@@ -660,6 +708,9 @@ export class MigrationInitializer {
             "    },",
             "    proxies: {",
             mapEntries(proxies, 'proxy'),
+            "    },",
+            "    s3TrafficLoaders: {",
+            mapEntries(s3TrafficLoaders, 's3loader'),
             "    },",
             "    snapshotMigrations: {",
             mapEntries(snapshotMigrationResources, 'snapshot_migration'),
@@ -687,6 +738,7 @@ export class MigrationInitializer {
             "jq --argjson uids \"$uid_map_json\" '",
             "  .kafkaClusters |= ((. // []) | map(. + {resourceUid: $uids.kafkaClusters[.name]}))",
             "  | .proxies |= ((. // []) | map(. + {resourceUid: $uids.proxies[.name]} | .kafkaConfig += {clusterResourceUid: $uids.kafkaClusters[.kafkaConfig.label]}))",
+            "  | .s3TrafficLoaders |= ((. // []) | map(. + {resourceUid: $uids.s3TrafficLoaders[.name]} | .kafkaConfig += {clusterResourceUid: $uids.kafkaClusters[.kafkaConfig.label]}))",
             "  | .snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + \"-\" + .targetConfig.label + \"-\" + .label + \"-\" + .migrationLabel)]}))",
             "  | .trafficReplays |= ((. // []) | map(. + {resourceUid: $uids.trafficReplays[.name]}))",
             "' \"$CONFIG_PATH\" > \"$tmp_file\"",

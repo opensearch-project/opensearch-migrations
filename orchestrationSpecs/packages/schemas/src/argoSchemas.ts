@@ -274,12 +274,34 @@ export const DENORMALIZED_REPLAY_CONFIG = z.object({
     sourceLabel: z.string(),
     dependsOn: z.array(z.string()),
     dependsOnSnapshotMigrations: z.array(ENRICHED_SNAPSHOT_MIGRATION_FILTER),
-    fromProxy: z.string(),
-    fromProxyConfigChecksum: z.string(),
+    // Captured-traffic source name + checksum: works uniformly across live
+    // proxy and S3 loader paths. The replayer uses these to wait on the
+    // CapturedTraffic CR (whose name is `<fromCapturedTraffic>-topic`) and
+    // re-evaluate when the source's checksum changes.
+    fromCapturedTraffic: z.string(),
+    fromCapturedTrafficConfigChecksum: z.string(),
     kafkaClusterName: z.string(),
     kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
     replayerConfig: ARGO_REPLAYER_OPTIONS,
     toTarget: NAMED_TARGET_CLUSTER_CONFIG,
+    configChecksum: z.string(),
+    resourceUid: z.string(),
+});
+
+// One-time S3 → Kafka topic load. Created from a traffic.s3Sources entry.
+// Workflow runs the loader exactly once per CapturedTraffic resource;
+// re-runs are blocked by the resource's lifecycle (loadStarted gate +
+// lock-on-complete VAP).
+export const DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG = z.object({
+    name: z.string(),
+    sourceLabel: z.string(),
+    s3Uri: z.string(),
+    awsRegion: z.string(),
+    endpoint: z.string().default("").optional(),
+    kafkaClusterName: z.string(),
+    kafkaConfig: NAMED_KAFKA_CLIENT_CONFIG,
+    topicConfigChecksum: z.string(),
+    checksumForReplayer: z.string(),
     configChecksum: z.string(),
     resourceUid: z.string(),
 });
@@ -295,6 +317,7 @@ function makeResourceUidOptional<
 export const ARGO_MIGRATION_CONFIG = z.object({
     kafkaClusters: z.array(NAMED_KAFKA_CLUSTER_CONFIG).min(1).optional(),
     proxies: z.array(DENORMALIZED_PROXY_CONFIG).default([]),
+    s3TrafficLoaders: z.array(DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG).default([]),
     snapshots: z.array(DENORMALIZED_CREATE_SNAPSHOTS_CONFIG).default([]),
     snapshotMigrations: z.array(SNAPSHOT_MIGRATION_CONFIG).default([]),
     trafficReplays: z.array(DENORMALIZED_REPLAY_CONFIG).default([]),
@@ -307,6 +330,9 @@ function makePreEnrichMigrationConfigSchema() {
         ).min(1).optional(),
         proxies: z.array(
             makeResourceUidOptional(DENORMALIZED_PROXY_CONFIG)
+        ).default([]),
+        s3TrafficLoaders: z.array(
+            makeResourceUidOptional(DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG)
         ).default([]),
         snapshotMigrations: z.array(
             makeResourceUidOptional(SNAPSHOT_MIGRATION_CONFIG)

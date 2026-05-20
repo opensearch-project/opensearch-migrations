@@ -69,7 +69,7 @@ describe("unifiedSchemaValidator", () => {
             },
             replayers: {
                 replay1: {
-                    fromProxy: "proxy1",
+                    fromCapturedTraffic: "proxy1",
                     toTarget: "target1"
                 }
             }

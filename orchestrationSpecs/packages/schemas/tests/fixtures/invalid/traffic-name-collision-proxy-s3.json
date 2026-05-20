@@ -13,18 +13,24 @@
   "snapshotMigrationConfigs": [],
   "traffic": {
     "proxies": {
-      "proxy1": {
+      "shared": {
         "source": "source",
-        "listenPort": 9201,
         "proxyConfig": {
           "listenPort": 9201
         }
       }
     },
+    "s3Sources": {
+      "shared": {
+        "s3Uri": "s3://byo-traffic/dump.proto.gz",
+        "awsRegion": "us-east-2",
+        "sourceLabel": "source"
+      }
+    },
     "replayers": {
       "replayer1": {
-        "fromCapturedTraffic": "proxy1",
-        "toTarget": "does-not-exist"
+        "fromCapturedTraffic": "shared",
+        "toTarget": "target"
       }
     }
   }

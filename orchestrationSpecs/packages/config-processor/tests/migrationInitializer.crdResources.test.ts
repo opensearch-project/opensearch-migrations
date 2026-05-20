@@ -66,7 +66,7 @@ describe('migration initializer CRD resource generation', () => {
                 },
                 replayers: {
                     "target-replay": {
-                        fromProxy: "source-proxy",
+                        fromCapturedTraffic: "source-proxy",
                         toTarget: "target"
                     }
                 }

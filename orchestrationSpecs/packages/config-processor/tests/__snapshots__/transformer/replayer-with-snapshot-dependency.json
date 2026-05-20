@@ -132,7 +132,7 @@
   ],
   "trafficReplays": [
     {
-      "fromProxy": "proxy1",
+      "fromCapturedTraffic": "proxy1",
       "kafkaConfig": {
         "enableMSKAuth": false,
         "kafkaConnection": "",

@@ -184,7 +184,7 @@
     "replayers": {
         "REPLAYER": {
 #            "skipApprovals": false,
-            "fromProxy": "",  # string
+            "fromCapturedTraffic": "",  # string
             "toTarget": "",  # string
 #            "dependsOnSnapshotMigrations": [
 #                {

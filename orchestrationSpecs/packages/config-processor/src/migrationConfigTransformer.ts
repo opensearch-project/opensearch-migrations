@@ -256,9 +256,21 @@ function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["t
         normalizedProxies[key] = normalized;
     }
 
+    const normalizedS3Sources: NonNullable<InputConfig["traffic"]>["s3Sources"] = {};
+    for (const [key, s3] of Object.entries(traffic.s3Sources ?? {})) {
+        // Same sentinel-placeholder strip as proxies — empty-string kafkaTopic
+        // means "default to the source name", and the unified schema rejects
+        // empty strings for that field.
+        const normalized = s3.kafkaTopic === ""
+            ? (({kafkaTopic, ...rest}) => rest)(s3)
+            : s3;
+        normalizedS3Sources[key] = normalized;
+    }
+
     return {
         ...traffic,
         proxies: normalizedProxies,
+        s3Sources: normalizedS3Sources,
     };
 }
 
@@ -277,7 +289,10 @@ export function normalizeUserConfig(userConfig: InputConfig): NormalizedUserConf
 }
 
 /** Resolve kafkaClusterConfiguration, auto-injecting autoCreate entries only when no explicit kafka config was provided. */
-function resolveKafkaClusters(userConfig: { kafkaClusterConfiguration?: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>, traffic?: { proxies?: Record<string, { kafka?: string }> } }) {
+function resolveKafkaClusters(userConfig: {
+    kafkaClusterConfiguration?: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>,
+    traffic?: { proxies?: Record<string, { kafka?: string }>, s3Sources?: Record<string, { kafka?: string }> }
+}) {
     const explicit = userConfig.kafkaClusterConfiguration ?? {};
     if (Object.keys(explicit).length > 0) {
         return explicit;
@@ -285,6 +300,12 @@ function resolveKafkaClusters(userConfig: { kafkaClusterConfiguration?: Record<s
     const clusters: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>> = {};
     for (const proxy of Object.values(userConfig.traffic?.proxies || {})) {
         const key = proxy.kafka ?? "default";
+        if (!(key in clusters)) {
+            clusters[key] = DEFAULT_AUTO_CREATE_CONFIG;
+        }
+    }
+    for (const s3 of Object.values(userConfig.traffic?.s3Sources || {})) {
+        const key = s3.kafka ?? "default";
         if (!(key in clusters)) {
             clusters[key] = DEFAULT_AUTO_CREATE_CONFIG;
         }
@@ -391,6 +412,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     private async transformSync(userConfig: NormalizedUserConfig): Promise<OutputConfig> {
         const kafkaClusters = this.buildKafkaClusters(userConfig);
         const proxies = this.buildProxies(userConfig);
+        const s3TrafficLoaders = this.buildS3TrafficLoaders(userConfig);
         const snapshots = this.buildSnapshots(userConfig);
         const snapshotMigrations = await this.buildSnapshotMigrations(userConfig);
         const trafficReplays = this.buildTrafficReplays(userConfig);
@@ -413,6 +435,23 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const proxyChecksums = new Map(proxiesWithChecksums.map(p => [p.name, p.configChecksum]));
         const proxyChecksumForSnapshot = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForSnapshot]));
         const proxyChecksumForReplayer = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForReplayer]));
+
+        const s3LoadersWithChecksums = s3TrafficLoaders.map(s => {
+            const kafkaCs = kafkaChecksums.get(s.kafkaConfig.label) ?? '';
+            // Replayer & topic checksums are derived from the loader's identity:
+            // s3Uri + topic + kafka cluster. Editing the URI would force a reset
+            // of the CapturedTraffic resource (VAP-protected); the resulting
+            // checksum change is what flags the replayer to re-evaluate.
+            const checksum = cs(s.s3Uri, s.kafkaConfig.kafkaTopic, kafkaCs);
+            return {
+                ...s,
+                kafkaConfig: { ...s.kafkaConfig, configChecksum: kafkaCs },
+                topicConfigChecksum: cs(s.kafkaConfig.kafkaTopic, s.kafkaConfig.topicSpecOverrides, kafkaCs),
+                checksumForReplayer: checksum,
+                configChecksum: checksum,
+            };
+        });
+        const s3LoaderChecksumForReplayer = new Map(s3LoadersWithChecksums.map(s => [s.name, s.checksumForReplayer]));
 
         const snapshotsWithChecksums = snapshots.map(s => ({
             ...s,
@@ -452,37 +491,45 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             };
         });
 
-        const replaysWithChecksums = trafficReplays.map(r => ({
-            ...r,
-            dependsOn: [
-                r.fromProxy,
-                ...((r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
+        const replaysWithChecksums = trafficReplays.map(r => {
+            // Resolve the upstream checksum from either the proxy or the s3 loader.
+            // (One and only one will exist; super-refine guarantees no name collisions.)
+            const fromCapturedTrafficChecksum =
+                proxyChecksumForReplayer.get(r.fromCapturedTraffic) ??
+                s3LoaderChecksumForReplayer.get(r.fromCapturedTraffic) ??
+                '';
+            return ({
+                ...r,
+                dependsOn: [
+                    r.fromCapturedTraffic,
+                    ...((r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
+                        migrationsWithChecksums
+                            .filter(m =>
+                                m.sourceLabel === dep.source &&
+                                m.targetConfig.label === r.toTarget.label &&
+                                m.label === dep.snapshot
+                            )
+                            .map(m => [m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel].join('-'))
+                    ))
+                ],
+                kafkaConfig: { ...r.kafkaConfig, configChecksum: kafkaChecksums.get(r.kafkaConfig.label) ?? '' },
+                fromCapturedTrafficConfigChecksum: fromCapturedTrafficChecksum,
+                configChecksum: cs(r.replayerConfig, r.toTarget, fromCapturedTrafficChecksum),
+                dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
                     migrationsWithChecksums
                         .filter(m =>
                             m.sourceLabel === dep.source &&
                             m.targetConfig.label === r.toTarget.label &&
                             m.label === dep.snapshot
                         )
-                        .map(m => [m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel].join('-'))
-                ))
-            ],
-            kafkaConfig: { ...r.kafkaConfig, configChecksum: kafkaChecksums.get(r.kafkaConfig.label) ?? '' },
-            fromProxyConfigChecksum: proxyChecksumForReplayer.get(r.fromProxy) ?? '',
-            configChecksum: cs(r.replayerConfig, r.toTarget, proxyChecksumForReplayer.get(r.fromProxy)),
-            dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
-                migrationsWithChecksums
-                    .filter(m =>
-                        m.sourceLabel === dep.source &&
-                        m.targetConfig.label === r.toTarget.label &&
-                        m.label === dep.snapshot
-                    )
-                    .map(m => ({
-                        ...dep,
-                        migrationLabel: m.migrationLabel,
-                        configChecksum: m.checksumForReplayer,
-                    }))
-            ),
-        }));
+                        .map(m => ({
+                            ...dep,
+                            migrationLabel: m.migrationLabel,
+                            configChecksum: m.checksumForReplayer,
+                        }))
+                ),
+            });
+        });
 
         const kafkasWithChecksums = kafkaClusters.map(k => ({
             ...k,
@@ -492,6 +539,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const output = {
             ...(kafkasWithChecksums.length > 0 ? { kafkaClusters: kafkasWithChecksums } : {}),
             ...(proxiesWithChecksums.length > 0 ? { proxies: proxiesWithChecksums } : {}),
+            ...(s3LoadersWithChecksums.length > 0 ? { s3TrafficLoaders: s3LoadersWithChecksums } : {}),
             ...(snapshotsWithChecksums.length > 0 ? { snapshots: snapshotsWithChecksums } : {}),
             ...(migrationsWithChecksums.length > 0 ? { snapshotMigrations: migrationsWithChecksums } : {}),
             ...(replaysWithChecksums.length > 0 ? { trafficReplays: replaysWithChecksums } : {})
@@ -505,15 +553,20 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         }
     }
 
-    /** Collect auto-created kafka clusters with their aggregated topics from proxies. */
+    /** Collect auto-created kafka clusters with their aggregated topics from proxies and s3Sources. */
     private buildKafkaClusters(userConfig: NormalizedUserConfig) {
         const kafkaClusters = resolveKafkaClusters(userConfig);
-        // Aggregate topics per kafka cluster from proxies
+        // Aggregate topics per kafka cluster from proxies AND s3Sources
         const topicsByCluster = new Map<string, Set<string>>();
         for (const [proxyName, proxy] of Object.entries(userConfig.traffic?.proxies || {})) {
             const clusterKey = proxy.kafka ?? "default";
             if (!topicsByCluster.has(clusterKey)) topicsByCluster.set(clusterKey, new Set());
             topicsByCluster.get(clusterKey)!.add(proxy.kafkaTopic || proxyName);
+        }
+        for (const [s3Name, s3] of Object.entries(userConfig.traffic?.s3Sources || {})) {
+            const clusterKey = s3.kafka ?? "default";
+            if (!topicsByCluster.has(clusterKey)) topicsByCluster.set(clusterKey, new Set());
+            topicsByCluster.get(clusterKey)!.add(s3.kafkaTopic || s3Name);
         }
 
         return Object.entries(kafkaClusters)
@@ -708,15 +761,21 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         return results;
     }
 
-    /** Build traffic replay configs by resolving proxy → kafka chain. */
+    /** Build traffic replay configs by resolving captured-traffic source → kafka chain.
+     * The source can be either a live capture proxy or a one-time S3 load — both
+     * appear identical to the replayer (kafka cluster + topic). */
     private buildTrafficReplays(userConfig: NormalizedUserConfig) {
         const kafkaClusters = resolveKafkaClusters(userConfig);
-        const proxies = userConfig.traffic?.proxies;
+        const proxies = userConfig.traffic?.proxies ?? {};
+        const s3Sources = userConfig.traffic?.s3Sources ?? {};
 
         return Object.entries(userConfig.traffic?.replayers || {}).map(([name, replayer]) => {
-            const proxy = proxies?.[replayer.fromProxy];
-            if (!proxy) {
-                throw new Error(`Replayer references unknown proxy '${replayer.fromProxy}'`);
+            const sourceName = replayer.fromCapturedTraffic;
+            const proxy = proxies[sourceName];
+            const s3Source = s3Sources[sourceName];
+
+            if (!proxy && !s3Source) {
+                throw new Error(`Replayer references unknown captured-traffic source '${sourceName}'`);
             }
 
             const targetCluster = userConfig.targetClusters[replayer.toTarget];
@@ -724,18 +783,43 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 throw new Error(`Replayer references unknown target cluster '${replayer.toTarget}'`);
             }
 
-            const topic = proxy.kafkaTopic || replayer.fromProxy;
+            // proxy and s3Source share the same shape for what the replayer cares about:
+            // a kafka cluster reference, a topic name, and a sourceLabel.
+            const kafkaCluster = (proxy?.kafka ?? s3Source?.kafka) ?? "default";
+            const topicOverride = proxy?.kafkaTopic ?? s3Source?.kafkaTopic ?? "";
+            const topic = topicOverride || sourceName;
+            const sourceLabel = proxy?.source ?? s3Source!.sourceLabel;
+
             const replayerConfig = ARGO_REPLAYER_OPTIONS.parse(replayer.replayerConfig ?? {});
 
             return {
-                name: [replayer.fromProxy, replayer.toTarget, name].join('-'),
-                sourceLabel: proxy.source,
-                fromProxy: replayer.fromProxy,
-                kafkaClusterName: proxy.kafka ?? "default",
-                kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
+                name: [sourceName, replayer.toTarget, name].join('-'),
+                sourceLabel,
+                fromCapturedTraffic: sourceName,
+                kafkaClusterName: kafkaCluster,
+                kafkaConfig: buildKafkaClientConfig(kafkaCluster, kafkaClusters, topic),
                 toTarget: { ...targetCluster, label: replayer.toTarget },
                 replayerConfig,
                 ...(replayer.dependsOnSnapshotMigrations ? { dependsOnSnapshotMigrations: replayer.dependsOnSnapshotMigrations } : {}),
+            };
+        });
+    }
+
+    /** Build one denormalized loader entry per traffic.s3Sources item. */
+    private buildS3TrafficLoaders(userConfig: NormalizedUserConfig) {
+        const kafkaClusters = resolveKafkaClusters(userConfig);
+        const s3Sources = userConfig.traffic?.s3Sources ?? {};
+        return Object.entries(s3Sources).map(([name, s3]) => {
+            const kafkaCluster = s3.kafka ?? "default";
+            const topic = s3.kafkaTopic || name;
+            return {
+                name,
+                sourceLabel: s3.sourceLabel,
+                s3Uri: s3.s3Uri,
+                awsRegion: s3.awsRegion,
+                ...(s3.endpoint ? { endpoint: s3.endpoint } : {}),
+                kafkaClusterName: kafkaCluster,
+                kafkaConfig: buildKafkaClientConfig(kafkaCluster, kafkaClusters, topic),
             };
         });
     }

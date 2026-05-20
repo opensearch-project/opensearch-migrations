@@ -1,0 +1,401 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "WorkflowTemplate",
+  "metadata": {
+    "name": "s3-traffic-loader"
+  },
+  "spec": {
+    "serviceAccountName": "argo-workflow-executor",
+    "parallelism": 100,
+    "arguments": {
+      "parameters": [
+        {
+          "name": "s3SnapshotConfigMap",
+          "value": "s3-snapshot-config"
+        },
+        {
+          "name": "imageConfigMapName",
+          "value": "migration-image-config"
+        },
+        {
+          "name": "approvalConfigMapName",
+          "value": "approval-config"
+        }
+      ]
+    },
+    "templates": [
+      {
+        "name": "loads3intotopic",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "topicCrName"
+            },
+            {
+              "name": "topicName"
+            },
+            {
+              "name": "brokers"
+            },
+            {
+              "name": "s3Uri"
+            },
+            {
+              "name": "awsRegion"
+            },
+            {
+              "name": "endpoint",
+              "value": ""
+            },
+            {
+              "name": "kafkaAuthType",
+              "value": "none"
+            },
+            {
+              "name": "loadCompletionChecksum"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "container": {
+          "env": [
+            {
+              "name": "AWS_SHARED_CREDENTIALS_FILE",
+              "value": "{{=((!(0 == len(inputs.parameters.endpoint))) ? ('/config/credentials/configuration') : (''))}}"
+            },
+            {
+              "name": "AWS_REGION",
+              "value": "{{inputs.parameters.awsRegion}}"
+            },
+            {
+              "name": "AWS_DEFAULT_REGION",
+              "value": "{{inputs.parameters.awsRegion}}"
+            },
+            {
+              "name": "S3_URI",
+              "value": "{{inputs.parameters.s3Uri}}"
+            },
+            {
+              "name": "S3_ENDPOINT",
+              "value": "{{inputs.parameters.endpoint}}"
+            },
+            {
+              "name": "BROKERS",
+              "value": "{{inputs.parameters.brokers}}"
+            },
+            {
+              "name": "TOPIC",
+              "value": "{{inputs.parameters.topicName}}"
+            },
+            {
+              "name": "CT_NAME",
+              "value": "{{inputs.parameters.topicCrName}}"
+            },
+            {
+              "name": "LOAD_CHECKSUM",
+              "value": "{{inputs.parameters.loadCompletionChecksum}}"
+            },
+            {
+              "name": "KAFKA_AUTH_TYPE",
+              "value": "{{inputs.parameters.kafkaAuthType}}"
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "command": [
+            "/bin/bash",
+            "-lc"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            }
+          },
+          "args": [
+            "\nset -euo pipefail\n\n# Optional LocalStack endpoint override for kafkaImport.sh / aws CLI.\nS3_ENDPOINT_FLAG=\"\"\nif [[ -n \"$S3_ENDPOINT\" ]]; then\n    S3_ENDPOINT_FLAG=\"--endpoint-url $S3_ENDPOINT\"\nfi\n\nSTART_TS=$(date -u +%FT%TZ)\n\n# kafkaImport.sh streams S3 -> gunzip -> kafkaUtils --stdin into the topic.\nMIGRATION_KAFKA_BROKER_ENDPOINTS=\"$BROKERS\" \\\n  /root/kafka-tools/kafkaImport.sh \\\n    --topic \"$TOPIC\" \\\n    --s3-uri \"$S3_URI\" \\\n    ${S3_ENDPOINT:+--endpoint-url \"$S3_ENDPOINT\"} \\\n    ${KAFKA_AUTH_TYPE:+--auth-type \"$KAFKA_AUTH_TYPE\"}\n\nEND_TS=$(date -u +%FT%TZ)\n\n# On clean exit, patch CapturedTraffic to Ready with loadCompleted=true and\n# observability metadata. The status patch happens here (in the loader\n# container) rather than as a separate Argo step so a hard kill mid-load\n# leaves the CR in loadStarted=true / loadCompleted=absent state, which the\n# next workflow run sees and rejects (forcing a manual reset).\nkubectl patch capturedtraffic \"$CT_NAME\" \\\n  --type merge --subresource=status -p '{\n    \"status\": {\n      \"phase\": \"Ready\",\n      \"loadCompleted\": true,\n      \"configChecksum\": \"'\"$LOAD_CHECKSUM\"'\",\n      \"checksumForReplayer\": \"'\"$LOAD_CHECKSUM\"'\",\n      \"loadStats\": {\n        \"sourceUri\": \"'\"$S3_URI\"'\",\n        \"completedAt\": \"'\"$END_TS\"'\"\n      }\n    }\n  }'\n"
+          ],
+          "volumeMounts": [
+            {
+              "name": "test-creds",
+              "mountPath": "/config/credentials",
+              "readOnly": true
+            }
+          ]
+        },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "volumes": [
+          {
+            "name": "test-creds",
+            "configMap": {
+              "name": "localstack-test-creds",
+              "optional": true
+            }
+          }
+        ],
+        "retryStrategy": {
+          "limit": "3",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "reconcilecapturedtrafficandload",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "loaderConfig"
+            },
+            {
+              "name": "kafkaClusterName"
+            },
+            {
+              "name": "kafkaTopicName"
+            },
+            {
+              "name": "topicCrName"
+            },
+            {
+              "name": "configChecksum"
+            },
+            {
+              "name": "topicConfigChecksum"
+            },
+            {
+              "name": "checksumForSnapshot"
+            },
+            {
+              "name": "checksumForReplayer"
+            },
+            {
+              "name": "topicPartitions"
+            },
+            {
+              "name": "topicReplicas"
+            },
+            {
+              "name": "topicConfig"
+            },
+            {
+              "name": "kafkaClusterOwnerUid"
+            },
+            {
+              "name": "sourceK8sLabel"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "reconcilecapturedtrafficresource",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "topicCrName",
+                    "value": "{{inputs.parameters.topicCrName}}"
+                  },
+                  {
+                    "name": "kafkaClusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "kafkaTopicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{inputs.parameters.sourceK8sLabel}}"
+                  },
+                  {
+                    "name": "partitions",
+                    "value": "{{inputs.parameters.topicPartitions}}"
+                  },
+                  {
+                    "name": "replicas",
+                    "value": "{{inputs.parameters.topicReplicas}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{inputs.parameters.topicConfig}}"
+                  },
+                  {
+                    "name": "sourceKind",
+                    "value": "s3"
+                  },
+                  {
+                    "name": "s3SourceUri",
+                    "value": "{{=fromJSON(inputs.parameters.loaderConfig)['s3Uri']}}"
+                  },
+                  {
+                    "name": "retryGateName",
+                    "value": "{{='capturedtraffic.'+inputs.parameters.topicCrName+'.vapretry'}}"
+                  },
+                  {
+                    "name": "retryGroupName_view",
+                    "value": "{{='CapturedTraffic: '+inputs.parameters.topicCrName}}"
+                  }
+                ]
+              },
+              "name": "reconcileCapturedTrafficResource"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforkafkacluster",
+                "name": "resource-management"
+              },
+              "when": "{{=true && !(steps.reconcileCapturedTrafficResource.outputs.parameters.currentConfigChecksum == inputs.parameters.checksumForReplayer) && sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.loaderConfig))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  }
+                ]
+              },
+              "name": "waitForKafkaCluster"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "createkafkatopic",
+                "name": "setup-kafka"
+              },
+              "when": "{{=true && !(steps.reconcileCapturedTrafficResource.outputs.parameters.currentConfigChecksum == inputs.parameters.checksumForReplayer) && sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.loaderConfig))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "clusterName",
+                    "value": "{{inputs.parameters.kafkaClusterName}}"
+                  },
+                  {
+                    "name": "topicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  },
+                  {
+                    "name": "workflowUid",
+                    "value": "{{workflow.uid}}"
+                  },
+                  {
+                    "name": "ownerUid",
+                    "value": "{{inputs.parameters.kafkaClusterOwnerUid}}"
+                  },
+                  {
+                    "name": "sourceLabel",
+                    "value": "{{inputs.parameters.sourceK8sLabel}}"
+                  },
+                  {
+                    "name": "partitions",
+                    "value": "{{inputs.parameters.topicPartitions}}"
+                  },
+                  {
+                    "name": "replicas",
+                    "value": "{{inputs.parameters.topicReplicas}}"
+                  },
+                  {
+                    "name": "topicConfig",
+                    "value": "{{inputs.parameters.topicConfig}}"
+                  }
+                ]
+              },
+              "name": "createKafkaTopic"
+            }
+          ],
+          [
+            {
+              "template": "loads3intotopic",
+              "when": "{{=true && !(steps.reconcileCapturedTrafficResource.outputs.parameters.currentConfigChecksum == inputs.parameters.checksumForReplayer)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "topicCrName",
+                    "value": "{{inputs.parameters.topicCrName}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "topicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  },
+                  {
+                    "name": "brokers",
+                    "value": "{{=sprig.dig('kafkaConfig', 'kafkaConnection', '', fromJSON(inputs.parameters.loaderConfig))}}"
+                  },
+                  {
+                    "name": "s3Uri",
+                    "value": "{{=fromJSON(inputs.parameters.loaderConfig)['s3Uri']}}"
+                  },
+                  {
+                    "name": "awsRegion",
+                    "value": "{{=fromJSON(inputs.parameters.loaderConfig)['awsRegion']}}"
+                  },
+                  {
+                    "name": "endpoint",
+                    "value": "{{=sprig.dig('endpoint', '', fromJSON(inputs.parameters.loaderConfig))}}"
+                  },
+                  {
+                    "name": "kafkaAuthType",
+                    "value": "{{=sprig.dig('kafkaConfig', 'authType', 'none', fromJSON(inputs.parameters.loaderConfig))}}"
+                  },
+                  {
+                    "name": "loadCompletionChecksum",
+                    "value": "{{inputs.parameters.checksumForReplayer}}"
+                  }
+                ]
+              },
+              "name": "loadS3IntoTopic"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      }
+    ]
+  }
+}

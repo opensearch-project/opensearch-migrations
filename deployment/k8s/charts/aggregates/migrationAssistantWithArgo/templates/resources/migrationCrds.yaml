@@ -42,6 +42,20 @@ spec:
                 topicConfig:
                   type: object
                   x-kubernetes-preserve-unknown-fields: true
+                # Discriminator for how traffic enters the topic.
+                # "proxy": records produced by a live CaptureProxy.
+                # "s3":    records loaded once from an S3 archive (kafkaExport.sh format).
+                sourceKind:
+                  type: string
+                  enum: [proxy, s3]
+                # Set true once the workflow has committed to running a writer
+                # (proxy deploy or s3 loader). Used to detect a started-but-not-completed
+                # state on workflow restart — recovery requires deleting this CR.
+                loadStarted:
+                  type: boolean
+                # Only meaningful when sourceKind == "s3".
+                s3SourceUri:
+                  type: string
             status:
               type: object
               properties:
@@ -54,6 +68,24 @@ spec:
                   type: string
                 checksumForReplayer:
                   type: string
+                # True once the writer (proxy: deployment ready; s3: loader exited 0)
+                # has finished its initial fill of the topic. Replayer phase=Ready
+                # gating depends on this — for s3 it means the dump is fully on the
+                # topic; for proxy it means the proxy is serving traffic.
+                loadCompleted:
+                  type: boolean
+                # Observability for the s3 path.
+                loadStats:
+                  type: object
+                  properties:
+                    records:
+                      type: integer
+                    sourceUri:
+                      type: string
+                    completedAt:
+                      type: string
+                    durationMs:
+                      type: integer
               x-kubernetes-preserve-unknown-fields: true
 ---
 # CaptureProxy: represents a capture proxy deployment and its configuration.

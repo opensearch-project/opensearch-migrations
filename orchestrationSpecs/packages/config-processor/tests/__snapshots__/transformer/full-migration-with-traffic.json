@@ -156,7 +156,7 @@
   ],
   "trafficReplays": [
     {
-      "fromProxy": "captureProxy",
+      "fromCapturedTraffic": "captureProxy",
       "kafkaConfig": {
         "enableMSKAuth": false,
         "kafkaConnection": "",

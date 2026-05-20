@@ -60,3 +60,36 @@ More options for different types of reset [here](https://docs.cloudera.com/runti
 ```shell
 ./kafka-consumer-groups.sh --bootstrap-server "$MIGRATION_KAFKA_BROKER_ENDPOINTS" --timeout 100000 --reset-offsets --to-latest --topic logging-traffic-topic --group logging-group-default --execute
 ```
+
+### Importing Captured Traffic from S3
+
+Streams a `kafkaExport.sh`-produced archive (gzipped, base64-encoded TrafficStream
+records) onto a Kafka topic. The export and import are symmetric — every record
+loaded matches the bytes of the original capture, so the replayer reads it the
+same way as live-captured traffic.
+
+The topic must already exist (the import does not create it).
+
+Using the `kafkaImport.sh` helper (recommended — handles MSK/EKS auth detection):
+```shell
+/root/kafka-tools/kafkaImport.sh \
+    --topic "$TOPIC" \
+    --s3-uri "s3://your-bucket/kafka_export_from_migration_console_<ts>.proto.gz"
+```
+
+Or the underlying recipe directly:
+```shell
+aws s3 cp "$S3_URI" - \
+  | gunzip \
+  | /root/kafkaUtils/bin/kafkaUtils \
+      --stdin \
+      --topicName "$TOPIC" \
+      --kafkaBrokers "$MIGRATION_KAFKA_BROKER_ENDPOINTS"
+```
+
+Importing from a local file instead of S3:
+```shell
+/root/kafka-tools/kafkaImport.sh \
+    --topic "$TOPIC" \
+    --input-file /shared-logs-output/kafka_export_from_migration_console_<ts>.proto.gz
+```
