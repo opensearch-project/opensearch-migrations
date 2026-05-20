@@ -5,6 +5,33 @@ on:
     branches:
       - main
       - jenkins-trigger-test-*
+    # ─── Path-based test filtering ───────────────────────────────────────
+    # PRs/pushes that ONLY touch these paths skip all tests (Jenkins + Gradle).
+    # These are files that cannot affect test outcomes:
+    #   - **/*.md: documentation (never compiled or executed)
+    #   - AIAdvisor/**: standalone Go tool, separate build system, not in Gradle
+    #   - ShimLayer/**: isolated shim, not in main Gradle build
+    #   - Hidden files: IDE/linter/tooling configs (.claude, .idea, .vscode, etc.)
+    #
+    # To add a new skip path:
+    #   1. Verify it's not in settings.gradle or referenced by any test
+    #   2. Add to BOTH paths-ignore (push trigger) AND the case statement
+    #      in the detect-changes job (they handle different GitHub events)
+    #   3. Update this comment
+    #
+    # Safe default: if detect-changes fails, all tests run (should_run != 'false').
+    # ─────────────────────────────────────────────────────────────────────
+    paths-ignore:
+      - '**/*.md'
+      - 'AIAdvisor/**'
+      - 'ShimLayer/**'
+      - '.claude/**'
+      - '.idea/**'
+      - '.vscode/**'
+      - '.whitesource'
+      - '.codecov.yml'
+      - '.flake8'
+      - '.gitignore'
   pull_request_target:
     types: [opened, synchronize, reopened, labeled]
   merge_group:
@@ -16,6 +43,56 @@ permissions:
   contents: read # to fetch code (actions/checkout)
 
 jobs:
+  detect-changes:
+    runs-on: ubuntu-22.04
+    outputs:
+      should_run: ${{ github.event_name == 'push' || steps.check.outputs.should_run != 'false' }}
+    steps:
+      - name: Check for relevant changes
+        id: check
+        if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Use GitHub API to get changed files — no full clone needed.
+          if [ "${{ github.event_name }}" = "merge_group" ]; then
+            CHANGED=$(gh api repos/${{ github.repository }}/compare/${{ github.event.merge_group.base_sha }}...${{ github.event.merge_group.head_sha }} \
+              --jq '.files[].filename' 2>/dev/null || echo "")
+          else
+            CHANGED=$(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files \
+              --paginate --jq '.[].filename' 2>/dev/null || echo "")
+          fi
+
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          if [ -z "$CHANGED" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "Could not determine changed files, defaulting to run all tests"
+            exit 0
+          fi
+
+          # Check if ALL changed files are non-functional (docs, AI, hidden files, shim)
+          SKIP_ALL=true
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            case "$file" in
+              *.md) ;;
+              AIAdvisor/*) ;;
+              ShimLayer/*) ;;
+              .claude/*|.idea/*|.vscode/*|.whitesource|.codecov.yml|.flake8|.gitignore) ;;
+              *) SKIP_ALL=false; break ;;
+            esac
+          done <<< "$CHANGED"
+
+          if [ "$SKIP_ALL" = "true" ]; then
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "All changes are in skip-paths (docs/AI/shim/hidden), skipping all tests"
+          else
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "Functional changes detected, running all tests"
+          fi
+
   get-require-approval:
     # Skip all jenkins jobs if not on main repo
     if: ${{ github.repository == 'opensearch-project/opensearch-migrations' }}
@@ -25,7 +102,8 @@ jobs:
     uses: ./.github/workflows/sanitize-repo-details.yml
 
   full-es68-e2e-aws-test:
-    needs: [get-require-approval, sanitize-input]
+    needs: [get-require-approval, sanitize-input, detect-changes]
+    if: needs.detect-changes.outputs.should_run == 'true'
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
@@ -45,7 +123,8 @@ jobs:
           job_timeout_minutes: "180"
 
   elasticsearch-5x-k8s-local-test:
-    needs: [get-require-approval, sanitize-input]
+    needs: [get-require-approval, sanitize-input, detect-changes]
+    if: needs.detect-changes.outputs.should_run == 'true'
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
@@ -65,7 +144,8 @@ jobs:
           job_timeout_minutes: "120"
 
   elasticsearch-8x-k8s-local-test:
-    needs: [get-require-approval, sanitize-input]
+    needs: [get-require-approval, sanitize-input, detect-changes]
+    if: needs.detect-changes.outputs.should_run == 'true'
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
@@ -85,7 +165,8 @@ jobs:
           job_timeout_minutes: "120"
 
   solr-8x-k8s-local-test:
-    needs: [get-require-approval, sanitize-input]
+    needs: [get-require-approval, sanitize-input, detect-changes]
+    if: needs.detect-changes.outputs.should_run == 'true'
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
@@ -105,7 +186,8 @@ jobs:
           job_timeout_minutes: "120"
 
   docker-compose-e2e-test:
-    needs: [get-require-approval, sanitize-input]
+    needs: [get-require-approval, sanitize-input, detect-changes]
+    if: needs.detect-changes.outputs.should_run == 'true'
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     concurrency:
@@ -126,9 +208,10 @@ jobs:
 
   eks-integ-test:
     if: |
+      needs.detect-changes.outputs.should_run == 'true' && (
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-eks-tests')
-    needs: [get-require-approval, sanitize-input]
+      contains(github.event.pull_request.labels.*.name, 'run-eks-tests'))
+    needs: [get-require-approval, sanitize-input, detect-changes]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 120
@@ -150,9 +233,10 @@ jobs:
 
   eks-aoss-search-integ-test:
     if: |
+      needs.detect-changes.outputs.should_run == 'true' && (
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-aoss-tests')
-    needs: [get-require-approval, sanitize-input]
+      contains(github.event.pull_request.labels.*.name, 'run-aoss-tests'))
+    needs: [get-require-approval, sanitize-input, detect-changes]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 180
@@ -174,9 +258,10 @@ jobs:
 
   eks-aoss-timeseries-integ-test:
     if: |
+      needs.detect-changes.outputs.should_run == 'true' && (
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-aoss-tests')
-    needs: [get-require-approval, sanitize-input]
+      contains(github.event.pull_request.labels.*.name, 'run-aoss-tests'))
+    needs: [get-require-approval, sanitize-input, detect-changes]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 180
@@ -198,9 +283,10 @@ jobs:
 
   eks-aoss-vector-integ-test:
     if: |
+      needs.detect-changes.outputs.should_run == 'true' && (
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-aoss-tests')
-    needs: [get-require-approval, sanitize-input]
+      contains(github.event.pull_request.labels.*.name, 'run-aoss-tests'))
+    needs: [get-require-approval, sanitize-input, detect-changes]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 180
@@ -222,9 +308,10 @@ jobs:
 
   eks-byos-integ-test:
     if: |
+      needs.detect-changes.outputs.should_run == 'true' && (
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-eks-byos-tests')
-    needs: [get-require-approval, sanitize-input]
+      contains(github.event.pull_request.labels.*.name, 'run-eks-byos-tests'))
+    needs: [get-require-approval, sanitize-input, detect-changes]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 1080
@@ -246,9 +333,10 @@ jobs:
 
   eks-cdc-full-e2e-test:
     if: |
+      needs.detect-changes.outputs.should_run == 'true' && (
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-eks-tests')
-    needs: [get-require-approval, sanitize-input]
+      contains(github.event.pull_request.labels.*.name, 'run-eks-tests'))
+    needs: [get-require-approval, sanitize-input, detect-changes]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 180
@@ -270,9 +358,10 @@ jobs:
 
   eks-cdc-aoss-e2e-test:
     if: |
+      needs.detect-changes.outputs.should_run == 'true' && (
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-eks-tests')
-    needs: [get-require-approval, sanitize-input]
+      contains(github.event.pull_request.labels.*.name, 'run-eks-tests'))
+    needs: [get-require-approval, sanitize-input, detect-changes]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 240
@@ -294,9 +383,10 @@ jobs:
 
   eks-cfn-create-vpc-test:
     if: |
+      needs.detect-changes.outputs.should_run == 'true' && (
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-cfn-tests')
-    needs: [get-require-approval, sanitize-input]
+      contains(github.event.pull_request.labels.*.name, 'run-cfn-tests'))
+    needs: [get-require-approval, sanitize-input, detect-changes]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 120
@@ -318,9 +408,10 @@ jobs:
 
   eks-cfn-import-vpc-test:
     if: |
+      needs.detect-changes.outputs.should_run == 'true' && (
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-cfn-tests')
-    needs: [get-require-approval, sanitize-input]
+      contains(github.event.pull_request.labels.*.name, 'run-cfn-tests'))
+    needs: [get-require-approval, sanitize-input, detect-changes]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 120
@@ -342,9 +433,10 @@ jobs:
 
   eks-full-e2e-isolated-vpc-test:
     if: |
+      needs.detect-changes.outputs.should_run == 'true' && (
       github.event_name == 'push' ||
-      contains(github.event.pull_request.labels.*.name, 'run-eks-isolated-tests')
-    needs: [get-require-approval, sanitize-input]
+      contains(github.event.pull_request.labels.*.name, 'run-eks-isolated-tests'))
+    needs: [get-require-approval, sanitize-input, detect-changes]
     environment: ${{ needs.get-require-approval.outputs.is-require-approval }}
     runs-on: ubuntu-22.04
     timeout-minutes: 240
@@ -366,6 +458,7 @@ jobs:
 
   all-jenkins-checks-pass:
     needs:
+      - detect-changes
       - full-es68-e2e-aws-test
       - docker-compose-e2e-test
       - elasticsearch-5x-k8s-local-test
