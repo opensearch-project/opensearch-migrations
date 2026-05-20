@@ -166,8 +166,11 @@ class SidecarBuilderRoundTripTest {
             assertEquals(new TermEntry("26",   11, 13), entries.get(2));
 
             // LuceneLeafReader.joinWithOffsets should produce "date  tue  26"
+            List<org.opensearch.migrations.bulkload.lucene.TermEntry> luceneEntries = entries.stream()
+                    .map(e -> new org.opensearch.migrations.bulkload.lucene.TermEntry(e.term(), 0, e.startOffset(), e.endOffset()))
+                    .toList();
             String joined = org.opensearch.migrations.bulkload.lucene.LuceneLeafReader
-                    .joinWithOffsets(entries);
+                    .joinWithOffsets(luceneEntries);
             assertEquals("date  tue  26", joined,
                 "double-space gaps from character offsets must be preserved in reconstruction");
         } finally {
@@ -180,9 +183,9 @@ class SidecarBuilderRoundTripTest {
      */
     @Test
     void noOffset_fallsBackToSingleSpaceJoin() throws IOException {
-        List<TermEntry> entries = List.of(
-            new TermEntry("hello", PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET),
-            new TermEntry("world", PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET)
+        List<org.opensearch.migrations.bulkload.lucene.TermEntry> entries = List.of(
+            new org.opensearch.migrations.bulkload.lucene.TermEntry("hello", 0, PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET),
+            new org.opensearch.migrations.bulkload.lucene.TermEntry("world", 1, PostingsSink.NO_OFFSET, PostingsSink.NO_OFFSET)
         );
         String joined = org.opensearch.migrations.bulkload.lucene.LuceneLeafReader
                 .joinWithOffsets(entries);

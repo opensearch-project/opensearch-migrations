@@ -1342,6 +1342,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "default": "AUTO"
                     },
+                    "emitDocType": {
+                      "type": "string",
+                      "enum": [
+                        "AUTO",
+                        "ON",
+                        "OFF"
+                      ],
+                      "default": "AUTO"
+                    },
                     "allowedDocExceptionTypes": {
                       "type": "array",
                       "items": {
@@ -3061,6 +3070,20 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         ],
                         "default": "AUTO",
                         "description": "Controls document ID generation on the target. 'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. 'ALWAYS': always use server-generated IDs (discards source IDs). 'NEVER': always preserve source document IDs (may fail on serverless TIMESERIES/VECTOR collections)."
+                      },
+                      "emitDocType": {
+                        "type": "string",
+                        "enum": [
+                          "AUTO",
+                          "ON",
+                          "OFF"
+                        ],
+                        "default": "AUTO",
+                        "description": "Controls whether the ES _type field is propagated into bulk action-line metadata. 'AUTO' (default): emit _type only when the source is ES 6 or older AND a document transformer is configured (e.g. TypeMappingSanitizationTransformerProvider for multi-type indices). 'ON': always emit _type. 'OFF': never emit _type.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "allowedDocExceptionTypes": {
                         "type": "array",

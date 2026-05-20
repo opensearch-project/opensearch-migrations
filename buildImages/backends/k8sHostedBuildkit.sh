@@ -23,6 +23,48 @@ set_k8s_context_args() {
   fi
 }
 
+# Forward a cluster service to a stable host port. Always restarts the forward,
+# because pgrep-skip leaves stale forwards pointing at deleted pods after a
+# helm reinstall, which is exactly how Jib pushes vanish into the void.
+ensure_port_forward() {
+  local namespace="$1"
+  local service="$2"
+  local host_port="$3"
+  local svc_port="$4"
+
+  # SIGKILL any prior forward and wait for it to release the port before
+  # starting a new one. Without this the new kubectl loses the bind race,
+  # exits silently, and we end up probing the *old* zombie forward — which
+  # routes to a deleted pod after the buildkit helm uninstall/reinstall and
+  # leaves docker buildx hanging on the first connection.
+  pkill -KILL -f "kubectl port-forward.*${service}.*${host_port}:${svc_port}" 2>/dev/null || true
+  local i
+  for i in $(seq 1 30); do
+    (echo >/dev/tcp/localhost/"${host_port}") 2>/dev/null || break
+    sleep 1
+  done
+  if (echo >/dev/tcp/localhost/"${host_port}") 2>/dev/null; then
+    echo "ERROR: port localhost:${host_port} still in use after pkill, refusing to start a racing port-forward" >&2
+    return 1
+  fi
+
+  set_k8s_context_args
+  nohup kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} \
+    port-forward -n "${namespace}" "svc/${service}" "${host_port}:${svc_port}" \
+    > "/tmp/${service}-${host_port}.log" 2>&1 &
+
+  for i in $(seq 1 60); do
+    if (echo >/dev/tcp/localhost/"${host_port}") 2>/dev/null; then
+      echo "Port-forward localhost:${host_port} -> ${service}:${svc_port} ready"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "ERROR: port-forward localhost:${host_port} -> ${service}:${svc_port} not ready after 60s" >&2
+  cat "/tmp/${service}-${host_port}.log" >&2 || true
+  return 1
+}
+
 ensure_k8s_buildkit_release() {
   local context
   set_k8s_context_args
@@ -74,14 +116,7 @@ ensure_k8s_local_registry() {
   echo "Waiting for docker-registry deployment to be available..."
   kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} rollout status deployment/docker-registry -n buildkit --timeout=120s
 
-  # Kill any stale port-forward processes from previous runs. After a helm
-  # uninstall/reinstall cycle the old process points at a deleted pod and
-  # will never recover, so we must start a fresh one.
-  pkill -f "kubectl port-forward.*docker-registry.*5001:5000" 2>/dev/null || true
-  sleep 1
-
-  echo "Starting registry port-forward..."
-  nohup kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} port-forward -n buildkit svc/docker-registry 5001:5000 > /tmp/registry-forward.log 2>&1 &
+  ensure_port_forward buildkit docker-registry 5001 5000
 }
 
 ensure_k8s_buildx_builder() {
@@ -127,39 +162,14 @@ ensure_k8s_buildx_builder() {
       "${BUILDKIT_RESOURCE_OPTS[@]}" \
       ${BUILDKIT_IMAGE:+--driver-opt="image=${BUILDKIT_IMAGE}"}
   else
-    echo "Detected local K8s, using remote driver with port-forwards"
+    echo "Detected local K8s, using remote driver via port-forward"
     echo "Waiting for buildkitd pod..."
     kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} wait --for=condition=ready pod -l app=buildkitd -n "${namespace}" --timeout=120s
-
-    # Kill any stale port-forward processes from previous runs. After a helm
-    # uninstall/reinstall cycle the old process points at a deleted pod and
-    # will never recover — its connection attempt fails with:
-    #   "pod not found ("buildkitd_buildkit")"
-    # Always start a fresh port-forward against the current pod.
-    pkill -f "kubectl port-forward.*buildkitd.*1234:1234" 2>/dev/null || true
-    sleep 1
-
-    echo "Starting buildkit port-forward..."
-    nohup kubectl ${CONTEXT_ARGS[@]+"${CONTEXT_ARGS[@]}"} port-forward -n "${namespace}" svc/buildkitd 1234:1234 > /tmp/buildkit-forward.log 2>&1 &
-
-    echo "Waiting for buildkit port-forward to be ready..."
-    for i in $(seq 1 30); do
-      if (echo >/dev/tcp/localhost/1234) 2>/dev/null; then
-        echo "buildkit endpoint reachable"
-        break
-      fi
-      if [[ "${i}" -eq 30 ]]; then
-        echo "ERROR: buildkit endpoint not reachable at localhost:1234 after 30s" >&2
-        cat /tmp/buildkit-forward.log 2>/dev/null || true
-        exit 1
-      fi
-      sleep 1
-    done
-
+    ensure_port_forward "${namespace}" buildkitd 1234 1234
     docker buildx create \
       --name="${builder_name}" \
       --driver=remote \
-      tcp://localhost:1234
+      "tcp://localhost:1234"
   fi
 
   docker buildx use "${builder_name}"

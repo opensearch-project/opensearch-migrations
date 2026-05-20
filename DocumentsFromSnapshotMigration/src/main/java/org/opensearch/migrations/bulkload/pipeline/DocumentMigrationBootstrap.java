@@ -103,6 +103,11 @@ public class DocumentMigrationBootstrap {
     @Builder.Default
     private final boolean useRecoverySource = false;
 
+    // When true, propagate ES _type into bulk action-line metadata for transformers that need it
+    @Builder.Default
+    private final boolean emitDocType = false;
+
+
     // Index metadata factory for reading mappings (needed for sourceless migration)
     @Builder.Default
     private final IndexMetadata.Factory indexMetadataFactory = null;
@@ -298,7 +303,8 @@ public class DocumentMigrationBootstrap {
         }
         var builder = LuceneSnapshotSource.builder(extractor, snapshotName, workDir)
             .maxShardSizeBytes(maxShardSizeBytes)
-            .useRecoverySource(useRecoverySource);
+            .useRecoverySource(useRecoverySource)
+            .emitDocType(emitDocType);
         if (previousSnapshotName != null && deltaMode != null) {
             log.info("Creating delta document source: previous={}, mode={}", previousSnapshotName, deltaMode);
             builder.delta(previousSnapshotName, deltaMode, deltaContextFactory);

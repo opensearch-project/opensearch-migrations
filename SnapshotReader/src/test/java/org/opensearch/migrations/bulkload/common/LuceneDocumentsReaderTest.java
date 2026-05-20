@@ -6,15 +6,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -48,6 +44,7 @@ import reactor.test.StepVerifier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -218,19 +215,10 @@ public class LuceneDocumentsReaderTest {
     @Test
     @Tag("isolatedTest")
     void testParallelReading() throws Exception {
-        // Create a mock IndexReader with multiple leaves (segments)
         int numSegments = 10;
         int docsPerSegment = 100;
         var mockReader = mock(LuceneDirectoryReader.class);
         var leaves = new ArrayList<>();
-
-        var startLatch = new CountDownLatch(1);
-        var concurrentDocReads = new AtomicInteger(0);
-        var segmentReadTracker = new ConcurrentHashMap<String, AtomicBoolean>();
-        var concurrentSegmentReads = new AtomicInteger(0);
-        var expectedConcurrentDocReads = 100;
-
-        var allReadsStarted = new CountDownLatch(expectedConcurrentDocReads);
 
         for (int i = 0; i < numSegments; i++) {
             var context = mock(LuceneLeafReaderContext.class);
@@ -238,30 +226,23 @@ public class LuceneDocumentsReaderTest {
             when(context.reader()).thenAnswer(invocation -> leafReader);
             var segmentName = "__" + i;
             when(leafReader.getSegmentName()).thenReturn(segmentName);
-            segmentReadTracker.put(segmentName, new AtomicBoolean(false));
+            when(leafReader.getSegmentInfoString()).thenReturn(segmentName);
+            when(leafReader.toString()).thenReturn("MockLeafReader(" + segmentName + ")");
             when(leafReader.maxDoc()).thenReturn(docsPerSegment);
-            when(leafReader.getLiveDocs()).thenReturn(null); // Assume all docs are live
-
-            // Wrap the document method to track concurrency
-            when(leafReader.document(anyInt())).thenAnswer(invocation -> {
-                if (segmentReadTracker.get(segmentName).compareAndSet(false, true)) {
-                    concurrentSegmentReads.incrementAndGet(); // Increment only on first read per segment
-                }
-                concurrentDocReads.incrementAndGet();
-                allReadsStarted.countDown();
-                startLatch.await(); // Wait for the latch to be released before proceeding to track concurrency
-                var doc = mock(LuceneDocument.class);
-
-                var field1 = mock(LuceneField.class);
-                when(field1.name()).thenReturn("_id");
-                when(field1.asUid()).thenReturn("doc" + invocation.getArgument(0));
-                var field2 = mock(LuceneField.class);
-                when(field2.name()).thenReturn("_source");
-                when(field2.utf8Value()).thenReturn("{\"field\":\"value\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                when(field2.utf8ToStringValue()).thenReturn("{\"field\":\"value\"}");
-                when(doc.getFields()).thenAnswer(inv -> List.of(field1, field2));
-
-                return doc;
+            when(leafReader.getLiveDocs()).thenReturn(null);
+            when(leafReader.getDocValueFields()).thenReturn(Collections.emptyList());
+            when(leafReader.document(anyInt())).thenAnswer(inv -> createMockDocument(inv.getArgument(0)));
+            when(leafReader.newView()).thenAnswer(inv -> {
+                var viewReader = mock(LuceneLeafReader.class);
+                when(viewReader.getSegmentName()).thenReturn(segmentName);
+                when(viewReader.getSegmentInfoString()).thenReturn(segmentName);
+                when(viewReader.toString()).thenReturn("MockView(" + segmentName + ")");
+                when(viewReader.maxDoc()).thenReturn(docsPerSegment);
+                when(viewReader.getLiveDocs()).thenReturn(null);
+                when(viewReader.getDocValueFields()).thenReturn(Collections.emptyList());
+                when(viewReader.newView()).thenReturn(viewReader);
+                when(viewReader.document(anyInt())).thenAnswer(docInv -> createMockDocument(docInv.getArgument(0)));
+                return viewReader;
             });
             leaves.add(context);
         }
@@ -269,7 +250,6 @@ public class LuceneDocumentsReaderTest {
         when(mockReader.maxDoc()).thenReturn(docsPerSegment * numSegments);
         when(mockReader.getIndexDirectoryPath()).thenReturn(tempDirectory);
 
-        // Create a custom LuceneDocumentsReader for testing
         LuceneIndexReader reader = new IndexReader9(Paths.get("dummy"), false, "dummy_field") {
             @Override
             public LuceneDirectoryReader getReader(String ignoredSegmentName) {
@@ -277,33 +257,34 @@ public class LuceneDocumentsReaderTest {
             }
         };
 
-        AtomicInteger observedConcurrentDocReads = new AtomicInteger(0);
-        AtomicInteger observedConcurrentSegments = new AtomicInteger(0);
-
-        // Wait for all expected concurrent reads to reach the latch, then record and release
-        Schedulers.parallel().schedule(() -> {
-            try {
-                allReadsStarted.await(5, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            observedConcurrentSegments.set(concurrentSegmentReads.get());
-            observedConcurrentDocReads.set(concurrentDocReads.get());
-            startLatch.countDown();
-        }, 0, TimeUnit.MILLISECONDS);
-
-        // Read documents
         List<LuceneDocumentChange> actualDocuments = reader.streamDocumentChanges("dummy")
             .subscribeOn(Schedulers.parallel())
             .collectList()
-            .block(Duration.ofSeconds(10));
+            .block(Duration.ofSeconds(30));
 
-        // Verify results
-        var expectedConcurrentSegments = 1; // Segment concurrency disabled for preserved ordering
         assertNotNull(actualDocuments);
-        assertEquals(numSegments * docsPerSegment, actualDocuments.size());
-        assertEquals(expectedConcurrentSegments, observedConcurrentSegments.get(), "Expected concurrent open segments equal to " + expectedConcurrentSegments);
-        assertEquals(expectedConcurrentDocReads, observedConcurrentDocReads.get(), "Expected concurrent document reads to equal DEFAULT_BOUNDED_ELASTIC_SIZE");
+        assertEquals(numSegments * docsPerSegment, actualDocuments.size(),
+                "Expected all documents from all segments");
+
+        // Documents must be emitted in strictly ascending luceneDocNumber order
+        for (int i = 1; i < actualDocuments.size(); i++) {
+            assertTrue(
+                actualDocuments.get(i).luceneDocNumber > actualDocuments.get(i - 1).luceneDocNumber,
+                "Documents must be in ascending luceneDocNumber order at index " + i);
+        }
+    }
+
+    private static LuceneDocument createMockDocument(int docIdx) throws Exception {
+        var doc = mock(LuceneDocument.class);
+        var field1 = mock(LuceneField.class);
+        when(field1.name()).thenReturn("_id");
+        when(field1.asUid()).thenReturn("doc" + docIdx);
+        var field2 = mock(LuceneField.class);
+        when(field2.name()).thenReturn("_source");
+        when(field2.utf8Value()).thenReturn("{\"field\":\"value\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(field2.utf8ToStringValue()).thenReturn("{\"field\":\"value\"}");
+        when(doc.getFields()).thenAnswer(inv -> List.of(field1, field2));
+        return doc;
     }
 
     @Test

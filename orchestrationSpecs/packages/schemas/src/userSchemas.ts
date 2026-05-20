@@ -873,6 +873,13 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
             "'ALWAYS': always use server-generated IDs (discards source IDs). " +
             "'NEVER': always preserve source document IDs (may fail on serverless TIMESERIES/VECTOR collections)."),
+    emitDocType: z.enum(["AUTO", "ON", "OFF"]).default("AUTO").optional()
+        .describe("Controls whether the ES _type field is propagated into bulk action-line metadata. " +
+            "'AUTO' (default): emit _type only when the source is ES 6 or older AND a document transformer " +
+            "is configured (e.g. TypeMappingSanitizationTransformerProvider for multi-type indices). " +
+            "'ON': always emit _type. 'OFF': never emit _type.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
     allowedDocExceptionTypes: z.array(z.string()).default([]).optional()
         .describe("List of document-level exception types to treat as successful operations during bulk migration. " +
             "Documents that fail with these errors are not retried and not counted as failures — they are silently accepted. " +
