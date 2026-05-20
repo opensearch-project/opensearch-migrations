@@ -114,6 +114,23 @@ public interface LuceneLeafReader {
     }
 
     /**
+     * Opens a forward-only streaming cursor over the (segment, field) postings that yields
+     * the per-doc multiset of indexed terms (each term repeated by its per-doc frequency)
+     * in dictionary order, or {@code null} if the field has no postings to stream.
+     *
+     * <p>FREQS-only counterpart of {@link #openStreamingFieldPostings(String)}; used to
+     * reconstruct multi-valued keyword / not-analyzed subfields whose source representation
+     * is an array of duplicates that SORTED_SET doc_values cannot reproduce.
+     *
+     * <p>Implementations bound memory by the field's unique-term count: one PostingsEnum +
+     * one term String per term lives in the heap. Per-segment cost stays O(uniqueTerms)
+     * instead of O(docs &times; tokensPerDoc) for the previous eager-map path.
+     */
+    default StreamingMultiTermPostings openStreamingMultiTermPostings(String fieldName) throws IOException {
+        return null;
+    }
+
+    /**
      * Version-specific hook: walk the terms dictionary for a trie-encoded numeric field (ES 1.x /
      * Lucene 4-5: long, int, double, float, date, ip) and return a docId -> decoded Long map.
      *
@@ -125,40 +142,14 @@ public interface LuceneLeafReader {
      *
      * Returning Long here keeps the interface version-agnostic; the final numeric type
      * (int vs long vs float vs double vs IP string) is applied in {@link SourceReconstructor}
-     * using {@link FieldMappingInfo}.
-     *
-     * Called at most once per (segment, field) via {@link SegmentTermIndex}.
-     */
-    default Map<Integer, Long> buildNumericTermIndex(String fieldName) throws IOException {
-        return Collections.emptyMap();
-    }
-
     /**
-     * Builds a {@code docId -> List<String>} map for a multi-valued keyword/not-analyzed
-     * field by walking the terms dictionary once. Each term is repeated {@code freq} times
-     * (the number of times it was indexed for that doc). This recovers the full multiset of
-     * values including duplicates, though insertion order is lost (terms arrive in dictionary
-     * order, not the original array element order).
-     *
-     * <p>For a single-valued field, returns a one-element list per doc. Called at most once
-     * per (segment, field) via {@link SegmentTermIndex}.
-     */
-    default Map<Integer, List<String>> buildMultiTermIndex(String fieldName) throws IOException {
-        return Collections.emptyMap();
-    }
-
-    /**
-     * Builds a {@code docId -> term-string} map for a STRING field by walking the
-     * terms dictionary once. For keyword / not-analyzed fields each docId has exactly
-     * one term, so this map is the inverted-index inverse; it makes per-doc single-term
-     * recovery O(1) instead of O(numTerms) per doc.
-     *
-     * <p>Default implementation returns an empty map — concrete readers should override
-     * to walk their version-specific TermsEnum / PostingsEnum and populate the map.
+     * Builds a {@code docId -> Long} map for trie-encoded numeric fields. See callers in
+     * {@link SegmentTermIndex#getNumericForDocument} for usage; default returns empty so
+     * versions without trie-numerics (Lucene 6+) inherit a no-op.
      *
      * <p>Called at most once per (segment, field) via {@link SegmentTermIndex}.
      */
-    default Map<Integer, String> buildSingleTermIndex(String fieldName) throws IOException {
+    default Map<Integer, Long> buildNumericTermIndex(String fieldName) throws IOException {
         return Collections.emptyMap();
     }
 
@@ -269,6 +260,16 @@ public interface LuceneLeafReader {
     static String joinWithOffsets(List<TermEntry> entries) {
         if (entries.isEmpty()) return "";
 
+        // Same-position graph-token dedup: a tokenizer / token filter can emit several
+        // overlapping alternates at the same position (e.g. a custom date analyzer that
+        // emits both "03:25:00" and its "03", "25", "00" sub-tokens). For source
+        // reconstruction we want the original surface form, so within each position
+        // group we keep the longest term (which is also what {@code SidecarReader}
+        // does — see {@code dedupByLongestTerm}). Streaming postings (positional path)
+        // does not deduplicate up-front, so we do it here before the offset stitcher
+        // sees overlapping spans.
+        entries = dedupByLongestAtSamePosition(entries);
+
         // Check whether all entries carry valid offsets.
         boolean hasOffsets = true;
         for (TermEntry e : entries) {
@@ -302,6 +303,101 @@ public interface LuceneLeafReader {
             prevEnd = e.endOffset();
         }
         return sb.toString();
+    }
+
+    /**
+     * Within each position group (consecutive entries sharing {@code position()}), keep
+     * the entry whose term is longest. Then, walking the kept entries in position order,
+     * suppress any entry whose offset span lies entirely within the previously kept
+     * entry's span — these are graph-token sub-pieces of an already-emitted longer
+     * alternate (e.g. {@code "03"}, {@code "25"}, {@code "00"} after
+     * {@code "03:25:00"} is kept).
+     *
+     * <p>Mirrors {@link org.opensearch.migrations.bulkload.lucene.sidecar.SidecarReader}'s
+     * dedup contract so streaming and sidecar reconstruction produce the same surface
+     * form for graph-tokenized fields.
+     *
+     * <p>The streaming postings path emits one entry per (term, position) occurrence;
+     * tokenizers / token filters that emit overlapping alternates at the same position
+     * (synonym graphs, multi-grain date / number tokenizers) therefore produce multiple entries at
+     * one position. Without dedup, {@link #joinWithOffsets} would stitch every
+     * alternate's bytes back-to-back, corrupting the recovered source.
+     */
+    static List<TermEntry> dedupByLongestAtSamePosition(List<TermEntry> entries) {
+        int n = entries.size();
+        if (n < 2) return entries;
+
+        // Fast path: scan once, only allocate if we actually find duplicates.
+        // A duplicate is either:
+        //   (a) two consecutive entries sharing the same position AND with overlapping
+        //       offset spans (a real graph-token alternate — same-position WITHOUT offset
+        //       overlap is non-physical for real Lucene postings, so we leave those alone
+        //       to avoid dropping legitimate distinct tokens in synthetic test fixtures);
+        //   (b) an entry whose offset span is contained within the previous entry's span
+        //       (a sub-token at a later position whose long alternate already covered it).
+        boolean hasDup = false;
+        for (int i = 1; i < n; i++) {
+            TermEntry curr = entries.get(i);
+            TermEntry prev = entries.get(i - 1);
+            if (curr.position() == prev.position()
+                    && curr.startOffset() >= 0 && prev.startOffset() >= 0
+                    && offsetsOverlap(prev, curr)) {
+                hasDup = true;
+                break;
+            }
+            if (curr.startOffset() >= 0 && prev.endOffset() >= 0
+                    && curr.startOffset() >= prev.startOffset()
+                    && curr.endOffset() <= prev.endOffset()) {
+                hasDup = true;
+                break;
+            }
+        }
+        if (!hasDup) return entries;
+
+        ArrayList<TermEntry> out = new ArrayList<>(n);
+        int i = 0;
+        while (i < n) {
+            // Group together consecutive entries at the same position whose offsets overlap
+            // with the first entry of the group — that's a real graph-token alternate set.
+            int j = i + 1;
+            while (j < n
+                    && entries.get(j).position() == entries.get(i).position()
+                    && entries.get(i).startOffset() >= 0
+                    && entries.get(j).startOffset() >= 0
+                    && offsetsOverlap(entries.get(i), entries.get(j))) {
+                j++;
+            }
+            // Within [i, j), pick the longest term. Ties broken by encounter order.
+            int bestIdx = i;
+            int bestLen = entries.get(i).term().length();
+            for (int k = i + 1; k < j; k++) {
+                int len = entries.get(k).term().length();
+                if (len > bestLen) {
+                    bestIdx = k;
+                    bestLen = len;
+                }
+            }
+            TermEntry winner = entries.get(bestIdx);
+            // Suppress winners whose offset span is contained in the prior winner's span
+            // (graph sub-token at a later position).
+            if (!out.isEmpty()) {
+                TermEntry prev = out.get(out.size() - 1);
+                if (winner.startOffset() >= 0 && prev.endOffset() >= 0
+                        && winner.startOffset() >= prev.startOffset()
+                        && winner.endOffset() <= prev.endOffset()) {
+                    i = j;
+                    continue;
+                }
+            }
+            out.add(winner);
+            i = j;
+        }
+        return out;
+    }
+
+    /** True iff {@code a} and {@code b} share at least one character offset. */
+    private static boolean offsetsOverlap(TermEntry a, TermEntry b) {
+        return a.startOffset() < b.endOffset() && b.startOffset() < a.endOffset();
     }
 
     /**

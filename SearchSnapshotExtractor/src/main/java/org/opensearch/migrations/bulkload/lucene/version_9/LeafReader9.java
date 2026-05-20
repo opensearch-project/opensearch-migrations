@@ -10,6 +10,7 @@ import java.util.Map;
 
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
+import org.opensearch.migrations.bulkload.lucene.GenericStreamingMultiTermPostings;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 import org.opensearch.migrations.bulkload.lucene.StreamingFieldPostings;
 
@@ -313,50 +314,6 @@ public class LeafReader9 implements LuceneLeafReader {
         return null;
     }
 
-    @Override
-    public java.util.Map<Integer, String> buildSingleTermIndex(String fieldName) throws IOException {
-        Terms terms = wrapped.terms(fieldName);
-        if (terms == null) return java.util.Collections.emptyMap();
-        // Each docId gets the term that yielded it. For keyword/not-analyzed fields each
-        // doc has exactly one term, but the API permits multi-term too — we keep the
-        // first term encountered per (docId, fieldName) which matches getValueFromTerms's
-        // legacy behavior (it returned the first matching term in dictionary order).
-        java.util.HashMap<Integer, String> out = new java.util.HashMap<>();
-        TermsEnum termsEnum = terms.iterator();
-        BytesRef term;
-        while ((term = termsEnum.next()) != null) {
-            String termStr = term.utf8ToString();
-            PostingsEnum postings = termsEnum.postings(null, PostingsEnum.NONE);
-            int doc;
-            while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
-                out.putIfAbsent(doc, termStr);
-            }
-        }
-        return out;
-    }
-
-    @Override
-    public java.util.Map<Integer, java.util.List<String>> buildMultiTermIndex(String fieldName) throws IOException {
-        Terms terms = wrapped.terms(fieldName);
-        if (terms == null) return java.util.Collections.emptyMap();
-        java.util.HashMap<Integer, java.util.List<String>> out = new java.util.HashMap<>();
-        TermsEnum termsEnum = terms.iterator();
-        BytesRef term;
-        while ((term = termsEnum.next()) != null) {
-            String termStr = term.utf8ToString();
-            PostingsEnum postings = termsEnum.postings(null, PostingsEnum.FREQS);
-            int doc;
-            while ((doc = postings.nextDoc()) != PostingsEnum.NO_MORE_DOCS) {
-                int freq = postings.freq();
-                java.util.List<String> list = out.computeIfAbsent(doc, k -> new java.util.ArrayList<>());
-                for (int i = 0; i < freq; i++) {
-                    list.add(termStr);
-                }
-            }
-        }
-        return out;
-    }
-
     public String toString() {
         return wrapped.toString();
     }
@@ -365,5 +322,27 @@ public class LeafReader9 implements LuceneLeafReader {
     @Override
     public StreamingFieldPostings openStreamingFieldPostings(String fieldName) throws IOException {
         return new StreamingFieldPostings9(wrapped, fieldName);
+    }
+
+    @Override
+    public org.opensearch.migrations.bulkload.lucene.StreamingMultiTermPostings openStreamingMultiTermPostings(
+            String fieldName) throws IOException {
+        Terms terms = wrapped.terms(fieldName);
+        if (terms == null) {
+            return null;
+        }
+        java.util.ArrayList<GenericStreamingMultiTermPostings.TermPostings> built = new java.util.ArrayList<>();
+        TermsEnum te = terms.iterator();
+        BytesRef term;
+        while ((term = te.next()) != null) {
+            String termStr = term.utf8ToString();
+            PostingsEnum postings = te.postings(null, PostingsEnum.FREQS);
+            int firstDoc = postings.nextDoc();
+            if (firstDoc == PostingsEnum.NO_MORE_DOCS) continue;
+            built.add(new GenericStreamingMultiTermPostings.TermPostings(
+                termStr, LuceneStreamingAdapters.wrap(postings), firstDoc));
+        }
+        if (built.isEmpty()) return null;
+        return GenericStreamingMultiTermPostings.build(built);
     }
 }

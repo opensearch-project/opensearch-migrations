@@ -155,8 +155,8 @@ function processSettingsRoot(settings, removed, renames) {
 
     // Snapshot settings come in flat-dotted form upstream of the CanonicalTransformer
     // normalize step, e.g.:
-    //   "index.analysis.analyzer.alcatraz_tokenized_string.filter": [...]
-    //   "index.analysis.analyzer.alcatraz_tokenized_string.tokenizer": "standard"
+    //   "index.analysis.analyzer.custom_text_analyzer.filter": [...]
+    //   "index.analysis.analyzer.custom_text_analyzer.tokenizer": "standard"
     //   "index.analysis.filter.<name>.type": "stop"
     // Handle that shape directly so the transform fires before flat→tree conversion.
     processFlatDottedSettings(settings, removed, renames);

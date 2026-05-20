@@ -11,6 +11,7 @@ import java.util.Map;
 import org.opensearch.migrations.bulkload.lucene.BitSetConverter;
 import org.opensearch.migrations.bulkload.lucene.DocValueFieldInfo;
 import org.opensearch.migrations.bulkload.lucene.GenericStreamingFieldPostings;
+import org.opensearch.migrations.bulkload.lucene.GenericStreamingMultiTermPostings;
 import org.opensearch.migrations.bulkload.lucene.LuceneLeafReader;
 
 import lombok.Getter;
@@ -354,19 +355,32 @@ public class LeafReader7 implements LuceneLeafReader {
             PostingsEnum postings = te.postings(null, postingsFlags);
             int firstDoc = postings.nextDoc();
             if (firstDoc == PostingsEnum.NO_MORE_DOCS) continue;
-            final PostingsEnum pe = postings;
-            GenericStreamingFieldPostings.PostingsCursor cursor =
-                new GenericStreamingFieldPostings.PostingsCursor() {
-                    @Override public int nextDoc() throws IOException { return pe.nextDoc(); }
-                    @Override public int advance(int target) throws IOException { return pe.advance(target); }
-                    @Override public int freq() throws IOException { return pe.freq(); }
-                    @Override public int nextPosition() throws IOException { return pe.nextPosition(); }
-                    @Override public int startOffset() throws IOException { return pe.startOffset(); }
-                    @Override public int endOffset() throws IOException { return pe.endOffset(); }
-                };
-            built.add(new GenericStreamingFieldPostings.TermPostings(termStr, cursor, firstDoc));
+            built.add(new GenericStreamingFieldPostings.TermPostings(
+                termStr, LuceneStreamingAdapters.wrap(postings), firstDoc));
         }
         if (built.isEmpty()) return null;
         return GenericStreamingFieldPostings.build(built, fieldHasOffsets);
+    }
+
+    @Override
+    public org.opensearch.migrations.bulkload.lucene.StreamingMultiTermPostings openStreamingMultiTermPostings(
+            String fieldName) throws IOException {
+        Terms terms = wrapped.terms(fieldName);
+        if (terms == null) {
+            return null;
+        }
+        ArrayList<GenericStreamingMultiTermPostings.TermPostings> built = new ArrayList<>();
+        TermsEnum te = terms.iterator();
+        BytesRef term;
+        while ((term = te.next()) != null) {
+            String termStr = term.utf8ToString();
+            PostingsEnum postings = te.postings(null, PostingsEnum.FREQS);
+            int firstDoc = postings.nextDoc();
+            if (firstDoc == PostingsEnum.NO_MORE_DOCS) continue;
+            built.add(new GenericStreamingMultiTermPostings.TermPostings(
+                termStr, LuceneStreamingAdapters.wrap(postings), firstDoc));
+        }
+        if (built.isEmpty()) return null;
+        return GenericStreamingMultiTermPostings.build(built);
     }
 }

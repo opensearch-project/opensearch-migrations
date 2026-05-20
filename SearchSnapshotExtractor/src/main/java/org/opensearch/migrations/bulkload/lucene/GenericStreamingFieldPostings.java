@@ -9,13 +9,22 @@ import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Version-independent streaming postings cursor using a min-heap of per-term cursors.
- * Each version-specific LeafReader creates an instance via {@link #build}, passing
- * an iterator of (term, postingsCursor) pairs extracted from the version-specific
- * Lucene TermsEnum/PostingsEnum.
+ * Streaming postings cursor for fields indexed with positions (and optionally
+ * offsets). Returns position-ordered {@link TermEntry} lists per doc.
+ *
+ * <p>Built from a min-heap of per-term cursors via the shared
+ * {@link AbstractStreamingPostingsHeap} skeleton — see that class for
+ * heap-memory lifecycle, call discipline, and {@link #close()} semantics.
+ *
+ * <p>Per-doc work: drain every head at {@code docId}, capture each token's
+ * position into a primitive {@code long[]} (encoded as {@code (pos << 32 | idx)}),
+ * sort once with the JDK 21 vectorized {@code Arrays.sort(long[])} intrinsic,
+ * then materialize {@link TermEntry}s in position order.
  */
 @Slf4j
-public final class GenericStreamingFieldPostings implements StreamingFieldPostings {
+public final class GenericStreamingFieldPostings
+        extends AbstractStreamingPostingsHeap<List<TermEntry>>
+        implements StreamingFieldPostings {
 
     /** Abstraction over version-specific PostingsEnum. */
     public interface PostingsCursor {
@@ -28,28 +37,11 @@ public final class GenericStreamingFieldPostings implements StreamingFieldPostin
         int endOffset() throws IOException;
     }
 
-    /** A (term, cursor) pair provided by the version-specific builder. */
-    public record TermPostings(String term, PostingsCursor cursor, int firstDoc) {
-        // Record — no additional methods needed.
-    }
-
-    private static final class Cursor {
-        final String term;
-        final PostingsCursor postings;
-        int currentDoc;
-
-        Cursor(String term, PostingsCursor postings, int currentDoc) {
-            this.term = term;
-            this.postings = postings;
-            this.currentDoc = currentDoc;
-        }
-    }
+    /** A (term, cursor, firstDoc) triple from the version-specific builder. */
+    public record TermPostings(String term, PostingsCursor cursor, int firstDoc)
+            implements AbstractStreamingPostingsHeap.TermEntrySource {}
 
     private final boolean fieldHasOffsets;
-    private final Cursor[] heap;
-    private int heapSize;
-    private int lastAdvancedDoc = -1;
-    private boolean closed;
 
     private long[] scratchSortKey = new long[64];
     private String[] scratchTerm = new String[64];
@@ -57,10 +49,9 @@ public final class GenericStreamingFieldPostings implements StreamingFieldPostin
     private int[] scratchEnd;
 
     /**
-     * Builds a streaming field postings cursor from a list of term-postings pairs.
+     * Builds a streaming field postings cursor.
      *
-     * @param termPostings all terms for the field with their positioned postings cursors,
-     *                     pre-advanced to their first doc
+     * @param termPostings    pre-advanced cursors, one per term in the dictionary
      * @param fieldHasOffsets whether the field was indexed with character offsets
      */
     public static GenericStreamingFieldPostings build(List<TermPostings> termPostings, boolean fieldHasOffsets) {
@@ -68,67 +59,26 @@ public final class GenericStreamingFieldPostings implements StreamingFieldPostin
     }
 
     private GenericStreamingFieldPostings(List<TermPostings> termPostings, boolean fieldHasOffsets) {
+        super(termPostings);
         this.fieldHasOffsets = fieldHasOffsets;
         if (fieldHasOffsets) {
             this.scratchStart = new int[64];
             this.scratchEnd = new int[64];
         }
-
-        this.heap = new Cursor[termPostings.size()];
-        for (int i = 0; i < termPostings.size(); i++) {
-            TermPostings tp = termPostings.get(i);
-            heap[i] = new Cursor(tp.term(), tp.cursor(), tp.firstDoc());
-        }
-        this.heapSize = heap.length;
-        for (int i = (heapSize >>> 1) - 1; i >= 0; i--) {
-            siftDown(i);
-        }
     }
 
     @Override
     public List<TermEntry> advance(int docId) throws IOException {
-        if (closed) {
-            throw new IOException("StreamingFieldPostings is closed");
-        }
-        if (docId < lastAdvancedDoc) {
-            throw new IllegalStateException("StreamingFieldPostings cannot rewind: requested "
-                    + docId + " after " + lastAdvancedDoc);
-        }
-        lastAdvancedDoc = docId;
+        return advanceCommon(docId, Collections.emptyList());
+    }
 
-        if (heapSize == 0) {
-            return Collections.emptyList();
-        }
-
-        skipToDoc(docId);
-
-        if (heapSize == 0 || heap[0].currentDoc != docId) {
-            return Collections.emptyList();
-        }
-
+    @Override
+    protected List<TermEntry> drainAtDoc(int docId) throws IOException {
         int n = collectIntoScratch(docId);
-
         if (n == 0) {
             return Collections.emptyList();
         }
-
         return sortAndBuildResult(n);
-    }
-
-    private void skipToDoc(int docId) throws IOException {
-        while (heapSize > 0 && heap[0].currentDoc < docId) {
-            Cursor c = heap[0];
-            int next = c.postings.advance(docId);
-            if (next == PostingsCursor.NO_MORE_DOCS) {
-                heap[0] = heap[--heapSize];
-                heap[heapSize] = null;
-            } else {
-                c.currentDoc = next;
-            }
-            if (heapSize > 0) {
-                siftDown(0);
-            }
-        }
     }
 
     private int collectIntoScratch(int docId) throws IOException {
@@ -180,19 +130,6 @@ public final class GenericStreamingFieldPostings implements StreamingFieldPostin
         return n;
     }
 
-    private void advanceHeapHead() throws IOException {
-        int next = heap[0].postings.nextDoc();
-        if (next == PostingsCursor.NO_MORE_DOCS) {
-            heap[0] = heap[--heapSize];
-            heap[heapSize] = null;
-        } else {
-            heap[0].currentDoc = next;
-        }
-        if (heapSize > 0) {
-            siftDown(0);
-        }
-    }
-
     private List<TermEntry> sortAndBuildResult(int n) {
         Arrays.sort(scratchSortKey, 0, n);
 
@@ -213,31 +150,5 @@ public final class GenericStreamingFieldPostings implements StreamingFieldPostin
             }
         }
         return ordered;
-    }
-
-    @Override
-    public void close() {
-        if (closed) return;
-        closed = true;
-        for (int i = 0; i < heap.length; i++) {
-            heap[i] = null;
-        }
-        heapSize = 0;
-    }
-
-    private void siftDown(int i) {
-        int n = heapSize;
-        while (true) {
-            int l = (i << 1) + 1;
-            int r = l + 1;
-            int smallest = i;
-            if (l < n && heap[l].currentDoc < heap[smallest].currentDoc) smallest = l;
-            if (r < n && heap[r].currentDoc < heap[smallest].currentDoc) smallest = r;
-            if (smallest == i) return;
-            Cursor tmp = heap[i];
-            heap[i] = heap[smallest];
-            heap[smallest] = tmp;
-            i = smallest;
-        }
     }
 }

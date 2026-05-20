@@ -207,27 +207,27 @@ describe("analysis-component-removal transformer", () => {
             name: "x",
             body: {
                 settings: {
-                    "index.analysis.analyzer.alcatraz_tokenized_string.filter":
-                        ["standard", "alcatraz_pattern_capture", "lowercase", "asciifolding"],
-                    "index.analysis.analyzer.alcatraz_tokenized_string.tokenizer": "standard",
-                    "index.analysis.analyzer.alcatraz_tokenized_string.type": "custom",
+                    "index.analysis.analyzer.custom_text_analyzer.filter":
+                        ["standard", "custom_pattern_capture", "lowercase", "asciifolding"],
+                    "index.analysis.analyzer.custom_text_analyzer.tokenizer": "standard",
+                    "index.analysis.analyzer.custom_text_analyzer.type": "custom",
                     "index.number_of_shards": "1",
                 },
             },
         };
         const result = transformer(doc);
         const filter = result.body.settings[
-            "index.analysis.analyzer.alcatraz_tokenized_string.filter"
+            "index.analysis.analyzer.custom_text_analyzer.filter"
         ];
         expect(filter).toEqual([
-            "alcatraz_pattern_capture",
+            "custom_pattern_capture",
             "lowercase",
             "asciifolding",
         ]);
         // Tokenizer reference (string "standard") is a different namespace and must remain.
         expect(
             result.body.settings[
-                "index.analysis.analyzer.alcatraz_tokenized_string.tokenizer"
+                "index.analysis.analyzer.custom_text_analyzer.tokenizer"
             ]
         ).toBe("standard");
     });
