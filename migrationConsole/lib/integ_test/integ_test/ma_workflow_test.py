@@ -3,6 +3,9 @@ import subprocess
 
 import pytest
 
+from console_link.workflow.commands.crd_utils import list_migration_resources, resource_display_name
+from console_link.workflow.models.utils import load_k8s_config
+
 from .test_cases.ma_argo_test_base import MATestBase
 
 
@@ -31,10 +34,30 @@ def _run_workflow_reset(namespace: str = "ma"):
         pytest.fail("'workflow' CLI not found on PATH; cannot reset migration CRDs")
 
 
+def _fail_if_migration_resources_exist(namespace: str = "ma"):
+    """Fail before a test starts if a previous case left migration resources behind."""
+    try:
+        load_k8s_config()
+        resources = list_migration_resources(namespace)
+    except Exception as e:
+        pytest.fail(f"Unable to verify clean migration-resource state before test: {e}")
+
+    if not resources:
+        return
+
+    formatted = [resource_display_name(plural, name) for plural, name, _, _ in resources]
+    remaining_resources = ", ".join(formatted)
+    pytest.fail(
+        "Migration resources already exist before test starts; a previous workflow reset likely failed. "
+        f"Remaining resources in namespace {namespace}: {remaining_resources}"
+    )
+
+
 @pytest.fixture(autouse=True)
 def setup_and_teardown(request, keep_workflows, test_case: MATestBase):
     #-----Setup-----
     logger.info("Performing setup...")
+    _fail_if_migration_resources_exist()
 
     #-----Execute test-----
     yield

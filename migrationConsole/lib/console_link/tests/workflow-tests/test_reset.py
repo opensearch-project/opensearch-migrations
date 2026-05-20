@@ -1,5 +1,6 @@
 """Tests for workflow reset command (deletion-based CRD reset)."""
 
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from click.testing import CliRunner
@@ -121,13 +122,86 @@ class TestDeleteCrd:
         mock_custom = Mock()
         mock_custom.get_namespaced_custom_object.return_value = {}
         mock_client.CustomObjectsApi.return_value = mock_custom
-        mock_time.side_effect = [0, 0, 3, 3]
+        mock_time.side_effect = [0, 2, 2]
 
         assert _wait_until_gone('ma', 'datasnapshots', ['snap-a'], timeout=1) is False
-        mock_echo.assert_called_once()
-        assert mock_echo.call_args.kwargs == {'err': True}
-        assert 'Timed out waiting for deletion' in mock_echo.call_args.args[0]
-        assert 'kubectl get datasnapshots snap-a -n ma -o yaml' in mock_echo.call_args.args[0]
+        messages = [call.args[0] for call in mock_echo.call_args_list]
+        assert any('Timed out waiting for deletion' in message for message in messages)
+        assert any('kubectl get datasnapshots snap-a -n ma -o yaml' in message for message in messages)
+        assert any('Diagnostics for datasnapshot.snap-a' in message for message in messages)
+
+    @patch('console_link.workflow.commands.reset.time.time')
+    @patch('console_link.workflow.commands.reset.click.echo')
+    @patch('console_link.workflow.commands.reset.client')
+    def test_wait_until_gone_emits_kafka_storage_diagnostics_on_timeout(
+        self, mock_client, mock_echo, mock_time
+    ):
+        mock_custom = Mock()
+        mock_custom.get_namespaced_custom_object.return_value = {
+            'metadata': {
+                'name': 'default',
+                'deletionTimestamp': '2026-05-20T00:00:00Z',
+                'finalizers': ['foregroundDeletion'],
+            },
+            'status': {'phase': 'Deleting'},
+        }
+        mock_custom.list_namespaced_custom_object.return_value = {'items': []}
+        mock_core = Mock()
+        pvc = SimpleNamespace(
+            metadata=SimpleNamespace(
+                name='data-default-kafka-0',
+                finalizers=['kubernetes.io/pvc-protection'],
+                deletion_timestamp='2026-05-20T00:00:00Z',
+                owner_references=[],
+            ),
+            spec=SimpleNamespace(
+                volume_name='pvc-123',
+                storage_class_name='gp2',
+                resources=SimpleNamespace(requests={'storage': '2Gi'}),
+            ),
+            status=SimpleNamespace(phase='Bound'),
+        )
+        pv = SimpleNamespace(
+            metadata=SimpleNamespace(
+                name='pvc-123',
+                finalizers=['kubernetes.io/pv-protection'],
+                deletion_timestamp=None,
+                owner_references=[],
+            ),
+            spec=SimpleNamespace(
+                persistent_volume_reclaim_policy='Retain',
+                storage_class_name='gp2',
+                claim_ref=SimpleNamespace(namespace='ma', name='data-default-kafka-0'),
+            ),
+            status=SimpleNamespace(phase='Released'),
+        )
+        pod = SimpleNamespace(
+            metadata=SimpleNamespace(name='default-kafka-0'),
+            spec=SimpleNamespace(
+                volumes=[
+                    SimpleNamespace(
+                        persistent_volume_claim=SimpleNamespace(claim_name='data-default-kafka-0')
+                    )
+                ]
+            ),
+            status=SimpleNamespace(phase='Terminating'),
+        )
+        mock_core.list_namespaced_persistent_volume_claim.return_value.items = [pvc]
+        mock_core.read_persistent_volume.return_value = pv
+        mock_core.list_namespaced_pod.return_value.items = [pod]
+        mock_core.list_namespaced_event.return_value.items = []
+        mock_client.CustomObjectsApi.return_value = mock_custom
+        mock_client.CoreV1Api.return_value = mock_core
+        mock_time.side_effect = [0, 2, 2]
+
+        assert _wait_until_gone('ma', 'kafkaclusters', ['default'], timeout=1) is False
+
+        messages = [call.args[0] for call in mock_echo.call_args_list]
+        assert any('Diagnostics for kafkacluster.default' in message for message in messages)
+        assert any('Kafka PVC/PV diagnostics for cluster default' in message for message in messages)
+        assert any('PVC/data-default-kafka-0' in message for message in messages)
+        assert any('PV/pvc-123' in message for message in messages)
+        assert any('pods using PVC: default-kafka-0' in message for message in messages)
 
     @patch('console_link.workflow.commands.reset._wait_until_gone')
     @patch('console_link.workflow.commands.reset._delete_crd')
