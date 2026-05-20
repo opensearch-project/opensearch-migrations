@@ -13,6 +13,7 @@ import {
     getZodKeys,
     NAMED_KAFKA_CLIENT_CONFIG,
     NAMED_KAFKA_CLUSTER_CONFIG,
+    NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
     NAMED_TARGET_CLUSTER_CONFIG,
     PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
@@ -38,7 +39,7 @@ import {MetadataMigration} from "./metadataMigration";
 import {CreateOrGetSnapshot} from "./createOrGetSnapshot";
 import {ResourceManagement} from "./resourceManagement";
 
-import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {SetupKafka} from "./setupKafka";
 import {SetupCapture} from "./setupCapture";
@@ -106,16 +107,12 @@ export const FullMigration = WorkflowBuilder.create({
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
             .addCommand(["/bin/bash", "-lc"])
-            .addArgs([`
-set -euo pipefail
-
-selector='migrations.opensearch.org/workflow={{workflow.name}}'
-patch='{"metadata":{"ownerReferences":[{"apiVersion":"argoproj.io/v1alpha1","kind":"Workflow","name":"{{workflow.name}}","uid":"{{workflow.uid}}"}]}}'
-
-kubectl get approvalgates.migrations.opensearch.org -l "$selector" -o name \\
-  | xargs -r -n 1 kubectl patch --type merge -p "$patch" \\
-  || { echo "ERROR: failed to patch one or more approvalgate ownerReferences" >&2; exit 1; }
-`])
+            .addEnvVarsFromRecord({
+                WORKFLOW_NAME: expr.getWorkflowValue("name"),
+                WORKFLOW_UID: expr.getWorkflowValue("uid"),
+                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
+            })
+            .addArgs([workflowScriptCommand("addApprovalGateOwnerReferences.sh")])
         )
         .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )
@@ -127,11 +124,11 @@ kubectl get approvalgates.migrations.opensearch.org -l "$selector" -o name \\
             .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
             .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
             .addCommand(["/bin/bash", "-lc"])
-            .addArgs([`
-kubectl delete approvalgates.migrations.opensearch.org \\
-  -l "migrations.opensearch.org/workflow={{workflow.name}}" \\
-  --ignore-not-found
-`])
+            .addEnvVarsFromRecord({
+                WORKFLOW_NAME: expr.getWorkflowValue("name"),
+                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
+            })
+            .addArgs([workflowScriptCommand("cleanupApprovalGates.sh")])
         )
         .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )
@@ -309,6 +306,8 @@ kubectl delete approvalgates.migrations.opensearch.org \\
                     semaphoreKey: expr.get(
                         expr.deserializeRecord(b.inputs.snapshotItemConfig), "semaphoreKey"),
                     configChecksum: b.inputs.configChecksum,
+                    dataSnapshotName: b.inputs.resourceName,
+                    dataSnapshotUid: expr.get(expr.deserializeRecord(b.inputs.snapshotItemConfig), "resourceUid"),
                 }),
                 {when: c => ({templateExp: expr.and(
                     expr.not(expr.equals(c.readSnapshotPhase.outputs.phase, "Completed")),
@@ -345,7 +344,8 @@ kubectl delete approvalgates.migrations.opensearch.org \\
                             expr.deserializeRecord(expr.recordToString(c.item)),
                             "dependsOnProxySetups"
                         ),
-                        configChecksum: expr.get(c.item, "configChecksum")
+                        configChecksum: expr.get(c.item, "configChecksum"),
+                        resourceUid: expr.get(c.item, "resourceUid")
                     })),
 //                    snapshotItemConfig: expr.cast(c.item).to<Serialized<z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>>>(),
                     sourceConfig: expr.serialize(
@@ -377,12 +377,16 @@ kubectl delete approvalgates.migrations.opensearch.org \\
         .addRequiredInput("sourceVersion", typeToken<string>())
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addOptionalInput("sourceConfig", c =>
+            expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addRequiredInput("crdName", typeToken<string>())
         .addRequiredInput("resourceUid", typeToken<string>())
         .addRequiredInput("resourceCreationTimestamp", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("checksumForReplayer", typeToken<string>())
+        .addRequiredInput("workloadIdentityChecksum", typeToken<string>())
         .addRequiredInput("groupName_view", typeToken<string>())
         .addOptionalInput("sourceEndpoint", c => expr.literal(""))
         .addOptionalInput("metadataMigrationConfig", c =>
@@ -394,7 +398,6 @@ kubectl delete approvalgates.migrations.opensearch.org \\
         .addInputsFromRecord(ImageParameters)
 
         .addSteps(b => b
-            .addStep("idGenerator", INTERNAL, "doNothing")
             .addStep("metadataMigrate", MetadataMigration, "migrateMetaData", c => {
                     return c.register({
                         ...selectInputsForRegister(b, c),
@@ -408,11 +411,13 @@ kubectl delete approvalgates.migrations.opensearch.org \\
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "setupAndRunBulkLoad", c =>
                     c.register({
                         ...(selectInputsForRegister(b, c)),
-                        sessionName: c.steps.idGenerator.id,
+                        sessionName: expr.concat(expr.literal("rfs-"), b.inputs.workloadIdentityChecksum),
                         sourceVersion: b.inputs.sourceVersion,
                         sourceLabel: b.inputs.sourceLabel,
                         crdName: b.inputs.crdName,
-                        crdUid: b.inputs.resourceUid
+                        crdUid: b.inputs.resourceUid,
+                        configChecksum: b.inputs.configChecksum,
+                        checksumForReplayer: b.inputs.checksumForReplayer
                     }),
                 {when: {templateExp: expr.not(expr.isEmpty(b.inputs.documentBackfillConfig))}}
             )
@@ -502,6 +507,13 @@ kubectl delete approvalgates.migrations.opensearch.org \\
                         sourceVersion: expr.get(snapshotMigrationConfig, "sourceVersion"),
                         sourceLabel: expr.get(snapshotMigrationConfig, "sourceLabel"),
                         targetConfig: expr.serialize(expr.get(snapshotMigrationConfig, "targetConfig")),
+                        sourceConfig: expr.serialize(expr.makeDict({
+                            label: expr.get(snapshotMigrationConfig, "sourceLabel"),
+                            version: expr.get(snapshotMigrationConfig, "sourceVersion"),
+                            endpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], ""),
+                            allowInsecure: expr.dig(snapshotMigrationConfig, ["sourceAllowInsecure"], false),
+                            authConfig: expr.dig(snapshotMigrationConfig, ["sourceAuth"], expr.makeDict({}))
+                        })),
                         snapshotConfig: expr.serialize(expr.makeDict({
                             snapshotName: resolvedSnapshotName,
                             label: expr.get(snapshotRepoConfig, "label"),
@@ -522,12 +534,18 @@ kubectl delete approvalgates.migrations.opensearch.org \\
                         resourceUid: b.inputs.resourceUid,
                         resourceCreationTimestamp: c.steps.reconcileSnapshotMigrationResource.outputs.resourceCreationTimestamp,
                         groupName_view: expr.get(snapshotMigrationConfig, "migrationLabel"),
+                        workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum"),
+                        checksumForReplayer: expr.dig(snapshotMigrationConfig, ["checksumForReplayer"], ""),
                         sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], "")
                     });
                 }, {
                     when: c => ({templateExp: checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum)}),
                 }
             )
+            // Metadata-only path: workflow patches SM.status itself. On the
+            // RFS-enabled path, the RFS-completion CronJob is the sole writer
+            // of SM.status (INV-1), so this step is suppressed when a
+            // documentBackfillConfig is present.
             .addStep("patchSnapshotMigrationCompleted", ResourceManagement, "patchSnapshotMigrationCompleted",
                 c => c.register({
                     resourceName: b.inputs.resourceName,
@@ -538,7 +556,12 @@ kubectl delete approvalgates.migrations.opensearch.org \\
                         ["checksumForReplayer"], ""
                     ),
                 }),
-                {when: c => ({templateExp: checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
+                {when: c => ({templateExp: expr.and(
+                    checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum),
+                    expr.not(expr.hasKey(
+                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
+                        "documentBackfillConfig"))
+                )})}
             )
         })
     )

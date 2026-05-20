@@ -201,6 +201,36 @@ spec:
                   type: string
                 checksumForSnapshotMigration:
                   type: string
+                snapshotCreation:
+                  type: object
+                  properties:
+                    phase:
+                      type: string
+                      enum: [Pending, Running, Completed, Failed, Unknown]
+                    updatedAt:
+                      type: string
+                    message:
+                      type: string
+                    summary:
+                      type: object
+                      properties:
+                        shardsTotal:
+                          type: integer
+                        shardsSuccessful:
+                          type: integer
+                        shardsFailed:
+                          type: integer
+                        dataProcessed:
+                          type: string
+                          nullable: true
+                        dataProcessedUnit:
+                          type: string
+                          nullable: true
+                        eta:
+                          type: string
+                          nullable: true
+                      x-kubernetes-preserve-unknown-fields: true
+                  x-kubernetes-preserve-unknown-fields: true
               x-kubernetes-preserve-unknown-fields: true
 ---
 # SnapshotMigration: represents a migration from snapshot (metadata + document backfill).
@@ -360,6 +390,40 @@ spec:
                   type: string
                 checksumForReplayer:
                   type: string
+                documentBackfill:
+                  type: object
+                  properties:
+                    phase:
+                      type: string
+                      enum: [Pending, Running, Paused, Completed, Failed, Unknown]
+                    updatedAt:
+                      type: string
+                    message:
+                      type: string
+                    summary:
+                      type: object
+                      properties:
+                        percentageCompleted:
+                          type: number
+                        etaMs:
+                          type: number
+                          nullable: true
+                        started:
+                          type: string
+                          nullable: true
+                        finished:
+                          type: string
+                          nullable: true
+                        shardsTotal:
+                          type: integer
+                        shardsMigrated:
+                          type: integer
+                        shardsInProgress:
+                          type: integer
+                        shardsWaiting:
+                          type: integer
+                      x-kubernetes-preserve-unknown-fields: true
+                  x-kubernetes-preserve-unknown-fields: true
               x-kubernetes-preserve-unknown-fields: true
 ---
 # TrafficReplay: represents a traffic replayer and its configuration.

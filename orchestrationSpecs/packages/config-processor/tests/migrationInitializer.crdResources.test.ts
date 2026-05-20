@@ -126,6 +126,14 @@ describe('migration initializer CRD resource generation', () => {
         expect(getResource('ApprovalGate', 'migratemetadata.source-target-snap1-migration-0')?.spec.dependsOn).toBeUndefined();
 
         expect(enrichScript).toContain(
+            "data_snapshot_source_snap1=\"$(kubectl get datasnapshots.migrations.opensearch.org/source-snap1 -o jsonpath='{.metadata.uid}')\""
+        );
+        expect(enrichScript).toContain('dataSnapshots: {');
+        expect(enrichScript).toContain('"source-snap1": $data_snapshot_source_snap1');
+        expect(enrichScript).toContain(
+            '.snapshots |= ((. // []) | map(. as $snapshot | .createSnapshotConfig |= ((. // []) | map(. + {resourceUid: $uids.dataSnapshots[($snapshot.sourceConfig.label + "-" + .label)]}))))'
+        );
+        expect(enrichScript).toContain(
             "snapshot_migration_source_target_snap1_migration_0=\"$(kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1-migration-0 -o jsonpath='{.metadata.uid}')\""
         );
         expect(enrichScript).toContain('snapshotMigrations: {');
@@ -307,6 +315,9 @@ describe('migration initializer CRD resource generation', () => {
         const enrichScript = (initializer as any).generateWorkflowUidEnrichmentScript(bundle.workflows);
 
         expect(enrichScript).not.toBeNull();
+        expect(enrichScript).toContain(
+            "data_snapshot_source_snap1=\"$(kubectl get datasnapshots.migrations.opensearch.org/source-snap1 -o jsonpath='{.metadata.uid}')\""
+        );
         expect(enrichScript).toContain(
             "snapshot_migration_source_target_snap1_migration_0=\"$(kubectl get snapshotmigrations.migrations.opensearch.org/source-target-snap1-migration-0 -o jsonpath='{.metadata.uid}')\""
         );
