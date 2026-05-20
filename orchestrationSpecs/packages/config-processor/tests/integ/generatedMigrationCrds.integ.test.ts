@@ -13,6 +13,7 @@ import {MigrationInitializer} from "../../src";
 
 const TEST_NAMESPACE = "migration-crd-roundtrip";
 const MIGRATION_RUN_NAMESPACE = "migration-run-history";
+const DELETION_BOOKKEEPING_NAMESPACE = "deletion-bookkeeping";
 
 const CRD_KIND_TO_PLURAL: Record<string, string> = {
     ApprovalGate: "approvalgates",
@@ -345,5 +346,101 @@ describe("generated migration CRDs live compatibility", () => {
             workflowUid: "workflow-uid-123",
             workflowCreationTimestamp: "2026-05-18T11:45:00Z",
         });
+    });
+
+    test("allows Kubernetes deletion bookkeeping after a migration resource enters Deleting", async () => {
+        await copyTextToContainer(container, generateMigrationCrdsYaml(), "/tmp/migrationCrds.yaml");
+        await copyTextToContainer(container, generateValidatingAdmissionPoliciesYaml(), "/tmp/migrationVaps.yaml");
+        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationCrds.yaml"], "apply generated migration CRDs");
+        await execOrThrow(
+            container,
+            [
+                "kubectl",
+                "wait",
+                "--for=condition=Established",
+                "--timeout=90s",
+                "crd",
+                "-l",
+                "migrations.opensearch.org/generated=true",
+            ],
+            "wait for generated migration CRDs"
+        );
+        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/migrationVaps.yaml"], "apply generated migration VAPs");
+        await execOrThrow(container, ["kubectl", "create", "namespace", DELETION_BOOKKEEPING_NAMESPACE], "create deletion bookkeeping namespace");
+
+        const dataSnapshot = {
+            apiVersion: "migrations.opensearch.org/v1alpha1",
+            kind: "DataSnapshot",
+            metadata: {
+                name: "deleting-snapshot",
+                namespace: DELETION_BOOKKEEPING_NAMESPACE,
+                finalizers: ["migrations.opensearch.org/test-finalizer"],
+            },
+            spec: {
+                snapshotPrefix: "deleting-snapshot",
+                indexAllowlist: [],
+                maxSnapshotRateMbPerNode: 0,
+                jvmArgs: "",
+                loggingConfigurationOverrideConfigMap: "",
+            },
+        };
+        await copyTextToContainer(container, stringify(dataSnapshot), "/tmp/deletingDataSnapshot.yaml");
+        await execOrThrow(container, ["kubectl", "apply", "-f", "/tmp/deletingDataSnapshot.yaml"], "apply deleting DataSnapshot");
+        await execOrThrow(
+            container,
+            [
+                "kubectl",
+                "patch",
+                "datasnapshots.migrations.opensearch.org/deleting-snapshot",
+                "-n",
+                DELETION_BOOKKEEPING_NAMESPACE,
+                "--subresource=status",
+                "--type=merge",
+                "-p",
+                JSON.stringify({status: {phase: "Deleting"}}),
+            ],
+            "mark DataSnapshot as Deleting"
+        );
+        await execOrThrow(
+            container,
+            [
+                "kubectl",
+                "delete",
+                "datasnapshots.migrations.opensearch.org/deleting-snapshot",
+                "-n",
+                DELETION_BOOKKEEPING_NAMESPACE,
+                "--cascade=foreground",
+                "--wait=false",
+            ],
+            "request foreground deletion for DataSnapshot"
+        );
+
+        await execOrThrow(
+            container,
+            [
+                "kubectl",
+                "patch",
+                "datasnapshots.migrations.opensearch.org/deleting-snapshot",
+                "-n",
+                DELETION_BOOKKEEPING_NAMESPACE,
+                "--type=merge",
+                "-p",
+                JSON.stringify({metadata: {finalizers: []}}),
+            ],
+            "remove deletion finalizer from Deleting DataSnapshot"
+        );
+        await execOrThrow(
+            container,
+            [
+                "kubectl",
+                "wait",
+                "--for=delete",
+                "--timeout=30s",
+                "datasnapshots.migrations.opensearch.org/deleting-snapshot",
+                "-n",
+                DELETION_BOOKKEEPING_NAMESPACE,
+            ],
+            "wait for DataSnapshot deletion after finalizer removal"
+        );
     });
 });

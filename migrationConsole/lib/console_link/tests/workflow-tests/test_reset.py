@@ -8,10 +8,12 @@ from console_link.workflow.cli import workflow_cli
 from console_link.workflow.commands.reset import (
     _artifact_output_prefix,
     _build_child_map,
+    _delete_and_wait,
     _delete_crd,
     _find_ancestors,
     _find_dependents,
     _prune_ancestors_of_protected_proxies,
+    _wait_until_gone,
 )
 
 
@@ -110,6 +112,43 @@ class TestDeleteCrd:
             name='source-proxy',
             body='delete-options',
         )
+
+    @patch('console_link.workflow.commands.reset.time.sleep')
+    @patch('console_link.workflow.commands.reset.time.time')
+    @patch('console_link.workflow.commands.reset.click.echo')
+    @patch('console_link.workflow.commands.reset.client')
+    def test_wait_until_gone_returns_false_on_timeout(self, mock_client, mock_echo, mock_time, _mock_sleep):
+        mock_custom = Mock()
+        mock_custom.get_namespaced_custom_object.return_value = {}
+        mock_client.CustomObjectsApi.return_value = mock_custom
+        mock_time.side_effect = [0, 0, 3, 3]
+
+        assert _wait_until_gone('ma', 'datasnapshots', ['snap-a'], timeout=1) is False
+        mock_echo.assert_called_once()
+        assert mock_echo.call_args.kwargs == {'err': True}
+        assert 'Timed out waiting for deletion' in mock_echo.call_args.args[0]
+        assert 'kubectl get datasnapshots snap-a -n ma -o yaml' in mock_echo.call_args.args[0]
+
+    @patch('console_link.workflow.commands.reset._wait_until_gone')
+    @patch('console_link.workflow.commands.reset._delete_crd')
+    @patch('console_link.workflow.commands.reset._cleanup_output_artifacts')
+    @patch('console_link.workflow.commands.reset._cleanup_owned_resources')
+    @patch('console_link.workflow.commands.reset._mark_deleting')
+    @patch('console_link.workflow.commands.reset._resource_metadata')
+    def test_delete_and_wait_fails_when_wait_times_out(
+        self,
+        mock_metadata,
+        _mock_mark,
+        _mock_cleanup_owned,
+        _mock_cleanup_artifacts,
+        mock_delete,
+        mock_wait,
+    ):
+        mock_metadata.return_value = ('uid-a', '2026-05-20T00:00:00Z')
+        mock_delete.return_value = True
+        mock_wait.return_value = False
+
+        assert _delete_and_wait('ma', 'datasnapshots', 'snap-a') == ('snap-a', False)
 
 
 class TestResetCommandList:

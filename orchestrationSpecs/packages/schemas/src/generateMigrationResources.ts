@@ -519,6 +519,21 @@ function deletingPhaseGuardPolicy(): string {
     const resources = RESOURCE_PROJECTIONS
         .filter(resource => resource.lifecycle !== "approvalGate")
         .map(resource => resource.plural);
+    const sameOptionalMetadataMapExpression = (field: "labels" | "annotations") => [
+        `(!has(object.metadata.${field}) && !has(oldObject.metadata.${field}))`,
+        `(has(object.metadata.${field}) && has(oldObject.metadata.${field}) && object.metadata.${field} == oldObject.metadata.${field})`,
+    ].join(" ||\n");
+    const deletionBookkeepingExpression = [
+        "object.spec == oldObject.spec",
+        "(has(object.metadata.deletionTimestamp) || has(oldObject.metadata.deletionTimestamp))",
+        "object.metadata.name == oldObject.metadata.name",
+        "object.metadata.namespace == oldObject.metadata.namespace",
+        `(${indentBlock(sameOptionalMetadataMapExpression("labels"), 2)}\n)`,
+        `(${indentBlock(sameOptionalMetadataMapExpression("annotations"), 2)}\n)`,
+        "(!has(object.metadata.finalizers) ||\n" +
+        "  (has(oldObject.metadata.finalizers) && object.metadata.finalizers.all(finalizer, finalizer in oldObject.metadata.finalizers))\n" +
+        ")",
+    ].join(" &&\n");
     return [
         "---",
         "apiVersion: admissionregistration.k8s.io/v1",
@@ -537,8 +552,9 @@ function deletingPhaseGuardPolicy(): string {
         `      resources: [${resources.map(r => JSON.stringify(r)).join(", ")}]`,
         "  validations:",
         validationRule(
-            "!has(oldObject.status) ||\n!has(oldObject.status.phase) ||\noldObject.status.phase != 'Deleting'",
-            "This resource is being deleted. No updates are permitted during teardown."
+            "!has(oldObject.status) ||\n!has(oldObject.status.phase) ||\noldObject.status.phase != 'Deleting' ||\n" +
+            `(\n${indentBlock(deletionBookkeepingExpression, 2)}\n)`,
+            "This resource is being deleted. Only Kubernetes deletion bookkeeping updates are permitted during teardown."
         ),
         "",
         policyBinding("deleting-phase-guard"),

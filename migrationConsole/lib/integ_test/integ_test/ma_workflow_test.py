@@ -24,11 +24,11 @@ def _run_workflow_reset(namespace: str = "ma"):
         if result.stderr:
             logger.warning("workflow reset stderr:\n%s", result.stderr)
         if result.returncode != 0:
-            logger.warning("workflow reset exited with code %d", result.returncode)
+            pytest.fail(f"workflow reset exited with code {result.returncode}")
     except subprocess.TimeoutExpired:
-        logger.warning("workflow reset timed out after 300s")
+        pytest.fail("workflow reset timed out after 300s")
     except FileNotFoundError:
-        logger.warning("'workflow' CLI not found on PATH, skipping CRD reset")
+        pytest.fail("'workflow' CLI not found on PATH; cannot reset migration CRDs")
 
 
 @pytest.fixture(autouse=True)

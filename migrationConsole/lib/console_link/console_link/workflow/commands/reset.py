@@ -96,7 +96,16 @@ def _wait_until_gone(namespace, plural, names, timeout=120):
         if remaining:
             time.sleep(2)
     if remaining:
-        logger.warning(f"Timed out waiting for deletion: {remaining}")
+        timeout_message = (
+            f"Timed out waiting for deletion: {remaining}. Resource deletion was requested, "
+            f"but the resource is still present. Check deletionTimestamp, finalizers, "
+            f"ownerReferences, and status with: kubectl get {plural} {','.join(sorted(remaining))} "
+            f"-n {namespace} -o yaml"
+        )
+        click.echo(f"  Error: {timeout_message}", err=True)
+        logger.error(timeout_message)
+        return False
+    return True
 
 
 def _get_resource_completions(ctx, _, incomplete):
@@ -341,7 +350,7 @@ def _delete_and_wait(namespace, plural, name, delete_output_artifacts=True):
         click.echo(f"  Keeping output artifacts for {resource_display_name(plural, name)}{detail}: {path}")
     ok = _delete_crd(namespace, plural, name)
     if ok:
-        _wait_until_gone(namespace, plural, [name])
+        ok = _wait_until_gone(namespace, plural, [name])
     return name, ok
 
 
