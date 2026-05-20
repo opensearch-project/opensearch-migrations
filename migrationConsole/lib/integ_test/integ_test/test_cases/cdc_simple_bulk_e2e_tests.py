@@ -5,7 +5,7 @@ from .cdc_base import (
     MATestBase, MigrationType, MATestUserArguments,
     CDC_SOURCE_TARGET_COMBINATIONS, REPLAYER_LABEL_SELECTOR, PROXY_LABEL_SELECTOR,
     wait_for_pod_ready, wait_for_replayer_consuming,
-    run_generate_data,
+    run_generate_data, log_kafka_consumer_group_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,6 +77,11 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
         logger.info("Waiting for replayer to join Kafka consumer group...")
         wait_for_replayer_consuming(namespace=ns)
 
+        # Snapshot consumer-group offsets/lag at the start of replay so the log
+        # captures what the replayer is about to consume. The end-of-replay
+        # snapshot is logged in verify_clusters() after target verification.
+        log_kafka_consumer_group_state(label="replay-start")
+
         logger.info("Post-snapshot: generating %d docs into %s via proxy", self.POST_SNAPSHOT_DOCS, self.idx_post)
         run_generate_data("proxy", self.idx_post, self.POST_SNAPSHOT_DOCS)
 
@@ -108,11 +113,17 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
         # snapshot-restored ones.
         expected_pre = self.PRE_SNAPSHOT_DOCS * 2
         logger.info("Verifying both indices on target (pre-snapshot expects %d due to duplication)...", expected_pre)
-        self.target_operations.check_doc_counts_match(
-            cluster=self.target_cluster,
-            expected_index_details={
-                self.idx_pre: {"count": expected_pre},
-                self.idx_post: {"count": self.POST_SNAPSHOT_DOCS},
-            },
-            max_attempts=120, delay=10.0,
-        )
+        try:
+            self.target_operations.check_doc_counts_match(
+                cluster=self.target_cluster,
+                expected_index_details={
+                    self.idx_pre: {"count": expected_pre},
+                    self.idx_post: {"count": self.POST_SNAPSHOT_DOCS},
+                },
+                max_attempts=120, delay=10.0,
+            )
+        finally:
+            # Always log the consumer-group state at end-of-replay, regardless
+            # of whether verification passed: the snapshot is most valuable
+            # exactly when target counts didn't reach the expected value.
+            log_kafka_consumer_group_state(label="replay-end")

@@ -99,4 +99,6 @@ Set this in your transformsSources:
   transformsSources:
     my-transforms:
       image: "${PINNED_REF}"
+
+PINNED_REF=${PINNED_REF}
 OUTPUT

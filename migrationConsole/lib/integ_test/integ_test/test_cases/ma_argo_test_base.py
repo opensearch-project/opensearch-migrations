@@ -88,7 +88,15 @@ class MATestBase:
         self.target_cluster = None
         self.imported_clusters = False
 
-        if not self.is_aoss:
+        if self.is_aoss:
+            # AOSS-friendly tests signal opt-in by passing allow_source_target_combinations=[]
+            # and overriding import_existing_clusters to construct an AOSS target cluster
+            # without a target_version. Tests that declare non-empty OS combinations are
+            # OS-only; skip them cleanly when the run targets AOSS rather than letting
+            # them NPE on self.target_version downstream.
+            if allow_source_target_combinations:
+                raise ClusterVersionCombinationUnsupported(self.source_version, self.target_type)
+        else:
             supported_combo = False
             for (allowed_source, allowed_target) in allow_source_target_combinations:
                 if (is_incoming_version_supported(allowed_source, self.source_version) and

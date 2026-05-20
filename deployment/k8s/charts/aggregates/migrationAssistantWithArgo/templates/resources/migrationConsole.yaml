@@ -26,6 +26,14 @@ rules:
     resources: ["approvalgates", "capturedtraffics", "captureproxies", "datasnapshots", "kafkaclusters", "snapshotmigrations", "trafficreplays",
                 "approvalgates/status", "capturedtraffics/status", "captureproxies/status", "datasnapshots/status", "kafkaclusters/status", "snapshotmigrations/status", "trafficreplays/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["kafka.strimzi.io"]
+    # Read access for runtime SCRAM credential resolution; delete access
+    # for `workflow reset` cleanup of stuck CRs between integ-test cases.
+    # The reset CLI runs under this SA and walks (kafkatopics → kafkausers
+    # → kafkas → kafkanodepools); without delete here the cleanup 403's,
+    # leaving residual broker pods that deadlock the next test's setup.
+    resources: ["kafkas", "kafkausers", "kafkatopics", "kafkanodepools"]
+    verbs: ["get", "list", "watch", "delete", "deletecollection"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1

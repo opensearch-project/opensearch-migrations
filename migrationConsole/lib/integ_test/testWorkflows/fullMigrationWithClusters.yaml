@@ -220,36 +220,33 @@ spec:
         command: [sh, -c]
         args:
           - |
+            set -e
             echo "Waiting for {{inputs.parameters.cluster-type}} cluster to be ready..."
-            
-            # Try StatefulSet pod first (for helm-based clusters)
-            if kubectl wait --for=condition=ready pod/{{inputs.parameters.cluster-name}}-0 \
-              --namespace={{inputs.parameters.namespace}} \
-              --timeout=10s 2>/dev/null; then
-              echo "{{inputs.parameters.cluster-type}} cluster pod (StatefulSet) is ready!"
-            else
-              # Fallback to Deployment rollout status (for ES 1.5/2.4)
-              echo "StatefulSet pod not found, checking Deployment..."
-              kubectl rollout status deployment/{{inputs.parameters.cluster-name}} \
-                --namespace={{inputs.parameters.namespace}} \
-                --timeout=200s
-              echo "{{inputs.parameters.cluster-type}} cluster deployment is ready!"
-            fi
-            # Check if StatefulSet pod exists first
-            if kubectl get pod/{{inputs.parameters.cluster-name}}-0 \
-                 --namespace={{inputs.parameters.namespace}} >/dev/null 2>&1; then
-              echo "Found StatefulSet pod {{inputs.parameters.cluster-name}}-0, waiting for readiness..."
-              kubectl wait --for=condition=ready pod/{{inputs.parameters.cluster-name}}-0 \
-                --namespace={{inputs.parameters.namespace}} \
-                --timeout=200s
-              echo "{{inputs.parameters.cluster-type}} cluster pod (StatefulSet) is ready!"
-            else
-              echo "StatefulSet pod not found, checking Deployment..."
-              kubectl rollout status deployment/{{inputs.parameters.cluster-name}} \
-                --namespace={{inputs.parameters.namespace}} \
-                --timeout=200s
-              echo "{{inputs.parameters.cluster-type}} cluster deployment is ready!"
-            fi
+
+            # Wait for pod or deployment to appear (StatefulSet controller may need a moment)
+            for i in $(seq 1 30); do
+              if kubectl get pod/{{inputs.parameters.cluster-name}}-0 \
+                   --namespace={{inputs.parameters.namespace}} >/dev/null 2>&1; then
+                echo "Found StatefulSet pod {{inputs.parameters.cluster-name}}-0, waiting for readiness..."
+                kubectl wait --for=condition=ready pod/{{inputs.parameters.cluster-name}}-0 \
+                  --namespace={{inputs.parameters.namespace}} \
+                  --timeout=300s
+                echo "{{inputs.parameters.cluster-type}} cluster pod (StatefulSet) is ready!"
+                exit 0
+              elif kubectl get deployment/{{inputs.parameters.cluster-name}} \
+                     --namespace={{inputs.parameters.namespace}} >/dev/null 2>&1; then
+                echo "Found Deployment {{inputs.parameters.cluster-name}}, waiting for rollout..."
+                kubectl rollout status deployment/{{inputs.parameters.cluster-name}} \
+                  --namespace={{inputs.parameters.namespace}} \
+                  --timeout=300s
+                echo "{{inputs.parameters.cluster-type}} cluster deployment is ready!"
+                exit 0
+              fi
+              echo "Waiting for pod or deployment to appear (attempt $i/30)..."
+              sleep 10
+            done
+            echo "ERROR: Neither StatefulSet pod nor Deployment found for {{inputs.parameters.cluster-name}} after 5 minutes"
+            exit 1
 
     # Generic suspend template for pausing workflow execution
     - name: suspend-step
