@@ -103,7 +103,7 @@ public class RegularDocumentReaderEngine implements DocumentReaderEngine {
         var mappingContext = getFieldMappingContext(indexName);
         return new DocumentChangeset(
             Flux.empty(),
-            LuceneReader.readDocsByLeavesFromStartingPosition(directoryReader, startingDocId, mappingContext),
+            LuceneReader.readDocsByLeavesFromStartingPosition(directoryReader, startingDocId, mappingContext, false),
             LuceneDirectoryReader.getCleanupRunnable(directoryReader)
         );
     }
