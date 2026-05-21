@@ -41,6 +41,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             .addCommand(["/bin/bash", "-c"])
             .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
             .addEnvVar("MIGRATION_CONFIG_BASE64", cb.inputs.migrationConfigBase64)
+            .addEnvVar("RUN_NONCE", expr.literal("1")) // setting since Solr 6 / 7 depend on known snapshot name
             .addArgs([configureAndSubmitScript])
         )
         .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)

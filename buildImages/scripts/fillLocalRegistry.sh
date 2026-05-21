@@ -29,10 +29,13 @@ docker ps -q -f name=^buildkitd$ | grep -q . || docker run -d --privileged \
 
 docker buildx inspect local-remote-builder >/dev/null 2>&1 || docker buildx create --name local-remote-builder --driver remote tcp://localhost:1234
 
+# NOTE: if only testing changes in solr and / or ES, can use flags -PincludeSolr666, -PexcludeESCustomTestImages params respectively
 PLATFORM=$(uname -m)
 echo "Building general and test images"
-../gradlew "buildImagesToRegistry_${PLATFORM}" "buildKitTestAll_${PLATFORM}" -PregistryEndpoint=localhost:5001 -Pbuilder=local-remote-builder
+../gradlew "buildImagesToRegistry_${PLATFORM}" "buildKitTestAll_${PLATFORM}" -PregistryEndpoint=localhost:5001 -Pbuilder=local-remote-builder -PincludeSolr660TestImage -PexcludeESCustomTestImages
 
 
 echo "Registry contents:"
 curl http://localhost:5001/v2/_catalog
+echo "Custom solr tags:"
+curl http://localhost:5001/v2/migrations/custom-solr/tags/list

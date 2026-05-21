@@ -25,7 +25,7 @@ def publishedRepoByImageName = [
         transformation_shim   : "opensearch-migrations-transformation-shim",
 ]
 
-def includeSolr666TestImage = project.hasProperty('includeSolr666TestImage') // pass -PincludeSolr666TestImage to include
+def includeSolr660TestImage = project.hasProperty('includeSolr660TestImage') // pass -PincludeSolr660TestImage to include
 def excludeESCustomTestImages = project.hasProperty('excludeESCustomTestImages') // pass -PexcludeESCustomTestImages to exclude custom ES test image builds
 
 def getRepoNameIfPublishing = { Map cfg ->
@@ -126,11 +126,11 @@ def buildKitProjects = [
 
 // custom solr image since solr 6.x does not bring arm64 / multiplatform
 // build loads jar, which needs to be pulled from archive, which can be slow
-def solr666Entry = [
-    serviceName: "customSolr666",
+def solr660Entry = [
+    serviceName: "customSolr660",
     contextDir: "custom-solr-images/dockerfiles",
     imageName:  "custom-solr",
-    imageTag:   "6.6.6",
+    imageTag:   "6.6.0",
 ]
 // Custom Elasticsearch images for k8s integration tests
 def customESEntries = [
@@ -228,7 +228,7 @@ def customESEntries = [
 
 // Test/CI-only images — not built by buildKitAll, use buildKitTestAll instead
 def testBuildKitProjects = [
-    *(includeSolr666TestImage ? [solr666Entry] : []),
+    *(includeSolr660TestImage ? [solr660Entry] : []),
     *(excludeESCustomTestImages ? [] : customESEntries),
 ]
 

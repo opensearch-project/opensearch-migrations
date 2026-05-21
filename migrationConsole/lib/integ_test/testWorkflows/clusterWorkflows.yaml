@@ -1855,7 +1855,7 @@ spec:
                   serviceAccountName: migration-console-access-role
                   containers:
                     - name: solr
-                      image: ${IMAGE_REGISTRY_PREFIX}migrations/custom-solr:6.6.6
+                      image: ${IMAGE_REGISTRY_PREFIX}migrations/custom-solr:6.6.0
                       imagePullPolicy: Always
                       securityContext:
                         runAsUser: 0
@@ -2045,7 +2045,7 @@ spec:
             {
               "endpoint": "http://${CLUSTER_NAME}:8983",
               "allowInsecure": true,
-              "version": "SOLR 6.6.6"
+              "version": "SOLR 6.6.0"
             }
             EOF
 
