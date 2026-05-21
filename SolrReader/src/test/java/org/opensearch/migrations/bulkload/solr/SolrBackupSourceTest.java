@@ -118,6 +118,15 @@ class SolrBackupSourceTest {
     }
 
     @Test
+    void returnsEmptyPartitionsForNonExistentBackupDir() {
+        // only backup.properties in S3, local dir never created.
+        var missingDir = tempDir.resolve("nonexistent_collection");
+        var source = new SolrBackupSource(missingDir, "test", emptySchema(), 6);
+        var partitions = source.listPartitions("test");
+        assertThat("No partitions for missing backup dir", partitions.size(), equalTo(0));
+    }
+
+    @Test
     void fallsBackToSingleShardForEmptyDir() throws IOException {
         // Empty directory — falls back to treating it as single shard
         var source = new SolrBackupSource(tempDir, "test", emptySchema(), 8);

@@ -173,6 +173,10 @@ public class SolrBackupSource implements DocumentSource {
      * Discover shard directories from the backup (non-UUID layouts).
      */
     List<Path> discoverShardDirs() {
+        if (!Files.isDirectory(backupDir)) {
+            log.warn("Backup directory does not exist, treating as empty collection: {}", backupDir);
+            return List.of();
+        }
         if (hasSegmentsFile(backupDir)) {
             return List.of(backupDir);
         }
