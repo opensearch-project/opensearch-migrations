@@ -12,6 +12,28 @@ fi
 CONFIG_FILENAME=$1
 shift  # Remove first argument, leaving any additional args in $@
 
+# unique-run-nonce is only used as the suffix for auto-created snapshot names.
+# It is not part of INITIALIZE_CMD input, so filter it out while preserving all
+# other arguments for the config processor.
+RUN_NONCE=""
+ALL_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --unique-run-nonce)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --unique-run-nonce requires a value" >&2
+                exit 1
+            fi
+            RUN_NONCE="$2"
+            shift 2
+            ;;
+        *)
+            ALL_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${NODEJS:=node}"
@@ -35,13 +57,16 @@ else
         ''|*[!0-9]*) RUN_NUMBER="$(date +%s)000" ;;
     esac
 fi
-UUID="$RUN_NUMBER"
+
+: "${RUN_NONCE:=$RUN_NUMBER}"
+
 echo "Using migration run number: $RUN_NUMBER"
+echo "Using snapshot nonce: $RUN_NONCE"
 
 WORKFLOW_NAME="migration-workflow"
 
 echo "Running configuration conversion..."
-$INITIALIZE_CMD --user-config $CONFIG_FILENAME --output-dir $TEMP_DIR --workflow-name "$WORKFLOW_NAME" --run-number "$RUN_NUMBER" $@
+$INITIALIZE_CMD --user-config "$CONFIG_FILENAME" --output-dir "$TEMP_DIR" --workflow-name "$WORKFLOW_NAME" --run-number "$RUN_NUMBER" "${ALL_ARGS[@]}"
 
 echo "Applying Kubernetes resources..."
 if [ -x "$TEMP_DIR/handleK8sResources.sh" ]; then
@@ -77,7 +102,7 @@ spec:
   arguments:
     parameters:
       - name: uniqueRunNonce
-        value: "$UUID"
+        value: "$RUN_NONCE"
       - name: migrationRunNumber
         value: "$RUN_NUMBER"
       - name: approval-config

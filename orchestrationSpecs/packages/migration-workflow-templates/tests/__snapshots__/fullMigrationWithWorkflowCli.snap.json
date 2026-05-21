@@ -63,6 +63,10 @@
               "value": "{{inputs.parameters.migrationConfigBase64}}"
             },
             {
+              "name": "RUN_NONCE",
+              "value": "1"
+            },
+            {
               "name": "WORKFLOW_SCRIPTS_ROOT",
               "value": "{{inputs.parameters.workflowScriptsRoot}}"
             }

@@ -88,7 +88,7 @@ public class ClusterVersionDetector {
     }
 
     private static Mono<Version> detectSolrVersion(RestClient client) {
-        return client.getAsync("solr/admin/info/system", null)
+        return client.getAsync("solr/admin/info/system?wt=json", null)
             .flatMap(resp -> {
                 if (resp.statusCode != 200) {
                     return Mono.error(new UnexpectedStatusCode(resp));
