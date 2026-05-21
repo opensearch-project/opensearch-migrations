@@ -16,6 +16,8 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
+import com.google.protobuf.ByteString;
+
 /**
  * Formats a single TrafficStream record as one line of text for the dump-raw mode.
  * No cross-record aggregation — each TrafficStream is self-contained.
@@ -115,17 +117,16 @@ public class TrafficStreamDumper {
             var obs = observations.get(i);
             if (obs.hasSegmentEnd()) {
                 i++; // absorb into current run
-                continue;
-            }
-            int dataLen = dataLength(obs, reads);
-            if (dataLen == 0 && !isReadOrWritePayload(obs, reads)) {
+            } else if (!isReadOrWritePayload(obs, reads)) {
                 break;
+            } else {
+                int dataLen = dataLength(obs, reads);
+                totalSize += dataLen;
+                if (previewBuf != null && previewCopied < previewBytes && dataLen > 0) {
+                    previewCopied += copyPreviewBytes(obs, reads, previewBuf, previewCopied);
+                }
+                i++;
             }
-            totalSize += dataLen;
-            if (previewBuf != null && previewCopied < previewBytes && dataLen > 0) {
-                previewCopied += copyPreviewBytes(obs, reads, previewBuf, previewCopied);
-            }
-            i++;
         }
 
         sb.append(' ').append(reads ? 'R' : 'W').append('[').append(totalSize).append(']');
@@ -161,15 +162,26 @@ public class TrafficStreamDumper {
      * Returns the number of bytes copied.
      */
     private static int copyPreviewBytes(TrafficObservation obs, boolean reads, byte[] previewBuf, int copiedSoFar) {
-        com.google.protobuf.ByteString data = reads
-            ? (obs.hasRead() ? obs.getRead().getData() : obs.getReadSegment().getData())
-            : (obs.hasWrite() ? obs.getWrite().getData() : obs.getWriteSegment().getData());
+        ByteString data = getPayloadData(obs, reads);
         int remaining = previewBuf.length - copiedSoFar;
         int toCopy = Math.min(data.size(), remaining);
         if (toCopy > 0) {
             data.substring(0, toCopy).copyTo(previewBuf, copiedSoFar);
         }
         return toCopy;
+    }
+
+    private static ByteString getPayloadData(TrafficObservation obs, boolean reads) {
+        if (reads) {
+            if (obs.hasRead()) {
+                return obs.getRead().getData();
+            }
+            return obs.getReadSegment().getData();
+        }
+        if (obs.hasWrite()) {
+            return obs.getWrite().getData();
+        }
+        return obs.getWriteSegment().getData();
     }
 
     private static String formatPreview(byte[] buf, int copied, long totalSize) {

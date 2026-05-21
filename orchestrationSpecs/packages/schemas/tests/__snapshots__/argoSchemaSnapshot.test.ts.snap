@@ -878,7 +878,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "config": {
                           "type": "object",
                           "additionalProperties": {
-                            "nullable": true
+                            "type": [
+                              "string",
+                              "number",
+                              "boolean",
+                              "object",
+                              "array",
+                              "null"
+                            ]
                           }
                         }
                       },
