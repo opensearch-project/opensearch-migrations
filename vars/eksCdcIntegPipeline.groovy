@@ -230,7 +230,11 @@ def call(Map config = [:]) {
                                             tag="transforms-${bank}-\${content_hash}"
                                             output=\$(deployment/k8s/package-transforms.sh "\${transforms_dir}" "${env.registryEndpoint}" "\${tag}")
                                             printf '%s\\n' "\${output}" >&2
-                                            pinned_ref=\$(printf '%s\\n' "\${output}" | grep -oE '[^[:space:]]+@sha256:[a-f0-9]{64}' | tail -n 1)
+                                            # Match a non-whitespace, non-quote run before @sha256:<64 hex>.
+                                            # The script embeds the pinned ref inside a YAML 'image: "..."' line;
+                                            # excluding double-quotes from the prefix character class avoids
+                                            # capturing the surrounding " into the result.
+                                            pinned_ref=\$(printf '%s\\n' "\${output}" | grep -oE '[^[:space:]"]+@sha256:[a-f0-9]{64}' | tail -n 1)
                                             test -n "\${pinned_ref}"
                                             printf '%s\\n' "\${pinned_ref}"
                                         """,
