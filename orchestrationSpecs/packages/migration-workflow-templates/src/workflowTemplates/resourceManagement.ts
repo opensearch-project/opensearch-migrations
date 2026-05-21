@@ -3,11 +3,14 @@ import {
     AllowLiteralOrExpression,
     BaseExpression,
     expr,
+    FunctionExpression,
     INTERNAL,
     InputParamDef,
     InputParametersRecord,
     makeDirectTypeProxy,
     makeStringTypeProxy,
+    NonSerializedPlainObject,
+    PlainObject,
     selectInputsForRegister,
     Serialized,
     TemplateBuilder,
@@ -31,7 +34,9 @@ import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 const SECONDS_IN_DAYS = 24 * 3600;
 const LONGEST_POSSIBLE_MIGRATION = 365 * SECONDS_IN_DAYS;
 const CRD_API_VERSION = "migrations.opensearch.org/v1alpha1";
-const RUN_UID_LABEL = "workflows.argoproj.io/run-uid";
+const RUN_NUMBER_LABEL = "migrations.opensearch.org/run-number";
+const APPROVED_DURING_RUN_ANNOTATION = "migrations.opensearch.org/approved-during-run";
+const MIGRATION_RUN_NUMBER_VALUE = "{{workflow.parameters.migrationRunNumber}}";
 const WORKFLOW_LABEL = "workflows.argoproj.io/workflow";
 const SOURCE_LABEL = "migrations.opensearch.org/source";
 const TARGET_LABEL = "migrations.opensearch.org/target";
@@ -68,6 +73,16 @@ function placeholderStatusFields<T extends StringStatusFields>(fields: T): Recor
         proxied[String(key)] = `{{inputs.parameters.${String(key)}}}`;
     }
     return proxied;
+}
+
+function makeYamlJsonLiteralProxy<T extends NonSerializedPlainObject>(value: BaseExpression<T, any>): T {
+    // Resource templates substitute Argo expressions before kubectl parses the YAML.
+    // toJSON keeps quote-heavy strings, arrays, and objects valid as YAML literals.
+    const jsonExpression = new FunctionExpression<Serialized<T>, NonSerializedPlainObject, any>(
+        "toJSON",
+        [value] as unknown as BaseExpression<NonSerializedPlainObject, any>[]
+    );
+    return makeDirectTypeProxy(jsonExpression as unknown as BaseExpression<Record<string, PlainObject>>) as unknown as T;
 }
 
 function buildPatchStatusTemplate<
@@ -131,7 +146,7 @@ function buildPatchOutputTemplate<ParentWorkflowScope extends WorkflowAndTemplat
                                 s3Key: "{{inputs.parameters.s3Key}}",
                                 resourceUid: "{{inputs.parameters.resourceUid}}",
                                 workflowName: "{{workflow.name}}",
-                                workflowUid: "{{workflow.uid}}",
+                                migrationRunNumber: MIGRATION_RUN_NUMBER_VALUE,
                                 workflowCreationTimestamp: "{{workflow.creationTimestamp}}",
                                 configChecksum: "{{inputs.parameters.configChecksum}}"
                             }
@@ -154,7 +169,7 @@ function makeKafkaClusterManifest(
             name: makeStringTypeProxy(expr.get(kc, "name")),
             labels: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                 [STRIMZI_CLUSTER_LABEL]: makeStringTypeProxy(expr.get(kc, "name")),
             }
         },
@@ -206,7 +221,7 @@ function makeCapturedTrafficManifest(
             name: makeStringTypeProxy(topicCrName),
             labels: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                 [SOURCE_LABEL]: makeStringTypeProxy(sourceLabel),
                 [KAFKA_CLUSTER_LABEL]: makeStringTypeProxy(kafkaClusterName),
             }
@@ -257,7 +272,7 @@ function makeCaptureProxyManifest(
             name: makeStringTypeProxy(proxyName),
             labels: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                 [SOURCE_LABEL]: makeStringTypeProxy(expr.dig(config, ["sourceConfig", "label"], "")),
                 [TASK_LABEL]: "captureProxy",
             }
@@ -281,7 +296,7 @@ function makeSnapshotMigrationManifest(
             name: makeStringTypeProxy(resourceName),
             labels: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                 [SOURCE_LABEL]: makeStringTypeProxy(expr.get(config, "sourceLabel")),
                 [TARGET_LABEL]: makeStringTypeProxy(expr.dig(config, ["targetConfig", "label"], expr.literal(""))),
                 [SNAPSHOT_LABEL]: makeStringTypeProxy(expr.dig(config, ["snapshotConfig", "label"], expr.literal(""))),
@@ -307,8 +322,11 @@ function makeSnapshotMigrationManifest(
             metadataMigrationOtelCollectorEndpoint: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "otelCollectorEndpoint"], expr.literal(""))),
             metadataMigrationOutput: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "output"], expr.literal("HUMAN_READABLE"))),
             metadataMigrationTransformerConfigBase64: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "transformerConfigBase64"], expr.literal(""))),
-            metadataMigrationTransformerConfig: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "transformerConfig"], expr.literal(""))),
+            metadataMigrationTransformerConfig: makeYamlJsonLiteralProxy(expr.dig(config, ["metadataMigrationConfig", "transformerConfig"], expr.literal(""))),
             metadataMigrationTransformerConfigFile: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "transformerConfigFile"], expr.literal(""))),
+            metadataMigrationTransformsImage: makeYamlJsonLiteralProxy(expr.dig(config, ["metadataMigrationConfig", "transformsImage"], expr.literal(""))),
+            metadataMigrationTransformsImagePullPolicy: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "transformsImagePullPolicy"], expr.literal("IfNotPresent"))),
+            metadataMigrationTransformsConfigMap: makeYamlJsonLiteralProxy(expr.dig(config, ["metadataMigrationConfig", "transformsConfigMap"], expr.literal(""))),
             documentBackfillPodReplicas: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "podReplicas"], 1)),
             documentBackfillJvmArgs: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "jvmArgs"], expr.literal(""))),
             documentBackfillLoggingConfigurationOverrideConfigMap: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "loggingConfigurationOverrideConfigMap"], expr.literal(""))),
@@ -319,8 +337,11 @@ function makeSnapshotMigrationManifest(
             documentBackfillEnableSourcelessMigrations: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "enableSourcelessMigrations"], false)),
             documentBackfillUseRecoverySource: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "useRecoverySource"], false)),
             documentBackfillDocTransformerConfigBase64: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "docTransformerConfigBase64"], expr.literal(""))),
-            documentBackfillDocTransformerConfig: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "docTransformerConfig"], expr.literal(""))),
+            documentBackfillDocTransformerConfig: makeYamlJsonLiteralProxy(expr.dig(config, ["documentBackfillConfig", "docTransformerConfig"], expr.literal(""))),
             documentBackfillDocTransformerConfigFile: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "docTransformerConfigFile"], expr.literal(""))),
+            documentBackfillTransformsImage: makeYamlJsonLiteralProxy(expr.dig(config, ["documentBackfillConfig", "transformsImage"], expr.literal(""))),
+            documentBackfillTransformsImagePullPolicy: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "transformsImagePullPolicy"], expr.literal("IfNotPresent"))),
+            documentBackfillTransformsConfigMap: makeYamlJsonLiteralProxy(expr.dig(config, ["documentBackfillConfig", "transformsConfigMap"], expr.literal(""))),
             documentBackfillDocumentsPerBulkRequest: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "documentsPerBulkRequest"], 0x7fffffff)),
             documentBackfillDocumentsSizePerBulkRequest: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "documentsSizePerBulkRequest"], 10 * 1024 * 1024)),
             documentBackfillInitialLeaseDuration: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "initialLeaseDuration"], expr.literal("PT1H"))),
@@ -354,6 +375,9 @@ function makeTrafficReplayManifest(
         ),
         podReplicas: expr.dig(opts, ["podReplicas"], 1),
         resources: expr.get(opts, "resources"),
+        transformsImage: expr.dig(opts, ["transformsImage"], expr.literal("")),
+        transformsImagePullPolicy: expr.dig(opts, ["transformsImagePullPolicy"], expr.literal("IfNotPresent")),
+        transformsConfigMap: expr.dig(opts, ["transformsConfigMap"], expr.literal("")),
     });
     return {
         apiVersion: CRD_API_VERSION,
@@ -362,7 +386,7 @@ function makeTrafficReplayManifest(
             name: makeStringTypeProxy(name),
             labels: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                 [SOURCE_LABEL]: makeStringTypeProxy(sourceLabel),
                 [TARGET_LABEL]: makeStringTypeProxy(targetLabel),
                 [TASK_LABEL]: "trafficReplayer",
@@ -460,7 +484,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                         name: b.inputs.resourceName,
                         labels: {
                             [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                            [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                            [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                             [SOURCE_LABEL]: makeStringTypeProxy(b.inputs.sourceLabel),
                             [SNAPSHOT_LABEL]: makeStringTypeProxy(expr.get(snapshotItemConfig, "label")),
                         }
@@ -554,8 +578,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     metadata: {
                         name: b.inputs.resourceName,
                         annotations: {
-                            "migrations.opensearch.org/approved-by-run":
-                                makeStringTypeProxy(expr.getWorkflowValue("uid"))
+                            [APPROVED_DURING_RUN_ANNOTATION]: MIGRATION_RUN_NUMBER_VALUE
                         }
                     }
                 }
@@ -580,10 +603,18 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
+    .addTemplate("patchKafkaClusterPending", t => buildPatchStatusTemplate(t, "KafkaCluster", {}))
+    .addTemplate("patchCapturedTrafficPending", t => buildPatchStatusTemplate(t, "CapturedTraffic", {}))
+    .addTemplate("patchCaptureProxyPending", t => buildPatchStatusTemplate(t, "CaptureProxy", {}))
+    .addTemplate("patchDataSnapshotPending", t => buildPatchStatusTemplate(t, "DataSnapshot", {}))
+    .addTemplate("patchSnapshotMigrationPending", t => buildPatchStatusTemplate(t, "SnapshotMigration", {}))
+    .addTemplate("patchTrafficReplayPending", t => buildPatchStatusTemplate(t, "TrafficReplay", {}))
+
     // ── Root reconcile wrappers ──────────────────────────────────────────
 
     .addTemplate("reconcileKafkaClusterResource", t => t
         .addRequiredInput("kafkaClusterConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("retryGateName", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
@@ -593,6 +624,16 @@ export const ResourceManagement = WorkflowBuilder.create({
                     kafkaClusterConfig: b.inputs.kafkaClusterConfig,
                 }),
                 {continueOn: {failed: true}}
+            )
+            .addStep("markPending", INTERNAL, "patchKafkaClusterPending", c =>
+                c.register({
+                    resourceName: expr.jsonPathStrict(b.inputs.kafkaClusterConfig, "name"),
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.equals(c.tryApply.status, "Succeeded"),
+                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
+                )})}
             )
             .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
                 c.register({
@@ -618,6 +659,7 @@ export const ResourceManagement = WorkflowBuilder.create({
             .addStepToSelf("retryLoop", c =>
                 c.register({
                     kafkaClusterConfig: b.inputs.kafkaClusterConfig,
+                    configChecksum: b.inputs.configChecksum,
                     retryGateName: b.inputs.retryGateName,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
@@ -640,6 +682,7 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("replicas", typeToken<number>())
         .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
         .addRequiredInput("sourceLabel", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("retryGateName", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
         .addOptionalInput("sourceKind", c => "proxy")
@@ -659,6 +702,16 @@ export const ResourceManagement = WorkflowBuilder.create({
                     s3SourceUri: b.inputs.s3SourceUri,
                 }),
                 {continueOn: {failed: true}}
+            )
+            .addStep("markPending", INTERNAL, "patchCapturedTrafficPending", c =>
+                c.register({
+                    resourceName: b.inputs.topicCrName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.equals(c.tryApply.status, "Succeeded"),
+                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
+                )})}
             )
             .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
                 c.register({
@@ -692,6 +745,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     topicConfig: b.inputs.topicConfig,
                     sourceKind: b.inputs.sourceKind,
                     s3SourceUri: b.inputs.s3SourceUri,
+                    configChecksum: b.inputs.configChecksum,
                     retryGateName: b.inputs.retryGateName,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
@@ -710,6 +764,7 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("topicCrName", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("retryGateName", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
@@ -721,6 +776,16 @@ export const ResourceManagement = WorkflowBuilder.create({
                     topicCrName: b.inputs.topicCrName,
                 }),
                 {continueOn: {failed: true}}
+            )
+            .addStep("markPending", INTERNAL, "patchCaptureProxyPending", c =>
+                c.register({
+                    resourceName: b.inputs.proxyName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.equals(c.tryApply.status, "Succeeded"),
+                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
+                )})}
             )
             .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
                 c.register({
@@ -748,6 +813,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     proxyConfig: b.inputs.proxyConfig,
                     proxyName: b.inputs.proxyName,
                     topicCrName: b.inputs.topicCrName,
+                    configChecksum: b.inputs.configChecksum,
                     retryGateName: b.inputs.retryGateName,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
@@ -766,6 +832,7 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("snapshotItemConfig", typeToken<z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>>())
         .addRequiredInput("sourceLabel", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
         .addSteps(b => b
@@ -776,6 +843,16 @@ export const ResourceManagement = WorkflowBuilder.create({
                     sourceLabel: b.inputs.sourceLabel,
                 }),
                 {continueOn: {failed: true}}
+            )
+            .addStep("markPending", INTERNAL, "patchDataSnapshotPending", c =>
+                c.register({
+                    resourceName: b.inputs.resourceName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.equals(c.tryApply.status, "Succeeded"),
+                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
+                )})}
             )
         )
         .addExpressionOutput("currentConfigChecksum", c =>
@@ -789,6 +866,7 @@ export const ResourceManagement = WorkflowBuilder.create({
     .addTemplate("reconcileSnapshotMigrationResource", t => t
         .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("retryGateName", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
@@ -799,6 +877,16 @@ export const ResourceManagement = WorkflowBuilder.create({
                     snapshotMigrationConfig: b.inputs.snapshotMigrationConfig,
                 }),
                 {continueOn: {failed: true}}
+            )
+            .addStep("markPending", INTERNAL, "patchSnapshotMigrationPending", c =>
+                c.register({
+                    resourceName: b.inputs.resourceName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.equals(c.tryApply.status, "Succeeded"),
+                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
+                )})}
             )
             .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
                 c.register({
@@ -825,6 +913,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                 c.register({
                     snapshotMigrationConfig: b.inputs.snapshotMigrationConfig,
                     resourceName: b.inputs.resourceName,
+                    configChecksum: b.inputs.configChecksum,
                     retryGateName: b.inputs.retryGateName,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
@@ -851,6 +940,7 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("targetLabel", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("retryGateName", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
@@ -864,6 +954,16 @@ export const ResourceManagement = WorkflowBuilder.create({
                     targetLabel: b.inputs.targetLabel,
                 }),
                 {continueOn: {failed: true}}
+            )
+            .addStep("markPending", INTERNAL, "patchTrafficReplayPending", c =>
+                c.register({
+                    resourceName: b.inputs.name,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.equals(c.tryApply.status, "Succeeded"),
+                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
+                )})}
             )
             .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
                 c.register({
@@ -893,6 +993,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     replayerOptions: b.inputs.replayerOptions,
                     sourceLabel: b.inputs.sourceLabel,
                     targetLabel: b.inputs.targetLabel,
+                    configChecksum: b.inputs.configChecksum,
                     retryGateName: b.inputs.retryGateName,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
@@ -912,14 +1013,12 @@ export const ResourceManagement = WorkflowBuilder.create({
     .addTemplate("patchKafkaClusterReady", t => buildPatchStatusTemplate(t, "KafkaCluster", {
         configChecksum: ""
     }))
-    .addTemplate("patchCapturedTrafficRunning", t => buildPatchStatusTemplate(t, "CapturedTraffic", {}))
     .addTemplate("patchCapturedTrafficReady", t => buildPatchStatusTemplate(t, "CapturedTraffic", {
         configChecksum: "",
         checksumForSnapshot: "",
         checksumForReplayer: ""
     }))
     .addTemplate("patchCapturedTrafficError", t => buildPatchStatusTemplate(t, "CapturedTraffic", {}))
-    .addTemplate("patchCaptureProxyRunning", t => buildPatchStatusTemplate(t, "CaptureProxy", {}))
     .addTemplate("patchCaptureProxyReady", t => buildPatchStatusTemplate(t, "CaptureProxy", {
         configChecksum: "",
         checksumForSnapshot: "",

@@ -22,6 +22,9 @@ is a caller, not a second validator.
   - validates and transforms a user config, then writes workflow artifacts
 - `packages/config-processor/src/runMigrationConfigTransformer.ts`
   - validates and transforms a user config, then prints the transformed output
+- `packages/config-processor/src/resolveMigrationResources.ts`
+  - builds the resolved migration resources artifact from either user config or
+    transformed workflow config
 
 All of these flow into `MigrationConfigTransformer`.
 
@@ -52,6 +55,10 @@ raw user input
 The central implementation is:
 
 - `packages/config-processor/src/migrationConfigTransformer.ts`
+
+After transformation, resource parameter projection, CRD/VAP generation, and
+resolved migration resources generation are described in
+[resolvingMigrationParametersFromConfigs.md](../docs/resolvingMigrationParametersFromConfigs.md).
 
 ## Current Pipeline Graph
 

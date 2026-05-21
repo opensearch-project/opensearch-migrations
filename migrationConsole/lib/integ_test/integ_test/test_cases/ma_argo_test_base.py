@@ -25,6 +25,9 @@ _WILDCARD_TEMPLATE_MAP = {
     ("opensearch", 3): 1,
 }
 
+CLUSTER_SETUP_TIMEOUT_SECONDS = 1000
+MIGRATION_COMPLETION_TIMEOUT_SECONDS = 1800
+
 
 def get_template_name(version: ClusterVersion) -> str:
     minor = version.minor_version
@@ -50,7 +53,8 @@ class ClusterVersionCombinationUnsupported(Exception):
 class MATestUserArguments:
     def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool,
                  target_type: str = "OS", image_registry_prefix: str = "",
-                 speedup_factor: int = 20, observed_packet_timeout: int = 30):
+                 speedup_factor: int = 20, observed_packet_timeout: int = 30,
+                 transform_image_basic: str = "", transform_image_sequence: str = ""):
         self.source_version = source_version
         self.target_version = target_version
         self.target_type = target_type
@@ -59,6 +63,8 @@ class MATestUserArguments:
         self.image_registry_prefix = image_registry_prefix
         self.speedup_factor = speedup_factor
         self.observed_packet_timeout = observed_packet_timeout
+        self.transform_image_basic = transform_image_basic
+        self.transform_image_sequence = transform_image_sequence
 
 
 class MATestBase:
@@ -102,6 +108,8 @@ class MATestBase:
         self.image_registry_prefix = user_args.image_registry_prefix
         self.speedup_factor = user_args.speedup_factor
         self.observed_packet_timeout = user_args.observed_packet_timeout
+        self.transform_image_basic = user_args.transform_image_basic
+        self.transform_image_sequence = user_args.transform_image_sequence
         self.workflow_template = "full-migration-with-clusters"
         self.workflow_snapshot_and_migration_config = None
         self.source_operations = get_operations_library_by_version(self.source_version)
@@ -231,7 +239,8 @@ class MATestBase:
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         if not self.imported_clusters:
-            self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=1000)
+            self.argo_service.wait_for_suspend(workflow_name=self.workflow_name,
+                                               timeout_seconds=CLUSTER_SETUP_TIMEOUT_SECONDS)
             self.source_cluster = self.argo_service.get_cluster_config_from_workflow(
                 workflow_name=self.workflow_name, cluster_type="source")
             self.target_cluster = self.argo_service.get_cluster_config_from_workflow(
@@ -240,7 +249,7 @@ class MATestBase:
     def prepare_clusters(self):
         pass
 
-    def workflow_perform_migrations(self, timeout_seconds: int = 1000):
+    def workflow_perform_migrations(self, timeout_seconds: int = MIGRATION_COMPLETION_TIMEOUT_SECONDS):
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         if self.imported_clusters:

@@ -16,10 +16,13 @@ def orchestrationSpecsDirP = rootProject.layout.projectDirectory.dir("orchestrat
 def orchestrationP     = orchestrationSpecsDirP
 def configProcessorP   = orchestrationP.dir("packages/config-processor")
 def workflowTemplatesP = orchestrationP.dir("packages/migration-workflow-templates")
+def schemasP           = orchestrationP.dir("packages/schemas")
 def configProcessorStagingP =
         layout.buildDirectory.dir("dockerContext/nodeStaging/configProcessor")
 def workflowTemplatesStagingP =
         layout.buildDirectory.dir("dockerContext/nodeStaging/workflowTemplates")
+def migrationResourcesStagingP =
+        layout.buildDirectory.dir("dockerContext/nodeStaging/migrationResources")
 
 tasks.register('installDependencies', NpmTask) {
     description = 'Install npm dependencies for orchestrationSpecs'
@@ -88,6 +91,26 @@ tasks.register('buildAndStageConfigProcessor', NpmTask) {
     }
 }
 
+tasks.register('buildAndStageMigrationResources', NpmTask) {
+    description = 'Generate migration CRDs and ValidatingAdmissionPolicies into Docker staging'
+    workingDir = orchestrationSpecsDirP.asFile
+    args = ['run', 'stage-migration-resources', '--', '--outputDirectory', migrationResourcesStagingP.get().asFile.absolutePath]
+    dependsOn installDependencies
+
+    inputs.dir(schemasP.dir("src"))
+    inputs.file(schemasP.file("package.json"))
+    inputs.file(orchestrationSpecsDirP.file("package.json"))
+    inputs.file(orchestrationSpecsDirP.file("package-lock.json"))
+    inputs.file(orchestrationSpecsDirP.file("tsconfig.base.json"))
+    inputs.file(orchestrationSpecsDirP.file("tsconfig.json"))
+    inputs.file(orchestrationSpecsDirP.file("tsconfig.workspaces.json"))
+    outputs.dir(migrationResourcesStagingP)
+
+    doFirst {
+        migrationResourcesStagingP.get().asFile.mkdirs()
+    }
+}
+
 def buildAndStageConfigProcessorProvider = tasks.named("buildAndStageConfigProcessor")
 def nodeSetupProvider = tasks.named("nodeSetup")
 def nodeExt = extensions.getByType(NodeExtension)
@@ -111,6 +134,7 @@ tasks.register('syncDockerBuildContext', Sync) {
 
     dependsOn makeAndStageWorkflowTemplates
     dependsOn buildAndStageConfigProcessor
+    dependsOn buildAndStageMigrationResources
 
     // Explicitly declare inputs for all files being synced
     inputs.file(project.file("Dockerfile"))

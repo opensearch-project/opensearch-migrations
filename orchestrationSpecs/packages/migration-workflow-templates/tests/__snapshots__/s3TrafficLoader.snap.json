@@ -20,6 +20,14 @@
         {
           "name": "approvalConfigMapName",
           "value": "approval-config"
+        },
+        {
+          "name": "migrationRunNumber",
+          "value": "0"
+        },
+        {
+          "name": "workflowScriptsRoot",
+          "value": "/root/workflows/.workflowScripts"
         }
       ]
     },
@@ -256,6 +264,10 @@
                     "value": "{{=fromJSON(inputs.parameters.loaderConfig)['s3Uri']}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.checksumForReplayer}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{='capturedtraffic.'+inputs.parameters.topicCrName+'.vapretry'}}"
                   },
@@ -312,8 +324,8 @@
                     "value": "{{inputs.parameters.kafkaTopicName}}"
                   },
                   {
-                    "name": "workflowUid",
-                    "value": "{{workflow.uid}}"
+                    "name": "migrationRunNumber",
+                    "value": "{{workflow.parameters.migrationRunNumber}}"
                   },
                   {
                     "name": "ownerUid",

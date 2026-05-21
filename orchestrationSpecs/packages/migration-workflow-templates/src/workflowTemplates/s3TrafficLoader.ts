@@ -184,6 +184,7 @@ kubectl patch capturedtraffic "$CT_NAME" \\
                     topicConfig: b.inputs.topicConfig,
                     sourceKind: expr.literal("s3"),
                     s3SourceUri: s3Uri,
+                    configChecksum: b.inputs.checksumForReplayer,
                     retryGateName: expr.concat(expr.literal("capturedtraffic."), b.inputs.topicCrName, expr.literal(".vapretry")),
                     retryGroupName_view: expr.concat(expr.literal("CapturedTraffic: "), b.inputs.topicCrName),
                 })
@@ -202,7 +203,7 @@ kubectl patch capturedtraffic "$CT_NAME" \\
                 c.register({
                     clusterName: b.inputs.kafkaClusterName,
                     topicName: b.inputs.kafkaTopicName,
-                    workflowUid: expr.getWorkflowValue("uid"),
+                    migrationRunNumber: t.inputs.workflowParameters.migrationRunNumber,
                     ownerUid: b.inputs.kafkaClusterOwnerUid,
                     sourceLabel: b.inputs.sourceK8sLabel,
                     partitions: b.inputs.topicPartitions,
