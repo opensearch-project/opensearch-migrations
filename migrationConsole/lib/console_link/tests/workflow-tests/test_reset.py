@@ -130,6 +130,52 @@ class TestDeleteCrd:
         assert any('kubectl get datasnapshots snap-a -n ma -o yaml' in message for message in messages)
         assert any('Diagnostics for datasnapshot.snap-a' in message for message in messages)
 
+    @patch('console_link.workflow.commands.reset.time.sleep')
+    @patch('console_link.workflow.commands.reset.time.time')
+    @patch('console_link.workflow.commands.reset.click.echo')
+    @patch('console_link.workflow.commands.reset.client')
+    def test_wait_until_gone_reports_owner_reference_blockers(
+        self, mock_client, mock_echo, mock_time, _mock_sleep
+    ):
+        mock_custom = Mock()
+        mock_custom.get_namespaced_custom_object.return_value = {
+            'kind': 'DataSnapshot',
+            'metadata': {
+                'name': 'snap-a',
+                'uid': 'owner-uid',
+                'deletionTimestamp': '2026-05-20T00:00:00Z',
+                'finalizers': ['foregroundDeletion'],
+            },
+            'status': {'phase': 'Deleting'},
+        }
+        mock_custom.list_namespaced_custom_object.return_value = {'items': []}
+
+        blocker = SimpleNamespace(
+            metadata=SimpleNamespace(
+                name='external-blocker',
+                finalizers=['example.com/test-finalizer'],
+                deletion_timestamp='2026-05-20T00:00:00Z',
+                owner_references=[
+                    SimpleNamespace(kind='DataSnapshot', name='snap-a', uid='owner-uid')
+                ],
+            ),
+            status=SimpleNamespace(phase=None, conditions=[]),
+        )
+        mock_core = Mock()
+        mock_core.list_namespaced_config_map.return_value = SimpleNamespace(items=[blocker])
+        mock_core.list_namespaced_event.return_value = SimpleNamespace(items=[])
+
+        mock_client.CustomObjectsApi.return_value = mock_custom
+        mock_client.CoreV1Api.return_value = mock_core
+        mock_time.side_effect = [0, 2, 2]
+
+        assert _wait_until_gone('ma', 'datasnapshots', ['snap-a'], timeout=1) is False
+
+        messages = [call.args[0] for call in mock_echo.call_args_list]
+        assert any('OwnerReference dependents that may block foreground deletion' in message for message in messages)
+        assert any('v1/configmaps/external-blocker' in message for message in messages)
+        assert any("finalizers=['example.com/test-finalizer']" in message for message in messages)
+
     @patch('console_link.workflow.commands.reset.time.time')
     @patch('console_link.workflow.commands.reset.click.echo')
     @patch('console_link.workflow.commands.reset.client')

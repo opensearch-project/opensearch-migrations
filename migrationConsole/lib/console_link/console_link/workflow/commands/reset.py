@@ -156,6 +156,21 @@ _STRIMZI_API = 'kafka.strimzi.io/v1'
 _STRIMZI_CLUSTER_LABEL = 'strimzi.io/cluster'
 _APPS_API = 'apps/v1'
 
+_OWNER_REF_DIAGNOSTIC_RESOURCES = [
+    ('v1', 'pods'),
+    ('v1', 'persistentvolumeclaims'),
+    ('v1', 'services'),
+    ('v1', 'secrets'),
+    ('v1', 'configmaps'),
+    (_APPS_API, 'deployments'),
+    (_APPS_API, 'statefulsets'),
+    (_APPS_API, 'replicasets'),
+    (_STRIMZI_API, 'kafkas'),
+    (_STRIMZI_API, 'kafkanodepools'),
+    (_STRIMZI_API, 'kafkatopics'),
+    (_STRIMZI_API, 'kafkausers'),
+]
+
 _OWNED_RESOURCE_CLEANUP = {
     'kafkaclusters': [
         # Topics/users first — Strimzi topic operator needs the cluster alive
@@ -220,6 +235,36 @@ def _find_owned(namespace, api_gv, plural, label_key, cr_name):
         return []
 
 
+def _list_items(response):
+    """Return Kubernetes list items, treating mocked diagnostic responses as empty."""
+    items = getattr(response, "items", None) if not isinstance(response, dict) else response.get("items", [])
+    return items if isinstance(items, list) else []
+
+
+def _list_namespaced_resources(namespace, api_gv, plural):
+    """List a known namespaced resource group for stuck-delete diagnostics."""
+    group, version = _parse_api_gv(api_gv)
+    try:
+        if group:
+            return _list_items(client.CustomObjectsApi().list_namespaced_custom_object(
+                group=group, version=version, namespace=namespace, plural=plural
+            ))
+        v1, apps = client.CoreV1Api(), client.AppsV1Api()
+        dispatch = {
+            'pods': v1.list_namespaced_pod,
+            'persistentvolumeclaims': v1.list_namespaced_persistent_volume_claim,
+            'services': v1.list_namespaced_service,
+            'secrets': v1.list_namespaced_secret,
+            'configmaps': v1.list_namespaced_config_map,
+            'deployments': apps.list_namespaced_deployment,
+            'statefulsets': apps.list_namespaced_stateful_set,
+            'replicasets': apps.list_namespaced_replica_set,
+        }
+        return _list_items(dispatch[plural](namespace))
+    except (ApiException, KeyError):
+        return []
+
+
 def _delete_owned_resource(namespace, api_gv, plural, name):
     group, version = _parse_api_gv(api_gv)
     try:
@@ -250,6 +295,28 @@ def _item_finalizers(item):
             else item.metadata.finalizers or [])
 
 
+def _item_metadata(item):
+    return item.get('metadata', {}) if isinstance(item, dict) else item.metadata
+
+
+def _item_status(item):
+    return item.get('status', {}) if isinstance(item, dict) else getattr(item, 'status', None)
+
+
+def _item_phase(item):
+    status = _item_status(item)
+    if isinstance(status, dict):
+        return status.get('phase')
+    return getattr(status, 'phase', None)
+
+
+def _item_conditions(item):
+    status = _item_status(item)
+    if isinstance(status, dict):
+        return status.get('conditions', [])
+    return getattr(status, 'conditions', []) or []
+
+
 def _metadata_field(metadata, key, default=None):
     if isinstance(metadata, dict):
         return metadata.get(key, default)
@@ -268,14 +335,33 @@ def _format_owner_references(owner_refs):
     return "[" + ", ".join(formatted) + "]"
 
 
+def _owner_ref_field(ref, field):
+    if isinstance(ref, dict):
+        return ref.get(field)
+    return getattr(ref, field, None)
+
+
+def _metadata_owner_references(metadata):
+    return _metadata_field(metadata, "ownerReferences", None) or _metadata_field(
+        metadata, "owner_references", None
+    ) or []
+
+
+def _owner_ref_matches(metadata, owner_uid, owner_kind, owner_name):
+    for ref in _metadata_owner_references(metadata):
+        if owner_uid and _owner_ref_field(ref, "uid") == owner_uid:
+            return True
+        if _owner_ref_field(ref, "kind") == owner_kind and _owner_ref_field(ref, "name") == owner_name:
+            return True
+    return False
+
+
 def _format_metadata_for_diagnostics(metadata):
     finalizers = _metadata_field(metadata, "finalizers", None) or []
     deletion_timestamp = _metadata_field(metadata, "deletionTimestamp", None) or _metadata_field(
         metadata, "deletion_timestamp", None
     )
-    owner_refs = _metadata_field(metadata, "ownerReferences", None) or _metadata_field(
-        metadata, "owner_references", None
-    ) or []
+    owner_refs = _metadata_owner_references(metadata)
     return (
         f"deletionTimestamp={deletion_timestamp or NONE_PLACEHOLDER}, "
         f"finalizers={finalizers}, ownerReferences={_format_owner_references(owner_refs)}"
@@ -283,6 +369,8 @@ def _format_metadata_for_diagnostics(metadata):
 
 
 def _format_conditions(conditions):
+    if not isinstance(conditions, list):
+        return "[]"
     if not conditions:
         return "[]"
     formatted = []
@@ -320,7 +408,7 @@ def _emit_core_resource_line(kind, name, metadata, status_phase=None, extra=None
 
 def _find_pods_using_pvc(namespace, pvc_name):
     try:
-        pods = client.CoreV1Api().list_namespaced_pod(namespace=namespace).items
+        pods = _list_items(client.CoreV1Api().list_namespaced_pod(namespace=namespace))
     except ApiException:
         return []
     matches = []
@@ -335,10 +423,10 @@ def _find_pods_using_pvc(namespace, pvc_name):
 
 def _emit_events_for_object(namespace, kind, name, limit=5):
     try:
-        events = client.CoreV1Api().list_namespaced_event(
+        events = _list_items(client.CoreV1Api().list_namespaced_event(
             namespace=namespace,
             field_selector=f"involvedObject.kind={kind},involvedObject.name={name}",
-        ).items
+        ))
     except ApiException:
         return
     if not events:
@@ -420,6 +508,31 @@ def _emit_kafka_storage_diagnostics(namespace, cluster_name):
         _emit_events_for_object(namespace, "PersistentVolumeClaim", pvc.metadata.name)
 
 
+def _emit_owner_reference_blockers(namespace, owner_kind, owner_name, owner_uid):
+    """Print objects that still point at a foreground-deleting owner."""
+    blockers = []
+    for api_gv, plural in _OWNER_REF_DIAGNOSTIC_RESOURCES:
+        for item in _list_namespaced_resources(namespace, api_gv, plural):
+            metadata = _item_metadata(item)
+            if _owner_ref_matches(metadata, owner_uid, owner_kind, owner_name):
+                blockers.append((api_gv, plural, item))
+
+    if not blockers:
+        click.echo("    No ownerReference dependents found in diagnostic resource groups.", err=True)
+        return
+
+    click.echo("    OwnerReference dependents that may block foreground deletion:", err=True)
+    for api_gv, plural, item in blockers:
+        metadata = _item_metadata(item)
+        click.echo(
+            f"      {api_gv}/{plural}/{_item_name(item)}: "
+            f"{_format_metadata_for_diagnostics(metadata)}, "
+            f"phase={_item_phase(item) or NONE_PLACEHOLDER}, "
+            f"conditions={_format_conditions(_item_conditions(item))}",
+            err=True,
+        )
+
+
 def _emit_strimzi_child_diagnostics(namespace, cluster_name):
     for api_gv, plural, label_key in _OWNED_RESOURCE_CLEANUP.get('kafkaclusters', []):
         items = _find_owned(namespace, api_gv, plural, label_key, cluster_name)
@@ -461,6 +574,10 @@ def _emit_deletion_diagnostics(namespace, plural, names):
             f"conditions={_format_conditions(status.get('conditions', []))}",
             err=True,
         )
+        _emit_events_for_object(namespace, item.get("kind", plural), name)
+        owner_uid = metadata.get("uid")
+        owner_kind = item.get("kind", DISPLAY_NAMES.get(plural, plural))
+        _emit_owner_reference_blockers(namespace, owner_kind, name, owner_uid)
         if plural == 'kafkaclusters':
             _emit_strimzi_child_diagnostics(namespace, name)
             _emit_kafka_storage_diagnostics(namespace, name)
