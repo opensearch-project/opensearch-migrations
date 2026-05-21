@@ -138,10 +138,36 @@ export function proxyNumThreadsMutator(): Mutator {
  * target for this test framework.
  */
 export function snapshotMigrationMaxConnectionsMutator(): Mutator {
-    return {
+    return snapshotMigrationMaxConnectionsBaseMutator({
         name: "snapshotMigration-maxConnections",
         changeClass: "impossible",
         dependencyPattern: "subject-impossible-change",
+    });
+}
+
+/**
+ * Same user-config field as the terminal impossible mutator, but tagged
+ * with its declared schema class for in-progress state-control cases.
+ * The completed-subject case remains impossible because the terminal
+ * SnapshotMigration spec is sealed after completion.
+ */
+export function snapshotMigrationMaxConnectionsGatedMutator(): Mutator {
+    return snapshotMigrationMaxConnectionsBaseMutator({
+        name: "snapshotMigration-maxConnections-gated",
+        changeClass: "gated",
+        dependencyPattern: "subject-gated-change",
+    });
+}
+
+function snapshotMigrationMaxConnectionsBaseMutator(opts: {
+    name: string;
+    changeClass: ChangeClass;
+    dependencyPattern: DependencyPattern;
+}): Mutator {
+    return {
+        name: opts.name,
+        changeClass: opts.changeClass,
+        dependencyPattern: opts.dependencyPattern,
         subject: "snapshotmigration:source-target-snap1-migration-0" as ComponentId,
         expectedRerunComponents: [
             "snapshotmigration:source-target-snap1-migration-0" as ComponentId,
@@ -149,7 +175,7 @@ export function snapshotMigrationMaxConnectionsMutator(): Mutator {
         changedPaths: [
             "snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig.maxConnections",
         ],
-        approvalPattern: "source-target-snap1-migration-0.vapretry",
+        approvalPattern: "snapshotmigration.source-target-snap1-migration-0",
         reset: {
             path: "source-target-snap1-migration-0",
             cascade: true,
@@ -186,6 +212,52 @@ export function snapshotMigrationMaxConnectionsMutator(): Mutator {
                     ? documentBackfillConfig["maxConnections"]
                     : 4;
             documentBackfillConfig["maxConnections"] = current === 5 ? 6 : 5;
+            return cloned;
+        },
+    };
+}
+
+/**
+ * dataSnapshotMaxSnapshotRateMutator — simple safe mutator for the
+ * basic snapshot workflow's DataSnapshot subject. It changes the
+ * create-snapshot rate limit, leaving the poison pill free to control
+ * source/snapshot-repository availability.
+ */
+export function dataSnapshotMaxSnapshotRateMutator(): Mutator {
+    return {
+        name: "dataSnapshot-maxSnapshotRate",
+        changeClass: "safe",
+        dependencyPattern: "subject-change",
+        subject: "datasnapshot:source-snap1" as ComponentId,
+        expectedRerunComponents: ["datasnapshot:source-snap1" as ComponentId],
+        changedPaths: [
+            "sourceClusters.source.snapshotInfo.snapshots.snap1.config.createSnapshotConfig.maxSnapshotRateMbPerNode",
+        ],
+        apply(config: unknown): unknown {
+            const cloned = structuredClone(config);
+            const root = cloned as Record<string, unknown>;
+            const sourceClusters = root["sourceClusters"] as Record<string, unknown> | undefined;
+            if (!sourceClusters) throw new Error("dataSnapshot-maxSnapshotRate mutator: missing 'sourceClusters'");
+            const source = sourceClusters["source"] as Record<string, unknown> | undefined;
+            if (!source) throw new Error("dataSnapshot-maxSnapshotRate mutator: missing 'sourceClusters.source'");
+            const snapshotInfo = source["snapshotInfo"] as Record<string, unknown> | undefined;
+            if (!snapshotInfo) throw new Error("dataSnapshot-maxSnapshotRate mutator: missing 'sourceClusters.source.snapshotInfo'");
+            const snapshots = snapshotInfo["snapshots"] as Record<string, unknown> | undefined;
+            if (!snapshots) throw new Error("dataSnapshot-maxSnapshotRate mutator: missing 'sourceClusters.source.snapshotInfo.snapshots'");
+            const snap1 = snapshots["snap1"] as Record<string, unknown> | undefined;
+            if (!snap1) throw new Error("dataSnapshot-maxSnapshotRate mutator: missing 'sourceClusters.source.snapshotInfo.snapshots.snap1'");
+            const snapConfig = snap1["config"] as Record<string, unknown> | undefined;
+            if (!snapConfig) throw new Error("dataSnapshot-maxSnapshotRate mutator: missing 'sourceClusters.source.snapshotInfo.snapshots.snap1.config'");
+            const createSnapshotConfig =
+                snapConfig["createSnapshotConfig"] as Record<string, unknown> | undefined;
+            if (!createSnapshotConfig) {
+                throw new Error("dataSnapshot-maxSnapshotRate mutator: missing 'sourceClusters.source.snapshotInfo.snapshots.snap1.config.createSnapshotConfig'");
+            }
+            const current =
+                typeof createSnapshotConfig["maxSnapshotRateMbPerNode"] === "number"
+                    ? createSnapshotConfig["maxSnapshotRateMbPerNode"]
+                    : 0;
+            createSnapshotConfig["maxSnapshotRateMbPerNode"] = current === 1 ? 2 : 1;
             return cloned;
         },
     };

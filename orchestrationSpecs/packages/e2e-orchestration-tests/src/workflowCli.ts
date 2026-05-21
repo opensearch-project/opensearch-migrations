@@ -39,6 +39,8 @@ export interface WorkflowCliRunResult {
     exitCode: number;
 }
 
+export type ApprovalGateCategory = "step" | "change" | "retry";
+
 export type WorkflowCliRunner = (
     workflowArgs: readonly string[],
     opts?: KubectlRunOptions,
@@ -197,19 +199,49 @@ export class WorkflowCli {
         return this.must(args, { timeoutMs: this.defaultTimeoutMs });
     }
 
-    /**
-     * Approve structural step gates.
-     *
-     * The migration-console CLI approves pending gates directly by
-     * task name or glob pattern, e.g.:
-     * `workflow approve "*.evaluateMetadata" --namespace ma`.
-     */
+    /** `workflow approve <category> --list --namespace <ns>`. */
+    listApprovalGates(category: ApprovalGateCategory): WorkflowCliRunResult {
+        return this.must(["approve", category, "--list", "--namespace", this.namespace]);
+    }
+
+    /** Backwards-compatible default: approve structural step gates. */
     approve(pattern: string): WorkflowCliRunResult {
-        const args = ["approve", pattern, "--namespace", this.namespace];
+        return this.approveStep(pattern);
+    }
+
+    approveStep(pattern: string): WorkflowCliRunResult {
+        return this.approveGate("step", pattern);
+    }
+
+    approveChange(pattern: string): WorkflowCliRunResult {
+        return this.approveGate("change", pattern);
+    }
+
+    approveRetry(
+        pattern: string,
+        opts: { allowPrereqFailure?: boolean } = {},
+    ): WorkflowCliRunResult {
+        return this.approveGate("retry", pattern, opts);
+    }
+
+    private approveGate(
+        category: ApprovalGateCategory,
+        pattern: string,
+        opts: { allowPrereqFailure?: boolean } = {},
+    ): WorkflowCliRunResult {
+        const args = ["approve", category, pattern, "--namespace", this.namespace];
         const res = this.runner(args, { timeoutMs: this.defaultTimeoutMs });
+        const combinedOutput = `${res.stdout}\n${res.stderr}`;
         if (
             res.exitCode !== 0 &&
-            /(No pending steps found|No gates are currently being waited on|No pending gates match)/i.test(res.stdout)
+            /(No pending steps found|No steps are currently being waited on|No gated changes are currently being waited on|No retry gates are currently being waited on|No gates are currently being waited on|No pending gates match|No gates match)/i.test(combinedOutput)
+        ) {
+            return { ...res, exitCode: 0 };
+        }
+        if (
+            opts.allowPrereqFailure &&
+            res.exitCode !== 0 &&
+            /Cannot approve retry gates\. These resources still exist/i.test(combinedOutput)
         ) {
             return { ...res, exitCode: 0 };
         }

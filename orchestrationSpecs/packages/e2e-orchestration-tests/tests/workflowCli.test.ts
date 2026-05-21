@@ -120,6 +120,7 @@ describe("WorkflowCli subcommands", () => {
         cli.approve("source.target.snap1.migration-0.evaluatemetadata");
         expect(r.calls[0].args).toEqual([
             "approve",
+            "step",
             "source.target.snap1.migration-0.evaluatemetadata",
             "--namespace",
             "ma",
@@ -132,6 +133,7 @@ describe("WorkflowCli subcommands", () => {
         cli.approve("*.evaluateMetadata");
         expect(r.calls[0].args).toEqual([
             "approve",
+            "step",
             "*.evaluateMetadata",
             "--namespace",
             "ma",
@@ -154,6 +156,44 @@ describe("WorkflowCli subcommands", () => {
         const result = cli.approve("*.documentbackfill");
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toContain("No pending gates match");
+    });
+
+    it("builds categorized change and retry approval commands", () => {
+        const r = recordingRunner();
+        const cli = new WorkflowCli({ runner: r.runner, namespace: "ma" });
+        cli.approveChange("captureproxy.capture-proxy");
+        cli.approveRetry("snapshotmigration.source-target-snap1-migration-0");
+        expect(r.calls.map((c) => c.args)).toEqual([
+            ["approve", "change", "captureproxy.capture-proxy", "--namespace", "ma"],
+            ["approve", "retry", "snapshotmigration.source-target-snap1-migration-0", "--namespace", "ma"],
+        ]);
+    });
+
+    it("lists categorized approval gates", () => {
+        const r = recordingRunner();
+        const cli = new WorkflowCli({ runner: r.runner, namespace: "ma" });
+        cli.listApprovalGates("retry");
+        expect(r.calls[0].args).toEqual([
+            "approve",
+            "retry",
+            "--list",
+            "--namespace",
+            "ma",
+        ]);
+    });
+
+    it("can treat retry prerequisite failures as expected non-advancement", () => {
+        const r = recordingRunner();
+        r.respond(
+            "",
+            "Cannot approve retry gates. These resources still exist:\n  SnapshotMigration/source-target-snap1-migration-0\n",
+            1,
+        );
+        const cli = new WorkflowCli({ runner: r.runner, namespace: "ma" });
+        const result = cli.approveRetry("snapshotmigration.source-target-snap1-migration-0", {
+            allowPrereqFailure: true,
+        });
+        expect(result.exitCode).toBe(0);
     });
 
     it("builds 'reset' with all documented flags in order", () => {
@@ -200,7 +240,7 @@ describe("buildWorkflowCliRunner kubectl-exec", () => {
             pod: "migration-console-0",
             kubectl: kc.kubectl,
         });
-        runner(["approve", "*.evaluateMetadata", "--namespace", "ma"]);
+        runner(["approve", "step", "*.evaluateMetadata", "--namespace", "ma"]);
         expect(kc.calls[0].args).toEqual([
             "exec",
             "-n",
@@ -209,6 +249,7 @@ describe("buildWorkflowCliRunner kubectl-exec", () => {
             "--",
             "workflow",
             "approve",
+            "step",
             "*.evaluateMetadata",
             "--namespace",
             "ma",

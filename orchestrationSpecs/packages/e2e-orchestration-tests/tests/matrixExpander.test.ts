@@ -14,6 +14,31 @@ function fakeSpec(overrides: Partial<ScenarioSpec> = {}): ScenarioSpec {
     };
 }
 
+function specWithPoisonPill(overrides: Partial<ScenarioSpec> = {}): ScenarioSpec {
+    return fakeSpec({
+        fixtures: {
+            poisonPills: {
+                byName: {
+                    "bad-source-endpoint": {
+                        subject: "captureproxy:capture-proxy" as ComponentId,
+                        strategy: "config-value",
+                        expectedCollateral: [],
+                        poison: {
+                            path: "sourceClusters.source.endpoint",
+                            value: "https://bad-source:9200",
+                        },
+                        restore: {
+                            path: "sourceClusters.source.endpoint",
+                            value: "https://good-source:9200",
+                        },
+                    },
+                },
+            },
+        },
+        ...overrides,
+    });
+}
+
 function registryWithSafeMutator(): MutatorRegistry {
     const reg = new MutatorRegistry();
     reg.register({
@@ -37,6 +62,7 @@ describe("expandCases", () => {
         expect(cases[0].subject).toBe("captureproxy:capture-proxy");
         expect(cases[0].mutator.name).toBe("proxy-numThreads");
         expect(cases[0].response).toBeNull();
+        expect(cases[0].subjectStateAtMutation).toBe("completed");
     });
 
     it("uses explicit select when provided", () => {
@@ -99,5 +125,85 @@ describe("expandCases", () => {
         const cases = expandCases(spec, reg);
         expect(cases).toHaveLength(2);
         expect(cases.map((c) => c.mutator.name).sort()).toEqual(["m1", "m2"]);
+    });
+
+    it("expands a poison-pill selector to an in-progress case", () => {
+        const spec = specWithPoisonPill({
+            matrix: {
+                subject: "captureproxy:capture-proxy",
+                select: [
+                    {
+                        changeClass: "safe",
+                        patterns: ["subject-change"],
+                        poisonPill: "bad-source-endpoint",
+                    },
+                ],
+            },
+        });
+
+        const cases = expandCases(spec, registryWithSafeMutator());
+
+        expect(cases).toHaveLength(1);
+        expect(cases[0]).toMatchObject({
+            subjectStateAtMutation: "in-progress",
+            poisonPillName: "bad-source-endpoint",
+            caseName:
+                "captureproxy-capture-proxy-subject-change-proxy-numThreads-in-progress-bad-source-endpoint",
+        });
+    });
+
+    it("can expand both completed and in-progress coverage for one selector", () => {
+        const spec = specWithPoisonPill({
+            matrix: {
+                subject: "captureproxy:capture-proxy",
+                select: [
+                    {
+                        changeClass: "safe",
+                        patterns: ["subject-change"],
+                        subjectStates: ["completed", "in-progress"],
+                        poisonPill: "bad-source-endpoint",
+                    },
+                ],
+            },
+        });
+
+        const cases = expandCases(spec, registryWithSafeMutator());
+
+        expect(cases.map((c) => c.subjectStateAtMutation)).toEqual([
+            "completed",
+            "in-progress",
+        ]);
+    });
+
+    it("rejects an in-progress selector whose poison pill targets another subject", () => {
+        const spec = specWithPoisonPill({
+            fixtures: {
+                poisonPills: {
+                    byName: {
+                        "bad-snapshot-repo": {
+                            subject: "datasnapshot:source-snap1" as ComponentId,
+                            strategy: "config-value",
+                            expectedCollateral: [],
+                            poison: { path: "sourceClusters.source.endpoint", value: "bad" },
+                            restore: { path: "sourceClusters.source.endpoint", value: "good" },
+                        },
+                    },
+                },
+            },
+            matrix: {
+                subject: "captureproxy:capture-proxy",
+                select: [
+                    {
+                        changeClass: "safe",
+                        patterns: ["subject-change"],
+                        poisonPill: "bad-snapshot-repo",
+                    },
+                ],
+            },
+        });
+
+        expect(() => expandCases(spec, registryWithSafeMutator())).toThrow(
+            /targets 'datasnapshot:source-snap1'/,
+        );
     });
 });

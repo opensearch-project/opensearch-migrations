@@ -134,10 +134,10 @@ describe("runNoopCase — basic flow", () => {
                 .filter((c) => c.args[0] === "approve")
                 .map((c) => c.args);
             expect(approveCalls).toEqual([
-                ["approve", "*.evaluateMetadata", "--namespace", "ma"],
-                ["approve", "*.migrateMetadata", "--namespace", "ma"],
-                ["approve", "*.evaluateMetadata", "--namespace", "ma"],
-                ["approve", "*.migrateMetadata", "--namespace", "ma"],
+                ["approve", "step", "*.evaluateMetadata", "--namespace", "ma"],
+                ["approve", "step", "*.migrateMetadata", "--namespace", "ma"],
+                ["approve", "step", "*.evaluateMetadata", "--namespace", "ma"],
+                ["approve", "step", "*.migrateMetadata", "--namespace", "ma"],
             ]);
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -359,6 +359,90 @@ describe("runNoopCase — basic flow", () => {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }
     });
+
+    it("stops approval-gate waits when the inner workflow has a failed node", async () => {
+        const { deps, tmpDir, baselinePath } = makeRunnerTestDeps();
+        let now = 0;
+        deps.clock = {
+            now: () => now,
+            sleep: (ms: number) => {
+                now += ms;
+                return Promise.resolve();
+            },
+        };
+        deps.spec.phaseCompletionTimeoutSeconds = 60;
+        deps.workflowCli = new WorkflowCli({
+            namespace: "ma",
+            runner: () => ({ stdout: "No gates available.\n", stderr: "", exitCode: 0 }),
+        });
+        deps.k8sClient = new K8sClient({
+            namespace: "ma",
+            runner: (args) => {
+                if (args[0] === "delete") {
+                    return { stdout: "", stderr: "", exitCode: 0 };
+                }
+                if (
+                    args[0] === "get" &&
+                    args[1] === "workflows.argoproj.io" &&
+                    args[2] === "migration-workflow"
+                ) {
+                    return {
+                        stdout: JSON.stringify({
+                            metadata: { name: "migration-workflow" },
+                            status: {
+                                phase: "Running",
+                                nodes: {
+                                    failed: {
+                                        templateName: "upsertsnapshotmigrationresource",
+                                        phase: "Failed",
+                                        message: "VAP denied immutable field update",
+                                    },
+                                },
+                            },
+                        }),
+                        stderr: "",
+                        exitCode: 0,
+                    };
+                }
+                return { stdout: "", stderr: "unexpected kubectl call", exitCode: 99 };
+            },
+        });
+
+        try {
+            const outPath = await runWorkflowCasePlan(deps, {
+                caseName: "approval-gate-failed-workflow",
+                steps: [
+                    {
+                        runName: "mutated",
+                        configYaml: fs.readFileSync(baselinePath, "utf8"),
+                        operations: [
+                            {
+                                kind: "checkpoint",
+                                checkpoint: "on-blocked",
+                                subject: COMPONENTS[0],
+                                approvalGate: {
+                                    category: "retry",
+                                    pattern: "snapshotmigration.source-target-snap1-migration-0",
+                                },
+                            },
+                        ],
+                    },
+                ],
+            });
+
+            const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
+            expect(snapshot.outcome).toBe("error");
+            expect(snapshot.diagnostics.join("\n")).toContain(
+                "approval-gate-workflow-error at on-blocked",
+            );
+            expect(snapshot.diagnostics.join("\n")).toContain(
+                "upsertsnapshotmigrationresource:Failed",
+            );
+            expect(now).toBe(10000);
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
 });
 
 describe("runNoopCase — workflow submit path", () => {
@@ -567,10 +651,10 @@ describe("runNoopCase — error paths", () => {
 
     it("still deletes workflow resources when a post-submit command fails", async () => {
         const { deps, k8sCalls, tmpDir } = makeRunnerTestDeps();
-        (deps.workflowCli as unknown as { approve: () => never }).approve =
+        (deps.workflowCli as unknown as { approveStep: () => never }).approveStep =
             () => {
                 throw new WorkflowCliError(
-                    "workflow approve *.evaluateMetadata --namespace ma exited 1",
+                    "workflow approve step *.evaluateMetadata --namespace ma exited 1",
                     1,
                     "",
                     "No gates are currently being waited on by the workflow.",
@@ -789,6 +873,7 @@ describe("runWorkflowCasePlan — multi-checkpoint run steps", () => {
             ]);
             expect(calls[calls.length - 1].args).toEqual([
                 "approve",
+                "step",
                 "capture-proxy.vapretry",
                 "--namespace",
                 "ma",

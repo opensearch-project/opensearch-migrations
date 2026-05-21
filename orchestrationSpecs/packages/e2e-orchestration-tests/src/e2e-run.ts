@@ -18,6 +18,7 @@ import { OVERALL_MIGRATION_CONFIG } from "@opensearch-migrations/schemas";
 
 import { K8sClient, MIGRATION_CRD_PLURALS, extractCrdObservation } from "./k8sClient";
 import {
+    ApprovalGateCategory,
     WorkflowCli,
     WorkflowCliError,
     WorkflowCliRunResult,
@@ -40,9 +41,17 @@ import {
     RunRecord,
     RunCheckpoint,
     ArgoWorkflowObservation,
+    CaseCoverage,
 } from "./reportSchema";
 import { CaseReport, writeCaseSnapshot } from "./snapshotStore";
-import { Checkpoint, ComponentId, ObservedComponent, ScenarioSpec, Violation } from "./types";
+import {
+    Checkpoint,
+    ComponentId,
+    ObservedComponent,
+    ScenarioSpec,
+    SubjectStateAtMutation,
+    Violation,
+} from "./types";
 import { Actor, ActorContext, ActorRegistry } from "./actors";
 import { builtinActors } from "./builtinActors";
 import { deriveBehavior } from "./behaviorDerivation";
@@ -50,6 +59,14 @@ import { assertNoViolations } from "./assertLogic";
 import { ExpandedTestCase, expandCases } from "./matrixExpander";
 import { Mutator, MutatorRegistry } from "./fixtures/mutators";
 import { builtinMutators } from "./fixtures/builtinMutators";
+import {
+    PoisonPillMode,
+    ResolvedPoisonPill,
+    applyPoisonPillSideEffect,
+    applyPoisonPillToConfig,
+    resolvePoisonPill,
+} from "./poisonPills";
+import { writeCoverageOverview } from "./coverageOverview";
 
 // ── Types shared by the CLI entrypoint and its testable core ─────────
 
@@ -68,6 +85,12 @@ const ARGO_WORKFLOW_STATUS_JSONPATH =
     `{.metadata.name}{"\\n"}{.status.phase}{"\\n"}{.status.message}{"\\n"}` +
     `{.status.startedAt}{"\\n"}{.status.finishedAt}`;
 const DEFAULT_INNER_WORKFLOW_MISSING_GRACE_SECONDS = 30;
+const COMPLETED_SUBJECT_PHASES: ReadonlySet<string> = new Set([
+    "Ready",
+    "Completed",
+    "Skipped",
+    "Deleted",
+]);
 
 export interface ReadClusterObservations {
     (): Promise<{ components: Record<ComponentId, ObservedComponent> }>;
@@ -126,6 +149,7 @@ export interface LiveRunnerDeps {
 export interface WorkflowCasePlanStep {
     runName: string;
     configYaml: string;
+    stateControl?: WorkflowStateControlOperation;
     operations: readonly WorkflowCasePlanOperation[];
 }
 
@@ -138,14 +162,23 @@ export interface WorkflowCheckpointOperation {
     kind: "checkpoint";
     checkpoint: Checkpoint;
     subject: ComponentId | null;
+    waitMode?: "phase-complete" | "subject-incomplete";
     expectedRerunComponents?: readonly ComponentId[];
     changedPaths?: readonly string[];
+    approvalGate?: {
+        category: Extract<ApprovalGateCategory, "change" | "retry">;
+        pattern: string;
+    };
 }
 
 export interface WorkflowApproveOperation {
     kind: "approve";
     /** Approval gate name or glob pattern accepted by `workflow approve`. */
     pattern: string;
+    /** Defaults to structural step approval. */
+    category?: ApprovalGateCategory;
+    /** Retry-only: approving before reset is expected to be rejected. */
+    allowPrereqFailure?: boolean;
     /** Event action label; defaults to `approve-response`. */
     action?: string;
 }
@@ -162,8 +195,14 @@ export interface WorkflowResetOperation {
     };
 }
 
+export interface WorkflowStateControlOperation {
+    poisonPillName: string;
+    mode: PoisonPillMode;
+}
+
 export interface WorkflowCasePlan {
     caseName: string;
+    coverage?: Omit<CaseCoverage, "observedSubjectPhaseBeforeMutation">;
     steps: readonly WorkflowCasePlanStep[];
 }
 
@@ -219,6 +258,7 @@ export async function runSafeCase(deps: LiveRunnerDeps, expandedCase: ExpandedTe
 
     return runWorkflowCasePlan(deps, {
         caseName: expandedCase.caseName,
+        coverage: coverageForExpandedCase(deps, expandedCase),
         steps: [
             {
                 runName: "baseline",
@@ -288,6 +328,10 @@ export async function runGatedCase(deps: LiveRunnerDeps, expandedCase: ExpandedT
             subject: expandedCase.subject,
             expectedRerunComponents: expandedCase.expectedRerunComponents,
             changedPaths: expandedCase.changedPaths,
+            approvalGate: {
+                category: "change",
+                pattern: approvalPattern,
+            },
         },
     ];
 
@@ -296,6 +340,7 @@ export async function runGatedCase(deps: LiveRunnerDeps, expandedCase: ExpandedT
             {
                 kind: "approve",
                 pattern: approvalPattern,
+                category: "change",
             },
             {
                 kind: "checkpoint",
@@ -323,6 +368,7 @@ export async function runGatedCase(deps: LiveRunnerDeps, expandedCase: ExpandedT
 
     return runWorkflowCasePlan(deps, {
         caseName: expandedCase.caseName,
+        coverage: coverageForExpandedCase(deps, expandedCase),
         steps,
     });
 }
@@ -351,6 +397,12 @@ export async function runImpossibleCase(deps: LiveRunnerDeps, expandedCase: Expa
             subject: expandedCase.subject,
             expectedRerunComponents: expandedCase.expectedRerunComponents,
             changedPaths: expandedCase.changedPaths,
+            approvalGate: approvalPattern
+                ? {
+                      category: "retry",
+                      pattern: approvalPattern,
+                  }
+                : undefined,
         },
     ];
 
@@ -373,6 +425,8 @@ export async function runImpossibleCase(deps: LiveRunnerDeps, expandedCase: Expa
                 {
                     kind: "approve",
                     pattern: approvalPattern!,
+                    category: "retry",
+                    allowPrereqFailure: true,
                 },
                 {
                     kind: "checkpoint",
@@ -380,6 +434,10 @@ export async function runImpossibleCase(deps: LiveRunnerDeps, expandedCase: Expa
                     subject: expandedCase.subject,
                     expectedRerunComponents: expandedCase.expectedRerunComponents,
                     changedPaths: expandedCase.changedPaths,
+                    approvalGate: {
+                        category: "retry",
+                        pattern: approvalPattern!,
+                    },
                 },
             );
             break;
@@ -414,6 +472,7 @@ export async function runImpossibleCase(deps: LiveRunnerDeps, expandedCase: Expa
                 {
                     kind: "approve",
                     pattern: approvalPattern!,
+                    category: "retry",
                 },
                 {
                     kind: "checkpoint",
@@ -442,8 +501,256 @@ export async function runImpossibleCase(deps: LiveRunnerDeps, expandedCase: Expa
 
     return runWorkflowCasePlan(deps, {
         caseName: expandedCase.caseName,
+        coverage: coverageForExpandedCase(deps, expandedCase),
         steps,
     });
+}
+
+/**
+ * Run a state-controlled case where a poison pill first holds the
+ * subject short of completion, then the runner submits the real
+ * mutation with the poison restored. This lets coverage distinguish
+ * "same field changed while completed" from "same field changed while
+ * the subject was still in-progress".
+ */
+export async function runStateControlledCase(
+    deps: LiveRunnerDeps,
+    expandedCase: ExpandedTestCase,
+): Promise<string> {
+    if (expandedCase.subjectStateAtMutation !== "in-progress") {
+        throw new Error(
+            `runStateControlledCase requires subjectStateAtMutation='in-progress'; got '${expandedCase.subjectStateAtMutation}'`,
+        );
+    }
+    const poisonPillName = requirePoisonPillName(expandedCase);
+    const pill = resolvePoisonPill(deps.spec, poisonPillName, expandedCase.subject);
+    const baselineYaml = fs.readFileSync(deps.baselineConfigPath, "utf8");
+    const baselineConfig = parseYaml(baselineYaml);
+    const poisonedBaselineYaml = stringifyYaml(
+        applyPoisonPillToConfig(baselineConfig, pill.spec, "poison"),
+    );
+    const unpoisonedBaselineConfig = applyPoisonPillToConfig(
+        baselineConfig,
+        pill.spec,
+        "restore",
+    );
+    const mutatedConfig = expandedCase.mutator.apply(unpoisonedBaselineConfig);
+    if (deps.validateMutatedConfig) {
+        validateWorkflowConfig(mutatedConfig, expandedCase.caseName);
+    }
+    const mutatedYaml = stringifyYaml(mutatedConfig);
+
+    const steps: WorkflowCasePlanStep[] = [
+        {
+            runName: "poison-baseline",
+            configYaml: poisonedBaselineYaml,
+            stateControl: {
+                poisonPillName,
+                mode: "poison",
+            },
+            operations: [
+                {
+                    kind: "checkpoint",
+                    checkpoint: "subject-held",
+                    subject: expandedCase.subject,
+                    waitMode: "subject-incomplete",
+                },
+            ],
+        },
+        {
+            runName: "mutated",
+            configYaml: mutatedYaml,
+            stateControl: {
+                poisonPillName,
+                mode: "restore",
+            },
+            operations: mutationOperationsForStateControlledCase(expandedCase),
+        },
+    ];
+
+    if (shouldRunNoopPost(expandedCase)) {
+        steps.push(noopStep("noop-post", mutatedYaml));
+    }
+
+    return runWorkflowCasePlan(deps, {
+        caseName: expandedCase.caseName,
+        coverage: coverageForExpandedCase(deps, expandedCase, pill),
+        steps,
+    });
+}
+
+function mutationOperationsForStateControlledCase(
+    expandedCase: ExpandedTestCase,
+): WorkflowCasePlanOperation[] {
+    const common = {
+        subject: expandedCase.subject,
+        expectedRerunComponents: expandedCase.expectedRerunComponents,
+        changedPaths: expandedCase.changedPaths,
+    };
+    if (expandedCase.mutator.changeClass === "safe") {
+        return [
+            {
+                kind: "checkpoint",
+                checkpoint: "mutated-complete",
+                ...common,
+            },
+        ];
+    }
+    if (expandedCase.mutator.changeClass === "gated") {
+        const response = requireResponse(expandedCase, ["approve", "leave-blocked"]);
+        const approvalPattern = requireApprovalPattern(expandedCase);
+        const operations: WorkflowCasePlanOperation[] = [
+            {
+                kind: "checkpoint",
+                checkpoint: "before-approval",
+                approvalGate: {
+                    category: "change",
+                    pattern: approvalPattern,
+                },
+                ...common,
+            },
+        ];
+        if (response === "approve") {
+            operations.push(
+                {
+                    kind: "approve",
+                    pattern: approvalPattern,
+                    category: "change",
+                },
+                {
+                    kind: "checkpoint",
+                    checkpoint: "after-approval",
+                    ...common,
+                },
+            );
+        }
+        return operations;
+    }
+
+    const response = requireResponse(expandedCase, [
+        "reset-then-approve",
+        "approve-only",
+        "reset-only",
+        "leave-blocked",
+    ]);
+    const approvalPattern = expandedCase.mutator.approvalPattern;
+    const reset = expandedCase.mutator.reset;
+    const operations: WorkflowCasePlanOperation[] = [
+        {
+            kind: "checkpoint",
+            checkpoint: "on-blocked",
+            approvalGate: approvalPattern
+                ? {
+                      category: "retry",
+                      pattern: approvalPattern,
+                  }
+                : undefined,
+            ...common,
+        },
+    ];
+    if (response === "leave-blocked") return operations;
+    if ((response === "approve-only" || response === "reset-then-approve") && !approvalPattern) {
+        throw new Error(`case '${expandedCase.caseName}' requires mutator.approvalPattern`);
+    }
+    if ((response === "reset-only" || response === "reset-then-approve") && !reset) {
+        throw new Error(`case '${expandedCase.caseName}' requires mutator.reset metadata`);
+    }
+    if (response === "approve-only") {
+        operations.push(
+            {
+                kind: "approve",
+                pattern: approvalPattern!,
+                category: "retry",
+                allowPrereqFailure: true,
+            },
+            {
+                kind: "checkpoint",
+                checkpoint: "after-approve-without-reset",
+                approvalGate: {
+                    category: "retry",
+                    pattern: approvalPattern!,
+                },
+                ...common,
+            },
+        );
+    } else if (response === "reset-only") {
+        operations.push(
+            {
+                kind: "reset",
+                reset: reset!,
+            },
+            {
+                kind: "checkpoint",
+                checkpoint: "after-reset",
+                ...common,
+            },
+        );
+    } else {
+        operations.push(
+            {
+                kind: "reset",
+                reset: reset!,
+            },
+            {
+                kind: "checkpoint",
+                checkpoint: "after-reset",
+                ...common,
+            },
+            {
+                kind: "approve",
+                pattern: approvalPattern!,
+                category: "retry",
+            },
+            {
+                kind: "checkpoint",
+                checkpoint: "after-approve",
+                ...common,
+            },
+        );
+    }
+    return operations;
+}
+
+function shouldRunNoopPost(expandedCase: ExpandedTestCase): boolean {
+    if (expandedCase.mutator.changeClass === "safe") return true;
+    return expandedCase.response === "approve" || expandedCase.response === "reset-then-approve";
+}
+
+function requirePoisonPillName(expandedCase: ExpandedTestCase): string {
+    if (!expandedCase.poisonPillName) {
+        throw new Error(
+            `case '${expandedCase.caseName}' requires poisonPillName for in-progress subject-state coverage`,
+        );
+    }
+    return expandedCase.poisonPillName;
+}
+
+function coverageForExpandedCase(
+    deps: Pick<LiveRunnerDeps, "spec">,
+    expandedCase: ExpandedTestCase,
+    resolvedPoisonPill?: ResolvedPoisonPill,
+): Omit<CaseCoverage, "observedSubjectPhaseBeforeMutation"> {
+    const pill = resolvedPoisonPill ??
+        (expandedCase.poisonPillName
+            ? resolvePoisonPill(deps.spec, expandedCase.poisonPillName, expandedCase.subject)
+            : undefined);
+    return {
+        subject: expandedCase.subject,
+        subjectStateAtMutation: expandedCase.subjectStateAtMutation,
+        declaredChangeClass: expandedCase.mutator.changeClass,
+        dependencyPattern: expandedCase.mutator.dependencyPattern,
+        response: expandedCase.response,
+        mutatorName: expandedCase.mutator.name,
+        changedPaths: [...expandedCase.changedPaths],
+        expectedRerunComponents: [...expandedCase.expectedRerunComponents],
+        poisonPill: pill
+            ? {
+                  name: pill.name,
+                  strategy: pill.spec.strategy,
+                  expectedCollateral: [...pill.spec.expectedCollateral],
+              }
+            : undefined,
+    };
 }
 
 function buildMutatedYaml(
@@ -518,6 +825,7 @@ export async function runWorkflowCasePlan(
     const violations: Violation[] = [];
     const runs: Record<string, RunRecord> = {};
     const events: CaseEvent[] = [];
+    const pendingStateControlRestores = new Map<string, ResolvedPoisonPill>();
     let outcome: CaseOutcome = "partial";
 
     // Resolved inside the try so an unknown actor becomes a diagnostic
@@ -576,11 +884,13 @@ export async function runWorkflowCasePlan(
                 runName: step.runName,
                 workflowName,
                 configYaml: step.configYaml,
+                stateControl: step.stateControl,
                 operations: step.operations,
                 priorComponents,
                 diagnostics,
                 events,
                 clock,
+                pendingStateControlRestores,
             });
             runs[step.runName] = run;
             violations.push(...collectViolations(run));
@@ -609,6 +919,13 @@ export async function runWorkflowCasePlan(
         outcome = "error";
         diagnostics.push(...formatFatalDiagnostics(e));
     } finally {
+        restorePendingStateControls({
+            deps,
+            pendingStateControlRestores,
+            diagnostics,
+            events,
+            clock,
+        });
         // Teardown actors always run, regardless of what went wrong.
         // Their own failures are recorded as diagnostics but do not
         // mask the original error or promote outcome beyond "error".
@@ -640,6 +957,9 @@ export async function runWorkflowCasePlan(
         outcome,
         startedAt,
         finishedAt: new Date(clock.now()).toISOString(),
+        coverage: plan.coverage
+            ? enrichCoverageWithObservedSubjectState(plan.coverage, runs)
+            : undefined,
         runs,
         events,
         checkers: [],
@@ -659,27 +979,59 @@ function lastComponents(run: RunRecord): Readonly<Record<ComponentId, ObservedCo
     return run.checkpoints[run.checkpoints.length - 1]?.components ?? null;
 }
 
+function enrichCoverageWithObservedSubjectState(
+    coverage: Omit<CaseCoverage, "observedSubjectPhaseBeforeMutation">,
+    runs: Record<string, RunRecord>,
+): CaseCoverage {
+    return {
+        ...coverage,
+        observedSubjectPhaseBeforeMutation: subjectPhaseBeforeMutation(
+            coverage.subject,
+            runs,
+        ),
+    };
+}
+
+function subjectPhaseBeforeMutation(
+    subject: ComponentId,
+    runs: Record<string, RunRecord>,
+): string | undefined {
+    let lastPhase: string | undefined;
+    for (const [runName, run] of Object.entries(runs)) {
+        if (runName === "mutated") return lastPhase;
+        for (const checkpoint of run.checkpoints) {
+            const observed = checkpoint.components[subject];
+            if (observed?.phase) lastPhase = observed.phase;
+        }
+    }
+    return lastPhase;
+}
+
 async function runSubmittedWorkflow(args: {
     deps: LiveRunnerDeps;
     runName: string;
     workflowName: string;
     configYaml: string;
+    stateControl: WorkflowStateControlOperation | undefined;
     operations: readonly WorkflowCasePlanOperation[];
     priorComponents: Readonly<Record<ComponentId, ObservedComponent>> | null;
     diagnostics: string[];
     events: CaseEvent[];
     clock: typeof realClock;
+    pendingStateControlRestores: Map<string, ResolvedPoisonPill>;
 }): Promise<RunRecord> {
     const {
         deps,
         runName,
         workflowName,
         configYaml,
+        stateControl,
         operations,
         priorComponents,
         diagnostics,
         events,
         clock,
+        pendingStateControlRestores,
     } = args;
     const checkpoints: RunCheckpoint[] = [];
     let attemptedSubmit = false;
@@ -699,6 +1051,24 @@ async function runSubmittedWorkflow(args: {
         });
         if (!preSubmitCleanupOk) {
             throw new Error(`pre-submit workflow cleanup failed for ${runName}`);
+        }
+        if (stateControl) {
+            progress(
+                deps,
+                `[${workflowName}] ${stateControl.mode} poison pill ${stateControl.poisonPillName}`,
+            );
+            const pill = runStateControlOperation({
+                deps,
+                stateControl,
+                runName,
+                events,
+                clock,
+            });
+            if (stateControl.mode === "poison") {
+                pendingStateControlRestores.set(pill.name, pill);
+            } else {
+                pendingStateControlRestores.delete(pill.name);
+            }
         }
         progress(deps, `[${workflowName}] configure`);
         workflowEvent(
@@ -730,8 +1100,8 @@ async function runSubmittedWorkflow(args: {
                 clock,
                 runName,
                 "approve",
-                workflowApproveCommand(gate.approvePattern, deps.namespace),
-                () => deps.workflowCli.approve(gate.approvePattern),
+                workflowApproveCommand("step", gate.approvePattern, deps.namespace),
+                () => deps.workflowCli.approveStep(gate.approvePattern),
             );
         }
         for (const operation of operations) {
@@ -743,8 +1113,10 @@ async function runSubmittedWorkflow(args: {
                     workflowName,
                     operation.checkpoint,
                     operation.subject,
+                    operation.waitMode,
                     operation.expectedRerunComponents,
                     operation.changedPaths,
+                    operation.approvalGate,
                     priorComponents,
                     diagnostics,
                     events,
@@ -759,8 +1131,8 @@ async function runSubmittedWorkflow(args: {
                     clock,
                     runName,
                     operation.action ?? "approve-response",
-                    workflowApproveCommand(operation.pattern, deps.namespace),
-                    () => deps.workflowCli.approve(operation.pattern),
+                    workflowApproveCommand(operation.category ?? "step", operation.pattern, deps.namespace),
+                    () => approveWorkflowGate(deps.workflowCli, operation),
                 );
                 continue;
             }
@@ -854,7 +1226,7 @@ function formatFatalDiagnostics(e: unknown): string[] {
 }
 
 function isBlockingCheckpointDiagnostic(diagnostic: string): boolean {
-    return /^(workflow-timeout|workflow-failed|phase-timeout) at /.test(diagnostic);
+    return /^(workflow-timeout|workflow-failed|phase-timeout|subject-incomplete-timeout|approval-gate-timeout|approval-gate-workflow-error) at /.test(diagnostic);
 }
 
 function progress(deps: Pick<LiveRunnerDeps, "progress">, message: string): void {
@@ -908,19 +1280,106 @@ function workflowEvent(
     }
 }
 
+function runStateControlOperation(args: {
+    deps: LiveRunnerDeps;
+    stateControl: WorkflowStateControlOperation;
+    runName: string;
+    events: CaseEvent[];
+    clock: typeof realClock;
+}): ResolvedPoisonPill {
+    const { deps, stateControl, runName, events, clock } = args;
+    const pill = resolvePoisonPill(
+        deps.spec,
+        stateControl.poisonPillName,
+        deps.spec.matrix.subject as ComponentId,
+    );
+    try {
+        applyPoisonPillSideEffect(deps.workflowCli, pill, stateControl.mode);
+        events.push(event(clock, runName, "state-control", "ok", {
+            message:
+                `${stateControl.mode} poisonPill '${pill.name}' ` +
+                `(${pill.spec.strategy}) for ${pill.spec.subject}`,
+        }));
+        return pill;
+    } catch (e) {
+        const err = e as Partial<WorkflowCliError> & Partial<Error>;
+        events.push(event(clock, runName, "state-control", "error", {
+            message:
+                `${stateControl.mode} poisonPill '${pill.name}' failed: ` +
+                (err.message ?? String(e)),
+            stdout: err.stdout || undefined,
+            stderr: err.stderr || undefined,
+        }));
+        throw e;
+    }
+}
+
+function restorePendingStateControls(args: {
+    deps: LiveRunnerDeps;
+    pendingStateControlRestores: Map<string, ResolvedPoisonPill>;
+    diagnostics: string[];
+    events: CaseEvent[];
+    clock: typeof realClock;
+}): void {
+    const {
+        deps,
+        pendingStateControlRestores,
+        diagnostics,
+        events,
+        clock,
+    } = args;
+    for (const pill of pendingStateControlRestores.values()) {
+        try {
+            applyPoisonPillSideEffect(deps.workflowCli, pill, "restore");
+            events.push(event(clock, "teardown", "state-control-restore", "ok", {
+                message: `restored poisonPill '${pill.name}' (${pill.spec.strategy})`,
+            }));
+        } catch (e) {
+            const err = e as Partial<WorkflowCliError> & Partial<Error>;
+            const diagnostic =
+                `state-control restore for poisonPill '${pill.name}' failed: ` +
+                (err.message ?? String(e));
+            diagnostics.push(diagnostic);
+            events.push(event(clock, "teardown", "state-control-restore", "error", {
+                message: diagnostic,
+                stdout: err.stdout || undefined,
+                stderr: err.stderr || undefined,
+            }));
+        }
+    }
+    pendingStateControlRestores.clear();
+}
+
 async function waitAndCheckpoint(
     deps: LiveRunnerDeps,
     into: RunCheckpoint[],
     workflowName: string,
     checkpoint: Checkpoint,
     subject: ComponentId | null,
+    waitMode: WorkflowCheckpointOperation["waitMode"] | undefined,
     expectedRerunComponents: readonly ComponentId[] | undefined,
     changedPaths: readonly string[] | undefined,
+    approvalGate: WorkflowCheckpointOperation["approvalGate"] | undefined,
     priorComponents: Readonly<Record<ComponentId, ObservedComponent>> | null,
     diagnostics: string[],
     events: CaseEvent[],
     clock: typeof realClock,
 ): Promise<void> {
+    if (waitMode === "subject-incomplete") {
+        await waitAndCheckpointSubjectIncomplete({
+            deps,
+            into,
+            workflowName,
+            checkpoint,
+            subject,
+            priorComponents,
+            diagnostics,
+            events,
+            clock,
+        });
+        return;
+    }
+
     events.push(event(clock, checkpoint, "wait-phase-completion", "ok", {
         message: `waiting up to ${deps.spec.phaseCompletionTimeoutSeconds}s`,
     }));
@@ -989,13 +1448,77 @@ async function waitAndCheckpoint(
             );
         }
     }
+    let approvalGateObserved = false;
+    let approvalGateWaitFailed = false;
+    if (approvalGate) {
+        events.push(event(clock, checkpoint, "wait-approval-gate", "ok", {
+            command: workflowApproveListCommand(approvalGate.category, deps.namespace),
+            message: `waiting for ${approvalGate.category} gate ${approvalGate.pattern}`,
+        }));
+        progress(
+            deps,
+            `[${workflowName}] checkpoint ${checkpoint}: wait for ${approvalGate.category} gate ${approvalGate.pattern}`,
+        );
+        const gateOutcome = await waitForApprovalGate({
+            workflowCli: deps.workflowCli,
+            k8sClient: deps.k8sClient,
+            category: approvalGate.category,
+            pattern: approvalGate.pattern,
+            timeoutSeconds: deps.spec.phaseCompletionTimeoutSeconds,
+            clock,
+        });
+        if (gateOutcome.kind === "ready") {
+            approvalGateObserved = true;
+            events.push(event(clock, checkpoint, "wait-approval-gate", "ok", {
+                command: workflowApproveListCommand(approvalGate.category, deps.namespace),
+                message: `${approvalGate.category} gate ${approvalGate.pattern} available after ${gateOutcome.waitedMs}ms`,
+                stdout: gateOutcome.stdout || undefined,
+            }));
+            progress(
+                deps,
+                `[${workflowName}] checkpoint ${checkpoint}: ${approvalGate.category} gate available after ${gateOutcome.waitedMs}ms`,
+            );
+        } else if (gateOutcome.kind === "workflow-error") {
+            approvalGateWaitFailed = true;
+            events.push(event(clock, checkpoint, "wait-approval-gate", "error", {
+                command: workflowApproveListCommand(approvalGate.category, deps.namespace),
+                message: gateOutcome.message,
+                stdout: gateOutcome.stdout || undefined,
+                stderr: gateOutcome.stderr || undefined,
+            }));
+            diagnostics.push(
+                `approval-gate-workflow-error at ${checkpoint}: ${gateOutcome.message}`,
+            );
+            progress(
+                deps,
+                `[${workflowName}] checkpoint ${checkpoint}: ${approvalGate.category} gate blocked by workflow error after ${gateOutcome.waitedMs}ms`,
+            );
+        } else {
+            approvalGateWaitFailed = true;
+            events.push(event(clock, checkpoint, "wait-approval-gate", "error", {
+                command: workflowApproveListCommand(approvalGate.category, deps.namespace),
+                message: `${approvalGate.category} gate ${approvalGate.pattern} was not available after ${gateOutcome.waitedMs}ms`,
+                stdout: gateOutcome.stdout || undefined,
+                stderr: gateOutcome.stderr || undefined,
+            }));
+            diagnostics.push(
+                `approval-gate-timeout at ${checkpoint}: ${approvalGate.category} gate ${approvalGate.pattern} was not available after ${gateOutcome.waitedMs}ms`,
+            );
+            progress(
+                deps,
+                `[${workflowName}] checkpoint ${checkpoint}: ${approvalGate.category} gate missing after ${gateOutcome.waitedMs}ms`,
+            );
+        }
+    }
     progress(
         deps,
         `[${workflowName}] checkpoint ${checkpoint}: wait for ${deps.topology.components.length} component phase(s)`,
     );
     const outcome: PhaseCompletionOutcome = await waitForPhaseCompletion({
         components: deps.topology.components,
-        timeoutSeconds: workflowWaitTimedOut ? 1 : deps.spec.phaseCompletionTimeoutSeconds,
+        timeoutSeconds: workflowWaitTimedOut || approvalGateWaitFailed
+            ? 1
+            : deps.spec.phaseCompletionTimeoutSeconds,
         readObservations: async () => {
             const o = await deps.readObservations();
             return Object.values(o.components).map((c) => ({
@@ -1009,6 +1532,16 @@ async function waitAndCheckpoint(
     // Re-read final state after wait so the snapshot has the settled
     // phases.
     const finalObs = await deps.readObservations();
+    if (approvalGateObserved && subject) {
+        const subjectObs = finalObs.components[subject];
+        if (subjectObs) {
+            finalObs.components[subject] = {
+                ...subjectObs,
+                gatePending: true,
+                gateType: approvalGate!.category,
+            };
+        }
+    }
 
     if (outcome.kind === "timeout") {
         const workflowSummary = summarizeArgoWorkflow(deps.k8sClient);
@@ -1064,6 +1597,251 @@ async function waitAndCheckpoint(
             observations: withBehavior,
         }),
     });
+}
+
+async function waitAndCheckpointSubjectIncomplete(args: {
+    deps: LiveRunnerDeps;
+    into: RunCheckpoint[];
+    workflowName: string;
+    checkpoint: Checkpoint;
+    subject: ComponentId | null;
+    priorComponents: Readonly<Record<ComponentId, ObservedComponent>> | null;
+    diagnostics: string[];
+    events: CaseEvent[];
+    clock: typeof realClock;
+}): Promise<void> {
+    const {
+        deps,
+        into,
+        workflowName,
+        checkpoint,
+        subject,
+        priorComponents,
+        diagnostics,
+        events,
+        clock,
+    } = args;
+    if (!subject) {
+        throw new Error(`${checkpoint} checkpoint with waitMode=subject-incomplete requires subject`);
+    }
+    events.push(event(clock, checkpoint, "wait-subject-incomplete", "ok", {
+        message: `waiting up to ${deps.spec.phaseCompletionTimeoutSeconds}s for ${subject} to exist without reaching completion`,
+    }));
+    progress(
+        deps,
+        `[${workflowName}] checkpoint ${checkpoint}: wait for ${subject} to remain incomplete`,
+    );
+    const outcome = await waitForSubjectIncomplete({
+        readObservations: deps.readObservations,
+        subject,
+        timeoutSeconds: deps.spec.phaseCompletionTimeoutSeconds,
+        clock,
+    });
+
+    if (outcome.kind === "timeout") {
+        events.push(event(clock, checkpoint, "wait-subject-incomplete", "error", {
+            message: `${subject} did not reach an incomplete observable state after ${outcome.waitedMs}ms; last phase=${outcome.lastPhase ?? "(missing)"}`,
+        }));
+        diagnostics.push(
+            `subject-incomplete-timeout at ${checkpoint}: ${subject}=${outcome.lastPhase ?? "(missing)"}`,
+        );
+        progress(
+            deps,
+            `[${workflowName}] checkpoint ${checkpoint}: ${subject} did not become incomplete after ${outcome.waitedMs}ms`,
+        );
+    } else {
+        events.push(event(clock, checkpoint, "wait-subject-incomplete", "ok", {
+            message: `${subject}=${outcome.phase} after ${outcome.waitedMs}ms`,
+        }));
+        progress(
+            deps,
+            `[${workflowName}] checkpoint ${checkpoint}: ${subject}=${outcome.phase} after ${outcome.waitedMs}ms`,
+        );
+    }
+
+    const finalObs = await deps.readObservations();
+    const argoWorkflow = readArgoWorkflowObservation(deps.k8sClient);
+    events.push(event(clock, checkpoint, "observe", "ok", {
+        message: [
+            `captured ${Object.keys(finalObs.components).length} component(s)`,
+            argoWorkflow
+                ? `argo ${argoWorkflow.name}=${argoWorkflow.phase ?? "Unknown"}`
+                : undefined,
+        ].filter(Boolean).join("; "),
+    }));
+
+    const withBehavior = deriveBehaviorOnAll(finalObs.components, priorComponents);
+    into.push({
+        checkpoint,
+        observedAt: new Date(clock.now()).toISOString(),
+        argoWorkflow,
+        components: withBehavior,
+        violations: assertNoViolations({
+            checkpoint,
+            subject,
+            topology: deps.topology,
+            observations: withBehavior,
+        }),
+    });
+}
+
+type SubjectIncompleteOutcome =
+    | {
+          kind: "ready";
+          waitedMs: number;
+          phase: string;
+      }
+    | {
+          kind: "timeout";
+          waitedMs: number;
+          lastPhase?: string;
+      };
+
+async function waitForSubjectIncomplete(opts: {
+    readObservations: ReadClusterObservations;
+    subject: ComponentId;
+    timeoutSeconds: number;
+    pollIntervalMs?: number;
+    clock: typeof realClock;
+}): Promise<SubjectIncompleteOutcome> {
+    const pollMs = opts.pollIntervalMs ?? 2000;
+    const start = opts.clock.now();
+    const deadlineMs = start + opts.timeoutSeconds * 1000;
+    let lastPhase: string | undefined;
+
+    while (true) {
+        const observations = await opts.readObservations();
+        const subjectObs = observations.components[opts.subject];
+        lastPhase = subjectObs?.phase;
+        if (subjectObs && !COMPLETED_SUBJECT_PHASES.has(subjectObs.phase)) {
+            return {
+                kind: "ready",
+                waitedMs: opts.clock.now() - start,
+                phase: subjectObs.phase,
+            };
+        }
+        if (opts.clock.now() >= deadlineMs) {
+            return {
+                kind: "timeout",
+                waitedMs: opts.clock.now() - start,
+                lastPhase,
+            };
+        }
+        await opts.clock.sleep(pollMs);
+    }
+}
+
+type ApprovalGateWaitOutcome =
+    | {
+          kind: "ready";
+          waitedMs: number;
+          stdout: string;
+      }
+    | {
+          kind: "workflow-error";
+          waitedMs: number;
+          message: string;
+          stdout: string;
+          stderr: string;
+      }
+    | {
+          kind: "timeout";
+          waitedMs: number;
+          stdout: string;
+          stderr: string;
+      };
+
+async function waitForApprovalGate(opts: {
+    workflowCli: WorkflowCli;
+    k8sClient?: K8sClient;
+    category: Extract<ApprovalGateCategory, "change" | "retry">;
+    pattern: string;
+    timeoutSeconds: number;
+    pollIntervalMs?: number;
+    workflowFailureGraceMs?: number;
+    clock: typeof realClock;
+}): Promise<ApprovalGateWaitOutcome> {
+    const pollMs = opts.pollIntervalMs ?? 2000;
+    const workflowFailureGraceMs = opts.workflowFailureGraceMs ?? 10000;
+    const start = opts.clock.now();
+    const deadlineMs = start + opts.timeoutSeconds * 1000;
+    let lastStdout = "";
+    let lastStderr = "";
+    let firstWorkflowFailureAt: number | null = null;
+    let lastWorkflowFailure: string | null = null;
+
+    while (true) {
+        try {
+            const result = opts.workflowCli.listApprovalGates(opts.category);
+            lastStdout = result.stdout;
+            lastStderr = result.stderr;
+            if (approvalGateListContains(result.stdout, opts.pattern)) {
+                return {
+                    kind: "ready",
+                    waitedMs: opts.clock.now() - start,
+                    stdout: result.stdout,
+                };
+            }
+        } catch (e) {
+            const err = e as Partial<WorkflowCliError>;
+            lastStdout = err.stdout ?? "";
+            lastStderr = err.stderr ?? err.message ?? "";
+        }
+
+        const workflowFailure = opts.k8sClient
+            ? summarizeFailedArgoNodes(opts.k8sClient)
+            : null;
+        if (workflowFailure) {
+            lastWorkflowFailure = workflowFailure;
+            firstWorkflowFailureAt ??= opts.clock.now();
+            if (opts.clock.now() - firstWorkflowFailureAt >= workflowFailureGraceMs) {
+                return {
+                    kind: "workflow-error",
+                    waitedMs: opts.clock.now() - start,
+                    message: workflowFailure,
+                    stdout: lastStdout,
+                    stderr: lastStderr,
+                };
+            }
+        } else {
+            firstWorkflowFailureAt = null;
+            lastWorkflowFailure = null;
+        }
+
+        if (opts.clock.now() >= deadlineMs) {
+            return {
+                kind: "timeout",
+                waitedMs: opts.clock.now() - start,
+                stdout: lastStdout,
+                stderr: lastWorkflowFailure
+                    ? `${lastStderr}\n${lastWorkflowFailure}`.trim()
+                    : lastStderr,
+            };
+        }
+        await opts.clock.sleep(pollMs);
+    }
+}
+
+function approvalGateListContains(stdout: string, pattern: string): boolean {
+    const stripped = stripAnsi(stdout);
+    const variants = approvalGatePatternVariants(pattern);
+    return stripped
+        .split(/\r?\n/)
+        .some((line) => variants.some((v) => line.includes(v)));
+}
+
+function approvalGatePatternVariants(pattern: string): string[] {
+    const out = new Set<string>([pattern]);
+    if (pattern.endsWith(".vapretry")) {
+        out.add(pattern.slice(0, -".vapretry".length));
+    } else {
+        out.add(`${pattern}.vapretry`);
+    }
+    return [...out].filter((v) => v.length > 0);
+}
+
+function stripAnsi(s: string): string {
+    return s.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
 }
 
 function buildNoopCaseName(spec: ScenarioSpec): string {
@@ -1249,6 +2027,9 @@ export async function runExpandedCase(
     deps: LiveRunnerDeps,
     expanded: ExpandedTestCase,
 ): Promise<string> {
+    if (expanded.subjectStateAtMutation === "in-progress") {
+        return runStateControlledCase(deps, expanded);
+    }
     if (expanded.mutator.changeClass === "safe") {
         return runSafeCase(deps, expanded);
     }
@@ -1357,6 +2138,7 @@ async function main(): Promise<void> {
             progress: (message) => console.error(message),
         });
         const summary = summariseSnapshots(out);
+        const coverage = writeCoverageOverview(out, outputDir);
         for (const c of summary.cases) {
             const suffix =
                 c.violationCount > 0
@@ -1366,6 +2148,8 @@ async function main(): Promise<void> {
                 `Snapshot written to ${c.path} [${c.outcome}]${suffix}`,
             );
         }
+        console.log(`Coverage overview written to ${coverage.jsonPath}`);
+        console.log(`Coverage overview written to ${coverage.markdownPath}`);
         if (summary.anyFailed) {
             console.error(
                 `Run failed: ${summary.errorCount} case(s) errored, ${summary.totalViolations} violation(s) across ${summary.cases.length} case(s).`,
@@ -1419,8 +2203,35 @@ function collectViolations(run: RunRecord): Violation[] {
     return run.checkpoints.flatMap((cp) => cp.violations ?? []);
 }
 
-function workflowApproveCommand(pattern: string, namespace: string): string {
-    return `workflow approve ${pattern} --namespace ${namespace}`;
+function approveWorkflowGate(
+    workflowCli: WorkflowCli,
+    operation: WorkflowApproveOperation,
+): WorkflowCliRunResult {
+    switch (operation.category ?? "step") {
+        case "step":
+            return workflowCli.approveStep(operation.pattern);
+        case "change":
+            return workflowCli.approveChange(operation.pattern);
+        case "retry":
+            return workflowCli.approveRetry(operation.pattern, {
+                allowPrereqFailure: operation.allowPrereqFailure,
+            });
+    }
+}
+
+function workflowApproveCommand(
+    category: ApprovalGateCategory,
+    pattern: string,
+    namespace: string,
+): string {
+    return `workflow approve ${category} ${pattern} --namespace ${namespace}`;
+}
+
+function workflowApproveListCommand(
+    category: ApprovalGateCategory,
+    namespace: string,
+): string {
+    return `workflow approve ${category} --list --namespace ${namespace}`;
 }
 
 function workflowResetCommand(
@@ -1485,6 +2296,37 @@ function summarizeArgoWorkflow(k8sClient: K8sClient): string | null {
             return `${INNER_MIGRATION_WORKFLOW_NAME} phase=${phase}`;
         }
         return `${INNER_MIGRATION_WORKFLOW_NAME} phase=${phase}; nodes=${interestingNodes
+            .map((n) => `${n.name ?? "(unnamed)"}:${n.phase}${n.message ? ` (${n.message})` : ""}`)
+            .join(", ")}`;
+    } catch {
+        return null;
+    }
+}
+
+function summarizeFailedArgoNodes(k8sClient: K8sClient): string | null {
+    try {
+        const workflow = k8sClient.getOne(ARGO_WORKFLOW_RESOURCE, INNER_MIGRATION_WORKFLOW_NAME);
+        if (!workflow) return null;
+        const status = asRecord(workflow["status"]);
+        const phase = typeof status?.["phase"] === "string" ? status["phase"] : "(unknown)";
+        const nodes = asRecord(status?.["nodes"]);
+        const failedNodes = nodes
+            ? Object.values(nodes)
+                  .map((n) => asRecord(n))
+                  .filter((n): n is Record<string, unknown> => Boolean(n))
+                  .map((n) => ({
+                      name: workflowNodeName(n),
+                      phase: typeof n["phase"] === "string" ? n["phase"] : undefined,
+                      message: truncate(
+                          typeof n["message"] === "string" ? n["message"] : undefined,
+                          180,
+                      ),
+                  }))
+                  .filter((n) => n.phase && ARGO_WORKFLOW_FAILURE_PHASES.has(n.phase))
+                  .slice(0, 4)
+            : [];
+        if (failedNodes.length === 0) return null;
+        return `${INNER_MIGRATION_WORKFLOW_NAME} phase=${phase}; failed nodes=${failedNodes
             .map((n) => `${n.name ?? "(unnamed)"}:${n.phase}${n.message ? ` (${n.message})` : ""}`)
             .join(", ")}`;
     } catch {

@@ -3,6 +3,7 @@
  *
  * Implemented checkpoints:
  *   - `baseline-complete`: observation anchor only; no assertions.
+ *   - `subject-held`: poison-pill state-control anchor; no assertions.
  *   - `noop`: every component must be `skipped`.
  *   - `mutated-complete`: safe-case terminal — components whose
  *     checksums are material to the changed paths must be `reran`;
@@ -59,6 +60,7 @@ export interface AssertNoViolationsInput {
 export function assertNoViolations(input: AssertNoViolationsInput): Violation[] {
     switch (input.checkpoint) {
         case "baseline-complete":
+        case "subject-held":
             return [];
         case "noop":
             return assertNoop(input);

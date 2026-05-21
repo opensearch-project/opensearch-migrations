@@ -40,6 +40,29 @@ fixtures:
       target-creds:
         usernameEnv: E2E_TARGET_BASIC_AUTH_USERNAME
         passwordEnv: E2E_TARGET_BASIC_AUTH_PASSWORD
+  poisonPills:
+    byName:
+      datasnapshot-bad-repo-endpoint:
+        subject: datasnapshot:source-snap1
+        strategy: config-value
+        expectedCollateral: [captureproxy:capture-proxy]
+        poison:
+          path: sourceClusters.source.snapshotInfo.repos.default.endpoint
+          value: "http://does-not-exist.ma.svc.cluster.local:4566"
+        restore:
+          path: sourceClusters.source.snapshotInfo.repos.default.endpoint
+          value: "localstack://localstack:4566"
+      snapshotmigration-bad-target-auth:
+        subject: snapshotmigration:source-target-snap1-migration-0
+        strategy: basic-auth-credentials
+        expectedCollateral: [trafficreplay:capture-proxy-target-replay1]
+        secretName: target-creds
+        poison:
+          usernameEnv: E2E_BAD_TARGET_BASIC_AUTH_USERNAME
+          passwordEnv: E2E_BAD_TARGET_BASIC_AUTH_PASSWORD
+        restore:
+          usernameEnv: E2E_TARGET_BASIC_AUTH_USERNAME
+          passwordEnv: E2E_TARGET_BASIC_AUTH_PASSWORD
 `;
 
 describe("parseScenarioSpec", () => {
@@ -80,6 +103,18 @@ describe("parseScenarioSpec", () => {
         expect(spec.fixtures.basicAuthCredentials?.bySecretName["target-creds"]).toEqual({
             usernameEnv: "E2E_TARGET_BASIC_AUTH_USERNAME",
             passwordEnv: "E2E_TARGET_BASIC_AUTH_PASSWORD",
+        });
+        expect(spec.fixtures.poisonPills?.byName["datasnapshot-bad-repo-endpoint"]).toMatchObject({
+            subject: "datasnapshot:source-snap1",
+            strategy: "config-value",
+            poison: {
+                path: "sourceClusters.source.snapshotInfo.repos.default.endpoint",
+            },
+        });
+        expect(spec.fixtures.poisonPills?.byName["snapshotmigration-bad-target-auth"]).toMatchObject({
+            subject: "snapshotmigration:source-target-snap1-migration-0",
+            strategy: "basic-auth-credentials",
+            secretName: "target-creds",
         });
     });
 

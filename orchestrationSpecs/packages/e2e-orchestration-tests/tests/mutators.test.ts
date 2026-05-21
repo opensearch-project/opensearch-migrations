@@ -1,8 +1,10 @@
 import { ComponentId } from "../src/types";
 import {
+    dataSnapshotMaxSnapshotRateMutator,
     Mutator,
     MutatorRegistry,
     proxyNumThreadsMutator,
+    snapshotMigrationMaxConnectionsGatedMutator,
     snapshotMigrationMaxConnectionsMutator,
 } from "../src/fixtures/mutators";
 
@@ -217,5 +219,61 @@ describe("snapshotMigrationMaxConnectionsMutator", () => {
 
     it("apply() throws on missing snapshotMigrationConfigs key", () => {
         expect(() => mutator.apply({})).toThrow(/missing 'snapshotMigrationConfigs'/);
+    });
+});
+
+describe("snapshotMigrationMaxConnectionsGatedMutator", () => {
+    it("uses declared gated metadata for in-progress state-control cases", () => {
+        const mutator = snapshotMigrationMaxConnectionsGatedMutator();
+        expect(mutator.name).toBe("snapshotMigration-maxConnections-gated");
+        expect(mutator.changeClass).toBe("gated");
+        expect(mutator.dependencyPattern).toBe("subject-gated-change");
+        expect(mutator.changedPaths).toEqual([
+            "snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig.maxConnections",
+        ]);
+        expect(mutator.approvalPattern).toBe(
+            "snapshotmigration.source-target-snap1-migration-0",
+        );
+    });
+});
+
+describe("dataSnapshotMaxSnapshotRateMutator", () => {
+    const mutator = dataSnapshotMaxSnapshotRateMutator();
+
+    it("has the expected metadata", () => {
+        expect(mutator.name).toBe("dataSnapshot-maxSnapshotRate");
+        expect(mutator.changeClass).toBe("safe");
+        expect(mutator.dependencyPattern).toBe("subject-change");
+        expect(mutator.subject).toBe("datasnapshot:source-snap1");
+        expect(mutator.expectedRerunComponents).toEqual(["datasnapshot:source-snap1"]);
+    });
+
+    it("apply() changes the create snapshot rate limit without mutating input", () => {
+        const input = {
+            sourceClusters: {
+                source: {
+                    snapshotInfo: {
+                        snapshots: {
+                            snap1: {
+                                config: {
+                                    createSnapshotConfig: {
+                                        maxSnapshotRateMbPerNode: 0,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        };
+        const result = mutator.apply(input) as any;
+        expect(
+            input.sourceClusters.source.snapshotInfo.snapshots.snap1.config
+                .createSnapshotConfig.maxSnapshotRateMbPerNode,
+        ).toBe(0);
+        expect(
+            result.sourceClusters.source.snapshotInfo.snapshots.snap1.config
+                .createSnapshotConfig.maxSnapshotRateMbPerNode,
+        ).toBe(1);
     });
 });

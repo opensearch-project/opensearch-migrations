@@ -56,6 +56,21 @@ describe("deriveBehavior", () => {
         );
     });
 
+    it("uses actionable retry gates as the blocked signal even when the CR phase is terminal", () => {
+        expect(
+            deriveBehavior({
+                prev: obs({ uid: "u1", configChecksum: "c1" }),
+                curr: obs({
+                    phase: "Completed",
+                    uid: "u1",
+                    configChecksum: "c1",
+                    gatePending: true,
+                    gateType: "retry",
+                }),
+            }),
+        ).toBe("blocked");
+    });
+
     it("maps Suspended/Paused to 'gated'", () => {
         expect(deriveBehavior({ prev: null, curr: obs({ phase: "Suspended" }) })).toBe(
             "gated",
@@ -63,6 +78,21 @@ describe("deriveBehavior", () => {
         expect(deriveBehavior({ prev: null, curr: obs({ phase: "Paused" }) })).toBe(
             "gated",
         );
+    });
+
+    it("uses actionable change gates as the gated signal", () => {
+        expect(
+            deriveBehavior({
+                prev: obs({ uid: "u1", configChecksum: "c1" }),
+                curr: obs({
+                    phase: "Completed",
+                    uid: "u1",
+                    configChecksum: "c1",
+                    gatePending: true,
+                    gateType: "change",
+                }),
+            }),
+        ).toBe("gated");
     });
 
     it("maps Initialized/Pending/missing to 'unstarted'", () => {

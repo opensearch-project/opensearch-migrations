@@ -23,6 +23,7 @@ describe("enum schemas", () => {
     it("covers every checkpoint from the design doc", () => {
         for (const v of [
             "baseline-complete",
+            "subject-held",
             "noop",
             "mutated-complete",
             "before-approval",
@@ -212,6 +213,24 @@ describe("MatrixSelectorSchema", () => {
                 response: "approve",
             }).success,
         ).toBe(false);
+    });
+
+    it("requires a poisonPill when selecting in-progress subject state", () => {
+        expect(
+            MatrixSelectorSchema.safeParse({
+                changeClass: "safe",
+                patterns: ["subject-change"],
+                subjectStates: ["in-progress"],
+            }).success,
+        ).toBe(false);
+        expect(
+            MatrixSelectorSchema.safeParse({
+                changeClass: "safe",
+                patterns: ["subject-change"],
+                subjectStates: ["in-progress"],
+                poisonPill: "bad-source-endpoint",
+            }).success,
+        ).toBe(true);
     });
 });
 

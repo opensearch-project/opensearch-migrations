@@ -98,6 +98,7 @@ export interface CaseReport {
     durationMs?: number;
     duration?: string;
     detailPath: string;
+    coverage?: CaseSnapshot["coverage"];
     runCount: number;
     violationCount: number;
     diagnosticCount: number;
@@ -226,6 +227,7 @@ export function buildCaseReport(snapshot: CaseSnapshot, detailPath: string): Cas
         finishedAt: snapshot.finishedAt,
         ...durationBetween(snapshot.startedAt, snapshot.finishedAt),
         detailPath,
+        coverage: snapshot.coverage,
         runCount: runs.length,
         violationCount: (snapshot.violations ?? []).length,
         diagnosticCount: (snapshot.diagnostics ?? []).length,

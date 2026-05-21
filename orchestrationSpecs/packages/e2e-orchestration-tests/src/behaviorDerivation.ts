@@ -18,6 +18,9 @@
  *   - `blocked`  : current phase is `Blocked`.
  *   - `gated`    : current phase is `Suspended` (legacy design-doc
  *                  terminology) or `Paused`.
+ *   - `blocked`/`gated`: an ApprovalGate associated with this component
+ *                  is currently actionable. Impossible retry gates map
+ *                  to `blocked`; gated-change gates map to `gated`.
  *   - `unstarted`: current phase indicates the CRD exists but has not
  *                  progressed this run (`Initialized`, `Pending`, or a
  *                  missing phase field).
@@ -59,6 +62,10 @@ export interface DeriveBehaviorInput {
  */
 export function deriveBehavior({ prev, curr }: DeriveBehaviorInput): Behavior {
     const phase = curr.phase ?? "";
+
+    if (curr.gatePending) {
+        return curr.gateType === "change" ? "gated" : "blocked";
+    }
 
     if (BLOCKED_PHASES.has(phase)) return "blocked";
     if (GATED_PHASES.has(phase)) return "gated";

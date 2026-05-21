@@ -19,6 +19,10 @@ Reasons:
 
 Add this package to the existing workspace automatically by placing it under `packages/*`. Give it package scripts for `test`, `type-check`, `generate-transition-trees`, `run`, and later `generate-outer`.
 
+## Local Image Tagging Note
+
+For kind/minikube validation after a single-architecture image build, deploy Helm values with the arch-suffixed tag that was pushed by the build, for example `latest-workflow-tests_arm64` or `latest-workflow-tests_amd64`. Do not assume the plain tag `latest-workflow-tests` exists after a single-arch build; reserve plain tags for multi-arch builds or an explicit retagging step.
+
 ## Design Contract
 
 `e2eOrchestrationTestFramework.md` is the source of truth for framework semantics: specs, fixtures, responses, checkpoints, expected CRD `ComponentTopology`, transition trees, snapshots, and the constraint walk. This plan only describes implementation order and repo placement. If this plan conflicts with the design document, update the plan.
@@ -48,6 +52,8 @@ Create these files in `orchestrationSpecs/packages/e2e-orchestration-tests`:
 | `src/e2e-run.ts` | CLI entrypoint |
 | `src/snapshotStore.ts` | Diagnostic JSON snapshot writer |
 | `src/reportSchema.ts` | Snapshot schema |
+| `src/poisonPills.ts` | Reversible subject state-control fixtures |
+| `src/coverageOverview.ts` | Run-level coverage summary writer |
 | `src/fixtures/` | Built-in mutators, actors, observers, checkers |
 | `specs/` | Initial specs |
 | `transitionTrees/` | Generated and reviewed transition trees |
@@ -74,6 +80,8 @@ Current branch status:
 - `[x]` Workspace package skeleton exists under `orchestrationSpecs/packages/e2e-orchestration-tests`.
 - `[x]` Package-local `test` and `type-check` scripts run successfully.
 - `[x]` Core spec/schema loading exists for `baseConfig`, `phaseCompletionTimeoutSeconds`, `matrix`, `lifecycle`, and `approvalGates`.
+- `[x]` Scenario specs can declare poison-pill fixtures for config-value toggles and workflow-managed basic-auth credential toggles.
+- `[x]` Matrix selectors can request `subjectStates: [completed, in-progress]`; in-progress cases require a named poison pill.
 - `[~]` Selector validation exists, but the `subject-change` comment and implementation still need to be reconciled.
 
 Create the package with no cluster dependency yet.
@@ -82,6 +90,7 @@ Implement:
 
 - `types.ts` with `ChangeClass`, `DependencyPattern`, `Response`, `LifecyclePhase`, `ComponentKind`, `ComponentId`, `Checkpoint`, `ObservedComponent`, `ObservedSnapshot`, and `Violation`.
 - Spec schema with `baseConfig`, `phaseCompletionTimeoutSeconds`, `matrix`, `lifecycle`, and `approvalGates`.
+- Poison-pill fixture schema for reversible state controls. These fixtures are not mutators; they hold the subject in-progress so the real mutator can be submitted against a non-completed subject.
 - Fixture interfaces from the design doc, but keep `WorkflowConfig` as `z.infer<typeof OVERALL_MIGRATION_CONFIG>` for mutators because specs point at user configs.
 
 Exit criteria:
@@ -107,6 +116,10 @@ Current branch status:
 - `[x]` Noop and safe pass/fail assertions are wired into runner snapshots; gated and impossible case-plan assertions are wired in unit tests, with live validation still pending.
 - `[x]` Blocking checkpoint wait failures (`workflow-timeout`, `workflow-failed`, `phase-timeout`) now stop the case before the next plan step while preserving the failed run in the snapshot.
 - `[x]` Inner Argo workflow waits use a lightweight JSONPath status projection so large Argo workflow status payloads do not look like missing workflows or consume the full phase timeout.
+- `[x]` Mutation-gate checkpoints now use categorized workflow approval commands: structural gates use `workflow approve step`, gated changes use `workflow approve change`, and impossible retry gates use `workflow approve retry`.
+- `[x]` Approval-gate waits stop early with an actionable diagnostic when Argo already has failed nodes and the expected gate is still not available, instead of consuming the full phase timeout.
+- `[x]` State-controlled cases can submit a poison-baseline run, observe `subject-held`, then submit the restore plus the real mutation.
+- `[~]` Poison-pill support is unit-tested for config-value and basic-auth strategies; live DataSnapshot/SnapshotMigration poison-pill validation is still pending.
 
 Get a real cluster-backed test running as early as possible, even if it covers only one safe/noop path and uses hardcoded scenario data. This is intentionally a vertical slice from the design document's "How A Test Case Runs" section, not the full framework.
 
@@ -121,6 +134,7 @@ Implement:
 - A second submission of the same config for `noop-pre`.
 - Execution of lifecycle teardown actors in a `finally` path when configured. Setup actors may be minimal in the first slice, but teardown-on-failure must be wired before live runs are trusted.
 - A snapshot file with raw observations, even before all assertions exist.
+- A state-controlled case path that can hold the subject in-progress before the mutation is submitted.
 
 Exit criteria:
 
@@ -143,6 +157,8 @@ Current branch status:
 - `[x]` Missing inner Argo workflow evidence uses a short appearance grace and records `workflow-missing`; it no longer consumes the full phase timeout before CRD checks can proceed.
 - `[x]` Large inner Argo workflow resources use lightweight status polling for checkpoint waits, with full workflow JSON still captured only as best-effort diagnostic evidence.
 - `[x]` CLI live runs emit lightweight progress lines for setup, configure, submit, checkpoints, approvals, resets, and cleanup.
+- `[x]` Case snapshots can include coverage metadata: subject, subject state at mutation, observed subject phase before mutation, declared change class, mutator, response, changed paths, expected reruns, and poison-pill strategy/collateral.
+- `[x]` CLI runs write `coverage-summary.json` and `coverage-summary.md` beside case snapshots.
 
 Stabilize the data captured by the thin live test.
 
@@ -159,6 +175,7 @@ Exit criteria:
 - `[x]` Duplicate observation keys are rejected.
 - `[x]` A failed live run still writes enough diagnostic data to debug command/setup/cleanup failures.
 - `[x]` Raw Argo workflow phase and compact node diagnostics are captured for checkpoint diagnostics.
+- `[x]` Coverage overview groups cases by subject, subject state at mutation, declared change class, dependency pattern, response, and poison pill.
 
 ### 4. Temporary Expected CRD ComponentTopology For The First Scenario `[~]`
 
@@ -321,6 +338,8 @@ Latest live validation note:
 - The same run exposed a harness issue where baseline timeout was logged and the runner continued into `noop-pre`; that is now fixed so checkpoint wait failures stop the case and write an error snapshot.
 - 2026-05-20 clean-cluster run used `kind-ma-workflow-e2e` with image tag `workflow-tests-20260520` and `basicSnapshotNoop.test.yaml --noop-only`. DataSnapshot and SnapshotMigration reached `Completed`, and the RFS coordinator came up with zero restarts under the current resource block. The run still failed because Argo marked `migration-workflow` `Failed` after `initializeRunMetadata` exited 1. Evidence from the failed pod showed the script looked for `migration-workflow-run-<runNumber>`, while the e2e runner's hidden workflow-name override created `<outerWorkflowName>-run-<runNumber>`. The runner now uses the default `migration-workflow` submit path; revalidate on a clean cluster before continuing to noop-pre/gated/impossible live validation.
 - 2026-05-20 clean-cluster rerun used `kind-ma-workflow-e2e-default` with image tag `workflow-tests-20260520-default` and `basicSnapshotNoop.test.yaml --noop-only`. Baseline completed in 4m44s, noop-pre completed in 39.857s, both Argo workflows reported `Succeeded`, DataSnapshot and SnapshotMigration reached `Completed`, and the case passed with zero diagnostics and zero violations. Snapshot output: `/tmp/e2e-orchestration-snapshots-ma-workflow-e2e-default-basic-noop-20260520/datasnapshot-source-snap1-noop.json`.
+- 2026-05-20 safe-flow run used `kind-ma-workflow-safe` and `fullMigrationProxySafe.test.yaml`. The four-run safe sequence completed and the summary snapshot passed with zero diagnostics and zero violations. Snapshot output: `/tmp/e2e-orchestration-snapshots-ma-workflow-safe-full-proxy-safe-20260520/captureproxy-capture-proxy-subject-change-proxy-numThreads.json`.
+- 2026-05-20 impossible-flow run used `kind-ma-workflow-impossible` with image tag `workflow-tests-20260520-impossible` and `basicSnapshotImpossible.test.yaml`. Baseline completed in 278.425s and noop-pre completed in 37.688s. The mutated run submitted `documentBackfillConfig.maxConnections: 5`; `upsertsnapshotmigrationresource` failed with the expected VAP immutable-field denial against the completed `SnapshotMigration`, but `workflow approve retry --list` still reported `No gates available` while Argo stayed `Running` at `3/4`. Treat this as the current SUT/workflow retry-gate blocker before impossible `leave-blocked` can pass live. Evidence was saved to `/tmp/e2e-orchestration-evidence-ma-workflow-impossible-20260520/`.
 
 ### 7. Matrix Expander And Mutator Registry `[~]`
 
@@ -334,6 +353,9 @@ Current branch status:
 - `[x]` The built-in basic impossible mutator targets `SnapshotMigration/source-target-snap1-migration-0`, because that resource is terminal and already uses the workflow's ApprovalGate retry wrapper. The earlier DataSnapshot target is not the first live impossible candidate because `reconcileDataSnapshotResource` currently has no retry gate wrapper.
 - `[x]` Mutated configs are validated against `OVERALL_MIGRATION_CONFIG` before CLI submission.
 - `[x]` Gated/impossible response expansion exists at the matrix level; the live runner now has case-plan wiring for gated approve/leave-blocked and impossible leave-blocked/approve-only/reset-only/reset-then-approve.
+- `[x]` Matrix expansion now carries `subjectStateAtMutation`. Existing selectors expand to `completed`; selectors with a `poisonPill` expand to `in-progress`; selectors can request both states explicitly.
+- `[x]` Expanded in-progress case names include the poison pill to make completed vs in-progress coverage distinct on disk.
+- `[x]` Built-in mutators now include a DataSnapshot safe `maxSnapshotRateMbPerNode` change and a SnapshotMigration gated `maxConnections` change for in-progress state-control specs.
 
 Expand cases with straightforward nested-loop code; it does not need a complex topology resolver.
 
@@ -342,8 +364,10 @@ Conceptually:
 ```typescript
 for (const selector of spec.matrix.select ?? defaultSelectorsFor(subject)) {
   for (const mutator of registry.findMutators(subject, selector)) {
-    for (const response of responsesFor(selector, mutator)) {
-      cases.push({ subject, mutator, response });
+    for (const subjectState of subjectStatesFor(selector)) {
+      for (const response of responsesFor(selector, mutator)) {
+        cases.push({ subject, mutator, response, subjectState });
+      }
     }
   }
 }
@@ -367,9 +391,33 @@ Each mutator should declare:
 Exit criteria:
 
 - `[x]` A spec with `select` expands to the expected safe cases.
+- `[x]` A spec with poison-pill state control expands in-progress cases and rejects unknown or wrong-subject poison pills.
 - `[x]` Mutated configs validate against `OVERALL_MIGRATION_CONFIG`.
 - `[x]` The CLI runner executes all expanded safe cases by default.
 - `[ ]` Optional exact-case selection exists only as a developer convenience, not as required behavior.
+
+### 7a. Poison-Pill State Control And Coverage Overview `[~]`
+
+Current branch status:
+
+- `[x]` `fixtures.poisonPills.byName` supports `config-value` and `basic-auth-credentials` strategies.
+- `[x]` `config-value` poison pills can write a poison value and restore value into the submitted workflow config.
+- `[x]` `basic-auth-credentials` poison pills use `workflow configure credentials create/update --stdin` through the same workflow-managed credential path as setup.
+- `[x]` In-progress case execution submits `poison-baseline`, waits for the subject to be observable but not completed, then submits `mutated` with the restore value and the real mutator applied.
+- `[x]` Each case snapshot records coverage metadata, and CLI runs write `coverage-summary.json` plus `coverage-summary.md`.
+- `[x]` Added checked-in live specs for DataSnapshot bad snapshot-repository endpoint and SnapshotMigration bad target-auth state control.
+- `[ ]` Validate both poison-pill strategies against a clean cluster and confirm the restore step resumes progress.
+- `[ ]` Decide whether narrower long-term poison pills, such as target-index write blocks, should replace broad auth/source/repo blockers in stable suites.
+
+Implementation rule:
+
+- Poison pills are state-control fixtures, not mutators. They should not be included in the changed-path oracle for the behavior under test, but their known collateral should be documented in coverage output.
+
+Exit criteria:
+
+- A DataSnapshot case can hold `datasnapshot:source-snap1` in-progress, mutate a selected field, apply the restore step, and report the observed subject phase before mutation.
+- A SnapshotMigration case can hold `snapshotmigration:source-target-snap1-migration-0` in-progress, mutate a selected field, apply the restore step, and report the observed subject phase before mutation.
+- `coverage-summary.md` is enough to see which subject/state/change-class combinations ran without opening the detail snapshots.
 
 ### 8. Transition Tree Generator `[ ]`
 
@@ -442,6 +490,7 @@ Current branch status:
 - `[x]` Expanded non-safe cases dispatch to their own case-plan builders instead of the safe runner.
 - `[~]` Gated mutator metadata is supported through `mutator.approvalPattern`; no built-in gated mutator is registered yet.
 - `[x]` Live gated execution is wired into `runExpandedCase` and unit-tested for the approve response.
+- `[x]` The runner waits for `workflow approve change --list` before the `before-approval` checkpoint and sends `workflow approve change <pattern>` for the approve response.
 
 Implement `response: approve` and `response: leave-blocked` after safe flow is stable.
 
@@ -467,7 +516,9 @@ Current branch status:
 - `[x]` Expanded non-safe cases dispatch to their own case-plan builders instead of the safe runner.
 - `[x]` One impossible mutator and reset/approval metadata are defined for `SnapshotMigration/source-target-snap1-migration-0`.
 - `[x]` Live impossible execution is wired into `runExpandedCase` and unit-tested for `leave-blocked`; response operations for `approve-only`, `reset-only`, and `reset-then-approve` are also encoded in the case plan.
-- `[ ]` Live impossible execution still needs real-cluster validation and gate-state assertions.
+- `[~]` Live impossible execution reached baseline and noop-pre on a clean cluster, then hit a SUT/workflow retry-gate blocker before `leave-blocked` could pass.
+- `[x]` The runner waits for `workflow approve retry --list` and annotates the subject observation with `gatePending`/`gateType` when the retry gate becomes actionable.
+- `[x]` Approval-gate waits now produce a blocking `approval-gate-workflow-error` diagnostic if Argo has failed nodes but the expected retry gate never becomes available.
 
 Implement only after reset behavior is understood per component kind.
 
@@ -488,7 +539,7 @@ For `approve-only` and `reset-only`, verify non-advancement by comparing a befor
 
 Exit criteria:
 
-- `[~]` All four response plans can be constructed by the runner; real-cluster snapshots are still pending.
+- `[~]` All four response plans can be constructed by the runner; real-cluster validation is blocked by the retry-gate availability issue captured in the latest live validation note.
 - The AND condition is proven: approval alone does not advance, reset alone does not advance, reset plus approval does advance.
 
 ### 12. Multi-Case Execution `[~]`

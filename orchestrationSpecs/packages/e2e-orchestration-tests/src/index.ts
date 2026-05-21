@@ -14,9 +14,12 @@ export * from "./assertLogic";
 export * from "./fixtures/mutators";
 export * from "./fixtures/builtinMutators";
 export * from "./matrixExpander";
+export * from "./poisonPills";
+export * from "./coverageOverview";
 export {
     runNoopCase,
     runSafeCase,
+    runStateControlledCase,
     runExpandedCase,
     runExpandedCases,
     runFromSpec,
@@ -30,6 +33,7 @@ export type {
     WorkflowCheckpointOperation,
     WorkflowApproveOperation,
     WorkflowResetOperation,
+    WorkflowStateControlOperation,
     RunFromSpecOptions,
     CaseSummary,
     RunSummary,

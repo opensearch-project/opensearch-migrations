@@ -19,6 +19,15 @@ import { z } from "zod";
 export const ChangeClassSchema = z.enum(["safe", "gated", "impossible"]);
 export type ChangeClass = z.infer<typeof ChangeClassSchema>;
 
+/**
+ * Subject lifecycle state when the test submits the mutation under
+ * test. Existing cases mutate after a completed baseline; poison-pill
+ * cases intentionally hold the subject before completion so the same
+ * mutator can exercise pre-terminal behavior.
+ */
+export const SubjectStateAtMutationSchema = z.enum(["completed", "in-progress"]);
+export type SubjectStateAtMutation = z.infer<typeof SubjectStateAtMutationSchema>;
+
 /** Where the change lands relative to the subject component. */
 export const DependencyPatternSchema = z.enum([
     "subject-change",
@@ -57,6 +66,7 @@ export type LifecyclePhase = z.infer<typeof LifecyclePhaseSchema>;
 /** Checkpoints at which assertNoViolations is called. */
 export const CheckpointSchema = z.enum([
     "baseline-complete",
+    "subject-held",
     "noop",
     "mutated-complete",
     "before-approval",
@@ -141,6 +151,16 @@ export const MatrixSelectorSchema = z
         patterns: z.array(DependencyPatternSchema).min(1),
         /** Required for gated/impossible; must be omitted for safe. */
         response: ResponseSchema.optional(),
+        /**
+         * Optional subject states to exercise. Omitted keeps the
+         * historical completed-baseline behavior. Supplying a
+         * `poisonPill` without this field expands only the in-progress
+         * state, which keeps poison-pill specs concise but still
+         * explicit.
+         */
+        subjectStates: z.array(SubjectStateAtMutationSchema).min(1).optional(),
+        /** Name under fixtures.poisonPills.byName for in-progress cases. */
+        poisonPill: z.string().min(1).optional(),
     })
     .strict()
     .superRefine((sel, ctx) => {
@@ -159,6 +179,17 @@ export const MatrixSelectorSchema = z
                     path: ["patterns", i],
                 });
             }
+        }
+        if (
+            sel.subjectStates?.includes("in-progress") &&
+            sel.poisonPill === undefined
+        ) {
+            ctx.addIssue({
+                code: "custom",
+                message:
+                    "selectors that include subjectStates: [in-progress] must set 'poisonPill'",
+                path: ["poisonPill"],
+            });
         }
 
         if (sel.changeClass === "safe") {
@@ -243,9 +274,58 @@ export const BasicAuthCredentialsFixtureSchema = z
     .strict();
 export type BasicAuthCredentialsFixture = z.infer<typeof BasicAuthCredentialsFixtureSchema>;
 
+export const ConfigValuePoisonPillSchema = z
+    .object({
+        subject: ComponentIdSchema,
+        strategy: z.literal("config-value"),
+        description: z.string().optional(),
+        expectedCollateral: z.array(ComponentIdSchema).default([]),
+        poison: z
+            .object({
+                path: z.string().min(1),
+                value: z.unknown(),
+            })
+            .strict(),
+        restore: z
+            .object({
+                path: z.string().min(1),
+                value: z.unknown(),
+            })
+            .strict(),
+    })
+    .strict();
+export type ConfigValuePoisonPill = z.infer<typeof ConfigValuePoisonPillSchema>;
+
+export const BasicAuthCredentialsPoisonPillSchema = z
+    .object({
+        subject: ComponentIdSchema,
+        strategy: z.literal("basic-auth-credentials"),
+        description: z.string().optional(),
+        expectedCollateral: z.array(ComponentIdSchema).default([]),
+        secretName: z.string().min(1),
+        poison: EnvCredentialSourceSchema,
+        restore: EnvCredentialSourceSchema,
+    })
+    .strict();
+export type BasicAuthCredentialsPoisonPill = z.infer<typeof BasicAuthCredentialsPoisonPillSchema>;
+
+export const PoisonPillSpecSchema = z.discriminatedUnion("strategy", [
+    ConfigValuePoisonPillSchema,
+    BasicAuthCredentialsPoisonPillSchema,
+]);
+export type PoisonPillSpec = z.infer<typeof PoisonPillSpecSchema>;
+
+export const PoisonPillFixtureSchema = z
+    .object({
+        byName: z.record(z.string().min(1), PoisonPillSpecSchema),
+    })
+    .strict();
+export type PoisonPillFixture = z.infer<typeof PoisonPillFixtureSchema>;
+
 export const FixturesSpecSchema = z
     .object({
         basicAuthCredentials: BasicAuthCredentialsFixtureSchema.optional(),
+        poisonPills: PoisonPillFixtureSchema.optional(),
     })
     .strict()
     .default({});
@@ -287,6 +367,7 @@ export const ObservedComponentSchema = z
         startedAtSeconds: z.number().optional(),
         durationSeconds: z.number().optional(),
         gatePending: z.boolean().optional(),
+        gateType: z.enum(["step", "change", "retry"]).optional(),
         /** For impossible-case non-advancement verification. */
         advanced: z.boolean().optional(),
         /** Diagnostic-only raw data from the CRD. */

@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { runSafeCase, runExpandedCases, LiveRunnerDeps } from "../src/e2e-run";
+import { runSafeCase, runExpandedCases, runStateControlledCase, LiveRunnerDeps } from "../src/e2e-run";
 import { buildTopology } from "../src/componentTopology";
 import { WorkflowCli } from "../src/workflowCli";
 import { K8sClient } from "../src/k8sClient";
@@ -72,6 +72,7 @@ function expandedCase(overrides: Partial<ExpandedTestCase> = {}): ExpandedTestCa
         expectedRerunComponents: mutator.expectedRerunComponents ?? [SUBJECT],
         changedPaths: mutator.changedPaths,
         response: null,
+        subjectStateAtMutation: "completed",
         ...overrides,
     };
 }
@@ -86,6 +87,7 @@ function makeRunnerTestDeps(opts: {
     deps: LiveRunnerDeps;
     calls: { args: readonly string[]; input?: string }[];
     tmpDir: string;
+    baselinePath: string;
 } {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "safe-run-"));
     const baselinePath = path.join(tmpDir, "baseline.wf.yaml");
@@ -96,6 +98,23 @@ function makeRunnerTestDeps(opts: {
     const workflowCli = new WorkflowCli({
         runner: (args, runOpts) => {
             calls.push({ args: [...args], input: runOpts?.input });
+            if (args[0] === "approve" && args[2] === "--list") {
+                const category = args[1];
+                if (category === "change") {
+                    return {
+                        stdout: "captureproxy.capture-proxy (change approval required)\n",
+                        stderr: "",
+                        exitCode: 0,
+                    };
+                }
+                if (category === "retry") {
+                    return {
+                        stdout: "snapshotmigration.source-target-snap1-migration-0 (retry approval required)\n",
+                        stderr: "",
+                        exitCode: 0,
+                    };
+                }
+            }
             return { stdout: "", stderr: "", exitCode: 0 };
         },
         namespace: "ma",
@@ -146,7 +165,7 @@ function makeRunnerTestDeps(opts: {
         baselineConfigPath: baselinePath,
         outputDir: path.join(tmpDir, "snapshots"),
     };
-    return { deps, calls, tmpDir };
+    return { deps, calls, tmpDir, baselinePath };
 }
 
 describe("runSafeCase — happy path", () => {
@@ -341,6 +360,101 @@ describe("runSafeCase — noop-post catches residual state", () => {
     });
 });
 
+describe("runStateControlledCase", () => {
+    it("submits a poisoned baseline, then submits the restore plus the real mutation", async () => {
+        const { deps, calls, tmpDir, baselinePath } = makeRunnerTestDeps({
+            observationFactory: (n) => {
+                const components: Record<ComponentId, ObservedComponent> = {};
+                const afterRestore = n >= 3;
+                for (const c of ALL) {
+                    const isSubject = c === SUBJECT;
+                    components[c] = {
+                        componentId: c,
+                        phase: afterRestore || !isSubject ? "Ready" : "Initialized",
+                        configChecksum: afterRestore && isSubject
+                            ? `mutated-cs-${c}`
+                            : `baseline-cs-${c}`,
+                        uid: `uid-${c}`,
+                    };
+                }
+                return components;
+            },
+        });
+        fs.writeFileSync(
+            baselinePath,
+            [
+                "sourceClusters:",
+                "  source:",
+                '    endpoint: "https://good-source:9200"',
+                "traffic:",
+                "  proxies: {}",
+                "",
+            ].join("\n"),
+            "utf8",
+        );
+        deps.spec.fixtures = {
+            poisonPills: {
+                byName: {
+                    "bad-source-endpoint": {
+                        subject: SUBJECT,
+                        strategy: "config-value",
+                        expectedCollateral: [SNAP],
+                        poison: {
+                            path: "sourceClusters.source.endpoint",
+                            value: "https://bad-source:9200",
+                        },
+                        restore: {
+                            path: "sourceClusters.source.endpoint",
+                            value: "https://good-source:9200",
+                        },
+                    },
+                },
+            },
+        };
+
+        try {
+            const outPath = await runStateControlledCase(
+                deps,
+                expandedCase({
+                    subjectStateAtMutation: "in-progress",
+                    poisonPillName: "bad-source-endpoint",
+                }),
+            );
+            const snap = readDetailSnapshot(outPath);
+            const report = JSON.parse(fs.readFileSync(outPath, "utf8"));
+            const configureInputs = calls
+                .filter((c) => c.args[0] === "configure")
+                .map((c) => c.input ?? "");
+
+            expect(Object.keys(snap.runs)).toEqual([
+                "poison-baseline",
+                "mutated",
+                "noop-post",
+            ]);
+            expect(snap.runs["poison-baseline"].checkpoints[0].checkpoint)
+                .toBe("subject-held");
+            expect(configureInputs[0]).toContain("https://bad-source:9200");
+            expect(configureInputs[1]).toContain("https://good-source:9200");
+            expect(configureInputs[1]).toContain("__mutated: true");
+            expect(snap.coverage).toMatchObject({
+                subject: SUBJECT,
+                subjectStateAtMutation: "in-progress",
+                observedSubjectPhaseBeforeMutation: "Initialized",
+                poisonPill: {
+                    name: "bad-source-endpoint",
+                    strategy: "config-value",
+                    expectedCollateral: [SNAP],
+                },
+            });
+            expect(report.coverage.observedSubjectPhaseBeforeMutation)
+                .toBe("Initialized");
+            expect(snap.outcome).toBe("passed");
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+});
+
 describe("runExpandedCases", () => {
     it("writes one snapshot per expanded case and returns every path", async () => {
         // Build deps whose spec triggers expansion to a single case
@@ -430,7 +544,7 @@ describe("runExpandedCases", () => {
             changeClass: "gated",
             dependencyPattern: "subject-gated-change",
             changedPaths: ["traffic.proxies.capture-proxy.proxyConfig.enabled"],
-            approvalPattern: "capture-proxy.captureproxy.vapretry",
+            approvalPattern: "captureproxy.capture-proxy",
         };
 
         try {
@@ -454,15 +568,15 @@ describe("runExpandedCases", () => {
                 "configure",
                 "submit",
                 "approve",
+                "approve",
                 "configure",
                 "submit",
             ]);
-            expect(calls.find((c) => c.args[0] === "approve")?.args).toEqual([
-                "approve",
-                "capture-proxy.captureproxy.vapretry",
-                "--namespace",
-                "ma",
-            ]);
+            expect(calls.filter((c) => c.args[0] === "approve").map((c) => c.args))
+                .toEqual([
+                    ["approve", "change", "--list", "--namespace", "ma"],
+                    ["approve", "change", "captureproxy.capture-proxy", "--namespace", "ma"],
+                ]);
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }
@@ -503,6 +617,7 @@ describe("runExpandedCases", () => {
             changedPaths: [
                 "snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig.maxConnections",
             ],
+            approvalPattern: "snapshotmigration.source-target-snap1-migration-0",
         };
 
         try {
@@ -525,6 +640,7 @@ describe("runExpandedCases", () => {
                 "submit",
                 "configure",
                 "submit",
+                "approve",
             ]);
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });

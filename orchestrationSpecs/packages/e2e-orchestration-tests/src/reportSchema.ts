@@ -9,9 +9,13 @@ import { z } from "zod";
 
 import {
     CheckpointSchema,
+    ChangeClassSchema,
     ComponentIdSchema,
+    DependencyPatternSchema,
     ObservedComponent,
     ObservedComponentSchema,
+    ResponseSchema,
+    SubjectStateAtMutationSchema,
     ViolationSchema,
 } from "./types";
 
@@ -137,6 +141,29 @@ export const CaseEventSchema = z
     .strict();
 export type CaseEvent = z.infer<typeof CaseEventSchema>;
 
+export const CaseCoverageSchema = z
+    .object({
+        subject: ComponentIdSchema,
+        subjectStateAtMutation: SubjectStateAtMutationSchema,
+        observedSubjectPhaseBeforeMutation: z.string().optional(),
+        declaredChangeClass: ChangeClassSchema,
+        dependencyPattern: DependencyPatternSchema,
+        response: ResponseSchema.nullable(),
+        mutatorName: z.string(),
+        changedPaths: z.array(z.string()).default([]),
+        expectedRerunComponents: z.array(ComponentIdSchema).default([]),
+        poisonPill: z
+            .object({
+                name: z.string(),
+                strategy: z.enum(["config-value", "basic-auth-credentials"]),
+                expectedCollateral: z.array(ComponentIdSchema).default([]),
+            })
+            .strict()
+            .optional(),
+    })
+    .strict();
+export type CaseCoverage = z.infer<typeof CaseCoverageSchema>;
+
 /**
  * Case-level outcome. 'partial' means the runner reached the case but
  * could not exercise the full behavior (e.g. missing implementation,
@@ -159,6 +186,8 @@ export const CaseSnapshotSchema = z
         /** ISO-8601 timestamps of case boundaries. */
         startedAt: z.string(),
         finishedAt: z.string().optional(),
+        /** Coverage dimensions used by the run-level coverage overview. */
+        coverage: CaseCoverageSchema.optional(),
         /** Runs keyed by run name (baseline, noop-pre, etc.). */
         runs: z.record(z.string(), RunRecordSchema),
         /** Ordered operational history of commands/actions attempted. */

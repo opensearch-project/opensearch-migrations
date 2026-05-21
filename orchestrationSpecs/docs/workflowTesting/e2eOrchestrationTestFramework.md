@@ -118,6 +118,15 @@ matrix:
     - changeClass: safe
       patterns: [subject-change]
 
+    # Optional state-control coverage. Omit subjectStates for the normal
+    # completed-baseline case. Add in-progress with a poisonPill to hold the
+    # subject before the mutation is submitted. Supplying only poisonPill is
+    # shorthand for subjectStates: [in-progress].
+    - changeClass: safe
+      patterns: [subject-change]
+      subjectStates: [completed, in-progress]
+      poisonPill: datasnapshot-bad-repo-endpoint
+
     # Gated: two cases per mutator — approve (happy path) and leave-blocked (regression guard)
     - changeClass: gated
       patterns: [subject-gated-change]
@@ -169,7 +178,39 @@ fixtures:
       target-creds:
         usernameEnv: E2E_TARGET_BASIC_AUTH_USERNAME
         passwordEnv: E2E_TARGET_BASIC_AUTH_PASSWORD
+  poisonPills:
+    byName:
+      datasnapshot-bad-repo-endpoint:
+        subject: datasnapshot:source-snap1
+        strategy: config-value
+        expectedCollateral: [captureproxy:capture-proxy]
+        poison:
+          path: sourceClusters.source.snapshotInfo.repos.default.endpoint
+          value: "http://does-not-exist.ma.svc.cluster.local:4566"
+        restore:
+          path: sourceClusters.source.snapshotInfo.repos.default.endpoint
+          value: "localstack://localstack:4566"
+      snapshotmigration-bad-target-auth:
+        subject: snapshotmigration:source-target-snap1-migration-0
+        strategy: basic-auth-credentials
+        expectedCollateral: [trafficreplay:capture-proxy-target-replay1]
+        secretName: target-creds
+        poison:
+          usernameEnv: E2E_BAD_TARGET_BASIC_AUTH_USERNAME
+          passwordEnv: E2E_BAD_TARGET_BASIC_AUTH_PASSWORD
+        restore:
+          usernameEnv: E2E_TARGET_BASIC_AUTH_USERNAME
+          passwordEnv: E2E_TARGET_BASIC_AUTH_PASSWORD
 ```
+
+Poison pills are state-control fixtures, not the mutation under test. A
+poisoned case first submits a baseline with the poison active and waits for the
+subject to exist without reaching completion. It then submits the real mutator
+with the restore value applied. This lets the same field be tested while the subject
+is completed and while the subject is still in-progress, without treating the
+poison field as part of the behavioral oracle. `expectedCollateral` documents
+known blast radius so coverage reports can distinguish intended side effects
+from assertions about the subject.
 
 ---
 
@@ -181,7 +222,7 @@ npx tsx src/e2e-run.ts specs/proxy-subjectChange.test.yaml
 
 1. **Resolve topology and expand** — the test framework resolves the baseline scenario's `ComponentTopology`, then queries the fixture registry for mutators whose `changeClass` and `dependencyPattern` tags match each selector entry. Each mutator × response combination becomes one expanded test case. For the spec above with one safe mutator, one gated mutator, and one impossible mutator, this produces 7 cases (1 + 2 + 4).
 
-2. **Run each case** — always in this four-run sequence:
+2. **Run each case** — completed-baseline cases use this sequence:
    - Actor lifecycle fixtures (setup)
    - Submit baseline config, approve structural gates, observe
    - Resubmit same config (`noop-pre`), verify all components skip
@@ -189,9 +230,19 @@ npx tsx src/e2e-run.ts specs/proxy-subjectChange.test.yaml
    - Resubmit mutated config (`noop-post`), verify all components skip
    - Actor lifecycle fixtures (teardown)
 
-3. **Capture a behavior snapshot** — component phases, behaviors (ran/reran/skipped/gated/blocked), timing from Argo node status, checker verdicts. Snapshots are diagnostic logs, not oracles.
+   In-progress cases replace baseline/noop-pre with a `poison-baseline` run:
+   apply the poison, submit baseline, wait for the subject to remain
+   incomplete, then submit the restore plus the real mutator.
+
+3. **Capture a behavior snapshot** — component phases, behaviors (ran/reran/skipped/gated/blocked), subject state before mutation, timing from Argo node status, checker verdicts. Snapshots are diagnostic logs, not oracles.
 
 4. **Compare against the transition trees** — the test passes when every observed behavior is consistent with the `changeRestriction` annotations in the committed trees. It fails when any behavior contradicts them.
+
+5. **Write a coverage overview** — the runner writes `coverage-summary.json`
+   and `coverage-summary.md` beside the case snapshots. The overview groups by
+   subject, subject state at mutation, declared change class, dependency
+   pattern, response, and poison pill so gaps are visible even when adaptive
+   state-control tests take different paths on different runs.
 
 ---
 
