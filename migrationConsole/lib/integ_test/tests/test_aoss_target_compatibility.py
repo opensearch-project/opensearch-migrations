@@ -41,11 +41,11 @@ def _typed_user_args():
 
 
 def test_aoss_target_drops_typed_only_test():
-    # Test0041CdcFullE2eMountableTransforms has CDC_SOURCE_TARGET_COMBINATIONS,
+    # Test0042CdcFullE2eMountableTransforms has CDC_SOURCE_TARGET_COMBINATIONS,
     # so it is NOT AOSS-compatible and must be rejected at construction time
     # under target_type=AOSS.
     with pytest.raises(ClusterVersionCombinationUnsupported):
-        _mt_tests.Test0041CdcFullE2eMountableTransforms(user_args=_aoss_user_args())
+        _mt_tests.Test0042CdcFullE2eMountableTransforms(user_args=_aoss_user_args())
 
 
 def test_aoss_target_drops_typed_only_simple_bulk():
@@ -63,4 +63,4 @@ def test_aoss_target_accepts_aoss_native_test():
 def test_typed_target_keeps_typed_only_tests():
     # For non-AOSS runs, typed-only tests still need to instantiate.
     _bulk_tests.Test0040CdcFullE2eSimpleBulk(user_args=_typed_user_args())
-    _mt_tests.Test0041CdcFullE2eMountableTransforms(user_args=_typed_user_args())
+    _mt_tests.Test0042CdcFullE2eMountableTransforms(user_args=_typed_user_args())

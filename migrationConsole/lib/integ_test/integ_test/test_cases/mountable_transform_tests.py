@@ -14,7 +14,7 @@ from .cdc_base import (
 logger = logging.getLogger(__name__)
 
 
-class Test0041CdcFullE2eMountableTransforms(MATestBase):
+class Test0042CdcFullE2eMountableTransforms(MATestBase):
     """Full CDC E2E test for image-mounted transform files across migration types."""
 
     requires_explicit_selection = True
@@ -37,7 +37,7 @@ class Test0041CdcFullE2eMountableTransforms(MATestBase):
             allow_source_target_combinations=CDC_SOURCE_TARGET_COMBINATIONS,
         )
         uid = self.unique_id
-        self.index_name = f"cdc0041-mountable-transforms-{uid}"
+        self.index_name = f"cdc0042-mountable-transforms-{uid}"
         self.doc_ids = [f"doc_{i}" for i in range(self.DOC_COUNT)]
         self.backfill_field_value = f"backfill-{uid}"
         self.order_field_value = f"second-transform-after-{self.backfill_field_value}"
@@ -93,7 +93,7 @@ class Test0041CdcFullE2eMountableTransforms(MATestBase):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
         self.workflow_template = "cdc-full-e2e-imported-clusters"
         if not self.transform_image_basic or not self.transform_image_sequence:
-            raise ValueError("Test0041 requires --transform_image_basic and --transform_image_sequence")
+            raise ValueError("Test0042 requires --transform_image_basic and --transform_image_sequence")
 
         self.parameters["transforms-sources"] = {
             "transform-basic": {"image": self.transform_image_basic},

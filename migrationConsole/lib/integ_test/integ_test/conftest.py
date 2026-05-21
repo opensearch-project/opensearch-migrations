@@ -133,11 +133,10 @@ def _filter_test_cases(test_ids_list: List[str]) -> List:
     - If test_ids_list is empty: return all tests EXCEPT those with requires_explicit_selection=True
     - If test_ids_list is provided: return only tests whose class name begins with Test{id}.
 
-    Matching is anchored on the Test{id} prefix to avoid accidental collisions
-    where one ID is a substring of another (e.g. '004' matching Test0040,
-    Test0041, ...) or two test classes share the same numeric ID
-    (e.g. Test0041CdcFullE2eAossTarget vs Test0041CdcFullE2eMountableTransforms,
-    both selected when '0041' is requested).
+    Matching is anchored on the Test{id} prefix so a stray substring
+    (e.g. '004' inside a longer numeric, description, or file path)
+    cannot leak into the selection set. Test IDs are themselves expected
+    to be unique per class.
     """
     if not test_ids_list:
         # Default run: exclude tests that require explicit selection
