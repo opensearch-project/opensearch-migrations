@@ -32,6 +32,7 @@ import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.PredicateLoader;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
@@ -189,6 +190,14 @@ public class TrafficReplayer {
 
         @ParametersDelegate
         private TupleTransformationParams tupleTransformationParams = new TupleTransformationParams();
+
+        @Parameter(
+            required = false,
+            names = {"--request-filter-config", "--requestFilterConfig"},
+            arity = 1,
+            description = "Configuration for request filtering. JSON array with one entry whose key is the "
+                + "predicate provider name. Requests failing the predicate are skipped (not sent to target).")
+        private String requestFilterConfig;
 
         @Parameter(
             required = false,
@@ -650,11 +659,13 @@ public class TrafficReplayer {
                 : new BulkItemErrorClassifier();
 
             var transformationLoader = new TransformationLoader();
+            var effectiveTransformerSupplier = buildTransformerSupplier(
+                transformationLoader, hostname, params.userAgent, requestTransformerConfig, params.requestFilterConfig);
             var tr = new TrafficReplayerTopLevel(
                 topContext,
                 uri,
                 authTransformer,
-                () -> transformationLoader.getTransformerFactoryLoader(hostname, params.userAgent, requestTransformerConfig),
+                effectiveTransformerSupplier,
                 TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                     uri,
                     params.allowInsecureConnections,
@@ -742,6 +753,23 @@ public class TrafficReplayer {
                 activeContextLogger.atLevel(acmLevel).setMessage("[end of run]]").log();
             }
         }
+    }
+
+    static Supplier<IJsonTransformer> buildTransformerSupplier(
+        TransformationLoader transformationLoader,
+        String hostname,
+        String userAgent,
+        String requestTransformerConfig,
+        String requestFilterConfig
+    ) {
+        Supplier<IJsonTransformer> base = () -> transformationLoader.getTransformerFactoryLoader(
+            hostname, userAgent, requestTransformerConfig);
+        if (requestFilterConfig == null || requestFilterConfig.isBlank()) {
+            return base;
+        }
+        var requestFilter = new PredicateLoader().getPredicateFactoryLoader(requestFilterConfig);
+        log.atInfo().setMessage("Request filter configured").log();
+        return () -> new FilteringTransformerWrapper(base.get(), requestFilter);
     }
 
     private static ThreadLocalTupleWriter createS3TupleWriterIfConfigured(

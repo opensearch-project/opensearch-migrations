@@ -24,7 +24,7 @@ public class PassThruHttpHeaders extends DefaultHttpHeaders {
             Stream.concat(
                 Stream.of(
                     HttpHeaderNames.CONTENT_LENGTH.toString(),
-                    HttpHeaderNames.CONTENT_TRANSFER_ENCODING.toString(),
+                    HttpHeaderNames.TRANSFER_ENCODING.toString(),
                     HttpHeaderNames.TRAILER.toString()
                 ),
                 Optional.ofNullable(extraHeaderNames).stream().flatMap(Arrays::stream)
