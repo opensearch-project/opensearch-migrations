@@ -25,18 +25,14 @@ import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceC
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
+import org.opensearch.migrations.testutils.TrafficStreamFixtures;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.TestContext;
-import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
-import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.opensearch.migrations.transform.TransformationLoader;
 
-import com.google.protobuf.ByteString;
-import com.google.protobuf.Timestamp;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
@@ -58,21 +54,7 @@ class RequestFilterE2ETest extends FullTrafficReplayerTest {
         "POST /data HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntest";
 
     private TrafficStream buildTrafficStream(String httpRequest) {
-        return TrafficStream.newBuilder()
-            .setNodeId(TEST_NODE_ID)
-            .setConnectionId(TEST_CONNECTION_ID)
-            .setNumberOfThisLastChunk(0)
-            .addSubStream(TrafficObservation.newBuilder()
-                .setTs(Timestamp.newBuilder().setSeconds(1).build())
-                .setRead(ReadObservation.newBuilder()
-                    .setData(ByteString.copyFromUtf8(httpRequest))
-                    .build())
-                .build())
-            .addSubStream(TrafficObservation.newBuilder()
-                .setTs(Timestamp.newBuilder().setSeconds(3).build())
-                .setClose(CloseObservation.newBuilder().build())
-                .build())
-            .build();
+        return TrafficStreamFixtures.makeHttpRequestTrafficStream(TEST_NODE_ID, TEST_CONNECTION_ID, httpRequest);
     }
 
     /**

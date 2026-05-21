@@ -8,6 +8,7 @@
 #   0021-0029  AOSS collection tests (search, time-series, vector)
 #   0031-0039  CDC tests (capture proxy + replayer + live traffic)
 #   0040-0049  CDC full E2E tests (capture proxy + replayer + backfill + generate-data)
+#   0050-0059  BYOC captured-traffic tests
 #
 import json
 import os
@@ -31,6 +32,7 @@ from .test_cases.mountable_transform_tests import *
 from .test_cases.cdc_aoss_tests import *
 from .test_cases.aoss_collection_tests import *
 from .test_cases.solr_tests import *
+from .test_cases.byoc_captured_traffic_tests import *
 
 logger = logging.getLogger(__name__)
 
