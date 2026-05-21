@@ -330,9 +330,8 @@ public interface LuceneLeafReader {
         // Fast path: scan once, only allocate if we actually find duplicates.
         // A duplicate is either:
         //   (a) two consecutive entries sharing the same position AND with overlapping
-        //       offset spans (a real graph-token alternate — same-position WITHOUT offset
-        //       overlap is non-physical for real Lucene postings, so we leave those alone
-        //       to avoid dropping legitimate distinct tokens in synthetic test fixtures);
+        //       offset spans (a real graph-token alternate); OR both having NO_OFFSET (-1),
+        //       in which case same-position alone is sufficient to group and pick longest;
         //   (b) an entry whose offset span is contained within the previous entry's span
         //       (a sub-token at a later position whose long alternate already covered it).
         boolean hasDup = false;
@@ -340,8 +339,9 @@ public interface LuceneLeafReader {
             TermEntry curr = entries.get(i);
             TermEntry prev = entries.get(i - 1);
             if (curr.position() == prev.position()
-                    && curr.startOffset() >= 0 && prev.startOffset() >= 0
-                    && offsetsOverlap(prev, curr)) {
+                    && ((curr.startOffset() >= 0 && prev.startOffset() >= 0
+                            && offsetsOverlap(prev, curr))
+                        || (curr.startOffset() < 0 && prev.startOffset() < 0))) {
                 hasDup = true;
                 break;
             }
@@ -357,14 +357,17 @@ public interface LuceneLeafReader {
         ArrayList<TermEntry> out = new ArrayList<>(n);
         int i = 0;
         while (i < n) {
-            // Group together consecutive entries at the same position whose offsets overlap
-            // with the first entry of the group — that's a real graph-token alternate set.
+            // Group consecutive entries at the same position:
+            //   - if offsets are available: require overlap (real graph-token alternates)
+            //   - if offsets are NO_OFFSET (-1): group by position alone, pick longest
             int j = i + 1;
             while (j < n
                     && entries.get(j).position() == entries.get(i).position()
-                    && entries.get(i).startOffset() >= 0
-                    && entries.get(j).startOffset() >= 0
-                    && offsetsOverlap(entries.get(i), entries.get(j))) {
+                    && ((entries.get(i).startOffset() >= 0
+                            && entries.get(j).startOffset() >= 0
+                            && offsetsOverlap(entries.get(i), entries.get(j)))
+                        || (entries.get(i).startOffset() < 0
+                            && entries.get(j).startOffset() < 0))) {
                 j++;
             }
             // Within [i, j), pick the longest term. Ties broken by encounter order.

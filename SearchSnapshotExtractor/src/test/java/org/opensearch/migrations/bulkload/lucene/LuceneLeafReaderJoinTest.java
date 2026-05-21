@@ -203,6 +203,20 @@ class LuceneLeafReaderJoinTest {
     }
 
     @Test
+    void dedup_samePositionAllNoOffset_keepsLongest() {
+        // When offsets are NO_OFFSET (-1), same-position alone is sufficient to group.
+        // The longest term wins, matching the offset-aware behaviour.
+        List<TermEntry> input = List.of(
+            teNoOffset("a",   0),
+            teNoOffset("aa",  0),
+            teNoOffset("aaa", 0)
+        );
+        List<TermEntry> out = LuceneLeafReader.dedupByLongestAtSamePosition(input);
+        assertEquals(1, out.size());
+        assertEquals("aaa", out.get(0).term());
+    }
+
+    @Test
     void dedup_samePositionWithoutOffsetOverlap_isPreserved() {
         // Defensive: same-position entries that DON'T share offset spans cannot be real
         // graph-token alternates from Lucene postings. Don't drop them — they may be
