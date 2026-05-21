@@ -129,22 +129,23 @@ def pytest_generate_tests(metafunc):
 def _filter_test_cases(test_ids_list: List[str]) -> List:
     """
     Filter test cases based on test_ids_list.
-    
+
     - If test_ids_list is empty: return all tests EXCEPT those with requires_explicit_selection=True
-    - If test_ids_list is provided: return only tests matching the IDs (including explicit-only tests)
-    
-    Note: Matching uses substring search (e.g., '000' matches Test0001, Test0002, etc.).
+    - If test_ids_list is provided: return only tests whose class name begins with Test{id}.
+
+    Matching is anchored on the Test{id} prefix to avoid accidental collisions
+    where one ID is a substring of another (e.g. '004' matching Test0040,
+    Test0041, ...) or two test classes share the same numeric ID
+    (e.g. Test0041CdcFullE2eAossTarget vs Test0041CdcFullE2eMountableTransforms,
+    both selected when '0041' is requested).
     """
     if not test_ids_list:
         # Default run: exclude tests that require explicit selection
         return [case for case in ALL_TEST_CASES if not getattr(case, 'requires_explicit_selection', False)]
-    
+
     # Explicit selection: include matching tests regardless of requires_explicit_selection
-    filtered_cases = []
-    for case in ALL_TEST_CASES:
-        if any(tid in str(case) for tid in test_ids_list):
-            filtered_cases.append(case)
-    return filtered_cases
+    prefixes = tuple(f"Test{tid}" for tid in test_ids_list)
+    return [case for case in ALL_TEST_CASES if case.__name__.startswith(prefixes)]
 
 
 def _generate_test_cases(user_args: MATestUserArguments, test_ids_list: List[str]):

@@ -88,7 +88,19 @@ class MATestBase:
         self.target_cluster = None
         self.imported_clusters = False
 
-        if not self.is_aoss:
+        if self.is_aoss:
+            # AOSS targets are exposed via subclasses that override
+            # import_existing_clusters to construct the AOSS target_cluster
+            # directly. Such subclasses signal opt-in by leaving
+            # allow_source_target_combinations empty. A test with a non-empty
+            # combo list is configured for typed (ES/OS) targets and would
+            # crash on `self.target_version.full_cluster_type` in the default
+            # import_existing_clusters when target_version is None.
+            if allow_source_target_combinations:
+                raise ClusterVersionCombinationUnsupported(
+                    self.source_version, "AOSS",
+                    message="Test is configured for typed targets and is not AOSS-compatible")
+        else:
             supported_combo = False
             for (allowed_source, allowed_target) in allow_source_target_combinations:
                 if (is_incoming_version_supported(allowed_source, self.source_version) and
@@ -292,10 +304,17 @@ class MATestBase:
         #    resources spawned by CDC tests keep running independently and are
         #    cleaned up by helm uninstall / workflow reset, not by the outer
         #    workflow's lifecycle.
+        #
+        # CDC outer workflows can take multiple minutes after verify_clusters
+        # because monitorWorkflow polls migration-workflow status on a 60s
+        # interval; a 300s budget here was too tight and frequently timed out
+        # the EKS pipelines (particularly Test0031, Test0033). 900s comfortably
+        # covers two monitor poll cycles plus the final evaluate/delete steps
+        # while still failing fast on truly stuck workflows.
         if not self.imported_clusters:
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
         self.argo_service.wait_for_ending_phase(
-            workflow_name=self.workflow_name, timeout_seconds=300
+            workflow_name=self.workflow_name, timeout_seconds=900
         )
 
     def test_after(self):
