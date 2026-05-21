@@ -190,6 +190,11 @@ public class SolrBackupSource implements DocumentSource {
                     if (hasSegmentsFile(shardDir)) {
                         return Stream.of(shardDir);
                     }
+                    // Solr 6 SolrCloud BACKUP writes snapshot.shardN/ dirs; stubs may be empty
+                    // before the shardPreparer downloads the actual index files.
+                    if (shardDir.getFileName().toString().startsWith("snapshot.")) {
+                        return Stream.of(shardDir);
+                    }
                     var indexPath = shardDir.resolve("data").resolve(INDEX_DIR_NAME);
                     if (hasSegmentsFile(indexPath)) {
                         return Stream.of(indexPath);
