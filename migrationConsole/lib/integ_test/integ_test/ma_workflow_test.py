@@ -73,6 +73,7 @@ def setup_and_teardown(request, keep_workflows, test_case: MATestBase):
         if request.node.rep_call and request.node.rep_call.failed:
             logger.info(f"Test failed - printing workflow details for {test_case.workflow_name}")
             test_case.argo_service.print_workflow_details(workflow_name=test_case.workflow_name)
+            test_case.argo_service.print_namespace_diagnostics(workflow_name=test_case.workflow_name)
             test_case.argo_service.save_namespace_diagnostics("./logs", workflow_name=test_case.workflow_name)
         if not keep_workflows:
             test_case.argo_service.delete_workflow(workflow_name=test_case.workflow_name)

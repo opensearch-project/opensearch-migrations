@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 ARTIFACT_OUTPUT_ROOT = "migration-outputs"
 NONE_PLACEHOLDER = "<none>"
+CR_DELETION_TIMEOUT_SECONDS = 600
+OWNED_RESOURCE_DELETION_TIMEOUT_SECONDS = 120
 
 
 def _resettable_names(namespace):
@@ -74,7 +76,7 @@ def _delete_crd(namespace, plural, name):
         return False
 
 
-def _wait_until_gone(namespace, plural, names, timeout=120):
+def _wait_until_gone(namespace, plural, names, timeout=CR_DELETION_TIMEOUT_SECONDS):
     """Wait until all named CRDs are fully deleted."""
     custom = client.CustomObjectsApi()
     deadline = time.time() + timeout
@@ -153,8 +155,12 @@ def _resolve_targets(namespace, path):
 # Groups are processed in order. Within each group all matches are deleted and awaited.
 
 _STRIMZI_API = 'kafka.strimzi.io/v1'
+_STRIMZI_CORE_API = 'core.strimzi.io/v1beta2'
 _STRIMZI_CLUSTER_LABEL = 'strimzi.io/cluster'
 _APPS_API = 'apps/v1'
+_BATCH_API = 'batch/v1'
+_POLICY_API = 'policy/v1'
+_RBAC_API = 'rbac.authorization.k8s.io/v1'
 
 _OWNER_REF_DIAGNOSTIC_RESOURCES = [
     ('v1', 'pods'),
@@ -162,13 +168,19 @@ _OWNER_REF_DIAGNOSTIC_RESOURCES = [
     ('v1', 'services'),
     ('v1', 'secrets'),
     ('v1', 'configmaps'),
+    ('v1', 'serviceaccounts'),
     (_APPS_API, 'deployments'),
     (_APPS_API, 'statefulsets'),
     (_APPS_API, 'replicasets'),
+    (_BATCH_API, 'jobs'),
+    (_POLICY_API, 'poddisruptionbudgets'),
+    (_RBAC_API, 'roles'),
+    (_RBAC_API, 'rolebindings'),
     (_STRIMZI_API, 'kafkas'),
     (_STRIMZI_API, 'kafkanodepools'),
     (_STRIMZI_API, 'kafkatopics'),
     (_STRIMZI_API, 'kafkausers'),
+    (_STRIMZI_CORE_API, 'strimzipodsets'),
 ]
 
 _OWNED_RESOURCE_CLEANUP = {
@@ -178,6 +190,8 @@ _OWNED_RESOURCE_CLEANUP = {
         (_STRIMZI_API, 'kafkausers', _STRIMZI_CLUSTER_LABEL),
         # Kafka CR next — Strimzi tears down brokers
         (_STRIMZI_API, 'kafkas', None),
+        # Strimzi-generated podsets can lag behind the Kafka CR in busy clusters
+        (_STRIMZI_CORE_API, 'strimzipodsets', _STRIMZI_CLUSTER_LABEL),
         # Nodepool last — Strimzi honors deleteClaim when it processes nodepool deletion
         (_STRIMZI_API, 'kafkanodepools', _STRIMZI_CLUSTER_LABEL),
     ],
@@ -256,9 +270,14 @@ def _list_namespaced_resources(namespace, api_gv, plural):
             'services': v1.list_namespaced_service,
             'secrets': v1.list_namespaced_secret,
             'configmaps': v1.list_namespaced_config_map,
+            'serviceaccounts': v1.list_namespaced_service_account,
             'deployments': apps.list_namespaced_deployment,
             'statefulsets': apps.list_namespaced_stateful_set,
             'replicasets': apps.list_namespaced_replica_set,
+            'jobs': client.BatchV1Api().list_namespaced_job,
+            'poddisruptionbudgets': client.PolicyV1Api().list_namespaced_pod_disruption_budget,
+            'roles': client.RbacAuthorizationV1Api().list_namespaced_role,
+            'rolebindings': client.RbacAuthorizationV1Api().list_namespaced_role_binding,
         }
         return _list_items(dispatch[plural](namespace))
     except (ApiException, KeyError):
@@ -278,6 +297,10 @@ def _delete_owned_resource(namespace, api_gv, plural, name):
                 'secrets': v1.delete_namespaced_secret,
                 'deployments': apps.delete_namespaced_deployment,
                 'statefulsets': apps.delete_namespaced_stateful_set,
+                'jobs': client.BatchV1Api().delete_namespaced_job,
+                'poddisruptionbudgets': client.PolicyV1Api().delete_namespaced_pod_disruption_budget,
+                'roles': client.RbacAuthorizationV1Api().delete_namespaced_role,
+                'rolebindings': client.RbacAuthorizationV1Api().delete_namespaced_role_binding,
             }
             dispatch[plural](name, namespace)
         logger.info(f"Deleted {plural}/{name}")
@@ -594,7 +617,14 @@ def _strip_finalizers(namespace, api_gv, plural, name):
             pass
 
 
-def _wait_for_owned_deletion(namespace, api_gv, plural, label_key, cr_name, timeout=120):
+def _wait_for_owned_deletion(
+    namespace,
+    api_gv,
+    plural,
+    label_key,
+    cr_name,
+    timeout=OWNED_RESOURCE_DELETION_TIMEOUT_SECONDS,
+):
     """Poll until owned resources are gone, stripping stuck finalizers as fallback."""
     group, _ = _parse_api_gv(api_gv)
     deadline = time.time() + timeout

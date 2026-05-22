@@ -9,6 +9,7 @@ from console_link.workflow.cli import workflow_cli
 from console_link.workflow.commands.reset import (
     _artifact_output_prefix,
     _build_child_map,
+    _cleanup_owned_resources,
     _delete_and_wait,
     _delete_crd,
     _find_ancestors,
@@ -112,6 +113,31 @@ class TestDeleteCrd:
             plural='capturedtraffics',
             name='source-proxy',
             body='delete-options',
+        )
+
+    @patch('console_link.workflow.commands.reset._wait_for_owned_deletion')
+    @patch('console_link.workflow.commands.reset._delete_owned_resource')
+    @patch('console_link.workflow.commands.reset._find_owned')
+    def test_kafka_cleanup_includes_strimzi_podsets(
+        self, mock_find_owned, mock_delete_owned, mock_wait_for_owned
+    ):
+        podset = {'metadata': {'name': 'default-dual-role'}}
+        mock_find_owned.side_effect = lambda _ns, _api_gv, plural, _label, _name: (
+            [podset] if plural == 'strimzipodsets' else []
+        )
+
+        _cleanup_owned_resources('ma', 'kafkaclusters', 'default')
+
+        mock_delete_owned.assert_called_once_with(
+            'ma',
+            'core.strimzi.io/v1beta2',
+            'strimzipodsets',
+            'default-dual-role',
+        )
+        assert any(
+            call.args == ('ma', 'core.strimzi.io/v1beta2', 'strimzipodsets',
+                          'strimzi.io/cluster', 'default')
+            for call in mock_wait_for_owned.call_args_list
         )
 
     @patch('console_link.workflow.commands.reset.time.sleep')
