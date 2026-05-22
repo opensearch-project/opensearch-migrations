@@ -1,0 +1,136 @@
+# migrationAssistantTUI — golangci-lint v2 config.
+#
+# Three rules in here are LOAD-BEARING (per DESIGN-RECOMMENDATION §2):
+#
+#   R1  depguard.tui-no-io     — internal/ui/** cannot import I/O packages.
+#                                Forces all side effects through the workspace
+#                                façade injected by internal/app.
+#   R2  depguard.no-charm-v1   — only charm.land/v2 imports compile. Blocks the
+#                                most common Charm-ecosystem footgun: silently
+#                                pulling v1 types into a v2 program.
+#   R3  forbidigo.no-fmt-print — fmt.Print/Println/Printf are forbidden under
+#                                internal/ui/**. Stray prints corrupt alt-screen
+#                                rendering. They are allowed in cmd/tui/main.go
+#                                (which prints AFTER tea.Program returns) and in
+#                                internal/log (file-only writer).
+#
+# Removing or weakening any of these three should be a deliberate, design-doc
+# referenced PR — they are the mechanical guardrails that make the project safe
+# for agent-led development.
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - depguard
+    - forbidigo
+    - gofmt
+    - govet
+    - importas
+    - ineffassign
+    - misspell
+    - revive
+    - staticcheck
+    - unused
+
+  settings:
+    depguard:
+      rules:
+        # R2 — Charm v1 hard-banned everywhere.
+        no-charm-v1:
+          list-mode: lax
+          deny:
+            - pkg: github.com/charmbracelet/bubbletea
+              desc: "use charm.land/bubbletea/v2 instead (v1 is hard-banned, see DESIGN §2.R2)"
+            - pkg: github.com/charmbracelet/bubbles
+              desc: "use charm.land/bubbles/v2 instead (see DESIGN §2.R2)"
+            - pkg: github.com/charmbracelet/lipgloss
+              desc: "use charm.land/lipgloss/v2 instead (see DESIGN §2.R2)"
+
+        # R1 — UI is forbidden to do I/O directly. All side effects must go
+        # through the per-feature interfaces in internal/feature/* injected
+        # via the workspace façade.
+        tui-no-io:
+          list-mode: lax
+          files:
+            - "**/internal/ui/**"
+          deny:
+            - pkg: net/http
+              desc: "internal/ui must not do HTTP — use internal/feature/* via the workspace façade (DESIGN §2.R1)"
+            - pkg: os/exec
+              desc: "internal/ui must not exec subprocesses — use internal/feature/tools (DESIGN §2.R1)"
+            - pkg: database/sql
+              desc: "internal/ui must not touch databases (DESIGN §2.R1)"
+            - pkg: github.com/aws/aws-sdk-go-v2
+              desc: "internal/ui must not import the AWS SDK — use internal/feature/aws (DESIGN §2.R1)"
+            - pkg: $all
+              desc: ""
+          allow:
+            - $gostd
+            - charm.land/bubbles/v2
+            - charm.land/bubbletea/v2
+            - charm.land/lipgloss/v2
+            - github.com/charmbracelet/x/exp/golden
+            - github.com/charmbracelet/x/exp/teatest/v2
+            - github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/ui
+            - github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/feature
+            - github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/handoffbrief
+            - github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/skillkit
+            - github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/launch
+            - github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/pubsub
+            - github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/log
+            - github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/marelease
+            - github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/versioncheck
+            - github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/config
+            - github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/workdir
+            - github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/testutil
+            - github.com/stretchr/testify
+
+    # R3 — no fmt.Print* in TUI mode. The alt-screen renderer owns stdout while
+    # the program is running; prints corrupt the frame and are nearly impossible
+    # to triage from a screenshot.
+    forbidigo:
+      forbid:
+        - pattern: '^fmt\.(Print|Println|Printf|Fprintf|Fprintln|Fprint)$'
+          msg: "fmt.Print* is forbidden in TUI mode (DESIGN §2.R3); use slog through internal/log instead"
+      analyze-types: true
+      exclude-godoc-examples: true
+
+    importas:
+      no-unaliased: true
+      alias:
+        - pkg: charm.land/bubbletea/v2
+          alias: tea
+        - pkg: charm.land/bubbles/v2/(\w+)
+          alias: $1
+        - pkg: charm.land/lipgloss/v2
+          alias: lipgloss
+        - pkg: github.com/charmbracelet/x/exp/teatest/v2
+          alias: teatest
+        - pkg: github.com/charmbracelet/x/exp/golden
+          alias: golden
+
+  exclusions:
+    rules:
+      # cmd/tui prints to stderr/stdout AFTER the tea.Program returns — this is
+      # the one sanctioned exception to R3, and the reason main.go is small and
+      # paranoidly reviewed.
+      - path: "cmd/tui/.*\\.go"
+        linters:
+          - forbidigo
+
+      # internal/log writes to a file via slog; the forbid rule is for the UI
+      # path that competes with the alt-screen, not the file-only logger.
+      - path: "internal/log/.*\\.go"
+        linters:
+          - forbidigo
+
+      # *_test.go in feature/* may legitimately call fmt for fixture builders.
+      - path: "_test\\.go"
+        linters:
+          - forbidigo

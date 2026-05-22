@@ -1,0 +1,48 @@
+# goreleaser config — produces a static migration-assistant binary for the
+# matrix called out in DESIGN §5.
+#
+# We do NOT release from this config yet; the file exists so the build matrix
+# is documented in code rather than living in CI YAML.
+
+version: 2
+
+project_name: migration-assistant
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: migration-assistant
+    main: ./cmd/tui
+    binary: migration-assistant
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.MAVersion={{.Env.MA_VERSION}}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ .Version }}-snapshot"
+
+changelog:
+  disable: true
