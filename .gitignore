@@ -55,3 +55,25 @@ frontend/
 deployment/k8s/aws/dist/
 .scannerwork/
 .sisyphus/
+
+# Migration Assistant TUI (Go module)
+#
+# The TUI module has its own migrationAssistantTUI/.gitignore that
+# covers /bin/, /dist/, coverage.{out,html}, *.test, *.prof. The root
+# rules below catch only the cases where artifacts can escape the
+# module boundary:
+#
+#   - `go build ./cmd/tui` from the repo ROOT (not from inside the
+#     module) lands the binary at /tui. Guard against that.
+#   - A misdirected `go build -o migrationAssistantTUI/tui …` lands
+#     a binary at the module root, outside its own /bin/ rule.
+#
+# We deliberately do NOT add `migrationAssistantTUI/**/*.test` etc.
+# here — the module-local .gitignore already owns those.
+/tui
+migrationAssistantTUI/tui
+migrationAssistantTUI/cmd/tui/tui
+# Go workspace files — these are user-local, never committed.
+go.work
+go.work.sum
+
