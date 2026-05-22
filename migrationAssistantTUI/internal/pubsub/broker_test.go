@@ -124,7 +124,12 @@ func TestBroker_SlowConsumerDoesNotBlockFast(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
+		// 10s, not 2s: under -race + the full package sweep on CI, 100
+		// messages can take longer than 2s purely due to scheduler
+		// pressure (the test isn't measuring throughput, just absence
+		// of deadlock). 10s is still trivial for a healthy broker and
+		// catches a real stall fast.
 		t.Fatalf("fast consumer stalled at %d/%d (slow blocking publisher?)",
 			fastReceived.Load(), N)
 	}
