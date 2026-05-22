@@ -617,3 +617,45 @@ def test_get_cluster_config_from_workflow_invalid_json(mock_get_json, argo_servi
 
     with pytest.raises(json.JSONDecodeError):
         argo_service.get_cluster_config_from_workflow("test-workflow", "source")
+
+
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_logs')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._run_kubectl_command')
+def test_collect_namespace_diagnostics_includes_cr_state_and_pod_logs(mock_kubectl, mock_workflow_logs,
+                                                                      argo_service):
+    """Test failure diagnostics include migration CRs and logs from non-workflow pods."""
+    def command_result(stdout):
+        return CommandResult(
+            success=True,
+            value="",
+            output=CompletedProcess(args=["kubectl"], returncode=0, stdout=stdout, stderr="")
+        )
+
+    def run_command(args):
+        if args.get("get") == "pods" and args.get("-o") == "json":
+            return command_result(json.dumps({
+                "items": [
+                    {"metadata": {"name": "rfs-worker-0"}},
+                    {"metadata": {"name": "migration-console-0"}}
+                ]
+            }))
+        if args.get("logs") == "pod/rfs-worker-0":
+            return command_result("rfs worker log")
+        if args.get("logs") == "pod/migration-console-0":
+            return command_result("console log")
+        if args.get("get", "").startswith("kafkaclusters"):
+            return command_result("snapshotmigration yaml")
+        return command_result("kubectl output")
+
+    mock_kubectl.side_effect = run_command
+    mock_workflow_logs.return_value = command_result("workflow pod logs")
+
+    diagnostics = argo_service.collect_namespace_diagnostics(workflow_name="test-workflow")
+
+    assert "kubectl get kafkaclusters,capturedtraffics,captureproxies,datasnapshots" in diagnostics
+    assert "snapshotmigrations,trafficreplays,approvalgates,migrationruns -o yaml" in diagnostics
+    assert "snapshotmigration yaml" in diagnostics
+    assert "kubectl logs for workflow test-workflow" in diagnostics
+    assert "workflow pod logs" in diagnostics
+    assert "logs for pod/rfs-worker-0" in diagnostics
+    assert "rfs worker log" in diagnostics

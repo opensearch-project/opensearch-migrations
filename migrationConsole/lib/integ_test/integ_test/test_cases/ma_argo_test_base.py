@@ -25,6 +25,9 @@ _WILDCARD_TEMPLATE_MAP = {
     ("opensearch", 3): 1,
 }
 
+CLUSTER_SETUP_TIMEOUT_SECONDS = 1000
+MIGRATION_COMPLETION_TIMEOUT_SECONDS = 1800
+
 
 def get_template_name(version: ClusterVersion) -> str:
     minor = version.minor_version
@@ -236,7 +239,8 @@ class MATestBase:
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         if not self.imported_clusters:
-            self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=1000)
+            self.argo_service.wait_for_suspend(workflow_name=self.workflow_name,
+                                               timeout_seconds=CLUSTER_SETUP_TIMEOUT_SECONDS)
             self.source_cluster = self.argo_service.get_cluster_config_from_workflow(
                 workflow_name=self.workflow_name, cluster_type="source")
             self.target_cluster = self.argo_service.get_cluster_config_from_workflow(
@@ -245,7 +249,7 @@ class MATestBase:
     def prepare_clusters(self):
         pass
 
-    def workflow_perform_migrations(self, timeout_seconds: int = 1000):
+    def workflow_perform_migrations(self, timeout_seconds: int = MIGRATION_COMPLETION_TIMEOUT_SECONDS):
         if not self.workflow_name:
             raise ValueError("Workflow name is not available, workflow may not have been started")
         if self.imported_clusters:

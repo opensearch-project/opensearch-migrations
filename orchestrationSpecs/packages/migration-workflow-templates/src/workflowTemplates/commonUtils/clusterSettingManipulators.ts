@@ -50,6 +50,10 @@ export function makeTargetParamDict(targetConfig: BaseExpression<Serialized<z.in
     return makeClusterParamDict("target", targetConfig);
 }
 
+export function makeSourceParamDict(sourceConfig: BaseExpression<Serialized<z.infer<typeof SOURCE_CLUSTER_CONFIG>>>) {
+    return makeClusterParamDict("source", sourceConfig);
+}
+
 export function makeRfsCoordinatorParamDict(rfsCoordinatorConfig: BaseExpression<Serialized<z.infer<typeof TARGET_CLUSTER_CONFIG>>>) {
     return makeClusterParamDict("coordinator", rfsCoordinatorConfig);
 }

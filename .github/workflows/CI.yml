@@ -280,6 +280,9 @@ jobs:
         run: npm ci
       - name: Run CDK Jest Tests (using mocked images)
         run: npm run test
+      - name: Run orchestration CRD integration tests
+        if: matrix.npm-project == './orchestrationSpecs'
+        run: npm run test:integ:crds
       - name: Upload coverage to Codecov
         if: always()
         uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2

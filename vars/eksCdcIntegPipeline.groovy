@@ -228,9 +228,9 @@ def call(Map config = [:]) {
                                             transforms_dir="migrationConsole/lib/integ_test/integ_test/transform_assets/mountable/${bank}"
                                             content_hash=\$(cd "\${transforms_dir}" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print substr(\$1,1,20)}')
                                             tag="transforms-${bank}-\${content_hash}"
-                                            output=\$(deployment/k8s/package-transforms.sh "\${transforms_dir}" "${env.registryEndpoint}" "\${tag}")
+                                            output=\$(deployment/k8s/package-transforms.sh "\${transforms_dir}" "${env.registryEndpoint}" "\${tag}" --output json)
                                             printf '%s\\n' "\${output}" >&2
-                                            pinned_ref=\$(printf '%s\\n' "\${output}" | grep -oE '[^[:space:]]+@sha256:[a-f0-9]{64}' | tail -n 1)
+                                            pinned_ref=\$(printf '%s\\n' "\${output}" | jq -r '.image // empty')
                                             test -n "\${pinned_ref}"
                                             printf '%s\\n' "\${pinned_ref}"
                                         """,
