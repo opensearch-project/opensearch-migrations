@@ -9,9 +9,14 @@ exposes `AgentDetector`. `internal/feature/tools` exposes `ToolDetector`.
 Each is a small interface (≤ 6 methods) with a real implementation and a
 fake.
 
-The aggregate `Workspace` interface in `internal/ui/workspace` exists *only*
-so the root model has a single injection point. Pages do not depend on the
-aggregate; they depend on the leaf interface they actually use.
+The aggregate `Workspace` interface in `internal/feature/feature.go` exists
+*only* so the root model has a single injection point. Pages do not depend on
+the aggregate; they depend on the leaf interface they actually use.
+
+The aggregate's *implementations* (`NewReal`, `NewFake`) live in
+`internal/ui/workspace` because constructing them needs UI-cross-cutting
+context (lipgloss styles for synthetic warnings, golden-test config) that
+`internal/feature/` can't see without inverting the layered import order.
 
 ## Rule 2 — Backend → UI goes through `internal/pubsub`
 
