@@ -253,7 +253,7 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: b.inputs.resourceName,
                 })
             )
-            .addStep("waitForProxyDeps", ResourceManagement, "waitForCaptureProxy", c =>
+            .addStep("waitIndefinitelyForProxyDeps", ResourceManagement, "waitIndefinitelyForCaptureProxy", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
                         resourceName: expr.get(c.item, "name"),
@@ -274,7 +274,7 @@ export const FullMigration = WorkflowBuilder.create({
                     )}),
                 }
             )
-            .addStep("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c =>
+            .addStep("waitIndefinitelyForSnapshot", ResourceManagement, "waitIndefinitelyForDataSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.resourceName,
@@ -450,7 +450,7 @@ export const FullMigration = WorkflowBuilder.create({
                     });
                 },
             )
-            .addStep("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c => {
+            .addStep("waitIndefinitelyForSnapshot", ResourceManagement, "waitIndefinitelyForDataSnapshot", c => {
                 const config = expr.deserializeRecord(b.inputs.snapshotMigrationConfig);
                 const snapshotNameRes = expr.get(config, "snapshotNameResolution");
                 return c.register({
@@ -606,7 +606,7 @@ export const FullMigration = WorkflowBuilder.create({
                     retryGroupName_view: expr.concat(expr.literal("TrafficReplay: "), b.inputs.name),
                 }),
             )
-            .addStep("waitForSnapshotMigrationDeps", ResourceManagement, "waitForSnapshotMigration", c => {
+            .addStep("waitIndefinitelyForSnapshotMigrationDeps", ResourceManagement, "waitIndefinitelyForSnapshotMigration", c => {
                     return c.register({
                         ...selectInputsForRegister(b, c),
                         resourceName: expr.concat(
@@ -633,7 +633,7 @@ export const FullMigration = WorkflowBuilder.create({
                     )}),
                 }
             )
-            .addStep("waitForProxy", ResourceManagement, "waitForCaptureProxy", c =>
+            .addStep("waitIndefinitelyForProxy", ResourceManagement, "waitIndefinitelyForCaptureProxy", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.fromProxy,

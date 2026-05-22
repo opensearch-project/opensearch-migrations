@@ -89,8 +89,7 @@
         "resource": {
           "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{inputs.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{=fromJSON(inputs.parameters.kafkaSpec)}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
           "action": "apply",
-          "setOwnerReference": false,
-          "successCondition": "status.listeners"
+          "setOwnerReference": false
         },
         "retryStrategy": {
           "limit": "6",
@@ -102,14 +101,7 @@
           }
         },
         "outputs": {
-          "parameters": [
-            {
-              "name": "brokers",
-              "valueFrom": {
-                "jsonPath": "{.status.listeners[?(@.name=='plain')].bootstrapServers}"
-              }
-            }
-          ]
+          "parameters": []
         }
       },
       {
@@ -133,8 +125,7 @@
         "resource": {
           "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.clusterName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{inputs.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.clusterName}}\"\n  annotations:\n    strimzi.io/node-pools: enabled\n    strimzi.io/kraft: enabled\nspec:\n  kafka: {{=fromJSON(inputs.parameters.kafkaSpec)}}\n  entityOperator:\n    topicOperator: {}\n    userOperator: {}\n",
           "action": "apply",
-          "setOwnerReference": false,
-          "successCondition": "status.listeners"
+          "setOwnerReference": false
         },
         "retryStrategy": {
           "limit": "6",
@@ -146,14 +137,7 @@
           }
         },
         "outputs": {
-          "parameters": [
-            {
-              "name": "brokers",
-              "valueFrom": {
-                "jsonPath": "{.status.listeners[?(@.name=='tls')].bootstrapServers}"
-              }
-            }
-          ]
+          "parameters": []
         }
       },
       {
@@ -231,17 +215,27 @@
               },
               "name": "deployScramCluster"
             }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforkafkaclusterready",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.clusterName}}"
+                  }
+                ]
+              },
+              "name": "waitForClusterReady"
+            }
           ]
         ],
         "outputs": {
-          "parameters": [
-            {
-              "name": "bootstrapServers",
-              "valueFrom": {
-                "expression": "((sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512') ? (steps.deployScramCluster.outputs.parameters.brokers) : (steps.deployNoAuthCluster.outputs.parameters.brokers))"
-              }
-            }
-          ]
+          "parameters": []
         }
       },
       {
@@ -277,8 +271,7 @@
         "resource": {
           "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{inputs.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.clusterName}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceLabel}}\"\nspec:\n  partitions: {{inputs.parameters.partitions}}\n  replicas: {{inputs.parameters.replicas}}\n  config: {{=fromJSON(inputs.parameters.topicConfig)}}\n",
           "action": "apply",
-          "setOwnerReference": false,
-          "successCondition": "status.topicName"
+          "setOwnerReference": false
         },
         "retryStrategy": {
           "limit": "6",
@@ -290,14 +283,7 @@
           }
         },
         "outputs": {
-          "parameters": [
-            {
-              "name": "topicName",
-              "valueFrom": {
-                "jsonPath": "{.status.topicName}"
-              }
-            }
-          ]
+          "parameters": []
         }
       },
       {
@@ -321,8 +307,7 @@
         "resource": {
           "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaUser\nmetadata:\n  name: \"{{=inputs.parameters.clusterName+'-migration-app'}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: KafkaCluster\n      name: {{inputs.parameters.clusterName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  labels:\n    strimzi.io/cluster: \"{{inputs.parameters.clusterName}}\"\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{inputs.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.clusterName}}\"\nspec: {{=fromJSON(inputs.parameters.userSpec)}}\n",
           "action": "apply",
-          "setOwnerReference": false,
-          "successCondition": "status.conditions"
+          "setOwnerReference": false
         },
         "retryStrategy": {
           "limit": "6",
@@ -437,6 +422,28 @@
                 ]
               },
               "name": "deployKafkaUser"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforsecretkey",
+                "name": "resource-management"
+              },
+              "when": "{{=sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.clusterConfig)) == 'scram-sha-512'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "secretName",
+                    "value": "{{=inputs.parameters.clusterName+'-migration-app'}}"
+                  },
+                  {
+                    "name": "secretKey",
+                    "value": "password"
+                  }
+                ]
+              },
+              "name": "waitForKafkaUserSecret"
             }
           ]
         ],

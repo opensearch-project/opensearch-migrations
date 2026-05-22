@@ -291,7 +291,7 @@
         }
       },
       {
-        "name": "waitforapproval",
+        "name": "waitforuserapproval",
         "inputs": {
           "parameters": [
             {
@@ -303,6 +303,15 @@
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: ApprovalGate\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
           "action": "get",
           "successCondition": "status.phase == Approved"
+        },
+        "retryStrategy": {
+          "limit": "37",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "15",
+            "factor": "2",
+            "cap": "180"
+          }
         },
         "outputs": {
           "parameters": []
@@ -640,7 +649,7 @@
           ],
           [
             {
-              "template": "waitforapproval",
+              "template": "waitforuserapproval",
               "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
@@ -834,7 +843,7 @@
           ],
           [
             {
-              "template": "waitforapproval",
+              "template": "waitforuserapproval",
               "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
@@ -1024,7 +1033,7 @@
           ],
           [
             {
-              "template": "waitforapproval",
+              "template": "waitforuserapproval",
               "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
@@ -1270,7 +1279,7 @@
           ],
           [
             {
-              "template": "waitforapproval",
+              "template": "waitforuserapproval",
               "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
@@ -1460,7 +1469,7 @@
           ],
           [
             {
-              "template": "waitforapproval",
+              "template": "waitforuserapproval",
               "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
@@ -1993,7 +2002,7 @@
             "wait",
             "--for=create",
             "{{='kafka/'+inputs.parameters.resourceName}}",
-            "--timeout=31536000s"
+            "--timeout=60s"
           ],
           "resources": {
             "limits": {
@@ -2011,7 +2020,7 @@
             "karpenter.sh/do-not-disrupt": "true"
           }
         },
-        "activeDeadlineSeconds": "31536000",
+        "activeDeadlineSeconds": "1200",
         "outputs": {
           "parameters": []
         }
@@ -2022,27 +2031,78 @@
           "parameters": [
             {
               "name": "resourceName"
-            },
-            {
-              "name": "imageMigrationConsoleLocation"
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy"
             }
           ]
         },
         "resource": {
           "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
           "action": "get",
-          "successCondition": "status.listeners"
+          "successCondition": "status.listeners, status.conditions.0.type == Ready, status.conditions.0.status == True"
         },
         "retryStrategy": {
           "limit": "6",
-          "retryPolicy": "OnError",
+          "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
             "factor": "2",
             "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "waitforkafkatopicready",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "topicName"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n",
+          "action": "get",
+          "successCondition": "status.conditions.0.type == Ready, status.conditions.0.status == True"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "waitforsecretkey",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "secretName"
+            },
+            {
+              "name": "secretKey"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: \"{{inputs.parameters.secretName}}\"\n",
+          "action": "get",
+          "successCondition": "{{='data.'+inputs.parameters.secretKey}}"
+        },
+        "retryStrategy": {
+          "limit": "10",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "5",
+            "factor": "2",
+            "cap": "30"
           }
         },
         "outputs": {
@@ -2095,14 +2155,6 @@
                   {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.resourceName}}"
-                  },
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                   }
                 ]
               },
@@ -2160,7 +2212,7 @@
         }
       },
       {
-        "name": "waitforcapturedtraffic",
+        "name": "waitindefinitelyforcapturedtraffic",
         "inputs": {
           "parameters": [
             {
@@ -2187,12 +2239,12 @@
           "failureCondition": "status.phase == Error"
         },
         "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
+          "limit": "20",
+          "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
             "factor": "2",
-            "cap": "60"
+            "cap": "120"
           }
         },
         "outputs": {
@@ -2200,7 +2252,7 @@
         }
       },
       {
-        "name": "waitforcaptureproxy",
+        "name": "waitindefinitelyforcaptureproxy",
         "inputs": {
           "parameters": [
             {
@@ -2227,12 +2279,12 @@
           "failureCondition": "status.phase == Error"
         },
         "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
+          "limit": "20",
+          "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
             "factor": "2",
-            "cap": "60"
+            "cap": "120"
           }
         },
         "outputs": {
@@ -2240,7 +2292,7 @@
         }
       },
       {
-        "name": "waitfordatasnapshot",
+        "name": "waitindefinitelyfordatasnapshot",
         "inputs": {
           "parameters": [
             {
@@ -2267,12 +2319,12 @@
           "failureCondition": "status.phase == Error"
         },
         "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
+          "limit": "20",
+          "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
             "factor": "2",
-            "cap": "60"
+            "cap": "120"
           }
         },
         "outputs": {
@@ -2280,7 +2332,7 @@
         }
       },
       {
-        "name": "waitforsnapshotmigration",
+        "name": "waitindefinitelyforsnapshotmigration",
         "inputs": {
           "parameters": [
             {
@@ -2307,12 +2359,12 @@
           "failureCondition": "status.phase == Error"
         },
         "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
+          "limit": "20",
+          "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
             "factor": "2",
-            "cap": "60"
+            "cap": "120"
           }
         },
         "outputs": {

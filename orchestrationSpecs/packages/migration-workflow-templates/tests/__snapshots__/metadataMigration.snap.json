@@ -964,7 +964,7 @@
           [
             {
               "templateRef": {
-                "template": "waitforapproval",
+                "template": "waitforuserapproval",
                 "name": "resource-management"
               },
               "arguments": {
@@ -975,7 +975,7 @@
                   }
                 ]
               },
-              "name": "waitForApproval"
+              "name": "waitForUserApproval"
             }
           ]
         ],
@@ -996,7 +996,7 @@
           [
             {
               "templateRef": {
-                "template": "waitforapproval",
+                "template": "waitforuserapproval",
                 "name": "resource-management"
               },
               "arguments": {
@@ -1007,7 +1007,7 @@
                   }
                 ]
               },
-              "name": "waitForApproval"
+              "name": "waitForUserApproval"
             }
           ]
         ],

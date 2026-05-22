@@ -24,6 +24,7 @@ export type K8sActionVerb = "create" | "get" | "apply" | "delete" | "replace" | 
 /** Partial representation of io.argoproj.workflow.v1alpha1.ResourceTemplate */
 export type ResourceWorkflowDefinition = {
     action: AllowLiteralOrExpression<K8sActionVerb>,
+    activeDeadlineSeconds?: AllowLiteralOrExpression<number | string>,
     failureCondition?: AllowLiteralOrExpression<string>,
     flags?: string[],
     setOwnerReference?: AllowLiteralOrExpression<boolean>,
@@ -60,7 +61,11 @@ export class K8sResourceBuilder<
     }
 
     getBody() {
-        return {resource: this.bodyScope};
+        const { activeDeadlineSeconds, ...resource } = this.bodyScope as unknown as ResourceWorkflowDefinition;
+        return {
+            resource,
+            ...(activeDeadlineSeconds !== undefined && { activeDeadlineSeconds })
+        };
     }
 
     // SUBCLASS METHOD: return the concrete subclass directly
