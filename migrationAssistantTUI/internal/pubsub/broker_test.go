@@ -94,12 +94,19 @@ func TestBroker_Close(t *testing.T) {
 }
 
 // TestBroker_SlowConsumerDoesNotBlockFast — the load-bearing property.
-// One subscriber that never reads must not stall a publisher that is
-// hammering messages. The slow channel's messages are dropped (counted
-// by DropCount), and the fast channel still receives every event.
+// A deliberately-stalled "slow" consumer must not block Publish; the
+// fast consumer must keep progressing and the broker must record drops
+// on the slow side. Without this, a hung render goroutine would
+// deadlock the deploy goroutine and the UI would freeze with no
+// diagnostic.
 //
-// Without this, a hung render goroutine would deadlock the deploy
-// goroutine and the UI would freeze with no diagnostic.
+// Note on what we DON'T assert: that the fast consumer receives every
+// published message. Under -race with package-wide load, the publisher
+// loop can race ahead of the fast reader, fill its 64-element buffer,
+// and drop on the fast side too. That's correct broker behavior under
+// the non-blocking-publisher contract — assertion target is "no
+// deadlock + fast made meaningful progress + slow caused drops",
+// NOT "exactly N delivered".
 func TestBroker_SlowConsumerDoesNotBlockFast(t *testing.T) {
 	b := pubsub.NewBroker()
 	t.Cleanup(b.Close)
@@ -107,34 +114,51 @@ func TestBroker_SlowConsumerDoesNotBlockFast(t *testing.T) {
 	slow, _ := b.Subscribe() // intentionally never read
 	fast, _ := b.Subscribe()
 
-	const N = 100
+	const N = 1000 // bigger than buffer so we're guaranteed to exercise drops
 	var fastReceived atomic.Int64
-	done := make(chan struct{})
+	stop := make(chan struct{})
 	go func() {
-		for i := 0; i < N; i++ {
-			<-fast
-			fastReceived.Add(1)
+		for {
+			select {
+			case _, ok := <-fast:
+				if !ok {
+					return
+				}
+				fastReceived.Add(1)
+			case <-stop:
+				return
+			}
 		}
-		close(done)
 	}()
 
-	for i := 0; i < N; i++ {
-		b.Publish(i)
-	}
+	publishDone := make(chan struct{})
+	go func() {
+		defer close(publishDone)
+		for i := 0; i < N; i++ {
+			b.Publish(i)
+		}
+	}()
 
+	// Publisher must NEVER block — even though slow consumer is hung.
 	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		// 10s, not 2s: under -race + the full package sweep on CI, 100
-		// messages can take longer than 2s purely due to scheduler
-		// pressure (the test isn't measuring throughput, just absence
-		// of deadlock). 10s is still trivial for a healthy broker and
-		// catches a real stall fast.
-		t.Fatalf("fast consumer stalled at %d/%d (slow blocking publisher?)",
-			fastReceived.Load(), N)
+	case <-publishDone:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("Publish stalled — slow consumer is blocking publisher")
 	}
 
-	// Slow channel had a buffer's worth, then dropped the rest.
+	// Fast consumer must have made meaningful progress (proving it
+	// wasn't blocked behind the slow one). Allow scheduler slack: at
+	// least one buffer-full's worth.
+	require.Eventually(t,
+		func() bool { return fastReceived.Load() >= 64 },
+		2*time.Second, 10*time.Millisecond,
+		"fast consumer made no progress (got %d, want >=64)",
+		fastReceived.Load())
+	close(stop)
+
+	// Slow consumer's buffered channel had a buffer's worth queued and
+	// the rest were dropped — that's the proof Publish chose drop over
+	// block.
 	require.Greater(t, b.DropCount(), int64(0),
 		"slow consumer should have caused at least one drop")
 
