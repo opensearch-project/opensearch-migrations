@@ -200,10 +200,10 @@ type recordingT struct {
 	fail func()
 }
 
-func (r *recordingT) Helper()                            {}
-func (r *recordingT) Fatalf(format string, args ...any)  { r.fail() }
-func (r *recordingT) Fatal(args ...any)                  { r.fail() }
-func (r *recordingT) Errorf(format string, args ...any)  { r.fail() }
+func (r *recordingT) Helper()                           {}
+func (r *recordingT) Fatalf(format string, args ...any) { r.fail() }
+func (r *recordingT) Fatal(args ...any)                 { r.fail() }
+func (r *recordingT) Errorf(format string, args ...any) { r.fail() }
 
 // ---------------------------------------------------------------------
 // Init helper — drains the start cmd

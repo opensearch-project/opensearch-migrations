@@ -53,9 +53,9 @@ func (c *stubCFN) ListStacks(ctx context.Context, _ *cfn.ListStacksInput, _ ...f
 }
 
 type stubEKS struct {
-	out *eks.ListClustersOutput
+	out  *eks.ListClustersOutput
 	desc map[string]*eks.DescribeClusterOutput
-	err error
+	err  error
 }
 
 func (e *stubEKS) ListClusters(ctx context.Context, _ *eks.ListClustersInput, _ ...func(*eks.Options)) (*eks.ListClustersOutput, error) {
@@ -86,7 +86,7 @@ func newRealForTest(s *stubSTS, c *stubCFN, e *stubEKS) pkgaws.Service {
 }
 
 // Helpers for SDK pointer types
-func sp(s string) *string { return &s }
+func sp(s string) *string       { return &s }
 func tp(t time.Time) *time.Time { return &t }
 
 func TestRealService_WhoAmI_HappyPath(t *testing.T) {

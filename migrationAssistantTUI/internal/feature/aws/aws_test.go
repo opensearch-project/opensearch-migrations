@@ -11,14 +11,14 @@ import (
 )
 
 type stubService struct {
-	id   aws.Identity
-	stk  []aws.Stack
-	cls  []aws.Cluster
-	err  error
+	id  aws.Identity
+	stk []aws.Stack
+	cls []aws.Cluster
+	err error
 }
 
-func (s stubService) WhoAmI(_ context.Context) (aws.Identity, error)       { return s.id, s.err }
-func (s stubService) ListStacks(_ context.Context) ([]aws.Stack, error)    { return s.stk, s.err }
+func (s stubService) WhoAmI(_ context.Context) (aws.Identity, error)        { return s.id, s.err }
+func (s stubService) ListStacks(_ context.Context) ([]aws.Stack, error)     { return s.stk, s.err }
 func (s stubService) ListClusters(_ context.Context) ([]aws.Cluster, error) { return s.cls, s.err }
 
 func TestServiceContract_HappyPath(t *testing.T) {

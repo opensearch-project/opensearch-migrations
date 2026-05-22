@@ -35,7 +35,7 @@ func newFakeResolver() *fakeResolver {
 	r.orderMtx.Store(&empty)
 	return r
 }
-func (r *fakeResolver) wire(name, path string)    { r.out[name] = path }
+func (r *fakeResolver) wire(name, path string)         { r.out[name] = path }
 func (r *fakeResolver) wireErr(name string, err error) { r.errOn[name] = err }
 
 func (r *fakeResolver) Resolve(_ context.Context, name string) (string, error) {
@@ -80,7 +80,7 @@ func TestDecide_FreshWhenNoWorkdir(t *testing.T) {
 
 func TestDecide_ResumeWhenStateMatches(t *testing.T) {
 	det := workdir.DetectResult{
-		Path: "/tmp/x/opensearch-migration-111122223333-us-east-1",
+		Path:   "/tmp/x/opensearch-migration-111122223333-us-east-1",
 		Exists: true, HasState: true,
 		State: workdir.State{Account: "111122223333", Region: "us-east-1", Page: "wizard"},
 	}
@@ -90,7 +90,7 @@ func TestDecide_ResumeWhenStateMatches(t *testing.T) {
 
 func TestDecide_ForceFreshOverridesResume(t *testing.T) {
 	det := workdir.DetectResult{
-		Path: "/tmp/x/opensearch-migration-111122223333-us-east-1",
+		Path:   "/tmp/x/opensearch-migration-111122223333-us-east-1",
 		Exists: true, HasState: true,
 		State: workdir.State{Account: "111122223333", Region: "us-east-1"},
 	}
@@ -102,7 +102,7 @@ func TestDecide_DirExistsButNoState_AskOperator(t *testing.T) {
 	// Operator created the dir manually (or a prior crash); we can't
 	// assume their intent — surface for confirmation.
 	det := workdir.DetectResult{
-		Path: "/tmp/x/opensearch-migration-111122223333-us-east-1",
+		Path:   "/tmp/x/opensearch-migration-111122223333-us-east-1",
 		Exists: true, HasState: false,
 	}
 	got := launch.Decide(det, launch.PreferenceAuto)

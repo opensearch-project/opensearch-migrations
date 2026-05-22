@@ -19,13 +19,18 @@ type Publisher interface {
 // FakeScript is the recipe a FakeDriver replays.
 //
 // Plan         — what PreviewPlan returns. Can be the zero value if the
-//                test only exercises Run.
+//
+//	test only exercises Run.
+//
 // PreviewError — if non-nil, PreviewPlan returns this instead of Plan.
 // Events       — what Run replays in order, one per "tick", to the
-//                publisher. A PhaseFailed event short-circuits Run.
+//
+//	publisher. A PhaseFailed event short-circuits Run.
+//
 // EventDelay   — sleep between each Event. Zero means "as fast as
-//                possible." Tests that want to exercise ctx cancel
-//                mid-stream set this to ~50ms.
+//
+//	possible." Tests that want to exercise ctx cancel
+//	mid-stream set this to ~50ms.
 //
 // Adjustment E in the design doc: this is the missing layer between unit
 // tests (mock-everything) and end-to-end harnesses (real CFN/helm). A

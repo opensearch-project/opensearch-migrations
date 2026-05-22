@@ -45,8 +45,8 @@ import (
 	"strings"
 	"sync"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/pubsub"
 	"github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/ui/common"
@@ -142,7 +142,7 @@ type Config struct {
 type Model struct {
 	cfg Config
 
-	active  msg.PageID  // currently-focused page id
+	active  msg.PageID   // currently-focused page id
 	history []msg.PageID // back-stack; does NOT include `active`
 
 	// Chrome we reserve. Header (1) + status line (1) + footer help (1).

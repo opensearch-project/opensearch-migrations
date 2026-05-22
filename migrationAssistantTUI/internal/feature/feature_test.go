@@ -27,24 +27,28 @@ type stubWorkspace struct {
 	deploy    deploy.Driver
 }
 
-func (w stubWorkspace) AWS() awsf.Service             { return w.aws }
-func (w stubWorkspace) Agents() agents.Detector       { return w.agents }
-func (w stubWorkspace) Tools() tools.Detector         { return w.tools }
-func (w stubWorkspace) Artifacts() artifacts.Source   { return w.artifacts }
-func (w stubWorkspace) DeployDriver() deploy.Driver   { return w.deploy }
+func (w stubWorkspace) AWS() awsf.Service           { return w.aws }
+func (w stubWorkspace) Agents() agents.Detector     { return w.agents }
+func (w stubWorkspace) Tools() tools.Detector       { return w.tools }
+func (w stubWorkspace) Artifacts() artifacts.Source { return w.artifacts }
+func (w stubWorkspace) DeployDriver() deploy.Driver { return w.deploy }
 
 // minimal stubs for each leaf, kept private to this test.
 type aDet struct{}
+
 func (aDet) Detect(_ context.Context) ([]agents.Agent, error) { return nil, nil }
 
 type tDet struct{}
+
 func (tDet) Detect(_ context.Context) ([]tools.Tool, error) { return nil, nil }
 
 type aSrc struct{}
-func (aSrc) All() []artifacts.Artifact                    { return nil }
-func (aSrc) ByName(string) (artifacts.Artifact, bool)     { return artifacts.Artifact{}, false }
+
+func (aSrc) All() []artifacts.Artifact                { return nil }
+func (aSrc) ByName(string) (artifacts.Artifact, bool) { return artifacts.Artifact{}, false }
 
 type dDrv struct{}
+
 func (dDrv) PreviewPlan(_ context.Context, _ deploy.Params) (deploy.Plan, error) {
 	return deploy.Plan{}, nil
 }

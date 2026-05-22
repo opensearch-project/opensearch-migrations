@@ -6,10 +6,10 @@
 // goroutines. The ONLY pattern by which a backend goroutine delivers a
 // message into Update is:
 //
-//   1. Backend publishes to a *Broker via Publish.
-//   2. The root Model has subscribed once via Subscribe.
-//   3. The root Model's Init returns a tea.Sub that pulls from the
-//      subscription channel and yields tea.Msg values into Update.
+//  1. Backend publishes to a *Broker via Publish.
+//  2. The root Model has subscribed once via Subscribe.
+//  3. The root Model's Init returns a tea.Sub that pulls from the
+//     subscription channel and yields tea.Msg values into Update.
 //
 // This package is deliberately tiny. It does NOT depend on bubbletea,
 // because it is shared by feature packages that the UI cannot import

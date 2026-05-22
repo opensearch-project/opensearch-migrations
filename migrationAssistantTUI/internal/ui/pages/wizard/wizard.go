@@ -41,8 +41,8 @@ import (
 	"fmt"
 	"strings"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/handoffbrief"
@@ -98,12 +98,12 @@ var fields = []fieldSpec{
 
 // Page is the wizard page Model.
 type Page struct {
-	cfg     Config
-	inputs  []textinput.Model
-	active  int    // index into fields/inputs
-	banner  string // non-empty after a failed validation Enter
-	width   int
-	height  int
+	cfg    Config
+	inputs []textinput.Model
+	active int    // index into fields/inputs
+	banner string // non-empty after a failed validation Enter
+	width  int
+	height int
 }
 
 var _ common.Page = (*Page)(nil)

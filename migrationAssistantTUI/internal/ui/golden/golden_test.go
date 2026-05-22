@@ -64,9 +64,9 @@ const (
 
 // scenario is one (page-builder, name, optional pre-render driver) tuple.
 type scenario struct {
-	name    string
-	build   func() common.Page
-	drive   func(*teatest.Harness) // optional: keystrokes/messages before View()
+	name  string
+	build func() common.Page
+	drive func(*teatest.Harness) // optional: keystrokes/messages before View()
 }
 
 // allScenarios is the full golden matrix. Keep this list ordered by

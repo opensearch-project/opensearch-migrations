@@ -201,11 +201,11 @@ type realWorkspace struct {
 	deploy    deploy.Driver
 }
 
-func (r *realWorkspace) AWS() aws.Service             { return r.aws }
-func (r *realWorkspace) Agents() agents.Detector      { return r.agents }
-func (r *realWorkspace) Tools() tools.Detector        { return r.tools }
-func (r *realWorkspace) Artifacts() artifacts.Source  { return r.artifacts }
-func (r *realWorkspace) DeployDriver() deploy.Driver  { return r.deploy }
+func (r *realWorkspace) AWS() aws.Service            { return r.aws }
+func (r *realWorkspace) Agents() agents.Detector     { return r.agents }
+func (r *realWorkspace) Tools() tools.Detector       { return r.tools }
+func (r *realWorkspace) Artifacts() artifacts.Source { return r.artifacts }
+func (r *realWorkspace) DeployDriver() deploy.Driver { return r.deploy }
 
 // ----------------------------------------------------------------------------
 // Fake
@@ -279,8 +279,8 @@ func (f *Fake) WithDeployDriver(d deploy.Driver) *Fake {
 	return &out
 }
 
-func (f *Fake) AWS() aws.Service             { return f.aws }
-func (f *Fake) Agents() agents.Detector      { return f.agents }
-func (f *Fake) Tools() tools.Detector        { return f.tools }
-func (f *Fake) Artifacts() artifacts.Source  { return f.artifacts }
-func (f *Fake) DeployDriver() deploy.Driver  { return f.deploy }
+func (f *Fake) AWS() aws.Service            { return f.aws }
+func (f *Fake) Agents() agents.Detector     { return f.agents }
+func (f *Fake) Tools() tools.Detector       { return f.tools }
+func (f *Fake) Artifacts() artifacts.Source { return f.artifacts }
+func (f *Fake) DeployDriver() deploy.Driver { return f.deploy }

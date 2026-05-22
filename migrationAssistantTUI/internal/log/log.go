@@ -122,9 +122,9 @@ func LogPath() string {
 
 // resolveDir applies the canonical-then-fallback path resolution.
 //
-//   1. Options.Dir if non-empty (test override).
-//   2. UserCacheDir() / opensearch-migration-assistant / log
-//   3. TempDir() / ma-cache
+//  1. Options.Dir if non-empty (test override).
+//  2. UserCacheDir() / opensearch-migration-assistant / log
+//  3. TempDir() / ma-cache
 //
 // Step 3 is deliberately NOT a real fallback for the canonical path — it
 // is the *fallback location* when the host has no UserCacheDir available

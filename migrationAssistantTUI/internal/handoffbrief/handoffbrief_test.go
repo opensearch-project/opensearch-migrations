@@ -104,10 +104,10 @@ func TestValidate_RejectsInlinedCredentialInAuthRef(t *testing.T) {
 	// auth_ref ("hunter2") it must NOT pass validation. Only the
 	// known indirection schemes (keychain:, env:, vault:) are allowed.
 	cases := []string{
-		"hunter2",                       // bare password
-		"username:password@host",        // looks structured but wrong scheme
-		"keychain:",                     // empty scheme value
-		"env:",                          // empty scheme value
+		"hunter2",                // bare password
+		"username:password@host", // looks structured but wrong scheme
+		"keychain:",              // empty scheme value
+		"env:",                   // empty scheme value
 	}
 	for _, ref := range cases {
 		t.Run(ref, func(t *testing.T) {

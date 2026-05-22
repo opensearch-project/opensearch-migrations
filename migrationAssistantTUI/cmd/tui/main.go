@@ -24,6 +24,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	deployfeat "github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/feature/deploy"
 	"github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/log"
 	"github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/pubsub"
 	"github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/ui"
@@ -34,18 +35,17 @@ import (
 	"github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/ui/pages/review"
 	"github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/ui/pages/welcome"
 	"github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/ui/pages/wizard"
-	deployfeat "github.com/opensearch-project/opensearch-migrations/migrationAssistantTUI/internal/feature/deploy"
 )
 
 // exitCode constants. Stable: external scripts MAY inspect them.
 const (
-	exitOK        = 0
-	exitUsage     = 2 // bad CLI args (reserved; not used yet)
-	exitLogSetup  = 3 // could not open log file in any candidate dir
-	exitProgram   = 4 // tea.Program.Run() returned error
-	exitHandoff   = 5 // handoff requested but resolveHandoffBin failed
-	exitChdir     = 6 // syscall.Chdir to handoff workdir failed
-	exitExec      = 7 // syscall.Exec returned (only on EBADF / ENOEXEC)
+	exitOK       = 0
+	exitUsage    = 2 // bad CLI args (reserved; not used yet)
+	exitLogSetup = 3 // could not open log file in any candidate dir
+	exitProgram  = 4 // tea.Program.Run() returned error
+	exitHandoff  = 5 // handoff requested but resolveHandoffBin failed
+	exitChdir    = 6 // syscall.Chdir to handoff workdir failed
+	exitExec     = 7 // syscall.Exec returned (only on EBADF / ENOEXEC)
 )
 
 // run is the testable entry point. main() defers to it so test code
