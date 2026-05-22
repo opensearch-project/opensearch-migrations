@@ -245,7 +245,10 @@ describe("dataSnapshotMaxSnapshotRateMutator", () => {
         expect(mutator.changeClass).toBe("safe");
         expect(mutator.dependencyPattern).toBe("subject-change");
         expect(mutator.subject).toBe("datasnapshot:source-snap1");
-        expect(mutator.expectedRerunComponents).toEqual(["datasnapshot:source-snap1"]);
+        expect(mutator.expectedRerunComponents).toEqual([
+            "datasnapshot:source-snap1",
+            "snapshotmigration:source-target-snap1-migration-0",
+        ]);
     });
 
     it("apply() changes the create snapshot rate limit without mutating input", () => {

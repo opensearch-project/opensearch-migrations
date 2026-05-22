@@ -64,8 +64,22 @@ describe("deriveBehavior", () => {
                     phase: "Completed",
                     uid: "u1",
                     configChecksum: "c1",
-                    gatePending: true,
-                    gateType: "retry",
+                    approvalGateActionable: true,
+                    approvalGateCategory: "retry",
+                }),
+            }),
+        ).toBe("blocked");
+    });
+
+    it("uses admission-policy rejection as a blocked signal when no retry gate became actionable", () => {
+        expect(
+            deriveBehavior({
+                prev: obs({ uid: "u1", configChecksum: "c1" }),
+                curr: obs({
+                    phase: "Completed",
+                    uid: "u1",
+                    configChecksum: "c1",
+                    admissionPolicyBlocked: true,
                 }),
             }),
         ).toBe("blocked");
@@ -88,8 +102,8 @@ describe("deriveBehavior", () => {
                     phase: "Completed",
                     uid: "u1",
                     configChecksum: "c1",
-                    gatePending: true,
-                    gateType: "change",
+                    approvalGateActionable: true,
+                    approvalGateCategory: "change",
                 }),
             }),
         ).toBe("gated");

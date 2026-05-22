@@ -221,7 +221,9 @@ function snapshotMigrationMaxConnectionsBaseMutator(opts: {
  * dataSnapshotMaxSnapshotRateMutator — simple safe mutator for the
  * basic snapshot workflow's DataSnapshot subject. It changes the
  * create-snapshot rate limit, leaving the poison pill free to control
- * source/snapshot-repository availability.
+ * source/snapshot-repository availability. When the snapshot is still
+ * in progress, the resulting snapshot checksum is material to the
+ * downstream SnapshotMigration, so both components are expected to run.
  */
 export function dataSnapshotMaxSnapshotRateMutator(): Mutator {
     return {
@@ -229,7 +231,10 @@ export function dataSnapshotMaxSnapshotRateMutator(): Mutator {
         changeClass: "safe",
         dependencyPattern: "subject-change",
         subject: "datasnapshot:source-snap1" as ComponentId,
-        expectedRerunComponents: ["datasnapshot:source-snap1" as ComponentId],
+        expectedRerunComponents: [
+            "datasnapshot:source-snap1" as ComponentId,
+            "snapshotmigration:source-target-snap1-migration-0" as ComponentId,
+        ],
         changedPaths: [
             "sourceClusters.source.snapshotInfo.snapshots.snap1.config.createSnapshotConfig.maxSnapshotRateMbPerNode",
         ],

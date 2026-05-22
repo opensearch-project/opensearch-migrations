@@ -366,7 +366,17 @@ export const ObservedComponentSchema = z
         uid: z.string().optional(),
         startedAtSeconds: z.number().optional(),
         durationSeconds: z.number().optional(),
+        /**
+         * True only when `workflow approve <category> --list` shows this
+         * component's approval gate as currently actionable.
+         */
+        approvalGateActionable: z.boolean().optional(),
+        approvalGateCategory: z.enum(["step", "change", "retry"]).optional(),
+        /** The mutation was rejected before a retry ApprovalGate became actionable. */
+        admissionPolicyBlocked: z.boolean().optional(),
+        /** @deprecated use approvalGateActionable. */
         gatePending: z.boolean().optional(),
+        /** @deprecated use approvalGateCategory. */
         gateType: z.enum(["step", "change", "retry"]).optional(),
         /** For impossible-case non-advancement verification. */
         advanced: z.boolean().optional(),

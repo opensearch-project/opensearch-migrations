@@ -18,9 +18,12 @@
  *   - `blocked`  : current phase is `Blocked`.
  *   - `gated`    : current phase is `Suspended` (legacy design-doc
  *                  terminology) or `Paused`.
- *   - `blocked`/`gated`: an ApprovalGate associated with this component
- *                  is currently actionable. Impossible retry gates map
- *                  to `blocked`; gated-change gates map to `gated`.
+ *   - `blocked`/`gated`: `workflow approve <category> --list` reports
+ *                  an actionable ApprovalGate for this component.
+ *                  Impossible retry gates map to `blocked`;
+ *                  gated-change gates map to `gated`.
+ *   - `blocked`  : an impossible mutation was rejected by admission
+ *                  policy before a retry ApprovalGate became actionable.
  *   - `unstarted`: current phase indicates the CRD exists but has not
  *                  progressed this run (`Initialized`, `Pending`, or a
  *                  missing phase field).
@@ -63,8 +66,14 @@ export interface DeriveBehaviorInput {
 export function deriveBehavior({ prev, curr }: DeriveBehaviorInput): Behavior {
     const phase = curr.phase ?? "";
 
-    if (curr.gatePending) {
-        return curr.gateType === "change" ? "gated" : "blocked";
+    if (curr.admissionPolicyBlocked) {
+        return "blocked";
+    }
+
+    const approvalGateActionable = curr.approvalGateActionable ?? curr.gatePending;
+    if (approvalGateActionable) {
+        const category = curr.approvalGateCategory ?? curr.gateType;
+        return category === "change" ? "gated" : "blocked";
     }
 
     if (BLOCKED_PHASES.has(phase)) return "blocked";

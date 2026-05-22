@@ -443,6 +443,160 @@ describe("runNoopCase — basic flow", () => {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }
     });
+
+    it("treats admission-policy rejection as the blocked signal for retry-gated impossible changes", async () => {
+        const { deps, tmpDir, baselinePath } = makeRunnerTestDeps();
+        let now = 0;
+        deps.clock = {
+            now: () => now,
+            sleep: (ms: number) => {
+                now += ms;
+                return Promise.resolve();
+            },
+        };
+        deps.spec.phaseCompletionTimeoutSeconds = 60;
+        deps.topology = buildTopology({ components: [COMPONENTS[0]], edges: [] });
+        deps.workflowCli = new WorkflowCli({
+            namespace: "ma",
+            runner: () => ({ stdout: "No gates available.\n", stderr: "", exitCode: 0 }),
+        });
+        deps.k8sClient = new K8sClient({
+            namespace: "ma",
+            runner: (args) => {
+                if (args[0] === "delete") {
+                    return { stdout: "", stderr: "", exitCode: 0 };
+                }
+                if (
+                    args[0] === "get" &&
+                    args[1] === "workflows.argoproj.io" &&
+                    args[2] === "migration-workflow"
+                ) {
+                    return {
+                        stdout: JSON.stringify({
+                            metadata: { name: "migration-workflow" },
+                            status: {
+                                phase: "Running",
+                                nodes: {
+                                    failed: {
+                                        templateName: "upsertsnapshotmigrationresource",
+                                        phase: "Failed",
+                                        message:
+                                            "The snapshotmigrations \"source-target-snap1-migration-0\" is invalid: " +
+                                            "ValidatingAdmissionPolicy denied immutable field update",
+                                    },
+                                },
+                            },
+                        }),
+                        stderr: "",
+                        exitCode: 0,
+                    };
+                }
+                return { stdout: "", stderr: "unexpected kubectl call", exitCode: 99 };
+            },
+        });
+
+        try {
+            const outPath = await runWorkflowCasePlan(deps, {
+                caseName: "admission-policy-blocked",
+                steps: [
+                    {
+                        runName: "mutated",
+                        configYaml: fs.readFileSync(baselinePath, "utf8"),
+                        operations: [
+                            {
+                                kind: "checkpoint",
+                                checkpoint: "on-blocked",
+                                subject: COMPONENTS[0],
+                                approvalGate: {
+                                    category: "retry",
+                                    pattern: "snapshotmigration.source-target-snap1-migration-0",
+                                },
+                            },
+                        ],
+                    },
+                ],
+            });
+
+            const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
+            expect(snapshot.outcome).toBe("passed");
+            expect(snapshot.diagnostics.join("\n")).not.toContain(
+                "approval-gate-workflow-error",
+            );
+            expect(
+                snapshot.runs["mutated"].checkpoints[0].components[COMPONENTS[0]].behavior,
+            ).toBe("blocked");
+            expect(now).toBe(10000);
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it("does not wait for a gated subject to leave Pending once the gate is observed", async () => {
+        const { deps, tmpDir, baselinePath } = makeRunnerTestDeps();
+        let now = 0;
+        deps.clock = {
+            now: () => now,
+            sleep: (ms: number) => {
+                now += ms;
+                return Promise.resolve();
+            },
+        };
+        deps.topology = buildTopology({ components: [COMPONENTS[0]], edges: [] });
+        deps.readObservations = async () => ({
+            components: {
+                [COMPONENTS[0]]: {
+                    componentId: COMPONENTS[0],
+                    phase: "Pending",
+                    configChecksum: "c1",
+                    generation: 1,
+                    uid: "u1",
+                },
+            } as Record<ComponentId, ObservedComponent>,
+        });
+        deps.workflowCli = new WorkflowCli({
+            namespace: "ma",
+            runner: (args) => ({
+                stdout:
+                    args[0] === "approve" && args[1] === "change" && args[2] === "--list"
+                        ? "captureproxy.capture-proxy\n"
+                        : "",
+                stderr: "",
+                exitCode: 0,
+            }),
+        });
+
+        try {
+            const outPath = await runWorkflowCasePlan(deps, {
+                caseName: "gated-subject-held",
+                steps: [
+                    {
+                        runName: "mutated",
+                        configYaml: fs.readFileSync(baselinePath, "utf8"),
+                        operations: [
+                            {
+                                kind: "checkpoint",
+                                checkpoint: "before-approval",
+                                subject: COMPONENTS[0],
+                                approvalGate: {
+                                    category: "change",
+                                    pattern: "captureproxy.capture-proxy",
+                                },
+                            },
+                        ],
+                    },
+                ],
+            });
+
+            const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
+            expect(snapshot.outcome).toBe("passed");
+            expect(
+                snapshot.runs["mutated"].checkpoints[0].components[COMPONENTS[0]].behavior,
+            ).toBe("gated");
+            expect(now).toBe(0);
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
 });
 
 describe("runNoopCase — workflow submit path", () => {

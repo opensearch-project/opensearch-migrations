@@ -142,6 +142,12 @@ export interface LiveRunnerDeps {
      * phaseCompletionTimeoutSeconds budget still applies.
      */
     innerWorkflowMissingGraceSeconds?: number;
+    /**
+     * Optional pause after deleting the fixed-name Argo workflow and
+     * before submitting the next run. Live clusters can otherwise race
+     * the Argo controller when the same workflow name is reused quickly.
+     */
+    workflowCleanupSettleMs?: number;
     /** Optional live progress sink for CLI runs. Unit tests leave this unset. */
     progress?: (message: string) => void;
 }
@@ -313,8 +319,8 @@ export async function runSafeCase(deps: LiveRunnerDeps, expandedCase: ExpandedTe
 /**
  * Run a gated mutation case. The mutated workflow stays alive across
  * the pre-approval checkpoint and optional approval action so the
- * ApprovalGate signal is sent into the same workflow execution that
- * hit the gate.
+ * approval signal is sent into the same workflow execution whose
+ * `workflow approve <category> --list` output made the gate actionable.
  */
 export async function runGatedCase(deps: LiveRunnerDeps, expandedCase: ExpandedTestCase): Promise<string> {
     const baselineYaml = fs.readFileSync(deps.baselineConfigPath, "utf8");
@@ -1052,6 +1058,19 @@ async function runSubmittedWorkflow(args: {
         if (!preSubmitCleanupOk) {
             throw new Error(`pre-submit workflow cleanup failed for ${runName}`);
         }
+        const cleanupSettleMs = deps.workflowCleanupSettleMs ?? 0;
+        if (cleanupSettleMs > 0) {
+            progress(
+                deps,
+                `[${workflowName}] settle after workflow cleanup for ${cleanupSettleMs}ms`,
+            );
+            events.push(event(clock, runName, "settle-after-workflow-cleanup", "ok", {
+                message:
+                    `waiting ${cleanupSettleMs}ms after deleting ${INNER_MIGRATION_WORKFLOW_NAME} ` +
+                    "before reusing the fixed workflow name",
+            }));
+            await clock.sleep(cleanupSettleMs);
+        }
         if (stateControl) {
             progress(
                 deps,
@@ -1227,6 +1246,19 @@ function formatFatalDiagnostics(e: unknown): string[] {
 
 function isBlockingCheckpointDiagnostic(diagnostic: string): boolean {
     return /^(workflow-timeout|workflow-failed|phase-timeout|subject-incomplete-timeout|approval-gate-timeout|approval-gate-workflow-error) at /.test(diagnostic);
+}
+
+function isExpectedAdmissionPolicyBlock(
+    checkpoint: Checkpoint,
+    category: Extract<ApprovalGateCategory, "change" | "retry">,
+    message: string,
+): boolean {
+    return (
+        checkpoint === "on-blocked" &&
+        category === "retry" &&
+        /ValidatingAdmissionPolicy|is invalid/i.test(message) &&
+        /snapshotmigration|upsertsnapshotmigrationresource/i.test(message)
+    );
 }
 
 function progress(deps: Pick<LiveRunnerDeps, "progress">, message: string): void {
@@ -1448,16 +1480,19 @@ async function waitAndCheckpoint(
             );
         }
     }
-    let approvalGateObserved = false;
+    let approvalGateActionable = false;
+    let admissionPolicyBlocked = false;
     let approvalGateWaitFailed = false;
     if (approvalGate) {
         events.push(event(clock, checkpoint, "wait-approval-gate", "ok", {
             command: workflowApproveListCommand(approvalGate.category, deps.namespace),
-            message: `waiting for ${approvalGate.category} gate ${approvalGate.pattern}`,
+            message:
+                `waiting for actionable ${approvalGate.category} gate ` +
+                `${approvalGate.pattern} from workflow approve --list`,
         }));
         progress(
             deps,
-            `[${workflowName}] checkpoint ${checkpoint}: wait for ${approvalGate.category} gate ${approvalGate.pattern}`,
+            `[${workflowName}] checkpoint ${checkpoint}: wait for actionable ${approvalGate.category} gate ${approvalGate.pattern}`,
         );
         const gateOutcome = await waitForApprovalGate({
             workflowCli: deps.workflowCli,
@@ -1468,45 +1503,69 @@ async function waitAndCheckpoint(
             clock,
         });
         if (gateOutcome.kind === "ready") {
-            approvalGateObserved = true;
+            approvalGateActionable = true;
             events.push(event(clock, checkpoint, "wait-approval-gate", "ok", {
                 command: workflowApproveListCommand(approvalGate.category, deps.namespace),
-                message: `${approvalGate.category} gate ${approvalGate.pattern} available after ${gateOutcome.waitedMs}ms`,
+                message:
+                    `${approvalGate.category} gate ${approvalGate.pattern} ` +
+                    `actionable after ${gateOutcome.waitedMs}ms`,
                 stdout: gateOutcome.stdout || undefined,
             }));
             progress(
                 deps,
-                `[${workflowName}] checkpoint ${checkpoint}: ${approvalGate.category} gate available after ${gateOutcome.waitedMs}ms`,
+                `[${workflowName}] checkpoint ${checkpoint}: ${approvalGate.category} gate actionable after ${gateOutcome.waitedMs}ms`,
             );
         } else if (gateOutcome.kind === "workflow-error") {
-            approvalGateWaitFailed = true;
-            events.push(event(clock, checkpoint, "wait-approval-gate", "error", {
-                command: workflowApproveListCommand(approvalGate.category, deps.namespace),
-                message: gateOutcome.message,
-                stdout: gateOutcome.stdout || undefined,
-                stderr: gateOutcome.stderr || undefined,
-            }));
-            diagnostics.push(
-                `approval-gate-workflow-error at ${checkpoint}: ${gateOutcome.message}`,
-            );
-            progress(
-                deps,
-                `[${workflowName}] checkpoint ${checkpoint}: ${approvalGate.category} gate blocked by workflow error after ${gateOutcome.waitedMs}ms`,
-            );
+            if (
+                isExpectedAdmissionPolicyBlock(
+                    checkpoint,
+                    approvalGate.category,
+                    gateOutcome.message,
+                )
+            ) {
+                admissionPolicyBlocked = true;
+                events.push(event(clock, checkpoint, "wait-approval-gate", "ok", {
+                    command: workflowApproveListCommand(approvalGate.category, deps.namespace),
+                    message:
+                        "mutation was rejected by admission policy before a retry gate became actionable: " +
+                        gateOutcome.message,
+                    stdout: gateOutcome.stdout || undefined,
+                    stderr: gateOutcome.stderr || undefined,
+                }));
+                progress(
+                    deps,
+                    `[${workflowName}] checkpoint ${checkpoint}: mutation rejected by admission policy after ${gateOutcome.waitedMs}ms`,
+                );
+            } else {
+                approvalGateWaitFailed = true;
+                events.push(event(clock, checkpoint, "wait-approval-gate", "error", {
+                    command: workflowApproveListCommand(approvalGate.category, deps.namespace),
+                    message: gateOutcome.message,
+                    stdout: gateOutcome.stdout || undefined,
+                    stderr: gateOutcome.stderr || undefined,
+                }));
+                diagnostics.push(
+                    `approval-gate-workflow-error at ${checkpoint}: ${gateOutcome.message}`,
+                );
+                progress(
+                    deps,
+                    `[${workflowName}] checkpoint ${checkpoint}: ${approvalGate.category} gate blocked by workflow error after ${gateOutcome.waitedMs}ms`,
+                );
+            }
         } else {
             approvalGateWaitFailed = true;
             events.push(event(clock, checkpoint, "wait-approval-gate", "error", {
                 command: workflowApproveListCommand(approvalGate.category, deps.namespace),
-                message: `${approvalGate.category} gate ${approvalGate.pattern} was not available after ${gateOutcome.waitedMs}ms`,
+                message: `${approvalGate.category} gate ${approvalGate.pattern} was not actionable after ${gateOutcome.waitedMs}ms`,
                 stdout: gateOutcome.stdout || undefined,
                 stderr: gateOutcome.stderr || undefined,
             }));
             diagnostics.push(
-                `approval-gate-timeout at ${checkpoint}: ${approvalGate.category} gate ${approvalGate.pattern} was not available after ${gateOutcome.waitedMs}ms`,
+                `approval-gate-timeout at ${checkpoint}: ${approvalGate.category} gate ${approvalGate.pattern} was not actionable after ${gateOutcome.waitedMs}ms`,
             );
             progress(
                 deps,
-                `[${workflowName}] checkpoint ${checkpoint}: ${approvalGate.category} gate missing after ${gateOutcome.waitedMs}ms`,
+                `[${workflowName}] checkpoint ${checkpoint}: ${approvalGate.category} gate not actionable after ${gateOutcome.waitedMs}ms`,
             );
         }
     }
@@ -1523,7 +1582,18 @@ async function waitAndCheckpoint(
             const o = await deps.readObservations();
             return Object.values(o.components).map((c) => ({
                 componentId: c.componentId,
-                phase: c.phase,
+                // If the workflow CLI says the subject's gate is
+                // actionable, the checkpoint has been reached even
+                // though the subject CRD may still be Pending/Created.
+                // For impossible changes, admission-policy rejection is
+                // also a valid blocked checkpoint. In both cases, do
+                // not wait for the subject to complete before capturing
+                // the checkpoint.
+                phase:
+                    (approvalGateActionable || admissionPolicyBlocked) &&
+                    subject === c.componentId
+                        ? "Blocked"
+                        : c.phase,
             }));
         },
         clock,
@@ -1532,13 +1602,17 @@ async function waitAndCheckpoint(
     // Re-read final state after wait so the snapshot has the settled
     // phases.
     const finalObs = await deps.readObservations();
-    if (approvalGateObserved && subject) {
+    if ((approvalGateActionable || admissionPolicyBlocked) && subject) {
         const subjectObs = finalObs.components[subject];
         if (subjectObs) {
             finalObs.components[subject] = {
                 ...subjectObs,
-                gatePending: true,
-                gateType: approvalGate!.category,
+                ...(approvalGateActionable
+                    ? {
+                          approvalGateActionable: true,
+                          approvalGateCategory: approvalGate!.category,
+                      }
+                    : { admissionPolicyBlocked: true }),
             };
         }
     }
@@ -1992,6 +2066,7 @@ export async function runFromSpec(opts: RunFromSpecOptions): Promise<string[]> {
         mutatorRegistry,
         validateMutatedConfig: true,
         waitForInnerWorkflowCompletion: true,
+        workflowCleanupSettleMs: 5000,
         progress: opts.progress,
     };
 
