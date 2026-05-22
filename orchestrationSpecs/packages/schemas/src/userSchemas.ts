@@ -906,6 +906,18 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
+    positionGapStopword: z.string().default("").optional()
+        .describe("Token used to fill skipped Lucene positions when reconstructing analyzed-text fields from postings. " +
+            "ES preserves position increments for stop-word-filtered tokens (e.g. 'i like the tree' with stopword 'the' indexes " +
+            "at positions 0,1,3 — position 2 is consumed by 'the' but the term itself is dropped). Without this flag the " +
+            "reconstructor joins on spaces and OS re-tokenizes the document at consecutive positions [0,1,2], silently " +
+            "changing slop / proximity / phrase semantics on migrated documents. With positionGapStopword set to a token " +
+            "that the TARGET analyzer treats as a stopword (commonly 'a' for english/standard analyzers), the reconstructor " +
+            "splices that token into the gap so OS re-creates the original [0,1,3] postings while indexing. " +
+            "The token MUST be on the target's stopword list or it leaks into search results. " +
+            "Default: empty (legacy multi-space behaviour).")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
 }).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");
 
 export const USER_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(USER_RFS_WORKFLOW_OPTIONS);

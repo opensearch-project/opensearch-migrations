@@ -427,6 +427,8 @@ spec:
          object.spec.documentBackfillEnableSourcelessMigrations == oldObject.spec.documentBackfillEnableSourcelessMigrations) &&
         (!has(oldObject.spec.documentBackfillUseRecoverySource) || !has(object.spec.documentBackfillUseRecoverySource) ||
          object.spec.documentBackfillUseRecoverySource == oldObject.spec.documentBackfillUseRecoverySource) &&
+        (!has(oldObject.spec.documentBackfillPositionGapStopword) || !has(object.spec.documentBackfillPositionGapStopword) ||
+         object.spec.documentBackfillPositionGapStopword == oldObject.spec.documentBackfillPositionGapStopword) &&
         (!has(oldObject.spec.documentBackfillEmitDocType) || !has(object.spec.documentBackfillEmitDocType) ||
          object.spec.documentBackfillEmitDocType == oldObject.spec.documentBackfillEmitDocType)
       message: "Impossible: SnapshotMigration document backfill fields cannot be changed. Delete and recreate."

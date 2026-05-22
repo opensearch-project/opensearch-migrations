@@ -316,6 +316,8 @@ spec:
                   type: boolean
                 documentBackfillUseRecoverySource:
                   type: boolean
+                documentBackfillPositionGapStopword:
+                  type: string
                 documentBackfillDocTransformerConfigBase64:
                   type: string
                 documentBackfillDocTransformerConfig:

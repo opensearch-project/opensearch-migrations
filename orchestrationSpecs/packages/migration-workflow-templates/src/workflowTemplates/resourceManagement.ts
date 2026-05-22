@@ -323,6 +323,7 @@ function makeSnapshotMigrationManifest(
             documentBackfillAllowLooseVersionMatching: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "allowLooseVersionMatching"], true)),
             documentBackfillEnableSourcelessMigrations: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "enableSourcelessMigrations"], false)),
             documentBackfillUseRecoverySource: makeDirectTypeProxy(expr.dig(config, ["documentBackfillConfig", "useRecoverySource"], false)),
+            documentBackfillPositionGapStopword: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "positionGapStopword"], expr.literal(""))),
             documentBackfillDocTransformerConfigBase64: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "docTransformerConfigBase64"], expr.literal(""))),
             documentBackfillDocTransformerConfig: makeYamlJsonLiteralProxy(expr.dig(config, ["documentBackfillConfig", "docTransformerConfig"], expr.literal(""))),
             documentBackfillDocTransformerConfigFile: makeStringTypeProxy(expr.dig(config, ["documentBackfillConfig", "docTransformerConfigFile"], expr.literal(""))),
