@@ -7,7 +7,17 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"time"
 )
+
+// processGroupKillWaitDelay bounds how long cmd.Wait may block after
+// Cancel has fired. If a grandchild still holds the inherited stdout
+// pipe, the io-copy goroutine inside os/exec would hang forever; this
+// backstop forcibly closes the pipe and surfaces the ctx error. 2s is
+// generous enough for an honest fast-exit and tight enough to keep the
+// CI ContextCancelKillsProcess assertion (<2s elapsed) realistic when
+// composed with the immediate pgroup-kill below.
+const processGroupKillWaitDelay = 2 * time.Second
 
 // ExecStep is one subprocess invocation a Plan resolves to.
 //
@@ -200,15 +210,41 @@ type ExecCommandRunner struct{}
 
 // Run executes (cmd, args) under ctx, streaming merged stdout/stderr
 // lines through onLine. Returns nil on exit 0; otherwise returns the
-// underlying error from cmd.Wait. ctx cancellation propagates to the
-// process via exec.CommandContext.
+// underlying error from cmd.Wait. ctx cancellation propagates by
+// SIGKILL'ing the whole process group, not just the leader — see
+// configureProcessGroup for the rationale (process-tree leak via
+// inherited stdout pipe held open by orphaned grandchildren).
 func (ExecCommandRunner) Run(ctx context.Context, _ string, cmd string, args []string, onLine func(string)) error {
+	// We use exec.CommandContext so Cmd.Start accepts our custom
+	// Cancel (Go enforces that Cancel is only valid on
+	// CommandContext-created commands). We then OVERRIDE the default
+	// Cancel (which Kills only the leader) with one that targets the
+	// whole process group. The default Cancel only Kill()s the leader;
+	// if the script backgrounds a grandchild (common in shell wrappers
+	// around helm/kubectl), the grandchild inherits stdout and keeps
+	// the pipe open, blocking cmd.Wait until the grandchild's natural
+	// exit. The pgroup-kill + WaitDelay combo breaks that liveness
+	// chain. See real_exec_pgroup_test.go for the regression guard.
 	c := exec.CommandContext(ctx, cmd, args...)
+	configureProcessGroup(c) // platform-specific: Setpgid on Unix, no-op elsewhere
+
 	stdout, err := c.StdoutPipe()
 	if err != nil {
 		return err
 	}
 	c.Stderr = c.Stdout // merge — single line stream simplifies the UI
+
+	// Custom Cancel: kill the whole process group, not just the leader.
+	// This is the real fix; WaitDelay below is only a backstop.
+	// CommandContext sets up the ctx→Cancel bridge for us; we just
+	// need to override Cancel before Start().
+	c.Cancel = func() error { return killProcessGroup(c) }
+	// WaitDelay backstop: if Cancel fired but cmd.Wait is still blocked
+	// on an inherited FD (rare after pgroup-kill but possible if the
+	// kernel hasn't reaped yet), force-close pipes and let Wait return
+	// after this delay. Without it, cmd.Wait could hang indefinitely.
+	c.WaitDelay = processGroupKillWaitDelay
+
 	if err := c.Start(); err != nil {
 		return err
 	}
@@ -229,6 +265,12 @@ func (ExecCommandRunner) Run(ctx context.Context, _ string, cmd string, args []s
 	// downstream of the process exiting anyway, and Wait() has the
 	// authoritative status.
 	if err := c.Wait(); err != nil {
+		// If ctx was cancelled, prefer the ctx error over the
+		// "signal: killed" wait error — it's more informative for
+		// callers.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		return err
 	}
 	if scanErr := scanner.Err(); scanErr != nil && !errors.Is(scanErr, io.EOF) {
