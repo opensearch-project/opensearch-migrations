@@ -78,24 +78,37 @@ type LayoutMsg struct {
 // NavigateMsg
 // ----------------------------------------------------------------------------
 
-// NavigateMsg requests the root Model to transition to To. The
-// root validates the transition (legal next-pages depend on the
+// NavigateMsg requests the root Model to transition forward to To.
+// The root validates the transition (legal next-pages depend on the
 // state machine in internal/ui).
 type NavigateMsg struct {
 	To PageID
 }
 
+// NavigateBackMsg pops the page-history stack by one. Sent when the
+// user presses Esc/⇧Tab on a page that doesn't otherwise consume the
+// key. A distinct zero-value type (rather than a NavigateMsg with a
+// `Back bool` field) so the root's type switch is unambiguous and
+// you can never accidentally encode "back to PageWelcome" — Back has
+// no destination, only a stack pop.
+type NavigateBackMsg struct{}
+
 // ----------------------------------------------------------------------------
 // Severity + ErrorMsg
 // ----------------------------------------------------------------------------
 
-// Severity orders error gravity: Info < Warn < Error.
+// Severity orders error gravity: Info < Warn < Error < Fatal.
+// Fatal is reserved for unrecoverable conditions (workspace mount
+// lost, panic recovered) — the root Model returns tea.Quit when it
+// sees one. Use Error for "this attempt failed but the user can
+// retry"; Fatal for "the whole session is dead".
 type Severity int
 
 const (
 	SeverityInfo Severity = iota
 	SeverityWarn
 	SeverityError
+	SeverityFatal
 )
 
 // String returns the lowercase name (used in error log lines).
@@ -107,6 +120,8 @@ func (s Severity) String() string {
 		return "warn"
 	case SeverityError:
 		return "error"
+	case SeverityFatal:
+		return "fatal"
 	default:
 		return fmt.Sprintf("unknown(%d)", int(s))
 	}
@@ -137,10 +152,17 @@ func (m ErrorMsg) String() string {
 // Model returns tea.Quit, then cmd/tui's main runs syscall.Exec
 // with these arguments so the user lands inside the agent shell
 // with no TUI in the process tree.
+//
+// BriefPath is the on-disk location of the handoff brief markdown
+// the deploy/review pages have already written. cmd/tui/main.go
+// reads it after Quit so it can surface the path in the post-exit
+// banner ("Brief: /tmp/work/.ma/handoff/brief.md") even if the
+// agent itself doesn't ingest it directly.
 type HandoffMsg struct {
-	Bin  string
-	Args []string
-	Env  []string // os.Environ()-style "K=V" pairs
+	Bin       string
+	Args      []string
+	Env       []string // os.Environ()-style "K=V" pairs
+	BriefPath string
 }
 
 // ----------------------------------------------------------------------------
@@ -168,7 +190,13 @@ type DeployEventMsg struct {
 // It is the SOLE channel by which backend goroutines push events
 // into the UI — never a direct goroutine push, never a Cmd that
 // reads outside its own closure (rule r3 in UX.md).
+//
+// Payload is `any` (not []byte) because the broker is in-process:
+// there's no serialization boundary, callers should carry typed Go
+// values. Topic is purely advisory metadata for log lines and the
+// optional file logger; routing is by Payload's Go type, asserted
+// in the recipient page's Update().
 type BrokerEnvelopeMsg struct {
 	Topic   string
-	Payload []byte
+	Payload any
 }
