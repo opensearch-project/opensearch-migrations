@@ -352,13 +352,14 @@ public class RfsMigrateDocuments {
                 "\"i like the tree\" with stopword \"the\" indexes at positions 0,1,3 — position 2 is consumed " +
                 "by \"the\" but the term itself is dropped). Without this flag the reconstructor joins on spaces " +
                 "and OS re-tokenizes the document at consecutive positions [0,1,2], silently changing slop / " +
-                "proximity / phrase semantics. With --position-gap-stopword=<token> set to a token that the TARGET " +
-                "analyzer treats as a stopword (commonly 'a' for english/standard analyzers), the reconstructor " +
-                "splices that token into the gap so OS re-creates the original [0,1,3] postings while indexing. " +
-                "The token MUST be on the target's stopword list or it leaks into search results. " +
-                "Default: unset (legacy multi-space behaviour)."
+                "proximity / phrase semantics. The reconstructor splices this token into the gap so OS — assumed " +
+                "to have the same token configured as a stopword — re-creates the original [0,1,3] postings while " +
+                "indexing. The token MUST be on the target's stopword list or it leaks into search results; " +
+                "'a' is a safe default for the english / standard analyzers. " +
+                "Pass an empty string to opt out and fall back to the legacy multi-space behaviour. " +
+                "Default: 'a'."
         )
-        public String positionGapStopword = null;
+        public String positionGapStopword = "a";
     }
 
 
