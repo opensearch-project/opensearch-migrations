@@ -2393,6 +2393,18 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                 "{\"subj\":\"" + doc2Subj + "\",\"fsubj\":\"" + doc2Fsubj + "\"}",
                 null, docType);
 
+            // doc3 — position-gap stopword regression. The custom analyzer's my_stopwords
+            // filter strips "the"/"a"/"an" but Lucene preserves the position increment,
+            // so the source postings carry [0:alpha, 2:omega] (position 1 was "the").
+            // Without the position-gap-stopword fix, the reconstructor joins on spaces
+            // ("alpha omega") and OS re-tokenizes at consecutive [0:alpha, 1:omega],
+            // breaking proximity / slop / phrase semantics on the migrated document.
+            String doc3Subj = "alpha the omega";
+            String doc3Fsubj = "BR-003";
+            sourceOps.createDocument(indexName, "3",
+                "{\"subj\":\"" + doc3Subj + "\",\"fsubj\":\"" + doc3Fsubj + "\"}",
+                null, docType);
+
             sourceOps.post("/_refresh", null);
 
             // Snapshot the source.
@@ -2451,17 +2463,43 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             targetOps.createIndex(indexName, targetIndexBody);
 
             // Step 2: DOCUMENT MIGRATION via the sourceless pipeline.
-            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
-                sourceCluster.getContainerVersion().getVersion(), true);
-            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
-            var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+            //
+            // Set the position-gap stopword tunable to "a" before the migration runs. The
+            // sourceless test path bypasses RfsMigrateDocuments.main() — which is where the
+            // CLI default ("a") is normally promoted into a system property — so the join
+            // layer would otherwise see the unset sysprop and fall back to the legacy
+            // multi-space behaviour. Setting it here mirrors what main() does and lets the
+            // proximity-query assertions below verify the position-preservation contract
+            // end-to-end (snapshot → reconstruction → OS re-tokenization).
+            //
+            // "a" is in the my_stopwords filter on this index, so OS strips the filler
+            // while preserving its position increment. Cleared in finally so the prop does
+            // not leak into the next parameterized run.
+            String priorStopwordProp = System.setProperty(
+                org.opensearch.migrations.bulkload.lucene.RfsTunables.POSITION_GAP_STOPWORD_PROP,
+                "a");
+            try {
+                var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                    sourceCluster.getContainerVersion().getVersion(), true);
+                var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+                var docCtx = DocumentMigrationTestContext.factory().noOtelTracking();
 
-            waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
-                sourceRepo, "custom_snap", List.of(indexName), targetCluster,
-                new AtomicInteger(), new Random(1), docCtx,
-                sourceCluster.getContainerVersion().getVersion(),
-                targetCluster.getContainerVersion().getVersion()
-            ));
+                waitForRfsCompletion(() -> SourcelessMigrationTest.migrateDocumentsSequentiallyWithSourceless(
+                    sourceRepo, "custom_snap", List.of(indexName), targetCluster,
+                    new AtomicInteger(), new Random(1), docCtx,
+                    sourceCluster.getContainerVersion().getVersion(),
+                    targetCluster.getContainerVersion().getVersion()
+                ));
+            } finally {
+                if (priorStopwordProp == null) {
+                    System.clearProperty(
+                        org.opensearch.migrations.bulkload.lucene.RfsTunables.POSITION_GAP_STOPWORD_PROP);
+                } else {
+                    System.setProperty(
+                        org.opensearch.migrations.bulkload.lucene.RfsTunables.POSITION_GAP_STOPWORD_PROP,
+                        priorStopwordProp);
+                }
+            }
 
             targetOps.post("/_refresh", null);
 
@@ -2509,6 +2547,55 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
                 "doc2 subj must not contain doc1-only token 'buyout' (per-doc postings isolation). reconstructed=" + doc2SubjReconstructed);
             assertFalse(doc1SubjReconstructed.contains("quarterly"),
                 "doc1 subj must not contain doc2-only token 'quarterly' (per-doc postings isolation). reconstructed=" + doc1SubjReconstructed);
+
+            // Position-gap stopword fidelity (doc3, "alpha the omega").
+            //
+            // The source postings for doc3.subj are [0:alpha, 2:omega] — Lucene kept
+            // position 1 reserved for the dropped stopword "the". The reconstructor with
+            // POSITION_GAP_STOPWORD_PROP="a" splices the filler into the gap, producing
+            // text the OS analyzer re-tokenizes back to [0:alpha, 2:omega] (the my_stopwords
+            // filter strips "a" while preserving its position increment).
+            //
+            // Behavioural witness: a match_phrase("alpha omega", slop=0) MUST NOT match —
+            // positions are 2 apart, slop=0 requires adjacent. With slop=2 the same query
+            // MUST match. If the filler had not been spliced in, OS would re-tokenize at
+            // [0:alpha, 1:omega] and slop=0 would match — silently changing query semantics
+            // on the migrated document. This assertion is the end-to-end contract.
+            String doc3Resp = targetOps.get("/" + indexName + "/_doc/3").getValue();
+            JsonNode doc3Source = MAPPER.readTree(doc3Resp).path("_source");
+            log.info("Reconstructed doc3 (position-gap stopword case): {}", doc3Source);
+            assertEquals(doc3Fsubj, doc3Source.path("fsubj").asText(),
+                "doc3 fsubj (keyword) must reconstruct byte-exact via DocValues. _source=" + doc3Source);
+            String doc3SubjReconstructed = doc3Source.path("subj").asText().toLowerCase();
+            assertTrue(doc3SubjReconstructed.contains("alpha"),
+                "doc3 subj must contain 'alpha': " + doc3SubjReconstructed);
+            assertTrue(doc3SubjReconstructed.contains("omega"),
+                "doc3 subj must contain 'omega': " + doc3SubjReconstructed);
+
+            // Tight phrase: alpha and omega MUST NOT be adjacent on the target — the
+            // dropped-stopword position increment was preserved through migration.
+            String tightPhraseQuery =
+                "{\"query\":{\"match_phrase\":{\"subj\":{\"query\":\"alpha omega\",\"slop\":0}}}}";
+            String tightResp = targetOps.post("/" + indexName + "/_search", tightPhraseQuery).getValue();
+            log.info("Tight (slop=0) match_phrase response: {}", tightResp);
+            JsonNode tightHits = MAPPER.readTree(tightResp).path("hits").path("total");
+            // Total may be a number (ES 7.0+) or an object with .value.
+            int tightHitCount = tightHits.isObject() ? tightHits.path("value").asInt() : tightHits.asInt();
+            assertEquals(0, tightHitCount,
+                "match_phrase('alpha omega', slop=0) must NOT match doc3 — position-gap stopword " +
+                "was preserved through reconstruction. Got " + tightHitCount + " hits. Response: " + tightResp);
+
+            // Loose phrase: with slop=2 the original gap (positions 0..2) is reachable.
+            // Sanity check that the document was actually indexed and queryable.
+            String looseQuery =
+                "{\"query\":{\"match_phrase\":{\"subj\":{\"query\":\"alpha omega\",\"slop\":2}}}}";
+            String looseResp = targetOps.post("/" + indexName + "/_search", looseQuery).getValue();
+            log.info("Loose (slop=2) match_phrase response: {}", looseResp);
+            JsonNode looseHits = MAPPER.readTree(looseResp).path("hits").path("total");
+            int looseHitCount = looseHits.isObject() ? looseHits.path("value").asInt() : looseHits.asInt();
+            assertTrue(looseHitCount >= 1,
+                "match_phrase('alpha omega', slop=2) must match doc3 — original positions are 2 apart. " +
+                "Got " + looseHitCount + " hits. Response: " + looseResp);
         }
     }
 
