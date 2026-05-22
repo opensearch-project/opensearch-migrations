@@ -20,6 +20,14 @@
         {
           "name": "approvalConfigMapName",
           "value": "approval-config"
+        },
+        {
+          "name": "migrationRunNumber",
+          "value": "0"
+        },
+        {
+          "name": "workflowScriptsRoot",
+          "value": "/root/workflows/.workflowScripts"
         }
       ]
     },
@@ -273,8 +281,9 @@
           "setOwnerReference": false
         },
         "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
+          "limit": "3",
+          "retryPolicy": "Always",
+          "expression": "lastRetry.message matches 'failed calling webhook|no endpoints available|connection refused|context deadline exceeded|Client\\\\.Timeout exceeded|net/http: request canceled'",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -693,6 +702,10 @@
                     "value": "{{inputs.parameters.topicConfig}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.topicConfigChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{='capturedtraffic.'+inputs.parameters.topicCrName+'.vapretry'}}"
                   },
@@ -749,8 +762,8 @@
                     "value": "{{inputs.parameters.kafkaTopicName}}"
                   },
                   {
-                    "name": "workflowUid",
-                    "value": "{{workflow.uid}}"
+                    "name": "migrationRunNumber",
+                    "value": "{{workflow.parameters.migrationRunNumber}}"
                   },
                   {
                     "name": "ownerUid",
@@ -832,6 +845,10 @@
                     "value": "{{inputs.parameters.topicCrName}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{='captureproxy.'+inputs.parameters.proxyName+'.vapretry'}}"
                   },
@@ -865,7 +882,7 @@
           [
             {
               "templateRef": {
-                "template": "patchcaptureproxyrunning",
+                "template": "patchcaptureproxypending",
                 "name": "resource-management"
               },
               "when": "{{=true && !(steps.reconcileCaptureProxyResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
@@ -877,11 +894,11 @@
                   },
                   {
                     "name": "phase",
-                    "value": "Running"
+                    "value": "Pending"
                   }
                 ]
               },
-              "name": "patchCaptureProxyRunning"
+              "name": "patchCaptureProxyPending"
             }
           ],
           [

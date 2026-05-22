@@ -29,6 +29,20 @@ images:
 
 # Kyverno chart configuration
 charts:
+  cert-manager:
+    values:
+      replicaCount: 1
+      podDisruptionBudget:
+        enabled: false
+      cainjector:
+        replicaCount: 1
+        podDisruptionBudget:
+          enabled: false
+      webhook:
+        replicaCount: 1
+        podDisruptionBudget:
+          enabled: false
+
   kyverno:
     values:
       webhooksCleanup:

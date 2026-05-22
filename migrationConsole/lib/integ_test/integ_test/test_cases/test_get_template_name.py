@@ -1,6 +1,13 @@
+from unittest.mock import Mock
+
 import pytest
+
 from integ_test.cluster_version import ClusterVersion
-from integ_test.test_cases.ma_argo_test_base import get_template_name
+from integ_test.test_cases.ma_argo_test_base import (
+    MIGRATION_COMPLETION_TIMEOUT_SECONDS,
+    MATestBase,
+    get_template_name,
+)
 
 
 @pytest.mark.parametrize("version_str, expected_template", [
@@ -68,3 +75,18 @@ def test_template_names_exist_in_cluster_workflows():
                 f"Source template {get_template_name(src)} not declared in clusterWorkflows.yaml"
             assert get_template_name(tgt) in declared, \
                 f"Target template {get_template_name(tgt)} not declared in clusterWorkflows.yaml"
+
+
+def test_workflow_perform_migrations_uses_default_completion_timeout():
+    test_case = MATestBase.__new__(MATestBase)
+    test_case.workflow_name = "test-workflow"
+    test_case.imported_clusters = False
+    test_case.argo_service = Mock()
+
+    test_case.workflow_perform_migrations()
+
+    test_case.argo_service.resume_workflow.assert_called_once_with(workflow_name="test-workflow")
+    test_case.argo_service.wait_for_suspend.assert_called_once_with(
+        workflow_name="test-workflow",
+        timeout_seconds=MIGRATION_COMPLETION_TIMEOUT_SECONDS,
+    )
