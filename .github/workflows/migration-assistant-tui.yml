@@ -1,0 +1,177 @@
+# Migration Assistant TUI — CI
+#
+# Gates PRs that touch migrationAssistantTUI/ on:
+#
+#   * gofmt cleanliness
+#   * go vet
+#   * race-clean -count=2 test pass for every package
+#   * golden visual-regression suite (internal/ui/golden)
+#   * binary builds successfully under -ldflags injection
+#
+# This workflow does NOT run on changes outside migrationAssistantTUI/.
+# It does NOT replace any existing CI job; it sits alongside CI.yml.
+#
+# Why not extend CI.yml: the existing workflow is gradle/python/java
+# heavy and its setup-env action does NOT install Go. A separate
+# workflow keeps the diff narrow and the failure surface readable.
+#
+# Concurrency: matches CI.yml's policy — cancel in-progress runs for
+# the same PR ref except on main.
+
+name: Migration Assistant TUI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'migrationAssistantTUI/**'
+      - '.github/workflows/migration-assistant-tui.yml'
+  pull_request:
+    paths:
+      - 'migrationAssistantTUI/**'
+      - '.github/workflows/migration-assistant-tui.yml'
+  merge_group:
+
+env:
+  # Pin to the version declared in migrationAssistantTUI/go.mod. Bump
+  # this AND go.mod's `go` line in the same PR so CI doesn't drift.
+  GO_VERSION: '1.25.0'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ !(github.event_name == 'push' && github.repository == 'opensearch-project/opensearch-migrations' && github.ref == 'refs/heads/main') }}
+
+defaults:
+  run:
+    # Every step runs from inside the TUI module so we don't need to
+    # cd in each script block.
+    working-directory: migrationAssistantTUI
+
+jobs:
+  # -------------------------------------------------------------------
+  # gofmt — formatting check
+  # -------------------------------------------------------------------
+  gofmt:
+    name: gofmt
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: migrationAssistantTUI/go.sum
+      - name: gofmt -l
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "::error::gofmt found unformatted files:"
+            echo "$out"
+            exit 1
+          fi
+
+  # -------------------------------------------------------------------
+  # go vet — built-in static analysis
+  # -------------------------------------------------------------------
+  vet:
+    name: go vet
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: migrationAssistantTUI/go.sum
+      - run: go vet ./...
+
+  # -------------------------------------------------------------------
+  # test — race + count=2 across the whole module
+  # -------------------------------------------------------------------
+  test:
+    name: test (race, -count=2)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: migrationAssistantTUI/go.sum
+
+      - name: go test -race -count=2
+        # -count=2 catches state leaks between test runs (cached map
+        # corruption, package-var bleed). Cheap insurance — every
+        # package's tests are <2s.
+        run: go test -race -count=2 ./...
+
+  # -------------------------------------------------------------------
+  # build — verify the binary compiles under -ldflags injection
+  # -------------------------------------------------------------------
+  build:
+    name: build (with -ldflags)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: migrationAssistantTUI/go.sum
+
+      - name: Build with version injection
+        run: |
+          go build \
+            -ldflags "-X main.Version=ci-test -X main.MAVersion=0.0.0-ci" \
+            -o /tmp/ma-tui \
+            ./cmd/tui
+          test -x /tmp/ma-tui
+
+  # -------------------------------------------------------------------
+  # goldens — confirm goldens are up-to-date (regen ⇒ no diff)
+  # -------------------------------------------------------------------
+  goldens-up-to-date:
+    name: goldens up-to-date
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: migrationAssistantTUI/go.sum
+
+      - name: Regenerate goldens
+        run: go test ./internal/ui/golden -run TestGolden -update
+
+      - name: Verify no goldens drifted
+        # If -update produced any diff, the contributor forgot to
+        # commit it. Surface the diff so the failure is actionable.
+        run: |
+          if ! git diff --quiet -- internal/ui/golden/testdata/; then
+            echo "::error::goldens are out of date — run:"
+            echo "::error::  go test ./internal/ui/golden -run TestGolden -update"
+            echo "::error::and commit the result. Diff:"
+            git --no-pager diff -- internal/ui/golden/testdata/
+            exit 1
+          fi
+
+  # -------------------------------------------------------------------
+  # tidy — go.mod / go.sum cleanliness
+  # -------------------------------------------------------------------
+  mod-tidy:
+    name: go mod tidy clean
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: migrationAssistantTUI/go.sum
+
+      - name: go mod tidy
+        run: go mod tidy
+
+      - name: Verify no go.mod/go.sum drift
+        run: |
+          if ! git diff --quiet -- go.mod go.sum; then
+            echo "::error::go.mod / go.sum are out of date — run \`go mod tidy\` and commit:"
+            git --no-pager diff -- go.mod go.sum
+            exit 1
+          fi
