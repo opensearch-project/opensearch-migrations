@@ -246,6 +246,14 @@ public interface LuceneLeafReader {
     }
 
     /**
+     * Joins a list of {@link TermEntry} tokens into a single string. Convenience overload that
+     * reads the position-gap stopword from {@link RfsTunables#positionGapStopword()}.
+     */
+    static String joinWithOffsets(List<TermEntry> entries) {
+        return joinWithOffsets(entries, RfsTunables.positionGapStopword());
+    }
+
+    /**
      * Joins a list of {@link TermEntry} tokens into a single string.
      *
      * <p>When every entry carries valid character offsets (i.e. none equals
@@ -256,18 +264,30 @@ public interface LuceneLeafReader {
      *
      * <p>When any entry lacks valid offsets (sentinel -1), the method falls back to a single
      * space between every token — the original behaviour before offset support was added.
+     *
+     * <p>When {@code positionGapStopword} is non-null AND adjacent entries have a Lucene-position
+     * gap greater than 1 (i.e. the source analyzer's stop-word filter ate one or more
+     * positions), the stitcher inserts {@code (positionGap - 1)} copies of the token between
+     * the two real terms — for example, "i like the tree" indexed by ES with
+     * {@code stopwords:["the"]} yields postings [0:i, 1:like, 3:tree], and the reconstructor
+     * with {@code positionGapStopword="a"} produces {@code "i like a tree"} so that OS
+     * (configured with {@code stopwords:["the","a"]} or just {@code "a"}) re-tokenizes back to
+     * the same [0, 1, 3] positions. Without this, the reconstructed string {@code "i like
+     * tree"} re-indexes at consecutive [0, 1, 2] and silently changes the slop / proximity
+     * semantics of the migrated document. The token MUST be configured as a stopword on the
+     * target analyzer for this workaround to round-trip correctly; otherwise it leaks into
+     * search results.
      */
-    static String joinWithOffsets(List<TermEntry> entries) {
+    static String joinWithOffsets(List<TermEntry> entries, String positionGapStopword) {
         if (entries.isEmpty()) return "";
 
         // Same-position graph-token dedup: a tokenizer / token filter can emit several
         // overlapping alternates at the same position (e.g. a custom date analyzer that
         // emits both "03:25:00" and its "03", "25", "00" sub-tokens). For source
         // reconstruction we want the original surface form, so within each position
-        // group we keep the longest term (which is also what {@code SidecarReader}
-        // does — see {@code dedupByLongestTerm}). Streaming postings (positional path)
-        // does not deduplicate up-front, so we do it here before the offset stitcher
-        // sees overlapping spans.
+        // group we keep the longest term. Streaming postings (positional path) does not
+        // deduplicate up-front, so we do it here before the offset stitcher sees
+        // overlapping spans.
         entries = dedupByLongestAtSamePosition(entries);
 
         // Check whether all entries carry valid offsets.
@@ -279,28 +299,58 @@ public interface LuceneLeafReader {
             }
         }
 
+        boolean hasStopwordFiller = positionGapStopword != null && !positionGapStopword.isBlank();
+
         if (!hasOffsets) {
-            // Fall back: single space between tokens (original behaviour).
+            // Fall back: positions are still available, so inject one stopword filler per
+            // missing position when configured; otherwise single-space join (legacy behaviour).
             StringBuilder sb = new StringBuilder();
+            int prevPos = -1;
             for (int i = 0; i < entries.size(); i++) {
-                if (i > 0) sb.append(' ');
-                sb.append(entries.get(i).term());
+                TermEntry e = entries.get(i);
+                if (i > 0) {
+                    sb.append(' ');
+                    int posGap = (prevPos >= 0) ? e.position() - prevPos : 1;
+                    if (hasStopwordFiller && posGap > 1) {
+                        for (int g = 1; g < posGap; g++) sb.append(positionGapStopword).append(' ');
+                    }
+                }
+                sb.append(e.term());
+                prevPos = e.position();
             }
             return sb.toString();
         }
 
-        // Offset-gap reconstruction: fill inter-token spans with spaces.
+        // Offset-gap reconstruction: fill inter-token spans with spaces, optionally splicing
+        // a configured stopword for each Lucene position the analyzer's stop-word filter ate.
         StringBuilder sb = new StringBuilder();
         int prevEnd = 0;
+        int prevPos = -1;
         for (TermEntry e : entries) {
             int gap = e.startOffset() - prevEnd;
             // gap < 0 can happen only if tokens overlap (e.g. synonym at same position with
             // different lengths after dedup) — clamp to 0 so we never insert negative spaces.
             if (gap > 0) {
-                for (int s = 0; s < gap; s++) sb.append(' ');
+                int posGap = (prevPos >= 0) ? e.position() - prevPos : 1;
+                if (hasStopwordFiller && posGap > 1) {
+                    // Reserve one space immediately after the prior token, then "<token> "
+                    // for each missing position. Any remaining offset gap is padded with
+                    // spaces afterwards so character offsets that were originally consumed by
+                    // a longer stopword (e.g. ES "the" → 3 chars) still align approximately.
+                    int fillerLen = positionGapStopword.length();
+                    int fillerTokens = posGap - 1;
+                    int filledChars = 1 + fillerTokens * (fillerLen + 1);
+                    sb.append(' ');
+                    for (int t = 0; t < fillerTokens; t++) sb.append(positionGapStopword).append(' ');
+                    int remaining = gap - filledChars;
+                    for (int s = 0; s < remaining; s++) sb.append(' ');
+                } else {
+                    for (int s = 0; s < gap; s++) sb.append(' ');
+                }
             }
             sb.append(e.term());
             prevEnd = e.endOffset();
+            prevPos = e.position();
         }
         return sb.toString();
     }
@@ -312,10 +362,6 @@ public interface LuceneLeafReader {
      * entry's span — these are graph-token sub-pieces of an already-emitted longer
      * alternate (e.g. {@code "03"}, {@code "25"}, {@code "00"} after
      * {@code "03:25:00"} is kept).
-     *
-     * <p>Mirrors {@link org.opensearch.migrations.bulkload.lucene.sidecar.SidecarReader}'s
-     * dedup contract so streaming and sidecar reconstruction produce the same surface
-     * form for graph-tokenized fields.
      *
      * <p>The streaming postings path emits one entry per (term, position) occurrence;
      * tokenizers / token filters that emit overlapping alternates at the same position

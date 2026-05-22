@@ -344,6 +344,21 @@ public class RfsMigrateDocuments {
             arity = 0
         )
         public boolean useRecoverySource = false;
+
+        @Parameter(required = false,
+            names = { "--position-gap-stopword", "--positionGapStopword" },
+            description = "Optional. Token used to fill skipped Lucene positions when reconstructing analyzed-text " +
+                "fields from postings. ES preserves position increments for stop-word-filtered tokens (e.g. " +
+                "\"i like the tree\" with stopword \"the\" indexes at positions 0,1,3 — position 2 is consumed " +
+                "by \"the\" but the term itself is dropped). Without this flag the reconstructor joins on spaces " +
+                "and OS re-tokenizes the document at consecutive positions [0,1,2], silently changing slop / " +
+                "proximity / phrase semantics. With --position-gap-stopword=<token> set to a token that the TARGET " +
+                "analyzer treats as a stopword (commonly 'a' for english/standard analyzers), the reconstructor " +
+                "splices that token into the gap so OS re-creates the original [0,1,3] postings while indexing. " +
+                "The token MUST be on the target's stopword list or it leaks into search results. " +
+                "Default: unset (legacy multi-space behaviour)."
+        )
+        public String positionGapStopword = null;
     }
 
 
@@ -492,6 +507,20 @@ public class RfsMigrateDocuments {
         }
 
         validateArgs(arguments);
+
+        // Forward the position-gap stopword to the reconstruction layer via system property —
+        // LuceneLeafReader.joinWithOffsets reads it from RfsTunables.positionGapStopword().
+        // Done here (rather than threaded through DocumentMigrationBootstrap) to match the
+        // existing tunables pattern for rfs.reader.parallelism, keeping the streaming-postings
+        // hot path free of per-call config plumbing.
+        if (arguments.experimental.positionGapStopword != null
+                && !arguments.experimental.positionGapStopword.isBlank()) {
+            System.setProperty(
+                org.opensearch.migrations.bulkload.lucene.RfsTunables.POSITION_GAP_STOPWORD_PROP,
+                arguments.experimental.positionGapStopword);
+            log.atInfo().setMessage("Position-gap stopword filler enabled: '{}'")
+                .addArgument(arguments.experimental.positionGapStopword).log();
+        }
 
         if (arguments.cleanLocalDirs) {
             FileSystemUtils.deleteDirectories(arguments.s3LocalDir, arguments.luceneDir);

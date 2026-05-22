@@ -229,4 +229,91 @@ class LuceneLeafReaderJoinTest {
         // No overlap → no dedup → same reference returned.
         assertSame(input, LuceneLeafReader.dedupByLongestAtSamePosition(input));
     }
+
+    // -------------------------------------------------------------------------
+    //  Position-gap stopword filler (preserves ES position increments through
+    //  reconstruction so OS re-tokenization keeps the same slop / phrase semantics)
+    // -------------------------------------------------------------------------
+
+    @Test
+    void joinWithOffsets_noOffsets_positionGap_insertsStopwordFiller() {
+        // ES indexed "i like the tree" with stopword "the" — postings carry [0:i, 1:like, 3:tree].
+        // Position 2 is consumed by "the" but the term is dropped, leaving a gap. The reconstructor
+        // splices the configured stopword token so OS re-creates the same gap.
+        List<TermEntry> entries = List.of(
+            teNoOffset("i",    0),
+            teNoOffset("like", 1),
+            teNoOffset("tree", 3)
+        );
+        assertEquals("i like a tree", LuceneLeafReader.joinWithOffsets(entries, "a"));
+    }
+
+    @Test
+    void joinWithOffsets_noOffsets_multiplePositionsSkipped_insertsMultipleFillers() {
+        // Two consecutive stopwords ate positions 1 and 2; reconstructor inserts two fillers
+        // so OS reproduces the exact 0..3 position layout.
+        List<TermEntry> entries = List.of(
+            teNoOffset("foo", 0),
+            teNoOffset("bar", 3)
+        );
+        assertEquals("foo a a bar", LuceneLeafReader.joinWithOffsets(entries, "a"));
+    }
+
+    @Test
+    void joinWithOffsets_noOffsets_noStopwordConfigured_legacySingleSpaceJoin() {
+        // Default behaviour preserved when stopword is not configured: single space between
+        // tokens, position gaps are silently lost (the bug the new flag works around).
+        List<TermEntry> entries = List.of(
+            teNoOffset("i",    0),
+            teNoOffset("like", 1),
+            teNoOffset("tree", 3)
+        );
+        assertEquals("i like tree", LuceneLeafReader.joinWithOffsets(entries, null));
+        assertEquals("i like tree", LuceneLeafReader.joinWithOffsets(entries, ""));
+    }
+
+    @Test
+    void joinWithOffsets_offsetsAware_positionGap_insertsStopwordFillerWithinGap() {
+        // ES indexed "i like the tree" — offsets are present: i=0..1, like=2..6, tree=11..15.
+        // Position gap between "like" and "tree" is 2 (=> one stopword needed). Character gap
+        // between like.endOffset=6 and tree.startOffset=11 is 5: " a   " (space + token + 3 pad
+        // spaces filling the residual offset gap).
+        List<TermEntry> entries = List.of(
+            te("i",    0,  0,  1),
+            te("like", 1,  2,  6),
+            te("tree", 3, 11, 15)
+        );
+        // Walk: prevEnd=0, "i" gap=0 -> ""; prevEnd=1, "like" gap=1 -> " "; prevEnd=6, "tree"
+        // gap=5, posGap=2, filler "a " consumes 1+2=3 chars => 2 trailing pad spaces.
+        // Final: "i like a   tree".
+        assertEquals("i like a   tree", LuceneLeafReader.joinWithOffsets(entries, "a"));
+    }
+
+    @Test
+    void joinWithOffsets_offsetsAware_consecutivePositions_unchangedByStopword() {
+        // No position gap (every increment is 1) -> stopword has nothing to fill, output is
+        // identical to legacy behaviour.
+        List<TermEntry> entries = List.of(
+            te("date", 0, 0, 4),
+            te("wed",  1, 6, 9)
+        );
+        assertEquals("date  wed", LuceneLeafReader.joinWithOffsets(entries, "a"));
+        assertEquals("date  wed", LuceneLeafReader.joinWithOffsets(entries, null));
+    }
+
+    @Test
+    void joinWithOffsets_offsetsAware_fillerLongerThanGap_doesNotAddNegativeSpaces() {
+        // Pathological case: configured stopword is longer than the original offset gap. The
+        // filler still goes in (preserving position semantics) but the residual-padding loop
+        // must not append negative spaces. Resulting string may be longer than the original
+        // surface form — acceptable: the slop/proximity contract trumps surface fidelity.
+        List<TermEntry> entries = List.of(
+            te("a",    0, 0, 1),
+            te("tree", 3, 2, 6)   // posGap=3 -> needs 2 fillers
+        );
+        // gap=1, posGap=3, filler="stopword" len=8, requested chars = 1 + 2*(8+1) = 19.
+        // remaining = 1 - 19 = -18 -> the for(int s=0; s<remaining; s++) loop is a no-op.
+        assertEquals("a stopword stopword tree",
+            LuceneLeafReader.joinWithOffsets(entries, "stopword"));
+    }
 }
