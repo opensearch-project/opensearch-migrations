@@ -1,0 +1,26 @@
+
+Configure your migration
+Step 1 / 7
+
+> Source endpoint
+    > h
+
+  Source engine
+    > e
+
+  Source engine version
+    > 7
+
+  Source auth method
+    > n
+
+  Source auth ref
+    > k
+
+  Approximate source size
+    > 1
+
+  Target type
+    > n
+
+  Tab/Shift+Tab to move · Enter to submit · Esc to cancel

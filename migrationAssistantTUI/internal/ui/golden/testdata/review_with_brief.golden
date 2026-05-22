@@ -1,0 +1,13 @@
+
+Review handoff brief
+
+Stage:        dev
+AWS Account:  123456789012
+Region:       us-east-1
+EKS Cluster:  ma-cluster
+Namespace:    ma
+Source:       (unset) (unset) @ (unset)
+Target:       (unset) @ (unset)
+Approx size:  (unset)
+
+Press Enter to deploy · Esc to go back

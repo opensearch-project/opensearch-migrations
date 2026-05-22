@@ -1,0 +1,10 @@
+
+Deploying migration assistant
+
+     preflight — Validate AWS credentials pending
+     imageops — Push container images pending
+     nodepool — Provision EKS node pool pending
+     helm — Install MA Helm chart pending
+     smoke — Run smoke checks pending
+
+  Esc to cancel.

@@ -1,0 +1,9 @@
+
+OpenSearch Migration Assistant
+version 3.2.1
+
+  Migration Assistant guides you from cluster bootstrap to a
+  ready-to-run migration. Each step writes a structured handoff
+  brief; agents pick up where you leave off.
+
+  Press Enter to begin.
