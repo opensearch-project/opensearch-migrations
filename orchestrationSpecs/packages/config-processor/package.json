@@ -16,7 +16,8 @@
     "dev-transform": "tsx src/runMigrationConfigTransformer.ts",
     "bundle": "node makeBundle.js",
     "check-and-bundle": "npm run type-check && npm run test && npm run bundle",
-    "test": "jest --coverage --config ./jest.config.js"
+    "test": "jest --coverage --config ./jest.config.js",
+    "test:integ:crds": "jest --config ./jest.integ.config.js --runTestsByPath tests/integ/generatedMigrationCrds.integ.test.ts"
   },
   "dependencies": {
     "@opensearch-migrations/schemas": "*",
@@ -26,6 +27,7 @@
     "zod": "^4"
   },
   "devDependencies": {
+    "@testcontainers/k3s": "^11.12.0",
     "@types/jest": "*",
     "@types/node": "^24.0.13",
     "tsx": "^4.20.5",

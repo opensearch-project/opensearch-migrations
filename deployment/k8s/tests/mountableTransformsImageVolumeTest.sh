@@ -101,12 +101,12 @@ cat > "${TRANSFORMS_DIR}/helpers/helper.py" <<'EOF'
 VALUE = "mountable_transform_seen"
 EOF
 
-PACKAGE_OUTPUT="$(deployment/k8s/package-transforms.sh "${TRANSFORMS_DIR}" "${IMAGE_REPO}" "${IMAGE_TAG}")"
+PACKAGE_OUTPUT="$(deployment/k8s/package-transforms.sh "${TRANSFORMS_DIR}" "${IMAGE_REPO}" "${IMAGE_TAG}" --output json)"
 echo "${PACKAGE_OUTPUT}"
 
-PINNED_REF="$(printf '%s\n' "${PACKAGE_OUTPUT}" | sed -n 's/^[[:space:]]*image: "\(.*\)"/\1/p' | tail -1)"
+PINNED_REF="$(printf '%s\n' "${PACKAGE_OUTPUT}" | jq -r '.image // empty')"
 if [[ -z "${PINNED_REF}" ]]; then
-  echo "Unable to determine digest-pinned transform image reference from package output." >&2
+  echo "Unable to determine digest-pinned transform image reference from package JSON output." >&2
   exit 1
 fi
 
