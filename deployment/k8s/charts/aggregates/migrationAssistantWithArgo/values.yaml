@@ -242,6 +242,19 @@ charts:
       podDisruptionBudget:
         enabled: true
         minAvailable: 1
+      # Soft anti-affinity so the 2 replicas + PDB above can actually keep at
+      # least one ready endpoint across node loss. Without this both replicas
+      # may land on one node, defeating the HA budget.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: cert-manager
+                    app.kubernetes.io/component: controller
+                topologyKey: kubernetes.io/hostname
       resources:
         requests: { cpu: 50m, memory: 64Mi }
         limits:   { cpu: 250m, memory: 128Mi }
@@ -250,6 +263,16 @@ charts:
         podDisruptionBudget:
           enabled: true
           minAvailable: 1
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/instance: cert-manager
+                      app.kubernetes.io/component: cainjector
+                  topologyKey: kubernetes.io/hostname
         resources:
           requests: { cpu: 50m, memory: 64Mi }
           limits:   { cpu: 250m, memory: 128Mi }
@@ -258,6 +281,16 @@ charts:
         podDisruptionBudget:
           enabled: true
           minAvailable: 1
+        affinity:
+          podAntiAffinity:
+            preferredDuringSchedulingIgnoredDuringExecution:
+              - weight: 100
+                podAffinityTerm:
+                  labelSelector:
+                    matchLabels:
+                      app.kubernetes.io/instance: cert-manager
+                      app.kubernetes.io/component: webhook
+                  topologyKey: kubernetes.io/hostname
         resources:
           requests: { cpu: 50m, memory: 64Mi }
           limits:   { cpu: 100m, memory: 128Mi }
