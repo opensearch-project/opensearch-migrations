@@ -5,6 +5,7 @@ Test IDs 0031-0039 are reserved for CDC variants.
 import logging
 import subprocess
 import time
+from typing import Optional
 
 from kubernetes import client, config as k8s_config
 from kubernetes.client.rest import ApiException
@@ -363,6 +364,224 @@ def run_generate_data(cluster: str, index_name: str, num_docs: int):
     if result.returncode != 0:
         raise RuntimeError(f"generate-data failed (exit {result.returncode}): {result.stderr}")
     logger.info("generate-data output: %s", result.stdout.strip())
+
+
+def _run_describe_consumer_group(group_name: Optional[str],
+                                 probe_timeout_seconds: int = 15) -> Optional[str]:
+    """Run `console kafka describe-consumer-group` and return its stdout, or
+    None if the group does not exist / the command failed / timed out.
+
+    Caller decides what counts as a successful describe — this helper only
+    handles transport-level failures.
+    """
+    cmd = ["console", "kafka", "describe-consumer-group"]
+    if group_name is not None:
+        cmd.append(group_name)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=probe_timeout_seconds)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+    if result.returncode != 0:
+        return None
+    out = (result.stdout or "")
+    if "does not exist" in out:
+        return None
+    return out
+
+
+def _iter_native_describe_rows(describe_output: str):
+    """Yield column-name -> token dicts for each data row of the native
+    `kafka-consumer-groups.sh --describe` table embedded in describe_output.
+
+    The augmented `PARTITION TIME LAG` section is skipped because it has its
+    own header. We anchor on the native header row (`GROUP TOPIC PARTITION
+    CURRENT-OFFSET LOG-END-OFFSET LAG ...`) and split subsequent non-blank
+    rows by whitespace; rows shorter than the header are ignored.
+    """
+    header_indices = None
+    for raw in describe_output.splitlines():
+        line = raw.strip()
+        if not line:
+            header_indices = None
+            continue
+        tokens = line.split()
+        if header_indices is None:
+            if tokens[0] == "GROUP" and "PARTITION" in tokens and "CURRENT-OFFSET" in tokens:
+                header_indices = {tok: i for i, tok in enumerate(tokens)}
+            continue
+        # Skip the augmented "PARTITION TIME LAG" sub-table: its header starts
+        # with TOPIC, not GROUP, so we drop the native header on a blank line
+        # (above) and refuse to parse rows under a non-native header here.
+        if "GROUP" not in header_indices:
+            continue
+        if len(tokens) <= max(header_indices.values()):
+            continue
+        yield {col: tokens[idx] for col, idx in header_indices.items()}
+
+
+def _consumer_group_max_lag(group_name: Optional[str] = None,
+                            probe_timeout_seconds: int = 15) -> Optional[int]:
+    """Return the maximum LAG across all partitions in the consumer-group
+    describe table, or None if the group is missing / the describe failed /
+    no parseable LAG values are present.
+
+    A row whose LAG is `-` (no committed offset yet) is treated as unbounded
+    lag and forces the function to return None — callers will keep polling
+    until at least one commit lands.
+    """
+    out = _run_describe_consumer_group(group_name, probe_timeout_seconds)
+    if out is None:
+        return None
+    saw_row = False
+    max_lag: Optional[int] = None
+    for row in _iter_native_describe_rows(out):
+        saw_row = True
+        token = row.get("LAG", "-")
+        if token in ("-", ""):
+            return None
+        try:
+            value = int(token)
+        except ValueError:
+            return None
+        if max_lag is None or value > max_lag:
+            max_lag = value
+    return max_lag if saw_row else None
+
+
+class ReplayLagDrainTimeout(AssertionError):
+    """Raised when the replayer consumer-group fails to drain to the requested
+    max-lag threshold within the configured timeout.
+
+    Inherits from AssertionError so it surfaces as a test failure in CI
+    reports, not an infrastructure error.
+    """
+
+
+def _wait_for_consumer_group_caught_up(group_name: Optional[str], label: str,
+                                       max_allowed_lag: int,
+                                       timeout_seconds: int,
+                                       interval_seconds: float = 3.0) -> tuple:
+    """Bounded poll until the group's max per-partition LAG drops to <=
+    `max_allowed_lag`. Returns (succeeded: bool, last_observed: Optional[int]).
+
+    LAG=`-` on any partition (no commit yet) keeps the wait polling — the
+    time-lag table is uninformative until at least one auto-commit lands.
+
+    The replayer's in-order commit constraint (OffsetLifecycleTracker) can
+    keep LAG=1 around well after every response landed on the target because
+    the head-of-line TrafficStream may still be in flight. Callers usually
+    pass `max_allowed_lag=1` so a fully-replayed run isn't reported as still
+    behind.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    attempt = 0
+    last_observed: Optional[int] = None
+    display_name = group_name if group_name is not None else "<workflow-resolved>"
+    while time.monotonic() < deadline:
+        attempt += 1
+        observed = _consumer_group_max_lag(group_name)
+        last_observed = observed
+        if observed is not None and observed <= max_allowed_lag:
+            logger.info("[%s] Consumer group '%s' max LAG=%d (<=%d) after %d probe(s)",
+                        label, display_name, observed, max_allowed_lag, attempt)
+            return True, observed
+        time.sleep(interval_seconds)
+    logger.warning(
+        "[%s] Consumer group '%s' did not reach LAG<=%d within %ds (last observed=%s); "
+        "the snapshot below shows the still-behind state.",
+        label, display_name, max_allowed_lag, timeout_seconds,
+        "<unparsed>" if last_observed is None else last_observed,
+    )
+    return False, last_observed
+
+
+def _emit_describe_snapshot(label: str, group_name: Optional[str],
+                            timeout_seconds: int) -> None:
+    """Run `console kafka describe-consumer-group` once and log the output.
+
+    Infrastructure-level failures (timeout, missing CLI, non-zero exit) are
+    logged but never raised — those would mask real test failures.
+    """
+    cmd = ["console", "kafka", "describe-consumer-group"]
+    if group_name is not None:
+        cmd.append(group_name)
+    logger.info("[%s] Running: %s", label, " ".join(cmd))
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        logger.warning("[%s] '%s' timed out after %ds; continuing.",
+                       label, " ".join(cmd), timeout_seconds)
+        return
+    except FileNotFoundError:
+        logger.warning("[%s] 'console' CLI not found on PATH; skipping consumer-group describe.",
+                       label)
+        return
+
+    stdout = (result.stdout or "").rstrip()
+    stderr = (result.stderr or "").rstrip()
+    if result.returncode != 0:
+        logger.warning("[%s] describe-consumer-group exited with %d. stdout:\n%s\nstderr:\n%s",
+                       label, result.returncode, stdout, stderr)
+        return
+    if stderr:
+        logger.info("[%s] describe-consumer-group stderr:\n%s", label, stderr)
+    logger.info("[%s] describe-consumer-group output:\n%s", label, stdout)
+
+
+def log_kafka_consumer_group_state(label: str, group_name: Optional[str] = None,
+                                   timeout_seconds: int = 120) -> None:
+    """Pure snapshot: run `console kafka describe-consumer-group` and log
+    its output (including the per-partition TIME LAG section). Used for
+    in-progress checkpoints like [replay-start] where the replayer hasn't
+    drained yet — no waits, no asserts.
+
+    `group_name=None` (the default) defers selection to the console CLI,
+    which resolves the workflow-managed group (`replayer-<targetLabel>` in
+    EKS) from the workflow config. Pass an explicit name to override.
+    """
+    _emit_describe_snapshot(label, group_name, timeout_seconds)
+
+
+def assert_replay_drained(label: str = "replay-end",
+                          group_name: Optional[str] = None,
+                          max_lag: int = 1,
+                          timeout_seconds: int = 600,
+                          describe_timeout_seconds: int = 120) -> None:
+    """Wait for the replayer consumer-group to drain to max per-partition
+    LAG <=`max_lag`, log the describe snapshot, and raise on timeout.
+
+    Use at the post-verification checkpoint ([replay-end]). Without this
+    assertion, `verify_clusters` happily passes when the target has the
+    expected docs even though the replayer never committed past offset 0
+    — a real failure mode we hit on EKS where a single in-flight
+    TrafficStream stalled the in-order commit chain forever.
+
+    `max_lag=1` (default) absorbs the in-order commit residue from
+    OffsetLifecycleTracker: a head-of-line in-flight TrafficStream can
+    keep LAG=1 indefinitely even after every response landed on the
+    target. Set higher only if you've consciously decided the test
+    tolerates more drift.
+
+    `timeout_seconds=600` (10min) covers production-shaped runs where
+    drain takes minutes after `check_doc_counts_match` returns. Override
+    if your test is bounded smaller.
+
+    Raises `ReplayLagDrainTimeout` (an AssertionError) on drain stall.
+    Infrastructure-level describe failures are logged but never raised.
+    """
+    drain_succeeded, last_lag = _wait_for_consumer_group_caught_up(
+        group_name, label,
+        max_allowed_lag=max_lag,
+        timeout_seconds=timeout_seconds,
+    )
+    _emit_describe_snapshot(label, group_name, describe_timeout_seconds)
+    if not drain_succeeded:
+        raise ReplayLagDrainTimeout(
+            f"[{label}] Replayer consumer-group did not drain to LAG<={max_lag} "
+            f"within {timeout_seconds}s "
+            f"(last observed max LAG={last_lag if last_lag is not None else '<unparsed>'}). "
+            f"See the snapshot logged above for per-partition state."
+        )
 
 
 def send_bulk(cluster, index_name: str, start: int, count: int):

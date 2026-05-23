@@ -827,11 +827,32 @@ def delete_topic_cmd(ctx, acknowledge_risk, topic_name):
             click.echo("Aborting command.")
 
 
+DEFAULT_LEGACY_CONSUMER_GROUP = "logging-group-default"
+
+
+def _resolve_default_consumer_group(env) -> str:
+    """Pick the consumer group `describe-consumer-group` uses when the caller
+    omits the argument.
+
+    Workflow-driven deployments (k8s/EKS) set group IDs of the form
+    `replayer-<targetLabel>` per fullMigration.ts; the legacy CDK/docker
+    deployments and the local dev environment use `logging-group-default`.
+    Prefer the workflow-resolved group when available so CDC integ tests
+    and operators don't have to memorize the deploy-specific name.
+    """
+    groups = list(getattr(env, "kafka_consumer_groups", None) or [])
+    if groups:
+        return groups[0]
+    return DEFAULT_LEGACY_CONSUMER_GROUP
+
+
 @kafka_group.command(name="describe-consumer-group")
-@click.argument('group_name', required=False, default="logging-group-default",
+@click.argument('group_name', required=False, default=None,
                 shell_complete=get_kafka_consumer_group_completions)
 @click.pass_obj
 def describe_group_command(ctx, group_name):
+    if group_name is None:
+        group_name = _resolve_default_consumer_group(ctx.env)
     result = kafka_.describe_consumer_group(ctx.env.kafka, group_name=group_name)
     click.echo(result.value)
 

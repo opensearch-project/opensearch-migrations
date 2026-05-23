@@ -1020,6 +1020,35 @@ def test_cli_kafka_describe_consumer_group(runner, mocker):
     assert result.exit_code == 0
 
 
+def test_cli_kafka_describe_consumer_group_falls_back_to_legacy_default(runner, mocker):
+    # No workflow-resolved groups => use the legacy default name. This keeps
+    # CDK/docker-compose deployments and the local dev path working unchanged.
+    model_mock = mocker.patch.object(StandardKafka, 'describe_consumer_group')
+    result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'describe-consumer-group'],
+                           catch_exceptions=True)
+    model_mock.assert_called_once_with(group_name='logging-group-default')
+    assert result.exit_code == 0
+
+
+def test_cli_kafka_describe_consumer_group_uses_resolved_group_when_present(runner, mocker):
+    # When the env was built from a workflow config containing replayers, the
+    # CLI default should be the workflow-resolved group, not the legacy name.
+    model_mock = mocker.patch.object(StandardKafka, 'describe_consumer_group')
+
+    real_env = Environment(config_file=VALID_SERVICES_YAML)
+    real_env.kafka_consumer_groups = ["replayer-prod-target", "replayer-staging-target"]
+
+    class _StubContext:
+        env = real_env
+
+    mocker.patch.object(cli_module, "Context", return_value=_StubContext())
+
+    result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'describe-consumer-group'],
+                           catch_exceptions=True)
+    model_mock.assert_called_once_with(group_name='replayer-prod-target')
+    assert result.exit_code == 0
+
+
 def test_cli_kafka_list_consumer_groups(runner, mocker):
     model_mock = mocker.patch.object(StandardKafka, 'list_consumer_groups')
     middleware_mock = mocker.spy(middleware.kafka, 'list_consumer_groups')
