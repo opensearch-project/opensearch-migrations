@@ -217,14 +217,26 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
 
     @Override
     public void onPartitionsAssigned(Collection<TopicPartition> newPartitions) {
-        // Flush pending cleanup even when no new partitions are assigned (all pending are truly lost)
-        if (newPartitions.isEmpty() && !pendingCleanupPartitions.isEmpty()) {
-            log.atInfo().setMessage("{} assigned no new partitions; flushing {} pending cleanup partitions as truly lost.")
-                .addArgument(this).addArgument(pendingCleanupPartitions::size).log();
+        // Drain pendingCleanupPartitions FIRST so synthetic closes carry the OLD generation,
+        // matching the session.generation set when channels were opened on that generation.
+        // If we bumped the generation first, the synthetic-close session keys would carry the
+        // NEW generation and onNetworkConnectionClosed (called with session.generation = OLD)
+        // would never find them, leaking outstandingTrafficSourceReaderInterruptedCloseSessions
+        // and permanently blocking real records.
+        //
+        // Every partition that round-tripped through pendingCleanupPartitions has had its
+        // fetch position reset to the last committed offset by the broker, so any in-flight
+        // accumulations are about to receive re-delivered records under a new generation.
+        // Treat ALL pending partitions as truly lost — including those reassigned back to us —
+        // so each in-flight connection gets a proper interrupted-close before the new records
+        // arrive.
+        if (!pendingCleanupPartitions.isEmpty()) {
             var trulyLost = new ArrayList<>(pendingCleanupPartitions);
             pendingCleanupPartitions.clear();
+            log.atInfo().setMessage("Treating {} pending partition(s) as truly lost (any round-trip " +
+                    "still resets fetch position to last committed offset): {}")
+                .addArgument(trulyLost::size).addArgument(trulyLost).log();
             onPartitionsTrulyLostCallback.accept(trulyLost);
-            return;
         }
         if (newPartitions.isEmpty()) {
             log.atInfo().setMessage("{} assigned no new partitions.").addArgument(this).log();
@@ -245,18 +257,6 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 .addArgument(this)
                 .addArgument(() -> newPartitions.stream().map(String::valueOf).collect(Collectors.joining(",")))
                 .log();
-        }
-        // Compute truly lost = pending cleanup - newly assigned
-        if (!pendingCleanupPartitions.isEmpty()) {
-            var newPartitionNums = newPartitions.stream().map(TopicPartition::partition).collect(Collectors.toSet());
-            var trulyLost = pendingCleanupPartitions.stream()
-                .filter(p -> !newPartitionNums.contains(p))
-                .collect(Collectors.toList());
-            pendingCleanupPartitions.clear();
-            if (!trulyLost.isEmpty()) {
-                log.atInfo().setMessage("Partitions truly lost (not reassigned): {}").addArgument(trulyLost).log();
-                onPartitionsTrulyLostCallback.accept(trulyLost);
-            }
         }
     }
 

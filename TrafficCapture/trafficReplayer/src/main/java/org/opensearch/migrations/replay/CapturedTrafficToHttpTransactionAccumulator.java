@@ -299,16 +299,17 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var partitionId = yetToBeSequencedTrafficStream.getNodeId();
         var connectionId = yetToBeSequencedTrafficStream.getConnectionId();
 
-        // If the incoming key has a higher generation than the stored accumulation, the partition
-        // was revoked and reassigned without a TrafficSourceReaderInterruptedClose being processed
-        // for this connection. This should not happen in normal operation — the interrupted-close
-        // path should have cleaned up the accumulation before new-generation data arrives.
-        // Log an error and discard the stale accumulation defensively.
+        // Defensive backstop: a higher generation means the partition was revoked and reassigned.
+        // The source layer (KafkaTrafficCaptureSource + TrackingKafkaConsumer) is responsible for
+        // injecting a TrafficSourceReaderInterruptedClose ahead of any new-generation records, so
+        // this branch should not fire in normal operation. If it does, log loudly and still close
+        // the connection through the interrupted-close path so the channel session is cancelled
+        // (preventing self-healing reconnects) before the re-delivered records create a fresh one.
         var existingAccum = liveStreams.getIfPresent(tsk);
         if (existingAccum != null && existingAccum.sourceGeneration < tsk.getSourceGeneration()) {
             log.atError().setMessage("Stale accumulation found for {}:{} (stored gen={}, incoming gen={}) — " +
-                    "TrafficSourceReaderInterruptedClose was not processed for this connection. " +
-                    "This indicates a gap in interrupted-close coverage.")
+                    "TrafficSourceReaderInterruptedClose was not delivered for this connection before " +
+                    "the new-generation record arrived. This indicates a gap in source-layer interrupted-close coverage.")
                 .addArgument(partitionId)
                 .addArgument(connectionId)
                 .addArgument(existingAccum.sourceGeneration)
@@ -316,7 +317,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 .log();
             fireAccumulationsCallbacksAndClose(
                 existingAccum,
-                RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY
+                RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED
             );
             liveStreams.remove(partitionId, connectionId);
         }

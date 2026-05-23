@@ -327,8 +327,9 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             java.util.concurrent.locks.LockSupport.parkNanos(5_000_000); // yield for up to 5 ms
             return Collections.emptyList();
         }
+        List<ITrafficStreamWithKey> records;
         try {
-            return trackingKafkaConsumer.getNextBatchOfRecords(context, (offsetData, kafkaRecord) -> {
+            records = trackingKafkaConsumer.getNextBatchOfRecords(context, (offsetData, kafkaRecord) -> {
                 try {
                     TrafficStream ts = TrafficStream.parseFrom(kafkaRecord.value());
                     var trafficStreamsSoFar = trafficStreamsRead.incrementAndGet();
@@ -378,6 +379,27 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             log.atError().setCause(e).setMessage("Terminating Kafka traffic stream due to exception").log();
             throw e;
         }
+        // A rebalance can fire inline during kafkaConsumer.poll() above. When it does,
+        // onPartitionsRevoked / onPartitionsAssigned enqueue synthetic closes for the in-flight
+        // connections and bump the consumer generation, so any records returned from the same
+        // poll carry the NEW generation. If we returned those records without delivering the
+        // synthetic closes first, the accumulator would see new-generation records against
+        // old-generation accumulations and trip its defensive backstop. Drain every synthetic
+        // close batch enqueued during the poll and prepend them so the accumulator processes
+        // them in order before any new-generation records.
+        var prepended = new ArrayList<ITrafficStreamWithKey>();
+        for (var batch = trafficSourceReaderInterruptedCloseQueue.poll();
+             batch != null;
+             batch = trafficSourceReaderInterruptedCloseQueue.poll()) {
+            prepended.addAll(batch);
+        }
+        if (prepended.isEmpty()) {
+            return records;
+        }
+        log.atInfo().setMessage("Rebalance during poll: prepending {} synthetic close(s) to {} record(s)")
+            .addArgument(prepended::size).addArgument(records::size).log();
+        prepended.addAll(records);
+        return Collections.unmodifiableList(prepended);
     }
 
     @Override
