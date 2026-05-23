@@ -38,7 +38,10 @@ ElasticsearchV8_X = ClusterVersion("ES_8.x")
 OpensearchV1_X = ClusterVersion("OS_1.x")
 OpensearchV2_X = ClusterVersion("OS_2.x")
 OpensearchV3_X = ClusterVersion("OS_3.x")
+SolrV6_X = ClusterVersion("SOLR_6.x")
+SolrV7_X = ClusterVersion("SOLR_7.x")
 SolrV8_X = ClusterVersion("SOLR_8.x")
+SolrV9_X = ClusterVersion("SOLR_9.x")
 
 
 def build_combinations(sources, targets):

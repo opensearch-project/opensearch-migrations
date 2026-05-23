@@ -165,11 +165,32 @@ class SolrTransformerProviderTest {
     }
 
     @Test
-    void createTransformer_missingBindingsObject_throws() {
+    void createTransformer_missingBindingsObject_succeeds() {
         var config = new LinkedHashMap<String, Object>();
         config.put("initializationScript", IDENTITY_SCRIPT);
         var provider = new SolrTransformerProvider();
-        assertThrows(IllegalArgumentException.class, () -> provider.createTransformer(config));
+        var transformer = provider.createTransformer(config);
+        assertNotNull(transformer);
+    }
+
+    @Test
+    void createTransformer_objectBindings() {
+        var script = "(function(bindings) { return function(msg) { " +
+            "msg.set('customKey', bindings.customKey); " +
+            "return msg; }; })";
+
+        var config = new LinkedHashMap<String, Object>();
+        config.put("initializationScript", script);
+        config.put("bindingsObject", Map.of("customKey", "from-object"));
+
+        var provider = new SolrTransformerProvider();
+        var transformer = provider.createTransformer(config);
+
+        var input = new LinkedHashMap<String, Object>();
+        input.put("URI", "/test");
+        @SuppressWarnings("unchecked")
+        var result = (Map<String, Object>) transformer.transformJson(input);
+        assertEquals("from-object", result.get("customKey"));
     }
 
     @Test

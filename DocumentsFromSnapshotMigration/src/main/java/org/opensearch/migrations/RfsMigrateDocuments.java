@@ -2,6 +2,7 @@ package org.opensearch.migrations;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
@@ -1064,6 +1065,17 @@ public class RfsMigrateDocuments {
                         finalS3Repo.downloadPrefix(dataRoot + "/" + resolved.latestZkBackupName());
                         log.atInfo().setMessage("Downloading shard metadata for collection '{}' from S3").addArgument(collection).log();
                         finalS3Repo.downloadPrefix(dataRoot + "/shard_backup_metadata");
+                        // Solr 6: create local stub dirs for snapshot.shardN/ so shard
+                        // discovery can count them before index files are downloaded.
+                        finalS3Repo.listSubDirectories(dataRoot).stream()
+                            .filter(name -> name.startsWith("snapshot."))
+                            .forEach(snapshotDirName -> {
+                                try {
+                                    Files.createDirectories(finalBackupDir.resolve(dataRoot).resolve(snapshotDirName));
+                                } catch (IOException e) {
+                                    log.warn("Failed to create snapshot stub dir {}/{}", dataRoot, snapshotDirName, e);
+                                }
+                            });
                     } else {
                         log.warn("No zk_backup directories found for collection '{}' in S3", collection);
                     }
@@ -1087,9 +1099,14 @@ public class RfsMigrateDocuments {
                         finalS3Repo.downloadFile(collectionDataPrefix + "/index/" + uuid);
                     }
                 } else {
+                    // Non-UUID layout: Solr 6 uses snapshot.shardN/ dirs at the collection
+                    // root; Solr 8 non-incremental uses a single index/ dir.
                     log.atInfo().setMessage("Downloading index data for shard '{}/{}' from S3")
                         .addArgument(partition.collection()).addArgument(partition.shard()).log();
-                    finalS3Repo.downloadPrefix(collectionDataPrefix + "/index");
+                    var shardPath = partition.shard().startsWith("snapshot.")
+                        ? collectionDataPrefix + "/" + partition.shard()
+                        : collectionDataPrefix + "/index";
+                    finalS3Repo.downloadPrefix(shardPath);
                 }
             } : null;
 

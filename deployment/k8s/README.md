@@ -29,10 +29,11 @@ $(git rev-parse --show-toplevel)/deployment/k8s/localTesting.sh
 
 Install prerequisites (see below), including `kind`.
 
-This script creates a `kind` cluster, starts or reuses an external local
-registry at `localhost:5002` by default, starts or reuses an external `buildkitd`
-container, builds the project images into that registry, and installs the same
-helm charts used by the Minikube flow.
+This script creates a `kind` cluster, starts or reuses the shared docker-hosted
+`docker-registry` container at `localhost:5001` (the same one `localTesting.sh`
+uses), starts or reuses an external `buildkitd` container, builds the project
+images into that registry, and installs the same helm charts used by the
+Minikube flow.
 
 ```bash
 echo "Will create/reuse a kind cluster, build images, and install the MA helm chart for those images"
@@ -111,17 +112,15 @@ A convenience script `minikubeLocal.sh` is located in this directory which wraps
 Install `kind` from the upstream release or your package manager of choice.
 The `kindTesting.sh` script assumes the cluster is created from
 [kindClusterConfig.yaml](kindClusterConfig.yaml), which configures kind to pull
-project images from the local registry mirror at `localhost:5002` by default.
+project images from the local registry mirror at `localhost:5001`.
 
-The local testing scripts use different build backends:
-* `localTesting.sh` uses the `k8sHosted` backend, with BuildKit and the registry running in Kubernetes.
-* `kindTesting.sh` uses the `dockerHosted` backend, with `docker-registry` and `buildkitd` running as Docker containers and kind nodes pulling from that registry.
+Both local flows use the same docker-hosted backend:
+* `localTesting.sh` (minikube) and `kindTesting.sh` (kind) source `buildImages/backends/dockerHostedBuildkit.sh`. They share a single `docker-registry` container on the `local-migrations-network` Docker network. Host-side `docker buildx` pushes to `localhost:5001`; pods inside the cluster pull by the in-cluster DNS name `docker-registry:5000`. The cluster's nodes are joined to `local-migrations-network` so the name resolves via Docker's bridge DNS. Plain HTTP is allowed on the in-cluster endpoint — for kind via a containerd `hosts.toml`, for minikube via `--insecure-registry=docker-registry:5000`.
+* EKS / GKE / AKS use `buildImages/backends/eksKubernetesBuildkit.sh`, which spins up amd64 + arm64 buildkit Pods directly via `docker buildx --driver=kubernetes` on the cluster's `build-nodepool`.
 
 Those backend implementations live under [buildImages/backends](../../buildImages/backends), which keeps image-build orchestration with the build tooling.
 
-This split allows the two local flows to coexist on one host by default:
-* Minikube keeps using host port `5001`
-* `kind` uses host port `5002`
+Because kind and minikube share one `docker-registry` container, you cannot run both clusters simultaneously on the same host — but image layers and the buildkit cache are reused across them.
 
 If you want the kind cluster to run on OrbStack instead of Docker Desktop,
 switch the active Docker context before running the script so `docker` and

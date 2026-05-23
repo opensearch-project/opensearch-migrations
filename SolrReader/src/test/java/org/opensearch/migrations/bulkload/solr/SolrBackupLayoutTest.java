@@ -71,6 +71,21 @@ class SolrBackupLayoutTest {
     }
 
     @Test
+    void containsBackupDataMarkers_solr6SnapshotShardDir() throws IOException {
+        // Solr 6 SolrCloud backup contains snapshot.shardN directories — these should
+        // be recognised as backup data markers so resolveCollectionDataDir returns the
+        // correct collection directory without descending an extra level.
+        var collectionDir = tempDir.resolve("myCollection");
+        Files.createDirectories(collectionDir.resolve("snapshot.shard1"));
+        Files.createDirectories(collectionDir.resolve("snapshot.shard2"));
+        Files.createFile(collectionDir.resolve("backup.properties"));
+
+        // resolveCollectionDataDir should return collectionDir itself (not descend further)
+        var resolved = SolrBackupLayout.resolveCollectionDataDir(collectionDir);
+        assertThat(resolved, equalTo(collectionDir));
+    }
+
+    @Test
     void findLatestZkBackup_numberedRevisionWinsOverBare() throws IOException {
         // If both numbered and unnumbered zk_backups exist (highly unusual), the
         // numbered one takes precedence — newer Solr versions are authoritative.

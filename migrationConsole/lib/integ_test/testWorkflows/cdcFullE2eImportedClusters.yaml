@@ -26,6 +26,10 @@ spec:
         value: "20"
       - name: observed-packet-timeout
         value: "30"
+      - name: transforms-sources
+        value: "{}"
+      - name: replayer-config-overrides
+        value: "{}"
 
   templates:
     - name: main
@@ -33,6 +37,34 @@ spec:
         parameters:
           - name: source-configs
           - name: target-config
+          - name: transforms-sources
+            default: "{}"
+          - name: replayer-config-overrides
+            default: "{}"
+          - name: tupleS3Region
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: AWS_REGION
+          - name: useLocalStack
+            default: "false"
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: USE_LOCAL_STACK
+                optional: true
+          - name: tupleS3Endpoint
+            default: ""
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: ENDPOINT_HTTP
+                optional: true
+          - name: tupleS3BucketName
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.s3-snapshot-configmap}}"
+                key: BUCKET_NAME
           - name: imageMigrationConsoleLocation
             valueFrom:
               configMapKeyRef:
@@ -54,6 +86,8 @@ spec:
                   value: "{{inputs.parameters.source-configs}}"
                 - name: target-config
                   value: "{{inputs.parameters.target-config}}"
+                - name: transforms-sources
+                  value: "{{inputs.parameters.transforms-sources}}"
                 - name: imageMigrationConsoleLocation
                   value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
                 - name: imageMigrationConsolePullPolicy
@@ -75,6 +109,16 @@ spec:
                   value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
                 - name: imageMigrationConsolePullPolicy
                   value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                - name: replayer-config-overrides
+                  value: "{{inputs.parameters.replayer-config-overrides}}"
+                - name: tupleS3Region
+                  value: "{{inputs.parameters.tupleS3Region}}"
+                - name: useLocalStack
+                  value: "{{inputs.parameters.useLocalStack}}"
+                - name: tupleS3Endpoint
+                  value: "{{inputs.parameters.tupleS3Endpoint}}"
+                - name: tupleS3BucketName
+                  value: "{{inputs.parameters.tupleS3BucketName}}"
 
         - - name: run-full-migration-with-workflow-cli
             templateRef:

@@ -8560,6 +8560,7 @@ export type ReplicaSet = IoK8SApiAppsV113;
 export type StatefulSet = IoK8SApiAppsV118;
 export type Job = IoK8SApiBatchV111;
 export type CronJob = IoK8SApiBatchV1;
+export type JobTemplateSpec = IoK8SApiBatchV12;
 
 // Clean type aliases for commonly used types
 export type Container = IoK8SApiCoreV137;
