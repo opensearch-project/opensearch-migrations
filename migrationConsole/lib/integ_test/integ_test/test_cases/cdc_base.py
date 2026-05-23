@@ -6,7 +6,7 @@ import logging
 import subprocess
 import time
 
-from kubernetes import client, config as k8s_config, watch
+from kubernetes import client, config as k8s_config
 
 from console_link.models.cluster import Cluster
 
@@ -43,11 +43,17 @@ def is_pod_ready(pod) -> bool:
     return False
 
 
+_POD_READY_HEARTBEAT_SECONDS = 30
+
+
 def wait_for_pod_ready(namespace: str, label_selector: str, timeout_seconds: int = 1200):
     """Wait until a pod matching the label selector is Running and Ready.
 
-    Uses the K8s Watch API for event-driven detection.
-    Equivalent to: kubectl wait --for=condition=Ready pod -l <label> -n <ns>
+    Heartbeats once per `_POD_READY_HEARTBEAT_SECONDS` so a stuck wait surfaces
+    in the pytest log instead of a 60-minute silent gap, and dumps
+    `kubectl describe`/events on timeout so the eventual TimeoutError carries
+    enough context to identify the cause (ImagePullBackOff, FailedScheduling,
+    parent CR never created the pod, etc.).
     """
     load_k8s_config()
     v1 = client.CoreV1Api()
@@ -55,28 +61,43 @@ def wait_for_pod_ready(namespace: str, label_selector: str, timeout_seconds: int
     logger.info("Waiting for pod with label '%s' to be Ready (timeout=%ds)...",
                 label_selector, timeout_seconds)
 
-    pods = v1.list_namespaced_pod(namespace, label_selector=label_selector)
-    for pod in pods.items:
-        if is_pod_ready(pod):
-            logger.info("Pod %s is already Running and Ready", pod.metadata.name)
-            return
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        pods = v1.list_namespaced_pod(namespace, label_selector=label_selector)
+        for pod in pods.items:
+            if is_pod_ready(pod):
+                logger.info("Pod %s is Running and Ready", pod.metadata.name)
+                return
+        elapsed = int(time.monotonic() - (deadline - timeout_seconds))
+        logger.info("Still waiting for %s ready (elapsed=%ds, timeout=%ds); pods=%s",
+                    label_selector, elapsed, timeout_seconds,
+                    [(p.metadata.name, p.status.phase) for p in pods.items] or "<none>")
+        time.sleep(_POD_READY_HEARTBEAT_SECONDS)
 
-    # Resume watch from where the list left off
-    w = watch.Watch()
-    for event in w.stream(v1.list_namespaced_pod,
-                          namespace=namespace,
-                          label_selector=label_selector,
-                          resource_version=pods.metadata.resource_version,
-                          timeout_seconds=timeout_seconds):
-        pod = event["object"]
-        if is_pod_ready(pod):
-            logger.info("Pod %s is Running and Ready", pod.metadata.name)
-            w.stop()
-            return
-        logger.debug("Pod event %s pod=%s phase=%s",
-                     event["type"], pod.metadata.name, pod.status.phase or "Unknown")
-
+    _dump_pod_diagnostics(namespace, label_selector)
     raise TimeoutError(f"No pod with label '{label_selector}' reached Ready within {timeout_seconds}s")
+
+
+def _dump_pod_diagnostics(namespace: str, label_selector: str) -> None:
+    """Best-effort diagnostic dump on pod-readiness timeout.
+
+    `kubectl describe` exposes container waiting-reason + recent pod events;
+    `kubectl get events --field-selector=type!=Normal` exposes scheduler /
+    kubelet errors (FailedScheduling, FailedMount). Failures here are
+    swallowed so they can't mask the underlying TimeoutError.
+    """
+    cmds = (
+        ["kubectl", "describe", "pod", "-l", label_selector, "-n", namespace],
+        ["kubectl", "get", "events", "-n", namespace,
+         "--sort-by=.lastTimestamp", "--field-selector=type!=Normal"],
+    )
+    for cmd in cmds:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.stdout.strip():
+                logger.warning("$ %s\n%s", " ".join(cmd), result.stdout.rstrip())
+        except Exception as e:  # noqa: BLE001 — diagnostic must not raise
+            logger.warning("$ %s failed: %s", " ".join(cmd), e)
 
 
 def wait_for_replayer_consuming(namespace: str, timeout_seconds: int = 120, interval: int = 5):
