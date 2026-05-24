@@ -33,6 +33,6 @@
                   $VALUE_PARAM
 {{- end }}
               }
-              retry 2 15 "helm upgrade --install {{ $name }}" -- do_install_{{ $name | replace "-" "_" }}
+              retry "$HELM_INSTALL_RETRY_ATTEMPTS" "$HELM_INSTALL_RETRY_SLEEP_SECONDS" "helm upgrade --install {{ $name }}" -- do_install_{{ $name | replace "-" "_" }}
               touch /tmp/helm-status/{{ $name }}.done
 {{- end }}
