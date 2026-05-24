@@ -487,6 +487,34 @@ def test_cli_cluster_generate_data_proxy(runner, mocker, proxy_enabled_yaml_path
     assert result.exit_code == 0
 
 
+def test_cli_cluster_generate_data_partial_insert_exits_nonzero(runner, mocker, proxy_enabled_yaml_path):
+    # Regression test: when bulk_insert_data bails early after persistent failures (e.g.
+    # sigv4-via-proxy 403s on the AOSS test pipeline), the CLI must exit non-zero so the
+    # integ test sees a clear error in <30s instead of waiting for an outer subprocess
+    # timeout to fire 5 minutes later.
+    mocker.patch('importlib.util.module_from_spec').return_value.bulk_insert_data = mocker.Mock(
+        return_value={
+            'total_inserted': 0,
+            'total_errors': 50,
+            'elapsed_time': 1.0,
+            'docs_per_sec': 0.0,
+            'estimated_size_mb': 0.0,
+        }
+    )
+    mocker.patch('importlib.util.spec_from_file_location').return_value.loader.exec_module = mocker.Mock()
+    mocker.patch('os.path.exists', return_value=True)
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(proxy_enabled_yaml_path), 'clusters', 'generate-data',
+         '--cluster', 'proxy', '--index-name', 'test-index', '--num-docs', '50'],
+        catch_exceptions=True,
+    )
+
+    assert result.exit_code != 0
+    assert 'Inserted 0 of 50' in result.output
+
+
 def test_cli_cluster_clear_indices(runner, mocker):
     mock = mocker.patch('console_link.middleware.clusters.clear_indices')
     result = runner.invoke(cli,

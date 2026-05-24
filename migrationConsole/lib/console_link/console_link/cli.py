@@ -437,7 +437,7 @@ def generate_data_cmd(ctx, cluster, index_name, doc_size_bytes, num_docs, target
         
         # Execute bulk data generation
         result = bulk_insert_data(cluster_obj, index_name, num_docs, doc_size_bytes, batch_size)
-        
+
         # Display results
         click.echo("\nData generation completed:")
         click.echo(f"  Documents inserted: {result['total_inserted']:,}")
@@ -445,9 +445,18 @@ def generate_data_cmd(ctx, cluster, index_name, doc_size_bytes, num_docs, target
         click.echo(f"  Time elapsed: {result['elapsed_time']:.1f}s")
         click.echo(f"  Rate: {result['docs_per_sec']:.1f} docs/sec")
         click.echo(f"  Estimated size: {result['estimated_size_mb']:.1f}MB")
-        
+
         if result['total_errors'] > 0:
             click.echo(f"Warning: {result['total_errors']} documents failed to insert")
+
+        # Exit non-zero when not all documents were inserted, so callers (integ tests)
+        # can fail fast with the actual error message instead of waiting for an outer
+        # subprocess timeout to fire.
+        if result['total_inserted'] < num_docs:
+            raise click.ClickException(
+                f"Inserted {result['total_inserted']:,} of {num_docs:,} requested documents "
+                f"({result['total_errors']:,} errors). See log output above for the failure cause."
+            )
             
     except ImportError as e:
         raise click.ClickException(f"Failed to import bulk data generation module: {e}")
