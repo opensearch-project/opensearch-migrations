@@ -193,11 +193,11 @@ class TestRunner:
         log_file = f"/tmp/{self.unique_id}_pytest.log"
         exit_code_file = f"/tmp/{self.unique_id}_exit_code"
 
-        self.k8s_service.exec_background_cmd(
+        background_pod = self.k8s_service.exec_background_cmd(
             command_list=command_list, log_file=log_file, exit_code_file=exit_code_file)
 
         exit_code = self.k8s_service.poll_cmd_completion(
-            log_file=log_file, exit_code_file=exit_code_file)
+            log_file=log_file, exit_code_file=exit_code_file, expected_console_pod=background_pod)
 
         output_file_path = f"/root/lib/integ_test/results/{self.unique_id}/test_report.json"
         logger.info(f"Retrieving test report at {output_file_path}")
