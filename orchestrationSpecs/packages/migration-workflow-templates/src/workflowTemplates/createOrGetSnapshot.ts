@@ -61,6 +61,8 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
         .addRequiredInput("semaphoreConfigMapName", typeToken<string>())
         .addRequiredInput("semaphoreKey", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("dataSnapshotName", typeToken<string>())
+        .addRequiredInput("dataSnapshotUid", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
@@ -83,7 +85,9 @@ export const CreateOrGetSnapshot = WorkflowBuilder.create({
                         })
                     ),
                     semaphoreConfigMapName: b.inputs.semaphoreConfigMapName,
-                    semaphoreKey: b.inputs.semaphoreKey
+                    semaphoreKey: b.inputs.semaphoreKey,
+                    dataSnapshotName: b.inputs.dataSnapshotName,
+                    dataSnapshotUid: b.inputs.dataSnapshotUid
                 }), {
                     when: tasks => tasks.getSnapshotName.outputs.autoCreate
                 }

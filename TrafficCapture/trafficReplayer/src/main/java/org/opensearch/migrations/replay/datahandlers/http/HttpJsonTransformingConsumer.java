@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletionException;
 
 import org.opensearch.migrations.Utils;
+import org.opensearch.migrations.replay.RequestFilteredException;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
@@ -124,7 +125,28 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
             if (getHttpRequestDecoderHandler() == null) { // LastHttpContent won't be sent
                 channel.writeInbound(new EndOfInput());   // so send our own version of 'EOF'
             }
+        } catch (RequestFilteredException e) {
+            log.atInfo().setMessage("Request filtered - skipping").log();
+            channel.finishAndReleaseAll();
+            channel.close();
+            transformationContext.onTransformSkip();
+            transformationContext.close();
+            return TextTrackedFuture.completedFuture(
+                new TransformedOutputAndResult<>(null, HttpRequestTransformationStatus.skipped()),
+                () -> "HttpJsonTransformingConsumer.filteredRequest"
+            );
         } catch (Exception e) {
+            if (hasRequestFilteredCause(e)) {
+                log.atInfo().setMessage("Request filtered (wrapped) - skipping").log();
+                channel.finishAndReleaseAll();
+                channel.close();
+                transformationContext.onTransformSkip();
+                transformationContext.close();
+                return TextTrackedFuture.completedFuture(
+                    new TransformedOutputAndResult<>(null, HttpRequestTransformationStatus.skipped()),
+                    () -> "HttpJsonTransformingConsumer.filteredRequest"
+                );
+            }
             this.transformationContext.addCaughtException(e);
             log.atWarn().setCause(e)
                 .setMessage("Caught exception when sending the end of content").log();
@@ -306,5 +328,13 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     private static HttpRequestTransformationStatus makeStatusForRedrive(Throwable reason) {
         return reason == null
             ? HttpRequestTransformationStatus.skipped() : HttpRequestTransformationStatus.makeError(reason);
+    }
+
+    private static boolean hasRequestFilteredCause(Throwable t) {
+        while (t != null) {
+            if (t instanceof RequestFilteredException) return true;
+            t = t.getCause();
+        }
+        return false;
     }
 }

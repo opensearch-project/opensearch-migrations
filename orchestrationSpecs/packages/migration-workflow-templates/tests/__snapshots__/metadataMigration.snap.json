@@ -20,6 +20,14 @@
         {
           "name": "approvalConfigMapName",
           "value": "approval-config"
+        },
+        {
+          "name": "migrationRunNumber",
+          "value": "0"
+        },
+        {
+          "name": "workflowScriptsRoot",
+          "value": "/root/workflows/.workflowScripts"
         }
       ]
     },
@@ -45,6 +53,10 @@
             },
             {
               "name": "sourceEndpoint",
+              "value": ""
+            },
+            {
+              "name": "sourceConfig",
               "value": ""
             },
             {
@@ -117,6 +129,26 @@
                   "optional": true
                 }
               }
+            },
+            {
+              "name": "SOURCE_USERNAME",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig))))}}",
+                  "key": "username",
+                  "optional": true
+                }
+              }
+            },
+            {
+              "name": "SOURCE_PASSWORD",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig))))}}",
+                  "key": "password",
+                  "optional": true
+                }
+              }
             }
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -137,7 +169,7 @@
           "args": [
             "{{inputs.parameters.commandMode}}",
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'transformsImage', 'transformsImagePullPolicy', 'transformsConfigMap')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], \"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], \"s3LocalDir\", '/tmp')))), sprig.dict(\"outputFile\", '/tmp/outputs/metadata-output.log', \"allowExistingIndexes\", true)), ((0 == len(inputs.parameters.sourceEndpoint)) ? (sprig.dict()) : (sprig.dict(\"sourceHost\", inputs.parameters.sourceEndpoint, \"sourceVersion\", inputs.parameters.sourceVersion)))))}}"
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'transformsImage', 'transformsImagePullPolicy', 'transformsConfigMap')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], \"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], \"s3LocalDir\", '/tmp')))), sprig.dict(\"outputFile\", '/tmp/outputs/metadata-output.log', \"allowExistingIndexes\", true)), ((0 == len(inputs.parameters.sourceEndpoint)) ? (sprig.dict()) : (sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceAwsServiceSigningName\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], \"sourceAwsRegion\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceCaCert\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict(\"sourceHost\", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"sourceInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.dict(\"sourceHost\", inputs.parameters.sourceEndpoint, \"sourceVersion\", inputs.parameters.sourceVersion))))))}}"
           ],
           "volumeMounts": [
             {
@@ -217,6 +249,10 @@
               "value": ""
             },
             {
+              "name": "sourceConfig",
+              "value": ""
+            },
+            {
               "name": "imageMigrationConsoleLocation"
             },
             {
@@ -286,6 +322,26 @@
                   "optional": true
                 }
               }
+            },
+            {
+              "name": "SOURCE_USERNAME",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig))))}}",
+                  "key": "username",
+                  "optional": true
+                }
+              }
+            },
+            {
+              "name": "SOURCE_PASSWORD",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig))))}}",
+                  "key": "password",
+                  "optional": true
+                }
+              }
             }
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -306,7 +362,7 @@
           "args": [
             "{{inputs.parameters.commandMode}}",
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'transformsImage', 'transformsImagePullPolicy', 'transformsConfigMap')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], \"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], \"s3LocalDir\", '/tmp')))), sprig.dict(\"outputFile\", '/tmp/outputs/metadata-output.log', \"allowExistingIndexes\", true)), ((0 == len(inputs.parameters.sourceEndpoint)) ? (sprig.dict()) : (sprig.dict(\"sourceHost\", inputs.parameters.sourceEndpoint, \"sourceVersion\", inputs.parameters.sourceVersion)))))}}"
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'transformsImage', 'transformsImagePullPolicy', 'transformsConfigMap')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], \"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], \"s3LocalDir\", '/tmp')))), sprig.dict(\"outputFile\", '/tmp/outputs/metadata-output.log', \"allowExistingIndexes\", true)), ((0 == len(inputs.parameters.sourceEndpoint)) ? (sprig.dict()) : (sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceAwsServiceSigningName\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], \"sourceAwsRegion\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceCaCert\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict(\"sourceHost\", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"sourceInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.dict(\"sourceHost\", inputs.parameters.sourceEndpoint, \"sourceVersion\", inputs.parameters.sourceVersion))))))}}"
           ],
           "volumeMounts": [
             {
@@ -389,6 +445,10 @@
               "value": ""
             },
             {
+              "name": "sourceConfig",
+              "value": ""
+            },
+            {
               "name": "imageMigrationConsoleLocation"
             },
             {
@@ -458,6 +518,26 @@
                   "optional": true
                 }
               }
+            },
+            {
+              "name": "SOURCE_USERNAME",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig))))}}",
+                  "key": "username",
+                  "optional": true
+                }
+              }
+            },
+            {
+              "name": "SOURCE_PASSWORD",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig))))}}",
+                  "key": "password",
+                  "optional": true
+                }
+              }
             }
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -478,7 +558,7 @@
           "args": [
             "{{inputs.parameters.commandMode}}",
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'transformsImage', 'transformsImagePullPolicy', 'transformsConfigMap')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], \"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], \"s3LocalDir\", '/tmp')))), sprig.dict(\"outputFile\", '/tmp/outputs/metadata-output.log', \"allowExistingIndexes\", true)), ((0 == len(inputs.parameters.sourceEndpoint)) ? (sprig.dict()) : (sprig.dict(\"sourceHost\", inputs.parameters.sourceEndpoint, \"sourceVersion\", inputs.parameters.sourceVersion)))))}}"
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'transformsImage', 'transformsImagePullPolicy', 'transformsConfigMap')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion), sprig.merge(sprig.merge(((0 == len(sprig.dig('endpoint', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3Endpoint\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['endpoint']))), ((0 == len(sprig.dig('s3RoleArn', '', sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')))) ? (sprig.dict()) : (sprig.dict(\"s3RoleArn\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RoleArn'])))), sprig.dict(\"s3RepoUri\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['s3RepoPathUri'], \"s3Region\", sprig.omit(fromJSON(inputs.parameters.snapshotConfig)['repoConfig'], 's3RoleArn')['awsRegion'], \"s3LocalDir\", '/tmp')))), sprig.dict(\"outputFile\", '/tmp/outputs/metadata-output.log', \"allowExistingIndexes\", true)), ((0 == len(inputs.parameters.sourceEndpoint)) ? (sprig.dict()) : (sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceAwsServiceSigningName\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], \"sourceAwsRegion\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceCaCert\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict(\"sourceHost\", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"sourceInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.dict(\"sourceHost\", inputs.parameters.sourceEndpoint, \"sourceVersion\", inputs.parameters.sourceVersion))))))}}"
           ],
           "volumeMounts": [
             {
@@ -560,6 +640,10 @@
               "value": ""
             },
             {
+              "name": "sourceConfig",
+              "value": ""
+            },
+            {
               "name": "imageMigrationConsoleLocation"
             },
             {
@@ -630,6 +714,10 @@
                   {
                     "name": "sourceEndpoint",
                     "value": "{{inputs.parameters.sourceEndpoint}}"
+                  },
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -715,6 +803,10 @@
                     "value": "{{inputs.parameters.sourceEndpoint}}"
                   },
                   {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}"
+                  },
+                  {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
                   },
@@ -796,6 +888,10 @@
                   {
                     "name": "sourceEndpoint",
                     "value": "{{inputs.parameters.sourceEndpoint}}"
+                  },
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -931,6 +1027,10 @@
               "value": ""
             },
             {
+              "name": "sourceConfig",
+              "value": ""
+            },
+            {
               "name": "snapshotConfig",
               "description": "Snapshot storage details (region, endpoint, etc)"
             },
@@ -1022,6 +1122,10 @@
                   {
                     "name": "sourceEndpoint",
                     "value": "{{inputs.parameters.sourceEndpoint}}"
+                  },
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
@@ -1148,6 +1252,10 @@
                   {
                     "name": "sourceEndpoint",
                     "value": "{{inputs.parameters.sourceEndpoint}}"
+                  },
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",

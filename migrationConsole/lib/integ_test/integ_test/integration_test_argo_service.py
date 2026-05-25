@@ -13,7 +13,7 @@ import tempfile
 import os
 import yaml
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from console_link.models.cluster import Cluster
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
@@ -29,8 +29,14 @@ def _utc_now_for_kubernetes() -> str:
 
 
 def _command_stdout(result: CommandResult) -> str:
-    if result.output and result.output.stdout:
-        return result.output.stdout
+    parts = []
+    if result.output:
+        if result.output.stdout:
+            parts.append(result.output.stdout)
+        if result.output.stderr:
+            parts.append(f"STDERR:\n{result.output.stderr}")
+    if parts:
+        return "\n".join(parts)
     return result.display()
 
 
@@ -155,64 +161,123 @@ class IntegrationTestArgoService:
         except Exception as e:
             logger.error(f"Failed to get workflow logs: {e}")
 
+    def print_namespace_diagnostics(self, workflow_name: Optional[str] = None) -> None:
+        """Log the same diagnostics that are written to disk before teardown deletes resources."""
+        try:
+            logger.info(self.collect_namespace_diagnostics(workflow_name=workflow_name))
+        except Exception as e:
+            logger.error(f"Failed to print namespace diagnostics: {e}")
+
     def save_namespace_diagnostics(self, output_dir: str, workflow_name: Optional[str] = None) -> Optional[str]:
         """Save detailed namespace diagnostics to a file for artifact collection."""
-        diagnostic_resources = "pods,services,deployments,statefulsets,workflows"
         try:
             os.makedirs(output_dir, exist_ok=True)
             output_file = os.path.join(output_dir, f"namespace-{self.namespace}-diagnostics.txt")
 
             with open(output_file, 'w') as f:
-                f.write(f"===== Namespace {self.namespace} Diagnostics =====\n\n")
-
-                # kubectl get resources
-                f.write(f"===== kubectl get {diagnostic_resources} =====\n")
-                try:
-                    result = CommandRunner("kubectl", {
-                        "get": diagnostic_resources,
-                        "--namespace": self.namespace,
-                        "-o": "wide"
-                    }).run()
-                    f.write(_command_stdout(result) + "\n\n")
-                except Exception as e:
-                    f.write(f"Error: {e}\n\n")
-
-                # kubectl describe resources
-                f.write(f"===== kubectl describe {diagnostic_resources} =====\n")
-                try:
-                    result = CommandRunner("kubectl", {
-                        "describe": diagnostic_resources,
-                        "--namespace": self.namespace
-                    }).run()
-                    f.write(_command_stdout(result) + "\n\n")
-                except Exception as e:
-                    f.write(f"Error: {e}\n\n")
-
-                # kubectl get events
-                f.write("===== kubectl get events =====\n")
-                try:
-                    result = CommandRunner("kubectl", {
-                        "get": "events",
-                        "--namespace": self.namespace,
-                        "--sort-by": ".lastTimestamp"
-                    }).run()
-                    f.write(_command_stdout(result) + "\n\n")
-                except Exception as e:
-                    f.write(f"Error: {e}\n\n")
-
-                if workflow_name:
-                    f.write(f"===== kubectl logs for workflow {workflow_name} =====\n")
-                    try:
-                        result = self._get_workflow_logs(workflow_name)
-                        f.write((result.output.stdout if result.output else "") + "\n\n")
-                    except Exception as e:
-                        f.write(f"Error: {e}\n\n")
+                f.write(self.collect_namespace_diagnostics(workflow_name=workflow_name))
 
             logger.info(f"Saved namespace diagnostics to {output_file}")
             return output_file
         except Exception as e:
             logger.error(f"Failed to save namespace diagnostics: {e}")
             return None
+
+    def collect_namespace_diagnostics(self, workflow_name: Optional[str] = None) -> str:
+        """Collect workflow, migration CR, workload, event, and pod log state before test cleanup."""
+        sections: List[str] = [f"===== Namespace {self.namespace} Diagnostics =====\n"]
+
+        core_resources = "pods,services,deployments,statefulsets,jobs,cronjobs,pvc,configmaps,secrets,workflows"
+        migration_resources = (
+            "kafkaclusters,capturedtraffics,captureproxies,datasnapshots,"
+            "snapshotmigrations,trafficreplays,approvalgates,migrationruns"
+        )
+        strimzi_resources = (
+            "kafkas.kafka.strimzi.io,kafkanodepools.kafka.strimzi.io,"
+            "strimzipodsets.core.strimzi.io,kafkatopics.kafka.strimzi.io"
+        )
+
+        self._append_kubectl_output(sections, f"kubectl get {core_resources} -o wide", {
+            "get": core_resources,
+            "--namespace": self.namespace,
+            "-o": "wide"
+        })
+        self._append_kubectl_output(sections, f"kubectl get {migration_resources} -o yaml", {
+            "get": migration_resources,
+            "--namespace": self.namespace,
+            "-o": "yaml"
+        })
+        self._append_kubectl_output(sections, f"kubectl describe {migration_resources}", {
+            "describe": migration_resources,
+            "--namespace": self.namespace
+        })
+        self._append_kubectl_output(sections, f"kubectl get {strimzi_resources} -o yaml", {
+            "get": strimzi_resources,
+            "--namespace": self.namespace,
+            "-o": "yaml"
+        })
+        self._append_kubectl_output(sections, f"kubectl describe {core_resources}", {
+            "describe": core_resources,
+            "--namespace": self.namespace
+        })
+        self._append_kubectl_output(sections, "kubectl get events --sort-by=.lastTimestamp", {
+            "get": "events",
+            "--namespace": self.namespace,
+            "--sort-by": ".lastTimestamp"
+        })
+
+        if workflow_name:
+            sections.append(f"===== kubectl logs for workflow {workflow_name} =====")
+            try:
+                result = self._get_workflow_logs(workflow_name)
+                sections.append(_command_stdout(result))
+            except Exception as e:
+                sections.append(f"Error: {e}")
+            sections.append("")
+
+        self._append_all_pod_logs(sections)
+        return "\n".join(sections)
+
+    def _append_kubectl_output(self, sections: List[str], heading: str, kubectl_args: Dict[str, Any]) -> None:
+        sections.append(f"===== {heading} =====")
+        try:
+            result = self._run_kubectl_command(kubectl_args)
+            sections.append(_command_stdout(result))
+        except Exception as e:
+            sections.append(f"Error: {e}")
+        sections.append("")
+
+    def _append_all_pod_logs(self, sections: List[str], tail_lines: int = 500) -> None:
+        sections.append(f"===== kubectl logs for all namespace pods (tail={tail_lines}) =====")
+        try:
+            result = self._run_kubectl_command({
+                "get": "pods",
+                "--namespace": self.namespace,
+                "-o": "json"
+            })
+            pods = json.loads(result.output.stdout if result.output else "{}").get("items", [])
+        except Exception as e:
+            sections.append(f"Error listing pods: {e}")
+            sections.append("")
+            return
+
+        for pod in pods:
+            pod_name = pod.get("metadata", {}).get("name")
+            if not pod_name:
+                continue
+            sections.append(f"----- logs for pod/{pod_name} -----")
+            try:
+                log_result = self._run_kubectl_command({
+                    "logs": f"pod/{pod_name}",
+                    "--namespace": self.namespace,
+                    "--all-containers=true": FlagOnlyArgument,
+                    "--prefix=true": FlagOnlyArgument,
+                    "--tail": str(tail_lines)
+                })
+                sections.append(_command_stdout(log_result))
+            except Exception as e:
+                sections.append(f"Error: {e}")
+            sections.append("")
 
     def get_workflow_status(self, workflow_name: str) -> CommandResult:
         workflow_data = self._get_workflow_status_json(workflow_name)

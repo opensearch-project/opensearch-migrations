@@ -20,6 +20,14 @@
         {
           "name": "approvalConfigMapName",
           "value": "approval-config"
+        },
+        {
+          "name": "migrationRunNumber",
+          "value": "0"
+        },
+        {
+          "name": "workflowScriptsRoot",
+          "value": "/root/workflows/.workflowScripts"
         }
       ]
     },
@@ -91,6 +99,12 @@
               "name": "configChecksum"
             },
             {
+              "name": "dataSnapshotName"
+            },
+            {
+              "name": "dataSnapshotUid"
+            },
+            {
               "name": "imageMigrationConsoleLocation"
             },
             {
@@ -157,6 +171,14 @@
                   {
                     "name": "configChecksum",
                     "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "dataSnapshotName",
+                    "value": "{{inputs.parameters.dataSnapshotName}}"
+                  },
+                  {
+                    "name": "dataSnapshotUid",
+                    "value": "{{inputs.parameters.dataSnapshotUid}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",
