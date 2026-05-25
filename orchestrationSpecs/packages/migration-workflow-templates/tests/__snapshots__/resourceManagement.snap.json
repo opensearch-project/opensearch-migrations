@@ -305,7 +305,7 @@
           "successCondition": "status.phase == Approved"
         },
         "retryStrategy": {
-          "limit": "37",
+          "limit": "20",
           "retryPolicy": "Always",
           "backoff": {
             "duration": "15",
