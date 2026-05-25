@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>README Preview — OpenSearch Migration Assistant</title>
+<link rel="stylesheet" type="text/css" href="https://unpkg.com/asciinema-player@3.7.1/dist/bundle/asciinema-player.css" />
+<style>
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  color: #1f2328;
+  background: #ffffff;
+  max-width: 1012px;
+  margin: 0 auto;
+  padding: 45px;
+}
+h1 { font-size: 2em; border-bottom: 1px solid #d1d9e0b3; padding-bottom: .3em; }
+h2 { font-size: 1.5em; border-bottom: 1px solid #d1d9e0b3; padding-bottom: .3em; }
+h3 { font-size: 1.25em; }
+a { color: #0969da; text-decoration: none; }
+a:hover { text-decoration: underline; }
+code { background: #eff1f3; padding: .2em .4em; border-radius: 6px; font-size: 85%; }
+pre { background: #f6f8fa; padding: 16px; border-radius: 6px; overflow-x: auto; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; }
+table th, table td { border: 1px solid #d1d9e0; padding: 6px 13px; }
+table th { background: #f6f8fa; font-weight: 600; }
+table tr:nth-child(2n) { background: #f6f8fa; }
+blockquote { color: #656d76; border-left: .25em solid #d1d9e0; padding: 0 1em; margin: 16px 0; }
+hr { border: none; border-top: 1px solid #d1d9e0b3; margin: 24px 0; }
+img { max-width: 100%; }
+</style>
+</head>
+<body>
+<h1 dir="auto">OpenSearch Migration Assistant</h1>
+<p dir="auto"><strong>The most reliable, cost-effective way to migrate to OpenSearch — zero downtime, full rollback safety.</strong></p>
+<p dir="auto"><a href="https://github.com/opensearch-project/opensearch-migrations/releases"><img src="https://camo.githubusercontent.com/b52490406f1a2305f3a8b60758d0a09828b58241039f31f7ef08856e0d528014/68747470733a2f2f696d672e736869656c64732e696f2f6769746875622f762f72656c656173652f6f70656e7365617263682d70726f6a6563742f6f70656e7365617263682d6d6967726174696f6e73" alt="Latest Release" data-canonical-src="https://img.shields.io/github/v/release/opensearch-project/opensearch-migrations" style="max-width: 100%;"></a><br>
+<a href="https://codecov.io/gh/opensearch-project/opensearch-migrations" rel="nofollow"><img src="https://camo.githubusercontent.com/c3fb8c71aeda882b3d1c809c7fde717aa55cab8a8daa599ae6d029007be4699d/68747470733a2f2f636f6465636f762e696f2f67682f6f70656e7365617263682d70726f6a6563742f6f70656e7365617263682d6d6967726174696f6e732f67726170682f62616467652e737667" alt="codecov" data-canonical-src="https://codecov.io/gh/opensearch-project/opensearch-migrations/graph/badge.svg" style="max-width: 100%;"></a><br>
+<a href="https://github.com/opensearch-project/opensearch-migrations/releases"><img src="https://camo.githubusercontent.com/ad107534d66e9273aec57944d5fe81148cd0b90ffade0fe6ca9810731ab0aef6/68747470733a2f2f696d672e736869656c64732e696f2f62616467652f72656c65617365732d7765656b6c792d626c7565" alt="Weekly Releases" data-canonical-src="https://img.shields.io/badge/releases-weekly-blue" style="max-width: 100%;"></a><br>
+<a href="https://github.com/opensearch-project/opensearch-migrations/graphs/contributors"><img src="https://camo.githubusercontent.com/0112ae7462833859210e930e5f3c5e5306008cf2f8585130b4dcd95b3e56efb2/68747470733a2f2f696d672e736869656c64732e696f2f6769746875622f636f6e7472696275746f72732f6f70656e7365617263682d70726f6a6563742f6f70656e7365617263682d6d6967726174696f6e73" alt="Contributors" data-canonical-src="https://img.shields.io/github/contributors/opensearch-project/opensearch-migrations" style="max-width: 100%;"></a></p>
+<hr>
+<h2 dir="auto">The Problem</h2>
+<p dir="auto">Upgrading Elasticsearch or migrating to OpenSearch traditionally means:</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Manual Approach</th>
+<th>What Goes Wrong</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Upgrade one major version at a time (6→7→8→OS)</td>
+<td>Weeks of maintenance windows per hop</td>
+</tr>
+<tr>
+<td>Blue/green with reindex</td>
+<td>Hours of downtime, risk of data drift</td>
+</tr>
+<tr>
+<td>Snapshot-restore to a new cluster</td>
+<td>No way to validate before cutting over</td>
+</tr>
+<tr>
+<td>Hope your clients work with the new version</td>
+<td>Breaking changes discovered in production</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<h2 dir="auto">See It In Action</h2>
+<p dir="auto"><a href="demo/migration-demo.cast"><img src="https://camo.githubusercontent.com/7d523e5deb56cdb8a3fad70eabe18f775e9000a6731e783647f736aaa8020d85/68747470733a2f2f61736369696e656d612e6f72672f612f706c616365686f6c6465722e737667" alt="asciicast" data-canonical-src="https://asciinema.org/a/placeholder.svg" style="max-width: 100%;"></a></p>
+<blockquote>
+<p dir="auto"><em>ES 7.10 → OpenSearch 3.6: snapshot creation, metadata migration, document backfill, and verification — all orchestrated by the workflow CLI on Kubernetes.</em></p>
+<p dir="auto">Run it yourself: <code class="notranslate">bash demo/run-demo.sh</code></p>
+</blockquote>
+<h2 dir="auto">The Solution</h2>
+<p dir="auto">Migration Assistant handles the entire journey in <strong>one hop</strong> — from any supported source directly to your target version — while your production cluster stays online:</p>
+<p align="center" dir="auto">
+  <a target="_blank" rel="noopener noreferrer nofollow" href="https://raw.githubusercontent.com/wiki/opensearch-project/opensearch-migrations/diagrams/eks-architecture.svg"><img src="https://raw.githubusercontent.com/wiki/opensearch-project/opensearch-migrations/diagrams/eks-architecture.svg" alt="Migration Assistant Architecture" width="900" style="max-width: 100%;"></a>
+</p>
+<h3 dir="auto">How it works</h3>
+<ol dir="auto">
+<li><strong>Deploy target cluster</strong> — automated provisioning via AWS CDK or local Docker</li>
+<li><strong>Backfill historical data</strong> — snapshot-based, upgrades Lucene format automatically</li>
+<li><strong>Capture &amp; replay live traffic</strong> — real requests validated against target before cutover</li>
+<li><strong>Compare responses</strong> — automated diff between source and target responses</li>
+<li><strong>Switch over</strong> — route traffic to target with instant rollback if anything looks wrong</li>
+</ol>
+<hr>
+<h2 dir="auto">Performance</h2>
+<p dir="auto">Each Reindex-From-Snapshot worker (2 vCPU, 4 GB) sustains <strong>23.5 MB/s</strong> — that's <strong>~2 TB/day per worker</strong>. Add workers to scale linearly:</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Workers</th>
+<th>Throughput</th>
+<th>Data Moved per Day</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>23.5 MB/s</td>
+<td>~2 TB</td>
+</tr>
+<tr>
+<td>10</td>
+<td>235 MB/s</td>
+<td>~20 TB</td>
+</tr>
+<tr>
+<td>50</td>
+<td>1.18 GB/s</td>
+<td>~100 TB</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p dir="auto">Workers run on AWS Fargate — scale out on demand, pay only for migration duration, scale back to zero when done.</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Component</th>
+<th>Per-Worker Throughput</th>
+<th>Docs/Minute</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Reindex-From-Snapshot</td>
+<td>23.5 MB/s</td>
+<td>590,000</td>
+</tr>
+<tr>
+<td>Traffic Replay</td>
+<td>67.5 MB/s</td>
+<td>1,694,000</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p dir="auto"><a href="#performance-benchmarks">Full benchmark methodology →</a></p>
+<hr>
+<h2 dir="auto">Supported Migration Paths</h2>
+<markdown-accessiblity-table><table role="table">
+<tbody><tr>
+  <th rowspan="2">Source</th>
+  <th colspan="3">Target</th>
+</tr>
+<tr>
+  <th>OpenSearch 1.x</th>
+  <th>OpenSearch 2.x</th>
+  <th>OpenSearch 3.x</th>
+</tr>
+<tr><td>Elasticsearch 1.x–2.x*</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>Elasticsearch 5.x–7.x</td><td>✓</td><td>✓</td><td>✓</td></tr>
+<tr><td>Elasticsearch 8.x</td><td></td><td>✓</td><td>✓</td></tr>
+<tr><td>OpenSearch 1.x–2.x</td><td></td><td>✓</td><td>✓</td></tr>
+<tr><td>Apache Solr 6.x–9.x*</td><td></td><td></td><td>✓</td></tr>
+</tbody></table></markdown-accessiblity-table>
+<p dir="auto">* Backfill only — Capture and Replay is not supported for these source versions.</p>
+<p dir="auto"><strong>Platforms:</strong> Self-managed (cloud or on-premises), Amazon OpenSearch Service, Amazon OpenSearch Serverless</p>
+<blockquote>
+<p dir="auto"><strong>No other tool supports post-fork migrations.</strong> Migration Assistant is the only solution that migrates data from Elasticsearch 8.x or Apache Solr to OpenSearch. Standard approaches (snapshot-restore, reindex-from-remote, rolling upgrades) break at the ES 7.10 fork boundary. For Solr, no other tool reads backup data directly — alternatives require re-indexing from the application layer.</p>
+</blockquote>
+<hr>
+<h2 dir="auto">Quick Start</h2>
+<h3 dir="auto">Local (Docker)</h3>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate">git clone https://github.com/opensearch-project/opensearch-migrations.git
+<span class="pl-c1">cd</span> opensearch-migrations
+./gradlew -p TrafficCapture/dockerSolution build</pre></div>
+<p dir="auto">See the <a href="DEVELOPER_GUIDE.md">Development Guide</a> for running the full local stack.</p>
+<h3 dir="auto">AWS Deployment</h3>
+<p dir="auto">Deploy the production-ready solution in your AWS account:</p>
+<div class="highlight highlight-source-shell" dir="auto"><pre class="notranslate"><span class="pl-c"><span class="pl-c">#</span> Full automated deployment via CDK</span></pre></div>
+<p dir="auto">Follow the <a href="https://docs.opensearch.org/latest/migration-assistant/" rel="nofollow">Deployment Guide</a> for step-by-step instructions.</p>
+<h3 dir="auto">AI-Guided Migration</h3>
+<p dir="auto">The <a href="kiro-cli/README.md">Kiro CLI</a> provides an AI agent that walks you through the entire process — from source discovery to provisioning to data migration.</p>
+<hr>
+<h2 dir="auto">Key Capabilities</h2>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Capability</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="MetadataMigration/README.md"><strong>Metadata Migration</strong></a></td>
+<td>Migrate indices, templates, aliases, and cluster settings</td>
+</tr>
+<tr>
+<td><a href="RFS/docs/DESIGN.md"><strong>Reindex-from-Snapshot</strong></a></td>
+<td>Backfill historical data with automatic Lucene version upgrade</td>
+</tr>
+<tr>
+<td><a href="docs/TrafficCaptureAndReplayDesign.md"><strong>Capture &amp; Replay</strong></a></td>
+<td>Validate your target handles real production traffic correctly</td>
+</tr>
+<tr>
+<td><a href="docs/ClientTrafficSwinging.md"><strong>Traffic Routing</strong></a></td>
+<td>Zero-downtime client switchover with rollback</td>
+</tr>
+<tr>
+<td><a href="docs/migration-console.md"><strong>Migration Console</strong></a></td>
+<td>CLI that guides you step-by-step</td>
+</tr>
+<tr>
+<td><a href="docs/TrafficCaptureAndReplayDesign.md"><strong>Response Comparison</strong></a></td>
+<td>Automated diff of source vs. target responses</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p dir="auto"><strong>Migration Rollback:</strong> Your source cluster stays synchronized throughout. Monitor the target's behavior under real load, then commit the switch — or revert instantly.</p>
+<hr>
+<h2 dir="auto">Performance Benchmarks</h2>
+<p dir="auto">Tested on 03/10/25 (<a href="https://github.com/opensearch-project/opensearch-migrations/pull/1337" data-hovercard-type="pull_request" data-hovercard-url="/opensearch-project/opensearch-migrations/pull/1337/hovercard">PR #1337</a>). Average doc size: 2.39 KB uncompressed (source doc + index command), 1.54 KB primary shard size per doc on OS 2.17 with defaults.</p>
+<markdown-accessiblity-table><table role="table">
+<thead>
+<tr>
+<th>Service</th>
+<th>vCPU</th>
+<th>Memory (GB)</th>
+<th>Type Mapping Sanitization</th>
+<th>Peak Docs/min</th>
+<th>Primary Shard Rate (MB/s)</th>
+<th>Source Data Rate (MB/s)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Reindex-From-Snapshot</td>
+<td>2</td>
+<td>4</td>
+<td>Disabled</td>
+<td>590,000</td>
+<td>15.1</td>
+<td>23.5</td>
+</tr>
+<tr>
+<td>Reindex-From-Snapshot</td>
+<td>2</td>
+<td>4</td>
+<td>Enabled</td>
+<td>546,000</td>
+<td>14.0</td>
+<td>21.7</td>
+</tr>
+<tr>
+<td>Traffic Replay</td>
+<td>8</td>
+<td>48</td>
+<td>Disabled</td>
+<td>1,694,000</td>
+<td>43.5</td>
+<td>67.5</td>
+</tr>
+<tr>
+<td>Traffic Replay</td>
+<td>8</td>
+<td>48</td>
+<td>Enabled</td>
+<td>1,645,000</td>
+<td>42.2</td>
+<td>65.5</td>
+</tr>
+</tbody>
+</table></markdown-accessiblity-table>
+<p dir="auto">Throughput scales with additional Fargate workers (horizontal) or larger instances (vertical). All tests CPU-bound; results may vary with client compression.</p>
+<hr>
+<h2 dir="auto">Documentation</h2>
+<ul dir="auto">
+<li><strong><a href="https://docs.opensearch.org/latest/migration-assistant/" rel="nofollow">User Guide</a></strong> — Full walkthrough for production migrations</li>
+<li><strong><a href="DEVELOPER_GUIDE.md">Development Guide</a></strong> — Build, test, and deploy locally</li>
+</ul>
+<hr>
+<h2 dir="auto">Community</h2>
+<p dir="auto">This project ships weekly releases and is actively maintained by 50+ contributors.</p>
+<p dir="auto"><strong>Found a bug or need a feature?</strong></p>
+<ul dir="auto">
+<li><a href="https://github.com/opensearch-project/opensearch-migrations/issues">Search existing issues</a> — upvote and comment if it's already reported</li>
+<li><a href="https://github.com/opensearch-project/opensearch-migrations/issues/new/choose">Open a new issue</a> — we triage within the week</li>
+</ul>
+<p dir="auto"><strong>Want to contribute?</strong> See <a href="CONTRIBUTING.md">CONTRIBUTING.md</a> for guidelines.</p>
+<hr>
+<h2 dir="auto">CI/CD</h2>
+<p dir="auto">Weekly releases published via GitHub Actions + <a href="https://migrations.ci.opensearch.org/" rel="nofollow">Jenkins</a>. Artifacts include attestation for supply-chain verification.</p>
+<h2 dir="auto">Security</h2>
+<p dir="auto">See <a href="SECURITY.md">SECURITY.md</a> for reporting vulnerabilities.</p>
+<h2 dir="auto">License</h2>
+<p dir="auto">Apache-2.0 — see <a href="LICENSE">LICENSE</a>.</p>
+<script src="https://unpkg.com/asciinema-player@3.7.1/dist/bundle/asciinema-player.min.js"></script>
+<script>
+  var el = document.getElementById('demo-player');
+  if (el) {
+    AsciinemaPlayer.create(
+      '/demo/migration-demo.cast',
+      el,
+      { cols: 120, rows: 35, autoPlay: true, speed: 1.5, theme: 'asciinema', fit: 'width' }
+    );
+  }
+</script>
+</body></html>
