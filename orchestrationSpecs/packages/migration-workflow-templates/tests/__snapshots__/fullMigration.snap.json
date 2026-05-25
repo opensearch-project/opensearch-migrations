@@ -748,7 +748,7 @@
           [
             {
               "templateRef": {
-                "template": "waitforcaptureproxy",
+                "template": "waitindefinitelyforcaptureproxy",
                 "name": "resource-management"
               },
               "withParam": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['dependsOnProxySetups']}}",
@@ -777,13 +777,13 @@
                   }
                 ]
               },
-              "name": "waitForProxyDeps"
+              "name": "waitIndefinitelyForProxyDeps"
             }
           ],
           [
             {
               "templateRef": {
-                "template": "waitfordatasnapshot",
+                "template": "waitindefinitelyfordatasnapshot",
                 "name": "resource-management"
               },
               "when": "{{=steps.readSnapshotPhase.outputs.parameters.phase == 'Pending' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum}}",
@@ -811,7 +811,7 @@
                   }
                 ]
               },
-              "name": "waitForSnapshot"
+              "name": "waitIndefinitelyForSnapshot"
             }
           ],
           [
@@ -1367,7 +1367,7 @@
           [
             {
               "templateRef": {
-                "template": "waitfordatasnapshot",
+                "template": "waitindefinitelyfordatasnapshot",
                 "name": "resource-management"
               },
               "when": "{{=true && !(steps.reconcileSnapshotMigrationResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum) && 'dataSnapshotResourceName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']}}",
@@ -1395,7 +1395,7 @@
                   }
                 ]
               },
-              "name": "waitForSnapshot"
+              "name": "waitIndefinitelyForSnapshot"
             }
           ],
           [
@@ -1684,7 +1684,7 @@
           [
             {
               "templateRef": {
-                "template": "waitforsnapshotmigration",
+                "template": "waitindefinitelyforsnapshotmigration",
                 "name": "resource-management"
               },
               "withParam": "{{inputs.parameters.dependsOnSnapshotMigrations}}",
@@ -1713,13 +1713,13 @@
                   }
                 ]
               },
-              "name": "waitForSnapshotMigrationDeps"
+              "name": "waitIndefinitelyForSnapshotMigrationDeps"
             }
           ],
           [
             {
               "templateRef": {
-                "template": "waitforcaptureproxy",
+                "template": "waitindefinitelyforcaptureproxy",
                 "name": "resource-management"
               },
               "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
@@ -1747,7 +1747,7 @@
                   }
                 ]
               },
-              "name": "waitForProxy"
+              "name": "waitIndefinitelyForProxy"
             }
           ],
           [

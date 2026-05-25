@@ -269,7 +269,6 @@ export const SetupKafka = WorkflowBuilder.create({
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
-                successCondition: "status.listeners",
                 manifest: makeDeployKafkaClusterKraftManifest({
                     clusterName: b.inputs.clusterName,
                     kafkaSpec: b.inputs.kafkaSpec,
@@ -277,8 +276,6 @@ export const SetupKafka = WorkflowBuilder.create({
                     ownerUid: b.inputs.ownerUid,
                 })
             }))
-        .addJsonPathOutput("brokers", "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
-            typeToken<string>())
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
@@ -292,7 +289,6 @@ export const SetupKafka = WorkflowBuilder.create({
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
-                successCondition: "status.listeners",
                 manifest: makeDeployKafkaClusterKraftManifest({
                     clusterName: b.inputs.clusterName,
                     kafkaSpec: b.inputs.kafkaSpec,
@@ -300,8 +296,6 @@ export const SetupKafka = WorkflowBuilder.create({
                     ownerUid: b.inputs.ownerUid,
                 })
             }))
-        .addJsonPathOutput("brokers", "{.status.listeners[?(@.name=='tls')].bootstrapServers}",
-            typeToken<string>())
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
@@ -315,35 +309,35 @@ export const SetupKafka = WorkflowBuilder.create({
 
         .addSteps(b => b
             .addStep("deployNoAuthCluster", INTERNAL, "deployKafkaClusterKraftNoAuth", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    kafkaSpec: expr.recordToString(makeManagedKafkaSpecNoAuth({
-                        version: b.inputs.version,
-                        clusterConfig: b.inputs.clusterConfig,
-                    })),
-                    migrationRunNumber: b.inputs.migrationRunNumber,
-                    ownerUid: b.inputs.ownerUid,
-                }),
+                    c.register({
+                        clusterName: b.inputs.clusterName,
+                        kafkaSpec: expr.recordToString(makeManagedKafkaSpecNoAuth({
+                            version: b.inputs.version,
+                            clusterConfig: b.inputs.clusterConfig,
+                        })),
+                        migrationRunNumber: b.inputs.migrationRunNumber,
+                        ownerUid: b.inputs.ownerUid,
+                    }),
                 {when: c => ({templateExp: expr.not(shouldCreateManagedKafkaUser(b.inputs.clusterConfig))})}
             )
             .addStep("deployScramCluster", INTERNAL, "deployKafkaClusterKraftScram", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    kafkaSpec: expr.recordToString(makeManagedKafkaSpecScram({
-                        version: b.inputs.version,
-                        clusterConfig: b.inputs.clusterConfig,
-                    })),
-                    migrationRunNumber: b.inputs.migrationRunNumber,
-                    ownerUid: b.inputs.ownerUid,
-                }),
+                    c.register({
+                        clusterName: b.inputs.clusterName,
+                        kafkaSpec: expr.recordToString(makeManagedKafkaSpecScram({
+                            version: b.inputs.version,
+                            clusterConfig: b.inputs.clusterConfig,
+                        })),
+                        migrationRunNumber: b.inputs.migrationRunNumber,
+                        ownerUid: b.inputs.ownerUid,
+                    }),
                 {when: c => ({templateExp: shouldCreateManagedKafkaUser(b.inputs.clusterConfig)})}
             )
+            .addStep("waitForClusterReady", ResourceManagement, "waitForKafkaClusterReady", c =>
+                c.register({
+                    resourceName: b.inputs.clusterName,
+                })
+            )
         )
-        .addExpressionOutput("bootstrapServers", c => expr.ternary(
-            shouldCreateManagedKafkaUser(c.inputs.clusterConfig),
-            c.steps.deployScramCluster.outputs.brokers,
-            c.steps.deployNoAuthCluster.outputs.brokers
-        ))
     )
 
 
@@ -361,7 +355,6 @@ export const SetupKafka = WorkflowBuilder.create({
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
-                successCondition: "status.topicName",
                 manifest: makeKafkaTopicManifest({
                     clusterName: b.inputs.clusterName,
                     topicName: b.inputs.topicName,
@@ -373,7 +366,6 @@ export const SetupKafka = WorkflowBuilder.create({
                     topicConfig: b.inputs.topicConfig,
                 })
             }))
-        .addJsonPathOutput("topicName", "{.status.topicName}", typeToken<string>())
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
@@ -386,7 +378,6 @@ export const SetupKafka = WorkflowBuilder.create({
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
-                successCondition: "status.conditions",
                 manifest: makeManagedKafkaUserManifest({
                     clusterName: b.inputs.clusterName,
                     userSpec: b.inputs.userSpec,
@@ -432,6 +423,13 @@ export const SetupKafka = WorkflowBuilder.create({
                         userSpec: expr.recordToString(makeManagedKafkaUserSpec(b.inputs.clusterConfig)),
                         migrationRunNumber: t.inputs.workflowParameters.migrationRunNumber,
                         ownerUid: b.inputs.ownerUid,
+                    }),
+                    {when: c => ({templateExp: shouldCreateManagedKafkaUser(b.inputs.clusterConfig)})}
+                )
+                .addStep("waitForKafkaUserSecret", ResourceManagement, "waitForSecretKey", c =>
+                    c.register({
+                        secretName: expr.concat(b.inputs.clusterName, expr.literal("-migration-app")),
+                        secretKey: expr.literal("password"),
                     }),
                     {when: c => ({templateExp: shouldCreateManagedKafkaUser(b.inputs.clusterConfig)})}
                 );

@@ -20,7 +20,12 @@ import {
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {SetupKafka} from "./setupKafka";
 import {z} from "zod";
-import {CERT_MANAGER_WEBHOOK_RETRY_STRATEGY, K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {
+    CERT_MANAGER_WEBHOOK_RETRY_STRATEGY,
+    K8S_INFRA_READY_RETRY_STRATEGY,
+    K8S_INFRA_READY_TIMEOUT_SECONDS,
+    K8S_RESOURCE_RETRY_STRATEGY,
+} from "./commonUtils/resourceRetryStrategy";
 import {CONTAINER_NAMES} from "../containerNames";
 import {ResourceManagement} from "./resourceManagement";
 
@@ -367,6 +372,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
+                activeDeadlineSeconds: K8S_INFRA_READY_TIMEOUT_SECONDS,
                 setOwnerReference: false,
                 successCondition: "status.readyReplicas > 0",
                 manifest: makeProxyDeploymentManifest({
@@ -409,6 +415,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
+                activeDeadlineSeconds: K8S_INFRA_READY_TIMEOUT_SECONDS,
                 setOwnerReference: false,
                 successCondition: "status.readyReplicas > 0",
                 manifest: makeProxyDeploymentManifest({
@@ -490,7 +497,8 @@ export const SetupCapture = WorkflowBuilder.create({
                 conditions: {
                     successCondition: "status.conditions.0.status == True",
                 }
-            }))
+            })
+            .addRetryParameters(K8S_INFRA_READY_RETRY_STRATEGY))
     )
 
 
@@ -528,6 +536,7 @@ export const SetupCapture = WorkflowBuilder.create({
                 b.inputs.resolvedKafkaAuthType,
                 expr.getLoose(kafkaConfig, "authType")
             );
+            const shouldUseScramAuth = expr.equals(effectiveKafkaAuthType, expr.literal("scram-sha-512"));
             const kafkaAuthConfigMapName = expr.concat(b.inputs.proxyName, expr.literal("-kafka-auth"));
             // Issuer fields for cert provisioning
             const issuerName = expr.dig(proxyOpts, ["tls", "issuerRef", "name"], expr.literal(""));
@@ -573,6 +582,13 @@ export const SetupCapture = WorkflowBuilder.create({
                             certName: certManagerSecretName,
                         }),
                     {when: {templateExp: hasCertManagerTls}}
+                )
+                .addStep("waitForKafkaAuthSecret", ResourceManagement, "waitForSecretKey", c =>
+                        c.register({
+                            secretName: expr.getLoose(kafkaConfig, "secretName"),
+                            secretKey: expr.literal("password"),
+                        }),
+                    {when: {templateExp: shouldUseScramAuth}}
                 )
                 .addStepGroup(g => g
                     .addStep("deployProxyNoTls", INTERNAL, "deployProxyDeployment", c =>
@@ -696,6 +712,15 @@ export const SetupCapture = WorkflowBuilder.create({
                     replicas: b.inputs.topicReplicas,
                     topicConfig: b.inputs.topicConfig,
                 }),
+                { when: c => ({templateExp: expr.and(
+                    checksumNotDone(c.reconcileCapturedTrafficResource.outputs.currentConfigChecksum, b.inputs.topicConfigChecksum),
+                    managedByWorkflow
+                )}) }
+            )
+            .addStep("waitForKafkaTopicReady", ResourceManagement, "waitForKafkaTopicReady", c =>
+                    c.register({
+                        topicName: b.inputs.kafkaTopicName,
+                    }),
                 { when: c => ({templateExp: expr.and(
                     checksumNotDone(c.reconcileCapturedTrafficResource.outputs.currentConfigChecksum, b.inputs.topicConfigChecksum),
                     managedByWorkflow

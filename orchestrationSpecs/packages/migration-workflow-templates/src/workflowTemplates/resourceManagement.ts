@@ -29,10 +29,16 @@ import {
 } from '@opensearch-migrations/schemas';
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
-import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {
+    K8S_INFRA_READY_RETRY_STRATEGY,
+    K8S_INFRA_READY_TIMEOUT_SECONDS,
+    K8S_RESOURCE_RETRY_STRATEGY,
+    K8S_INDEFINITE_RESOURCE_WAIT_RETRY_STRATEGY,
+    K8S_SECRET_READY_RETRY_STRATEGY,
+    K8S_USER_APPROVAL_WAIT_RETRY_STRATEGY,
+} from "./commonUtils/resourceRetryStrategy";
+import {STRIMZI_KAFKA_READY_SUCCESS_CONDITION} from "./commonUtils/strimziConditions";
 
-const SECONDS_IN_DAYS = 24 * 3600;
-const LONGEST_POSSIBLE_MIGRATION = 365 * SECONDS_IN_DAYS;
 const CRD_API_VERSION = "migrations.opensearch.org/v1alpha1";
 const RUN_NUMBER_LABEL = "migrations.opensearch.org/run-number";
 const APPROVED_DURING_RUN_ANNOTATION = "migrations.opensearch.org/approved-during-run";
@@ -533,7 +539,7 @@ export const ResourceManagement = WorkflowBuilder.create({
 
     // ── Approval gate primitives ─────────────────────────────────────────
 
-    .addTemplate("waitForApproval", t => t
+    .addTemplate("waitForUserApproval", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addWaitForExistingResource(b => b
             .setDefinition({
@@ -544,6 +550,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                 },
                 conditions: {successCondition: "status.phase == Approved"}
             })
+            .addRetryParameters(K8S_USER_APPROVAL_WAIT_RETRY_STRATEGY)
         )
     )
 
@@ -618,7 +625,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
                 )})}
             )
-            .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
+            .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
                     resourceName: b.inputs.retryGateName,
                 }),
@@ -692,7 +699,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
                 )})}
             )
-            .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
+            .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
                     resourceName: b.inputs.retryGateName,
                 }),
@@ -764,7 +771,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
                 )})}
             )
-            .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
+            .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
                     resourceName: b.inputs.retryGateName,
                 }),
@@ -865,7 +872,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
                 )})}
             )
-            .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
+            .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
                     resourceName: b.inputs.retryGateName,
                 }),
@@ -942,7 +949,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
                 )})}
             )
-            .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
+            .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
                     resourceName: b.inputs.retryGateName,
                 }),
@@ -1021,6 +1028,11 @@ export const ResourceManagement = WorkflowBuilder.create({
 
 
     // ── Wait templates (resource get with retry) ─────────────────────────
+    // Leaf Kubernetes/Strimzi/cert-manager waits use bounded infra retries.
+    // Waits on our own migration status resources can run much longer in a
+    // single attempt because another workflow branch is responsible for moving
+    // the CR to Ready/Completed/Error. Their retry limit only protects against
+    // wait pod eviction or transient API failures.
 
     .addTemplate("waitForKafkaClusterCreated", t => t
         .addRequiredInput("resourceName", typeToken<string>())
@@ -1031,7 +1043,11 @@ export const ResourceManagement = WorkflowBuilder.create({
                 waitForCreation: {
                     kubectlImage: b.inputs.imageMigrationConsoleLocation,
                     kubectlImagePullPolicy: b.inputs.imageMigrationConsolePullPolicy,
-                    maxDurationSeconds: LONGEST_POSSIBLE_MIGRATION
+                    maxDurationSeconds: K8S_INFRA_READY_TIMEOUT_SECONDS,
+                    maxKubeWaitDuration: 60,
+                    retryLimit: 15,
+                    retryInitialBackoffDuration: 10,
+                    retryFactor: 2,
                 }
             })
         )
@@ -1040,7 +1056,6 @@ export const ResourceManagement = WorkflowBuilder.create({
 
     .addTemplate("waitForKafkaClusterReady", t => t
         .addRequiredInput("resourceName", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
         .addWaitForExistingResource(b => b
             .setDefinition({
                 resource: {
@@ -1049,10 +1064,47 @@ export const ResourceManagement = WorkflowBuilder.create({
                     name: b.inputs.resourceName
                 },
                 conditions: {
-                    successCondition: expr.literal("status.listeners")
+                    successCondition: expr.literal(STRIMZI_KAFKA_READY_SUCCESS_CONDITION)
                 }
             })
-            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+            .addRetryParameters(K8S_INFRA_READY_RETRY_STRATEGY)
+        )
+    )
+
+
+    .addTemplate("waitForKafkaTopicReady", t => t
+        .addRequiredInput("topicName", typeToken<string>())
+        .addWaitForExistingResource(b => b
+            .setDefinition({
+                resource: {
+                    apiVersion: "kafka.strimzi.io/v1",
+                    kind: "KafkaTopic",
+                    name: b.inputs.topicName
+                },
+                conditions: {
+                    successCondition: "status.conditions.0.type == Ready, status.conditions.0.status == True"
+                }
+            })
+            .addRetryParameters(K8S_INFRA_READY_RETRY_STRATEGY)
+        )
+    )
+
+
+    .addTemplate("waitForSecretKey", t => t
+        .addRequiredInput("secretName", typeToken<string>())
+        .addRequiredInput("secretKey", typeToken<string>())
+        .addWaitForExistingResource(b => b
+            .setDefinition({
+                resource: {
+                    apiVersion: "v1",
+                    kind: "Secret",
+                    name: b.inputs.secretName
+                },
+                conditions: {
+                    successCondition: expr.concat(expr.literal("data."), b.inputs.secretKey)
+                }
+            })
+            .addRetryParameters(K8S_SECRET_READY_RETRY_STRATEGY)
         )
     )
 
@@ -1088,7 +1140,7 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
-    .addTemplate("waitForCapturedTraffic", t => t
+    .addTemplate("waitIndefinitelyForCapturedTraffic", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("checksumField", typeToken<string>())
@@ -1110,12 +1162,12 @@ export const ResourceManagement = WorkflowBuilder.create({
                     failureCondition: "status.phase == Error"
                 }
             })
-            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+            .addRetryParameters(K8S_INDEFINITE_RESOURCE_WAIT_RETRY_STRATEGY)
         )
     )
 
 
-    .addTemplate("waitForCaptureProxy", t => t
+    .addTemplate("waitIndefinitelyForCaptureProxy", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("checksumField", typeToken<string>())
@@ -1137,12 +1189,12 @@ export const ResourceManagement = WorkflowBuilder.create({
                     failureCondition: "status.phase == Error"
                 }
             })
-            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+            .addRetryParameters(K8S_INDEFINITE_RESOURCE_WAIT_RETRY_STRATEGY)
         )
     )
 
 
-    .addTemplate("waitForDataSnapshot", t => t
+    .addTemplate("waitIndefinitelyForDataSnapshot", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("checksumField", typeToken<string>())
@@ -1164,12 +1216,12 @@ export const ResourceManagement = WorkflowBuilder.create({
                     failureCondition: "status.phase == Error"
                 }
             })
-            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+            .addRetryParameters(K8S_INDEFINITE_RESOURCE_WAIT_RETRY_STRATEGY)
         )
     )
 
 
-    .addTemplate("waitForSnapshotMigration", t => t
+    .addTemplate("waitIndefinitelyForSnapshotMigration", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("checksumField", typeToken<string>())
@@ -1191,7 +1243,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     failureCondition: "status.phase == Error"
                 }
             })
-            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+            .addRetryParameters(K8S_INDEFINITE_RESOURCE_WAIT_RETRY_STRATEGY)
         )
     )
 

@@ -308,6 +308,15 @@
           "action": "get",
           "successCondition": "status.conditions.0.status == True"
         },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -460,6 +469,28 @@
                 ]
               },
               "name": "waitForCert"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforsecretkey",
+                "name": "resource-management"
+              },
+              "when": "{{=((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])) == 'scram-sha-512'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "secretName",
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['secretName']}}"
+                  },
+                  {
+                    "name": "secretKey",
+                    "value": "password"
+                  }
+                ]
+              },
+              "name": "waitForKafkaAuthSecret"
             }
           ],
           [
@@ -788,6 +819,24 @@
                 ]
               },
               "name": "createKafkaTopic"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforkafkatopicready",
+                "name": "resource-management"
+              },
+              "when": "{{=true && !(steps.reconcileCapturedTrafficResource.outputs.parameters.currentConfigChecksum == inputs.parameters.topicConfigChecksum) && sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.proxyConfig))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "topicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  }
+                ]
+              },
+              "name": "waitForKafkaTopicReady"
             }
           ],
           [

@@ -196,9 +196,9 @@ _OWNED_RESOURCE_CLEANUP = {
         (_STRIMZI_API, 'kafkanodepools', _STRIMZI_CLUSTER_LABEL),
     ],
     'captureproxies': [
-        ('cert-manager.io/v1', 'certificates', None),
         (_APPS_API, 'deployments', None),
         ('v1', 'services', None),
+        ('cert-manager.io/v1', 'certificates', None),
     ],
     'snapshotmigrations': [
         # RFS workers before coordinator
@@ -631,7 +631,7 @@ def _wait_for_owned_deletion(
     while time.time() < deadline:
         remaining = _find_owned(namespace, api_gv, plural, label_key, cr_name)
         if not remaining:
-            return
+            return True
         if group:
             for item in remaining:
                 if _item_finalizers(item):
@@ -641,7 +641,11 @@ def _wait_for_owned_deletion(
     remaining = _find_owned(namespace, api_gv, plural, label_key, cr_name)
     if remaining:
         names = ', '.join(_item_name(i) for i in remaining)
-        logger.warning(f"Timed out waiting for {plural} deletion: {names}")
+        timeout_message = f"Timed out waiting for {plural} deletion: {names}"
+        click.echo(f"  Error: {timeout_message}", err=True)
+        logger.error(timeout_message)
+        return False
+    return True
 
 
 def _cleanup_owned_resources(namespace, cr_plural, cr_name):
@@ -649,7 +653,14 @@ def _cleanup_owned_resources(namespace, cr_plural, cr_name):
     for api_gv, plural, label_key in _OWNED_RESOURCE_CLEANUP.get(cr_plural, []):
         for item in _find_owned(namespace, api_gv, plural, label_key, cr_name):
             _delete_owned_resource(namespace, api_gv, plural, _item_name(item))
-        _wait_for_owned_deletion(namespace, api_gv, plural, label_key, cr_name)
+        if not _wait_for_owned_deletion(namespace, api_gv, plural, label_key, cr_name):
+            click.echo(
+                f"  Error: refusing to delete {resource_display_name(cr_plural, cr_name)} "
+                f"until owned {plural} resources are gone.",
+                err=True,
+            )
+            return False
+    return True
 
 
 def _mark_deleting(namespace, plural, name):
@@ -706,7 +717,8 @@ def _delete_and_wait(namespace, plural, name, delete_output_artifacts=True):
     """Delete a single CRD and poll until it is gone."""
     uid, created_at = _resource_metadata(namespace, plural, name)
     _mark_deleting(namespace, plural, name)
-    _cleanup_owned_resources(namespace, plural, name)
+    if not _cleanup_owned_resources(namespace, plural, name):
+        return name, False
     if delete_output_artifacts:
         _cleanup_output_artifacts(plural, name, uid, created_at)
     else:
