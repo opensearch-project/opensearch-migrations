@@ -486,11 +486,11 @@ class LiveCheckProcessor:
               help='Show all workflows including completed ones (default: only running)')
 @click.option('--live-status/--no-live-status', default=True,
               help='Run a current status check for each snapshot and backfill still running')
-@click.option('--step-view', is_flag=True, default=False,
-              help='Show the Argo workflow step tree instead of the resource-centric view')
+@click.option('--resource-view/--step-view', default=False, show_default='step-view',
+              help='Choose the resource-centric view or the Argo workflow step tree')
 @click.pass_context
 def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, insecure, token, show_all, live_status,
-                   step_view):
+                   resource_view):
     """Show detailed status of workflows.
 
     Displays workflow progress, completed steps, and approval status.
@@ -500,9 +500,9 @@ def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, in
     Example:
         workflow status
         workflow status --all
-        workflow status --step-view
+        workflow status --resource-view
     """
-    if not step_view:
+    if resource_view:
         try:
             from ..resource_tree import (
                 build_resource_tree, display_resource_tree,
