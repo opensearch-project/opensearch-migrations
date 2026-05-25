@@ -8,7 +8,7 @@ import time
 
 from kubernetes import client, config as k8s_config
 
-from console_link.models.cluster import Cluster
+from console_link.models.cluster import Cluster, SIGV4_SIGNING_ENDPOINT_KEY
 
 from ..cluster_version import CDC_MIGRATION_COMBINATIONS
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments  # noqa: F401 (re-exported)
@@ -145,8 +145,14 @@ def log_replayer_diagnostics(namespace: str):
 
 def make_proxy_cluster(source_cluster):
     """Create a Cluster pointing at the capture-proxy endpoint, inheriting source auth."""
-    return Cluster(config={**source_cluster.config, "endpoint": PROXY_ENDPOINT,
-                           "allow_insecure": True})
+    proxy_config = {
+        **source_cluster.config,
+        "endpoint": PROXY_ENDPOINT,
+        "allow_insecure": True,
+    }
+    if "sigv4" in proxy_config:
+        proxy_config[SIGV4_SIGNING_ENDPOINT_KEY] = source_cluster.endpoint
+    return Cluster(config=proxy_config)
 
 
 def run_generate_data(cluster: str, index_name: str, num_docs: int):

@@ -102,12 +102,11 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
         pass
 
     def verify_clusters(self):
-        # Pre-snapshot docs appear on target twice: once from snapshot/backfill
-        # and once from replay. generate-data uses _bulk with auto-generated
-        # _ids, so the replay creates new docs instead of overwriting the
-        # snapshot-restored ones.
-        expected_pre = self.PRE_SNAPSHOT_DOCS * 2
-        logger.info("Verifying both indices on target (pre-snapshot expects %d due to duplication)...", expected_pre)
+        # Full E2E validates final source/target parity. Pre-snapshot docs are
+        # backfilled from the snapshot, and any captured replay should not
+        # inflate the final target count.
+        expected_pre = self.PRE_SNAPSHOT_DOCS
+        logger.info("Verifying both indices on target (pre-snapshot expects %d docs)...", expected_pre)
         self.target_operations.check_doc_counts_match(
             cluster=self.target_cluster,
             expected_index_details={
