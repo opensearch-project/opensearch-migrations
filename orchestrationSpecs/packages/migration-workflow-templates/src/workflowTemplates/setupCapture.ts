@@ -20,7 +20,7 @@ import {
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {SetupKafka} from "./setupKafka";
 import {z} from "zod";
-import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {CERT_MANAGER_WEBHOOK_RETRY_STRATEGY, K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {CONTAINER_NAMES} from "../containerNames";
 import {ResourceManagement} from "./resourceManagement";
 
@@ -474,7 +474,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     ownerUid: b.inputs.ownerUid,
                 })
             }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+        .addRetryParameters(CERT_MANAGER_WEBHOOK_RETRY_STRATEGY)
     )
 
 
@@ -670,6 +670,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     partitions: b.inputs.topicPartitions,
                     replicas: b.inputs.topicReplicas,
                     topicConfig: b.inputs.topicConfig,
+                    configChecksum: b.inputs.topicConfigChecksum,
                     retryGateName: expr.concat(expr.literal("capturedtraffic."), b.inputs.topicCrName, expr.literal(".vapretry")),
                     retryGroupName_view: expr.concat(expr.literal("CapturedTraffic: "), b.inputs.topicCrName),
                 })
@@ -688,7 +689,7 @@ export const SetupCapture = WorkflowBuilder.create({
                 c.register({
                     clusterName: b.inputs.kafkaClusterName,
                     topicName: b.inputs.kafkaTopicName,
-                    workflowUid: expr.getWorkflowValue("uid"),
+                    migrationRunNumber: t.inputs.workflowParameters.migrationRunNumber,
                     ownerUid: b.inputs.kafkaClusterOwnerUid,
                     sourceLabel: b.inputs.sourceK8sLabel,
                     partitions: b.inputs.topicPartitions,
@@ -720,6 +721,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     proxyConfig: b.inputs.proxyConfig,
                     proxyName: b.inputs.proxyName,
                     topicCrName: b.inputs.topicCrName,
+                    configChecksum: b.inputs.configChecksum,
                     retryGateName: expr.concat(expr.literal("captureproxy."), b.inputs.proxyName, expr.literal(".vapretry")),
                     retryGroupName_view: expr.concat(expr.literal("CaptureProxy: "), b.inputs.proxyName),
                 })
@@ -734,10 +736,10 @@ export const SetupCapture = WorkflowBuilder.create({
                     managedByWorkflow
                 )}) }
             )
-            .addStep("patchCaptureProxyRunning", ResourceManagement, "patchCaptureProxyRunning", c =>
+            .addStep("patchCaptureProxyPending", ResourceManagement, "patchCaptureProxyPending", c =>
                 c.register({
                     resourceName: b.inputs.proxyName,
-                    phase: expr.literal("Running"),
+                    phase: expr.literal("Pending"),
                 }),
                 { when: c => ({templateExp: checksumNotDone(
                     c.reconcileCaptureProxyResource.outputs.currentConfigChecksum,

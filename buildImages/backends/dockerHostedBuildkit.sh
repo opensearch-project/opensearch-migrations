@@ -116,6 +116,39 @@ ensure_registry_container() {
   fi
 }
 
+# Connect a Kubernetes cluster's docker network to the registry's network and
+# install a containerd hosts.toml on every node so pulls of
+# ${EXTERNAL_REGISTRY_NAME}:5000 are served over plain HTTP (the registry
+# container has no TLS). Pods reference images by that in-cluster name, which
+# the node container resolves via Docker's bridge DNS.
+# Args: <cluster-docker-network> <node-container-name>...
+connect_cluster_to_registry_network() {
+  local cluster_network="$1"
+  shift
+  local nodes=("$@")
+
+  set_docker_hosted_defaults
+
+  if ! docker network inspect "${cluster_network}" >/dev/null 2>&1; then
+    echo "Cluster docker network '${cluster_network}' does not exist" >&2
+    return 1
+  fi
+
+  if [[ "$(docker inspect -f "{{json .NetworkSettings.Networks}}" "${EXTERNAL_REGISTRY_NAME}" \
+        | grep -c "\"${cluster_network}\":")" -eq 0 ]]; then
+    docker network connect "${cluster_network}" "${EXTERNAL_REGISTRY_NAME}"
+  fi
+
+  local registry_dir="/etc/containerd/certs.d/${EXTERNAL_REGISTRY_NAME}:5000"
+  local node
+  for node in "${nodes[@]}"; do
+    docker exec "${node}" mkdir -p "${registry_dir}"
+    cat <<EOF | docker exec -i "${node}" cp /dev/stdin "${registry_dir}/hosts.toml"
+server = "http://${EXTERNAL_REGISTRY_NAME}:5000"
+EOF
+  done
+}
+
 ensure_buildx_builder() {
   local builder_name
   builder_name="builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}"

@@ -7,6 +7,7 @@ process.argv.splice(2, 1);
     const commands = new Map<string, () => Promise<void>>([
         ['constrainSchema', async () => require('./constrainUserSchema').main()],
         ['initialize', async () => require('./runMigrationInitializer').main()],
+        ['resolveMigrationResources', async () => require('./resolveMigrationResources').main()],
         ['findSecrets', async () => require('./findSecrets').main()],
         ['validate', async () => require('./validateConfig').main()],
         ['formatApprovals', async () => require('./formatApprovals').main()],

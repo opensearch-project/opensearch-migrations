@@ -5,6 +5,7 @@ https://github.com/opensearch-project/opensearch-migrations/issues/2803
 """
 
 import shutil
+import os
 import subprocess
 import sys
 import textwrap
@@ -62,6 +63,21 @@ def test_workflow_cli_import_installs_sigpipe_sig_dfl():
 
 # ---------- End-to-end: actual bug reproduction ----------
 
+
+def _workflow_sample_env(tmp_path):
+    """Provide the real CLI subprocess with a tiny packaged-sample stand-in."""
+    sample_path = tmp_path / "sample.yaml"
+    sample_path.write_text("sourceClusters: {}\n")
+
+    scripts_dir = tmp_path / "configProcessor"
+    scripts_dir.mkdir()
+
+    env = os.environ.copy()
+    env["CONFIG_PROCESSOR_DIR"] = str(scripts_dir)
+    env["MIGRATION_SAMPLE_CONFIG_PATH"] = str(sample_path)
+    return env
+
+
 @skip_on_windows
 @skip_if_not_installed
 @pytest.mark.parametrize("consumer", [
@@ -72,11 +88,12 @@ def test_workflow_cli_import_installs_sigpipe_sig_dfl():
     "grep -m1 sourceClusters",
     "sed -n 1p",
 ])
-def test_workflow_configure_sample_pipe_no_traceback(consumer):
+def test_workflow_configure_sample_pipe_no_traceback(consumer, tmp_path):
     """`workflow configure sample | <consumer>` must not print a Python traceback."""
     proc = subprocess.run(
         f"workflow configure sample | {consumer}",
         shell=True, capture_output=True, text=True, timeout=60,
+        env=_workflow_sample_env(tmp_path),
     )
     assert "Traceback" not in proc.stderr, (
         f"Unexpected traceback for consumer={consumer!r}:\n{proc.stderr}"
@@ -88,11 +105,12 @@ def test_workflow_configure_sample_pipe_no_traceback(consumer):
 
 @skip_on_windows
 @skip_if_not_installed
-def test_workflow_configure_sample_full_read_still_works():
+def test_workflow_configure_sample_full_read_still_works(tmp_path):
     """Sanity check: the fix must not break the happy path (full stdout read)."""
     proc = subprocess.run(
         "workflow configure sample",
         shell=True, capture_output=True, text=True, timeout=60,
+        env=_workflow_sample_env(tmp_path),
     )
     assert proc.returncode == 0, f"exit={proc.returncode} stderr={proc.stderr}"
     assert "sourceClusters" in proc.stdout

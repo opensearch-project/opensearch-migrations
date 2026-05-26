@@ -238,14 +238,26 @@ charts:
     values:
       crds:
         enabled: true
+      replicaCount: 2
+      podDisruptionBudget:
+        enabled: true
+        minAvailable: 1
       resources:
         requests: { cpu: 50m, memory: 64Mi }
         limits:   { cpu: 250m, memory: 128Mi }
       cainjector:
+        replicaCount: 2
+        podDisruptionBudget:
+          enabled: true
+          minAvailable: 1
         resources:
           requests: { cpu: 50m, memory: 64Mi }
           limits:   { cpu: 250m, memory: 128Mi }
       webhook:
+        replicaCount: 2
+        podDisruptionBudget:
+          enabled: true
+          minAvailable: 1
         resources:
           requests: { cpu: 50m, memory: 64Mi }
           limits:   { cpu: 100m, memory: 128Mi }

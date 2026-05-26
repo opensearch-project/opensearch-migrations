@@ -173,6 +173,10 @@ public class SolrBackupSource implements DocumentSource {
      * Discover shard directories from the backup (non-UUID layouts).
      */
     List<Path> discoverShardDirs() {
+        if (!Files.isDirectory(backupDir)) {
+            log.warn("Backup directory does not exist, treating as empty collection: {}", backupDir);
+            return List.of();
+        }
         if (hasSegmentsFile(backupDir)) {
             return List.of(backupDir);
         }
@@ -188,6 +192,11 @@ public class SolrBackupSource implements DocumentSource {
                 .sorted()
                 .flatMap(shardDir -> {
                     if (hasSegmentsFile(shardDir)) {
+                        return Stream.of(shardDir);
+                    }
+                    // Solr 6 SolrCloud BACKUP writes snapshot.shardN/ dirs; stubs may be empty
+                    // before the shardPreparer downloads the actual index files.
+                    if (shardDir.getFileName().toString().startsWith("snapshot.")) {
                         return Stream.of(shardDir);
                     }
                     var indexPath = shardDir.resolve("data").resolve(INDEX_DIR_NAME);

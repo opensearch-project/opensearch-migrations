@@ -132,12 +132,8 @@ class K8sService:
         self.exec_migration_console_cmd(
             command_list=["sh", "-c", f"rm -f {log_file} {exit_code_file}"],
             unbuffered=False)
-        wrapper = (
-            f"nohup sh -c '"
-            f"{inner_cmd} > {log_file} 2>&1; "
-            f"echo $? > {exit_code_file}"
-            f"' > /dev/null 2>&1 &"
-        )
+        script = f"{inner_cmd} > {shlex.quote(log_file)} 2>&1; echo $? > {shlex.quote(exit_code_file)}"
+        wrapper = f"nohup sh -c {shlex.quote(script)} > /dev/null 2>&1 &"
         self.exec_migration_console_cmd(command_list=["sh", "-c", wrapper], unbuffered=False)
         time.sleep(2)
         check = self.exec_migration_console_cmd(

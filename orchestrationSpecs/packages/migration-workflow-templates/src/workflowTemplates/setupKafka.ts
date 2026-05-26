@@ -78,7 +78,7 @@ function makeManagedKafkaListeners(authType: BaseExpression<string>) {
 function makeManagedKafkaUserManifest(args: {
     clusterName: BaseExpression<string>,
     userSpec: BaseExpression<Serialized<Record<string, any>>>,
-    workflowUid: BaseExpression<string>,
+    migrationRunNumber: BaseExpression<string>,
     ownerUid: BaseExpression<string>,
 }): Record<string, any> {
     return {
@@ -90,7 +90,7 @@ function makeManagedKafkaUserManifest(args: {
             labels: {
                 "strimzi.io/cluster": args.clusterName,
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                "workflows.argoproj.io/run-uid": makeStringTypeProxy(args.workflowUid),
+                "migrations.opensearch.org/run-number": makeStringTypeProxy(args.migrationRunNumber),
                 [KAFKA_CLUSTER_LABEL]: makeStringTypeProxy(args.clusterName),
             }
         },
@@ -101,7 +101,7 @@ function makeManagedKafkaUserManifest(args: {
 function makeDeployKafkaNodePool(args: {
     clusterName: BaseExpression<string>,
     nodePoolSpec: BaseExpression<Serialized<Record<string, any>>>,
-    workflowUid: BaseExpression<string>,
+    migrationRunNumber: BaseExpression<string>,
     ownerUid: BaseExpression<string>,
 }): Record<string, any> {
     return {
@@ -113,7 +113,7 @@ function makeDeployKafkaNodePool(args: {
             labels: {
                 "strimzi.io/cluster": args.clusterName,
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                "workflows.argoproj.io/run-uid": makeStringTypeProxy(args.workflowUid),
+                "migrations.opensearch.org/run-number": makeStringTypeProxy(args.migrationRunNumber),
                 [KAFKA_CLUSTER_LABEL]: makeStringTypeProxy(args.clusterName),
             }
         },
@@ -166,7 +166,7 @@ function makeManagedKafkaUserSpec(clusterConfig: BaseExpression<Serialized<Kafka
 function makeDeployKafkaClusterKraftManifest(args: {
     clusterName: BaseExpression<string>,
     kafkaSpec: BaseExpression<Serialized<Record<string, any>>>,
-    workflowUid: BaseExpression<string>,
+    migrationRunNumber: BaseExpression<string>,
     ownerUid: BaseExpression<string>,
 }): Record<string, any> {
     return {
@@ -178,7 +178,7 @@ function makeDeployKafkaClusterKraftManifest(args: {
             labels: {
                 "strimzi.io/cluster": makeStringTypeProxy(args.clusterName),
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                "workflows.argoproj.io/run-uid": makeStringTypeProxy(args.workflowUid),
+                "migrations.opensearch.org/run-number": makeStringTypeProxy(args.migrationRunNumber),
                 [KAFKA_CLUSTER_LABEL]: makeStringTypeProxy(args.clusterName),
             },
             annotations: {
@@ -200,7 +200,7 @@ function shouldCreateManagedKafkaUser(clusterConfig: BaseExpression<Serialized<K
 function makeKafkaTopicManifest(args: {
     clusterName: BaseExpression<string>,
     topicName: BaseExpression<string>,
-    workflowUid: BaseExpression<string>,
+    migrationRunNumber: BaseExpression<string>,
     ownerUid: BaseExpression<string>,
     sourceLabel: BaseExpression<string>,
     partitions: BaseExpression<Serialized<number>>,
@@ -216,7 +216,7 @@ function makeKafkaTopicManifest(args: {
             labels: {
                 "strimzi.io/cluster": args.clusterName,
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                "workflows.argoproj.io/run-uid": makeStringTypeProxy(args.workflowUid),
+                "migrations.opensearch.org/run-number": makeStringTypeProxy(args.migrationRunNumber),
                 [KAFKA_CLUSTER_LABEL]: makeStringTypeProxy(args.clusterName),
                 [SOURCE_LABEL]: makeStringTypeProxy(args.sourceLabel),
             }
@@ -243,7 +243,7 @@ export const SetupKafka = WorkflowBuilder.create({
     .addTemplate("deployKafkaNodePool", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("nodePoolSpec", typeToken<Serialized<Record<string, any>>>())
-        .addRequiredInput("workflowUid", typeToken<string>())
+        .addRequiredInput("migrationRunNumber", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
@@ -252,7 +252,7 @@ export const SetupKafka = WorkflowBuilder.create({
                 manifest: makeDeployKafkaNodePool({
                     clusterName: b.inputs.clusterName,
                     nodePoolSpec: b.inputs.nodePoolSpec,
-                    workflowUid: b.inputs.workflowUid,
+                    migrationRunNumber: b.inputs.migrationRunNumber,
                     ownerUid: b.inputs.ownerUid,
                 })
             }))
@@ -263,7 +263,7 @@ export const SetupKafka = WorkflowBuilder.create({
     .addTemplate("deployKafkaClusterKraftNoAuth", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("kafkaSpec", typeToken<Serialized<Record<string, any>>>())
-        .addRequiredInput("workflowUid", typeToken<string>())
+        .addRequiredInput("migrationRunNumber", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
@@ -273,7 +273,7 @@ export const SetupKafka = WorkflowBuilder.create({
                 manifest: makeDeployKafkaClusterKraftManifest({
                     clusterName: b.inputs.clusterName,
                     kafkaSpec: b.inputs.kafkaSpec,
-                    workflowUid: b.inputs.workflowUid,
+                    migrationRunNumber: b.inputs.migrationRunNumber,
                     ownerUid: b.inputs.ownerUid,
                 })
             }))
@@ -286,7 +286,7 @@ export const SetupKafka = WorkflowBuilder.create({
     .addTemplate("deployKafkaClusterKraftScram", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("kafkaSpec", typeToken<Serialized<Record<string, any>>>())
-        .addRequiredInput("workflowUid", typeToken<string>())
+        .addRequiredInput("migrationRunNumber", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
@@ -296,7 +296,7 @@ export const SetupKafka = WorkflowBuilder.create({
                 manifest: makeDeployKafkaClusterKraftManifest({
                     clusterName: b.inputs.clusterName,
                     kafkaSpec: b.inputs.kafkaSpec,
-                    workflowUid: b.inputs.workflowUid,
+                    migrationRunNumber: b.inputs.migrationRunNumber,
                     ownerUid: b.inputs.ownerUid,
                 })
             }))
@@ -310,7 +310,7 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("version", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
-        .addRequiredInput("workflowUid", typeToken<string>())
+        .addRequiredInput("migrationRunNumber", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
 
         .addSteps(b => b
@@ -321,7 +321,7 @@ export const SetupKafka = WorkflowBuilder.create({
                         version: b.inputs.version,
                         clusterConfig: b.inputs.clusterConfig,
                     })),
-                    workflowUid: b.inputs.workflowUid,
+                    migrationRunNumber: b.inputs.migrationRunNumber,
                     ownerUid: b.inputs.ownerUid,
                 }),
                 {when: c => ({templateExp: expr.not(shouldCreateManagedKafkaUser(b.inputs.clusterConfig))})}
@@ -333,7 +333,7 @@ export const SetupKafka = WorkflowBuilder.create({
                         version: b.inputs.version,
                         clusterConfig: b.inputs.clusterConfig,
                     })),
-                    workflowUid: b.inputs.workflowUid,
+                    migrationRunNumber: b.inputs.migrationRunNumber,
                     ownerUid: b.inputs.ownerUid,
                 }),
                 {when: c => ({templateExp: shouldCreateManagedKafkaUser(b.inputs.clusterConfig)})}
@@ -350,7 +350,7 @@ export const SetupKafka = WorkflowBuilder.create({
     .addTemplate("createKafkaTopic", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("topicName", typeToken<string>())
-        .addRequiredInput("workflowUid", typeToken<string>())
+        .addRequiredInput("migrationRunNumber", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("partitions", typeToken<number>())
@@ -365,7 +365,7 @@ export const SetupKafka = WorkflowBuilder.create({
                 manifest: makeKafkaTopicManifest({
                     clusterName: b.inputs.clusterName,
                     topicName: b.inputs.topicName,
-                    workflowUid: b.inputs.workflowUid,
+                    migrationRunNumber: b.inputs.migrationRunNumber,
                     ownerUid: b.inputs.ownerUid,
                     sourceLabel: b.inputs.sourceLabel,
                     partitions: b.inputs.partitions,
@@ -380,7 +380,7 @@ export const SetupKafka = WorkflowBuilder.create({
     .addTemplate("createKafkaUser", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("userSpec", typeToken<Serialized<Record<string, any>>>())
-        .addRequiredInput("workflowUid", typeToken<string>())
+        .addRequiredInput("migrationRunNumber", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
@@ -390,7 +390,7 @@ export const SetupKafka = WorkflowBuilder.create({
                 manifest: makeManagedKafkaUserManifest({
                     clusterName: b.inputs.clusterName,
                     userSpec: b.inputs.userSpec,
-                    workflowUid: b.inputs.workflowUid,
+                    migrationRunNumber: b.inputs.migrationRunNumber,
                     ownerUid: b.inputs.ownerUid,
                 })
             }))
@@ -413,7 +413,7 @@ export const SetupKafka = WorkflowBuilder.create({
                             ["nodePoolSpecOverrides"],
                             expr.makeDict({})
                         )),
-                        workflowUid: expr.getWorkflowValue("uid"),
+                        migrationRunNumber: t.inputs.workflowParameters.migrationRunNumber,
                         ownerUid: b.inputs.ownerUid,
                     })
                 )
@@ -422,7 +422,7 @@ export const SetupKafka = WorkflowBuilder.create({
                         clusterName: b.inputs.clusterName,
                         version: b.inputs.version,
                         clusterConfig: b.inputs.clusterConfig,
-                        workflowUid: expr.getWorkflowValue("uid"),
+                        migrationRunNumber: t.inputs.workflowParameters.migrationRunNumber,
                         ownerUid: b.inputs.ownerUid,
                     })
                 )
@@ -430,7 +430,7 @@ export const SetupKafka = WorkflowBuilder.create({
                     c.register({
                         clusterName: b.inputs.clusterName,
                         userSpec: expr.recordToString(makeManagedKafkaUserSpec(b.inputs.clusterConfig)),
-                        workflowUid: expr.getWorkflowValue("uid"),
+                        migrationRunNumber: t.inputs.workflowParameters.migrationRunNumber,
                         ownerUid: b.inputs.ownerUid,
                     }),
                     {when: c => ({templateExp: shouldCreateManagedKafkaUser(b.inputs.clusterConfig)})}
