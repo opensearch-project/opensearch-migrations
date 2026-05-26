@@ -11,8 +11,11 @@ metadata:
   name: migration-console-access-role
 rules:
   - apiGroups: [ "" ]
-    resources: ["configmaps", "events", "persistentvolumeclaims", "pods", "pods/log", "secrets", "services"]
+    resources: ["configmaps", "endpoints", "events", "persistentvolumeclaims", "pods", "pods/log", "secrets", "services"]
     verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "watch", "list"]
   - apiGroups: [""]
     resources: ["pods/attach"]
     verbs: ["create", "get"]

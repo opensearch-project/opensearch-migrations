@@ -20,8 +20,7 @@ from console_link.models.cluster import Cluster
 
 from .cdc_base import (
     MATestBase, MigrationType, MATestUserArguments,
-    REPLAYER_LABEL_SELECTOR, PROXY_LABEL_SELECTOR,
-    wait_for_pod_ready, wait_for_replayer_consuming,
+    wait_for_proxy_ready, wait_for_replayer_consuming,
     run_generate_data,
 )
 
@@ -82,6 +81,7 @@ class Test0034CdcOnlyAossTarget(MATestBase):
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
         self.workflow_template = "cdc-only-imported-clusters"
+        self.parameters["capture-proxy-service-type"] = self.capture_proxy_service_type
 
     def prepare_clusters(self):
         pass
@@ -89,11 +89,11 @@ class Test0034CdcOnlyAossTarget(MATestBase):
     def workflow_perform_migrations(self, timeout_seconds: int = 3600):
         if not self.workflow_name:
             raise ValueError("Workflow name is not available")
-        logger.info("Waiting for replayer to start...")
-        wait_for_pod_ready(self.argo_service.namespace, REPLAYER_LABEL_SELECTOR, timeout_seconds)
-        logger.info("Replayer is running")
+        logger.info("CDC workflow submitted; replayer readiness is checked before traffic is sent")
 
     def post_migration_actions(self):
+        logger.info("Waiting for capture-proxy service to be ready...")
+        wait_for_proxy_ready(self.argo_service.namespace)
         logger.info("Waiting for replayer to join Kafka consumer group...")
         wait_for_replayer_consuming(namespace=self.argo_service.namespace)
 
@@ -175,6 +175,7 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
         self.workflow_template = "cdc-full-e2e-imported-clusters"
         self.parameters["pre-snapshot-proxy-submit"] = "true"
+        self.parameters["capture-proxy-service-type"] = self.capture_proxy_service_type
 
     def prepare_clusters(self):
         pass
@@ -186,7 +187,7 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
 
         # --- Pre-snapshot: generate-data via proxy ---
         logger.info("Waiting for capture-proxy to be ready...")
-        wait_for_pod_ready(ns, PROXY_LABEL_SELECTOR, timeout_seconds)
+        wait_for_proxy_ready(ns, timeout_seconds)
 
         logger.info("Pre-snapshot: generating %d docs into %s via proxy", self.PRE_SNAPSHOT_DOCS, self.idx_pre)
         run_generate_data("proxy", self.idx_pre, self.PRE_SNAPSHOT_DOCS)
@@ -197,8 +198,6 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
         self.argo_service.resume_workflow(workflow_name=self.workflow_name)
 
         # --- Wait for replayer (signals backfill done) ---
-        logger.info("Waiting for replayer to start...")
-        wait_for_pod_ready(ns, REPLAYER_LABEL_SELECTOR, timeout_seconds)
         logger.info("Waiting for replayer to join Kafka consumer group...")
         wait_for_replayer_consuming(namespace=ns)
 

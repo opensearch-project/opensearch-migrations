@@ -32,6 +32,8 @@ spec:
         value: "{}"
       - name: pre-snapshot-proxy-submit
         value: "false"
+      - name: capture-proxy-service-type
+        value: "LoadBalancer"
 
   templates:
     - name: main
@@ -108,6 +110,8 @@ spec:
                   value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
                 - name: imageMigrationConsolePullPolicy
                   value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                - name: captureProxyServiceType
+                  value: "{{workflow.parameters.capture-proxy-service-type}}"
 
         - - name: run-proxy-only-migration-with-workflow-cli
             templateRef:
@@ -157,6 +161,8 @@ spec:
                   value: "{{inputs.parameters.tupleS3Endpoint}}"
                 - name: tupleS3BucketName
                   value: "{{inputs.parameters.tupleS3BucketName}}"
+                - name: captureProxyServiceType
+                  value: "{{workflow.parameters.capture-proxy-service-type}}"
 
         - - name: run-full-migration-with-workflow-cli
             templateRef:

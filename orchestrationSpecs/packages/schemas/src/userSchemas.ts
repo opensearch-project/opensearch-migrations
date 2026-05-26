@@ -461,8 +461,13 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
 export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
     loggingConfigurationOverrideConfigMap: z.string().default("").optional()
         .describe(LOGGING_CONFIG_OVERRIDE_DESC),
+    serviceType: z.enum(["LoadBalancer", "ClusterIP"]).default("LoadBalancer").optional()
+        .describe("Expert setting controlling how the capture proxy Kubernetes Service is exposed. " +
+            "'LoadBalancer' provisions a cloud/load-balancer-backed Service and waits for load balancer ingress before the proxy is Ready. " +
+            "'ClusterIP' exposes the proxy only inside the Kubernetes cluster and waits for the cluster-local Service endpoint before the proxy is Ready.")
+        .changeRestriction('impossible'),
     internetFacing: z.boolean().default(false).optional()
-        .describe("When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.")
+        .describe("When true and serviceType is 'LoadBalancer', the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.")
         .changeRestriction('impossible'),
     podReplicas: z.number().default(1).optional()
         .describe("Number of proxy pod replicas in the Kubernetes Deployment. Increase for higher throughput or availability."),

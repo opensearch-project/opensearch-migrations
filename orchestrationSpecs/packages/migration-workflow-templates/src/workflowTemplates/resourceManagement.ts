@@ -1006,7 +1006,9 @@ export const ResourceManagement = WorkflowBuilder.create({
     .addTemplate("patchCaptureProxyReady", t => buildPatchStatusTemplate(t, "CaptureProxy", {
         configChecksum: "",
         checksumForSnapshot: "",
-        checksumForReplayer: ""
+        checksumForReplayer: "",
+        serviceEndpoint: "",
+        loadBalancerEndpoint: "",
     }))
     .addTemplate("patchCaptureProxyError", t => buildPatchStatusTemplate(t, "CaptureProxy", {}))
     .addTemplate("patchDataSnapshotCompleted", t => buildPatchStatusTemplate(t, "DataSnapshot", {

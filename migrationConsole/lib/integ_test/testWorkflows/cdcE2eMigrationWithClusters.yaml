@@ -67,6 +67,8 @@ spec:
         value: "{}"
       - name: pre-snapshot-proxy-submit
         value: "false"
+      - name: capture-proxy-service-type
+        value: "LoadBalancer"
 
   templates:
     # Main workflow: provision clusters, pause for test data, run CDC+backfill.
@@ -196,6 +198,8 @@ spec:
                     configMapKeyRef:
                       name: "{{workflow.parameters.migration-image-configmap}}"
                       key: migrationConsolePullPolicy
+                - name: captureProxyServiceType
+                  value: "{{workflow.parameters.capture-proxy-service-type}}"
 
         - - name: run-proxy-only-migration-with-workflow-cli
             templateRef:
@@ -250,6 +254,8 @@ spec:
                     configMapKeyRef:
                       name: "{{workflow.parameters.migration-image-configmap}}"
                       key: migrationConsolePullPolicy
+                - name: captureProxyServiceType
+                  value: "{{workflow.parameters.capture-proxy-service-type}}"
 
         # Run the full migration using the CDC-enabled config.
         - - name: run-full-migration-with-workflow-cli

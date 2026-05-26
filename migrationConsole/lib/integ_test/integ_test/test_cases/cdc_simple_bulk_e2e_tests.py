@@ -3,8 +3,7 @@ import uuid
 
 from .cdc_base import (
     MATestBase, MigrationType, MATestUserArguments,
-    CDC_SOURCE_TARGET_COMBINATIONS, REPLAYER_LABEL_SELECTOR, PROXY_LABEL_SELECTOR,
-    wait_for_pod_ready, wait_for_replayer_consuming,
+    CDC_SOURCE_TARGET_COMBINATIONS, wait_for_proxy_ready, wait_for_replayer_consuming,
     run_generate_data,
 )
 
@@ -52,6 +51,7 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
             else "cdc-e2e-migration-with-clusters"
         )
         self.parameters["pre-snapshot-proxy-submit"] = "true"
+        self.parameters["capture-proxy-service-type"] = self.capture_proxy_service_type
 
     def prepare_clusters(self):
         pass
@@ -69,7 +69,7 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
 
         logger.info("Waiting for capture-proxy to be ready...")
-        wait_for_pod_ready(ns, PROXY_LABEL_SELECTOR, timeout_seconds)
+        wait_for_proxy_ready(ns, timeout_seconds)
 
         logger.info("Pre-snapshot: generating %d docs into %s via proxy", self.PRE_SNAPSHOT_DOCS, self.idx_pre)
         run_generate_data("proxy", self.idx_pre, self.PRE_SNAPSHOT_DOCS)
@@ -79,8 +79,6 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
         logger.info("Resuming workflow to submit full migration...")
         self.argo_service.resume_workflow(workflow_name=self.workflow_name)
 
-        logger.info("Waiting for replayer to start...")
-        wait_for_pod_ready(ns, REPLAYER_LABEL_SELECTOR, timeout_seconds)
         logger.info("Waiting for replayer to join Kafka consumer group...")
         wait_for_replayer_consuming(namespace=ns)
 

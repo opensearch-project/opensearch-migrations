@@ -63,7 +63,8 @@ class TestRunner:
                  combinations: List[Tuple[str, str]],
                  registry_prefix: str = "", values_file: str = None, skip_install: bool = False,
                  speedup_factor: int = 20, observed_packet_timeout: int = 30,
-                 transform_image_basic: str = "", transform_image_sequence: str = "") -> None:
+                 transform_image_basic: str = "", transform_image_sequence: str = "",
+                 capture_proxy_service_type: str = "LoadBalancer") -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
         self.test_ids = test_ids
@@ -76,6 +77,7 @@ class TestRunner:
         self.observed_packet_timeout = observed_packet_timeout
         self.transform_image_basic = transform_image_basic
         self.transform_image_sequence = transform_image_sequence
+        self.capture_proxy_service_type = capture_proxy_service_type
 
     def _print_test_stats(self, report: TestReport) -> None:
         for test in report.tests:
@@ -186,6 +188,7 @@ class TestRunner:
             command_list.append(f"--transform_image_basic={self.transform_image_basic}")
         if self.transform_image_sequence:
             command_list.append(f"--transform_image_sequence={self.transform_image_sequence}")
+        command_list.append(f"--capture_proxy_service_type={self.capture_proxy_service_type}")
         command_list.append(f"--speedup_factor={self.speedup_factor}")
         command_list.append(f"--observed_packet_timeout={self.observed_packet_timeout}")
         command_list.append("-s")
@@ -612,6 +615,12 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Digest-pinned transform image containing the sequence transform fixture bank."
     )
+    parser.add_argument(
+        "--capture-proxy-service-type",
+        choices=("LoadBalancer", "ClusterIP"),
+        default="LoadBalancer",
+        help="Kubernetes Service type for capture proxies. Use ClusterIP for local kind/minikube tests."
+    )
     return parser.parse_args()
 
 
@@ -654,7 +663,8 @@ def main() -> None:
                              speedup_factor=args.speedup_factor,
                              observed_packet_timeout=args.observed_packet_timeout,
                              transform_image_basic=args.transform_image_basic,
-                             transform_image_sequence=args.transform_image_sequence)
+                             transform_image_sequence=args.transform_image_sequence,
+                             capture_proxy_service_type=args.capture_proxy_service_type)
 
     if args.delete_only:
         fully_clean = test_runner.cleanup_deployment()

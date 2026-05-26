@@ -161,6 +161,32 @@ class IntegrationTestArgoService:
         except Exception as e:
             logger.error(f"Failed to get workflow logs: {e}")
 
+    def print_workflow_status(self, workflow_name: str) -> None:
+        """Print the final Argo workflow status before teardown deletes it."""
+        try:
+            workflow_data = self._get_workflow_status_json(workflow_name)
+            logger.info(
+                "Workflow %s status before cleanup:\n%s",
+                workflow_name,
+                json.dumps(workflow_data.get("status", {}), indent=2, sort_keys=True),
+            )
+        except Exception as e:
+            logger.error(f"Failed to get workflow status for {workflow_name}: {e}")
+
+    def print_migration_resource_status(self) -> None:
+        """Print migration CR statuses before reset removes them."""
+        migration_resources = (
+            "kafkaclusters,capturedtraffics,captureproxies,datasnapshots,"
+            "snapshotmigrations,trafficreplays,approvalgates,migrationruns"
+        )
+        sections: List[str] = []
+        self._append_kubectl_output(sections, f"kubectl get {migration_resources} -o yaml", {
+            "get": migration_resources,
+            "--namespace": self.namespace,
+            "-o": "yaml"
+        })
+        logger.info("Migration resource status before cleanup:\n%s", "\n".join(sections))
+
     def print_namespace_diagnostics(self, workflow_name: Optional[str] = None) -> None:
         """Log the same diagnostics that are written to disk before teardown deletes resources."""
         try:

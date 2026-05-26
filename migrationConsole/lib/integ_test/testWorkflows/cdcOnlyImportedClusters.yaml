@@ -17,6 +17,8 @@ spec:
         value: "120"
       - name: speedup-factor
         value: "20"
+      - name: capture-proxy-service-type
+        value: "LoadBalancer"
 
   templates:
     - name: main
@@ -113,7 +115,11 @@ spec:
                   "proxies": {
                     "capture-proxy": {
                       "source": "source1",
-                      "proxyConfig": { "listenPort": 9201, "noCapture": false }
+                      "proxyConfig": {
+                        "listenPort": 9201,
+                        "noCapture": false,
+                        "serviceType": "{{workflow.parameters.capture-proxy-service-type}}"
+                      }
                     }
                   },
                   "replayers": {

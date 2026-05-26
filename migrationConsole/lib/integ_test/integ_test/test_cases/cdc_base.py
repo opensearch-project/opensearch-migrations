@@ -7,8 +7,10 @@ import subprocess
 import time
 
 from kubernetes import client, config as k8s_config
+from kubernetes.client.rest import ApiException
 
 from console_link.models.cluster import Cluster, SIGV4_SIGNING_ENDPOINT_KEY
+from console_link.workflow.commands.crd_utils import CRD_GROUP, CRD_VERSION
 
 from ..cluster_version import CDC_MIGRATION_COMBINATIONS
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments  # noqa: F401 (re-exported)
@@ -17,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 # --- Constants shared across all CDC tests ---
 PROXY_DEPLOYMENT_NAME = "capture-proxy"
+PROXY_RESOURCE_NAME = "capture-proxy"
+PROXY_SERVICE_NAME = "capture-proxy"
 REPLAYER_LABEL_SELECTOR = "app=replayer"
 PROXY_LABEL_SELECTOR = "migrations/proxy=capture-proxy"
 PROXY_ENDPOINT = "https://capture-proxy:9201"
@@ -78,6 +82,78 @@ def wait_for_pod_ready(namespace: str, label_selector: str, timeout_seconds: int
     raise TimeoutError(f"No pod with label '{label_selector}' reached Ready within {timeout_seconds}s")
 
 
+def wait_for_proxy_ready(namespace: str, timeout_seconds: int = 1200):
+    """Wait until the CaptureProxy CR is Ready.
+
+    The workflow owns pod, Service, endpoint, and load-balancer readiness.
+    Tests gate only on the parent CaptureProxy CR status and inspect lower-level
+    objects only when collecting diagnostics after an Error or timeout.
+    """
+    load_k8s_config()
+
+    logger.info("Waiting for captureproxy/%s to be Ready (timeout=%ds)...", PROXY_RESOURCE_NAME, timeout_seconds)
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        phase, message, service_endpoint, load_balancer_endpoint = _get_capture_proxy_readiness_status(namespace)
+
+        if phase == "Ready":
+            logger.info(
+                "captureproxy/%s is Ready: serviceEndpoint=%s loadBalancerEndpoint=%s",
+                PROXY_RESOURCE_NAME, service_endpoint or "<unset>", load_balancer_endpoint or "<unset>",
+            )
+            return
+        if phase == "Error":
+            _dump_proxy_readiness_diagnostics(namespace)
+            raise RuntimeError(f"captureproxy/{PROXY_RESOURCE_NAME} entered Error phase: {message}")
+
+        elapsed = int(time.monotonic() - (deadline - timeout_seconds))
+        logger.info(
+            "Still waiting for captureproxy/%s Ready (elapsed=%ds, timeout=%ds): phase=%s message=%s "
+            "serviceEndpoint=%s loadBalancerEndpoint=%s",
+            PROXY_RESOURCE_NAME, elapsed, timeout_seconds, phase, message or "<none>",
+            service_endpoint or "<unset>", load_balancer_endpoint or "<unset>",
+        )
+        time.sleep(_POD_READY_HEARTBEAT_SECONDS)
+
+    _dump_proxy_readiness_diagnostics(namespace)
+    raise TimeoutError(f"captureproxy/{PROXY_RESOURCE_NAME} did not reach Ready within {timeout_seconds}s")
+
+
+def _get_capture_proxy_readiness_status(namespace: str) -> tuple[str, str, str, str]:
+    custom = client.CustomObjectsApi()
+    try:
+        proxy = custom.get_namespaced_custom_object(
+            group=CRD_GROUP,
+            version=CRD_VERSION,
+            namespace=namespace,
+            plural="captureproxies",
+            name=PROXY_RESOURCE_NAME,
+        )
+    except ApiException as e:
+        return (
+            "NotFound" if e.status == 404 else f"ApiException({e.status})",
+            e.reason,
+            "",
+            "",
+        )
+
+    status = proxy.get("status", {})
+    return (
+        status.get("phase", "Unknown"),
+        status.get("message", ""),
+        status.get("serviceEndpoint", ""),
+        status.get("loadBalancerEndpoint", ""),
+    )
+
+
+def _dump_proxy_readiness_diagnostics(namespace: str) -> None:
+    """Dump details that explain why the parent CaptureProxy CR is not Ready."""
+    _dump_capture_proxy_diagnostics(namespace, PROXY_RESOURCE_NAME)
+    _dump_pod_diagnostics(namespace, PROXY_LABEL_SELECTOR)
+    _dump_service_diagnostics(namespace, PROXY_SERVICE_NAME)
+
+
 def _dump_pod_diagnostics(namespace: str, label_selector: str) -> None:
     """Best-effort diagnostic dump on pod-readiness timeout.
 
@@ -97,6 +173,43 @@ def _dump_pod_diagnostics(namespace: str, label_selector: str) -> None:
             if result.stdout.strip():
                 logger.warning("$ %s\n%s", " ".join(cmd), result.stdout.rstrip())
         except Exception as e:  # noqa: BLE001 — diagnostic must not raise
+            logger.warning("$ %s failed: %s", " ".join(cmd), e)
+
+
+def _dump_capture_proxy_diagnostics(namespace: str, proxy_name: str) -> None:
+    cmds = (
+        ["kubectl", "get", "captureproxies", proxy_name, "-n", namespace, "-o", "yaml"],
+        ["kubectl", "describe", "captureproxies", proxy_name, "-n", namespace],
+    )
+    for cmd in cmds:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.stdout.strip():
+                logger.warning("$ %s\n%s", " ".join(cmd), result.stdout.rstrip())
+            if result.stderr.strip():
+                logger.warning("$ %s stderr\n%s", " ".join(cmd), result.stderr.rstrip())
+        except Exception as e:  # noqa: BLE001 - diagnostic must not raise
+            logger.warning("$ %s failed: %s", " ".join(cmd), e)
+
+
+def _dump_service_diagnostics(namespace: str, service_name: str) -> None:
+    cmds = (
+        ["kubectl", "get", "service", service_name, "-n", namespace, "-o", "wide"],
+        ["kubectl", "describe", "service", service_name, "-n", namespace],
+        ["kubectl", "get", "endpoints", service_name, "-n", namespace, "-o", "yaml"],
+        ["kubectl", "get", "endpointslices", "-n", namespace,
+         "-l", f"kubernetes.io/service-name={service_name}", "-o", "yaml"],
+        ["kubectl", "get", "events", "-n", namespace,
+         "--sort-by=.lastTimestamp", "--field-selector=type!=Normal"],
+    )
+    for cmd in cmds:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.stdout.strip():
+                logger.warning("$ %s\n%s", " ".join(cmd), result.stdout.rstrip())
+            if result.stderr.strip():
+                logger.warning("$ %s stderr\n%s", " ".join(cmd), result.stderr.rstrip())
+        except Exception as e:  # noqa: BLE001 - diagnostic must not raise
             logger.warning("$ %s failed: %s", " ".join(cmd), e)
 
 
