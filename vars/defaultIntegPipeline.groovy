@@ -170,7 +170,9 @@ def call(Map config = [:]) {
                                             "--stage ${stage}"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                         withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 5400, roleSessionName: 'jenkins-session') {
-                                            sh baseCommand
+                                            withEnv(["DOCKER_BUILD_RETRIES=${config.dockerBuildRetries ?: 3}"]) {
+                                                sh baseCommand
+                                            }
                                         }
                                     }
                                 }

@@ -31,7 +31,7 @@ wait_for_console_pod
 set +e
 STATUS_OUTPUT=$(
   kubectl exec --namespace "$WORKFLOW_NAMESPACE" "$MIGRATION_CONSOLE_POD" -- \
-    /bin/bash -lc 'workflow status --workflow-name migration-workflow' 2>&1
+    /bin/bash -lc 'workflow status --step-view --workflow-name migration-workflow' 2>&1
 )
 STATUS_EXIT_CODE=$?
 set -e
