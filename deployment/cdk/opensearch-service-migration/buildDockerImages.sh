@@ -9,6 +9,30 @@
 
 set -euo pipefail
 
+run_with_retries() {
+  local attempts="$1"
+  shift
+  local delay_seconds="${DOCKER_BUILD_RETRY_DELAY_SECONDS:-30}"
+  local attempt=1
+
+  while true; do
+    echo "Running Docker image build attempt ${attempt}/${attempts}: $*"
+    if "$@"; then
+      return 0
+    fi
+
+    local status=$?
+    if (( attempt >= attempts )); then
+      echo "Docker image build failed after ${attempts} attempts." >&2
+      return "$status"
+    fi
+
+    echo "Docker image build failed with exit code ${status}; retrying in ${delay_seconds}s..." >&2
+    sleep "$delay_seconds"
+    attempt=$((attempt + 1))
+  done
+}
+
 # Resolve the repo root from this script's own location so the script works
 # regardless of caller cwd (e.g. test/awsE2ESolutionSetup.sh cd's into
 # test/opensearch-cluster-cdk/ before invoking this script, which would make
@@ -30,7 +54,13 @@ case "$ARCH" in
 esac
 
 BUILDER_NAME="builder-${KUBE_CONTEXT}"
-./gradlew ":buildImages:buildImagesToRegistry_${PLATFORM}" \
+DOCKER_BUILD_RETRIES="${DOCKER_BUILD_RETRIES:-1}"
+case "$DOCKER_BUILD_RETRIES" in
+  ''|*[!0-9]*) echo "DOCKER_BUILD_RETRIES must be a positive integer, got: ${DOCKER_BUILD_RETRIES}" >&2; exit 2 ;;
+  0) echo "DOCKER_BUILD_RETRIES must be greater than zero" >&2; exit 2 ;;
+esac
+
+run_with_retries "$DOCKER_BUILD_RETRIES" ./gradlew ":buildImages:buildImagesToRegistry_${PLATFORM}" \
   -Pbuilder="$BUILDER_NAME" \
   -PregistryEndpoint="localhost:${EXTERNAL_REGISTRY_PORT}" \
   -PlocalContainerRegistryEndpoint="${EXTERNAL_REGISTRY_NAME}:5000" \
@@ -42,5 +72,5 @@ for image in capture_proxy migration_console traffic_replayer elasticsearch_sear
 done
 
 # otel_collector is not in buildImages — only needed for ECS/CDK path
-docker build -t "migrations/otel_collector:latest" \
+run_with_retries "$DOCKER_BUILD_RETRIES" docker build -t "migrations/otel_collector:latest" \
   "$MIGRATIONS_REPO_ROOT_DIR/TrafficCapture/dockerSolution/src/main/docker/otelCollector"
