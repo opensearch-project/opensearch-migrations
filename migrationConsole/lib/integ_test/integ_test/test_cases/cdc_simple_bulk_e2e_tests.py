@@ -21,11 +21,12 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
     Template selection follows MATestBase.imported_clusters so the same test
     runs correctly in both environments:
       * imported_clusters=True  (EKS, --reuse-clusters) -> cdc-full-e2e-imported-clusters,
-        runs straight through.
+        uses a proxy-only first submit before the full migration submit.
       * imported_clusters=False (k8s-local) -> cdc-e2e-migration-with-clusters,
         provisions source+target inline and suspends at pause-for-test-data
-        and pause-for-migration-verification; resume_workflow/wait_for_suspend
-        below mirror MATestBase's lifecycle for that shape.
+        before the proxy-only submit, pause-for-pre-snapshot-data before the
+        full migration submit, and pause-for-migration-verification before
+        teardown.
     """
     requires_explicit_selection = True
 
@@ -50,6 +51,7 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
             "cdc-full-e2e-imported-clusters" if self.imported_clusters
             else "cdc-e2e-migration-with-clusters"
         )
+        self.parameters["pre-snapshot-proxy-submit"] = "true"
 
     def prepare_clusters(self):
         pass
@@ -60,10 +62,10 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
         ns = self.argo_service.namespace
 
         # -with-clusters suspends at pause-for-test-data so the framework can
-        # collect cluster configs. Resume past it to deploy proxy + replayer.
-        # -imported-clusters has no suspend point.
+        # collect cluster configs. Resume past it to deploy Kafka + proxy.
+        # -imported-clusters starts the proxy-only submit immediately.
         if not self.imported_clusters:
-            logger.info("Resuming workflow past pause-for-test-data to start migration...")
+            logger.info("Resuming workflow past pause-for-test-data to start proxy-only capture...")
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
 
         logger.info("Waiting for capture-proxy to be ready...")
@@ -71,6 +73,11 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
 
         logger.info("Pre-snapshot: generating %d docs into %s via proxy", self.PRE_SNAPSHOT_DOCS, self.idx_pre)
         run_generate_data("proxy", self.idx_pre, self.PRE_SNAPSHOT_DOCS)
+
+        logger.info("Waiting for workflow to pause before full migration submit...")
+        self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=600)
+        logger.info("Resuming workflow to submit full migration...")
+        self.argo_service.resume_workflow(workflow_name=self.workflow_name)
 
         logger.info("Waiting for replayer to start...")
         wait_for_pod_ready(ns, REPLAYER_LABEL_SELECTOR, timeout_seconds)
@@ -102,11 +109,12 @@ class Test0040CdcFullE2eSimpleBulk(MATestBase):
         pass
 
     def verify_clusters(self):
-        # Full E2E validates final source/target parity. Pre-snapshot docs are
-        # backfilled from the snapshot, and any captured replay should not
-        # inflate the final target count.
-        expected_pre = self.PRE_SNAPSHOT_DOCS
-        logger.info("Verifying both indices on target (pre-snapshot expects %d docs)...", expected_pre)
+        # Pre-snapshot docs appear on target twice: once from snapshot/backfill
+        # and once from replay. generate-data uses _bulk with auto-generated
+        # _ids, so the replay creates new docs instead of overwriting the
+        # snapshot-restored ones.
+        expected_pre = self.PRE_SNAPSHOT_DOCS * 2
+        logger.info("Verifying both indices on target (pre-snapshot expects %d due to duplication)...", expected_pre)
         self.target_operations.check_doc_counts_match(
             cluster=self.target_cluster,
             expected_index_details={

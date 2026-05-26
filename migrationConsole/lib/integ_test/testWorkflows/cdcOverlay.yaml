@@ -107,3 +107,52 @@ spec:
           - name: migrationConfigBase64
             valueFrom:
               path: /tmp/migration-config-base64
+
+    # Overlay step: keep only Kafka + capture proxy so tests can capture traffic
+    # before allowing snapshot/backfill/replay to start.
+    - name: add-proxy-only-traffic-config
+      inputs:
+        parameters:
+          - name: baseConfigBase64
+          - name: imageMigrationConsoleLocation
+          - name: imageMigrationConsolePullPolicy
+      container:
+        image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+        imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+            BASE_CONFIG=$(echo "{{inputs.parameters.baseConfigBase64}}" | base64 -d)
+
+            PROXY_ONLY_CONFIG=$(echo "$BASE_CONFIG" | jq '
+              .sourceClusters |= with_entries(.value |= del(.snapshotInfo))
+              | .snapshotMigrationConfigs = []
+              | . + {
+                "kafkaClusterConfiguration": {
+                  "default": {
+                    "autoCreate": {}
+                  }
+                },
+                "traffic": {
+                  "proxies": {
+                    "capture-proxy": {
+                      "source": "source1",
+                      "proxyConfig": {
+                        "listenPort": 9201,
+                        "noCapture": false
+                      }
+                    }
+                  },
+                  "replayers": {}
+                }
+              }')
+
+            echo "CDC proxy-only overlay applied to migration config:"
+            echo "$PROXY_ONLY_CONFIG" | jq .
+            echo "$PROXY_ONLY_CONFIG" | base64 | tr -d '\n' > /tmp/migration-config-base64
+      outputs:
+        parameters:
+          - name: migrationConfigBase64
+            valueFrom:
+              path: /tmp/migration-config-base64

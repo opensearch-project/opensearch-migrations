@@ -174,6 +174,7 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
         self.workflow_template = "cdc-full-e2e-imported-clusters"
+        self.parameters["pre-snapshot-proxy-submit"] = "true"
 
     def prepare_clusters(self):
         pass
@@ -189,6 +190,11 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
 
         logger.info("Pre-snapshot: generating %d docs into %s via proxy", self.PRE_SNAPSHOT_DOCS, self.idx_pre)
         run_generate_data("proxy", self.idx_pre, self.PRE_SNAPSHOT_DOCS)
+
+        logger.info("Waiting for workflow to pause before full migration submit...")
+        self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=600)
+        logger.info("Resuming workflow to submit full migration...")
+        self.argo_service.resume_workflow(workflow_name=self.workflow_name)
 
         # --- Wait for replayer (signals backfill done) ---
         logger.info("Waiting for replayer to start...")

@@ -30,6 +30,8 @@ spec:
         value: "{}"
       - name: replayer-config-overrides
         value: "{}"
+      - name: pre-snapshot-proxy-submit
+        value: "false"
 
   templates:
     - name: main
@@ -92,6 +94,42 @@ spec:
                   value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
                 - name: imageMigrationConsolePullPolicy
                   value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+
+        - - name: add-proxy-only-traffic-config
+            templateRef:
+              name: cdc-overlay
+              template: add-proxy-only-traffic-config
+            when: "{{workflow.parameters.pre-snapshot-proxy-submit}} == true"
+            arguments:
+              parameters:
+                - name: baseConfigBase64
+                  value: "{{steps.generate-base-config.outputs.parameters.migrationConfigBase64}}"
+                - name: imageMigrationConsoleLocation
+                  value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                - name: imageMigrationConsolePullPolicy
+                  value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+
+        - - name: run-proxy-only-migration-with-workflow-cli
+            templateRef:
+              name: full-migration-with-workflow-cli
+              template: main
+            when: "{{workflow.parameters.pre-snapshot-proxy-submit}} == true"
+            arguments:
+              parameters:
+                - name: migrationConfigBase64
+                  value: "{{steps.add-proxy-only-traffic-config.outputs.parameters.migrationConfigBase64}}"
+                - name: imageMigrationConsoleLocation
+                  value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                - name: imageMigrationConsolePullPolicy
+                  value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                - name: keepMigrationWorkflow
+                  value: "true"
+
+        - - name: pause-for-pre-snapshot-data
+            templateRef:
+              name: full-migration-with-clusters
+              template: suspend-step
+            when: "{{workflow.parameters.pre-snapshot-proxy-submit}} == true"
 
         - - name: add-traffic-config
             templateRef:
