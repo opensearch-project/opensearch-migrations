@@ -31,9 +31,12 @@
     "build:strimzi-types": "npm run -w @opensearch-migrations/strimzi-types build",
     "build:unified-schema": "npm run -w @opensearch-migrations/schemas build-unified-schema -- ",
     "build:schemas": "npm run -w @opensearch-migrations/schemas build",
+    "build:migration-resources": "npm run stage-migration-resources -- ",
+    "stage-migration-resources": "npm run -w @opensearch-migrations/schemas stage-migration-resources -- ",
     "build:builders": "npm run -w @opensearch-migrations/argo-workflow-builders build",
     "build:templates": "npm run -w @opensearch-migrations/migration-workflow-templates build",
     "test": "npm run build && npm -ws --if-present run test",
+    "test:integ:crds": "npm run -w @opensearch-migrations/config-processor test:integ:crds",
     "predist-make-templates": "npm run build",
     "dist-make-templates": "npm run make-templates -w @opensearch-migrations/migration-workflow-templates -- ",
     "predist-transform-config": "npm run build",
@@ -55,5 +58,8 @@
     "make-sample": "npm run dev-make-sample",
     "transform-config": "npm run dev-transform-config -- ",
     "initialize-workflow-state": "npm run dev-initialize-workflow-state -- "
+  },
+  "overrides": {
+    "uuid": "11.1.1"
   }
 }

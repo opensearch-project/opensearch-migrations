@@ -12,7 +12,7 @@ def call(Map config = [:]) {
     def defaultStageId = config.defaultStageId ?: "aosscdc"
     def gitBranchDefault = config.gitBranchDefault ?: 'main'
     def jobName = config.jobName ?: "eks-cdc-aoss-integ-test"
-    def defaultTestIds = config.defaultTestIds ?: "0034"
+    def defaultTestIds = config.defaultTestIds ?: "0034,0041"
     def lockLabel = config.lockLabel ?: (jobName.startsWith("pr-") ? "aws-pr-slot" : "aws-main-slot")
     def clusterContextFilePath = "tmp/cluster-context-cdc-aoss-${currentBuild.number}.json"
 
@@ -23,7 +23,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: gitBranchDefault, description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
-            string(name: 'TEST_IDS', defaultValue: "${defaultTestIds}", description: 'Comma-separated test IDs to run (e.g. 0034,0042)')
+            string(name: 'TEST_IDS', defaultValue: "${defaultTestIds}", description: 'Comma-separated test IDs to run (e.g. 0034,0041)')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             choice(name: 'SOURCE_VERSION', choices: ['ES_7.10'], description: 'Source cluster version')
             choice(name: 'SOURCE_CLUSTER_TYPE', choices: ['OPENSEARCH_MANAGED_SERVICE'], description: 'Source cluster type')
@@ -231,43 +231,13 @@ def call(Map config = [:]) {
 
         post {
             always {
-                timeout(time: 75, unit: 'MINUTES') {
-                    script {
-                        def region = params.REGION ?: 'us-east-1'
-
-                        withMigrationsTestAccount(region: region, duration: 4500) { accountId ->
-                            if (env.eksClusterName) {
-                                cdcCleanupStep(kubeContext: env.eksKubeContext)
-                                eksCleanupStep(
-                                    stackName: env.STACK_NAME,
-                                    eksClusterName: env.eksClusterName,
-                                    kubeContext: env.eksKubeContext
-                                )
-                            }
-
-                            // Delete AOSS collection stack and MA stack in parallel
-                            parallel(
-                                'Delete AOSS Stack': {
-                                    echo "CLEANUP: Deleting cluster stack ${env.CLUSTER_STACK}"
-                                    sh "aws cloudformation delete-stack --stack-name ${env.CLUSTER_STACK} --region ${region} || true"
-                                    sh "aws cloudformation wait stack-delete-complete --stack-name ${env.CLUSTER_STACK} --region ${region} || true"
-                                },
-                                'Delete MA Stack': {
-                                    echo "CLEANUP: Deleting MA stack ${env.STACK_NAME}"
-                                    sh "aws cloudformation delete-stack --stack-name ${env.STACK_NAME} --region ${region} || true"
-                                    sh "aws cloudformation wait stack-delete-complete --stack-name ${env.STACK_NAME} --region ${region} || true"
-                                }
-                            )
-                        }
-
-                        sh """
-                            if command -v kubectl >/dev/null 2>&1; then
-                                kubectl config delete-context ${env.eksKubeContext} 2>/dev/null || true
-                            fi
-                        """
-                    }
-                }
-                archiveArtifacts artifacts: 'libraries/testAutomation/logs/**', allowEmptyArchive: true
+                eksPostCleanup(
+                    maStackName: env.STACK_NAME,
+                    clusterStackName: env.CLUSTER_STACK,
+                    clusterInsideMaVpc: true,
+                    kubeContext: env.eksKubeContext,
+                    eksClusterName: env.eksClusterName,
+                )
             }
         }
     }

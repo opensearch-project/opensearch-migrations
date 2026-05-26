@@ -542,17 +542,29 @@ def _complete_names(category):
         namespace = ctx.params.get('namespace', 'ma')
         workflow_name = ctx.params.get('workflow_name') or DEFAULT_WORKFLOW_NAME
         pre_approve = ctx.params.get('pre_approve', False)
+        selected_names = set(ctx.params.get('names') or ())
         try:
             load_k8s_config()
             gates = _gather_gates(namespace, workflow_name, category, pre_approve)
         except Exception:
             return []
+
+        completions = []
+        offered_names = set()
         # Offer display names (without the .vapretry suffix) for tab completion.
-        return [
-            CompletionItem(_display_name(g))
-            for g in gates
-            if _display_name(g).startswith(incomplete)
-        ]
+        for gate in gates:
+            display_name = _display_name(gate)
+            skip_gate = any((
+                not display_name.startswith(incomplete),
+                display_name in selected_names,
+                gate.name in selected_names,
+                display_name in offered_names,
+            ))
+            if skip_gate:
+                continue
+            completions.append(CompletionItem(display_name))
+            offered_names.add(display_name)
+        return completions
 
     return completer
 
@@ -797,12 +809,6 @@ class _OrderedGroup(click.Group):
 @click.pass_context
 def approve_group(ctx, list_flag, workflow_name, argo_server, namespace, insecure, token):
     """Approve workflow gates.
-
-    \b
-    Subcommands:
-      step      Approve user-defined migration checkpoints.
-      change    Acknowledge gated configuration field changes.
-      retry     Confirm recovery is complete after an impossible change.
 
     Run any subcommand with --help for details.
     """

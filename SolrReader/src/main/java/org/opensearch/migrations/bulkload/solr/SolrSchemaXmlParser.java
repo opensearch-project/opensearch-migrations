@@ -120,13 +120,18 @@ public class SolrSchemaXmlParser {
                 log.warn("No config directory found in {}", zkBackup);
                 return MAPPER.createObjectNode();
             }
+            // Solr config evolution: managed-schema.xml (current) → managed-schema (Solr 6+ default)
+            // → schema.xml (ClassicIndexSchemaFactory; common in Solr 5/6/7 configs upgraded in place).
             var schemaFile = configDir.resolve("managed-schema.xml");
             if (!Files.exists(schemaFile)) {
                 schemaFile = configDir.resolve("managed-schema");
-                if (!Files.exists(schemaFile)) {
-                    log.warn("No managed-schema.xml found in {}", configDir);
-                    return MAPPER.createObjectNode();
-                }
+            }
+            if (!Files.exists(schemaFile)) {
+                schemaFile = configDir.resolve("schema.xml");
+            }
+            if (!Files.exists(schemaFile)) {
+                log.warn("No managed-schema.xml, managed-schema, or schema.xml found in {}", configDir);
+                return MAPPER.createObjectNode();
             }
             return parse(schemaFile);
         } catch (IOException e) {

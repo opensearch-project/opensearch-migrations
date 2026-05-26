@@ -126,6 +126,10 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             }
             super.wrapUpWorkAndEmitSummary(replayEngine, accumulator);
         }
+
+        public void setResponsePostProcessor(IJsonTransformer postProcessor) {
+            this.responsePostProcessor = postProcessor;
+        }
     }
 
     protected static class IndexWatchingListenerFactory implements Supplier<Consumer<SourceTargetCaptureTuple>> {

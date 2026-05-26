@@ -17,7 +17,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: gitBranchDefault, description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
-            string(name: 'TEST_IDS', defaultValue: "${defaultTestIds}", description: 'Comma-separated test IDs to run (e.g. 0031)')
+            string(name: 'TEST_IDS', defaultValue: "${defaultTestIds}", description: 'Comma-separated test IDs to run (e.g. 0031,0042)')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             choice(
                     name: 'SOURCE_VERSION',
@@ -213,6 +213,41 @@ def call(Map config = [:]) {
                 }
             }
 
+            stage('Build Transform Test Images') {
+                steps {
+                    timeout(time: 20, unit: 'MINUTES') {
+                        script {
+                            withMigrationsTestAccount(region: params.REGION, duration: 1200) { accountId ->
+                                def ecrHost = env.registryEndpoint.split('/')[0]
+                                sh "aws ecr get-login-password --region ${params.REGION} | docker login --username AWS --password-stdin ${ecrHost}"
+
+                                def buildTransformImage = { bank ->
+                                    sh(
+                                        script: """
+                                            set -eu
+                                            transforms_dir="migrationConsole/lib/integ_test/integ_test/transform_assets/mountable/${bank}"
+                                            content_hash=\$(cd "\${transforms_dir}" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print substr(\$1,1,20)}')
+                                            tag="transforms-${bank}-\${content_hash}"
+                                            output=\$(deployment/k8s/package-transforms.sh "\${transforms_dir}" "${env.registryEndpoint}" "\${tag}" --output json)
+                                            printf '%s\\n' "\${output}" >&2
+                                            pinned_ref=\$(printf '%s\\n' "\${output}" | jq -r '.image // empty')
+                                            test -n "\${pinned_ref}"
+                                            printf '%s\\n' "\${pinned_ref}"
+                                        """,
+                                        returnStdout: true
+                                    ).trim()
+                                }
+
+                                env.TRANSFORM_IMAGE_BASIC = buildTransformImage('basic')
+                                env.TRANSFORM_IMAGE_SEQUENCE = buildTransformImage('sequence')
+                                echo "Transform image (basic): ${env.TRANSFORM_IMAGE_BASIC}"
+                                echo "Transform image (sequence): ${env.TRANSFORM_IMAGE_SEQUENCE}"
+                            }
+                        }
+                    }
+                }
+            }
+
             stage('Perform CDC E2E Tests') {
                 steps {
                     timeout(time: 2, unit: 'HOURS') {
@@ -220,7 +255,7 @@ def call(Map config = [:]) {
                             script {
                                 sh "pipenv install --deploy"
                                 withMigrationsTestAccount(region: params.REGION, duration: 14400) { accountId ->
-                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
+                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}'"
                                 }
                             }
                         }
@@ -231,47 +266,14 @@ def call(Map config = [:]) {
 
         post {
             always {
-                timeout(time: 75, unit: 'MINUTES') {
-                    script {
-                        def region = params.REGION ?: 'us-east-1'
-                        def maStackName = env.MA_STACK_NAME ?: "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${region}"
-
-                        withMigrationsTestAccount(region: region, duration: 4500) { accountId ->
-                            sh "mkdir -p libraries/testAutomation/logs"
-                            archiveArtifacts artifacts: 'libraries/testAutomation/logs/**', allowEmptyArchive: true
-
-                            if (env.eksClusterName) {
-                                cdcCleanupStep(kubeContext: env.eksKubeContext)
-                                eksCleanupStep(
-                                    stackName: maStackName,
-                                    eksClusterName: env.eksClusterName,
-                                    kubeContext: env.eksKubeContext
-                                )
-                            }
-
-                            // Destroy AOS domains and MA stack in parallel (independent — no shared VPC)
-                            parallel(
-                                'Destroy AOS Domains': {
-                                    dir('test') {
-                                        echo "CLEANUP: Destroying domain stacks via CDK"
-                                        sh "./awsDeployCluster.sh --stage ${maStageName} --context-file ${clusterContextFilePath} --destroy || true"
-                                    }
-                                },
-                                'Delete MA Stack': {
-                                    echo "CLEANUP: Deleting MA stack ${maStackName}"
-                                    sh "aws cloudformation delete-stack --stack-name ${maStackName} --region ${region} || true"
-                                    sh "aws cloudformation wait stack-delete-complete --stack-name ${maStackName} --region ${region} || true"
-                                }
-                            )
-                        }
-
-                        sh """
-                            if command -v kubectl >/dev/null 2>&1; then
-                                kubectl config delete-context ${env.eksKubeContext} 2>/dev/null || true
-                            fi
-                        """
-                    }
-                }
+                eksPostCleanup(
+                    maStackName: env.MA_STACK_NAME ?: "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${params.REGION}",
+                    clusterStackName: "OpenSearch-${maStageName}-${params.REGION}",
+                    kubeContext: env.eksKubeContext,
+                    eksClusterName: env.eksClusterName,
+                    cdkContextFile: clusterContextFilePath,
+                    cdkStage: maStageName,
+                )
             }
         }
     }

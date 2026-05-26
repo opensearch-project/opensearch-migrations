@@ -3,11 +3,11 @@ import {
     CLUSTER_VERSION_STRING,
     COMPLETE_SNAPSHOT_CONFIG,
     CONSOLE_SERVICES_CONFIG_FILE,
+    DEFAULT_RESOURCES,
     NAMED_TARGET_CLUSTER_CONFIG,
     ResourceRequirementsType,
     ARGO_RFS_OPTIONS,
     ARGO_RFS_WORKFLOW_OPTION_KEYS,
-    SNAPSHOT_MIGRATION_CONFIG,
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
 import {CONTAINER_NAMES} from "../containerNames";
@@ -15,8 +15,11 @@ import {CONTAINER_NAMES} from "../containerNames";
 import {
     AllowLiteralOrExpression,
     BaseExpression,
+    defineParam,
+    defineRequiredParam,
     expr,
     IMAGE_PULL_POLICY,
+    InputParamsToExpressions,
     INTERNAL, makeDirectTypeProxy, makeStringTypeProxy,
     selectInputsForRegister,
     Serialized,
@@ -27,10 +30,13 @@ import {Deployment} from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {makeRepoParamDict} from "./metadataMigration";
 import {
+    getTransformsPresence,
     setupLog4jConfigForContainer,
-    setupTestCredsForContainer
+    setupTestCredsForContainer,
+    setupTransformsForContainerForMode,
+    TransformVolumeMode
 } from "./commonUtils/containerFragments";
-import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {CommonWorkflowParameters, workflowIdentityEnvVars, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict, makeRfsCoordinatorParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
@@ -61,11 +67,6 @@ function makeParamsDict(
     sourceEndpoint?: BaseExpression<string>
 ) {
     const repoConfig = expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig");
-    // Issue #2975: enable the durable S3 DLQ on every EKS bulk-load pod. We reuse the
-    // snapshot's S3 region/role/endpoint to avoid inventing a new credentials path. When
-    // --dlq-s3-bucket is not supplied the Java side falls back to the deployment-
-    // provisioned default bucket (migrations-default-<account>-<stage>-<region>) read
-    // from the MIGRATIONS_DEFAULT_S3_BUCKET env var injected into the RFS pod below.
     const dlqParams = expr.makeDict({
         dlqS3Prefix: expr.literal("rfs-dlq/"),
         dlqSessionId: workflowUid
@@ -94,17 +95,6 @@ function makeParamsDict(
                 true)
         )
     );
-
-    // Pass sourceHost for Solr backup migrations (RFS detects Solr from sourceVersion)
-    if (sourceEndpoint) {
-        return expr.mergeDicts(base,
-            expr.ternary(
-                expr.isEmpty(sourceEndpoint),
-                expr.makeDict({}),
-                expr.makeDict({ sourceHost: sourceEndpoint })
-            )
-        );
-    }
     return base;
 }
 
@@ -112,13 +102,6 @@ function getRfsDeploymentName(sessionName: BaseExpression<string>) {
     return expr.concat(sessionName, expr.literal("-rfs"));
 }
 
-// Per-run pointer that lets the migration-console pod resolve the current DLQ
-// session without restarting between workflow runs. The console mounts this
-// ConfigMap at /etc/rfs-dlq (see deployment/.../migrationConsole.yaml); kubelet
-// refreshes the mount within ~60s after each patch, so `console backfill dlq …`
-// always reads the most recent run's session id. The fixed object name means
-// successive workflow runs overwrite (rather than accumulate) the pointer —
-// historical sessions remain inspectable via `--session <old-uid>` from S3.
 const DLQ_SESSION_CONFIGMAP_NAME = "rfs-dlq-current-session";
 
 function makeDlqSessionConfigMap(sessionId: BaseExpression<string>) {
@@ -128,11 +111,41 @@ function makeDlqSessionConfigMap(sessionId: BaseExpression<string>) {
         metadata: {name: DLQ_SESSION_CONFIGMAP_NAME},
         data: {
             session_id: makeStringTypeProxy(sessionId),
-            // Must stay in sync with dlqS3Prefix in makeParamsDict above.
             prefix: "rfs-dlq/"
         }
     };
 }
+
+function getRfsDoneCronJobName(sessionName: BaseExpression<string>) {
+    return expr.concat(sessionName, expr.literal("-rfs-done"));
+}
+
+const RFS_MONITOR_WORKFLOW_UID_LABEL = "migrations.opensearch.org/rfs-monitor-workflow-uid";
+const RFS_MONITOR_SESSION_LABEL = "migrations.opensearch.org/rfs-monitor-session";
+
+const startHistoricalBackfillInputs = {
+    sessionName: defineRequiredParam<string>(),
+    rfsJsonConfig: defineRequiredParam<string>(),
+    targetBasicCredsSecretNameOrEmpty: defineRequiredParam<string>(),
+    coordinatorBasicCredsSecretNameOrEmpty: defineRequiredParam<string>(),
+    podReplicas: defineRequiredParam<number>(),
+    jvmArgs: defineRequiredParam<string>(),
+    loggingConfigurationOverrideConfigMap: defineRequiredParam<string>(),
+    transformsImage: defineRequiredParam<string>(),
+    transformsImagePullPolicy: defineRequiredParam<IMAGE_PULL_POLICY>(),
+    transformsConfigMap: defineRequiredParam<string>(),
+    useLocalStack: defineRequiredParam<boolean>({description: "Only used for local testing"}),
+    resources: defineRequiredParam<ResourceRequirementsType>(),
+    crdName: defineRequiredParam<string>(),
+    crdUid: defineRequiredParam<string>(),
+    sourceK8sLabel: defineRequiredParam<string>(),
+    targetK8sLabel: defineRequiredParam<string>(),
+    snapshotK8sLabel: defineRequiredParam<string>(),
+    fromSnapshotMigrationK8sLabel: defineRequiredParam<string>(),
+    taskK8sLabel: defineParam<string>({expression: expr.literal("reindexFromSnapshot")}),
+    ...makeRequiredImageParametersForKeys(["ReindexFromSnapshot"])
+};
+
 
 function getRfsDeploymentManifest
 (args: {
@@ -146,6 +159,10 @@ function getRfsDeploymentManifest
     useLocalstackAwsCreds: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
     jvmArgs: BaseExpression<string>,
+    transformsImage: BaseExpression<string>,
+    transformsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
+    transformsConfigMap: BaseExpression<string>,
+    transformsVolumeMode: TransformVolumeMode,
 
     rfsImageName: BaseExpression<string>,
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
@@ -211,13 +228,19 @@ function getRfsDeploymentManifest
         resources: makeDirectTypeProxy(args.resources)
     };
 
-    const finalContainerDefinition = setupTestCredsForContainer(
-        args.useLocalstackAwsCreds,
-        setupLog4jConfigForContainer(
-            useCustomLogging,
-            args.loggingConfigMap,
-            {container: baseContainerDefinition, volumes: []},
-            args.jvmArgs
+    const finalContainerDefinition = setupTransformsForContainerForMode(
+        args.transformsVolumeMode,
+        args.transformsImage,
+        args.transformsImagePullPolicy,
+        args.transformsConfigMap,
+        setupTestCredsForContainer(
+            args.useLocalstackAwsCreds,
+            setupLog4jConfigForContainer(
+                useCustomLogging,
+                args.loggingConfigMap,
+                {container: baseContainerDefinition, volumes: []},
+                args.jvmArgs
+            )
         )
     );
     const deploymentName = getRfsDeploymentName(args.sessionName);
@@ -274,7 +297,6 @@ function getRfsDeploymentManifest
     } as Deployment;
 }
 
-
 function getCheckBackfillStatusScript(sessionName: BaseExpression<string>) {
     const template = `
 set -e -x
@@ -284,10 +306,6 @@ touch /tmp/phase-output.txt
 status_json=$(console --config-file=/config/migration_services.yaml --json backfill status --deep-check)
 status=$(echo "$status_json" | jq -r '.status')
 
-# DLQ fields are appended by the console CLI's _augment_status_with_dlq when the
-# RFS DLQ is configured (see middleware/dlq.py and cli.py). They are absent if
-# the deployment isn't running the DLQ — keep the suffix empty in that case so
-# legacy operators see no change in the status output format.
 dlq_loc=$(echo "$status_json" | jq -r '.dlq_location // empty')
 dlq_count=$(echo "$status_json" | jq -r '.failed_document_count // empty')
 dlq_suffix=""
@@ -326,12 +344,55 @@ fi
     return expr.fillTemplate(template, {"SESSION_NAME": sessionName});
 }
 
-export const DocumentBulkLoad = WorkflowBuilder.create({
+const documentBulkLoadBaseBuilder = WorkflowBuilder.create({
     k8sResourceName: "document-bulk-load",
     serviceAccountName: "argo-workflow-executor"
 })
 
     .addParams(CommonWorkflowParameters)
+
+    .addTemplate("applyRfsDoneCronJob", t => t
+        .addRequiredInput("sessionName", typeToken<string>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("checksumForReplayer", typeToken<string>())
+        .addRequiredInput("usesDedicatedCoordinator", typeToken<string>())
+        .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
+        .addRequiredInput("consoleConfigContents", typeToken<z.infer<typeof CONSOLE_SERVICES_CONFIG_FILE>>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+
+        .addContainer(c => c
+            .addImageInfo(c.inputs.imageMigrationConsoleLocation, c.inputs.imageMigrationConsolePullPolicy)
+            .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
+            .addCommand(["/bin/bash", "-lc"])
+            .addEnvVar("CRONJOB_NAME", getRfsDoneCronJobName(c.inputs.sessionName))
+            .addEnvVarsFromRecord({
+                SESSION_NAME: c.inputs.sessionName,
+                ...workflowIdentityEnvVars(),
+                SNAPSHOT_MIGRATION_NAME: c.inputs.crdName,
+                SM_UID: c.inputs.crdUid,
+                CONFIG_CHECKSUM: c.inputs.configChecksum,
+                CHECKSUM_FOR_REPLAYER: c.inputs.checksumForReplayer,
+                RFS_DEPLOYMENT_NAME: getRfsDeploymentName(c.inputs.sessionName),
+                RFS_COORDINATOR_NAME: getRfsCoordinatorClusterName(c.inputs.sessionName),
+                USES_DEDICATED_COORDINATOR: c.inputs.usesDedicatedCoordinator,
+                CONSOLE_IMAGE: c.inputs.imageMigrationConsoleLocation,
+                CONSOLE_IMAGE_PULL_POLICY: c.inputs.imageMigrationConsolePullPolicy,
+                FROM_SNAPSHOT_MIGRATION_LABEL: c.inputs.fromSnapshotMigrationK8sLabel,
+                CONSOLE_CONFIG_BASE64: expr.toBase64(expr.asString(c.inputs.consoleConfigContents)),
+                RFS_MONITOR_WORKFLOW_UID_LABEL: expr.literal(RFS_MONITOR_WORKFLOW_UID_LABEL),
+                RFS_MONITOR_SESSION_LABEL: expr.literal(RFS_MONITOR_SESSION_LABEL),
+                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
+            })
+            .addArgs([workflowScriptCommand("applyRfsMonitorCronJob.sh")])
+        )
+        .addRetryParameters({
+            limit: "5",
+            retryPolicy: "Always",
+            backoff: {duration: "2", factor: "2", cap: "30"}
+        })
+    )
 
     .addTemplate("stopHistoricalBackfill", t => t
         .addRequiredInput("sessionName", typeToken<string>())
@@ -397,53 +458,87 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         )
     )
 
+type StartHistoricalBackfillInputExpressions = InputParamsToExpressions<typeof startHistoricalBackfillInputs>;
+
+function makeRfsDeploymentDefinition(
+    inputs: StartHistoricalBackfillInputExpressions,
+    transformsVolumeMode: TransformVolumeMode
+) {
+    return {
+        action: "apply" as const,
+        setOwnerReference: false,
+        manifest: getRfsDeploymentManifest({
+            podReplicas: expr.deserializeRecord(inputs.podReplicas),
+            loggingConfigMap: inputs.loggingConfigurationOverrideConfigMap,
+            jvmArgs: inputs.jvmArgs,
+            transformsImage: inputs.transformsImage,
+            transformsImagePullPolicy: inputs.transformsImagePullPolicy,
+            transformsConfigMap: inputs.transformsConfigMap,
+            transformsVolumeMode,
+            useLocalstackAwsCreds: expr.deserializeRecord(inputs.useLocalStack),
+            sessionName: inputs.sessionName,
+            targetBasicCredsSecretNameOrEmpty: inputs.targetBasicCredsSecretNameOrEmpty,
+            coordinatorBasicCredsSecretNameOrEmpty: inputs.coordinatorBasicCredsSecretNameOrEmpty,
+            rfsImageName: inputs.imageReindexFromSnapshotLocation,
+            rfsImagePullPolicy: inputs.imageReindexFromSnapshotPullPolicy,
+            workflowName: expr.getWorkflowValue("name"),
+            jsonConfig: expr.toBase64(inputs.rfsJsonConfig),
+            resources: expr.deserializeRecord(inputs.resources),
+            crdName: inputs.crdName,
+            crdUid: inputs.crdUid,
+            sourceK8sLabel: inputs.sourceK8sLabel,
+            targetK8sLabel: inputs.targetK8sLabel,
+            snapshotK8sLabel: inputs.snapshotK8sLabel,
+            fromSnapshotMigrationK8sLabel: inputs.fromSnapshotMigrationK8sLabel,
+            taskK8sLabel: inputs.taskK8sLabel,
+        })
+    };
+}
+
+function addDocumentBulkLoadTransformTemplates(builder: typeof documentBulkLoadBaseBuilder) {
+    return builder
+        .addTemplate("startHistoricalBackfillWithImageTransforms", t => t
+            .addInputsFromRecord(startHistoricalBackfillInputs)
+            .addResourceTask(b => b
+                .setDefinition(makeRfsDeploymentDefinition(b.inputs, "image")))
+            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+        )
+        .addTemplate("startHistoricalBackfillWithConfigMapTransforms", t => t
+            .addInputsFromRecord(startHistoricalBackfillInputs)
+            .addResourceTask(b => b
+                .setDefinition(makeRfsDeploymentDefinition(b.inputs, "configMap")))
+            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+        )
+        .addTemplate("startHistoricalBackfillNoTransforms", t => t
+            .addInputsFromRecord(startHistoricalBackfillInputs)
+            .addResourceTask(b => b
+                .setDefinition(makeRfsDeploymentDefinition(b.inputs, "emptyDir")))
+            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+        );
+}
+
+export const DocumentBulkLoad = addDocumentBulkLoadTransformTemplates(documentBulkLoadBaseBuilder)
 
     .addTemplate("startHistoricalBackfill", t => t
-        .addRequiredInput("sessionName", typeToken<string>())
-        .addRequiredInput("rfsJsonConfig", typeToken<string>())
-        .addRequiredInput("targetBasicCredsSecretNameOrEmpty", typeToken<string>())
-        .addRequiredInput("coordinatorBasicCredsSecretNameOrEmpty", typeToken<string>())
-        .addRequiredInput("podReplicas", typeToken<number>())
-        .addRequiredInput("jvmArgs", typeToken<string>())
-        .addRequiredInput("loggingConfigurationOverrideConfigMap", typeToken<string>())
-        .addRequiredInput("useLocalStack", typeToken<boolean>(), "Only used for local testing")
-        .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
-        .addRequiredInput("crdName", typeToken<string>())
-        .addRequiredInput("crdUid", typeToken<string>())
-        .addRequiredInput("sourceK8sLabel", typeToken<string>())
-        .addRequiredInput("targetK8sLabel", typeToken<string>())
-        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
-        .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
-        .addOptionalInput("taskK8sLabel", c => "reindexFromSnapshot")
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
+        .addInputsFromRecord(startHistoricalBackfillInputs)
+        .addSteps(b => {
+            const {hasImage, hasConfigMapOnly, hasNone} =
+                getTransformsPresence(b.inputs.transformsImage, b.inputs.transformsConfigMap);
 
-        .addResourceTask(b => b
-            .setDefinition({
-                action: "create",
-                setOwnerReference: false,
-                manifest: getRfsDeploymentManifest({
-                    podReplicas: expr.deserializeRecord(b.inputs.podReplicas),
-                    loggingConfigMap: b.inputs.loggingConfigurationOverrideConfigMap,
-                    jvmArgs: b.inputs.jvmArgs,
-                    useLocalstackAwsCreds: expr.deserializeRecord(b.inputs.useLocalStack),
-                    sessionName: b.inputs.sessionName,
-                    targetBasicCredsSecretNameOrEmpty: b.inputs.targetBasicCredsSecretNameOrEmpty,
-                    coordinatorBasicCredsSecretNameOrEmpty: b.inputs.coordinatorBasicCredsSecretNameOrEmpty,
-                    rfsImageName: b.inputs.imageReindexFromSnapshotLocation,
-                    rfsImagePullPolicy: b.inputs.imageReindexFromSnapshotPullPolicy,
-                    workflowName: expr.getWorkflowValue("name"),
-                    jsonConfig: expr.toBase64(b.inputs.rfsJsonConfig),
-                    resources: expr.deserializeRecord(b.inputs.resources),
-                    crdName: b.inputs.crdName,
-                    crdUid: b.inputs.crdUid,
-                    sourceK8sLabel: b.inputs.sourceK8sLabel,
-                    targetK8sLabel: b.inputs.targetK8sLabel,
-                    snapshotK8sLabel: b.inputs.snapshotK8sLabel,
-                    fromSnapshotMigrationK8sLabel: b.inputs.fromSnapshotMigrationK8sLabel,
-                    taskK8sLabel: b.inputs.taskK8sLabel,
-                })
-            }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+            return b
+                .addStep("withImageTransforms", INTERNAL, "startHistoricalBackfillWithImageTransforms", c =>
+                    c.register({...selectInputsForRegister(b, c), taskK8sLabel: b.inputs.taskK8sLabel}),
+                    {when: {templateExp: hasImage}}
+                )
+                .addStep("withConfigMapTransforms", INTERNAL, "startHistoricalBackfillWithConfigMapTransforms", c =>
+                    c.register({...selectInputsForRegister(b, c), taskK8sLabel: b.inputs.taskK8sLabel}),
+                    {when: {templateExp: hasConfigMapOnly}}
+                )
+                .addStep("withoutTransforms", INTERNAL, "startHistoricalBackfillNoTransforms", c =>
+                    c.register({...selectInputsForRegister(b, c), taskK8sLabel: b.inputs.taskK8sLabel}),
+                    {when: {templateExp: hasNone}}
+                );
+        })
     )
 
 
@@ -458,7 +553,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addRequiredInput("crdName", typeToken<string>())
         .addRequiredInput("crdUid", typeToken<string>())
-        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
+        .addOptionalInput("sourceEndpoint", c => "")
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot"]))
 
         .addSteps(b => b
@@ -470,6 +565,12 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     coordinatorBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.rfsCoordinatorConfig),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
                     jvmArgs: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["jvmArgs"], ""),
+                    transformsImage: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["transformsImage"], ""),
+                    transformsImagePullPolicy: expr.get(
+                        expr.deserializeRecord(b.inputs.documentBackfillConfig),
+                        "transformsImagePullPolicy"
+                    ),
+                    transformsConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["transformsConfigMap"], ""),
                     useLocalStack: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
                     rfsJsonConfig: expr.asString(expr.serialize(
                         makeParamsDict(b.inputs.sourceVersion,
@@ -478,11 +579,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                             b.inputs.snapshotConfig,
                             b.inputs.documentBackfillConfig,
                             b.inputs.sessionName,
-                            // Use the Argo workflow UID (NOT the CRD UID) as the DLQ
-                            // session id: each workflow submission gets a fresh Workflow
-                            // CR with a new metadata.uid, so re-runs against the same
-                            // SnapshotMigration land under a new session=<...>/ prefix
-                            // and inspection commands see only the current run's failures.
                             expr.getWorkflowValue("uid"),
                             b.inputs.sourceEndpoint)
                     )),
@@ -499,9 +595,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     )
 
 
-    // Patches the rfs-dlq-current-session ConfigMap with this run's
-    // {{workflow.uid}} so the migration-console mount picks up the new session
-    // id without a pod restart. Idempotent: `apply` overwrites the same name.
     .addTemplate("publishDlqSession", t => t
         .addResourceTask(b => b
             .setDefinition({
@@ -528,8 +621,6 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole"]))
 
         .addSteps(b => b
-            // Patch the per-run DLQ pointer ConfigMap before any RFS pod starts so
-            // the console can resolve the new session id as soon as failures appear.
             .addStep("publishDlqSession", INTERNAL, "publishDlqSession", c =>
                 c.register({}))
             .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
@@ -560,6 +651,7 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
     )
 
 
+
     .addTemplate("doNothing", t => t
         .addSteps(b => b.addStepGroup(c => c)))
 
@@ -574,13 +666,43 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addRequiredInput("crdName", typeToken<string>())
         .addRequiredInput("crdUid", typeToken<string>())
-        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
+        .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("checksumForReplayer", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["ReindexFromSnapshot", "MigrationConsole", "CoordinatorCluster"]))
 
         .addSteps(b => {
             const createRfsCluster = shouldCreateRfsWorkCoordinationCluster(b.inputs.documentBackfillConfig);
+            const rfsCoordinatorConfig = expr.ternary(
+                createRfsCluster,
+                expr.serialize(makeRfsCoordinatorConfig(getRfsCoordinatorClusterName(b.inputs.sessionName))),
+                b.inputs.targetConfig
+            );
             return b
-                // (conditional) Deploy an OpenSearch cluster for RFS work coordination
+                .addStep("setupRfsConsoleConfig", MigrationConsole, "getConsoleConfig", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        targetConfig: rfsCoordinatorConfig,
+                        backfillSession: expr.serialize(expr.makeDict({
+                            sessionName: b.inputs.sessionName,
+                            deploymentName: getRfsDeploymentName(b.inputs.sessionName)
+                        }))
+                    })
+                )
+
+                .addStep("applyRfsDoneCronJob", INTERNAL, "applyRfsDoneCronJob", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        sessionName: b.inputs.sessionName,
+                        crdName: b.inputs.crdName,
+                        crdUid: b.inputs.crdUid,
+                        configChecksum: b.inputs.configChecksum,
+                        checksumForReplayer: b.inputs.checksumForReplayer,
+                        usesDedicatedCoordinator: expr.ternary(createRfsCluster, expr.literal("true"), expr.literal("false")),
+                        fromSnapshotMigrationK8sLabel: b.inputs.migrationLabel,
+                        consoleConfigContents: c.steps.setupRfsConsoleConfig.outputs.configContents
+                    })
+                )
+
                 .addStep("createRfsCoordinator", RfsCoordinatorCluster, "createRfsCoordinator", c =>
                         c.register({
                             clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName),
@@ -591,23 +713,19 @@ export const DocumentBulkLoad = WorkflowBuilder.create({
                     {when: {templateExp: createRfsCluster}}
                 )
 
-                // Always run bulk load, use deployed cluster or target cluster based on flag 'createRfsCluster'
-                .addStep("runBulkLoad", INTERNAL, "runBulkLoad", c =>
+                .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
-                        rfsCoordinatorConfig: expr.ternary(
-                            createRfsCluster,
-                            expr.serialize(makeRfsCoordinatorConfig(getRfsCoordinatorClusterName(b.inputs.sessionName))),
-                            b.inputs.targetConfig
-                        )
+                        rfsCoordinatorConfig
                     }))
 
-                // (conditional) Cleanup OpenSearch cluster used for RFS work coordination
-                .addStep("cleanupRfsCoordinator", RfsCoordinatorCluster, "deleteRfsCoordinator", c =>
-                        c.register({
-                            clusterName: getRfsCoordinatorClusterName(b.inputs.sessionName)
-                        }),
-                    {when: {templateExp: createRfsCluster}}
+                .addStep("waitForSnapshotMigration", ResourceManagement, "waitForSnapshotMigration", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        resourceName: b.inputs.crdName,
+                        configChecksum: b.inputs.configChecksum,
+                        checksumField: expr.literal("configChecksum")
+                    })
                 );
         })
     )

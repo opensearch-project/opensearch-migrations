@@ -9,7 +9,7 @@
  */
 def call(String input) {
     def trimmed = input.trim()
-    def pattern = ~/^(ES|OS)_(\d+)\.(\d+)$/
+    def pattern = ~/^(ES|OS|SOLR)_(\d+)\.(\d+)$/
     def matcher = trimmed =~ pattern
     if (!matcher.matches()) {
         error("Invalid version string format: '${input}'. Expected something like ES_7.10 or OS_1.3")
@@ -17,6 +17,6 @@ def call(String input) {
     def prefix = matcher[0][1]
     def major  = matcher[0][2]
     def minor  = matcher[0][3]
-    def name   = (prefix == 'ES') ? 'elasticsearch' : 'opensearch'
+    def name   = (prefix == 'ES') ? 'elasticsearch' : (prefix == 'OS') ? 'opensearch' : 'solr'
     return "${name}-${major}-${minor}"
 }

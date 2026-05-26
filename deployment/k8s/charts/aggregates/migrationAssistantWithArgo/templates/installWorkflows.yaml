@@ -21,7 +21,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: migration-console-for-workflows
-          image: {{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
           command:
             - "/bin/sh"
@@ -52,6 +52,27 @@ spec:
                 done
                 popd
               }
+
+              apply_migration_resources() {
+                local dir="${MIGRATION_RESOURCES_DIR:-/root/migrationResources}"
+                local generated_selector="migrations.opensearch.org/generated=true"
+                echo "Installing generated migration CRDs and admission policies from $dir"
+
+                kubectl apply -f "$dir/migrationCrds.yaml"
+                kubectl create --dry-run=client -o json -f "$dir/migrationCrds.yaml" | \
+                  jq -r '.items[]?.metadata.name // .metadata.name' | \
+                  while read -r crd_name; do
+                    [ -n "$crd_name" ] || continue
+                    kubectl wait --for condition=Established --timeout=60s "crd/$crd_name"
+                  done
+
+                kubectl delete validatingadmissionpolicybindings.admissionregistration.k8s.io \
+                  -l "$generated_selector" --ignore-not-found
+                kubectl delete validatingadmissionpolicies.admissionregistration.k8s.io \
+                  -l "$generated_selector" --ignore-not-found
+                kubectl apply -f "$dir/validatingAdmissionPolicies.yaml"
+              }
+              apply_migration_resources
               apply_workflows "workflows"
               apply_workflows "lib/integ_test/testWorkflows"
 ---
@@ -78,7 +99,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: migration-console-for-workflows
-          image: {{ .Values.images.migrationConsole.repository }}:{{ .Values.images.migrationConsole.tag }}
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
           command:
             - "/bin/sh"

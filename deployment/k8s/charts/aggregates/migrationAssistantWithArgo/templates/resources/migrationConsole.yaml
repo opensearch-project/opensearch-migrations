@@ -23,8 +23,8 @@ rules:
     resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
   - apiGroups: ["migrations.opensearch.org"]
-    resources: ["approvalgates", "capturedtraffics", "captureproxies", "datasnapshots", "kafkaclusters", "snapshotmigrations", "trafficreplays",
-                "approvalgates/status", "capturedtraffics/status", "captureproxies/status", "datasnapshots/status", "kafkaclusters/status", "snapshotmigrations/status", "trafficreplays/status"]
+    resources: ["approvalgates", "capturedtraffics", "captureproxies", "datasnapshots", "kafkaclusters", "migrationruns", "snapshotmigrations", "trafficreplays",
+                "approvalgates/status", "capturedtraffics/status", "captureproxies/status", "datasnapshots/status", "kafkaclusters/status", "migrationruns/status", "snapshotmigrations/status", "trafficreplays/status"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
 ---
@@ -137,7 +137,7 @@ spec:
       terminationGracePeriodSeconds: 65
       initContainers:
         - name: workflow-schema-generator
-          image: {{ .Values.images.installer.repository }}:{{ .Values.images.installer.tag }}
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.installer) }}
           imagePullPolicy: {{ .Values.images.installer.pullPolicy }}
           command:
             - /bin/sh
@@ -191,7 +191,7 @@ spec:
       {{- end }}
       containers:
         - name: console
-          image: {{ .Values.images.migrationConsole.repository}}:{{ .Values.images.migrationConsole.tag }}
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}
           imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
           # Since the console may be used interactively, try to keep the migration
           # console on the same node so that it can be stable.  Keep the requests

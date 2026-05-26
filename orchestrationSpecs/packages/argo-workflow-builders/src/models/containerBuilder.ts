@@ -232,12 +232,15 @@ export class ContainerBuilder<
     }
 
     getBody() {
-        const volumes = Object.entries(this.volumeScope).map(([name, config]) => ({
-            name,
-            configMap: config.configMap
-        }));
+        const volumes = Object.entries(this.volumeScope).map(([name, config]) => {
+            const {mountPath, readOnly, volume, ...volumeSource} = config as Record<string, PlainObject>;
+            return volume ?? {
+                name,
+                ...volumeSource
+            };
+        });
         const volumeMounts = Object.entries(this.volumeScope).map(([name, config]) => ({
-        name,
+            name,
             mountPath: config.mountPath,
             readOnly: config.readOnly
         }));

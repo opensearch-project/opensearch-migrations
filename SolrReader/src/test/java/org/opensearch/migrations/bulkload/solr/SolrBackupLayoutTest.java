@@ -58,6 +58,46 @@ class SolrBackupLayoutTest {
     }
 
     @Test
+    void findLatestZkBackup_bareZkBackupFallback_solr6Or7Layout() throws IOException {
+        // Solr 6/7 non-incremental SolrCloud BACKUP writes a bare zk_backup/ directory
+        // (no numeric suffix). findLatestZkBackup must fall back to it.
+        var collectionDir = tempDir.resolve("myCollection");
+        Files.createDirectories(collectionDir.resolve("zk_backup/configs/myconfig"));
+        Files.createFile(collectionDir.resolve("backup.properties"));
+
+        var latest = SolrBackupLayout.findLatestZkBackup(collectionDir);
+        assertThat(latest, org.hamcrest.CoreMatchers.notNullValue());
+        assertThat(latest.getFileName().toString(), equalTo("zk_backup"));
+    }
+
+    @Test
+    void containsBackupDataMarkers_solr6SnapshotShardDir() throws IOException {
+        // Solr 6 SolrCloud backup contains snapshot.shardN directories — these should
+        // be recognised as backup data markers so resolveCollectionDataDir returns the
+        // correct collection directory without descending an extra level.
+        var collectionDir = tempDir.resolve("myCollection");
+        Files.createDirectories(collectionDir.resolve("snapshot.shard1"));
+        Files.createDirectories(collectionDir.resolve("snapshot.shard2"));
+        Files.createFile(collectionDir.resolve("backup.properties"));
+
+        // resolveCollectionDataDir should return collectionDir itself (not descend further)
+        var resolved = SolrBackupLayout.resolveCollectionDataDir(collectionDir);
+        assertThat(resolved, equalTo(collectionDir));
+    }
+
+    @Test
+    void findLatestZkBackup_numberedRevisionWinsOverBare() throws IOException {
+        // If both numbered and unnumbered zk_backups exist (highly unusual), the
+        // numbered one takes precedence — newer Solr versions are authoritative.
+        var collectionDir = tempDir.resolve("myCollection");
+        Files.createDirectories(collectionDir.resolve("zk_backup/configs/legacy"));
+        Files.createDirectories(collectionDir.resolve("zk_backup_0/configs/modern"));
+
+        var latest = SolrBackupLayout.findLatestZkBackup(collectionDir);
+        assertThat(latest.getFileName().toString(), equalTo("zk_backup_0"));
+    }
+
+    @Test
     void findLatestZkBackup_ignoresNonMatching() throws IOException {
         var collectionDir = tempDir.resolve("myCollection");
         Files.createDirectories(collectionDir.resolve("zk_backup_0/configs/cfg"));

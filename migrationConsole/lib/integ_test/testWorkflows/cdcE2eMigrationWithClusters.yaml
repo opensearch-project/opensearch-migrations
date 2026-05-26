@@ -63,6 +63,8 @@ spec:
         value: "20"
       - name: observed-packet-timeout
         value: "30"
+      - name: transforms-sources
+        value: "{}"
 
   templates:
     # Main workflow: provision clusters, pause for test data, run CDC+backfill.
@@ -158,6 +160,8 @@ spec:
                   value: "{{workflow.parameters.snapshot-and-migration-configs}}"
                 - name: replayer-config
                   value: "{{workflow.parameters.replayer-config}}"
+                - name: transforms-sources
+                  value: "{{workflow.parameters.transforms-sources}}"
                 - name: imageMigrationConsoleLocation
                   valueFrom:
                     configMapKeyRef:

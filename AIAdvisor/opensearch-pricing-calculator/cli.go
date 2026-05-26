@@ -51,6 +51,7 @@ func initCLI() {
 	initEstimateProvisionedCmd()
 	initEstimateServerlessCmd()
 	initEstimateFromClusterCmd()
+	initMCPCmd()
 
 	// Default to serve when no subcommand is given
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
@@ -140,16 +141,17 @@ func runServe(cmd *cobra.Command, args []string) error {
 	provisionedHandler := provisioned.NewHandler(app.logger)
 	serverlessHandler := serverless.NewHandler(app.logger)
 
-	assistantHandler, err := assistant.NewHandler(app.logger)
+	te := mcp.NewToolExecutor(app.logger, provisionedHandler, serverlessHandler)
+
+	assistantHandler, err := assistant.NewHandler(app.logger, te)
 	if err != nil {
 		app.logger.Warn("Failed to initialize assistant handler", zap.Error(err))
 	} else {
 		app.assistantHandler = assistantHandler
 		app.logger.Info("Assistant handler initialized successfully")
 	}
-
-	mcpServer := mcp.NewServer(app.logger, fmt.Sprintf("http://localhost:%d", port), provisionedHandler, serverlessHandler)
-	mcpServer.RegisterRoutes()
+	app.toolExecutor = te
+	mcpHTTPServer := mcp.NewStreamableHTTPServer(te)
 
 	cacheScheduler := scheduler.NewCacheScheduler(app.logger, fmt.Sprintf("http://localhost:%d", port))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -165,8 +167,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	app.logger.Info("Starting MCP server.", zap.Int("port", mcpPort))
 	go func() {
-		err := http.ListenAndServe(fmt.Sprintf("0.0.0.0:%d", mcpPort), mcpServer)
-		if err != nil {
+		if err := mcpHTTPServer.Start(fmt.Sprintf("0.0.0.0:%d", mcpPort)); err != nil {
 			app.logger.Error("Unable to start the MCP server", zap.Error(err))
 		}
 	}()

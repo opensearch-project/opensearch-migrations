@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
@@ -30,6 +31,8 @@ import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
+import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.PredicateLoader;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
@@ -190,6 +193,23 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
+            names = {"--request-filter-config", "--requestFilterConfig"},
+            arity = 1,
+            description = "Configuration for request filtering. JSON array with one entry whose key is the "
+                + "predicate provider name. Requests failing the predicate are skipped (not sent to target).")
+        private String requestFilterConfig;
+
+        @Parameter(
+            required = false,
+            names = {"--response-post-processor-config", "--responsePostProcessorConfig"},
+            arity = 1,
+            description = "Configuration for response post-processing. Transforms target responses before "
+                + "tuple assembly (e.g., converting OpenSearch responses to Solr format for comparison). "
+                + "Same JSON format as --transformerConfig.")
+        private String responsePostProcessorConfig;
+
+        @Parameter(
+            required = false,
             names = { "--user-agent", "--userAgent" },
             arity = 1,
             description = "For HTTP requests to the target cluster, append this string (after \"; \") to"
@@ -204,7 +224,8 @@ public class TrafficReplayer {
         String inputFilename;
         @Parameter(
             required = false,
-            names = {"-t", PACKET_TIMEOUT_SECONDS_PARAMETER_NAME, "--packetTimeoutSeconds" },
+            names = {"-t", PACKET_TIMEOUT_SECONDS_PARAMETER_NAME, "--packetTimeoutSeconds",
+                "--observedPacketConnectionTimeout" },
             arity = 1,
             description = "assume that connections were terminated after this many "
                 + "seconds of inactivity observed in the captured stream")
@@ -218,7 +239,7 @@ public class TrafficReplayer {
         double speedupFactor = 1.0;
         @Parameter(
             required = false,
-            names = { LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME,  "--lookaheadTimeWindow" },
+            names = { LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME,  "--lookaheadTimeWindow", "--lookaheadTimeSeconds" },
             arity = 1,
             description = "Number of seconds of data that will be buffered.")
         int lookaheadTimeSeconds = 400;
@@ -238,7 +259,8 @@ public class TrafficReplayer {
         // https://github.com/opensearch-project/opensearch-java/blob/main/java-client/src/main/java/org/opensearch/client/transport/httpclient5/ApacheHttpClient5TransportBuilder.java#L49-L54
         @Parameter(
             required = false,
-            names = { "--target-response-timeout", "--targetResponseTimeout" },
+            names = { "--target-response-timeout", "--targetResponseTimeout",
+                "--targetServerResponseTimeoutSeconds" },
             arity = 1,
             description = "Seconds to wait before timing out a replayed request to the target.")
         int targetServerResponseTimeoutSeconds = 150;
@@ -273,7 +295,8 @@ public class TrafficReplayer {
         String kafkaTrafficGroupId;
         @Parameter(
             required = false,
-            names = { "--kafka-traffic-enable-msk-auth", "--kafkaTrafficEnabledMskAuth" },
+            names = { "--kafka-traffic-enable-msk-auth", "--kafkaTrafficEnabledMskAuth",
+                "--kafkaTrafficEnableMSKAuth" },
             arity = 0,
             description = "Legacy flag that enables MSK IAM auth. Prefer --kafkaAuthType=msk-iam")
         Boolean kafkaTrafficEnableMSKAuth;
@@ -645,11 +668,13 @@ public class TrafficReplayer {
                 : new BulkItemErrorClassifier();
 
             var transformationLoader = new TransformationLoader();
+            var effectiveTransformerSupplier = buildTransformerSupplier(
+                transformationLoader, hostname, params.userAgent, requestTransformerConfig, params.requestFilterConfig);
             var tr = new TrafficReplayerTopLevel(
                 topContext,
                 uri,
                 authTransformer,
-                () -> transformationLoader.getTransformerFactoryLoader(hostname, params.userAgent, requestTransformerConfig),
+                effectiveTransformerSupplier,
                 TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                     uri,
                     params.allowInsecureConnections,
@@ -659,6 +684,7 @@ public class TrafficReplayer {
                 orderedRequestTracker,
                 errorClassifier
             );
+            configureResponsePostProcessor(tr, transformationLoader, params.responsePostProcessorConfig);
             log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
                     " serverResponseTimeout={}s observedPacketConnectionTimeout={}s" +
                     " targetUri={} numClientThreads={}")
@@ -699,7 +725,10 @@ public class TrafficReplayer {
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
-            var tupleWriter = createS3TupleWriterIfConfigured(params);
+            var tupleWriter = createS3TupleWriterIfConfigured(
+                params,
+                () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig)
+            );
             if (tupleWriter != null) {
                 tr.setupRunAndWaitForReplayWithShutdownChecks(
                     Duration.ofSeconds(params.observedPacketConnectionTimeout),
@@ -736,7 +765,36 @@ public class TrafficReplayer {
         }
     }
 
-    private static ThreadLocalTupleWriter createS3TupleWriterIfConfigured(Parameters params) {
+    static Supplier<IJsonTransformer> buildTransformerSupplier(
+        TransformationLoader transformationLoader,
+        String hostname,
+        String userAgent,
+        String requestTransformerConfig,
+        String requestFilterConfig
+    ) {
+        Supplier<IJsonTransformer> base = () -> transformationLoader.getTransformerFactoryLoader(
+            hostname, userAgent, requestTransformerConfig);
+        if (requestFilterConfig == null || requestFilterConfig.isBlank()) {
+            return base;
+        }
+        var requestFilter = new PredicateLoader().getPredicateFactoryLoader(requestFilterConfig);
+        log.atInfo().setMessage("Request filter configured").log();
+        return () -> new FilteringTransformerWrapper(base.get(), requestFilter);
+    }
+
+    static void configureResponsePostProcessor(
+        TrafficReplayerTopLevel tr, TransformationLoader loader, String config
+    ) {
+        if (config != null && !config.isBlank()) {
+            tr.responsePostProcessor = loader.getTransformerFactoryLoader(null, null, config);
+            log.atInfo().setMessage("Response post-processor configured").log();
+        }
+    }
+
+    private static ThreadLocalTupleWriter createS3TupleWriterIfConfigured(
+        Parameters params,
+        Supplier<IJsonTransformer> tupleTransformerSupplier
+    ) {
         if (params.tupleS3Bucket == null || params.tupleS3Bucket.isEmpty()) {
             return null;
         }
@@ -763,7 +821,8 @@ public class TrafficReplayer {
                 params.tupleMaxFileSizeMb * 1024L * 1024L,
                 Duration.ofSeconds(params.tupleMaxBufferSeconds),
                 params.tupleMaxPerFile
-            )
+            ),
+            tupleTransformerSupplier
         );
     }
 

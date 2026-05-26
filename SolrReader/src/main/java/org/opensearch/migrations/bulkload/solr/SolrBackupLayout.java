@@ -71,24 +71,37 @@ public final class SolrBackupLayout {
         } catch (IOException e) {
             log.warn("Failed to list directories in {}", dataDir, e);
         }
+        // Solr 6/7 non-incremental SolrCloud BACKUP writes a bare `zk_backup/` directory
+        // (no numeric suffix). Fall back to that if no numbered revisions exist.
+        var bareZkBackup = dataDir.resolve("zk_backup");
+        if (Files.isDirectory(bareZkBackup)) {
+            log.info("Found bare zk_backup directory (Solr 6/7 layout): {}", bareZkBackup);
+            return bareZkBackup;
+        }
         return null;
     }
 
     /**
      * Given a list of directory names (from S3 listing or filesystem), finds the
      * latest {@code zk_backup_N} name.
+     * Falls back to bare {@code zk_backup} (no numeric suffix) for Solr 6/7 backups.
      *
      * @param dirNames list of directory names (not full paths)
      * @return the name of the latest zk_backup directory (e.g. "zk_backup_1"), or null
      */
     public static String findLatestZkBackupName(List<String> dirNames) {
-        return dirNames.stream()
+        var numbered = dirNames.stream()
             .filter(name -> ZK_BACKUP_PATTERN.matcher(name).matches())
             .max(Comparator.comparingInt(name -> {
                 var m = ZK_BACKUP_PATTERN.matcher(name);
                 return m.matches() ? Integer.parseInt(m.group(1)) : -1;
             }))
             .orElse(null);
+        if (numbered != null) {
+            return numbered;
+        }
+        // Solr 6/7 fallback: bare zk_backup/ with no numeric suffix
+        return dirNames.contains("zk_backup") ? "zk_backup" : null;
     }
 
     /**
@@ -214,8 +227,11 @@ public final class SolrBackupLayout {
                 var name = p.getFileName().toString();
                 return name.equals("shard_backup_metadata")
                     || name.equals("index")
+                    || name.equals("zk_backup")             // Solr 6/7 non-incremental layout
                     || ZK_BACKUP_PATTERN.matcher(name).matches()
-                    || name.startsWith("backup_");
+                    || name.startsWith("backup_")
+                    || name.equals("backup.properties")     // Solr 6/7 marker file
+                    || name.startsWith("snapshot.");        // Solr 6 snapshot.shardN dirs
             });
         } catch (IOException e) {
             return false;

@@ -33,7 +33,7 @@ pipenv run app --source-version=all --target-version=OS_3.1 \
 ```
 
 Supported versions:
-- **Sources:** `ES_1.5`, `ES_2.4`, `ES_5.6`, `ES_6.8`, `ES_7.10`, `OS_1.3`, `OS_2.19`
+- **Sources:** `ES_1.5`, `ES_2.4`, `ES_5.6`, `ES_6.8`, `ES_7.10`, `OS_1.3`, `OS_2.19`, `SOLR_6.6`, `SOLR_7.7`, `SOLR_8.11`, `SOLR_9.8`
 - **Targets:** `OS_1.3`, `OS_2.19`, `OS_3.1`
 
 **Run specific tests:**
