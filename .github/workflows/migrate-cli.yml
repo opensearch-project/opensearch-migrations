@@ -65,8 +65,15 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install bats-core + jq
-        run: sudo apt-get update -y && sudo apt-get install -y bats jq
+      - name: Install jq + bats-core (pinned 1.13.0 from upstream)
+        run: |
+          # ubuntu-22.04 ships bats 1.2 from apt, which lacks
+          # --print-output-on-failure (added in 1.5). Pull a pinned
+          # release from upstream for predictable behavior.
+          sudo apt-get update -y && sudo apt-get install -y jq
+          curl -fsSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.13.0.tar.gz \
+            | tar -xz -C /tmp
+          sudo /tmp/bats-core-1.13.0/install.sh /usr/local
       - name: Versions
         run: |
           bats --version
