@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# migration-assistant — OpenSearch Migration Assistant CLI entry point.
+#
+# Sources every lib in dependency order, then dispatches subcommands.
+# Keep this file thin: argument parsing lives in lib/resume.sh, lib/cleanup.sh.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Tell the libs we are the top-level process and want the global INT/TERM
+# trap installed. Sourcing the libs from a test harness leaves this unset.
+export MIGRATE_OWNS_PROCESS=1
+
+__resolve() {
+  local target="$1"
+  while [[ -L "$target" ]]; do
+    local link
+    link=$(readlink "$target")
+    if [[ "$link" = /* ]]; then
+      target="$link"
+    else
+      target="$(dirname "$target")/$link"
+    fi
+  done
+  printf '%s\n' "$target"
+}
+LIB_DIR="$(cd -- "$(dirname -- "$(__resolve "${BASH_SOURCE[0]}")")/../lib" && pwd)"
+export LIB_DIR
+
+# shellcheck source=lib/_common.sh
+source "$LIB_DIR/_common.sh"
+# shellcheck source=lib/version.sh
+source "$LIB_DIR/version.sh"
+# shellcheck source=lib/ui.sh
+source "$LIB_DIR/ui.sh"
+# shellcheck source=lib/log.sh
+source "$LIB_DIR/log.sh"
+# shellcheck source=lib/state.sh
+source "$LIB_DIR/state.sh"
+# shellcheck source=lib/discover.sh
+source "$LIB_DIR/discover.sh"
+# shellcheck source=lib/install_tools.sh
+source "$LIB_DIR/install_tools.sh"
+# shellcheck source=lib/artifacts.sh
+source "$LIB_DIR/artifacts.sh"
+# shellcheck source=lib/wizard.sh
+source "$LIB_DIR/wizard.sh"
+# shellcheck source=lib/cfn.sh
+source "$LIB_DIR/cfn.sh"
+# shellcheck source=lib/crane.sh
+source "$LIB_DIR/crane.sh"
+# shellcheck source=lib/helm.sh
+source "$LIB_DIR/helm.sh"
+# shellcheck source=lib/console.sh
+source "$LIB_DIR/console.sh"
+# shellcheck source=lib/agent.sh
+source "$LIB_DIR/agent.sh"
+# shellcheck source=lib/cleanup.sh
+source "$LIB_DIR/cleanup.sh"
+# shellcheck source=lib/resume.sh
+source "$LIB_DIR/resume.sh"
+
+case "${1:-resume}" in
+  resume|"")             cmd_resume   "${@:2}" ;;
+  cleanup)               cmd_cleanup  "${@:2}" ;;
+  version|--version|-V)  printf '%s\n' "$CLI_VERSION" ;;
+  help|--help|-h)        cmd_help ;;
+  -y|--*)
+    # Any flag-led invocation behaves like `resume <flags>` so
+    # `migration-assistant --non-interactive --stage ma …` works without
+    # the explicit `resume` subcommand. This matches aws-bootstrap.sh,
+    # which has no subcommands.
+    cmd_resume   "$@" ;;
+  *)
+    cmd_help
+    exit 64
+    ;;
+esac

@@ -1,0 +1,4 @@
+# The repo-root .gitignore has `**/bin/` (intended for transient build
+# directories). The migration-assistant CLI's `bin/` is source code,
+# not build output — re-include it here so `git add cli/` works.
+!bin/

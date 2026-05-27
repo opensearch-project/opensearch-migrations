@@ -47,7 +47,9 @@ EOF
 stub_calls() {
   local cmd="$1"
   local f="$STUB_DIR/${cmd}.calls"
-  [[ -f "$f" ]] && cat "$f" || true
+  if [[ -f "$f" ]]; then
+    cat "$f"
+  fi
 }
 
 # load_libs <name…> — source the named libs from the project's lib/.

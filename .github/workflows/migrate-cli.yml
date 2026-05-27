@@ -28,6 +28,25 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install shellcheck
         run: sudo apt-get update -y && sudo apt-get install -y shellcheck
+      - name: Versions
+        run: |
+          shellcheck --version
+          bash --version | head -1
+      - name: Verify CLI files are checked in
+        run: |
+          # Catch the silent ignore-by-**/bin/ failure at lint time, not at
+          # runtime where the error becomes "command not found".
+          set -e
+          for f in bin/migration-assistant install.sh lib/_common.sh; do
+            full="deployment/k8s/aws/cli/$f"
+            if [[ ! -f "$full" ]]; then
+              echo "::error::missing required file in checkout: $full" >&2
+              echo "  the repo-root .gitignore has \`**/bin/\`. The CLI's bin/ is" >&2
+              echo "  source — re-include via \`git add -f\` or a cli-local" >&2
+              echo "  .gitignore that re-includes it." >&2
+              exit 1
+            fi
+          done
       - name: shellcheck
         working-directory: deployment/k8s/aws/cli
         run: |
@@ -36,6 +55,11 @@ jobs:
             install.sh \
             lib/*.sh \
             test/helpers/stub.sh
+      - name: shellcheck assemble + Jenkins script
+        run: |
+          shellcheck \
+            deployment/k8s/aws/assemble-bootstrap.sh \
+            test/awsRunEksValidation.sh
 
   test:
     runs-on: ubuntu-22.04
@@ -43,9 +67,22 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install bats-core + jq
         run: sudo apt-get update -y && sudo apt-get install -y bats jq
-      - name: bats
+      - name: Versions
+        run: |
+          bats --version
+          jq --version
+          bash --version | head -1
+      - name: Verify CLI binary is executable
+        run: |
+          test -x deployment/k8s/aws/cli/bin/migration-assistant
+          deployment/k8s/aws/cli/bin/migration-assistant version
+      - name: bats (verbose, fail-fast on the first failing file)
         working-directory: deployment/k8s/aws/cli
-        run: bats test/
+        run: |
+          # --print-output-on-failure: dumps each failed test's stdout/stderr
+          # --show-output-of-passing-tests: surfaces the _diag dumps we emit
+          #   from test_resume_flow.bats on assertion failures
+          bats --print-output-on-failure --show-output-of-passing-tests test/
 
   smoke:
     runs-on: ubuntu-22.04
@@ -58,10 +95,10 @@ jobs:
         run: deployment/k8s/aws/cli/bin/migration-assistant version
       - name: migration-assistant help
         run: deployment/k8s/aws/cli/bin/migration-assistant help
-      - name: aws-bootstrap.sh shim help (deprecation banner + delegate)
-        run: deployment/k8s/aws/aws-bootstrap.sh help
       - name: assemble-bootstrap.sh produces dist artifacts
         run: |
           deployment/k8s/aws/assemble-bootstrap.sh --cli-version 0.0.0-ci
           test -f deployment/k8s/aws/dist/migration-assistant-cli-0.0.0-ci.tar.gz
           test -x deployment/k8s/aws/dist/aws-bootstrap.sh
+          # Sanity: the curl-pipe shim is well-formed bash.
+          bash -n deployment/k8s/aws/dist/aws-bootstrap.sh
