@@ -321,7 +321,7 @@ class TestWorkflowCLICommands:
         }
         mock_requests_get.return_value = mock_response
 
-        result = runner.invoke(workflow_cli, ['status', '--workflow-name', 'test-workflow'])
+        result = runner.invoke(workflow_cli, ['status', '--step-view', '--workflow-name', 'test-workflow'])
 
         assert result.exit_code == 0
         assert 'test-workflow' in result.output
@@ -392,7 +392,7 @@ class TestWorkflowCLICommands:
         
         mock_requests_get.side_effect = mock_get_response
 
-        result = runner.invoke(workflow_cli, ['status', '--all-workflows'])
+        result = runner.invoke(workflow_cli, ['status', '--step-view', '--all-workflows'])
 
         assert result.exit_code == 0
         assert 'Found 2 workflow(s)' in result.output

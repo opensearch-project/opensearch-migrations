@@ -5,6 +5,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -57,6 +58,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     protected final AtomicInteger exceptionRequestCount;
     public final IRootReplayerContext topLevelContext;
     protected final IWorkTracker<Void> requestWorkTracker;
+    protected IJsonTransformer responsePostProcessor;
 
 
     protected final AtomicBoolean stopReadingRef;
@@ -375,6 +377,9 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     tupleObserver.accept(requestResponseTuple);
                 }
                 var parsedMsgs = new ParsedHttpMessagesAsDicts(requestResponseTuple);
+                if (responsePostProcessor != null) {
+                    applyResponsePostProcessor(parsedMsgs);
+                }
                 writeFuture = tupleWriter.writeTuple(requestResponseTuple, parsedMsgs);
             }
 
@@ -382,6 +387,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 throw new CompletionException(t);
             }
             return writeFuture;
+        }
+
+        @SuppressWarnings("unchecked")
+        private void applyResponsePostProcessor(ParsedHttpMessagesAsDicts parsedMsgs) {
+            TrafficReplayerCore.applyResponsePostProcessor(responsePostProcessor, parsedMsgs);
         }
 
         private void packageAndWriteResponse(
@@ -510,6 +520,29 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     .addArgument(batchDurationMs)
                     .addArgument(trafficStreams::size)
                     .log();
+            }
+        }
+    }
+
+    /**
+     * Apply a response post-processor to all target responses in the parsed messages.
+     * Package-private static for testability.
+     */
+    @SuppressWarnings("unchecked")
+    static void applyResponsePostProcessor(IJsonTransformer postProcessor, ParsedHttpMessagesAsDicts parsedMsgs) {
+        var responses = parsedMsgs.targetResponseList;
+        if (responses == null) return;
+        for (int i = 0; i < responses.size(); i++) {
+            var original = responses.get(i);
+            if (original == null) continue;
+            try {
+                var transformed = (Map<String, Object>) postProcessor.transformJson(original);
+                responses.set(i, transformed);
+            } catch (Exception e) {
+                log.atWarn().setCause(e)
+                    .setMessage("Response post-processor failed for response {}, leaving empty")
+                    .addArgument(i).log();
+                responses.set(i, null);
             }
         }
     }
