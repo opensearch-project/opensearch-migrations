@@ -33,6 +33,8 @@ function getOutputDirectory(): string | null {
 
 const outputDirectory = getOutputDirectory();
 const targetNamespace = getNamespace();
+const workflowScriptsSourceDirectory = path.resolve("resources", "scripts");
+const workflowScriptsOutputDirectoryName = ".workflowScripts";
 
 function createDirectoryIfNotExists(dirPath: string): void {
     try {
@@ -41,6 +43,18 @@ function createDirectoryIfNotExists(dirPath: string): void {
     } catch (error) {
         console.error(`Error creating directory: ${error}`);
     }
+}
+
+function copyWorkflowScripts(outputDirectory: string): void {
+    const scriptsOutputDirectory = path.join(outputDirectory, workflowScriptsOutputDirectoryName);
+    fs.rmSync(scriptsOutputDirectory, {recursive: true, force: true});
+    fs.cpSync(workflowScriptsSourceDirectory, scriptsOutputDirectory, {recursive: true});
+    for (const entry of fs.readdirSync(scriptsOutputDirectory)) {
+        if (entry.endsWith(".sh")) {
+            fs.chmodSync(path.join(scriptsOutputDirectory, entry), 0o755);
+        }
+    }
+    console.log(`Workflow scripts copied successfully (${scriptsOutputDirectory}).`);
 }
 
 async function outputArgoWorkflowTemplate(workflowConfig: any, workflowName: string) {
@@ -72,6 +86,7 @@ async function writeAllWorkflows() {
 
     if (outputDirectory !== null) {
         createDirectoryIfNotExists(outputDirectory);
+        copyWorkflowScripts(outputDirectory);
     }
 
     for (const wf of AllWorkflowTemplates) {

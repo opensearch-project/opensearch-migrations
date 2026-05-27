@@ -24,6 +24,9 @@ from .crd_utils import (
 logger = logging.getLogger(__name__)
 
 ARTIFACT_OUTPUT_ROOT = "migration-outputs"
+NONE_PLACEHOLDER = "<none>"
+CR_DELETION_TIMEOUT_SECONDS = 600
+OWNED_RESOURCE_DELETION_TIMEOUT_SECONDS = 120
 
 
 def _resettable_names(namespace):
@@ -73,7 +76,7 @@ def _delete_crd(namespace, plural, name):
         return False
 
 
-def _wait_until_gone(namespace, plural, names, timeout=120):
+def _wait_until_gone(namespace, plural, names, timeout=CR_DELETION_TIMEOUT_SECONDS):
     """Wait until all named CRDs are fully deleted."""
     custom = client.CustomObjectsApi()
     deadline = time.time() + timeout
@@ -96,7 +99,17 @@ def _wait_until_gone(namespace, plural, names, timeout=120):
         if remaining:
             time.sleep(2)
     if remaining:
-        logger.warning(f"Timed out waiting for deletion: {remaining}")
+        timeout_message = (
+            f"Timed out waiting for deletion: {remaining}. Resource deletion was requested, "
+            f"but the resource is still present. Check deletionTimestamp, finalizers, "
+            f"ownerReferences, and status with: kubectl get {plural} {','.join(sorted(remaining))} "
+            f"-n {namespace} -o yaml"
+        )
+        click.echo(f"  Error: {timeout_message}", err=True)
+        logger.error(timeout_message)
+        _emit_deletion_diagnostics(namespace, plural, sorted(remaining))
+        return False
+    return True
 
 
 def _get_resource_completions(ctx, _, incomplete):
@@ -142,8 +155,33 @@ def _resolve_targets(namespace, path):
 # Groups are processed in order. Within each group all matches are deleted and awaited.
 
 _STRIMZI_API = 'kafka.strimzi.io/v1'
+_STRIMZI_CORE_API = 'core.strimzi.io/v1beta2'
 _STRIMZI_CLUSTER_LABEL = 'strimzi.io/cluster'
 _APPS_API = 'apps/v1'
+_BATCH_API = 'batch/v1'
+_POLICY_API = 'policy/v1'
+_RBAC_API = 'rbac.authorization.k8s.io/v1'
+
+_OWNER_REF_DIAGNOSTIC_RESOURCES = [
+    ('v1', 'pods'),
+    ('v1', 'persistentvolumeclaims'),
+    ('v1', 'services'),
+    ('v1', 'secrets'),
+    ('v1', 'configmaps'),
+    ('v1', 'serviceaccounts'),
+    (_APPS_API, 'deployments'),
+    (_APPS_API, 'statefulsets'),
+    (_APPS_API, 'replicasets'),
+    (_BATCH_API, 'jobs'),
+    (_POLICY_API, 'poddisruptionbudgets'),
+    (_RBAC_API, 'roles'),
+    (_RBAC_API, 'rolebindings'),
+    (_STRIMZI_API, 'kafkas'),
+    (_STRIMZI_API, 'kafkanodepools'),
+    (_STRIMZI_API, 'kafkatopics'),
+    (_STRIMZI_API, 'kafkausers'),
+    (_STRIMZI_CORE_API, 'strimzipodsets'),
+]
 
 _OWNED_RESOURCE_CLEANUP = {
     'kafkaclusters': [
@@ -152,6 +190,8 @@ _OWNED_RESOURCE_CLEANUP = {
         (_STRIMZI_API, 'kafkausers', _STRIMZI_CLUSTER_LABEL),
         # Kafka CR next — Strimzi tears down brokers
         (_STRIMZI_API, 'kafkas', None),
+        # Strimzi-generated podsets can lag behind the Kafka CR in busy clusters
+        (_STRIMZI_CORE_API, 'strimzipodsets', _STRIMZI_CLUSTER_LABEL),
         # Nodepool last — Strimzi honors deleteClaim when it processes nodepool deletion
         (_STRIMZI_API, 'kafkanodepools', _STRIMZI_CLUSTER_LABEL),
     ],
@@ -209,6 +249,41 @@ def _find_owned(namespace, api_gv, plural, label_key, cr_name):
         return []
 
 
+def _list_items(response):
+    """Return Kubernetes list items, treating mocked diagnostic responses as empty."""
+    items = getattr(response, "items", None) if not isinstance(response, dict) else response.get("items", [])
+    return items if isinstance(items, list) else []
+
+
+def _list_namespaced_resources(namespace, api_gv, plural):
+    """List a known namespaced resource group for stuck-delete diagnostics."""
+    group, version = _parse_api_gv(api_gv)
+    try:
+        if group:
+            return _list_items(client.CustomObjectsApi().list_namespaced_custom_object(
+                group=group, version=version, namespace=namespace, plural=plural
+            ))
+        v1, apps = client.CoreV1Api(), client.AppsV1Api()
+        dispatch = {
+            'pods': v1.list_namespaced_pod,
+            'persistentvolumeclaims': v1.list_namespaced_persistent_volume_claim,
+            'services': v1.list_namespaced_service,
+            'secrets': v1.list_namespaced_secret,
+            'configmaps': v1.list_namespaced_config_map,
+            'serviceaccounts': v1.list_namespaced_service_account,
+            'deployments': apps.list_namespaced_deployment,
+            'statefulsets': apps.list_namespaced_stateful_set,
+            'replicasets': apps.list_namespaced_replica_set,
+            'jobs': client.BatchV1Api().list_namespaced_job,
+            'poddisruptionbudgets': client.PolicyV1Api().list_namespaced_pod_disruption_budget,
+            'roles': client.RbacAuthorizationV1Api().list_namespaced_role,
+            'rolebindings': client.RbacAuthorizationV1Api().list_namespaced_role_binding,
+        }
+        return _list_items(dispatch[plural](namespace))
+    except (ApiException, KeyError):
+        return []
+
+
 def _delete_owned_resource(namespace, api_gv, plural, name):
     group, version = _parse_api_gv(api_gv)
     try:
@@ -222,6 +297,10 @@ def _delete_owned_resource(namespace, api_gv, plural, name):
                 'secrets': v1.delete_namespaced_secret,
                 'deployments': apps.delete_namespaced_deployment,
                 'statefulsets': apps.delete_namespaced_stateful_set,
+                'jobs': client.BatchV1Api().delete_namespaced_job,
+                'poddisruptionbudgets': client.PolicyV1Api().delete_namespaced_pod_disruption_budget,
+                'roles': client.RbacAuthorizationV1Api().delete_namespaced_role,
+                'rolebindings': client.RbacAuthorizationV1Api().delete_namespaced_role_binding,
             }
             dispatch[plural](name, namespace)
         logger.info(f"Deleted {plural}/{name}")
@@ -239,6 +318,294 @@ def _item_finalizers(item):
             else item.metadata.finalizers or [])
 
 
+def _item_metadata(item):
+    return item.get('metadata', {}) if isinstance(item, dict) else item.metadata
+
+
+def _item_status(item):
+    return item.get('status', {}) if isinstance(item, dict) else getattr(item, 'status', None)
+
+
+def _item_phase(item):
+    status = _item_status(item)
+    if isinstance(status, dict):
+        return status.get('phase')
+    return getattr(status, 'phase', None)
+
+
+def _item_conditions(item):
+    status = _item_status(item)
+    if isinstance(status, dict):
+        return status.get('conditions', [])
+    return getattr(status, 'conditions', []) or []
+
+
+def _metadata_field(metadata, key, default=None):
+    if isinstance(metadata, dict):
+        return metadata.get(key, default)
+    return getattr(metadata, key, default)
+
+
+def _format_owner_references(owner_refs):
+    if not owner_refs:
+        return "[]"
+    formatted = []
+    for ref in owner_refs:
+        if isinstance(ref, dict):
+            formatted.append(f"{ref.get('kind')}/{ref.get('name')}")
+        else:
+            formatted.append(f"{getattr(ref, 'kind', None)}/{getattr(ref, 'name', None)}")
+    return "[" + ", ".join(formatted) + "]"
+
+
+def _owner_ref_field(ref, field):
+    if isinstance(ref, dict):
+        return ref.get(field)
+    return getattr(ref, field, None)
+
+
+def _metadata_owner_references(metadata):
+    return _metadata_field(metadata, "ownerReferences", None) or _metadata_field(
+        metadata, "owner_references", None
+    ) or []
+
+
+def _owner_ref_matches(metadata, owner_uid, owner_kind, owner_name):
+    for ref in _metadata_owner_references(metadata):
+        if owner_uid and _owner_ref_field(ref, "uid") == owner_uid:
+            return True
+        if _owner_ref_field(ref, "kind") == owner_kind and _owner_ref_field(ref, "name") == owner_name:
+            return True
+    return False
+
+
+def _format_metadata_for_diagnostics(metadata):
+    finalizers = _metadata_field(metadata, "finalizers", None) or []
+    deletion_timestamp = _metadata_field(metadata, "deletionTimestamp", None) or _metadata_field(
+        metadata, "deletion_timestamp", None
+    )
+    owner_refs = _metadata_owner_references(metadata)
+    return (
+        f"deletionTimestamp={deletion_timestamp or NONE_PLACEHOLDER}, "
+        f"finalizers={finalizers}, ownerReferences={_format_owner_references(owner_refs)}"
+    )
+
+
+def _format_conditions(conditions):
+    if not isinstance(conditions, list):
+        return "[]"
+    if not conditions:
+        return "[]"
+    formatted = []
+    for condition in conditions[:5]:
+        if isinstance(condition, dict):
+            formatted.append(
+                f"{condition.get('type')}={condition.get('status')}"
+                f" reason={condition.get('reason', NONE_PLACEHOLDER)}"
+            )
+        else:
+            formatted.append(
+                f"{getattr(condition, 'type', None)}={getattr(condition, 'status', None)}"
+                f" reason={getattr(condition, 'reason', NONE_PLACEHOLDER)}"
+            )
+    suffix = f", ... ({len(conditions)} total)" if len(conditions) > 5 else ""
+    return "[" + ", ".join(formatted) + suffix + "]"
+
+
+def _resource_request(storage_requests):
+    if not storage_requests:
+        return NONE_PLACEHOLDER
+    if isinstance(storage_requests, dict):
+        return storage_requests.get("storage", NONE_PLACEHOLDER)
+    return NONE_PLACEHOLDER
+
+
+def _emit_core_resource_line(kind, name, metadata, status_phase=None, extra=None):
+    detail = _format_metadata_for_diagnostics(metadata)
+    if status_phase:
+        detail = f"phase={status_phase}, {detail}"
+    if extra:
+        detail = f"{detail}, {extra}"
+    click.echo(f"    {kind}/{name}: {detail}", err=True)
+
+
+def _find_pods_using_pvc(namespace, pvc_name):
+    try:
+        pods = _list_items(client.CoreV1Api().list_namespaced_pod(namespace=namespace))
+    except ApiException:
+        return []
+    matches = []
+    for pod in pods:
+        for volume in pod.spec.volumes or []:
+            claim = getattr(volume, "persistent_volume_claim", None)
+            if claim and claim.claim_name == pvc_name:
+                matches.append(pod)
+                break
+    return matches
+
+
+def _emit_events_for_object(namespace, kind, name, limit=5):
+    try:
+        events = _list_items(client.CoreV1Api().list_namespaced_event(
+            namespace=namespace,
+            field_selector=f"involvedObject.kind={kind},involvedObject.name={name}",
+        ))
+    except ApiException:
+        return
+    if not events:
+        return
+
+    def event_timestamp(event):
+        candidates = (
+            getattr(event, "last_timestamp", None),
+            getattr(event, "event_time", None),
+            getattr(event, "first_timestamp", None),
+            event.metadata.creation_timestamp,
+        )
+        return next((candidate for candidate in candidates if candidate), None)
+
+    events = sorted(
+        events,
+        key=event_timestamp,
+    )[-limit:]
+    click.echo(f"      recent {kind} events:", err=True)
+    for event in events:
+        timestamp = event_timestamp(event)
+        click.echo(
+            f"        {timestamp} {event.type or '<unknown>'} {event.reason or NONE_PLACEHOLDER}: "
+            f"{event.message or '<no message>'}",
+            err=True,
+        )
+
+
+def _emit_pv_diagnostics(pv_name):
+    if not pv_name:
+        return
+    try:
+        pv = client.CoreV1Api().read_persistent_volume(pv_name)
+    except ApiException as e:
+        click.echo(f"      PV/{pv_name}: unavailable ({e.status})", err=True)
+        return
+    claim_ref = pv.spec.claim_ref
+    claim = f"{claim_ref.namespace}/{claim_ref.name}" if claim_ref else NONE_PLACEHOLDER
+    _emit_core_resource_line(
+        "PV",
+        pv.metadata.name,
+        pv.metadata,
+        getattr(pv.status, "phase", None),
+        (
+            f"reclaimPolicy={pv.spec.persistent_volume_reclaim_policy}, "
+            f"storageClass={pv.spec.storage_class_name or NONE_PLACEHOLDER}, claimRef={claim}"
+        ),
+    )
+
+
+def _emit_kafka_storage_diagnostics(namespace, cluster_name):
+    pvcs = _find_kafka_pvcs(namespace, [cluster_name])
+    if not pvcs:
+        click.echo(f"    No Kafka PVCs found for cluster {cluster_name}.", err=True)
+        return
+
+    click.echo(f"    Kafka PVC/PV diagnostics for cluster {cluster_name}:", err=True)
+    for pvc in pvcs:
+        storage = _resource_request((pvc.spec.resources.requests or {}) if pvc.spec.resources else {})
+        _emit_core_resource_line(
+            "PVC",
+            pvc.metadata.name,
+            pvc.metadata,
+            getattr(pvc.status, "phase", None),
+            (
+                f"volume={pvc.spec.volume_name or NONE_PLACEHOLDER}, "
+                f"storageClass={pvc.spec.storage_class_name or NONE_PLACEHOLDER}, requestedStorage={storage}"
+            ),
+        )
+        pods = _find_pods_using_pvc(namespace, pvc.metadata.name)
+        if pods:
+            pod_summaries = [
+                f"{pod.metadata.name}(phase={getattr(pod.status, 'phase', '<unknown>')})"
+                for pod in pods[:5]
+            ]
+            suffix = f", ... ({len(pods)} total)" if len(pods) > 5 else ""
+            click.echo(f"      pods using PVC: {', '.join(pod_summaries)}{suffix}", err=True)
+        _emit_pv_diagnostics(pvc.spec.volume_name)
+        _emit_events_for_object(namespace, "PersistentVolumeClaim", pvc.metadata.name)
+
+
+def _emit_owner_reference_blockers(namespace, owner_kind, owner_name, owner_uid):
+    """Print objects that still point at a foreground-deleting owner."""
+    blockers = []
+    for api_gv, plural in _OWNER_REF_DIAGNOSTIC_RESOURCES:
+        for item in _list_namespaced_resources(namespace, api_gv, plural):
+            metadata = _item_metadata(item)
+            if _owner_ref_matches(metadata, owner_uid, owner_kind, owner_name):
+                blockers.append((api_gv, plural, item))
+
+    if not blockers:
+        click.echo("    No ownerReference dependents found in diagnostic resource groups.", err=True)
+        return
+
+    click.echo("    OwnerReference dependents that may block foreground deletion:", err=True)
+    for api_gv, plural, item in blockers:
+        metadata = _item_metadata(item)
+        click.echo(
+            f"      {api_gv}/{plural}/{_item_name(item)}: "
+            f"{_format_metadata_for_diagnostics(metadata)}, "
+            f"phase={_item_phase(item) or NONE_PLACEHOLDER}, "
+            f"conditions={_format_conditions(_item_conditions(item))}",
+            err=True,
+        )
+
+
+def _emit_strimzi_child_diagnostics(namespace, cluster_name):
+    for api_gv, plural, label_key in _OWNED_RESOURCE_CLEANUP.get('kafkaclusters', []):
+        items = _find_owned(namespace, api_gv, plural, label_key, cluster_name)
+        if not items:
+            continue
+        click.echo(f"    Related Strimzi {plural}:", err=True)
+        for item in items:
+            metadata = item.get("metadata", {})
+            status = item.get("status", {})
+            name = metadata.get("name")
+            click.echo(
+                f"      {plural}/{name}: {_format_metadata_for_diagnostics(metadata)}, "
+                f"conditions={_format_conditions(status.get('conditions', []))}",
+                err=True,
+            )
+
+
+def _emit_deletion_diagnostics(namespace, plural, names):
+    """Print concise stuck-delete diagnostics for resources that reset could not remove."""
+    custom = client.CustomObjectsApi()
+    for name in names:
+        click.echo(f"  Diagnostics for {resource_display_name(plural, name)}:", err=True)
+        try:
+            item = custom.get_namespaced_custom_object(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=namespace,
+                plural=plural,
+                name=name,
+            )
+        except ApiException as e:
+            click.echo(f"    Unable to fetch resource: Kubernetes API returned {e.status}", err=True)
+            continue
+        metadata = item.get("metadata", {})
+        status = item.get("status", {})
+        click.echo(f"    metadata: {_format_metadata_for_diagnostics(metadata)}", err=True)
+        click.echo(
+            f"    status: phase={status.get('phase', NONE_PLACEHOLDER)}, "
+            f"conditions={_format_conditions(status.get('conditions', []))}",
+            err=True,
+        )
+        _emit_events_for_object(namespace, item.get("kind", plural), name)
+        owner_uid = metadata.get("uid")
+        owner_kind = item.get("kind", DISPLAY_NAMES.get(plural, plural))
+        _emit_owner_reference_blockers(namespace, owner_kind, name, owner_uid)
+        if plural == 'kafkaclusters':
+            _emit_strimzi_child_diagnostics(namespace, name)
+            _emit_kafka_storage_diagnostics(namespace, name)
+
+
 def _strip_finalizers(namespace, api_gv, plural, name):
     group, version = _parse_api_gv(api_gv)
     if group:
@@ -250,7 +617,14 @@ def _strip_finalizers(namespace, api_gv, plural, name):
             pass
 
 
-def _wait_for_owned_deletion(namespace, api_gv, plural, label_key, cr_name, timeout=120):
+def _wait_for_owned_deletion(
+    namespace,
+    api_gv,
+    plural,
+    label_key,
+    cr_name,
+    timeout=OWNED_RESOURCE_DELETION_TIMEOUT_SECONDS,
+):
     """Poll until owned resources are gone, stripping stuck finalizers as fallback."""
     group, _ = _parse_api_gv(api_gv)
     deadline = time.time() + timeout
@@ -341,7 +715,7 @@ def _delete_and_wait(namespace, plural, name, delete_output_artifacts=True):
         click.echo(f"  Keeping output artifacts for {resource_display_name(plural, name)}{detail}: {path}")
     ok = _delete_crd(namespace, plural, name)
     if ok:
-        _wait_until_gone(namespace, plural, [name])
+        ok = _wait_until_gone(namespace, plural, [name])
     return name, ok
 
 

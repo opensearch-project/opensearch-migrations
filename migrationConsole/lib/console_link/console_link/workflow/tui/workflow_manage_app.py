@@ -35,6 +35,7 @@ NODE_TYPE_POD = "Pod"
 PHASE_RUNNING = "Running"
 PHASE_SUCCEEDED = "Succeeded"
 LOADING_ROOT_LABEL = "[yellow]⏳ Waiting for Workflow to be created...[/]"
+DESC_SHOW_OUTPUT = "Show Output"
 PATCH_OUTPUT_STEPS = {
     "patchMetadataEvaluateOutput": ("snapshotmigrations", "metadataEvaluate"),
     "patchMetadataMigrateOutput": ("snapshotmigrations", "metadataMigrate"),
@@ -53,7 +54,8 @@ class WorkflowTreeApp(App):
                  argo_service: ArgoWorkflowInterface,
                  pod_scraper: PodScraperInterface,
                  workflow_waiter: WaiterInterface,
-                 refresh_interval: float):
+                 refresh_interval: float,
+                 resource_view: bool = False):
         super().__init__()
         self.title = f"[{namespace}] {name}"  # override from base
 
@@ -66,10 +68,15 @@ class WorkflowTreeApp(App):
         self._workflow_waiter = workflow_waiter
         self._pod_scraper = pod_scraper
         self._refresh_interval = refresh_interval
+        self._resource_view = resource_view
 
         # State Containers (Managers)
         self._pods = PodNameManager(self, pod_scraper, name, namespace)
-        self._tree_state = TreeStateManager(namespace=namespace, on_new_pod=self._pods.observe_node)
+        if resource_view:
+            from .resource_tree_state_manager import ResourceTreeStateManager
+            self._tree_state = ResourceTreeStateManager(namespace=namespace)
+        else:
+            self._tree_state = TreeStateManager(namespace=namespace, on_new_pod=self._pods.observe_node)
         self._logs = LogManager(pod_scraper, namespace)
         self._live = LiveStatusManager(refresh_interval)
 
@@ -134,7 +141,8 @@ class WorkflowTreeApp(App):
 
         self._pods.trigger_resolve(new_run_id, use_cache=not force_reload)
 
-        self._live.reconcile_tree_for_live_status_checks(self, self._tree_state.tree.root)
+        if not self._resource_view:
+            self._live.reconcile_tree_for_live_status_checks(self, self._tree_state.tree.root)
 
         self.update_pod_status()
         self._update_dynamic_bindings()
@@ -314,6 +322,20 @@ class WorkflowTreeApp(App):
         if pod_name:
             self._logs.show_in_pager(self, pod_name, node_data.get('display_name', ''))
 
+    def action_view_resource_logs(self) -> None:
+        """View logs for a migration resource."""
+        node = self.current_node_data
+        if not node or not node.get('resource_path'):
+            return
+        resource_path = node['resource_path']
+        try:
+            from ..commands.log import get_resource_logs
+            logs = get_resource_logs(self._namespace, resource_path)
+            self._logs.show_output_texts_in_pager(
+                self, [(resource_path, logs)], resource_path, clean=True)
+        except Exception as e:
+            self.notify(f"Log error: {e}", severity="error")
+
     def action_copy_pod_name(self) -> None:
         if not self.current_node_data:
             return
@@ -389,23 +411,30 @@ class WorkflowTreeApp(App):
 
         node = self.current_node_data
         if node:
-            node_id = node.get('id')
-            ntype = node.get('type')
-            pod_resolved = self._pods.get_name(node_id) is not None
-
-            if ntype == NODE_TYPE_POD and pod_resolved and not is_approval_node(node):
-                self.bind("l", "view_logs", description="View Logs")
-                if self._collect_managed_output_refs():
-                    self.bind("o", "view_output", description="Show Output")
-                if node.get('phase') == PHASE_RUNNING:
-                    self.bind("f", "follow_logs", description="Follow Logs")
-                self.bind("c", "copy_pod_name", description="Copy Pod Name")
-            elif is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
-                self.bind("a", "approve_step", description="Approve")
-            elif self._collect_managed_output_refs():
-                self.bind("o", "view_output", description="Show Output")
+            self._bind_node_actions(node)
 
         self.refresh_bindings()
+
+    def _bind_node_actions(self, node: Dict) -> None:
+        """Bind context-sensitive keys for the selected node."""
+        node_id = node.get('id') or ''
+        ntype = node.get('type')
+
+        if node_id.startswith('resource:'):
+            self.bind("l", "view_resource_logs", description="View Logs")
+            if self._collect_managed_output_refs():
+                self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
+        elif ntype == NODE_TYPE_POD and self._pods.get_name(node_id) and not is_approval_node(node):
+            self.bind("l", "view_logs", description="View Logs")
+            if self._collect_managed_output_refs():
+                self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
+            if node.get('phase') == PHASE_RUNNING:
+                self.bind("f", "follow_logs", description="Follow Logs")
+            self.bind("c", "copy_pod_name", description="Copy Pod Name")
+        elif is_approval_node(node) and node.get('phase') == PHASE_RUNNING:
+            self.bind("a", "approve_step", description="Approve")
+        elif self._collect_managed_output_refs():
+            self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
 
 
 # --- Utilities ---

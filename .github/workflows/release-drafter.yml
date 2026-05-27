@@ -42,15 +42,15 @@ jobs:
           echo "127.0.0.1 docker-registry" | sudo tee -a /etc/hosts
           getent hosts docker-registry
           curl -sS http://docker-registry:5000/v2/ || true
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: ./.github/actions/setup-env
       - id: get_data
         run: |
           echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
       - name: Set up QEMU (for arm64 emulation)
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4
       - name: Set up Buildx builder (BuildKit)
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
         with:
           driver: docker-container
           # Keep debug on while we troubleshoot this new registry setup
@@ -81,7 +81,7 @@ jobs:
           ./gradlew publishMavenJavaPublicationToMavenRepository -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }} && tar -C build -cvf opensearch-migrations-build.tar.gz repository
       - name: Configure AWS Credentials
         if: ${{ !github.event.act }}
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885 # v6
         with:
           role-to-assume: ${{ secrets.MIGRATIONS_DOCKER_ROLE }}
           aws-region: us-east-1
@@ -94,7 +94,7 @@ jobs:
           echo "dockerhub-password=$DOCKERHUB_PASSWORD" >> $GITHUB_OUTPUT
       - name: Login to DockerHub
         if: ${{ !github.event.act }}
-        uses: docker/login-action@v4
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
         with:
           username: ${{ secrets.MIGRATIONS_DOCKER_USERNAME }}
           password: ${{ steps.retrieve-values.outputs.dockerhub-password }}
@@ -139,37 +139,37 @@ jobs:
           docker tag opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }} migrations/reindex_from_snapshot:latest
           docker tag opensearchstaging/opensearch-migrations-transformation-shim:${{ steps.get_data.outputs.version }} migrations/transformation_shim:latest
       - name: Generate SBOM for migration_console
-        uses: anchore/sbom-action@v0.24.0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           image: migrations/migration_console:latest
           output-file: opensearch-migrations-console-sbom.spdx.json
       - name: Generate SBOM for traffic_replayer
-        uses: anchore/sbom-action@v0.24.0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           image: migrations/traffic_replayer:latest
           output-file: opensearch-migrations-traffic-replayer-sbom.spdx.json
       - name: Generate SBOM for capture_proxy
-        uses: anchore/sbom-action@v0.24.0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           image: migrations/capture_proxy:latest
           output-file: opensearch-migrations-traffic-capture-proxy-sbom.spdx.json
       - name: Generate SBOM for reindex_from_snapshot
-        uses: anchore/sbom-action@v0.24.0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           image: migrations/reindex_from_snapshot:latest
           output-file: opensearch-migrations-reindex-from-snapshot-sbom.spdx.json
       - name: Generate SBOM for transformation_shim
-        uses: anchore/sbom-action@v0.24.0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           image: migrations/transformation_shim:latest
           output-file: opensearch-migrations-transformation-shim-sbom.spdx.json
       - name: Generate SBOM for artifacts
-        uses: anchore/sbom-action@v0.24.0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           file: opensearch-migrations-source.tar.gz
           output-file: opensearch-migrations-source-sbom.spdx.json
       - name: Install Helm
-        uses: azure/setup-helm@v5
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5
         # Uses latest Helm version by default
       - name: Package Helm chart
         run: |
@@ -178,7 +178,7 @@ jobs:
             --app-version ${{ steps.get_data.outputs.version }}
       - name: Set up Kind cluster for schema verification
         if: ${{ !github.event.act }}
-        uses: helm/kind-action@v1.14.0
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
           cluster_name: release-schema-verification
           node_image: kindest/node:v1.35.0
@@ -196,7 +196,7 @@ jobs:
           ./deployment/migration-assistant-solution/package-artifacts.sh
       - name: Upload unified schema artifact
         if: ${{ !github.event.act }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: workflowMigration-schema-${{ steps.get_data.outputs.version }}
           path: workflowMigration.schema.json
@@ -210,7 +210,7 @@ jobs:
           kubectl --context kind-release-schema-verification -n ma logs migration-console-0 -c console || true
       - name: Configure AWS Credentials for Solutions Credentials
         if: ${{ !github.event.act }}
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885 # v6
         with:
           role-to-assume: ${{ secrets.SOLUTIONS_CREDENTIALS_ROLE }}
           aws-region: us-east-1
@@ -244,7 +244,7 @@ jobs:
             --cli-version "${{ steps.get_data.outputs.version }}"
       - name: Draft a release
         if: ${{ !github.event.act }}
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
         with:
           draft: true
           generate_release_notes: true

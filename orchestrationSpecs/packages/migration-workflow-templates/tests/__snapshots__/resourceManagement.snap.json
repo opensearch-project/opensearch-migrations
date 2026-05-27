@@ -20,6 +20,14 @@
         {
           "name": "approvalConfigMapName",
           "value": "approval-config"
+        },
+        {
+          "name": "migrationRunNumber",
+          "value": "0"
+        },
+        {
+          "name": "workflowScriptsRoot",
+          "value": "/root/workflows/.workflowScripts"
         }
       ]
     },
@@ -34,7 +42,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: KafkaCluster\nmetadata:\n  name: \"{{=fromJSON(inputs.parameters.kafkaClusterConfig)['name']}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    workflows.argoproj.io/run-uid: \"{{workflow.uid}}\"\n    strimzi.io/cluster: \"{{=fromJSON(inputs.parameters.kafkaClusterConfig)['name']}}\"\nspec:\n  dependsOn: []\n  version: \"{{=fromJSON(inputs.parameters.kafkaClusterConfig)['version']}}\"\n  auth:\n    type: \"{{=sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\"\n  nodePool:\n    replicas: {{=sprig.dig('nodePoolSpecOverrides', 'replicas', 1, fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\n    roles: {{=sprig.dig('nodePoolSpecOverrides', 'roles', [\"controller\",\"broker\"], fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\n    storage:\n      size: \"{{=sprig.dig('nodePoolSpecOverrides', 'storage', 'size', '5Gi', fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\"\n      type: \"{{=sprig.dig('nodePoolSpecOverrides', 'storage', 'type', 'persistent-claim', fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\"\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: KafkaCluster\nmetadata:\n  name: \"{{=fromJSON(inputs.parameters.kafkaClusterConfig)['name']}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{workflow.parameters.migrationRunNumber}}\"\n    strimzi.io/cluster: \"{{=fromJSON(inputs.parameters.kafkaClusterConfig)['name']}}\"\nspec:\n  dependsOn: []\n  version: \"{{=fromJSON(inputs.parameters.kafkaClusterConfig)['version']}}\"\n  auth:\n    type: \"{{=sprig.dig('auth', 'type', 'none', fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\"\n  nodePool:\n    replicas: {{=sprig.dig('nodePoolSpecOverrides', 'replicas', 1, fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\n    roles: {{=sprig.dig('nodePoolSpecOverrides', 'roles', [\"controller\",\"broker\"], fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\n    storage:\n      size: \"{{=sprig.dig('nodePoolSpecOverrides', 'storage', 'size', '5Gi', fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\"\n      type: \"{{=sprig.dig('nodePoolSpecOverrides', 'storage', 'type', 'persistent-claim', fromJSON(inputs.parameters.kafkaClusterConfig)['config'])}}\"\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -86,7 +94,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.topicCrName}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    workflows.argoproj.io/run-uid: \"{{workflow.uid}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceLabel}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.kafkaClusterName}}\"\nspec:\n  dependsOn:\n    - \"{{inputs.parameters.kafkaClusterName}}\"\n  kafkaClusterName: \"{{inputs.parameters.kafkaClusterName}}\"\n  topicName: \"{{inputs.parameters.kafkaTopicName}}\"\n  partitions: {{inputs.parameters.partitions}}\n  replicas: {{inputs.parameters.replicas}}\n  topicConfig: {{=fromJSON(inputs.parameters.topicConfig)}}\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.topicCrName}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{workflow.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceLabel}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.kafkaClusterName}}\"\nspec:\n  dependsOn:\n    - \"{{inputs.parameters.kafkaClusterName}}\"\n  kafkaClusterName: \"{{inputs.parameters.kafkaClusterName}}\"\n  topicName: \"{{inputs.parameters.kafkaTopicName}}\"\n  partitions: {{inputs.parameters.partitions}}\n  replicas: {{inputs.parameters.replicas}}\n  topicConfig: {{=fromJSON(inputs.parameters.topicConfig)}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -126,7 +134,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CaptureProxy\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    workflows.argoproj.io/run-uid: \"{{workflow.uid}}\"\n    migrations.opensearch.org/source: \"{{=sprig.dig('sourceConfig', 'label', '', fromJSON(inputs.parameters.proxyConfig))}}\"\n    migrations.opensearch.org/task: captureProxy\nspec: {{=sprig.merge(sprig.dict(\"dependsOn\", [inputs.parameters.topicCrName], \"loggingConfigurationOverrideConfigMap\", sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']), \"internetFacing\", sprig.dig('internetFacing', false, fromJSON(inputs.parameters.proxyConfig)['proxyConfig']), \"podReplicas\", sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.proxyConfig)['proxyConfig']), \"resources\", fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['resources'], \"tls\", sprig.dig('tls', sprig.dict(), fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])), sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'internetFacing', 'podReplicas', 'resources', 'tls'))}}\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CaptureProxy\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{workflow.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/source: \"{{=sprig.dig('sourceConfig', 'label', '', fromJSON(inputs.parameters.proxyConfig))}}\"\n    migrations.opensearch.org/task: captureProxy\nspec: {{=sprig.merge(sprig.dict(\"dependsOn\", [inputs.parameters.topicCrName], \"loggingConfigurationOverrideConfigMap\", sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']), \"internetFacing\", sprig.dig('internetFacing', false, fromJSON(inputs.parameters.proxyConfig)['proxyConfig']), \"podReplicas\", sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.proxyConfig)['proxyConfig']), \"resources\", fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['resources'], \"tls\", sprig.dig('tls', sprig.dict(), fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])), sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'internetFacing', 'podReplicas', 'resources', 'tls'))}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -166,7 +174,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: DataSnapshot\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    workflows.argoproj.io/run-uid: \"{{workflow.uid}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceLabel}}\"\n    migrations.opensearch.org/snapshot: \"{{=fromJSON(inputs.parameters.snapshotItemConfig)['label']}}\"\nspec:\n  snapshotPrefix: \"{{=fromJSON(inputs.parameters.snapshotItemConfig)['snapshotPrefix']}}\"\n  indexAllowlist: {{=sprig.dig('indexAllowlist', [], fromJSON(inputs.parameters.snapshotItemConfig)['config'])}}\n  maxSnapshotRateMbPerNode: {{=sprig.dig('maxSnapshotRateMbPerNode', 0, fromJSON(inputs.parameters.snapshotItemConfig)['config'])}}\n  jvmArgs: \"{{=sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.snapshotItemConfig)['config'])}}\"\n  loggingConfigurationOverrideConfigMap: \"{{=sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.snapshotItemConfig)['config'])}}\"\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: DataSnapshot\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{workflow.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceLabel}}\"\n    migrations.opensearch.org/snapshot: \"{{=fromJSON(inputs.parameters.snapshotItemConfig)['label']}}\"\nspec:\n  snapshotPrefix: \"{{=fromJSON(inputs.parameters.snapshotItemConfig)['snapshotPrefix']}}\"\n  indexAllowlist: {{=sprig.dig('indexAllowlist', [], fromJSON(inputs.parameters.snapshotItemConfig)['config'])}}\n  maxSnapshotRateMbPerNode: {{=sprig.dig('maxSnapshotRateMbPerNode', 0, fromJSON(inputs.parameters.snapshotItemConfig)['config'])}}\n  jvmArgs: \"{{=sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.snapshotItemConfig)['config'])}}\"\n  loggingConfigurationOverrideConfigMap: \"{{=sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.snapshotItemConfig)['config'])}}\"\n",
           "action": "patch",
           "flags": [
             "--type",
@@ -206,7 +214,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    workflows.argoproj.io/run-uid: \"{{workflow.uid}}\"\n    migrations.opensearch.org/source: \"{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceLabel']}}\"\n    migrations.opensearch.org/target: \"{{=sprig.dig('targetConfig', 'label', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n    migrations.opensearch.org/snapshot: \"{{=sprig.dig('snapshotConfig', 'label', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n    migrations.opensearch.org/from-snapshot-migration: \"{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['migrationLabel']}}\"\nspec:\n  migrationLabel: \"{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['migrationLabel']}}\"\n  sourceVersion: \"{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceVersion']}}\"\n  sourceLabel: \"{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceLabel']}}\"\n  targetLabel: \"{{=sprig.dig('targetConfig', 'label', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  snapshotLabel: \"{{=sprig.dig('snapshotConfig', 'label', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationJvmArgs: \"{{=sprig.dig('metadataMigrationConfig', 'jvmArgs', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationLoggingConfigurationOverrideConfigMap: \"{{=sprig.dig('metadataMigrationConfig', 'loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationComponentTemplateAllowlist: {{=sprig.dig('metadataMigrationConfig', 'componentTemplateAllowlist', [], fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  metadataMigrationIndexAllowlist: {{=sprig.dig('metadataMigrationConfig', 'indexAllowlist', [], fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  metadataMigrationIndexTemplateAllowlist: {{=sprig.dig('metadataMigrationConfig', 'indexTemplateAllowlist', [], fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  metadataMigrationAllowLooseVersionMatching: {{=sprig.dig('metadataMigrationConfig', 'allowLooseVersionMatching', true, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  metadataMigrationClusterAwarenessAttributes: {{=sprig.dig('metadataMigrationConfig', 'clusterAwarenessAttributes', 1, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  metadataMigrationEnableSourcelessMigrations: {{=sprig.dig('metadataMigrationConfig', 'enableSourcelessMigrations', false, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  metadataMigrationUseRecoverySource: {{=sprig.dig('metadataMigrationConfig', 'useRecoverySource', false, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  metadataMigrationMultiTypeBehavior: \"{{=sprig.dig('metadataMigrationConfig', 'multiTypeBehavior', 'NONE', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationOtelCollectorEndpoint: \"{{=sprig.dig('metadataMigrationConfig', 'otelCollectorEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationOutput: \"{{=sprig.dig('metadataMigrationConfig', 'output', 'HUMAN_READABLE', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationTransformerConfigBase64: \"{{=sprig.dig('metadataMigrationConfig', 'transformerConfigBase64', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationTransformerConfig: {{=toJSON(sprig.dig('metadataMigrationConfig', 'transformerConfig', '', fromJSON(inputs.parameters.snapshotMigrationConfig)))}}\n  metadataMigrationTransformerConfigFile: \"{{=sprig.dig('metadataMigrationConfig', 'transformerConfigFile', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationTransformsImage: {{=toJSON(sprig.dig('metadataMigrationConfig', 'transformsImage', '', fromJSON(inputs.parameters.snapshotMigrationConfig)))}}\n  metadataMigrationTransformsImagePullPolicy: \"{{=sprig.dig('metadataMigrationConfig', 'transformsImagePullPolicy', 'IfNotPresent', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationTransformsConfigMap: {{=toJSON(sprig.dig('metadataMigrationConfig', 'transformsConfigMap', '', fromJSON(inputs.parameters.snapshotMigrationConfig)))}}\n  documentBackfillPodReplicas: {{=sprig.dig('documentBackfillConfig', 'podReplicas', 1, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillJvmArgs: \"{{=sprig.dig('documentBackfillConfig', 'jvmArgs', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillLoggingConfigurationOverrideConfigMap: \"{{=sprig.dig('documentBackfillConfig', 'loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillUseTargetClusterForWorkCoordination: {{=sprig.dig('documentBackfillConfig', 'useTargetClusterForWorkCoordination', false, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillResources: {{=sprig.dig('documentBackfillConfig', 'resources', sprig.dict(), fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillIndexAllowlist: {{=sprig.dig('documentBackfillConfig', 'indexAllowlist', [], fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillAllowLooseVersionMatching: {{=sprig.dig('documentBackfillConfig', 'allowLooseVersionMatching', true, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillEnableSourcelessMigrations: {{=sprig.dig('documentBackfillConfig', 'enableSourcelessMigrations', false, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillUseRecoverySource: {{=sprig.dig('documentBackfillConfig', 'useRecoverySource', false, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillDocTransformerConfigBase64: \"{{=sprig.dig('documentBackfillConfig', 'docTransformerConfigBase64', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillDocTransformerConfig: {{=toJSON(sprig.dig('documentBackfillConfig', 'docTransformerConfig', '', fromJSON(inputs.parameters.snapshotMigrationConfig)))}}\n  documentBackfillDocTransformerConfigFile: \"{{=sprig.dig('documentBackfillConfig', 'docTransformerConfigFile', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillTransformsImage: {{=toJSON(sprig.dig('documentBackfillConfig', 'transformsImage', '', fromJSON(inputs.parameters.snapshotMigrationConfig)))}}\n  documentBackfillTransformsImagePullPolicy: \"{{=sprig.dig('documentBackfillConfig', 'transformsImagePullPolicy', 'IfNotPresent', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillTransformsConfigMap: {{=toJSON(sprig.dig('documentBackfillConfig', 'transformsConfigMap', '', fromJSON(inputs.parameters.snapshotMigrationConfig)))}}\n  documentBackfillDocumentsPerBulkRequest: {{=sprig.dig('documentBackfillConfig', 'documentsPerBulkRequest', 2147483647, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillDocumentsSizePerBulkRequest: {{=sprig.dig('documentBackfillConfig', 'documentsSizePerBulkRequest', 10485760, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillInitialLeaseDuration: \"{{=sprig.dig('documentBackfillConfig', 'initialLeaseDuration', 'PT1H', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillMaxConnections: {{=sprig.dig('documentBackfillConfig', 'maxConnections', 10, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillMaxShardSizeBytes: {{=sprig.dig('documentBackfillConfig', 'maxShardSizeBytes', 85899345920, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillOtelCollectorEndpoint: \"{{=sprig.dig('documentBackfillConfig', 'otelCollectorEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillServerGeneratedIds: \"{{=sprig.dig('documentBackfillConfig', 'serverGeneratedIds', 'AUTO', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillAllowedDocExceptionTypes: {{=sprig.dig('documentBackfillConfig', 'allowedDocExceptionTypes', [], fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillCoordinatorRetryMaxRetries: {{=sprig.dig('documentBackfillConfig', 'coordinatorRetryMaxRetries', 7, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillCoordinatorRetryInitialDelayMs: {{=sprig.dig('documentBackfillConfig', 'coordinatorRetryInitialDelayMs', 1000, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillCoordinatorRetryMaxDelayMs: {{=sprig.dig('documentBackfillConfig', 'coordinatorRetryMaxDelayMs', 64000, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{workflow.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/source: \"{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceLabel']}}\"\n    migrations.opensearch.org/target: \"{{=sprig.dig('targetConfig', 'label', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n    migrations.opensearch.org/snapshot: \"{{=sprig.dig('snapshotConfig', 'label', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n    migrations.opensearch.org/from-snapshot-migration: \"{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['migrationLabel']}}\"\nspec:\n  migrationLabel: \"{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['migrationLabel']}}\"\n  sourceVersion: \"{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceVersion']}}\"\n  sourceLabel: \"{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceLabel']}}\"\n  targetLabel: \"{{=sprig.dig('targetConfig', 'label', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  snapshotLabel: \"{{=sprig.dig('snapshotConfig', 'label', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationJvmArgs: \"{{=sprig.dig('metadataMigrationConfig', 'jvmArgs', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationLoggingConfigurationOverrideConfigMap: \"{{=sprig.dig('metadataMigrationConfig', 'loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationComponentTemplateAllowlist: {{=sprig.dig('metadataMigrationConfig', 'componentTemplateAllowlist', [], fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  metadataMigrationIndexAllowlist: {{=sprig.dig('metadataMigrationConfig', 'indexAllowlist', [], fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  metadataMigrationIndexTemplateAllowlist: {{=sprig.dig('metadataMigrationConfig', 'indexTemplateAllowlist', [], fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  metadataMigrationAllowLooseVersionMatching: {{=sprig.dig('metadataMigrationConfig', 'allowLooseVersionMatching', true, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  metadataMigrationClusterAwarenessAttributes: {{=sprig.dig('metadataMigrationConfig', 'clusterAwarenessAttributes', 1, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  metadataMigrationEnableSourcelessMigrations: {{=sprig.dig('metadataMigrationConfig', 'enableSourcelessMigrations', false, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  metadataMigrationUseRecoverySource: {{=sprig.dig('metadataMigrationConfig', 'useRecoverySource', false, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  metadataMigrationMultiTypeBehavior: \"{{=sprig.dig('metadataMigrationConfig', 'multiTypeBehavior', 'NONE', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationOtelCollectorEndpoint: \"{{=sprig.dig('metadataMigrationConfig', 'otelCollectorEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationOutput: \"{{=sprig.dig('metadataMigrationConfig', 'output', 'HUMAN_READABLE', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationTransformerConfigBase64: \"{{=sprig.dig('metadataMigrationConfig', 'transformerConfigBase64', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationTransformerConfig: {{=toJSON(sprig.dig('metadataMigrationConfig', 'transformerConfig', '', fromJSON(inputs.parameters.snapshotMigrationConfig)))}}\n  metadataMigrationTransformerConfigFile: \"{{=sprig.dig('metadataMigrationConfig', 'transformerConfigFile', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationTransformsImage: {{=toJSON(sprig.dig('metadataMigrationConfig', 'transformsImage', '', fromJSON(inputs.parameters.snapshotMigrationConfig)))}}\n  metadataMigrationTransformsImagePullPolicy: \"{{=sprig.dig('metadataMigrationConfig', 'transformsImagePullPolicy', 'IfNotPresent', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  metadataMigrationTransformsConfigMap: {{=toJSON(sprig.dig('metadataMigrationConfig', 'transformsConfigMap', '', fromJSON(inputs.parameters.snapshotMigrationConfig)))}}\n  documentBackfillPodReplicas: {{=sprig.dig('documentBackfillConfig', 'podReplicas', 1, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillJvmArgs: \"{{=sprig.dig('documentBackfillConfig', 'jvmArgs', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillLoggingConfigurationOverrideConfigMap: \"{{=sprig.dig('documentBackfillConfig', 'loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillUseTargetClusterForWorkCoordination: {{=sprig.dig('documentBackfillConfig', 'useTargetClusterForWorkCoordination', false, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillResources: {{=sprig.dig('documentBackfillConfig', 'resources', sprig.dict(), fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillIndexAllowlist: {{=sprig.dig('documentBackfillConfig', 'indexAllowlist', [], fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillAllowLooseVersionMatching: {{=sprig.dig('documentBackfillConfig', 'allowLooseVersionMatching', true, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillEnableSourcelessMigrations: {{=sprig.dig('documentBackfillConfig', 'enableSourcelessMigrations', false, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillUseRecoverySource: {{=sprig.dig('documentBackfillConfig', 'useRecoverySource', false, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillDocTransformerConfigBase64: \"{{=sprig.dig('documentBackfillConfig', 'docTransformerConfigBase64', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillDocTransformerConfig: {{=toJSON(sprig.dig('documentBackfillConfig', 'docTransformerConfig', '', fromJSON(inputs.parameters.snapshotMigrationConfig)))}}\n  documentBackfillDocTransformerConfigFile: \"{{=sprig.dig('documentBackfillConfig', 'docTransformerConfigFile', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillTransformsImage: {{=toJSON(sprig.dig('documentBackfillConfig', 'transformsImage', '', fromJSON(inputs.parameters.snapshotMigrationConfig)))}}\n  documentBackfillTransformsImagePullPolicy: \"{{=sprig.dig('documentBackfillConfig', 'transformsImagePullPolicy', 'IfNotPresent', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillTransformsConfigMap: {{=toJSON(sprig.dig('documentBackfillConfig', 'transformsConfigMap', '', fromJSON(inputs.parameters.snapshotMigrationConfig)))}}\n  documentBackfillDocumentsPerBulkRequest: {{=sprig.dig('documentBackfillConfig', 'documentsPerBulkRequest', 2147483647, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillDocumentsSizePerBulkRequest: {{=sprig.dig('documentBackfillConfig', 'documentsSizePerBulkRequest', 10485760, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillInitialLeaseDuration: \"{{=sprig.dig('documentBackfillConfig', 'initialLeaseDuration', 'PT1H', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillMaxConnections: {{=sprig.dig('documentBackfillConfig', 'maxConnections', 10, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillMaxShardSizeBytes: {{=sprig.dig('documentBackfillConfig', 'maxShardSizeBytes', 85899345920, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillOtelCollectorEndpoint: \"{{=sprig.dig('documentBackfillConfig', 'otelCollectorEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillServerGeneratedIds: \"{{=sprig.dig('documentBackfillConfig', 'serverGeneratedIds', 'AUTO', fromJSON(inputs.parameters.snapshotMigrationConfig))}}\"\n  documentBackfillAllowedDocExceptionTypes: {{=sprig.dig('documentBackfillConfig', 'allowedDocExceptionTypes', [], fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillCoordinatorRetryMaxRetries: {{=sprig.dig('documentBackfillConfig', 'coordinatorRetryMaxRetries', 7, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillCoordinatorRetryInitialDelayMs: {{=sprig.dig('documentBackfillConfig', 'coordinatorRetryInitialDelayMs', 1000, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n  documentBackfillCoordinatorRetryMaxDelayMs: {{=sprig.dig('documentBackfillConfig', 'coordinatorRetryMaxDelayMs', 64000, fromJSON(inputs.parameters.snapshotMigrationConfig))}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -258,7 +266,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: TrafficReplay\nmetadata:\n  name: \"{{inputs.parameters.name}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    workflows.argoproj.io/run-uid: \"{{workflow.uid}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceLabel}}\"\n    migrations.opensearch.org/target: \"{{inputs.parameters.targetLabel}}\"\n    migrations.opensearch.org/task: trafficReplayer\nspec: {{=sprig.merge(sprig.dict(\"dependsOn\", fromJSON(inputs.parameters.dependsOn), \"jvmArgs\", sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.replayerOptions)), \"loggingConfigurationOverrideConfigMap\", sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.replayerOptions)), \"podReplicas\", sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.replayerOptions)), \"resources\", fromJSON(inputs.parameters.replayerOptions)['resources'], \"transformsImage\", sprig.dig('transformsImage', '', fromJSON(inputs.parameters.replayerOptions)), \"transformsImagePullPolicy\", sprig.dig('transformsImagePullPolicy', 'IfNotPresent', fromJSON(inputs.parameters.replayerOptions)), \"transformsConfigMap\", sprig.dig('transformsConfigMap', '', fromJSON(inputs.parameters.replayerOptions))), sprig.omit(fromJSON(inputs.parameters.replayerOptions), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'useLocalStack', 'resources', 'transformsImage', 'transformsImagePullPolicy', 'transformsConfigMap'))}}\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: TrafficReplay\nmetadata:\n  name: \"{{inputs.parameters.name}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{workflow.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceLabel}}\"\n    migrations.opensearch.org/target: \"{{inputs.parameters.targetLabel}}\"\n    migrations.opensearch.org/task: trafficReplayer\nspec: {{=sprig.merge(sprig.dict(\"dependsOn\", fromJSON(inputs.parameters.dependsOn), \"jvmArgs\", sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.replayerOptions)), \"loggingConfigurationOverrideConfigMap\", sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.replayerOptions)), \"podReplicas\", sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.replayerOptions)), \"resources\", fromJSON(inputs.parameters.replayerOptions)['resources'], \"transformsImage\", sprig.dig('transformsImage', '', fromJSON(inputs.parameters.replayerOptions)), \"transformsImagePullPolicy\", sprig.dig('transformsImagePullPolicy', 'IfNotPresent', fromJSON(inputs.parameters.replayerOptions)), \"transformsConfigMap\", sprig.dig('transformsConfigMap', '', fromJSON(inputs.parameters.replayerOptions))), sprig.omit(fromJSON(inputs.parameters.replayerOptions), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'podReplicas', 'useLocalStack', 'resources', 'transformsImage', 'transformsImagePullPolicy', 'transformsConfigMap'))}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -316,7 +324,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: \"{{inputs.parameters.resourceApiVersion}}\"\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n  annotations:\n    migrations.opensearch.org/approved-by-run: \"{{workflow.uid}}\"\n",
+          "manifest": "apiVersion: \"{{inputs.parameters.resourceApiVersion}}\"\nkind: \"{{inputs.parameters.resourceKind}}\"\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n  annotations:\n    migrations.opensearch.org/approved-during-run: \"{{workflow.parameters.migrationRunNumber}}\"\n",
           "action": "patch",
           "flags": [
             "--type",
@@ -371,11 +379,218 @@
         }
       },
       {
+        "name": "patchkafkaclusterpending",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: KafkaCluster\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchcapturedtrafficpending",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchcaptureproxypending",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CaptureProxy\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchdatasnapshotpending",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: DataSnapshot\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchsnapshotmigrationpending",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "patchtrafficreplaypending",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "phase"
+            }
+          ]
+        },
+        "resource": {
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: TrafficReplay\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
+          "action": "patch",
+          "flags": [
+            "--type",
+            "merge",
+            "--subresource=status"
+          ]
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "OnError",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
         "name": "reconcilekafkaclusterresource",
         "inputs": {
           "parameters": [
             {
               "name": "kafkaClusterConfig"
+            },
+            {
+              "name": "configChecksum"
             },
             {
               "name": "retryGateName"
@@ -402,6 +617,25 @@
               "continueOn": {
                 "failed": true
               }
+            }
+          ],
+          [
+            {
+              "template": "patchkafkaclusterpending",
+              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{=jsonpath(inputs.parameters.kafkaClusterConfig, '$.name')}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "markPending"
             }
           ],
           [
@@ -472,6 +706,10 @@
                     "value": "{{inputs.parameters.kafkaClusterConfig}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{inputs.parameters.retryGateName}}"
                   },
@@ -522,6 +760,9 @@
               "name": "sourceLabel"
             },
             {
+              "name": "configChecksum"
+            },
+            {
               "name": "retryGateName"
             },
             {
@@ -570,6 +811,25 @@
               "continueOn": {
                 "failed": true
               }
+            }
+          ],
+          [
+            {
+              "template": "patchcapturedtrafficpending",
+              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.topicCrName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "markPending"
             }
           ],
           [
@@ -664,6 +924,10 @@
                     "value": "{{inputs.parameters.topicConfig}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{inputs.parameters.retryGateName}}"
                   },
@@ -702,6 +966,9 @@
               "name": "topicCrName"
             },
             {
+              "name": "configChecksum"
+            },
+            {
               "name": "retryGateName"
             },
             {
@@ -734,6 +1001,25 @@
               "continueOn": {
                 "failed": true
               }
+            }
+          ],
+          [
+            {
+              "template": "patchcaptureproxypending",
+              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "markPending"
             }
           ],
           [
@@ -812,6 +1098,10 @@
                     "value": "{{inputs.parameters.topicCrName}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{inputs.parameters.retryGateName}}"
                   },
@@ -850,6 +1140,9 @@
               "name": "sourceLabel"
             },
             {
+              "name": "configChecksum"
+            },
+            {
               "name": "retryGroupName_view",
               "value": "Apply"
             }
@@ -880,6 +1173,25 @@
                 "failed": true
               }
             }
+          ],
+          [
+            {
+              "template": "patchdatasnapshotpending",
+              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "markPending"
+            }
           ]
         ],
         "outputs": {
@@ -902,6 +1214,9 @@
             },
             {
               "name": "resourceName"
+            },
+            {
+              "name": "configChecksum"
             },
             {
               "name": "retryGateName"
@@ -932,6 +1247,25 @@
               "continueOn": {
                 "failed": true
               }
+            }
+          ],
+          [
+            {
+              "template": "patchsnapshotmigrationpending",
+              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "markPending"
             }
           ],
           [
@@ -1006,6 +1340,10 @@
                     "value": "{{inputs.parameters.resourceName}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{inputs.parameters.retryGateName}}"
                   },
@@ -1056,6 +1394,9 @@
               "name": "targetLabel"
             },
             {
+              "name": "configChecksum"
+            },
+            {
               "name": "retryGateName"
             },
             {
@@ -1096,6 +1437,25 @@
               "continueOn": {
                 "failed": true
               }
+            }
+          ],
+          [
+            {
+              "template": "patchtrafficreplaypending",
+              "when": "{{=steps.tryApply.status == 'Succeeded' && !(steps.tryApply.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.name}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Pending"
+                  }
+                ]
+              },
+              "name": "markPending"
             }
           ],
           [
@@ -1182,6 +1542,10 @@
                     "value": "{{inputs.parameters.targetLabel}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
                     "name": "retryGateName",
                     "value": "{{inputs.parameters.retryGateName}}"
                   },
@@ -1223,40 +1587,6 @@
         },
         "resource": {
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: KafkaCluster\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n",
-          "action": "patch",
-          "flags": [
-            "--type",
-            "merge",
-            "--subresource=status"
-          ]
-        },
-        "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
-          "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
-          }
-        },
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "patchcapturedtrafficrunning",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName"
-            },
-            {
-              "name": "phase"
-            }
-          ]
-        },
-        "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
           "action": "patch",
           "flags": [
             "--type",
@@ -1334,40 +1664,6 @@
         },
         "resource": {
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
-          "action": "patch",
-          "flags": [
-            "--type",
-            "merge",
-            "--subresource=status"
-          ]
-        },
-        "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
-          "backoff": {
-            "duration": "10",
-            "factor": "2",
-            "cap": "60"
-          }
-        },
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "patchcaptureproxyrunning",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName"
-            },
-            {
-              "name": "phase"
-            }
-          ]
-        },
-        "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CaptureProxy\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n",
           "action": "patch",
           "flags": [
             "--type",
@@ -1570,7 +1866,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  outputs:\n    metadataEvaluate:\n      artifactName: \"{{inputs.parameters.artifactName}}\"\n      s3Key: \"{{inputs.parameters.s3Key}}\"\n      resourceUid: \"{{inputs.parameters.resourceUid}}\"\n      workflowName: \"{{workflow.name}}\"\n      workflowUid: \"{{workflow.uid}}\"\n      workflowCreationTimestamp: \"{{workflow.creationTimestamp}}\"\n      configChecksum: \"{{inputs.parameters.configChecksum}}\"\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  outputs:\n    metadataEvaluate:\n      artifactName: \"{{inputs.parameters.artifactName}}\"\n      s3Key: \"{{inputs.parameters.s3Key}}\"\n      resourceUid: \"{{inputs.parameters.resourceUid}}\"\n      workflowName: \"{{workflow.name}}\"\n      migrationRunNumber: \"{{workflow.parameters.migrationRunNumber}}\"\n      workflowCreationTimestamp: \"{{workflow.creationTimestamp}}\"\n      configChecksum: \"{{inputs.parameters.configChecksum}}\"\n",
           "action": "patch",
           "flags": [
             "--type",
@@ -1613,7 +1909,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  outputs:\n    metadataMigrate:\n      artifactName: \"{{inputs.parameters.artifactName}}\"\n      s3Key: \"{{inputs.parameters.s3Key}}\"\n      resourceUid: \"{{inputs.parameters.resourceUid}}\"\n      workflowName: \"{{workflow.name}}\"\n      workflowUid: \"{{workflow.uid}}\"\n      workflowCreationTimestamp: \"{{workflow.creationTimestamp}}\"\n      configChecksum: \"{{inputs.parameters.configChecksum}}\"\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: SnapshotMigration\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  outputs:\n    metadataMigrate:\n      artifactName: \"{{inputs.parameters.artifactName}}\"\n      s3Key: \"{{inputs.parameters.s3Key}}\"\n      resourceUid: \"{{inputs.parameters.resourceUid}}\"\n      workflowName: \"{{workflow.name}}\"\n      migrationRunNumber: \"{{workflow.parameters.migrationRunNumber}}\"\n      workflowCreationTimestamp: \"{{workflow.creationTimestamp}}\"\n      configChecksum: \"{{inputs.parameters.configChecksum}}\"\n",
           "action": "patch",
           "flags": [
             "--type",
