@@ -37,6 +37,24 @@ log_init() {
     fi
   fi
   : >>"$LOG_FILE"
+
+  # Write a session-separator header. With multiple invocations a single
+  # log file can grow to dozens of runs glued end-to-end; without a
+  # visual break, debugging "what happened on the last run" means
+  # tail-grepping for INFO/ERROR with timestamps. The banner makes
+  # `less +G migrate.log` and `grep -A` workflows tractable.
+  local ts; ts=$(date '+%Y-%m-%d %H:%M:%S %Z')
+  local cmd="${MIGRATE_INVOCATION:-${0:-migration-assistant}}"
+  local stage="${STAGE:-default}"
+  local pid="$$"
+  {
+    printf '\n'
+    printf '════════════════════════════════════════════════════════════════════\n'
+    printf '  migration-assistant session @ %s\n' "$ts"
+    printf '  cli=%s  stage=%s  pid=%s\n' "${CLI_VERSION:-?}" "$stage" "$pid"
+    printf '  cmd: %s\n' "$cmd"
+    printf '════════════════════════════════════════════════════════════════════\n'
+  } >>"$LOG_FILE"
 }
 
 # log_announce — tell the operator where the log is. Called by the banner

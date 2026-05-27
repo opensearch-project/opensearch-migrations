@@ -460,18 +460,42 @@ helm_watch_installer_logs() {
   # for a Job is "<job-name>-<5-char-hash>", so we resolve by label.
   # Track time by clock so we don't have to do float arithmetic on
   # sub-second poll intervals.
-  local started_s pod="" now_s
+  local started_s pod="" now_s pending_pod=""
+  local pending_warn_at="${INSTALLER_LOG_PENDING_WARN_S:-30}"
+  local warned_pending=0
   started_s=$(date +%s)
   _helm_inst_log "watching for pod of Job/$pod_name in namespace $ns"
   while :; do
     _alive || exit 0
-    pod=$(kubectl get pods --namespace "$ns" \
+    # Look for any pod backing the Job, regardless of phase. This lets
+    # us spot the pod even when it's stuck in Pending / ImagePullBackOff
+    # so we can surface diagnostics instead of timing out silently.
+    local snapshot
+    snapshot=$(kubectl get pods --namespace "$ns" \
             --selector "job-name=$pod_name" \
             --no-headers \
             -o custom-columns=NAME:.metadata.name,PHASE:.status.phase \
-            2>/dev/null \
+            2>/dev/null) || snapshot=""
+
+    pod=$(printf '%s\n' "$snapshot" \
           | awk '$2=="Running" || $2=="Succeeded" || $2=="Failed" {print $1; exit}')
     [[ -n "$pod" ]] && break
+
+    # Pod exists but is Pending — surface why ONCE after a threshold,
+    # then keep waiting up to detect_timeout. The chart's pre-install
+    # Job often legitimately spends 30-60s in Pending while node-pool
+    # scaling happens, so we don't dump diagnostics immediately.
+    pending_pod=$(printf '%s\n' "$snapshot" \
+            | awk '$2=="Pending" {print $1; exit}')
+    now_s=$(date +%s)
+    if [[ -n "$pending_pod" ]] \
+        && (( warned_pending == 0 )) \
+        && (( now_s - started_s >= pending_warn_at )); then
+      _helm_inst_log "pod $pending_pod has been Pending for ${pending_warn_at}s; dumping diagnostics"
+      _helm_inst_dump_pending_pod "$pending_pod" "$ns"
+      warned_pending=1
+    fi
+
     sleep "$poll"
     now_s=$(date +%s)
     if (( now_s - started_s >= detect_timeout )); then
@@ -480,7 +504,12 @@ helm_watch_installer_logs() {
   done
 
   if [[ -z "$pod" ]]; then
-    _helm_inst_log "no $pod_name pod reached Running within ${detect_timeout}s; giving up"
+    if [[ -n "$pending_pod" ]]; then
+      _helm_inst_log "pod $pending_pod never left Pending within ${detect_timeout}s — final diagnostics:"
+      _helm_inst_dump_pending_pod "$pending_pod" "$ns"
+    else
+      _helm_inst_log "no $pod_name pod appeared within ${detect_timeout}s; giving up"
+    fi
     exit 0
   fi
 
@@ -566,6 +595,30 @@ _helm_inst_log() {
   local ts; ts=$(date '+%Y-%m-%dT%H:%M:%S%z')
   printf '[%s] STREAM[installer] %s\n' "$ts" "$msg" >>"$LOG_FILE"
   printf '%s  installer│%s %s\n' "$__UI_C_DIM" "$__UI_C_RESET" "$msg" >&2
+}
+
+# _helm_inst_dump_pending_pod <pod> <namespace>
+#
+# When a Job's Pod has been Pending past the warn threshold, surface
+# the actual reason. Two streams of evidence:
+#   * The pod's container statuses (waiting reason — ImagePullBackOff,
+#     CrashLoopBackOff, ErrImageNeverPull, …)
+#   * The pod's recent Events (e.g. "Failed to pull image …").
+# Both go through log_stream so the operator sees them live AND they
+# land in the main log for post-mortem.
+_helm_inst_dump_pending_pod() {
+  local pod="$1" ns="$2"
+  _helm_inst_log "container statuses for $pod:"
+  log_stream "diag-pod-status" \
+    kubectl get pod "$pod" --namespace "$ns" \
+      -o 'custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[*].image,STATUS:.status.containerStatuses[*].state,REASON:.status.containerStatuses[*].state.waiting.reason,MESSAGE:.status.containerStatuses[*].state.waiting.message' \
+      || true
+  _helm_inst_log "recent events for $pod:"
+  log_stream "diag-pod-events" \
+    kubectl get events --namespace "$ns" \
+      --field-selector "involvedObject.name=$pod" \
+      --sort-by=.lastTimestamp \
+      || true
 }
 
 # helm_watch_pods <namespace> [<parent_pid>]

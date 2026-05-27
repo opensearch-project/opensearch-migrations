@@ -91,13 +91,22 @@ cmd_resume() {
 
   state_load
 
+  # `resuming` toggles whether we ask the operator anything. Set when:
+  #   * `last_step` is non-empty AND
+  #   * the operator accepts the "Resume from this point?" prompt
+  # In that case we suppress mode-switch + wizard prompts; everything
+  # downstream uses the values already saved in state.
+  local resuming=0
   local prev_step; prev_step=$(state_resumable_step)
   if [[ -n "$prev_step" ]]; then
     ui_info "previous run progressed to: $prev_step"
-    if ! ui_confirm "Resume from this point?" "Y"; then
+    if ui_confirm "Resume from this point?" "Y"; then
+      resuming=1
+    else
       ui_warn "starting over (state preserved, but flow restarts from discovery)"
       state_set last_step ""
       state_save
+      resuming=0
     fi
   fi
 
@@ -111,6 +120,8 @@ cmd_resume() {
     mode=$(_select_mode "$mode")
     state_set MODE "$mode"
     state_save
+  elif [[ $resuming -eq 1 ]]; then
+    ui_dim "  resuming with mode=$mode (use --switch to change)"
   else
     if ui_confirm "Mode: $mode. Switch?" "N"; then
       mode=$(_select_mode "$mode")
@@ -118,6 +129,7 @@ cmd_resume() {
       state_save
     fi
   fi
+  export MIGRATE_RESUMING="$resuming"
 
   case "$mode" in
     Manual) manual_path ;;

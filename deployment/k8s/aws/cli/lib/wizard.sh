@@ -21,6 +21,22 @@ __MIGRATE_WIZARD_LOADED=1
 wizard_collect() {
   ui_step "Configure deployment"
 
+  # Resume fast-path: if the operator accepted the resume prompt and
+  # all the wizard fields are already in state, skip every prompt.
+  # Saves the operator from re-tapping Enter through identical defaults.
+  # Operator can re-prompt the wizard with `--switch` (which clears MODE)
+  # OR by manually deleting state.env.
+  if [[ "${MIGRATE_RESUMING:-0}" -eq 1 ]] \
+      && [[ -n "$(state_get STAGE_NAME)" ]] \
+      && [[ -n "$(state_get MIRROR_IMAGES)" ]] \
+      && [[ -n "$(state_get MA_VERSION)" ]]; then
+    ui_dim "  resuming — using saved deploy config:"
+    ui_dim "    stage_name=$(state_get STAGE_NAME)"
+    ui_dim "    mirror_images=$(state_get MIRROR_IMAGES)"
+    ui_dim "    ma_version=$(state_get MA_VERSION)"
+    return 0
+  fi
+
   local stage_name mirror ma_ver
 
   # Default to "ma" — the kubernetes namespace the chart expects.
