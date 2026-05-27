@@ -132,3 +132,35 @@ _diag() {
     return 1
   fi
 }
+
+# Regression for: cmd_resume was state_save'ing BEFORE state_load,
+# wiping last_step from state.env every run. Result: the "Resume from
+# this point?" prompt never appeared and the wizard re-asked every
+# question even though state.env had everything pre-populated.
+@test "stale state with last_step shows resume prompt on rerun" {
+  mkdir -p "$STAGE_DIR"
+  cat >"$STAGE_DIR/state.env" <<EOF
+MODE="Manual"
+STAGE_NAME="ma"
+MIRROR_IMAGES="Y"
+MA_VERSION="3.2.1"
+last_step="wizard_done"
+EOF
+  printf '{
+    "MODE":"Manual","STAGE_NAME":"ma","MIRROR_IMAGES":"Y",
+    "MA_VERSION":"3.2.1","last_step":"wizard_done"
+  }' >"$STAGE_DIR/state.json"
+
+  # Reply "n" to the resume prompt so the run terminates quickly without
+  # diving into discovery. We just need to see the prompt.
+  run bash -c "printf 'n\n' | timeout 8 '$CLI_BIN' resume 2>&1"
+
+  if [[ "$output" != *"previous run progressed to: wizard_done"* ]]; then
+    _diag "resume: did not show 'previous run progressed to' prompt — state was wiped"
+    return 1
+  fi
+  if [[ "$output" != *"Resume from this point?"* ]]; then
+    _diag "resume: did not show resume confirmation prompt"
+    return 1
+  fi
+}

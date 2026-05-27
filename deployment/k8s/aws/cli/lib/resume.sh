@@ -15,11 +15,46 @@ __MIGRATE_RESUME_LOADED=1
 cmd_resume() {
   local force_switch=0 force_mode=""
   local args=()
+
+  # First pass: parse only --stage, so we know which stage's state to
+  # load. Everything else is parsed in the second pass below, AFTER
+  # state_load — otherwise the flag-driven state_set calls would write
+  # against an empty in-memory state, blowing away last_step etc.
+  local i
+  for ((i = 1; i <= $#; i++)); do
+    case "${!i}" in
+      --stage)
+        local next=$((i + 1))
+        STAGE="${!next}"
+        STAGE_DIR="$MIGRATE_HOME/$STAGE"
+        ;;
+      --stage=*)
+        STAGE="${!i#--stage=}"
+        STAGE_DIR="$MIGRATE_HOME/$STAGE"
+        ;;
+    esac
+  done
+
+  log_init
+  ui_banner "OpenSearch Migration Assistant"
+  ui_dim "  cli=$CLI_VERSION  stage=$STAGE  workdir=$STAGE_DIR"
+  log_announce
+  on_exit_register log_announce_exit
+  version_check
+
+  # Load existing state BEFORE the second flag pass so the flag-driven
+  # `state_set` calls merge into the loaded values rather than start
+  # fresh. Without this, last_step="wizard_done" (and all other
+  # previously-saved keys) gets clobbered to empty.
+  state_load
+
+  # Second pass: now safe to state_set, since the in-memory state
+  # already contains everything from disk.
   while [[ $# -gt 0 ]]; do
     case "$1" in
       # Native flags
-      --stage)        STAGE="$2"; STAGE_DIR="$MIGRATE_HOME/$STAGE"; shift 2 ;;
-      --stage=*)      STAGE="${1#--stage=}"; STAGE_DIR="$MIGRATE_HOME/$STAGE"; shift ;;
+      --stage)        shift 2 ;;
+      --stage=*)      shift ;;
       --switch)       force_switch=1; shift ;;
       --verbose|-v)   export MIGRATE_VERBOSE=1; shift ;;
       --reset-cache)  artifacts_reset_cache; shift ;;
@@ -78,18 +113,8 @@ cmd_resume() {
     esac
   done
 
-  # Persist any flags that hit state_set. Saving at this point also
-  # protects against flags being lost if state_load runs later.
-  state_save 2>/dev/null || true
-
-  log_init
-  ui_banner "OpenSearch Migration Assistant"
-  ui_dim "  cli=$CLI_VERSION  stage=$STAGE  workdir=$STAGE_DIR"
-  log_announce
-  on_exit_register log_announce_exit
-  version_check
-
-  state_load
+  # Persist the merged state (loaded values + any flag-driven overrides).
+  state_save
 
   # `resuming` toggles whether we ask the operator anything. Set when:
   #   * `last_step` is non-empty AND
