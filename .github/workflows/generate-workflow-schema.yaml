@@ -7,6 +7,9 @@ on:
       - main
     paths:
       - 'deployment/k8s/**'
+      - '!deployment/k8s/aws/cli/**'
+      - '!deployment/k8s/aws/aws-bootstrap.sh'
+      - '!deployment/k8s/aws/assemble-bootstrap.sh'
       - 'packages/schemas/**'
       - 'packages/config-processor/**'
       - 'migrationConsole/**'
@@ -15,6 +18,9 @@ on:
   pull_request:
     paths:
       - 'deployment/k8s/**'
+      - '!deployment/k8s/aws/cli/**'
+      - '!deployment/k8s/aws/aws-bootstrap.sh'
+      - '!deployment/k8s/aws/assemble-bootstrap.sh'
       - 'packages/schemas/**'
       - 'packages/config-processor/**'
       - 'migrationConsole/**'
