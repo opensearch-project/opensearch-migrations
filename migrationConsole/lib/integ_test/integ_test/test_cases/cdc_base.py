@@ -213,8 +213,16 @@ def _dump_service_diagnostics(namespace: str, service_name: str) -> None:
             logger.warning("$ %s failed: %s", " ".join(cmd), e)
 
 
-def wait_for_replayer_consuming(namespace: str, timeout_seconds: int = 120, interval: int = 5):
+def wait_for_replayer_consuming(
+    namespace: str,
+    timeout_seconds: int = 120,
+    interval: int = 5,
+    pod_ready_timeout_seconds: int = 1200,
+):
     """Wait until the replayer has joined the Kafka consumer group."""
+    logger.info("Waiting for replayer pod readiness before checking Kafka consumer group...")
+    wait_for_pod_ready(namespace, REPLAYER_LABEL_SELECTOR, timeout_seconds=pod_ready_timeout_seconds)
+
     start = time.time()
     while time.time() - start < timeout_seconds:
         try:

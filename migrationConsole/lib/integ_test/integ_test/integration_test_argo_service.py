@@ -213,7 +213,7 @@ class IntegrationTestArgoService:
         """Collect workflow, migration CR, workload, event, and pod log state before test cleanup."""
         sections: List[str] = [f"===== Namespace {self.namespace} Diagnostics =====\n"]
 
-        core_resources = "pods,services,deployments,statefulsets,jobs,cronjobs,pvc,configmaps,secrets,workflows"
+        core_resources = "pods,services,deployments,statefulsets,pvc,configmaps,secrets,workflows"
         migration_resources = (
             "kafkaclusters,capturedtraffics,captureproxies,datasnapshots,"
             "snapshotmigrations,trafficreplays,approvalgates,migrationruns"
