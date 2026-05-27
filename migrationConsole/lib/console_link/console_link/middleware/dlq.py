@@ -110,10 +110,10 @@ def load_config(session_override: Optional[str] = None) -> DlqConfig:
     # inspection to a non-default bucket (e.g., investigating a historical
     # run that wrote elsewhere).
     bucket = (
-        os.environ.get("RFS_DLQ_S3_BUCKET")
-        or _read_configmap("bucket")
-        or os.environ.get("MIGRATIONS_DEFAULT_S3_BUCKET")
-        or os.environ.get("BUCKET_NAME")
+        os.environ.get("RFS_DLQ_S3_BUCKET") or
+        _read_configmap("bucket") or
+        os.environ.get("MIGRATIONS_DEFAULT_S3_BUCKET") or
+        os.environ.get("BUCKET_NAME")
     )
     if not bucket:
         raise DlqNotConfigured(
@@ -123,9 +123,9 @@ def load_config(session_override: Optional[str] = None) -> DlqConfig:
         )
     # Prefix resolution: env override → ConfigMap → safe default.
     prefix = (
-        os.environ.get("RFS_DLQ_S3_PREFIX")
-        or _read_configmap("prefix")
-        or "rfs-dlq/"
+        os.environ.get("RFS_DLQ_S3_PREFIX") or
+        _read_configmap("prefix") or
+        "rfs-dlq/"
     )
     if not prefix.endswith("/"):
         prefix = prefix + "/"
@@ -133,9 +133,9 @@ def load_config(session_override: Optional[str] = None) -> DlqConfig:
     # The ConfigMap holds the *current* session id (Argo workflow UID) that
     # the bulk-load workflow most recently patched in.
     session = (
-        session_override
-        or os.environ.get("RFS_DLQ_SESSION_ID")
-        or _read_configmap("session_id")
+        session_override or
+        os.environ.get("RFS_DLQ_SESSION_ID") or
+        _read_configmap("session_id")
     )
     if not session:
         raise DlqNotConfigured(
