@@ -26,6 +26,19 @@ export const K8S_USER_APPROVAL_WAIT_RETRY_STRATEGY = {
 };
 
 export const K8S_INFRA_READY_TIMEOUT_SECONDS = 20 * 60;
+export const KAFKA_CLUSTER_READY_TIMEOUT_SECONDS = 45 * 60;
+
+export const KAFKA_DIAGNOSTIC_RETRY_STRATEGY = {
+    limit: "3",
+    retryPolicy: "Always",
+    backoff: {duration: "10", factor: "2", cap: "60"}
+};
+
+export const KAFKA_READY_WAIT_POD_RETRY_STRATEGY = {
+    limit: "3",
+    retryPolicy: "OnError",
+    backoff: {duration: "10", factor: "2", cap: "60"}
+};
 
 // Leaf infrastructure readiness should be bounded: Kafka, topics, certs,
 // secrets, and deployments should either become ready or expose a real rollout

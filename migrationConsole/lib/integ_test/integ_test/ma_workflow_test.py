@@ -54,7 +54,7 @@ def _fail_if_migration_resources_exist(namespace: str = "ma"):
 
 
 @pytest.fixture(autouse=True)
-def setup_and_teardown(request, keep_workflows, test_case: MATestBase):
+def setup_and_teardown(request, keep_workflows, dump_all_workflow_output_artifacts, test_case: MATestBase):
     #-----Setup-----
     logger.info("Performing setup...")
     _fail_if_migration_resources_exist()
@@ -75,8 +75,15 @@ def setup_and_teardown(request, keep_workflows, test_case: MATestBase):
         if request.node.rep_call and request.node.rep_call.failed:
             logger.info(f"Test failed - printing workflow details for {test_case.workflow_name}")
             test_case.argo_service.print_workflow_details(workflow_name=test_case.workflow_name)
-            test_case.argo_service.print_namespace_diagnostics(workflow_name=test_case.workflow_name)
-            test_case.argo_service.save_namespace_diagnostics("./logs", workflow_name=test_case.workflow_name)
+            test_case.argo_service.print_namespace_diagnostics(
+                workflow_name=test_case.workflow_name,
+                include_all_workflow_output_artifacts=dump_all_workflow_output_artifacts,
+            )
+            test_case.argo_service.save_namespace_diagnostics(
+                "./logs",
+                workflow_name=test_case.workflow_name,
+                include_all_workflow_output_artifacts=dump_all_workflow_output_artifacts,
+            )
         if not keep_workflows:
             test_case.argo_service.delete_workflow(workflow_name=test_case.workflow_name)
     # Reset all migration CRDs before test-specific cleanup

@@ -33,6 +33,310 @@
     },
     "templates": [
       {
+        "name": "diagnosekafkaclusternotready",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "container": {
+          "env": [
+            {
+              "name": "NAMESPACE",
+              "value": "{{workflow.namespace}}"
+            },
+            {
+              "name": "KAFKA_CLUSTER_NAME",
+              "value": "{{inputs.parameters.resourceName}}"
+            },
+            {
+              "name": "TIMEOUT_SECONDS",
+              "value": "2700"
+            },
+            {
+              "name": "DIAGNOSTIC_LOG_PATH",
+              "value": "/tmp/kafka-readiness-diagnostics.log"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "command": [
+            "/bin/bash",
+            "-lc"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            }
+          },
+          "args": [
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/diagnoseKafkaClusterNotReady.sh\""
+          ]
+        },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "activeDeadlineSeconds": 300,
+        "retryStrategy": {
+          "limit": "3",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": [],
+          "artifacts": [
+            {
+              "name": "kafkaReadinessDiagnostics",
+              "path": "/tmp/kafka-readiness-diagnostics.log",
+              "archive": {
+                "none": {}
+              },
+              "s3": {
+                "key": "{{='diagnostics/'+workflow.uid+'/kafkaReadinessDiagnostics'}}"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "name": "failkafkaclusterreadywait",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "container": {
+          "env": [
+            {
+              "name": "KAFKA_CLUSTER_NAME",
+              "value": "{{inputs.parameters.resourceName}}"
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "command": [
+            "/bin/bash",
+            "-lc"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            }
+          },
+          "args": [
+            "\nset -euo pipefail\necho \"Kafka/$KAFKA_CLUSTER_NAME did not become Ready; diagnostics were collected in the kafkaReadinessDiagnostics artifact and diagnostic pod logs\" >&2\nexit 1\n"
+          ]
+        },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "waitforkafkaclusterready",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "waitforkafkaclusterreadyresource",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  }
+                ]
+              },
+              "name": "waitForReady",
+              "continueOn": {
+                "failed": true,
+                "error": true
+              }
+            }
+          ],
+          [
+            {
+              "template": "diagnosekafkaclusternotready",
+              "when": "{{=steps.waitForReady.status == 'Failed' || steps.waitForReady.status == 'Error'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  }
+                ]
+              },
+              "name": "diagnoseFailure"
+            }
+          ],
+          [
+            {
+              "template": "failkafkaclusterreadywait",
+              "when": "{{=steps.waitForReady.status == 'Failed' || steps.waitForReady.status == 'Error'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  }
+                ]
+              },
+              "name": "failAfterDiagnostics"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "waitforkafkacluster",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "resourceName"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "steps": [
+          [
+            {
+              "templateRef": {
+                "template": "waitforkafkaclustercreated",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  }
+                ]
+              },
+              "name": "waitForCreation"
+            }
+          ],
+          [
+            {
+              "template": "waitforkafkaclusterready",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.resourceName}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  }
+                ]
+              },
+              "name": "waitForReady"
+            }
+          ]
+        ],
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
         "name": "deploykafkanodepool",
         "inputs": {
           "parameters": [
@@ -158,6 +462,12 @@
             },
             {
               "name": "ownerUid"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
             }
           ]
         },
@@ -218,12 +528,17 @@
           ],
           [
             {
-              "templateRef": {
-                "template": "waitforkafkaclusterready",
-                "name": "resource-management"
-              },
+              "template": "waitforkafkaclusterready",
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
                   {
                     "name": "resourceName",
                     "value": "{{inputs.parameters.clusterName}}"
@@ -337,6 +652,12 @@
             },
             {
               "name": "ownerUid"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
             }
           ]
         },
@@ -385,12 +706,20 @@
                     "value": "{{inputs.parameters.clusterConfig}}"
                   },
                   {
-                    "name": "migrationRunNumber",
-                    "value": "{{workflow.parameters.migrationRunNumber}}"
-                  },
-                  {
                     "name": "ownerUid",
                     "value": "{{inputs.parameters.ownerUid}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "migrationRunNumber",
+                    "value": "{{workflow.parameters.migrationRunNumber}}"
                   }
                 ]
               },

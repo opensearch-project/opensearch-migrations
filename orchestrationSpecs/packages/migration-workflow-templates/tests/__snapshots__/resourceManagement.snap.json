@@ -2032,22 +2032,68 @@
         }
       },
       {
-        "name": "waitforkafkaclusterready",
+        "name": "waitforkafkaclusterreadyresource",
         "inputs": {
           "parameters": [
             {
               "name": "resourceName"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
             }
           ]
         },
-        "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
-          "action": "get",
-          "successCondition": "status.listeners, status.conditions.0.type == Ready, status.conditions.0.status == True"
+        "container": {
+          "env": [
+            {
+              "name": "NAMESPACE",
+              "value": "{{workflow.namespace}}"
+            },
+            {
+              "name": "KAFKA_CLUSTER_NAME",
+              "value": "{{inputs.parameters.resourceName}}"
+            },
+            {
+              "name": "TIMEOUT_SECONDS",
+              "value": "2700"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "command": [
+            "/bin/bash",
+            "-lc"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            }
+          },
+          "args": [
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/waitForKafkaClusterReady.sh\""
+          ]
         },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "activeDeadlineSeconds": 2760,
         "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "Always",
+          "limit": "3",
+          "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
             "factor": "2",
@@ -2111,63 +2157,6 @@
             "cap": "30"
           }
         },
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "waitforkafkacluster",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "resourceName"
-            },
-            {
-              "name": "imageMigrationConsoleLocation"
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy"
-            }
-          ]
-        },
-        "steps": [
-          [
-            {
-              "template": "waitforkafkaclustercreated",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.resourceName}}"
-                  },
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  }
-                ]
-              },
-              "name": "waitForCreation"
-            }
-          ],
-          [
-            {
-              "template": "waitforkafkaclusterready",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.resourceName}}"
-                  }
-                ]
-              },
-              "name": "waitForReady"
-            }
-          ]
-        ],
         "outputs": {
           "parameters": []
         }

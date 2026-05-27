@@ -77,6 +77,8 @@ def pytest_addoption(parser):
     parser.addoption("--capture_proxy_service_type", action="store", default="LoadBalancer",
                      choices=("LoadBalancer", "ClusterIP"),
                      help="Capture proxy Kubernetes Service type for CDC workflow tests")
+    parser.addoption("--dump_all_workflow_output_artifacts", action="store_true", default=False,
+                     help="On failure, additionally read every output artifact referenced by current Argo workflow nodes")
 
 
 def pytest_configure(config):
@@ -229,3 +231,8 @@ def unique_id(pytestconfig):
 @pytest.fixture
 def keep_workflows(pytestconfig):
     return pytestconfig.getoption("keep_workflows")
+
+
+@pytest.fixture
+def dump_all_workflow_output_artifacts(pytestconfig):
+    return pytestconfig.getoption("dump_all_workflow_output_artifacts")

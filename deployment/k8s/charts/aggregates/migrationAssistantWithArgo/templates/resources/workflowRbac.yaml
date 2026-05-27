@@ -31,7 +31,7 @@ rules:
   # Add permissions for pods, pod logs, services, and service endpoints
   # (needed for Argo workflow execution and readiness checks).
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "services", "endpoints", "secrets", "configmaps", "serviceaccounts"]
+    resources: ["pods", "pods/log", "services", "endpoints", "events", "persistentvolumeclaims", "secrets", "configmaps", "serviceaccounts"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
   - apiGroups: ["discovery.k8s.io"]
     resources: ["endpointslices"]
@@ -63,6 +63,11 @@ rules:
   - apiGroups: ["kafka.strimzi.io"]
     resources: ["kafkas", "kafkatopics", "kafkanodepools", "kafkausers"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # Strimzi diagnostic resources used when Kafka setup does not become Ready.
+  - apiGroups: ["core.strimzi.io"]
+    resources: ["strimzipodsets"]
+    verbs: ["get", "list", "watch"]
 
   # cert-manager Certificate resources (namespace-scoped)
   - apiGroups: ["cert-manager.io"]

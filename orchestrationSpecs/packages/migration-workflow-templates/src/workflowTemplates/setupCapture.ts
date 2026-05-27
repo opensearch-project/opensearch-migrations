@@ -744,7 +744,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     retryGroupName_view: expr.concat(expr.literal("CapturedTraffic: "), b.inputs.topicCrName),
                 })
             )
-            .addStep("waitForKafkaCluster", ResourceManagement, "waitForKafkaCluster", c =>
+            .addStep("waitForKafkaCluster", SetupKafka, "waitForKafkaCluster", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.kafkaClusterName,

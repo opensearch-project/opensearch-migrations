@@ -25,6 +25,9 @@ REPLAYER_LABEL_SELECTOR = "app=replayer"
 PROXY_LABEL_SELECTOR = "migrations/proxy=capture-proxy"
 PROXY_ENDPOINT = "https://capture-proxy:9201"
 CDC_SOURCE_TARGET_COMBINATIONS = CDC_MIGRATION_COMBINATIONS
+PROXY_READY_TIMEOUT_SECONDS = 3600
+REPLAYER_POD_READY_BUFFER_SECONDS = 20 * 60
+DEFAULT_REPLAYER_POD_READY_TIMEOUT_SECONDS = PROXY_READY_TIMEOUT_SECONDS + REPLAYER_POD_READY_BUFFER_SECONDS
 
 
 # --- Shared helpers ---
@@ -50,7 +53,8 @@ def is_pod_ready(pod) -> bool:
 _POD_READY_HEARTBEAT_SECONDS = 30
 
 
-def wait_for_pod_ready(namespace: str, label_selector: str, timeout_seconds: int = 1200):
+def wait_for_pod_ready(namespace: str, label_selector: str, timeout_seconds: int = 1200,
+                       dependency_error_check=None):
     """Wait until a pod matching the label selector is Running and Ready.
 
     Heartbeats once per `_POD_READY_HEARTBEAT_SECONDS` so a stuck wait surfaces
@@ -67,6 +71,8 @@ def wait_for_pod_ready(namespace: str, label_selector: str, timeout_seconds: int
 
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
+        if dependency_error_check:
+            dependency_error_check()
         pods = v1.list_namespaced_pod(namespace, label_selector=label_selector)
         for pod in pods.items:
             if is_pod_ready(pod):
@@ -106,6 +112,7 @@ def wait_for_proxy_ready(namespace: str, timeout_seconds: int = 1200):
         if phase == "Error":
             _dump_proxy_readiness_diagnostics(namespace)
             raise RuntimeError(f"captureproxy/{PROXY_RESOURCE_NAME} entered Error phase: {message}")
+        _raise_if_kafka_cluster_error(namespace)
 
         elapsed = int(time.monotonic() - (deadline - timeout_seconds))
         logger.info(
@@ -145,6 +152,43 @@ def _get_capture_proxy_readiness_status(namespace: str) -> tuple[str, str, str, 
         status.get("serviceEndpoint", ""),
         status.get("loadBalancerEndpoint", ""),
     )
+
+
+def _raise_if_cdc_dependency_error(namespace: str) -> None:
+    phase, message, _, _ = _get_capture_proxy_readiness_status(namespace)
+    if phase == "Error":
+        _dump_proxy_readiness_diagnostics(namespace)
+        raise RuntimeError(f"captureproxy/{PROXY_RESOURCE_NAME} entered Error phase: {message}")
+    _raise_if_kafka_cluster_error(namespace)
+
+
+def _raise_if_kafka_cluster_error(namespace: str) -> None:
+    errors = _get_kafka_cluster_errors(namespace)
+    if not errors:
+        return
+    _dump_kafka_readiness_diagnostics(namespace)
+    formatted = ", ".join(f"{name}: {message or '<none>'}" for name, message in errors)
+    raise RuntimeError(f"KafkaCluster dependency entered Error phase: {formatted}")
+
+
+def _get_kafka_cluster_errors(namespace: str) -> list[tuple[str, str]]:
+    custom = client.CustomObjectsApi()
+    try:
+        response = custom.list_namespaced_custom_object(
+            group=CRD_GROUP,
+            version=CRD_VERSION,
+            namespace=namespace,
+            plural="kafkaclusters",
+        )
+    except ApiException:
+        return []
+
+    errors = []
+    for item in response.get("items", []):
+        status = item.get("status", {})
+        if status.get("phase") == "Error":
+            errors.append((item.get("metadata", {}).get("name", "<unknown>"), status.get("message", "")))
+    return errors
 
 
 def _dump_proxy_readiness_diagnostics(namespace: str) -> None:
@@ -217,11 +261,21 @@ def wait_for_replayer_consuming(
     namespace: str,
     timeout_seconds: int = 120,
     interval: int = 5,
-    pod_ready_timeout_seconds: int = 1200,
+    pod_ready_timeout_seconds: int = DEFAULT_REPLAYER_POD_READY_TIMEOUT_SECONDS,
 ):
     """Wait until the replayer has joined the Kafka consumer group."""
     logger.info("Waiting for replayer pod readiness before checking Kafka consumer group...")
-    wait_for_pod_ready(namespace, REPLAYER_LABEL_SELECTOR, timeout_seconds=pod_ready_timeout_seconds)
+    try:
+        wait_for_pod_ready(
+            namespace,
+            REPLAYER_LABEL_SELECTOR,
+            timeout_seconds=pod_ready_timeout_seconds,
+            dependency_error_check=lambda: _raise_if_cdc_dependency_error(namespace),
+        )
+    except TimeoutError:
+        _dump_capture_proxy_diagnostics(namespace, PROXY_RESOURCE_NAME)
+        _dump_kafka_readiness_diagnostics(namespace)
+        raise
 
     start = time.time()
     while time.time() - start < timeout_seconds:
@@ -262,6 +316,26 @@ def log_replayer_diagnostics(namespace: str):
                 logger.info("%s stderr:\n%s", command, result.stderr.strip())
         except Exception as e:
             logger.info("Failed to collect replayer diagnostics for kubectl %s: %s", " ".join(args), e)
+
+
+def _dump_kafka_readiness_diagnostics(namespace: str) -> None:
+    cmds = (
+        ["kubectl", "get", "kafkaclusters.migrations.opensearch.org", "-n", namespace, "-o", "yaml"],
+        ["kubectl", "get", "kafkas.kafka.strimzi.io", "-n", namespace, "-o", "yaml"],
+        ["kubectl", "get", "kafkanodepools.kafka.strimzi.io", "-n", namespace, "-o", "yaml"],
+        ["kubectl", "get", "pods", "-n", namespace, "-l", "strimzi.io/cluster", "-o", "wide"],
+        ["kubectl", "describe", "pods", "-n", namespace, "-l", "strimzi.io/cluster"],
+        ["kubectl", "get", "events", "-n", namespace, "--sort-by=.lastTimestamp", "--field-selector=type!=Normal"],
+    )
+    for cmd in cmds:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.stdout.strip():
+                logger.warning("$ %s\n%s", " ".join(cmd), result.stdout.rstrip())
+            if result.stderr.strip():
+                logger.warning("$ %s stderr\n%s", " ".join(cmd), result.stderr.rstrip())
+        except Exception as e:  # noqa: BLE001 - diagnostic must not raise
+            logger.warning("$ %s failed: %s", " ".join(cmd), e)
 
 
 def make_proxy_cluster(source_cluster):
