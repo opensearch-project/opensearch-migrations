@@ -40,7 +40,7 @@ Migration Assistant handles the entire journey in **one hop** — from any suppo
 
 ### How it works
 
-1. **Deploy target cluster** — automated provisioning via AWS CDK or local Docker
+1. **Deploy target cluster** — automated provisioning via AWS CDK or local Kubernetes
 2. **Backfill historical data** — snapshot-based, upgrades Lucene format automatically
 3. **Capture & replay live traffic** — real requests validated against target before cutover
 4. **Compare responses** — automated diff between source and target responses
@@ -59,7 +59,7 @@ Each Reindex-From-Snapshot worker (2 vCPU, 4 GB) sustains **23.5 MB/s** — that
 | 10 | 235 MB/s | ~20 TB |
 | 50 | 1.18 GB/s | ~100 TB |
 
-Workers run on AWS Fargate — scale out on demand, pay only for migration duration, scale back to zero when done.
+Throughput is measured in uncompressed source data. Workers scale horizontally on Kubernetes — add workers on demand, scale back to zero when done.
 
 | Component | Per-Worker Throughput | Docs/Minute |
 |---|---|---|
@@ -99,15 +99,15 @@ Workers run on AWS Fargate — scale out on demand, pay only for migration durat
 
 ## Quick Start
 
-### Local (Docker)
+### Local (Kubernetes)
 
 ```bash
 git clone https://github.com/opensearch-project/opensearch-migrations.git
 cd opensearch-migrations
-./gradlew -p TrafficCapture/dockerSolution build
+deployment/k8s/kindTesting.sh
 ```
 
-See the [Development Guide](DEVELOPER_GUIDE.md) for running the full local stack.
+See the [Kind testing README](deployment/k8s/README.md) for local development and testing.
 
 ### AWS Deployment
 
@@ -151,7 +151,7 @@ Tested on 03/10/25 ([PR #1337](https://github.com/opensearch-project/opensearch-
 | Traffic Replay | 8 | 48 | Disabled | 1,694,000 | 43.5 | 67.5 |
 | Traffic Replay | 8 | 48 | Enabled | 1,645,000 | 42.2 | 65.5 |
 
-Throughput scales with additional Fargate workers (horizontal) or larger instances (vertical). All tests CPU-bound; results may vary with client compression.
+Throughput scales with additional Kubernetes workers (horizontal) or larger instances (vertical). All tests CPU-bound; results may vary with client compression.
 
 ---
 
