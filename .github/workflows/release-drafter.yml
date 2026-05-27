@@ -238,9 +238,10 @@ jobs:
           solutionid=SO0290,\
           solutionname="migration-assistant-for-amazon-opensearch-service",\
           solutionversion=${{ steps.get_data.outputs.version }}
-      - name: Assemble self-contained aws-bootstrap.sh
+      - name: Assemble migration-assistant CLI artifacts
         run: |
-          deployment/k8s/aws/assemble-bootstrap.sh
+          deployment/k8s/aws/assemble-bootstrap.sh \
+            --cli-version "${{ steps.get_data.outputs.version }}"
       - name: Draft a release
         if: ${{ !github.event.act }}
         uses: softprops/action-gh-release@v3
@@ -256,4 +257,5 @@ jobs:
             migration-assistant-${{ steps.get_data.outputs.version }}.tgz
             workflowMigration.schema.json
             deployment/k8s/aws/dist/aws-bootstrap.sh
+            deployment/k8s/aws/dist/migration-assistant-cli-${{ steps.get_data.outputs.version }}.tar.gz
             **/*.spdx.json

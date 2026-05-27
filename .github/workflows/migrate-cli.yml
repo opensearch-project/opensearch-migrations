@@ -1,0 +1,67 @@
+# CI for the migration-assistant CLI under deployment/k8s/aws/cli/.
+# Path-scoped: only runs when CLI files (or this workflow) change.
+name: migrate-cli
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deployment/k8s/aws/cli/**'
+      - 'deployment/k8s/aws/aws-bootstrap.sh'
+      - 'deployment/k8s/aws/assemble-bootstrap.sh'
+      - '.github/workflows/migrate-cli.yml'
+  pull_request:
+    paths:
+      - 'deployment/k8s/aws/cli/**'
+      - 'deployment/k8s/aws/aws-bootstrap.sh'
+      - 'deployment/k8s/aws/assemble-bootstrap.sh'
+      - '.github/workflows/migrate-cli.yml'
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -y && sudo apt-get install -y shellcheck
+      - name: shellcheck
+        working-directory: deployment/k8s/aws/cli
+        run: |
+          shellcheck -x -P lib \
+            bin/migration-assistant \
+            install.sh \
+            lib/*.sh \
+            test/helpers/stub.sh
+
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats-core + jq
+        run: sudo apt-get update -y && sudo apt-get install -y bats jq
+      - name: bats
+        working-directory: deployment/k8s/aws/cli
+        run: bats test/
+
+  smoke:
+    runs-on: ubuntu-22.04
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install jq
+        run: sudo apt-get update -y && sudo apt-get install -y jq
+      - name: migration-assistant version
+        run: deployment/k8s/aws/cli/bin/migration-assistant version
+      - name: migration-assistant help
+        run: deployment/k8s/aws/cli/bin/migration-assistant help
+      - name: aws-bootstrap.sh shim help (deprecation banner + delegate)
+        run: deployment/k8s/aws/aws-bootstrap.sh help
+      - name: assemble-bootstrap.sh produces dist artifacts
+        run: |
+          deployment/k8s/aws/assemble-bootstrap.sh --cli-version 0.0.0-ci
+          test -f deployment/k8s/aws/dist/migration-assistant-cli-0.0.0-ci.tar.gz
+          test -x deployment/k8s/aws/dist/aws-bootstrap.sh

@@ -5,7 +5,7 @@
 # Copies all required container images and helm charts from public registries
 # to a private ECR registry. Run this from a machine with internet access.
 #
-# Can be run standalone or sourced by aws-bootstrap.sh (which calls
+# Can be run standalone or sourced by the migration-assistant CLI (which calls
 # mirror_images_to_ecr and mirror_charts_to_ecr directly).
 #
 # Usage: ./mirrorToEcr.sh <ecr-host> [--region <region>]

@@ -21,24 +21,37 @@ Migration Assistant on Kubernetes.
 
 ## Overview
 
-The `aws-bootstrap.sh` script is the single entry point for deploying the
-Migration Assistant onto AWS EKS.  The same script can be used by end-users
-and developers to bootstrap their Migration Assistant to EKS. It handles:
+The deploy entry point is `deployment/k8s/aws/cli/bin/migration-assistant`,
+a modular bash CLI under [cli/](cli/) with ~170 bats tests + shellcheck CI.
+It replaces the previous monolithic `aws-bootstrap.sh` (released versions
+of that file remain valid for older releases; the source is gone from
+this branch and forward).
+
+The CLI handles:
 
 1. **CloudFormation deployment** — creates the EKS cluster, ECR registry,
    IAM roles, and networking (new VPC or imported VPC).
 2. **EKS configuration** — sets up kubectl access, namespaces, and node pools.
 3. **Helm chart installation** — installs the Migration Assistant with all
-   sub-charts (Argo Workflows, Kafka, Prometheus, etc.).
+   sub-charts (Argo Workflows, Kafka, Prometheus, etc.). Live-streams the
+   pre-install hook Job's logs so you see per-sub-chart progress instead
+   of a 15-minute silent wait.
 4. **CloudWatch dashboards** — deploys monitoring dashboards.
 
 By default, all artifacts come from the latest published release.
-The script:
-- Downloads CloudFormation templates from the Solutions S3 bucket
-- Downloads Helm chart and dashboards from the GitHub release
-- Mirrors container images from public registries to private ECR
-  (use `--use-public-images` to opt out and pull directly from public registries)
 
+What's new compared to the old single-file `aws-bootstrap.sh`:
+
+- **Resumable**: state lives at `~/.opensearch-migrate/<stage>/state.env`.
+  Re-running picks up where the last run left off (post-CFN, post-helm, …).
+- **Live diagnostics**: CFN events, helm output, installer-Job pod logs,
+  and a per-cycle pod-status snapshot are streamed to stderr AND tee'd
+  into `~/.opensearch-migrate/<stage>/log/migrate.log`.
+- **Stuck-release recovery**: detects a previous helm release stuck in
+  `pending-install`/`pending-upgrade`/`failed` and offers rollback or
+  uninstall. Cleans up orphan `<release>-helm-installer` Jobs that
+  block re-installs.
+- **Non-interactive mode**: `--non-interactive` for Jenkins/CI.
 
 ### Prerequisites
 
@@ -51,19 +64,31 @@ The script:
 ### Deploy latest with a new VPC
 
 ```bash
-./deployment/k8s/aws/aws-bootstrap.sh \
+./deployment/k8s/aws/cli/bin/migration-assistant \
   --deploy-create-vpc-cfn \
   --stack-name MA \
   --stage prod \
   --region us-east-2
 ```
 
+For end-users without a repo checkout, the same flags work via the
+release-published curl-pipe shim:
+
+```bash
+curl -fsSL https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/aws-bootstrap.sh \
+  | bash -s -- --deploy-create-vpc-cfn --stack-name MA --stage prod --region us-east-2
+```
+
+(`assemble-bootstrap.sh` produces both the shim and the CLI tarball at
+release time. The shim downloads the tarball into `~/.opensearch-migrate/cli/<version>/`
+and execs the unpacked binary.)
+
 ### Deploy into an existing VPC
 
 Run without `--vpc-id` first to discover available VPCs and subnets:
 
 ```bash
-./deployment/k8s/aws/aws-bootstrap.sh \
+./deployment/k8s/aws/cli/bin/migration-assistant \
   --deploy-import-vpc-cfn \
   --stack-name MA-Production \
   --stage prod \
@@ -73,7 +98,7 @@ Run without `--vpc-id` first to discover available VPCs and subnets:
 Then re-run with the IDs:
 
 ```bash
-./deployment/k8s/aws/aws-bootstrap.sh \
+./deployment/k8s/aws/cli/bin/migration-assistant \
   --deploy-import-vpc-cfn \
   --stack-name MA-Production \
   --stage prod \
@@ -85,7 +110,7 @@ Then re-run with the IDs:
 ### Grant EKS access to a CI role or teammate
 
 ```bash
-./deployment/k8s/aws/aws-bootstrap.sh \
+./deployment/k8s/aws/cli/bin/migration-assistant \
   --skip-cfn-deploy \
   --eks-access-principal-arn arn:aws:iam::123456789012:role/MyRole \
   --stage dev \
@@ -93,10 +118,25 @@ Then re-run with the IDs:
   --skip-console-exec
 ```
 
-Run `./deployment/k8s/aws/aws-bootstrap.sh --help` for the full list of options.
+Run `./deployment/k8s/aws/cli/bin/migration-assistant help` for the full list of options.
+
+### Jenkins / CI invocation
+
+Non-interactive runs accept the same flags + `--non-interactive`:
+
+```bash
+./deployment/k8s/aws/cli/bin/migration-assistant \
+  --non-interactive \
+  --skip-console-exec \
+  --skip-setting-k8s-context \
+  --use-public-images \
+  --stage ma \
+  --region us-east-1
+```
 
 See the [project wiki](https://github.com/opensearch-project/opensearch-migrations/wiki)
-for additional deployment guidance.
+for additional deployment guidance, and [`cli/README.md`](cli/README.md) for
+the CLI's architecture.
 
 
 ## Isolated / Air-Gapped Networks
@@ -107,7 +147,7 @@ Add `--create-vpc-endpoints` (unless you're managing those endpoints elsewhere)
 and the script handles the rest.
 
 ```bash
-./deployment/k8s/aws/aws-bootstrap.sh \
+./deployment/k8s/aws/cli/bin/migration-assistant \
   --deploy-import-vpc-cfn \
   --create-vpc-endpoints \
   --stack-name MA-Prod \
@@ -138,7 +178,7 @@ artifacts directly, you'll also need to install:
 
 ```bash
 # From the repo root
-./deployment/k8s/aws/aws-bootstrap.sh \
+./deployment/k8s/aws/cli/bin/migration-assistant \
   --deploy-create-vpc-cfn \
   --build \
   --stack-name MA-Dev \

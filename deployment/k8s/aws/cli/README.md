@@ -1,0 +1,71 @@
+# migrate-cli
+
+A bash-native CLI for the OpenSearch Migration Assistant. Replaces the
+14k-line Go TUI proposed in
+[opensearch-project/opensearch-migrations#3008](https://github.com/opensearch-project/opensearch-migrations/pull/3008)
+with a single-binary install of pure shell scripts.
+
+## Install
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/install.sh | bash
+```
+
+This drops a versioned install at `~/.opensearch-migrate/cli/<version>/`
+and symlinks `~/.local/bin/migration-assistant`.
+
+## Use
+
+```sh
+migration-assistant                  # default: resume (or start) for stage 'default'
+migration-assistant --stage staging  # named stage (P2)
+migration-assistant --switch         # re-prompt Manual / Agent
+migration-assistant cleanup          # tear down + archive
+migration-assistant help
+```
+
+## What it does
+
+Discovery → wizard → CFN deploy (Create-VPC EKS template) → optional crane
+image mirror → helm install → either `kubectl exec migration-console-0`
+(Manual mode) **or** replaces itself with `claude|q|kiro|…` (Agent mode) and
+installs a `Startup.md` skill the agent reads first.
+
+State lives at `~/.opensearch-migrate/<stage>/` and survives terminal
+restarts. Resume from any step; switch modes any time.
+
+## Layout
+
+```
+bin/migration-assistant  dispatcher
+lib/_common.sh       shell hardening + traps
+lib/ui.sh            color/prompt/spinner
+lib/log.sh           append-only log + rotation
+lib/state.sh         state.env + state.json I/O
+lib/discover.sh      OS / pkg-mgr / AWS / EKS / CFN
+lib/install_tools.sh kubectl/helm/crane/aws/jq install
+lib/artifacts.sh     SHA-256-pinned download + cache
+lib/wizard.sh        4-field deploy params
+lib/cfn.sh           CFN deploy + event tail
+lib/crane.sh         image mirror loop
+lib/helm.sh          helm install + readiness wait
+lib/console.sh       kubectl exec migration-console-0
+lib/agent.sh         agent discover/setup/exec
+lib/cleanup.sh       teardown
+lib/resume.sh        controller + mode select
+lib/version.sh       version constants
+skills/Startup.md    the agent's first read
+test/                bats-core tests
+```
+
+## Develop
+
+```sh
+make lint       # shellcheck
+make test       # bats-core
+make install    # install from CURDIR via install.sh
+```
+
+## License
+
+Apache-2.0 (matches opensearch-project).
