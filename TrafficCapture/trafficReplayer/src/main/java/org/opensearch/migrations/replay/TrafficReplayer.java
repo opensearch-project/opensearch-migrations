@@ -201,6 +201,15 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
+            names = {"--response-post-processor-config", "--responsePostProcessorConfig"},
+            arity = 1,
+            description = "Configuration for response post-processing. Transforms target responses before "
+                + "tuple assembly (e.g., converting OpenSearch responses to Solr format for comparison). "
+                + "Same JSON format as --transformerConfig.")
+        private String responsePostProcessorConfig;
+
+        @Parameter(
+            required = false,
             names = { "--user-agent", "--userAgent" },
             arity = 1,
             description = "For HTTP requests to the target cluster, append this string (after \"; \") to"
@@ -675,6 +684,7 @@ public class TrafficReplayer {
                 orderedRequestTracker,
                 errorClassifier
             );
+            configureResponsePostProcessor(tr, transformationLoader, params.responsePostProcessorConfig);
             log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
                     " serverResponseTimeout={}s observedPacketConnectionTimeout={}s" +
                     " targetUri={} numClientThreads={}")
@@ -770,6 +780,15 @@ public class TrafficReplayer {
         var requestFilter = new PredicateLoader().getPredicateFactoryLoader(requestFilterConfig);
         log.atInfo().setMessage("Request filter configured").log();
         return () -> new FilteringTransformerWrapper(base.get(), requestFilter);
+    }
+
+    static void configureResponsePostProcessor(
+        TrafficReplayerTopLevel tr, TransformationLoader loader, String config
+    ) {
+        if (config != null && !config.isBlank()) {
+            tr.responsePostProcessor = loader.getTransformerFactoryLoader(null, null, config);
+            log.atInfo().setMessage("Response post-processor configured").log();
+        }
     }
 
     private static ThreadLocalTupleWriter createS3TupleWriterIfConfigured(
