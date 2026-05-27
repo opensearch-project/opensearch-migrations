@@ -80,9 +80,11 @@ esac
 EOF
   chmod +x "$STUB_DIR/kubectl"
 
+  # WATCH_INTERVAL=0.2 + first kill -0 check + sleep + kubectl call ≈ 0.6s
+  # before the first log line is emitted. Sleep 1.2s to be safe on slow CI.
   WATCH_INTERVAL=0.2 helm_watch_pods ma &
   local pid=$!
-  sleep 0.5
+  sleep 1.2
   kill "$pid" 2>/dev/null
   wait "$pid" 2>/dev/null || true
 
@@ -106,11 +108,13 @@ EOF
 
   WATCH_INTERVAL=0.2 helm_watch_pods ma &
   local pid=$!
-  sleep 0.5
+  sleep 1.2
   kill "$pid" 2>/dev/null
   wait "$pid" 2>/dev/null || true
 
-  grep -qE 'STREAM\[pods\] .*not_ready=migration-console-0' "$LOG_FILE"
+  # Format includes square brackets per the recent change to surface
+  # pod names in pods│ summaries.
+  grep -qE 'STREAM\[pods\] .*not_ready=\[migration-console-0\]' "$LOG_FILE"
 }
 
 @test "helm_watch_pods stays quiet on unchanged snapshots" {
