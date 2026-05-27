@@ -21,6 +21,8 @@ import lombok.extern.slf4j.Slf4j;
 @UtilityClass
 public class BulkResponseParser {
     private static final JsonFactory jsonFactory = new JsonFactory();
+    private static final String ITEMS_FIELD = "items";
+    private static final String MALFORMED_RESPONSE_ITEM = "malformed_response_item";
 
     /**
      * Scans a bulk response for all operations that were a success
@@ -63,7 +65,7 @@ public class BulkResponseParser {
                 while (parser.nextToken() != JsonToken.END_OBJECT) {
                     var fieldName = parser.currentName();
 
-                    if ("items".equals(fieldName)) {
+                    if (ITEMS_FIELD.equals(fieldName)) {
                         scanItems(parser, successfulDocumentIds, allowlist);
                     } else {
                         // Skip other fields at the root level
@@ -90,7 +92,7 @@ public class BulkResponseParser {
                 return null; // Can't parse - retry all
             }
             while (parser.nextToken() != JsonToken.END_OBJECT) {
-                if ("items".equals(parser.currentName())) {
+                if (ITEMS_FIELD.equals(parser.currentName())) {
                     scanItemPositions(parser, failedPositions, allowlist);
                     foundItems = true;
                 } else {
@@ -271,7 +273,7 @@ public class BulkResponseParser {
                 return null;
             }
             while (parser.nextToken() != JsonToken.END_OBJECT) {
-                if ("items".equals(parser.currentName())) {
+                if (ITEMS_FIELD.equals(parser.currentName())) {
                     scanItemsPartitioned(parser, partition, allowlist);
                     foundItems = true;
                 } else {
@@ -301,8 +303,7 @@ public class BulkResponseParser {
             if (parser.getCurrentToken() != JsonToken.START_OBJECT) {
                 continue;
             }
-            var rawJson = copyCurrentStructure(parser);
-            classifyItemFromRaw(rawJson, position, partition, allowlist);
+            classifyItemFromRaw(copyCurrentStructure(parser), position, partition, allowlist);
             position++;
         }
     }
@@ -321,60 +322,35 @@ public class BulkResponseParser {
         ItemPartition.ItemPartitionBuilder partition,
         DocumentExceptionAllowlist allowlist
     ) throws IOException {
-        String docId = null;
-        String result = null;
-        String errorType = null;
-
-        try (var p = jsonFactory.createParser(rawJson)) {
-            if (p.nextToken() != JsonToken.START_OBJECT) {
-                partition.retryableFailure(new ItemFailure(position, null, "malformed_response_item", rawJson));
-                return;
-            }
-            // Descend into the single op key (e.g. "index": { ... })
-            if (p.nextToken() != JsonToken.FIELD_NAME) {
-                partition.retryableFailure(new ItemFailure(position, null, "malformed_response_item", rawJson));
-                return;
-            }
-            if (p.nextToken() != JsonToken.START_OBJECT) {
-                partition.retryableFailure(new ItemFailure(position, null, "malformed_response_item", rawJson));
-                return;
-            }
-            while (p.nextToken() != JsonToken.END_OBJECT) {
-                var field = p.currentName();
-                p.nextToken();
-                if ("_id".equals(field)) {
-                    docId = p.getText();
-                } else if ("result".equals(field)) {
-                    result = p.getText();
-                } else if ("error".equals(field) && p.getCurrentToken() == JsonToken.START_OBJECT) {
-                    while (p.nextToken() != JsonToken.END_OBJECT) {
-                        if ("type".equals(p.currentName())) {
-                            p.nextToken();
-                            errorType = p.getText();
-                        } else {
-                            p.nextToken();
-                            p.skipChildren();
-                        }
-                    }
-                } else {
-                    p.skipChildren();
-                }
-            }
+        var info = parseItemFields(rawJson);
+        if (info == null) {
+            partition.retryableFailure(new ItemFailure(position, null, MALFORMED_RESPONSE_ITEM, rawJson));
+            return;
         }
-
-        if (result != null) {
+        if (info.getResult() != null) {
             partition.successPosition(position);
             return;
         }
-        if (errorType != null && allowlist.isAllowed(errorType)) {
+        if (info.getErrorType() != null && allowlist.isAllowed(info.getErrorType())) {
             partition.successPosition(position);
             return;
         }
-        var failure = new ItemFailure(position, docId, errorType, rawJson);
-        if (errorType != null && BulkDocErrorTypes.NON_RETRYABLE.contains(errorType)) {
+        var failure = new ItemFailure(position, info.getId(), info.getErrorType(), rawJson);
+        if (info.getErrorType() != null && BulkDocErrorTypes.NON_RETRYABLE.contains(info.getErrorType())) {
             partition.nonRetryableFailure(failure);
         } else {
             partition.retryableFailure(failure);
+        }
+    }
+
+    private static DocInfo parseItemFields(String rawJson) throws IOException {
+        try (var p = jsonFactory.createParser(rawJson)) {
+            if (p.nextToken() != JsonToken.START_OBJECT
+                || p.nextToken() != JsonToken.FIELD_NAME
+                || p.nextToken() != JsonToken.START_OBJECT) {
+                return null;
+            }
+            return extractDocInfo(p);
         }
     }
 

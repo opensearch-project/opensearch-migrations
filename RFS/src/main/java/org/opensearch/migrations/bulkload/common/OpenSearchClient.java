@@ -748,7 +748,7 @@ public abstract class OpenSearchClient {
             JsonNode responseItem = failure != null && failure.getResponseItemJson() != null
                 ? OBJECT_MAPPER.readTree(failure.getResponseItemJson()) : null;
             String failureType = failure != null ? failure.getErrorType() : null;
-            DlqRecord record = DlqRecord.builder()
+            DlqRecord dlqRecord = DlqRecord.builder()
                 .sessionId(dlqSessionId)
                 .workerId(dlqWorkerId)
                 .targetIndex(indexName)
@@ -759,7 +759,7 @@ public abstract class OpenSearchClient {
                 .requestItem(requestItem)
                 .responseItem(responseItem)
                 .build();
-            dlqSink.write(record).subscribe(
+            dlqSink.write(dlqRecord).subscribe(
                 v -> {},
                 err -> log.atError().setCause(err)
                     .setMessage("Failed to buffer DLQ record for index {}: {}")

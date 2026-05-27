@@ -31,6 +31,7 @@ import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.CompletionStatus;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
+import org.opensearch.migrations.reindexer.dlq.DlqSink;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -267,17 +268,7 @@ public class DocumentMigrationBootstrap {
             // If the flush fails (or times out), we throw so the work item is NOT marked
             // complete — a successor worker can re-emit any failures we may have lost.
             // This is the contract behind the DLQ lease-lifecycle requirement.
-            var dlqSink = targetClient.getDlqSink();
-            if (dlqSink != null) {
-                try {
-                    dlqSink.flush().block(Duration.ofMinutes(5));
-                } catch (Exception flushError) {
-                    log.atError().setCause(flushError)
-                        .setMessage("DLQ flush failed for {}; refusing to mark work item complete")
-                        .addArgument(wi).log();
-                    throw new RfsException("DLQ flush failed for " + wi, flushError);
-                }
-            }
+            flushDlqOrThrow(targetClient.getDlqSink(), wi);
 
             context.recordShardDuration(durationMs);
             context.recordDocsMigrated(totalDocsMigrated.get());
@@ -288,6 +279,20 @@ public class DocumentMigrationBootstrap {
             throw new RfsException("Partition migration interrupted", e);
         } finally {
             progressMonitor.close();
+        }
+    }
+
+    private static void flushDlqOrThrow(DlqSink dlqSink, IWorkCoordinator.WorkItemAndDuration.WorkItem wi) {
+        if (dlqSink == null) {
+            return;
+        }
+        try {
+            dlqSink.flush().block(Duration.ofMinutes(5));
+        } catch (Exception flushError) {
+            log.atError().setCause(flushError)
+                .setMessage("DLQ flush failed for {}; refusing to mark work item complete")
+                .addArgument(wi).log();
+            throw new RfsException("DLQ flush failed for " + wi, flushError);
         }
     }
 

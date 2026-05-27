@@ -24,7 +24,7 @@ import reactor.core.publisher.Mono;
 public interface DlqSink extends AutoCloseable {
 
     /** Buffer a record. Returned Mono completes only after flush durability. */
-    Mono<Void> write(DlqRecord record);
+    Mono<Void> write(DlqRecord dlqRecord);
 
     /** Force all buffered records durable. Safe to call repeatedly. */
     Mono<Void> flush();

@@ -36,7 +36,7 @@ public class S3DlqSink implements DlqSink {
 
     @FunctionalInterface
     public interface S3Uploader {
-        void upload(String s3Uri, byte[] data, String region) throws Exception;
+        void upload(String s3Uri, byte[] data, String region) throws IOException;
     }
 
     private final String bucket;
@@ -76,7 +76,7 @@ public class S3DlqSink implements DlqSink {
     }
 
     @Override
-    public Mono<Void> write(DlqRecord record) {
+    public Mono<Void> write(DlqRecord dlqRecord) {
         if (closed) {
             return Mono.error(new IllegalStateException("S3DlqSink is closed"));
         }
@@ -85,7 +85,7 @@ public class S3DlqSink implements DlqSink {
                 buffer = new ByteArrayOutputStream();
                 gzipOut = new GZIPOutputStream(buffer);
             }
-            byte[] json = MAPPER.writeValueAsBytes(record);
+            byte[] json = MAPPER.writeValueAsBytes(dlqRecord);
             gzipOut.write(json);
             gzipOut.write('\n');
         } catch (IOException e) {
