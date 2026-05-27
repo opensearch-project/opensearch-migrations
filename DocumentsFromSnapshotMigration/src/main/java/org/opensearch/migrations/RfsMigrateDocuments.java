@@ -310,7 +310,7 @@ public class RfsMigrateDocuments {
 
     /**
      * Configuration for the durable DLQ where terminal document failures are persisted.
-     * See issue #2975. DLQ is enabled when --dlq-s3-bucket is provided, or when the
+     * DLQ is enabled when --dlq-s3-bucket is provided, or when the
      * deployment-provisioned default bucket is available via MIGRATIONS_DEFAULT_S3_BUCKET;
      * otherwise terminal failures are not captured to a sink.
      */
@@ -794,19 +794,23 @@ public class RfsMigrateDocuments {
         if (region == null) {
             throw new ParameterException("--dlq-s3-region (or --s3-region) is required when --dlq-s3-bucket is set");
         }
-        var builder = S3AsyncClient.builder().region(Region.of(region));
-        String endpoint = arguments.dlqArgs.dlqS3Endpoint != null
-            ? arguments.dlqArgs.dlqS3Endpoint : arguments.s3Endpoint;
-        if (endpoint != null) {
-            builder = builder.endpointOverride(URI.create(endpoint));
+        log.atInfo().setMessage("DLQ config: region={} bucket={}")
+            .addArgument(region).addArgument(bucket).log();
+
+        var s3ClientBuilder = S3AsyncClient.builder()
+            .region(Region.of(region));
+        if (arguments.dlqArgs.dlqS3Endpoint != null) {
+            s3ClientBuilder.endpointOverride(URI.create(arguments.dlqArgs.dlqS3Endpoint));
         }
+        var s3Client = s3ClientBuilder.build();
+
         return S3DlqSink.builder()
-            .s3Client(builder.build())
             .bucket(bucket)
             .prefix(arguments.dlqArgs.dlqS3Prefix)
             .sessionId(sessionId)
             .workerId(workerId)
-            .policy(S3DlqSink.RotationPolicy.onePerFlush())
+            .region(region)
+            .uploader(S3DlqSink.s3ClientUploader(s3Client))
             .build();
     }
 
@@ -1118,6 +1122,7 @@ public class RfsMigrateDocuments {
         boolean useServerGeneratedIds,
         RootDocumentMigrationContext context
     ) {
+        S3Repo s3RepoRef = null;
         try {
             // Check the coordinator for pending work BEFORE downloading anything from S3.
             // This avoids wasting time/bandwidth downloading schema metadata on every pod restart
@@ -1178,6 +1183,7 @@ public class RfsMigrateDocuments {
                         arguments.s3Region,
                         arguments.s3Endpoint != null ? URI.create(arguments.s3Endpoint) : null
                     );
+                    s3RepoRef = s3Repo;
                     backupDir = s3Repo.getRepoRootDir();
                 } else {
                     throw new ParameterException(
@@ -1326,6 +1332,10 @@ public class RfsMigrateDocuments {
             log.atInfo().setMessage("No more Solr work items to process: {}").addArgument(e.getMessage()).log();
         } catch (Exception e) {
             throw new RuntimeException("Failed to migrate Solr backup", e);
+        } finally {
+            if (s3RepoRef != null) {
+                s3RepoRef.close();
+            }
         }
     }
 

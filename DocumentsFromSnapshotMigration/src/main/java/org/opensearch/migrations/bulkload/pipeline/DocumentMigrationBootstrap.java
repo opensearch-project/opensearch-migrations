@@ -266,7 +266,7 @@ public class DocumentMigrationBootstrap {
             // Flush the DLQ before letting ScopedWorkCoordinator call completeWorkItem.
             // If the flush fails (or times out), we throw so the work item is NOT marked
             // complete — a successor worker can re-emit any failures we may have lost.
-            // This is the contract behind the lease-lifecycle requirement on #2975.
+            // This is the contract behind the DLQ lease-lifecycle requirement.
             var dlqSink = targetClient.getDlqSink();
             if (dlqSink != null) {
                 try {

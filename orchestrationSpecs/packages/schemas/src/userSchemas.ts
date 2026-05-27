@@ -901,6 +901,13 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
+    dlqS3Prefix: z.string().default("rfs-dlq/").optional()
+        .describe("S3 key prefix for the dead-letter queue (DLQ) where terminal document failures are persisted. " +
+            "Each RFS run writes under <prefix>/session=<workflow-uid>/. " +
+            "Defaults to 'rfs-dlq/'."),
+    dlqS3Bucket: z.string().optional()
+        .describe("S3 bucket for the DLQ. When omitted, falls back to the deployment-provisioned " +
+            "default bucket (MIGRATIONS_DEFAULT_S3_BUCKET). Set this to use a separate bucket for DLQ records."),
 }).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");
 
 export const USER_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(USER_RFS_WORKFLOW_OPTIONS);

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
@@ -81,16 +82,9 @@ class BulkResponseParserPartitionTest {
         var partition = BulkResponseParser.partitionItems(body, DocumentExceptionAllowlist.empty());
 
         var item = partition.getNonRetryableFailures().get(0);
-        assertThat(item.getResponseItem().path("index").path("_id").asText(), equalTo("doc-1"));
-        assertThat(
-            item.getResponseItem().path("index").path("error").path("type").asText(),
-            equalTo("mapper_parsing_exception")
-        );
-        // The full error sub-object is retained so investigators see the "reason" too.
-        assertThat(
-            item.getResponseItem().path("index").path("error").path("reason").asText(),
-            equalTo("bad doc")
-        );
+        assertThat(item.getResponseItemJson(), containsString("\"_id\":\"doc-1\""));
+        assertThat(item.getResponseItemJson(), containsString("\"type\":\"mapper_parsing_exception\""));
+        assertThat(item.getResponseItemJson(), containsString("\"reason\":\"bad doc\""));
     }
 
     @Test

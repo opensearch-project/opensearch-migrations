@@ -655,12 +655,12 @@ def _augment_status_with_dlq(payload: dict) -> None:
 # ##################### DLQ (Reindex-from-Snapshot Dead Letter Queue) ###################
 
 
-@backfill_group.group(name="dlq", help="Inspect or manage RFS terminal-failure DLQ records.")
-def backfill_dlq_group():
+@click.group(name="dlq", help="Inspect or manage RFS terminal-failure DLQ records.")
+def dlq_group():
     """All actions related to the durable RFS DLQ for the current session."""
 
 
-@backfill_dlq_group.command(name="location", help="Print the S3 URI of the DLQ for the current session.")
+@dlq_group.command(name="location", help="Print the S3 URI of the DLQ for the current session.")
 @click.option('--session', default=None, help='Override the session id (defaults to RFS_DLQ_SESSION_ID).')
 def backfill_dlq_location_cmd(session):
     try:
@@ -670,7 +670,7 @@ def backfill_dlq_location_cmd(session):
     click.echo(cfg.location_uri)
 
 
-@backfill_dlq_group.command(name="count", help="Count failed document records in the current session's DLQ.")
+@dlq_group.command(name="count", help="Count failed document records in the current session's DLQ.")
 @click.option('--session', default=None, help='Override the session id (defaults to RFS_DLQ_SESSION_ID).')
 def backfill_dlq_count_cmd(session):
     try:
@@ -680,7 +680,7 @@ def backfill_dlq_count_cmd(session):
     click.echo(str(dlq_.count(cfg)))
 
 
-@backfill_dlq_group.command(name="list", help="List failed document records in stable order.")
+@dlq_group.command(name="list", help="List failed document records in stable order.")
 @click.option('--session', default=None, help='Override the session id (defaults to RFS_DLQ_SESSION_ID).')
 @click.option('--limit', default=100, show_default=True, type=int, help='Maximum records to print.')
 @click.pass_obj
@@ -1024,6 +1024,7 @@ def show(inputfile, outputfile):
 cli.add_command(cluster_group)
 cli.add_command(completion)
 cli.add_command(kafka_group)
+cli.add_command(dlq_group)
 
 if not DISABLE_LEGACY_COMMANDS:
     cli.add_command(snapshot_group)

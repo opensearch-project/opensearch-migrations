@@ -1373,6 +1373,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "boolean",
                       "default": false
                     },
+                    "dlqS3Prefix": {
+                      "type": "string",
+                      "default": "rfs-dlq/"
+                    },
+                    "dlqS3Bucket": {
+                      "type": "string",
+                      "description": "S3 bucket for the DLQ. When omitted, falls back to the deployment-provisioned default bucket (MIGRATIONS_DEFAULT_S3_BUCKET). Set this to use a separate bucket for DLQ records."
+                    },
                     "transformsImage": {
                       "type": "string",
                       "default": ""
@@ -3112,6 +3120,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "replayer"
                         ],
                         "changeRestriction": "impossible"
+                      },
+                      "dlqS3Prefix": {
+                        "type": "string",
+                        "default": "rfs-dlq/",
+                        "description": "S3 key prefix for the dead-letter queue (DLQ) where terminal document failures are persisted. Each RFS run writes under <prefix>/session=<workflow-uid>/. Defaults to 'rfs-dlq/'."
+                      },
+                      "dlqS3Bucket": {
+                        "type": "string",
+                        "description": "S3 bucket for the DLQ. When omitted, falls back to the deployment-provisioned default bucket (MIGRATIONS_DEFAULT_S3_BUCKET). Set this to use a separate bucket for DLQ records."
                       }
                     },
                     "description": "Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."

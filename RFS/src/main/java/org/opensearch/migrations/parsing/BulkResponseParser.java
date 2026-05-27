@@ -11,8 +11,6 @@ import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Value;
@@ -22,8 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @UtilityClass
 public class BulkResponseParser {
-    private static JsonFactory jsonFactory = new JsonFactory();
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final JsonFactory jsonFactory = new JsonFactory();
 
     /**
      * Scans a bulk response for all operations that were a success
@@ -304,31 +301,66 @@ public class BulkResponseParser {
             if (parser.getCurrentToken() != JsonToken.START_OBJECT) {
                 continue;
             }
-            // Capture the full per-item object as a JsonNode so we can preserve it verbatim.
-            JsonNode itemNode = OBJECT_MAPPER.readTree(parser);
-            classifyItem(itemNode, position, partition, allowlist);
+            var rawJson = copyCurrentStructure(parser);
+            classifyItemFromRaw(rawJson, position, partition, allowlist);
             position++;
         }
     }
 
-    private static void classifyItem(
-        JsonNode itemNode,
+    private static String copyCurrentStructure(JsonParser parser) throws IOException {
+        var sw = new java.io.StringWriter();
+        try (var gen = jsonFactory.createGenerator(sw)) {
+            gen.copyCurrentStructure(parser);
+        }
+        return sw.toString();
+    }
+
+    private static void classifyItemFromRaw(
+        String rawJson,
         int position,
         ItemPartition.ItemPartitionBuilder partition,
         DocumentExceptionAllowlist allowlist
-    ) {
-        // Each item is { "<op>": { ...payload... } } with a single op key.
-        if (!itemNode.isObject() || !itemNode.fields().hasNext()) {
-            // Malformed entry — treat as retryable failure so we don't silently drop it.
-            partition.retryableFailure(new ItemFailure(position, null, "malformed_response_item", itemNode));
-            return;
+    ) throws IOException {
+        String docId = null;
+        String result = null;
+        String errorType = null;
+
+        try (var p = jsonFactory.createParser(rawJson)) {
+            if (p.nextToken() != JsonToken.START_OBJECT) {
+                partition.retryableFailure(new ItemFailure(position, null, "malformed_response_item", rawJson));
+                return;
+            }
+            // Descend into the single op key (e.g. "index": { ... })
+            if (p.nextToken() != JsonToken.FIELD_NAME) {
+                partition.retryableFailure(new ItemFailure(position, null, "malformed_response_item", rawJson));
+                return;
+            }
+            if (p.nextToken() != JsonToken.START_OBJECT) {
+                partition.retryableFailure(new ItemFailure(position, null, "malformed_response_item", rawJson));
+                return;
+            }
+            while (p.nextToken() != JsonToken.END_OBJECT) {
+                var field = p.currentName();
+                p.nextToken();
+                if ("_id".equals(field)) {
+                    docId = p.getText();
+                } else if ("result".equals(field)) {
+                    result = p.getText();
+                } else if ("error".equals(field) && p.getCurrentToken() == JsonToken.START_OBJECT) {
+                    while (p.nextToken() != JsonToken.END_OBJECT) {
+                        if ("type".equals(p.currentName())) {
+                            p.nextToken();
+                            errorType = p.getText();
+                        } else {
+                            p.nextToken();
+                            p.skipChildren();
+                        }
+                    }
+                } else {
+                    p.skipChildren();
+                }
+            }
         }
-        var entry = itemNode.fields().next();
-        JsonNode payload = entry.getValue();
-        String docId = textOrNull(payload.get("_id"));
-        String result = textOrNull(payload.get("result"));
-        JsonNode errorNode = payload.get("error");
-        String errorType = errorNode != null && errorNode.isObject() ? textOrNull(errorNode.get("type")) : null;
 
         if (result != null) {
             partition.successPosition(position);
@@ -338,16 +370,12 @@ public class BulkResponseParser {
             partition.successPosition(position);
             return;
         }
-        var failure = new ItemFailure(position, docId, errorType, itemNode);
+        var failure = new ItemFailure(position, docId, errorType, rawJson);
         if (errorType != null && BulkDocErrorTypes.NON_RETRYABLE.contains(errorType)) {
             partition.nonRetryableFailure(failure);
         } else {
             partition.retryableFailure(failure);
         }
-    }
-
-    private static String textOrNull(JsonNode node) {
-        return node != null && !node.isNull() ? node.asText() : null;
     }
 
     /** One failed bulk item with enough context to be written to a DLQ. */
@@ -356,8 +384,8 @@ public class BulkResponseParser {
         int position;
         String documentId;
         String errorType;
-        /** Full per-item response object from the bulk API. */
-        JsonNode responseItem;
+        /** Full per-item response JSON from the bulk API. */
+        String responseItemJson;
     }
 
     /** Three-way classification of a bulk response, by item position. */

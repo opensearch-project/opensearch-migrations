@@ -228,9 +228,17 @@ public class SolrBackupSource implements DocumentSource {
     }
 
     /**
-     * Read a Lucene index using a MappedDirectory (for SolrCloud UUID backups).
+     * Read a Lucene index using a MappedDirectory (for SolrCloud backups with shard metadata).
+     * Identity mappings (key == value) are safe on any Solr version and fall through to the
+     * standard reader path. Actual UUID remappings require Solr 8.9+ (SIP-12) and use
+     * IndexReader9's MappedDirectory support.
      */
     private Flux<Document> readLuceneIndexMapped(Path indexDir, Map<String, String> fileNameMapping, long startingDocOffset) {
+        boolean hasUuidRemapping = fileNameMapping.entrySet().stream()
+            .anyMatch(e -> !e.getKey().equals(e.getValue()));
+        if (!hasUuidRemapping) {
+            return readLuceneIndex(indexDir, startingDocOffset);
+        }
         if (solrMajorVersion < 8) {
             return Flux.error(new IllegalStateException(
                 "SolrCloud UUID-mapped (incremental) backups are not supported for Solr "
@@ -240,7 +248,6 @@ public class SolrBackupSource implements DocumentSource {
             var fsDir = FSDirectory.open(indexDir);
             var mappedDir = new MappedDirectory(fsDir, fileNameMapping);
 
-            // Find the segments file from the mapping
             var segmentsFile = fileNameMapping.keySet().stream()
                 .filter(name -> name.startsWith(SEGMENTS_FILE_PREFIX))
                 .findFirst()

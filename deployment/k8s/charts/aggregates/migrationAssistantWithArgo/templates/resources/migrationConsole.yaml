@@ -283,13 +283,6 @@ spec:
           volumeMounts:
             - name: workflow-schema
               mountPath: /root/schema
-            # Per-RFS-run DLQ pointer patched by the document-bulk-load workflow
-            # (see orchestrationSpecs/.../documentBulkLoad.ts). Kubelet refreshes
-            # this mount within ~60s when the ConfigMap is patched, so
-            # `console backfill dlq …` always resolves to the latest session.
-            - name: rfs-dlq-current-session
-              mountPath: /etc/rfs-dlq
-              readOnly: true
     {{- if $sharedLogsVolumeEnabled }}
             - name: shared-logs
               mountPath: /shared-logs-output
@@ -297,13 +290,6 @@ spec:
       volumes:
         - name: workflow-schema
           emptyDir: {}
-        - name: rfs-dlq-current-session
-          configMap:
-            name: rfs-dlq-current-session
-            # optional: the ConfigMap doesn't exist until the first bulk-load
-            # workflow runs; before then `console backfill dlq …` will report
-            # "no session" and the user can pass --session manually.
-            optional: true
     {{- if $sharedLogsVolumeEnabled  }}
         - name: shared-logs
           persistentVolumeClaim:

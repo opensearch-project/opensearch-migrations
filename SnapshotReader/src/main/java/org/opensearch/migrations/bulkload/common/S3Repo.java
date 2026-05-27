@@ -20,7 +20,7 @@ import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 import software.amazon.awssdk.services.s3.model.S3Object;
 
 @Slf4j
-public class S3Repo implements SourceRepo {
+public class S3Repo implements SourceRepo, AutoCloseable {
     private static final double S3_TARGET_THROUGHPUT_GIBPS = 8.0; // Arbitrarily chosen
     private static final long S3_MAX_MEMORY_BYTES = 1024L * 1024 * 1024; // Arbitrarily chosen
     private static final long S3_MINIMUM_PART_SIZE_BYTES = 8L * 1024 * 1024; // Default, but be explicit
@@ -37,6 +37,13 @@ public class S3Repo implements SourceRepo {
     @Override
     public String toString() {
         return String.format("S3Repo [uri=%s, region=%s]", s3RepoUri.uri, s3Region);
+    }
+
+    @Override
+    public void close() {
+        if (s3Client != null) {
+            s3Client.close();
+        }
     }
 
     protected void ensureS3LocalDirectoryExists(Path localPath) {

@@ -696,7 +696,7 @@ public abstract class OpenSearchClient {
      * allowlisted items are routed to {@code successPositions} and intentionally NOT
      * added to {@code perPosition}, so a position-shifted lookup can never attach an
      * allowlisted item's {@code failureType} or documentId to a real retryable failure's
-     * DLQ record (acceptance criterion for issue #2975).
+     * DLQ record.
      */
     private void emitRetryExhaustedToDlq(
         String indexName,
@@ -745,7 +745,8 @@ public abstract class OpenSearchClient {
                 ? failure.getDocumentId()
                 : extractDocumentId(op);
             JsonNode requestItem = op != null ? OBJECT_MAPPER.valueToTree(op) : null;
-            JsonNode responseItem = failure != null ? failure.getResponseItem() : null;
+            JsonNode responseItem = failure != null && failure.getResponseItemJson() != null
+                ? OBJECT_MAPPER.readTree(failure.getResponseItemJson()) : null;
             String failureType = failure != null ? failure.getErrorType() : null;
             DlqRecord record = DlqRecord.builder()
                 .sessionId(dlqSessionId)

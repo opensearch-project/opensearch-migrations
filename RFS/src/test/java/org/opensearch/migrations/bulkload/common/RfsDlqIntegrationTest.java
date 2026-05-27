@@ -132,16 +132,14 @@ class RfsDlqIntegrationTest {
 
         // Capture every S3 PutObject so we can reconstruct what was persisted.
         var s3Captured = new S3Capture();
-        var s3Client = s3Captured.mockClient();
 
-        // Real S3DlqSink against the captured client — same code path as production.
         var dlqSinkA = S3DlqSink.builder()
-            .s3Client(s3Client)
             .bucket("rfs-bucket")
             .prefix("rfs-dlq/")
             .sessionId("session-A")
             .workerId("worker-1")
-            .policy(S3DlqSink.RotationPolicy.onePerFlush())
+            .region("us-east-1")
+            .uploader(s3Captured.captureUploader())
             .build();
 
         var allowlist = new DocumentExceptionAllowlist(Set.of("version_conflict_engine_exception"));
@@ -242,12 +240,12 @@ class RfsDlqIntegrationTest {
             .thenReturn(Mono.just(new HttpResponse(200, "", null, sessionBResponse)));
 
         var dlqSinkB = S3DlqSink.builder()
-            .s3Client(s3Client)
             .bucket("rfs-bucket")
             .prefix("rfs-dlq/")
             .sessionId("session-B")
             .workerId("worker-1")
-            .policy(S3DlqSink.RotationPolicy.onePerFlush())
+            .region("us-east-1")
+            .uploader(s3Captured.captureUploader())
             .build();
         openSearchClient.setDlqContext(dlqSinkB, "session-B", "worker-1");
 
@@ -318,12 +316,12 @@ class RfsDlqIntegrationTest {
 
         var s3Captured = new S3Capture();
         var dlqSink = S3DlqSink.builder()
-            .s3Client(s3Captured.mockClient())
             .bucket("rfs-bucket")
             .prefix("rfs-dlq/")
             .sessionId("session-exhaust")
             .workerId("worker-1")
-            .policy(S3DlqSink.RotationPolicy.onePerFlush())
+            .region("us-east-1")
+            .uploader(s3Captured.captureUploader())
             .build();
 
         var allowlist = new DocumentExceptionAllowlist(Set.of("version_conflict_engine_exception"));
@@ -457,36 +455,18 @@ class RfsDlqIntegrationTest {
         return org.hamcrest.core.IsNot.not(matcher);
     }
 
-    /** Holds the bytes uploaded to S3, keyed by the requested S3 key. */
+    /** Holds the bytes uploaded via the S3Uploader interface. */
     private static class S3Capture {
         private final List<CapturedObject> objects = new ArrayList<>();
 
-        S3AsyncClient mockClient() {
-            var s3 = mock(S3AsyncClient.class);
-            when(s3.putObject(any(PutObjectRequest.class), any(AsyncRequestBody.class)))
-                .thenAnswer(invocation -> {
-                    PutObjectRequest req = invocation.getArgument(0);
-                    AsyncRequestBody body = invocation.getArgument(1);
-                    var future = new CompletableFuture<PutObjectResponse>();
-                    body.subscribe(new Subscriber<ByteBuffer>() {
-                        private final java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-                        @Override public void onSubscribe(Subscription s) { s.request(Long.MAX_VALUE); }
-                        @Override public void onNext(ByteBuffer bb) {
-                            byte[] arr = new byte[bb.remaining()];
-                            bb.get(arr);
-                            baos.write(arr, 0, arr.length);
-                        }
-                        @Override public void onError(Throwable t) { future.completeExceptionally(t); }
-                        @Override public void onComplete() {
-                            synchronized (objects) {
-                                objects.add(new CapturedObject(req.key(), baos.toByteArray()));
-                            }
-                            future.complete(PutObjectResponse.builder().build());
-                        }
-                    });
-                    return future;
-                });
-            return s3;
+        S3DlqSink.S3Uploader captureUploader() {
+            return (s3Uri, data, region) -> {
+                // Extract the key from s3://bucket/key
+                var key = s3Uri.replaceFirst("s3://[^/]+/", "");
+                synchronized (objects) {
+                    objects.add(new CapturedObject(key, data));
+                }
+            };
         }
 
         List<CapturedObject> objectsUnder(String prefix) {

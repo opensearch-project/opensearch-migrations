@@ -68,7 +68,6 @@ function makeParamsDict(
 ) {
     const repoConfig = expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig");
     const dlqParams = expr.makeDict({
-        dlqS3Prefix: expr.literal("rfs-dlq/"),
         dlqSessionId: workflowUid
     });
     const base = expr.mergeDicts(
@@ -104,14 +103,14 @@ function getRfsDeploymentName(sessionName: BaseExpression<string>) {
 
 const DLQ_SESSION_CONFIGMAP_NAME = "rfs-dlq-current-session";
 
-function makeDlqSessionConfigMap(sessionId: BaseExpression<string>) {
+function makeDlqSessionConfigMap(sessionId: BaseExpression<string>, dlqS3Prefix: BaseExpression<string>) {
     return {
         apiVersion: "v1",
         kind: "ConfigMap",
         metadata: {name: DLQ_SESSION_CONFIGMAP_NAME},
         data: {
             session_id: makeStringTypeProxy(sessionId),
-            prefix: "rfs-dlq/"
+            prefix: makeStringTypeProxy(dlqS3Prefix)
         }
     };
 }
@@ -193,7 +192,7 @@ function getRfsDeploymentManifest
         env: [
             ...getTargetHttpAuthCredsEnvVars(args.targetBasicCredsSecretNameOrEmpty),
             ...getCoordinatorHttpAuthCredsEnvVars(args.coordinatorBasicCredsSecretNameOrEmpty),
-            // Issue #2975: terminal RFS document failures now go to a durable S3 DLQ
+            // Terminal RFS document failures now go to a durable S3 DLQ
             // (see RFS/.../reindexer/dlq). The previous OFF override turned off the
             // pod-local FailedRequests log because no durable replacement existed; we
             // can now keep the in-pod logger at WARN as a local-dev safety net. The
@@ -596,11 +595,12 @@ export const DocumentBulkLoad = addDocumentBulkLoadTransformTemplates(documentBu
 
 
     .addTemplate("publishDlqSession", t => t
+        .addRequiredInput("dlqS3Prefix", typeToken<string>())
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
-                manifest: makeDlqSessionConfigMap(expr.getWorkflowValue("uid"))
+                manifest: makeDlqSessionConfigMap(expr.getWorkflowValue("uid"), b.inputs.dlqS3Prefix)
             }))
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
@@ -622,7 +622,9 @@ export const DocumentBulkLoad = addDocumentBulkLoadTransformTemplates(documentBu
 
         .addSteps(b => b
             .addStep("publishDlqSession", INTERNAL, "publishDlqSession", c =>
-                c.register({}))
+                c.register({
+                    dlqS3Prefix: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["dlqS3Prefix"], "rfs-dlq/")
+                }))
             .addStep("startHistoricalBackfillFromConfig", INTERNAL, "startHistoricalBackfillFromConfig", c =>
                 c.register({
                     ...selectInputsForRegister(b, c)
