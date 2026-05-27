@@ -2,13 +2,13 @@
 # Build and push an OCI image containing user transform files.
 #
 # Usage:
-#   package-transforms.sh <transforms-dir> <registry-base> [tag]
+#   package-transforms.sh <transforms-dir> <registry-base> [tag] [--output human|json]
 #
 # Example:
 #   package-transforms.sh ./my-transforms \
 #       123456789012.dkr.ecr.us-east-1.amazonaws.com/opensearch-migrations-transforms
 #
-# The printed digest-pinned reference is the value to use in transformsSources.
+# Human output is the default. Use --output json for automation.
 
 set -euo pipefail
 
@@ -17,13 +17,14 @@ SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
 usage() {
   cat >&2 <<USAGE
 Usage:
-  ${SCRIPT_NAME} <transforms-dir> <registry-base> [tag]
+  ${SCRIPT_NAME} <transforms-dir> <registry-base> [tag] [--output human|json]
 
 Arguments:
   transforms-dir   Directory containing transform files to copy into the image root.
                    May be a relative or absolute path.
   registry-base    Registry/repository name without a tag.
   tag              Optional image tag. Defaults to latest.
+  --output          Output mode. Defaults to human. Use json for automation.
 
 Example:
   ${SCRIPT_NAME} ./my-transforms \\
@@ -37,6 +38,46 @@ die_with_usage() {
   usage
   exit 2
 }
+
+OUTPUT_MODE="human"
+POSITIONAL_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output)
+      if [[ $# -lt 2 ]]; then
+        die_with_usage "--output requires a value: human or json."
+      fi
+      OUTPUT_MODE="$2"
+      shift 2
+      ;;
+    --output=*)
+      OUTPUT_MODE="${1#--output=}"
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    --*)
+      die_with_usage "unexpected option: $1"
+      ;;
+    *)
+      POSITIONAL_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+case "${OUTPUT_MODE}" in
+  human|json)
+    ;;
+  *)
+    die_with_usage "--output must be either human or json."
+    ;;
+esac
+
+set -- "${POSITIONAL_ARGS[@]}"
 
 if [[ $# -lt 2 ]]; then
   die_with_usage "missing required argument(s)."
@@ -70,12 +111,34 @@ TRANSFORMS_DIR="$(cd -- "${TRANSFORMS_DIR_ARG}" && pwd -P)"
 DOCKERFILE_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 IMAGE_REF="${REGISTRY_BASE}:${TAG}"
 
-echo "Building transforms image from: ${TRANSFORMS_DIR}"
-docker build -f "${DOCKERFILE_DIR}/Dockerfile.transforms" -t "${IMAGE_REF}" "${TRANSFORMS_DIR}"
+log() {
+  if [[ "${OUTPUT_MODE}" == "json" ]]; then
+    echo "$@" >&2
+  else
+    echo "$@"
+  fi
+}
 
-echo "Pushing ${IMAGE_REF}..."
+json_string() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '"%s"' "${value}"
+}
+
+log "Building transforms image from: ${TRANSFORMS_DIR}"
+if [[ "${OUTPUT_MODE}" == "json" ]]; then
+  docker build -f "${DOCKERFILE_DIR}/Dockerfile.transforms" -t "${IMAGE_REF}" "${TRANSFORMS_DIR}" >&2
+else
+  docker build -f "${DOCKERFILE_DIR}/Dockerfile.transforms" -t "${IMAGE_REF}" "${TRANSFORMS_DIR}"
+fi
+
+log "Pushing ${IMAGE_REF}..."
 PUSH_OUTPUT="$(docker push "${IMAGE_REF}")"
-echo "${PUSH_OUTPUT}"
+log "${PUSH_OUTPUT}"
 
 DIGEST="$(echo "${PUSH_OUTPUT}" | grep -oE 'sha256:[a-f0-9]{64}' | head -1 || true)"
 if [[ -z "${DIGEST}" ]]; then
@@ -91,12 +154,26 @@ fi
 
 PINNED_REF="${REGISTRY_BASE}@${DIGEST}"
 
-cat <<OUTPUT
+if [[ "${OUTPUT_MODE}" == "json" ]]; then
+  cat <<OUTPUT
+{
+  "image": $(json_string "${PINNED_REF}"),
+  "registryBase": $(json_string "${REGISTRY_BASE}"),
+  "tag": $(json_string "${TAG}"),
+  "digest": $(json_string "${DIGEST}")
+}
+OUTPUT
+else
+  cat <<OUTPUT
 
 Transforms image pushed successfully.
+
+Pinned image:
+  ${PINNED_REF}
 
 Set this in your transformsSources:
   transformsSources:
     my-transforms:
       image: "${PINNED_REF}"
 OUTPUT
+fi

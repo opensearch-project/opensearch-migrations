@@ -765,11 +765,13 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
     enableSourcelessMigrations: z.boolean().default(false).optional()
         .describe("Enable migration of indices that have _source disabled or partially filtered (includes/excludes). " +
             "When enabled, document backfill will reconstruct documents from stored fields and doc_values. " +
-            "Without this flag, metadata migration will fail if any selected index has _source disabled or partially filtered."),
+            "Without this flag, metadata migration will fail if any selected index has _source disabled or partially filtered.")
+        .changeRestriction('impossible'),
     useRecoverySource: z.boolean().default(false).optional()
         .describe("When enabled, treat the _recovery_source stored field (present in ES 7+ / OpenSearch snapshots " +
             "with soft-deletes) as _source. This field is transient and may not be present for all documents, " +
-            "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient."),
+            "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
+        .changeRestriction('impossible'),
 }).describe("Process-level options for the metadata migration command, controlling which metadata is migrated and how it is transformed.");
 
 export const USER_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(USER_METADATA_WORKFLOW_OPTIONS);
@@ -1021,7 +1023,7 @@ export const HTTP_AUTH_MTLS = z.object({
 }).describe("Mutual TLS (mTLS) authentication using client certificates.");
 
 export const CLUSTER_VERSION_STRING = z.string().regex(/^(?:ES [125678]|OS [123]|SOLR [6789])(?:\.[0-9]+)+$/)
-    .describe("Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.6'.");
+    .describe("Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'.");
 
 export const CLUSTER_CONFIG = z.object({
     endpoint:  z.string().regex(new RegExp(OPTIONAL_HTTP_ENDPOINT_PATTERN)).default("").optional()

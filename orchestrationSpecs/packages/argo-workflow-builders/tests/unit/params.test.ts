@@ -1,5 +1,5 @@
 import {expectTypeOf} from "expect-type";
-import {CallerParams, defineParam, expr, InputParamDef, TemplateBuilder, typeToken, WorkflowBuilder} from '../../src';
+import {CallerParams, defineParam, expr, InputParamDef, renderWorkflowTemplate, TemplateBuilder, typeToken, WorkflowBuilder} from '../../src';
 
 export type SIMPLE_ENUM = "a" | "b" | "c";
 
@@ -91,6 +91,39 @@ describe("paramsFns runtime validation", () => {
             sb.addStep("init", doNothingTemplate, "reqEnum", c => c.register({reqEnum: sb.workflowInputs.wpEnum}));
             return sb;
         }));
+    });
+
+    it("optional input defaults render as template inputs and are referenced via inputs.parameters", () => {
+        const wf = WorkflowBuilder.create({k8sResourceName: "optional-input-render"})
+            .addTemplate("runner", t => t
+                .addOptionalInput("scriptRoot", () => "/root/workflows/.workflowScripts")
+                .addContainer(c => c
+                    .addImageInfo("busybox", "IfNotPresent")
+                    .addCommand(["/bin/sh", "-c"])
+                    .addResources({
+                        requests: {cpu: "100m", memory: "64Mi"},
+                        limits: {cpu: "100m", memory: "64Mi"}
+                    })
+                    .addEnvVarsFromRecord({
+                        SCRIPT_ROOT: c.inputs.scriptRoot
+                    })
+                    .addArgs(["echo ok"])
+                )
+            )
+            .setEntrypoint("runner")
+            .getFullScope();
+
+        const rendered = renderWorkflowTemplate(wf);
+        const template = rendered.spec.templates.find(t => t.name === "runner");
+
+        expect(template?.inputs?.parameters).toContainEqual({
+            name: "scriptRoot",
+            value: "/root/workflows/.workflowScripts"
+        });
+        expect(template?.container?.env).toContainEqual({
+            name: "SCRIPT_ROOT",
+            value: "{{inputs.parameters.scriptRoot}}"
+        });
     });
 
 });

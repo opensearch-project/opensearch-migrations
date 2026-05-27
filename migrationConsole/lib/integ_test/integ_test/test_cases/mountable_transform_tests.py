@@ -10,11 +10,12 @@ from .cdc_base import (
     wait_for_pod_ready, wait_for_replayer_consuming,
     make_proxy_cluster,
 )
+from .ma_argo_test_base import ClusterVersionCombinationUnsupported
 
 logger = logging.getLogger(__name__)
 
 
-class Test0041CdcFullE2eMountableTransforms(MATestBase):
+class Test0042CdcFullE2eMountableTransforms(MATestBase):
     """Full CDC E2E test for image-mounted transform files across migration types."""
 
     requires_explicit_selection = True
@@ -29,6 +30,12 @@ class Test0041CdcFullE2eMountableTransforms(MATestBase):
     TUPLE_GLOB = "/s3/artifacts/tuples/**/tuples-*.log.gz"
 
     def __init__(self, user_args: MATestUserArguments):
+        if user_args.target_type == "AOSS":
+            raise ClusterVersionCombinationUnsupported(
+                user_args.source_version,
+                user_args.target_type,
+                "Mountable transform CDC E2E requires a provisioned target cluster",
+            )
         super().__init__(
             user_args=user_args,
             description="Full E2E: mountable transform images for metadata, backfill, request, and tuple transforms.",
@@ -37,7 +44,7 @@ class Test0041CdcFullE2eMountableTransforms(MATestBase):
             allow_source_target_combinations=CDC_SOURCE_TARGET_COMBINATIONS,
         )
         uid = self.unique_id
-        self.index_name = f"cdc0041-mountable-transforms-{uid}"
+        self.index_name = f"cdc0042-mountable-transforms-{uid}"
         self.doc_ids = [f"doc_{i}" for i in range(self.DOC_COUNT)]
         self.backfill_field_value = f"backfill-{uid}"
         self.order_field_value = f"second-transform-after-{self.backfill_field_value}"
@@ -93,7 +100,7 @@ class Test0041CdcFullE2eMountableTransforms(MATestBase):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
         self.workflow_template = "cdc-full-e2e-imported-clusters"
         if not self.transform_image_basic or not self.transform_image_sequence:
-            raise ValueError("Test0041 requires --transform_image_basic and --transform_image_sequence")
+            raise ValueError("Test0042 requires --transform_image_basic and --transform_image_sequence")
 
         self.parameters["transforms-sources"] = {
             "transform-basic": {"image": self.transform_image_basic},
