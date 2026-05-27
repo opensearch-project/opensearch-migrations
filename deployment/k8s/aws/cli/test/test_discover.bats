@@ -32,17 +32,14 @@ teardown() {
   [ "$status" -ne 0 ]
 }
 
-@test "discover_os recognizes Darwin" {
-  if [[ "$(uname -s)" != "Darwin" ]]; then skip "macOS-only"; fi
+@test "discover_os identifies the host OS correctly" {
   state_load
   discover_os
-  [ "$(state_get OS_NAME)" = "darwin" ]
-}
-
-@test "discover_os recognizes Linux" {
-  if [[ "$(uname -s)" != "Linux" ]]; then skip "linux-only"; fi
-  state_load
-  discover_os
-  os=$(state_get OS_NAME)
-  [ "$os" = "linux" ] || [ "$os" = "wsl" ]
+  local os; os=$(state_get OS_NAME)
+  case "$(uname -s)" in
+    Darwin) [ "$os" = "darwin" ] ;;
+    Linux)  [ "$os" = "linux" ] || [ "$os" = "wsl" ] ;;
+    *)      printf 'unsupported test platform: %s\n' "$(uname -s)" >&2
+            return 1 ;;
+  esac
 }
