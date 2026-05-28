@@ -89,7 +89,7 @@ public abstract class MigratorEvaluatorBase {
                 .addArgument(versionTransformer.getClass().getSimpleName())
                 .log();
         return Transformers.builder()
-                .transformer(new FanOutCompositeTransformer(customTransformer.getTransformer(), versionTransformer))
+                .transformer(new FanOutCompositeTransformer(versionTransformer, customTransformer.getTransformer()))
                 .transformerInfos(customTransformer.getTransformerInfos())
                 .transformerInfo(Transformers.TransformerInfo.builder()
                     .name("Version Transform")

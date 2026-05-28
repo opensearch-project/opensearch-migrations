@@ -444,7 +444,7 @@
           [
             {
               "templateRef": {
-                "template": "waitfordatasnapshot",
+                "template": "waitindefinitelyfordatasnapshot",
                 "name": "resource-management"
               },
               "arguments": {
@@ -471,7 +471,7 @@
                   }
                 ]
               },
-              "name": "waitForCompletion"
+              "name": "waitIndefinitelyForCompletion"
             }
           ]
         ],

@@ -1647,7 +1647,7 @@
           [
             {
               "templateRef": {
-                "template": "waitforsnapshotmigration",
+                "template": "waitindefinitelyforsnapshotmigration",
                 "name": "resource-management"
               },
               "arguments": {
@@ -1674,7 +1674,7 @@
                   }
                 ]
               },
-              "name": "waitForSnapshotMigration"
+              "name": "waitIndefinitelyForSnapshotMigration"
             }
           ]
         ],

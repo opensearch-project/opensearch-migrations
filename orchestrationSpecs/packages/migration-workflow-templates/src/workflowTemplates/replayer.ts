@@ -28,7 +28,10 @@ import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {CONTAINER_NAMES} from "../containerNames";
-import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {
+    K8S_INFRA_READY_TIMEOUT_SECONDS,
+    K8S_RESOURCE_RETRY_STRATEGY,
+} from "./commonUtils/resourceRetryStrategy";
 import {ResourceManagement} from "./resourceManagement";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
@@ -319,6 +322,7 @@ function makeReplayerDeploymentDefinition(
 ) {
     return {
         action: "apply" as const,
+        activeDeadlineSeconds: K8S_INFRA_READY_TIMEOUT_SECONDS,
         setOwnerReference: false,
         successCondition: "status.readyReplicas > 0",
         manifest: getReplayerDeploymentManifest({
@@ -448,6 +452,7 @@ export const Replayer = addReplayerTransformDeploymentTemplates(replayerBaseBuil
           b.inputs.resolvedKafkaAuthType,
           expr.getLoose(kafkaConfig, "authType"),
         );
+        const shouldUseScramAuth = expr.equals(effectiveKafkaAuthType, expr.literal("scram-sha-512"));
         const kafkaAuthConfigMapName = expr.concat(
           b.inputs.name,
           expr.literal("-kafka-auth"),
@@ -461,6 +466,13 @@ export const Replayer = addReplayerTransformDeploymentTemplates(replayerBaseBuil
               c.register({
                 name: kafkaAuthConfigMapName,
               }),
+          )
+          .addStep("waitForKafkaAuthSecret", ResourceManagement, "waitForSecretKey", (c) =>
+              c.register({
+                secretName: expr.getLoose(kafkaConfig, "secretName"),
+                secretKey: expr.literal("password"),
+              }),
+              {when: {templateExp: shouldUseScramAuth}}
           )
           .addStep("deployReplayer", INTERNAL, "createDeployment", (c) =>
             c.register({

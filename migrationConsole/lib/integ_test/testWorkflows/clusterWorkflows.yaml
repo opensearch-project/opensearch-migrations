@@ -1132,6 +1132,7 @@ spec:
             cluster.name: {{inputs.parameters.cluster-name}}
             network.host: 0.0.0.0
             discovery.type: single-node
+            plugins.security.disabled: true
             EOF
             
             # Create OpenSearch values file
@@ -1220,6 +1221,7 @@ spec:
             cluster.name: {{inputs.parameters.cluster-name}}
             network.host: 0.0.0.0
             discovery.type: single-node
+            plugins.security.disabled: true
             EOF
             
             # Create OpenSearch values file
@@ -1231,9 +1233,8 @@ spec:
               tag: "2.19.1"
             singleNode: true
             replicas: 1
-            extraEnvs:
-              - name: "OPENSEARCH_INITIAL_ADMIN_PASSWORD"
-                value: "myStrongPassword123!"
+            securityConfig:
+              enabled: false
             resources:
               requests:
                 cpu: "2"
@@ -1256,7 +1257,7 @@ spec:
               --values /tmp/opensearch-values.yaml \
               --set-file config."opensearch\.yml"=/tmp/opensearch.yml
             
-            # Create cluster credentials secret (OpenSearch 2.19 password set via OPENSEARCH_INITIAL_ADMIN_PASSWORD)
+            # Create cluster credentials secret for compatibility with older test helpers.
             kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
               --from-literal=username=admin \
               --from-literal=password="myStrongPassword123!" \
@@ -1268,13 +1269,8 @@ spec:
             # Generate cluster configuration output
             cat > /tmp/cluster-config.json << EOF
             {
-              "endpoint": "https://{{inputs.parameters.cluster-name}}:9200",
-              "allowInsecure": true,
-              "authConfig": {
-                "basic": {
-                  "secretName": "{{inputs.parameters.cluster-name}}-creds"
-                }
-              }
+              "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
+              "allowInsecure": true
             }
             EOF
 

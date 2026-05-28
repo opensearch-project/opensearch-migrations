@@ -65,6 +65,10 @@ spec:
         value: "30"
       - name: transforms-sources
         value: "{}"
+      - name: pre-snapshot-proxy-submit
+        value: "false"
+      - name: capture-proxy-service-type
+        value: "LoadBalancer"
 
   templates:
     # Main workflow: provision clusters, pause for test data, run CDC+backfill.
@@ -173,6 +177,58 @@ spec:
                       name: "{{workflow.parameters.migration-image-configmap}}"
                       key: migrationConsolePullPolicy
 
+        # Optionally submit a proxy-only migration first so tests can load data
+        # through the capture proxy before snapshot creation is allowed to start.
+        - - name: add-proxy-only-traffic-config
+            templateRef:
+              name: cdc-overlay
+              template: add-proxy-only-traffic-config
+            when: "{{workflow.parameters.pre-snapshot-proxy-submit}} == true"
+            arguments:
+              parameters:
+                - name: baseConfigBase64
+                  value: "{{steps.generate-base-config.outputs.parameters.migrationConfigBase64}}"
+                - name: imageMigrationConsoleLocation
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
+                - name: imageMigrationConsolePullPolicy
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
+                - name: captureProxyServiceType
+                  value: "{{workflow.parameters.capture-proxy-service-type}}"
+
+        - - name: run-proxy-only-migration-with-workflow-cli
+            templateRef:
+              name: full-migration-with-workflow-cli
+              template: main
+            when: "{{workflow.parameters.pre-snapshot-proxy-submit}} == true"
+            arguments:
+              parameters:
+                - name: migrationConfigBase64
+                  value: "{{steps.add-proxy-only-traffic-config.outputs.parameters.migrationConfigBase64}}"
+                - name: imageMigrationConsoleLocation
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsoleImage
+                - name: imageMigrationConsolePullPolicy
+                  valueFrom:
+                    configMapKeyRef:
+                      name: "{{workflow.parameters.migration-image-configmap}}"
+                      key: migrationConsolePullPolicy
+                - name: keepMigrationWorkflow
+                  value: "true"
+
+        - - name: pause-for-pre-snapshot-data
+            templateRef:
+              name: full-migration-with-clusters
+              template: suspend-step
+            when: "{{workflow.parameters.pre-snapshot-proxy-submit}} == true"
+
         # Overlay CDC traffic config (Kafka, capture-proxy, replayer) onto the base config.
         # Delegates to the shared cdc-overlay template so that changes to the CDC
         # traffic shape are picked up by both the with-clusters and imported-clusters variants.
@@ -198,6 +254,8 @@ spec:
                     configMapKeyRef:
                       name: "{{workflow.parameters.migration-image-configmap}}"
                       key: migrationConsolePullPolicy
+                - name: captureProxyServiceType
+                  value: "{{workflow.parameters.capture-proxy-service-type}}"
 
         # Run the full migration using the CDC-enabled config.
         - - name: run-full-migration-with-workflow-cli

@@ -156,24 +156,22 @@ public class DeltaLuceneReader {
             .addArgument(totalDocsToAdd)
             .log();
 
-        // Create additions stream — sequential segment processing preserves document ordering
         var additionsStream = Flux.fromIterable(additions)
             .concatMapDelayError( c ->
                 LuceneReader.readDocsFromSegment(c,
                     startDocId,
                     Path.of(c.getReader().getSegmentName()),
                     DocumentChangeType.INDEX,
-                    null)
+                    null, false)
             ).subscribeOn(Schedulers.boundedElastic());
 
-        // Create deletions stream - these are documents that were removed between snapshots
         var deletionsStream = Flux.fromIterable(removes)
             .concatMapDelayError( c ->
                 LuceneReader.readDocsFromSegment(c,
                     startDocId,
                     Path.of(c.getReader().getSegmentName()),
                     DocumentChangeType.DELETE,
-                    null)
+                    null, false)
             ).subscribeOn(Schedulers.boundedElastic());
 
         return new DeltaResult(additionsStream, deletionsStream);
