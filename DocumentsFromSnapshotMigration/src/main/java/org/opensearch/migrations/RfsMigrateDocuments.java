@@ -294,7 +294,7 @@ public class RfsMigrateDocuments {
         private VersionStrictness versionStrictness = new VersionStrictness();
 
         @ParametersDelegate
-        private ExperimentalArgs experimental = new ExperimentalArgs();
+        ExperimentalArgs experimental = new ExperimentalArgs();
 
         @Parameter(required = false,
             names = { "--allowed-doc-exception-types", "--allowedDocExceptionTypes" },
@@ -792,7 +792,7 @@ public class RfsMigrateDocuments {
      * Does not include request execution time or network latency.
      * Logic matches the runtime retry implementation in OpenSearchWorkCoordinator.retryWithExponentialBackoff()
      */
-    private static long calculateTotalRetryWindowSeconds(OpenSearchWorkCoordinator.CompletionRetryConfig config) {
+    static long calculateTotalRetryWindowSeconds(OpenSearchWorkCoordinator.CompletionRetryConfig config) {
         long totalMs = 0;
         long delay = config.initialDelayMs();
         for (int i = 0; i < config.maxRetries(); i++) {
@@ -812,7 +812,7 @@ public class RfsMigrateDocuments {
      * Build the coordinator completion-retry configuration from CLI args and log its summary.
      * Shared between the ES and Solr backfill paths.
      */
-    private static OpenSearchWorkCoordinator.CompletionRetryConfig buildCompletionRetryConfig(Args arguments) {
+    static OpenSearchWorkCoordinator.CompletionRetryConfig buildCompletionRetryConfig(Args arguments) {
         var completionRetryConfig = new OpenSearchWorkCoordinator.CompletionRetryConfig(
             arguments.coordinatorRetryMaxRetries,
             arguments.coordinatorRetryInitialDelayMs,
@@ -908,7 +908,7 @@ public class RfsMigrateDocuments {
      * Build the document-exception allowlist from CLI args and log when non-empty.
      * Shared between the ES and Solr backfill paths.
      */
-    private static DocumentExceptionAllowlist buildDocumentExceptionAllowlist(Args arguments) {
+    static DocumentExceptionAllowlist buildDocumentExceptionAllowlist(Args arguments) {
         var allowedExceptionTypesSet = new HashSet<>(arguments.allowedDocExceptionTypes);
         var allowlist = new DocumentExceptionAllowlist(allowedExceptionTypesSet);
         if (!allowedExceptionTypesSet.isEmpty()) {
@@ -1176,7 +1176,7 @@ public class RfsMigrateDocuments {
         return successorShardNextAcquisitionLeaseExponent;
     }
 
-    private static List<String> getSuccessorWorkItemIds(IWorkCoordinator.WorkItemAndDuration workItemAndDuration, WorkItemCursor progressCursor) {
+    static List<String> getSuccessorWorkItemIds(IWorkCoordinator.WorkItemAndDuration workItemAndDuration, WorkItemCursor progressCursor) {
         if (workItemAndDuration == null) {
             throw new IllegalStateException("Unexpected worker coordination state. Expected workItem set when progressCursor not null.");
         }
