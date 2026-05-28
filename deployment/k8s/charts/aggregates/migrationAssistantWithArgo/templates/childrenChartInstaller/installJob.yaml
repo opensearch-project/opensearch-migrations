@@ -280,7 +280,7 @@ spec:
           {{- if eq $name "ack-cloudwatch-controller" }}
                     --set aws.region="{{ $.Values.aws.region }}" \
           {{- end }}
-          {{- if $chart.waitForInstallation }}
+          {{- if eq (include "migration.chartWaitForInstallation" (dict "chart" $chart "root" $)) "true" }}
                     $VALUE_PARAM \
                     --wait
           {{- else }}

@@ -140,18 +140,13 @@ otelConfiguration:
           exporters: [awsemf/cadvisor, prometheus]
 
 charts:
-  aws-privateca-issuer:
-    waitForInstallation: true
-
   argo-workflows:
-    waitForInstallation: true
     values:
       artifactRepository:
         s3:
           useSDKCreds: true
 
   fluent-bit:
-    waitForInstallation: true
     values:
       env:
         - name: AWS_REGION
@@ -187,12 +182,8 @@ charts:
           mountPath: /fluentbit/scripts
           readOnly: true
 
-  kube-prometheus-stack:
-    waitForInstallation: true
-
   strimzi-kafka-operator:
-    waitForInstallation: true
-     # Use EKS-specific node selectors or tolerations if you have dedicated infra
+    # Use EKS-specific node selectors or tolerations if you have dedicated infra
 #    nodeSelector:
 #    workload-type: "operator-control-plane"
 
@@ -212,4 +203,3 @@ charts:
         value: "120000" # 2 minutes (slows down background chatter)
       - name: KUBERNETES_CLIENT_READ_TIMEOUT_MS
         value: "30000"  # Avoid timing out on heavy K8s API responses
-
