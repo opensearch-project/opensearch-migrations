@@ -226,28 +226,38 @@ agent_exec() {
     resuming=1
   fi
 
-  ui_dim "  exec $bin (resume=$resuming)"
+  # Try resume first; fall back to fresh session on failure. We can't
+  # use `exec` for the resume attempt because exec replaces the
+  # process (no fallback possible). Instead, run resume as a child;
+  # if it exits cleanly we exit with its rc; if it fails fast (e.g.
+  # "no prior conversation found"), we exec the fresh-session form.
+  local fresh_prompt='Read Startup.md and skills/migrating-to-opensearch/SKILL.md, then give the user next steps.'
+  if (( resuming )); then
+    ui_dim "  trying $bin session resume…"
+    case "$agent" in
+      claude) "$bin" --continue           ;;
+      codex)  "$bin" resume --last        ;;
+      q)      "$bin" chat --resume        ;;
+      kiro)   "$bin" chat --agent opensearch-migration --resume ;;
+      *)      false ;;
+    esac
+    local rc=$?
+    if (( rc == 0 )); then
+      exit 0
+    fi
+    ui_warn "no resumable session found (rc=$rc); starting a fresh agent session"
+  fi
+
+  ui_dim "  exec $bin"
   case "$agent" in
-    claude)
-      if (( resuming )); then exec "$bin" --continue
-      else exec "$bin" "Read Startup.md and skills/migrating-to-opensearch/SKILL.md, then give the user next steps."
-      fi ;;
-    codex)
-      if (( resuming )); then exec "$bin" resume --last
-      else exec "$bin" "Read Startup.md and skills/migrating-to-opensearch/SKILL.md, then give the user next steps."
-      fi ;;
-    q)
-      if (( resuming )); then exec "$bin" chat --resume
-      else exec "$bin" chat "Read Startup.md and skills/migrating-to-opensearch/SKILL.md, then give the user next steps."
-      fi ;;
     kiro)
-      # kiro chat with the bundled opensearch-migration agent
-      # definition (.kiro/agents/opensearch-migration.json).
-      if (( resuming )); then exec "$bin" chat --agent opensearch-migration --resume
-      else exec "$bin" chat --agent opensearch-migration
-      fi ;;
+      exec "$bin" chat --agent opensearch-migration
+      ;;
+    q)
+      exec "$bin" chat "$fresh_prompt"
+      ;;
     *)
-      exec "$bin" "Read Startup.md and skills/migrating-to-opensearch/SKILL.md, then give the user next steps."
+      exec "$bin" "$fresh_prompt"
       ;;
   esac
 }
