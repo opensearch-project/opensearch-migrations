@@ -317,6 +317,8 @@ helm_recover_if_stuck() {
       printf '    %s[1]%s rollback to the last successful revision\n' "$__UI_C_BOLD" "$__UI_C_RESET" >&2
       printf '    %s[2]%s uninstall the release entirely (then helm will reinstall)\n' "$__UI_C_BOLD" "$__UI_C_RESET" >&2
       printf '    %s[3]%s abort and let me investigate manually\n' "$__UI_C_BOLD" "$__UI_C_RESET" >&2
+      printf '    %s[4]%s reconcile in place — clear the stuck status and let helm upgrade run again\n' \
+        "$__UI_C_BOLD" "$__UI_C_RESET" >&2
       local pick
       ui_prompt "Choose" "1" pick
       case "$pick" in
@@ -331,6 +333,24 @@ helm_recover_if_stuck() {
           ;;
         2)
           _helm_uninstall_quiet "$release" "$ns"
+          ;;
+        4)
+          # Clear the stuck pending-upgrade/failed status so the
+          # upcoming `helm upgrade --install` reconciles in place
+          # rather than fighting with the prior revision's lock.
+          # Implementation: mark the latest revision as superseded
+          # so helm picks the prior deployed one as the head, then
+          # let the upgrade flow create a new revision. If there's
+          # no prior deployed revision, fall through to a rollback.
+          _helm_clear_stuck_revision "$release" "$ns" || {
+            ui_warn "in-place reconcile not possible; falling back to rollback"
+            if log_stream "helm-rollback" "${HELM[@]}" rollback "$release" --namespace "$ns" --wait --timeout 5m; then
+              ui_ok "rollback complete"
+            else
+              ui_warn "rollback failed; falling back to uninstall"
+              _helm_uninstall_quiet "$release" "$ns"
+            fi
+          }
           ;;
         *)
           ui_warn "aborting; release $release is still in '$status' state"
@@ -515,6 +535,75 @@ _helm_release_status() {
       | sed -E 's/.*"info"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' \
       | head -1
   fi
+}
+
+# _helm_clear_stuck_revision <release> <ns>
+#
+# When helm's bookkeeping says pending-upgrade or failed but the cluster
+# itself is mostly healthy, clearing the stuck revision lets the next
+# `helm upgrade --install` reconcile in place instead of forcing a full
+# rollback or uninstall (which would delete + recreate workloads).
+#
+# Mechanism: helm stores each revision as a Secret named
+#   sh.helm.release.v1.<release>.v<rev>
+# with metadata.labels.status ∈ {deployed, superseded, pending-*, failed,
+# uninstalled}. We mark the latest revision as `superseded` so helm
+# picks the prior `deployed` revision as the current head; the upcoming
+# upgrade will then write a new v(rev+1) and roll forward.
+#
+# Returns 0 on success, 1 if there's no prior deployed revision to fall
+# back to (caller should rollback / uninstall instead).
+_helm_clear_stuck_revision() {
+  local release="$1" ns="$2"
+  ui_step "Clearing stuck helm revision so upgrade can reconcile in place"
+
+  # Latest revision number from helm itself.
+  local latest_rev
+  latest_rev=$("${HELM[@]}" history "$release" --namespace "$ns" --max 1 -o json 2>/dev/null \
+                | jq -r '.[0].revision // empty' 2>/dev/null)
+  if [[ -z "$latest_rev" ]]; then
+    log_warn "helm-clear: could not read latest revision for $release"
+    return 1
+  fi
+
+  # Need at least one prior `deployed` revision OR a fresh install
+  # (rev=1 stuck) — for fresh installs, in-place reconcile means
+  # uninstalling the failed first revision, which is functionally the
+  # same as the [2] uninstall path. Recommend that instead.
+  if (( latest_rev <= 1 )); then
+    log_warn "helm-clear: only revision $latest_rev exists; nothing to fall back to. Use [2] uninstall."
+    return 1
+  fi
+
+  local prior_rev=$(( latest_rev - 1 ))
+  local prior_status
+  prior_status=$("${HELM[@]}" history "$release" --namespace "$ns" -o json 2>/dev/null \
+                  | jq -r --argjson r "$prior_rev" '.[] | select(.revision == $r) | .status' \
+                  2>/dev/null)
+  if [[ "$prior_status" != "deployed" && "$prior_status" != "superseded" ]]; then
+    log_warn "helm-clear: prior revision $prior_rev has status '$prior_status' (not 'deployed'); cannot reconcile in place"
+    return 1
+  fi
+
+  # Patch the stuck Secret's status label to 'superseded'.
+  local secret="sh.helm.release.v1.${release}.v${latest_rev}"
+  ui_dim "  marking $secret as superseded (was the stuck revision)"
+  if ! "${KUBECTL[@]}" label secret "$secret" --namespace "$ns" \
+       --overwrite "status=superseded" >>"$LOG_FILE" 2>&1; then
+    log_warn "helm-clear: kubectl label failed; release secret may have a different name"
+    return 1
+  fi
+
+  # Promote the prior deployed revision to current head if it isn't
+  # already (helm reads the highest-numbered Secret with status=deployed).
+  if [[ "$prior_status" == "superseded" ]]; then
+    local prior_secret="sh.helm.release.v1.${release}.v${prior_rev}"
+    "${KUBECTL[@]}" label secret "$prior_secret" --namespace "$ns" \
+      --overwrite "status=deployed" >>"$LOG_FILE" 2>&1 || true
+  fi
+
+  ui_ok "stuck revision cleared; helm upgrade will create a new revision on top of v$prior_rev"
+  return 0
 }
 
 # _helm_uninstall_quiet <release> <ns>
