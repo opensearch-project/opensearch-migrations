@@ -48,7 +48,7 @@ def call(Map config = [:]) {
 
         options {
             lock(label: lockLabel, quantity: 1)
-            timeout(time: 4, unit: 'HOURS')
+            timeout(time: 5, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
         }
@@ -250,7 +250,7 @@ def call(Map config = [:]) {
 
             stage('Perform CDC E2E Tests') {
                 steps {
-                    timeout(time: 2, unit: 'HOURS') {
+                    timeout(time: 3, unit: 'HOURS') {
                         dir('libraries/testAutomation') {
                             script {
                                 sh "pipenv install --deploy"

@@ -54,7 +54,8 @@ class MATestUserArguments:
     def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool,
                  target_type: str = "OS", image_registry_prefix: str = "",
                  speedup_factor: int = 20, observed_packet_timeout: int = 30,
-                 transform_image_basic: str = "", transform_image_sequence: str = ""):
+                 transform_image_basic: str = "", transform_image_sequence: str = "",
+                 capture_proxy_service_type: str = "LoadBalancer"):
         self.source_version = source_version
         self.target_version = target_version
         self.target_type = target_type
@@ -65,6 +66,7 @@ class MATestUserArguments:
         self.observed_packet_timeout = observed_packet_timeout
         self.transform_image_basic = transform_image_basic
         self.transform_image_sequence = transform_image_sequence
+        self.capture_proxy_service_type = capture_proxy_service_type
 
 
 class MATestBase:
@@ -122,6 +124,7 @@ class MATestBase:
         self.observed_packet_timeout = user_args.observed_packet_timeout
         self.transform_image_basic = user_args.transform_image_basic
         self.transform_image_sequence = user_args.transform_image_sequence
+        self.capture_proxy_service_type = user_args.capture_proxy_service_type
         self.workflow_template = "full-migration-with-clusters"
         self.workflow_snapshot_and_migration_config = None
         self.source_operations = get_operations_library_by_version(self.source_version)

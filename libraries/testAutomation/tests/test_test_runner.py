@@ -118,6 +118,29 @@ class TestFailureDetection:
             runner.run()  # Should not raise
 
 
+class TestPytestCommand:
+    def test_capture_proxy_service_type_is_passed_to_pytest(self):
+        runner = _make_runner(combinations=[("ES_8.19", "OS_3.1")])
+        runner.capture_proxy_service_type = "ClusterIP"
+        runner.k8s_service.exec_background_cmd.return_value = "migration-console-0"
+        runner.k8s_service.poll_cmd_completion.return_value = 0
+        runner.k8s_service.exec_migration_console_cmd.return_value = str({
+            "summary": {
+                "passed": 1,
+                "failed": 0,
+                "source_version": "ES_8.19",
+                "target_version": "OS_3.1",
+                "expected": 1,
+            },
+            "tests": [],
+        })
+
+        runner.run_tests(source_version="ES_8.19", target_version="OS_3.1")
+
+        command_list = runner.k8s_service.exec_background_cmd.call_args.kwargs["command_list"]
+        assert "--capture_proxy_service_type=ClusterIP" in command_list
+
+
 from test_runner import get_version_combinations, TargetType, VALID_SOURCE_VERSIONS
 
 

@@ -72,6 +72,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
           "memory": "3500Mi",
         },
       },
+      "serviceType": "LoadBalancer",
       "suppressCaptureForHeaderMatch": [],
       "suppressCaptureForMethod": "",
       "suppressCaptureForUriPath": "",

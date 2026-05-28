@@ -93,7 +93,7 @@ public class SolrSnapshotReader implements ClusterReader {
 
     @Override
     public IndexMetadata.Factory getIndexMetadata() {
-        return new SolrBackupIndexMetadataFactory(backupDir, schemas, null, version.getMajor());
+        return new SolrBackupIndexMetadataFactory(backupDir, schemas, null);
     }
 
     @Override
