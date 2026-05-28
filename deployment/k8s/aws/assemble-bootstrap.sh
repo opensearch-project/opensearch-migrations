@@ -27,7 +27,23 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLI_DIR="$SCRIPT_DIR/cli"
 OUTPUT_DIR="${SCRIPT_DIR}/dist"
-CLI_VERSION="${CLI_VERSION:-3.2.1}"
+
+# CLI_VERSION resolution order:
+#   1. CLI_VERSION env var / --cli-version flag (release pipelines pin this).
+#   2. Repo's git short-SHA, prefixed with "0.0.0-dev-" so each dev/CI
+#      build lands in its own cache slot. The shim's
+#      "is the binary already installed?" check is keyed on the version
+#      string baked into the shim — without per-build versions, an
+#      operator who runs ./assemble-bootstrap.sh + ./dist/aws-bootstrap.sh
+#      on a fresh build keeps executing the FIRST install they ever did.
+#   3. Hardcoded "0.0.0-dev" as a last-resort fallback for non-git checkouts.
+if [[ -z "${CLI_VERSION:-}" ]]; then
+  if git_sha=$(git -C "$SCRIPT_DIR" rev-parse --short=10 HEAD 2>/dev/null); then
+    CLI_VERSION="0.0.0-dev-${git_sha}"
+  else
+    CLI_VERSION="0.0.0-dev"
+  fi
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -109,7 +125,25 @@ TARBALL_URL="\${MIGRATE_TARBALL_URL:-https://github.com/\${REPO}/releases/downlo
 SHIM_DIR=\$(cd "\$(dirname "\${BASH_SOURCE[0]:-\$0}")" && pwd 2>/dev/null) || SHIM_DIR=""
 LOCAL_TARBALL="\${SHIM_DIR:+\$SHIM_DIR/\$TARBALL_NAME}"
 
+# Refresh the install when:
+#   * the binary doesn't exist yet, OR
+#   * MIGRATE_REINSTALL=1 (operator wants to re-pull, e.g. after a CLI
+#     bug fix in the same release tag), OR
+#   * a sibling tarball is present and is NEWER than the cached binary
+#     (running ./assemble-bootstrap.sh && ./dist/aws-bootstrap.sh on a
+#     fresh repo build should pick up your local changes — without
+#     this, the first install wins forever for that CLI_VERSION).
+need_install=0
 if [[ ! -x "\$BIN" ]]; then
+  need_install=1
+elif [[ "\${MIGRATE_REINSTALL:-0}" == "1" ]]; then
+  need_install=1
+elif [[ -n "\$LOCAL_TARBALL" && -f "\$LOCAL_TARBALL" && "\$LOCAL_TARBALL" -nt "\$BIN" ]]; then
+  need_install=1
+fi
+
+if (( need_install )); then
+  rm -rf "\$PREFIX"
   mkdir -p "\$PREFIX"
   tmp=\$(mktemp -d)
   if [[ -n "\$LOCAL_TARBALL" && -f "\$LOCAL_TARBALL" ]]; then
