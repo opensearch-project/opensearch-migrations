@@ -59,7 +59,10 @@ def call(Map config = [:]) {
     def imageSourceFlag = config.maImagesSource ? "--ma-images-source ${config.maImagesSource}" : ''
 
     sh """
+        set +e
         ${bootstrap.script} \
+          --non-interactive \
+          --verbose \
           ${deployFlag} \
           --stack-name "${stackName}" \
           --stage "${stage}" \
@@ -73,8 +76,29 @@ def call(Map config = [:]) {
           --skip-setting-k8s-context \
           --kubectl-context "${kubectlContext}" \
           --region ${region} \
-          2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
+          2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }
+        rc=\${PIPESTATUS[0]}
+        set -e
+        if [ \$rc -ne 0 ]; then
+          echo "=== migration-assistant FAILED (rc=\$rc) — full migrate.log ==="
+          cat "\$HOME/.opensearch-migrate/${stage}/log/migrate.log" 2>&1 || \
+            echo "(migrate.log not found at \$HOME/.opensearch-migrate/${stage}/log/migrate.log)"
+          echo "=== end migrate.log ==="
+        fi
+        exit \$rc
     """
+
+    // Copy the full migrate.log into the workspace and archive it. Runs
+    // both on success and failure so the log is always captureable.
+    sh """
+        mkdir -p migrate-cli-logs/${stage}
+        cp -R "\$HOME/.opensearch-migrate/${stage}/log/." migrate-cli-logs/${stage}/ 2>/dev/null || true
+    """
+    archiveArtifacts(
+        artifacts: "migrate-cli-logs/**",
+        allowEmptyArchive: true,
+        fingerprint: false
+    )
 
     def exportsMap = parseCfnExports(stackName: stackName, region: region)
     env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']

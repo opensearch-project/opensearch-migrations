@@ -73,7 +73,7 @@ crane_mirror_or_skip() {
   local i=0 ok=0 failed=0
   while IFS= read -r src; do
     [[ -z "$src" ]] && continue
-    ((i++))
+    i=$((i+1))
     local dst ecr_repo
     dst=$(_dst_for "$src" "$ecr_host")
     ecr_repo=$(_ecr_repo_for "$src")
@@ -89,10 +89,10 @@ crane_mirror_or_skip() {
 
     if _crane_copy_retry "$src" "$dst"; then
       printf '%s✓%s\n' "$__UI_C_GREEN" "$__UI_C_RESET"
-      ((ok++))
+      ok=$((ok+1))
     else
       printf '%s✗%s\n' "$__UI_C_RED" "$__UI_C_RESET"
-      ((failed++))
+      failed=$((failed+1))
       log_error "crane copy failed (after retries): $src → $dst (ecr_repo=$ecr_repo)"
     fi
   done <<<"$image_list"
@@ -151,7 +151,7 @@ _crane_mirror_ma_images() {
 
   local pair build_name suffix src dst i=0 ok=0 failed=0 total=4
   for pair in "${pairs[@]}"; do
-    ((i++))
+    i=$((i+1))
     build_name=${pair%%|*}
     suffix=${pair##*|}
     if [[ -n "$ma_src" ]]; then
@@ -164,10 +164,10 @@ _crane_mirror_ma_images() {
 
     if _crane_copy_retry "$src" "$dst"; then
       printf '%s✓%s\n' "$__UI_C_GREEN" "$__UI_C_RESET"
-      ((ok++))
+      ok=$((ok+1))
     else
       printf '%s✗%s\n' "$__UI_C_RED" "$__UI_C_RESET"
-      ((failed++))
+      failed=$((failed+1))
       log_error "MA-image mirror failed: $src → $dst"
     fi
   done

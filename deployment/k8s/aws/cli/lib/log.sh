@@ -100,8 +100,16 @@ log_announce_exit() {
   if [[ "$rc" -ne 0 ]] \
      && [[ "$LOG_FILE" != "/dev/null" && -n "$LOG_FILE" && -f "$LOG_FILE" ]]; then
     if [[ "${MIGRATE_NONINTERACTIVE:-0}" -eq 1 ]] || [[ ! -t 2 ]]; then
-      local n="${MIGRATE_FAIL_LOG_TAIL_LINES:-200}"
-      printf '\n%s== migrate.log (last %s lines) ==%s\n' \
+      # Two pulls: a focused error/warn excerpt (last N matches), then a
+      # tail of N lines for surrounding context. The cfn-event log is so
+      # chatty that a flat tail rarely contains the actual failure.
+      local err_n="${MIGRATE_FAIL_LOG_ERR_LINES:-30}"
+      local n="${MIGRATE_FAIL_LOG_TAIL_LINES:-100}"
+      printf '\n%s== migrate.log: last %s ERROR/WARN lines ==%s\n' \
+        "$__UI_C_DIM" "$err_n" "$__UI_C_RESET" >&2
+      grep -E ' (ERROR|WARN|stream\[(crane|helm|kubectl-wait|installer|diag-)' "$LOG_FILE" \
+        | tail -n "$err_n" >&2 || true
+      printf '\n%s== migrate.log: last %s lines (full tail) ==%s\n' \
         "$__UI_C_DIM" "$n" "$__UI_C_RESET" >&2
       tail -n "$n" "$LOG_FILE" >&2 || true
       printf '%s== end migrate.log ==%s\n' \
