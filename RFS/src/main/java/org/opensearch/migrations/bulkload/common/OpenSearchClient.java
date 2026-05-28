@@ -736,7 +736,7 @@ public abstract class OpenSearchClient {
         }
     }
 
-    private void emitDlqRecord(String indexName, BulkOperationSpec op, ItemFailure failure, FailureClass cls) {
+    void emitDlqRecord(String indexName, BulkOperationSpec op, ItemFailure failure, FailureClass cls) {
         if (dlqSink == null) {
             return;
         }
@@ -773,7 +773,7 @@ public abstract class OpenSearchClient {
         }
     }
 
-    private static String extractDocumentId(BulkOperationSpec op) {
+    static String extractDocumentId(BulkOperationSpec op) {
         if (op == null) return null;
         try {
             // The bulk operation Jackson tree wraps the request payload under an
