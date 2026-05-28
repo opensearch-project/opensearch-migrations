@@ -46,6 +46,8 @@ source "$LIB_DIR/install_tools.sh"
 source "$LIB_DIR/artifacts.sh"
 # shellcheck source=lib/wizard.sh
 source "$LIB_DIR/wizard.sh"
+# shellcheck source=lib/dashboard.sh
+source "$LIB_DIR/dashboard.sh"
 # shellcheck source=lib/cfn.sh
 source "$LIB_DIR/cfn.sh"
 # shellcheck source=lib/crane.sh

@@ -236,7 +236,19 @@ _select_mode() {
 }
 
 # manual_path — full deploy + console exec.
+#
+# Fast path: when state has last_step=ready, the helm release is
+# `deployed`, AND the configured kubectl context still resolves, the
+# operator is just re-entering the console — skip the entire
+# discover→wizard→CFN→crane→helm pipeline (which is idempotent but
+# takes ~30s of API roundtrips) and exec straight into console.
 manual_path() {
+  if _manual_can_skip_to_console; then
+    ui_ok "deploy already complete (last_step=ready); skipping to console"
+    console_exec
+    return
+  fi
+
   ui_step "Discover environment"
   discover_os
   if ! discover_aws; then
@@ -265,6 +277,43 @@ manual_path() {
   state_save
 
   console_exec
+}
+
+# _manual_can_skip_to_console — exit 0 if we can re-enter the console
+# without the full deploy pipeline.
+#
+# Conditions:
+#   * state.last_step == ready (or console_handoff)
+#   * helm release exists and is `deployed`
+#   * the migration-console-0 pod exists in the saved namespace
+# Anything else returns non-zero and the full flow runs.
+_manual_can_skip_to_console() {
+  local last; last=$(state_resumable_step)
+  case "$last" in
+    # All three terminal states imply the deploy ran cleanly.
+    # agent_handoff: previous run finished into the agent.
+    # console_handoff: previous run finished into the console.
+    # ready: deploy finished but console_exec hasn't been called yet.
+    ready|console_handoff|agent_handoff) ;;
+    *) return 1 ;;
+  esac
+
+  local ns; ns=$(state_get STAGE_NAME "")
+  local release; release=$(state_get HELM_RELEASE "$ns")
+  [[ -z "$ns" || -z "$release" ]] && return 1
+
+  helm_kctx_init || return 1
+
+  # helm release must be `deployed`. _helm_release_status echoes empty
+  # when the release isn't installed.
+  local status; status=$(_helm_release_status "$release" "$ns")
+  [[ "$status" == "deployed" ]] || return 1
+
+  # console pod must exist (Running OR a re-startable phase).
+  "${KUBECTL[@]}" get pod migration-console-0 --namespace "$ns" >/dev/null 2>&1 \
+    || return 1
+
+  return 0
 }
 
 # cmd_help — short help text.

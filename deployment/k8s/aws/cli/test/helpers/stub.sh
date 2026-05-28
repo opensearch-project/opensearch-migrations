@@ -21,7 +21,10 @@ setup_isolated_home() {
 
 teardown_isolated_home() {
   if [[ -n "${TMPHOME:-}" && -d "$TMPHOME" ]]; then
-    rm -rf "$TMPHOME"
+    # Some tests exec real agent CLIs (claude, etc.) that write to
+    # subdirs (~/.cache/uv, ~/.builder-mcp) which can race with
+    # rm -rf. Tolerate that — the OS will reap the temp dir.
+    rm -rf "$TMPHOME" 2>/dev/null || true
   fi
 }
 

@@ -1,14 +1,14 @@
 #!/usr/bin/env bats
-# test_cfn_dashboard.bats — unit tests for the live CFN dashboard.
+# test_cfn_dashboard.bats — unit tests for the dashboard module + the
+# CFN-domain classifier glue in cfn.sh.
 #
-# Five concerns:
-#   1. _cfn_res_upsert + _cfn_res_idx round-trip (parallel-array store)
-#   2. _cfn_status_class classifies CFN statuses correctly
-#   3. _cfn_fmt_elapsed formats seconds as "Mm SSs"
-#   4. _repeat_char produces N copies, including the n=0 edge case
-#   5. _cfn_dashboard_render writes to STDERR only and tallies counts right
-#   6. _cfn_log_event writes to log file only, never stdout/stderr terminal
-#   7. _cfn_dash_emit_class respects the row cap
+# Generic dashboard primitives live in lib/dashboard.sh:
+#   1. dash_upsert + internal index round-trip
+#   2. dash_render: stderr-only, counts + bar correct, empty case
+#   3. _dash_emit_class respects row cap
+# CFN-specific:
+#   4. _cfn_status_class classifies CFN statuses correctly
+#   5. _cfn_log_event writes to log file only
 
 setup() {
   load 'helpers/stub.sh'
@@ -16,7 +16,7 @@ setup() {
   load_libs _common.sh ui.sh log.sh state.sh
   log_init
   load_libs version.sh discover.sh install_tools.sh artifacts.sh wizard.sh \
-            cfn.sh
+            dashboard.sh cfn.sh
 }
 
 teardown() {
@@ -36,25 +36,27 @@ run_split() {
 
 # ---------- (1) parallel-array store round-trip ----------
 
-@test "_cfn_res_upsert + _cfn_res_idx insert and update" {
-  _cfn_res_upsert "Vpc8378EB38"     "CREATE_IN_PROGRESS" "" "2026-05-26T22:00Z"
-  _cfn_res_upsert "AppRegistry"     "CREATE_COMPLETE"    "" "2026-05-26T22:01Z"
-  [ "${#_CFN_RES_KEYS[@]}" -eq 2 ]
+@test "dash_upsert inserts and updates without growing rows on update" {
+  dash_init t "Test"
+  dash_status_classifier t _cfn_status_class
+  dash_upsert t "Vpc8378EB38" "CREATE_IN_PROGRESS" "" "ts1"
+  dash_upsert t "AppRegistry" "CREATE_COMPLETE"    "" "ts2"
+  [ "${#__DASH_t_KEYS[@]}" -eq 2 ]
 
   # Update existing — must NOT add a row.
-  _cfn_res_upsert "Vpc8378EB38" "CREATE_COMPLETE" "" "2026-05-26T22:02Z"
-  [ "${#_CFN_RES_KEYS[@]}" -eq 2 ]
+  dash_upsert t "Vpc8378EB38" "CREATE_COMPLETE" "" "ts3"
+  [ "${#__DASH_t_KEYS[@]}" -eq 2 ]
 
-  idx=$(_cfn_res_idx "Vpc8378EB38")
-  [ "$idx" = "0" ]
-  packed="${_CFN_RES_VALS[$idx]}"
-  [[ "$packed" == CREATE_COMPLETE* ]]
-
-  idx=$(_cfn_res_idx "AppRegistry")
-  [ "$idx" = "1" ]
-
-  idx=$(_cfn_res_idx "NotPresent")
-  [ -z "$idx" ]
+  # Look up by inspecting the parallel arrays directly. Indexing
+  # internals are not part of the public API, but the test verifies
+  # the in-place update.
+  local i found=""
+  for ((i=0; i < ${#__DASH_t_KEYS[@]}; i++)); do
+    if [[ "${__DASH_t_KEYS[$i]}" == "Vpc8378EB38" ]]; then
+      found="${__DASH_t_VALS[$i]}"
+    fi
+  done
+  [[ "$found" == CREATE_COMPLETE* ]]
 }
 
 # ---------- (2) status classification ----------
@@ -72,79 +74,78 @@ run_split() {
 
 # ---------- (3) elapsed formatter ----------
 
-@test "_cfn_fmt_elapsed renders M m SS s" {
+@test "_dash_fmt_elapsed renders M m SS s" {
   now=$(date +%s)
-  out=$(_cfn_fmt_elapsed "$(( now - 75 ))")     # 1 minute 15 seconds
+  out=$(_dash_fmt_elapsed "$(( now - 75 ))")     # 1 minute 15 seconds
   [[ "$out" == "1m 15s" ]]
 
-  out=$(_cfn_fmt_elapsed "$(( now - 5 ))")
+  out=$(_dash_fmt_elapsed "$(( now - 5 ))")
   [[ "$out" == "0m 05s" ]]
 
-  out=$(_cfn_fmt_elapsed "$(( now - 3661 ))")
+  out=$(_dash_fmt_elapsed "$(( now - 3661 ))")
   [[ "$out" == "61m 01s" ]]
 }
 
 # ---------- (4) char repeat including n=0 ----------
 
-@test "_repeat_char repeats N copies of the char" {
-  out=$(_repeat_char '#' 5)
+@test "_dash_repeat_char repeats N copies of the char" {
+  out=$(_dash_repeat_char '#' 5)
   [ "$out" = "#####" ]
 
-  out=$(_repeat_char '█' 3)
+  out=$(_dash_repeat_char '█' 3)
   [ "$out" = "███" ]
 }
 
-@test "_repeat_char with n=0 emits nothing" {
-  out=$(_repeat_char '#' 0)
+@test "_dash_repeat_char with n=0 emits nothing" {
+  out=$(_dash_repeat_char '#' 0)
   [ -z "$out" ]
 }
 
-@test "_repeat_char with negative n emits nothing" {
-  out=$(_repeat_char '#' -3)
+@test "_dash_repeat_char with negative n emits nothing" {
+  out=$(_dash_repeat_char '#' -3)
   [ -z "$out" ]
 }
 
 # ---------- (5) dashboard render: stderr only, counts right ----------
 
-@test "_cfn_dashboard_render writes only to stderr" {
+@test "dash_render writes only to stderr" {
   _cfn_dashboard_init "MyStack" "us-east-1"
-  _cfn_res_upsert "A" "CREATE_COMPLETE"    "" "ts1"
-  _cfn_res_upsert "B" "CREATE_IN_PROGRESS" "" "ts2"
-  _cfn_res_upsert "C" "CREATE_FAILED"      "Insufficient capacity" "ts3"
+  dash_upsert cfn "A" "CREATE_COMPLETE"    "" "ts1"
+  dash_upsert cfn "B" "CREATE_IN_PROGRESS" "" "ts2"
+  dash_upsert cfn "C" "CREATE_FAILED"      "Insufficient capacity" "ts3"
 
-  run_split _cfn_dashboard_render "$(date +%s)"
-  [ -z "$STDOUT" ]                       # stdout untouched
+  run_split dash_render cfn "$(date +%s)"
+  [ -z "$STDOUT" ]
   [[ "$STDERR" == *"MyStack"* ]]
   [[ "$STDERR" == *"us-east-1"* ]]
-  [[ "$STDERR" == *"✓ 1"* ]]              # 1 completed
-  [[ "$STDERR" == *"↻ 1"* ]]              # 1 in progress
-  [[ "$STDERR" == *"✗ 1"* ]]              # 1 failed
+  [[ "$STDERR" == *"✓ 1"* ]]
+  [[ "$STDERR" == *"↻ 1"* ]]
+  [[ "$STDERR" == *"✗ 1"* ]]
   [[ "$STDERR" == *"total 3"* ]]
   [[ "$STDERR" == *"CREATE_FAILED"* ]]
   [[ "$STDERR" == *"Insufficient capacity"* ]]
-  _cfn_dashboard_cursor_restore
+  _dash_cursor_restore
 }
 
-@test "_cfn_dashboard_render percentage = completed/total" {
+@test "dash_render percentage = completed/total" {
   _cfn_dashboard_init "S" "r"
-  _cfn_res_upsert "A" "CREATE_COMPLETE"    "" "t"
-  _cfn_res_upsert "B" "CREATE_COMPLETE"    "" "t"
-  _cfn_res_upsert "C" "CREATE_COMPLETE"    "" "t"
-  _cfn_res_upsert "D" "CREATE_IN_PROGRESS" "" "t"
+  dash_upsert cfn "A" "CREATE_COMPLETE"    "" "t"
+  dash_upsert cfn "B" "CREATE_COMPLETE"    "" "t"
+  dash_upsert cfn "C" "CREATE_COMPLETE"    "" "t"
+  dash_upsert cfn "D" "CREATE_IN_PROGRESS" "" "t"
 
-  run_split _cfn_dashboard_render "$(date +%s)"
-  # 3/4 = 75%
+  run_split dash_render cfn "$(date +%s)"
   [[ "$STDERR" == *"75%"* ]]
-  _cfn_dashboard_cursor_restore
+  _dash_cursor_restore
 }
 
-@test "_cfn_dashboard_render handles empty resource set without crashing" {
+@test "dash_render handles empty resource set without crashing" {
   _cfn_dashboard_init "S" "r"
-  run_split _cfn_dashboard_render "$(date +%s)"
+  run_split dash_render cfn "$(date +%s)"
   [ -z "$STDOUT" ]
   [[ "$STDERR" == *"S"* ]]
   [[ "$STDERR" == *"total 0"* ]]
-  _cfn_dashboard_cursor_restore
+  _dash_cursor_restore
 }
 
 # ---------- (6) log-only event writer ----------
@@ -163,27 +164,24 @@ run_split() {
 
 # ---------- (7) row cap ----------
 
-@test "_cfn_dash_emit_class respects max-rows cap" {
+@test "_dash_emit_class respects max-rows cap" {
   _cfn_dashboard_init "S" "r"
-  # Create 10 in-progress resources but cap at 3.
   local i
   for i in 1 2 3 4 5 6 7 8 9 10; do
-    _cfn_res_upsert "R$i" "CREATE_IN_PROGRESS" "" "ts$i"
+    dash_upsert cfn "R$i" "CREATE_IN_PROGRESS" "" "ts$i"
   done
 
-  run_split _cfn_dash_emit_class prog 10 3
-  # The function returns (echoes) the row count on stdout.
+  run_split _dash_emit_class cfn prog 10 3 _cfn_status_class
   [ "$STDOUT" = "3" ]
-  # And prints exactly 3 row lines on stderr.
   rows=$(printf '%s\n' "$STDERR" | grep -c '↻' || true)
   [ "$rows" -eq 3 ]
-  _cfn_dashboard_cursor_restore
+  _dash_cursor_restore
 }
 
-@test "_cfn_dash_emit_class returns 0 when cls_count is 0" {
+@test "_dash_emit_class returns 0 when cls_count is 0" {
   _cfn_dashboard_init "S" "r"
-  run_split _cfn_dash_emit_class fail 0 5
+  run_split _dash_emit_class cfn fail 0 5 _cfn_status_class
   [ "$STDOUT" = "0" ]
   [ -z "$STDERR" ]
-  _cfn_dashboard_cursor_restore
+  _dash_cursor_restore
 }

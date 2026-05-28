@@ -202,88 +202,11 @@ _cfn_tail_events() {
   rm -f "$seen_log"
 }
 
-# ---------- Dashboard internals ----------
+# ---------- Dashboard ----------
 #
-# Resource state is two parallel arrays (bash 3.2-compatible):
-#   _CFN_RES_KEYS[i]  — logical resource ID
-#   _CFN_RES_VALS[i]  — packed "STATUS|REASON|TS|UPDATED_EPOCH"
-#
-# We keep the LAST status per resource. Render time we sort:
-#   * FAILED/ROLLBACK rows first (red)
-#   * IN_PROGRESS rows next (dim, with spinner glyph)
-#   * COMPLETE rows last (green, only the most recent few)
-# bounded by _CFN_DASH_MAX so the panel height is fixed.
-
-_CFN_RES_KEYS=()
-_CFN_RES_VALS=()
-_CFN_DASH_MAX=10
-_CFN_DASH_LAST_HEIGHT=0
-_CFN_DASH_SPINNER='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-_CFN_DASH_TICK=0
-_CFN_DASH_STACK=''
-_CFN_DASH_REGION=''
-
-_cfn_dashboard_init() {
-  _CFN_DASH_STACK="$1"
-  _CFN_DASH_REGION="$2"
-  _CFN_RES_KEYS=()
-  _CFN_RES_VALS=()
-  _CFN_DASH_LAST_HEIGHT=0
-  _CFN_DASH_TICK=0
-  # Hide the cursor while the dashboard owns this region.
-  printf '\033[?25l' >&2
-  on_exit_register _cfn_dashboard_cursor_restore
-}
-
-_cfn_dashboard_cursor_restore() {
-  printf '\033[?25h' >&2
-}
-
-# _cfn_res_idx <logical>  → echoes index in _CFN_RES_KEYS (or empty)
-_cfn_res_idx() {
-  local target="$1" i
-  for ((i=0; i < ${#_CFN_RES_KEYS[@]}; i++)); do
-    if [[ "${_CFN_RES_KEYS[$i]}" == "$target" ]]; then
-      printf '%d\n' "$i"
-      return
-    fi
-  done
-}
-
-# _cfn_res_upsert <logical> <status> <reason> <ts>
-_cfn_res_upsert() {
-  local logical="$1" status="$2" reason="$3" ts="$4"
-  local epoch; epoch=$(date +%s)
-  local packed="$status|$reason|$ts|$epoch"
-  local idx; idx=$(_cfn_res_idx "$logical")
-  if [[ -n "$idx" ]]; then
-    _CFN_RES_VALS[idx]="$packed"
-  else
-    _CFN_RES_KEYS[${#_CFN_RES_KEYS[@]}]="$logical"
-    _CFN_RES_VALS[${#_CFN_RES_VALS[@]}]="$packed"
-  fi
-}
-
-# _cfn_fmt_elapsed <started_epoch>  → "Mm Ss"
-_cfn_fmt_elapsed() {
-  local started="$1"
-  local now; now=$(date +%s)
-  local d=$(( now - started ))
-  local m=$(( d / 60 ))
-  local s=$(( d % 60 ))
-  printf '%dm %02ds\n' "$m" "$s"
-}
-
-# _repeat_char <char> <n>  → echoes char × n
-_repeat_char() {
-  local ch="$1" n="$2"
-  if (( n <= 0 )); then return; fi
-  local out
-  printf -v out '%*s' "$n" ''
-  printf '%s\n' "${out// /$ch}"
-}
-
-# _cfn_status_class <status>  → fail|prog|done|other
+# CFN-domain status classifier. Every other dashboard mechanic
+# (state, render, finish) is delegated to lib/dashboard.sh which
+# multiple modules share.
 _cfn_status_class() {
   case "$1" in
     *FAILED|*ROLLBACK*) printf 'fail\n' ;;
@@ -293,152 +216,16 @@ _cfn_status_class() {
   esac
 }
 
-# _cfn_dashboard_render <started_epoch>
-# Redraws the panel by moving the cursor up by the previous render height
-# and clearing each line. Always writes to stderr (UI discipline).
-_cfn_dashboard_render() {
-  local started="$1"
-  _CFN_DASH_TICK=$(( _CFN_DASH_TICK + 1 ))
-  local glyph_idx=$(( _CFN_DASH_TICK % ${#_CFN_DASH_SPINNER} ))
-  local glyph="${_CFN_DASH_SPINNER:$glyph_idx:1}"
-
-  # Tally counts.
-  local total=${#_CFN_RES_KEYS[@]}
-  local in_progress=0 completed=0 failed=0 i v cls
-  for ((i=0; i < total; i++)); do
-    v="${_CFN_RES_VALS[$i]}"
-    cls=$(_cfn_status_class "${v%%|*}")
-    case "$cls" in
-      fail) failed=$((failed + 1)) ;;
-      prog) in_progress=$((in_progress + 1)) ;;
-      done) completed=$((completed + 1)) ;;
-    esac
-  done
-
-  # Move cursor up by previous render height + erase those lines.
-  if (( _CFN_DASH_LAST_HEIGHT > 0 )); then
-    printf '\033[%dA' "$_CFN_DASH_LAST_HEIGHT" >&2
-    printf '\033[J' >&2
-  fi
-
-  local height=0
-  local elapsed; elapsed=$(_cfn_fmt_elapsed "$started")
-
-  # Header line.
-  printf '%s%s%s  %sCFN%s %s/%s  %selapsed %s%s\n' \
-    "$__UI_C_BOLD" "$glyph" "$__UI_C_RESET" \
-    "$__UI_C_DIM" "$__UI_C_RESET" \
-    "$_CFN_DASH_STACK" "$_CFN_DASH_REGION" \
-    "$__UI_C_DIM" "$elapsed" "$__UI_C_RESET" >&2
-  height=$(( height + 1 ))
-
-  # Counts + progress bar.
-  local seen=$(( total > 0 ? total : 1 ))
-  local pct=$(( (completed * 100) / seen ))
-  local bar_w=24
-  local fill=$(( (completed * bar_w) / seen ))
-  (( fill > bar_w )) && fill=$bar_w
-  local filled empty
-  filled=$(_repeat_char '█' "$fill")
-  empty=$(_repeat_char '░' "$(( bar_w - fill ))")
-  printf '  %s%s%s%s  %d%%   %s✓ %d%s  %s↻ %d%s  %s✗ %d%s  total %d\n' \
-    "$__UI_C_GREEN" "$filled" "$__UI_C_DIM" "$empty" \
-    "$pct" \
-    "$__UI_C_GREEN" "$completed" "$__UI_C_RESET" \
-    "$__UI_C_DIM" "$in_progress" "$__UI_C_RESET" \
-    "$__UI_C_RED" "$failed" "$__UI_C_RESET" \
-    "$total" >&2
-  printf '%s\n' "$__UI_C_RESET" >&2 # reset after the dim empty bar
-  height=$(( height + 2 ))
-
-  # Resource rows: failed first, then in_progress, then most-recent done.
-  # _cfn_dash_emit_class echoes the number of rows it actually printed so
-  # the parent can track the panel height.
-  local rows_left=$_CFN_DASH_MAX printed
-  printed=$(_cfn_dash_emit_class fail "$failed" "$rows_left")
-  height=$(( height + printed ))
-  rows_left=$(( rows_left - printed ))
-  if (( rows_left > 0 )); then
-    printed=$(_cfn_dash_emit_class prog "$in_progress" "$rows_left")
-    height=$(( height + printed ))
-    rows_left=$(( rows_left - printed ))
-  fi
-  if (( rows_left > 0 )); then
-    # quoted "done" so shellcheck doesn't confuse the class name with the keyword
-    printed=$(_cfn_dash_emit_class "done" "$completed" "$rows_left")
-    height=$(( height + printed ))
-  fi
-
-  # Hint line.
-  printf '%s  %s%s\n' "$__UI_C_DIM" "(Ctrl-C to abort; full event log: $LOG_FILE)" "$__UI_C_RESET" >&2
-  height=$(( height + 1 ))
-
-  _CFN_DASH_LAST_HEIGHT=$height
+_cfn_dashboard_init() {
+  local stack="$1" region="$2"
+  dash_init cfn "$(printf '%sCFN%s %s/%s' "$__UI_C_DIM" "$__UI_C_RESET" "$stack" "$region")"
+  dash_status_classifier cfn _cfn_status_class
 }
 
-# _cfn_dash_emit_class <class> <count_in_class> <max_rows>
-# Iterates resources of <class>, prints up to <max_rows> formatted rows on
-# stderr. Echoes the number of rows actually printed (so the parent can
-# track height).
-_cfn_dash_emit_class() {
-  local cls="$1" cls_count="$2" max="$3"
-  (( cls_count == 0 || max == 0 )) && { printf '0\n'; return; }
-
-  local color glyph
-  case "$cls" in
-    fail) color="$__UI_C_RED";    glyph='✗' ;;
-    prog) color="$__UI_C_DIM";    glyph='↻' ;;
-    done) color="$__UI_C_GREEN";  glyph='✓' ;;
-    *)    color="$__UI_C_RESET";  glyph='·' ;;
-  esac
-
-  # Build a list of "epoch|logical|status|reason" entries for this class,
-  # then sort newest-first, then print up to <max>.
-  local i v ts_epoch entries=() logical
-  for ((i=0; i < ${#_CFN_RES_KEYS[@]}; i++)); do
-    v="${_CFN_RES_VALS[$i]}"
-    [[ "$(_cfn_status_class "${v%%|*}")" == "$cls" ]] || continue
-    logical="${_CFN_RES_KEYS[$i]}"
-    ts_epoch="${v##*|}"
-    entries[${#entries[@]}]="$ts_epoch|$logical|$v"
-  done
-
-  # Sort by leading epoch descending.
-  local printed=0 line status reason
-  while IFS= read -r line; do
-    (( printed >= max )) && break
-    [[ -z "$line" ]] && continue
-    # Parse: <epoch>|<logical>|<status>|<reason>|<ts>|<epoch>
-    local rest=${line#*|}
-    logical=${rest%%|*}
-    rest=${rest#*|}
-    status=${rest%%|*}
-    rest=${rest#*|}
-    reason=${rest%%|*}
-    local short="$logical"
-    if (( ${#short} > 38 )); then
-      short="${short:0:35}…"
-    fi
-    if [[ -n "$reason" && "$reason" != "None" ]]; then
-      printf '  %s%s %-38s %-22s  %s%s\n' \
-        "$color" "$glyph" "$short" "$status" "$reason" "$__UI_C_RESET" >&2
-    else
-      printf '  %s%s %-38s %-22s%s\n' \
-        "$color" "$glyph" "$short" "$status" "$__UI_C_RESET" >&2
-    fi
-    printed=$((printed + 1))
-  done < <(printf '%s\n' "${entries[@]+"${entries[@]}"}" | sort -t'|' -k1,1 -nr)
-
-  printf '%d\n' "$printed"
-}
-
-_cfn_dashboard_finish() {
-  local started="$1"
-  # Final repaint without spinner glyph; cursor restored.
-  _CFN_DASH_TICK=0
-  _cfn_dashboard_render "$started"
-  _cfn_dashboard_cursor_restore
-}
+# Compatibility shims for the rest of cfn.sh and any tests.
+_cfn_res_upsert()      { dash_upsert cfn "$@"; }
+_cfn_dashboard_render() { dash_render cfn "$@"; }
+_cfn_dashboard_finish() { dash_finish cfn "$@"; }
 
 # _cfn_log_event — write the event to the main log only (no terminal).
 _cfn_log_event() {

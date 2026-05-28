@@ -56,10 +56,12 @@ teardown() {
 # _diag <message> — emit a labelled block of $output + $status to bats's
 # fd-3 (visible in CI logs) so a failing assertion explains itself.
 _diag() {
-  printf '\n--- %s ---\n' "$1" >&3
-  printf '  status=%s\n' "${status:-(unset)}" >&3
-  printf '  output:\n%s\n' "${output:-(empty)}" | sed 's/^/    /' >&3
-  printf '--- end ---\n' >&3
+  printf '%s\n' "" >&3
+  printf '%s\n' "--- $1 ---" >&3
+  printf '%s\n' "  status=${status:-(unset)}" >&3
+  printf '%s\n' "  output:" >&3
+  printf '%s\n' "${output:-(empty)}" | sed 's/^/    /' >&3
+  printf '%s\n' "--- end ---" >&3
 }
 
 @test "default run forces Manual mode (no driver prompt)" {
