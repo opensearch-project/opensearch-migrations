@@ -53,5 +53,6 @@ frontend/
 .settings/
 .factorypath
 deployment/k8s/aws/dist/
+deployment/k8s/aws/cli/dist/
 .scannerwork/
 .sisyphus/

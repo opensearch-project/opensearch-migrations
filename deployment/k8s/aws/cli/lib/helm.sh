@@ -290,6 +290,7 @@ helm_recover_if_stuck() {
       ;;
     pending-upgrade|failed)
       ui_warn "previous helm operation for '$release' is stuck (status=$status)"
+      _helm_explain_failure "$release" "$ns"
       ui_info "Recovery options:"
       printf '    %s[1]%s rollback to the last successful revision\n' "$__UI_C_BOLD" "$__UI_C_RESET" >&2
       printf '    %s[2]%s uninstall the release entirely (then helm will reinstall)\n' "$__UI_C_BOLD" "$__UI_C_RESET" >&2
@@ -383,6 +384,33 @@ helm_recover_orphan_jobs() {
     set -e
   done <<<"$stuck_jobs"
   ui_ok "orphan Jobs cleared"
+}
+
+# _helm_explain_failure <release> <ns> — print the WHY behind a failed
+# / pending-upgrade release so the operator can decide between rollback,
+# uninstall, and "leave it alone" without opening a second terminal.
+#
+# Surfaces:
+#   * helm's own DESCRIPTION line (often names the failed hook resource)
+#   * migration-console-0's pod phase + container readiness (so a
+#     "release failed but pod is Running/Ready" case is visible up front)
+#
+# Stderr only, dim color — informational, not an error.
+_helm_explain_failure() {
+  local release="$1" ns="$2"
+  local desc console
+  desc=$("${HELM[@]}" status "$release" --namespace "$ns" -o json 2>/dev/null \
+        | jq -r '.info.description // empty' 2>/dev/null)
+  if [[ -n "$desc" ]]; then
+    printf '%s  why: %s%s\n' "$__UI_C_DIM" "$desc" "$__UI_C_RESET" >&2
+  fi
+  console=$("${KUBECTL[@]}" get pod migration-console-0 --namespace "$ns" \
+              -o jsonpath='{.status.phase}|{range .status.containerStatuses[*]}{.ready},{end}' \
+              2>/dev/null) || console=""
+  if [[ -n "$console" ]]; then
+    printf '%s  migration-console-0: %s%s\n' \
+      "$__UI_C_DIM" "$console" "$__UI_C_RESET" >&2
+  fi
 }
 
 # _helm_release_status <release> <ns> → echoes the helm status (deployed,
