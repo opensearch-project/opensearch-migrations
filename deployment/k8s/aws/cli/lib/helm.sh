@@ -25,17 +25,19 @@ helm_kctx_init() {
 }
 
 HELM_CHART_NAME='migration-assistant'
-# IMPORTANT: the chart templates `.Release.Name` into the
-# default-create-argo-migration-templates Job's NAMESPACE env var. The
-# Job then `kubectl apply -f - -n $NAMESPACE`s argo workflow YAMLs that
-# the chart rendered with `metadata.namespace: <kubernetes namespace>`.
-# If release_name != namespace, the apply fails with:
-#   "the namespace from the provided object 'X' does not match 'Y'".
-# So we always run with release_name == namespace, matching the
-# upstream aws-bootstrap.sh contract:
-#   helm install "$namespace" … --namespace $namespace
-# The single var below holds both.
-HELM_DEFAULT_NS='ma'
+# The Migration Assistant chart hardcodes namespace=ma in its rendered
+# resources AND uses .Release.Name to write the namespace env var into
+# its post-install argo-templates Job. To keep things consistent we
+# pin BOTH the helm release name AND the kubernetes namespace to "ma"
+# regardless of the operator's chosen stage. The stage name is the
+# CFN-stack / ECR-repo / state-directory namer; it does NOT flow
+# through to k8s.
+#
+# This means a single EKS cluster runs ONE migration-assistant install
+# at a time (release=ma, ns=ma). Multiple stages → multiple CFN stacks
+# → multiple EKS clusters. That matches the aws-bootstrap.sh contract.
+HELM_RELEASE_NAME='ma'
+HELM_NAMESPACE='ma'
 
 helm_install_or_upgrade() {
   local stack_name; stack_name=$(state_get CFN_STACK_NAME)
@@ -103,27 +105,24 @@ helm_install_or_upgrade() {
   # otherwise fall back to the registry CFN provisioned, OR an empty value
   # which means we'll use the public images path.
   local registry; registry=$(state_get CRANE_REGISTRY "$registry_from_cfn")
-  local stage;    stage=$(state_get STAGE_NAME "$HELM_DEFAULT_NS")
+  local stage;    stage=$(state_get STAGE_NAME "default")
   local mirror_chosen; mirror_chosen=$(state_get MIRROR_IMAGES Y)
 
-  # Release name == namespace. The chart's
-  # default-create-argo-migration-templates Job templates Release.Name
-  # into a $NAMESPACE env var that's then used to `kubectl apply` the
-  # rendered argo workflow YAMLs. If release_name != namespace the apply
-  # 100% fails with:
-  #   "the namespace from the provided object 'X' does not match 'Y'"
-  # So we tie them together. aws-bootstrap.sh does the same.
-  local HELM_NS="$stage"
+  # The helm release name AND k8s namespace are pinned to "ma" — the
+  # chart's templates encode that name in several places (rendered
+  # resource namespaces, the post-install argo-templates Job's
+  # NAMESPACE env). The operator's chosen `stage` only affects CFN
+  # stack naming, ECR repo naming, and our state directory.
+  local release="$HELM_RELEASE_NAME"
+  local HELM_NS="$HELM_NAMESPACE"
 
-  ui_step "Installing/upgrading helm release: $stage in namespace $HELM_NS"
+  ui_step "Installing/upgrading helm release: $release (stage=$stage, namespace=$HELM_NS)"
 
   # Idempotent namespace ensure — quiet on success, loud on failure.
-  # We don't pipe yaml through log_stream because that streams the YAML
-  # body to stderr instead of into kubectl apply.
   helm_ensure_namespace "$HELM_NS"
 
   # Recover from a stuck/failed prior release before invoking helm.
-  helm_recover_if_stuck "$stage" "$HELM_NS" || return $?
+  helm_recover_if_stuck "$release" "$HELM_NS" || return $?
 
   local values_file="$STAGE_DIR/helm-values.yaml"
   _write_helm_values "$values_file"
@@ -187,7 +186,7 @@ helm_install_or_upgrade() {
   # `<release>-helm-installer` Job. The outer helm command is silent for
   # the entire duration of that Job (5-15 min). Stream the installer
   # pod's logs in parallel.
-  helm_watch_installer_logs "$stage" "$HELM_NS" "$our_pid" &
+  helm_watch_installer_logs "$release" "$HELM_NS" "$our_pid" &
   local installer_pid=$!
   on_signal_track_pid "$installer_pid"
 
@@ -199,7 +198,7 @@ helm_install_or_upgrade() {
   # gets nothing but the bare "Error: …" line. Don't remove the set +e.
   local helm_rc=0
   set +e
-  log_stream "helm" "${HELM[@]}" upgrade --install "$stage" "$chart" \
+  log_stream "helm" "${HELM[@]}" upgrade --install "$release" "$chart" \
     --namespace "$HELM_NS" \
     --values "$chart_extract/values.yaml" \
     --values "$chart_extract/valuesEks.yaml" \
@@ -225,7 +224,7 @@ helm_install_or_upgrade() {
   on_signal_untrack_pid "$installer_pid"
 
   if [[ $helm_rc -ne 0 ]]; then
-    helm_dump_diagnostics "$stage" "$HELM_NS"
+    helm_dump_diagnostics "$release" "$HELM_NS"
     ui_err "helm install/upgrade failed (rc=$helm_rc); diagnostics in $LOG_FILE"
     ui_dim "  retry hint: rerun migration-assistant; recovery will clean up stuck releases AND orphan helm-hook Jobs"
     return $helm_rc
@@ -241,13 +240,13 @@ helm_install_or_upgrade() {
   wait_rc=$?
   set -e
   if [[ $wait_rc -ne 0 ]]; then
-    helm_dump_diagnostics "$stage" "$HELM_NS"
+    helm_dump_diagnostics "$release" "$HELM_NS"
     ui_err "migration-console-0 did not become Ready (rc=$wait_rc); diagnostics in $LOG_FILE"
     return $wait_rc
   fi
 
   ui_ok "migration-console-0 is Ready"
-  state_set HELM_RELEASE "$stage"
+  state_set HELM_RELEASE "$release"
   state_set last_step "helm_done"
   state_save
 }

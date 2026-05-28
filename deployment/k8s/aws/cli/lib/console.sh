@@ -21,12 +21,11 @@ cmd_console() {
   done
   log_init
   state_load
-  local ns; ns=$(state_get STAGE_NAME "")
-  if [[ -z "$ns" ]]; then
+  if [[ -z "$(state_get STAGE_NAME "")" ]]; then
     die "no deployed stage found in state. Run \`migration-assistant\` first or pass --stage <name>."
   fi
   helm_kctx_init
-  _console_exec_into_pod "$ns"
+  _console_exec_into_pod "$HELM_NAMESPACE"
 }
 
 console_exec() {
@@ -46,9 +45,8 @@ console_exec() {
     return 0
   fi
 
-  local ns; ns=$(state_get STAGE_NAME "$HELM_DEFAULT_NS")
   helm_kctx_init
-  _console_exec_into_pod "$ns"
+  _console_exec_into_pod "$HELM_NAMESPACE"
 }
 
 # _console_exec_into_pod <ns>

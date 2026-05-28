@@ -70,6 +70,7 @@ case "${1:-resume}" in
   console)               cmd_console  "${@:2}" ;;
   agent)                 cmd_agent    "${@:2}" ;;
   diag)                  cmd_diag     "${@:2}" ;;
+  clear)                 cmd_clear    "${@:2}" ;;
   cleanup)               cmd_cleanup  "${@:2}" ;;
   version|--version|-V)  printf '%s\n' "$CLI_VERSION" ;;
   help|--help|-h)        cmd_help ;;

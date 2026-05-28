@@ -53,9 +53,11 @@ cmd_resume() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       # Native flags
-      # --stage doubles as STAGE_NAME (helm release + k8s namespace + CFN
-      # suffix). The first pass already set STAGE/STAGE_DIR; here we
-      # write STAGE_NAME so wizard/cfn/helm see it without re-prompting.
+      # --stage names the CFN stack suffix + ECR repo + state dir. It
+      # does NOT flow through to the helm release name or k8s namespace
+      # — those are always "ma" because the chart hardcodes that name
+      # in its rendered resources. STAGE_NAME's role is purely
+      # AWS-side identifier.
       --stage)        state_set STAGE_NAME "$2"; shift 2 ;;
       --stage=*)      state_set STAGE_NAME "${1#--stage=}"; shift ;;
       --switch)       force_switch=1; shift ;;
@@ -295,9 +297,9 @@ _manual_can_skip_to_console() {
     *) return 1 ;;
   esac
 
-  local ns; ns=$(state_get STAGE_NAME "")
-  local release; release=$(state_get HELM_RELEASE "$ns")
-  [[ -z "$ns" || -z "$release" ]] && return 1
+  local ns="$HELM_NAMESPACE"
+  local release="$HELM_RELEASE_NAME"
+  [[ -z "$(state_get STAGE_NAME "")" ]] && return 1
 
   helm_kctx_init || return 1
 
@@ -326,13 +328,15 @@ Usage:
                                                  Open an LLM coding agent
                                                  (claude / codex / q / kiro)
   migration-assistant diag     [--stage NAME]    Dump diagnostics to migrate.log
+  migration-assistant clear    [--stage NAME]    Wipe local state/history (no AWS changes)
   migration-assistant cleanup  [--stage NAME]    Tear down deploy + archive state
   migration-assistant version                    Print CLI version
   migration-assistant help                       This help
 
 Common flags:
-  --stage NAME            Stage name. Used as helm release, k8s namespace,
-                          and CFN stack suffix. Default: ma.
+  --stage NAME            Stage name. Suffixes the CFN stack name and
+                          ECR repo path. (helm release + k8s namespace
+                          are always "ma" — chart contract.)
   --region REGION         AWS region. Default: us-east-1.
   --version VER           Pin Migration Assistant artifact version.
                           Default: latest published release.

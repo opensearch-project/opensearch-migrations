@@ -39,8 +39,7 @@ cmd_agent() {
   done
   log_init
   state_load
-  local ns; ns=$(state_get STAGE_NAME "")
-  if [[ -z "$ns" ]]; then
+  if [[ -z "$(state_get STAGE_NAME "")" ]]; then
     die "no deployed stage found in state. Run \`migration-assistant\` first or pass --stage <name>."
   fi
   helm_kctx_init

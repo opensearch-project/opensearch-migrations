@@ -150,7 +150,7 @@ EOF
 # ---------- (5) static checks: helm.sh wires it up ----------
 
 @test "helm.sh calls helm_watch_installer_logs alongside helm_watch_pods" {
-  grep -q 'helm_watch_installer_logs "\$stage" "\$HELM_NS" "\$our_pid"' "$PROJECT_ROOT/lib/helm.sh"
+  grep -q 'helm_watch_installer_logs "\$release" "\$HELM_NS" "\$our_pid"' "$PROJECT_ROOT/lib/helm.sh"
 }
 
 @test "helm.sh tracks installer_pid for SIGINT cleanup" {

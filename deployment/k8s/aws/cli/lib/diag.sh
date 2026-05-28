@@ -23,12 +23,10 @@ cmd_diag() {
   ui_dim "  cli=$CLI_VERSION  stage=$STAGE  workdir=$STAGE_DIR"
   state_load
 
-  local release ns
-  release=$(state_get HELM_RELEASE "$(state_get STAGE_NAME "")")
-  ns=$(state_get STAGE_NAME "")
-  if [[ -z "$release" || -z "$ns" ]]; then
+  if [[ -z "$(state_get STAGE_NAME "")" ]]; then
     die "no deployed stage found in state. Run \`migration-assistant\` first or pass --stage <name>."
   fi
+  local release="${HELM_RELEASE_NAME}" ns="${HELM_NAMESPACE}"
 
   helm_kctx_init
   ui_info "stage=$STAGE  release=$release  namespace=$ns"

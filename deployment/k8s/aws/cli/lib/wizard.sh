@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # wizard.sh — collect deploy-time inputs.
 #
-# Three inputs. That's it. Anything migration-specific (source endpoint,
-# engine, auth, target type) is collected later — by the migration console's
-# own CLI in Manual mode, or by the agent in Agent mode.
-#
-#   STAGE_NAME     — Helm release name AND Kubernetes namespace AND CFN
-#                    stack suffix. Default "ma". Must equal namespace because
-#                    the chart's create-argo-migration-templates Job uses
-#                    Release.Name as the namespace for `kubectl apply`.
+# Four inputs:
+#   AWS_REGION     — region the CFN stack + EKS cluster + ECR live in.
+#                    Defaulted from the AWS creds, but the operator
+#                    confirms / changes (creds-default isn't right
+#                    often enough — many operators have us-west-2
+#                    in ~/.aws/config but want to deploy us-east-1).
+#   STAGE_NAME     — CFN stack suffix + ECR repo path + state dir.
+#                    The chart hardcodes the helm release name and
+#                    k8s namespace as "ma"; STAGE_NAME does NOT flow
+#                    through to either of those.
 #   MIRROR_IMAGES  — Y/N (skip = pass --use-public-images equivalent)
 #   MA_VERSION     — pinned Migration Assistant artifact version
 #
@@ -28,22 +30,37 @@ wizard_collect() {
   # Resume fast-path: if the operator accepted the resume prompt and
   # all the wizard inputs are already in state, skip every prompt.
   if [[ "${MIGRATE_RESUMING:-0}" -eq 1 ]] \
+      && [[ -n "$(state_get AWS_REGION)" ]] \
       && [[ -n "$(state_get STAGE_NAME)" ]] \
       && [[ -n "$(state_get MIRROR_IMAGES)" ]] \
       && [[ -n "$(state_get MA_VERSION)" ]]; then
     ui_dim "  resuming — using saved deploy config:"
-    ui_dim "    stage_name=$(state_get STAGE_NAME)"
-    ui_dim "    mirror_images=$(state_get MIRROR_IMAGES)"
-    ui_dim "    ma_version=$(state_get MA_VERSION)"
+    ui_dim "    aws_region    = $(state_get AWS_REGION)"
+    ui_dim "    stage_name    = $(state_get STAGE_NAME)"
+    ui_dim "    mirror_images = $(state_get MIRROR_IMAGES)"
+    ui_dim "    ma_version    = $(state_get MA_VERSION)"
     return 0
   fi
 
-  local stage_name mirror ma_ver
+  local region stage_name mirror ma_ver
 
-  # Adopt-existing path. discover_resources writes CFN_MA_STACKS into
-  # state — a space-separated list of MigrationAssistant-* stacks
-  # already in the account/region. If we find any, offer to adopt one
-  # before prompting for a fresh stage name.
+  # 1. AWS region. discover_aws populates AWS_REGION from the creds /
+  # AWS_REGION env var; the operator confirms or overrides. We
+  # surface the source so they can spot a mismatch.
+  local region_default
+  region_default=$(state_get AWS_REGION "")
+  if [[ -z "$region_default" ]]; then
+    region_default="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
+  fi
+  ui_dim "  AWS creds default: ${AWS_REGION:-${AWS_DEFAULT_REGION:-(unset)}}"
+  ui_prompt "AWS region (deploy target)" "$region_default" region
+  state_set AWS_REGION "$region"
+  export AWS_REGION="$region"
+
+  # 2. Adopt-existing path. discover_resources writes CFN_MA_STACKS
+  # into state — a space-separated list of MigrationAssistant-*
+  # stacks already in the account/region. If we find any, offer to
+  # adopt one before prompting for a fresh stage name.
   local existing; existing=$(state_get CFN_MA_STACKS "")
   if [[ -n "$existing" ]] && [[ -z "$(state_get STAGE_NAME "")" ]]; then
     local adopted
@@ -58,9 +75,7 @@ wizard_collect() {
   fi
 
   if [[ -z "$(state_get STAGE_NAME "")" ]]; then
-    # Default to "ma" — the kubernetes namespace the chart expects.
-    # See lib/helm.sh comment for why release name == namespace.
-    ui_prompt "Stage name (used for helm release, k8s namespace, and CFN suffix)" \
+    ui_prompt "Stage name (used for the CFN stack + ECR repos; the helm release and namespace are always 'ma')" \
               "$(state_get STAGE_NAME ma)" stage_name
     state_set STAGE_NAME "$stage_name"
   fi

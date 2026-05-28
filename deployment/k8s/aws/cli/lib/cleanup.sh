@@ -21,8 +21,13 @@ cmd_cleanup() {
   local stack;   stack=$(state_get CFN_STACK_NAME "")
   local release; release=$(state_get HELM_RELEASE "")
   local region;  region=$(state_get AWS_REGION "")
-  # Release-name == namespace per chart contract; STAGE_NAME holds both.
-  local helm_ns; helm_ns=$(state_get STAGE_NAME "$release")
+  # Release name AND namespace are pinned to "ma" (chart contract).
+  # If state has any deploy artifact AT ALL but no HELM_RELEASE row
+  # (legacy state files), assume the standard "ma" release.
+  local helm_ns="$HELM_NAMESPACE"
+  if [[ -z "$release" && -n "$stack" ]]; then
+    release="$HELM_RELEASE_NAME"
+  fi
   # Pick up KUBECTL_CONTEXT from state so cleanup operates on the right
   # cluster when the operator's active context is something else.
   helm_kctx_init
@@ -60,4 +65,35 @@ cmd_cleanup() {
 
   state_archive
   ui_ok "stage '$STAGE' cleaned up; state archived under $STAGE_DIR/archive/"
+}
+
+# cmd_clear — wipe local state + history for the current stage WITHOUT
+# touching AWS / kubernetes. Useful when state has drifted from the
+# real world (e.g. AWS resources got deleted out of band) and the
+# operator wants a fresh deploy without `cleanup` failing on missing
+# stacks.
+cmd_clear() {
+  local args=("$@") i force=0
+  for ((i = 0; i < ${#args[@]}; i++)); do
+    case "${args[$i]}" in
+      --stage)    STAGE="${args[$((i + 1))]}"; STAGE_DIR="$MIGRATE_HOME/$STAGE" ;;
+      --stage=*)  STAGE="${args[$i]#--stage=}"; STAGE_DIR="$MIGRATE_HOME/$STAGE" ;;
+      -y|--yes)   force=1 ;;
+    esac
+  done
+  log_init
+  ui_banner "Clear local state for stage: $STAGE"
+  if [[ ! -d "$STAGE_DIR" ]]; then
+    ui_info "nothing to clear; $STAGE_DIR does not exist"
+    return 0
+  fi
+  ui_dim "  workdir: $STAGE_DIR"
+  ui_dim "  this removes state.env / state.json / log / plan / history"
+  ui_dim "  this does NOT touch AWS resources or kubernetes (use 'cleanup' for that)"
+  if (( ! force )) && ! ui_confirm "Wipe local state for stage '$STAGE'?" "N"; then
+    ui_info "clear cancelled"
+    return 0
+  fi
+  rm -rf "$STAGE_DIR"
+  ui_ok "stage '$STAGE' state cleared"
 }

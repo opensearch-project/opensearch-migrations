@@ -1,15 +1,14 @@
 #!/usr/bin/env bats
-# test_release_name_eq_namespace.bats — regression guard for the
-# release-name vs namespace mismatch bug.
+# test_release_name_eq_namespace.bats — pin the helm release name and
+# k8s namespace to "ma" regardless of the operator's chosen stage.
 #
-# The chart's `default-create-argo-migration-templates` Job templates
+# The chart's create-argo-migration-templates Job templates
 # Release.Name into a $NAMESPACE env var, then `kubectl apply -f - -n
-# $NAMESPACE` rendered argo workflow YAMLs. If release_name != namespace
-# the apply fails:
-#   "the namespace from the provided object 'X' does not match 'Y'"
+# $NAMESPACE` rendered argo workflow YAMLs that hardcode
+# `metadata.namespace: ma`. Release name AND namespace MUST be "ma".
 #
-# We tie helm release name to the kubernetes namespace by deriving both
-# from STAGE_NAME. Default STAGE_NAME = "ma" (matches aws-bootstrap.sh).
+# Stage is the AWS-side identifier (CFN stack suffix, ECR repo, state
+# dir); it does NOT flow through to k8s.
 
 setup() {
   load 'helpers/stub.sh'
@@ -17,7 +16,8 @@ setup() {
   PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   export PROJECT_ROOT
   load_libs _common.sh ui.sh log.sh state.sh version.sh discover.sh \
-            install_tools.sh artifacts.sh wizard.sh cfn.sh crane.sh helm.sh
+            install_tools.sh artifacts.sh wizard.sh dashboard.sh cfn.sh \
+            crane.sh helm.sh
   log_init
 }
 
@@ -25,24 +25,34 @@ teardown() {
   teardown_isolated_home
 }
 
-# ---------- (1) HELM_DEFAULT_NS is "ma" (matches upstream bootstrap) ----------
+# ---------- HELM_RELEASE_NAME / HELM_NAMESPACE constants ----------
 
-@test "HELM_DEFAULT_NS is 'ma' (matches aws-bootstrap.sh default)" {
-  [ "$HELM_DEFAULT_NS" = "ma" ]
+@test "HELM_RELEASE_NAME is pinned to 'ma'" {
+  [ "$HELM_RELEASE_NAME" = "ma" ]
 }
 
-@test "helm.sh no longer hardcodes a HELM_NS=ma constant separate from STAGE" {
-  # The buggy version had `HELM_NS='ma'` at module scope while STAGE_NAME
-  # could be 'default' — that mismatch was the bug. Replaced with
-  # HELM_DEFAULT_NS plus a per-call local HELM_NS bound to STAGE_NAME.
-  ! grep -E "^HELM_NS='ma'" "$PROJECT_ROOT/lib/helm.sh"
+@test "HELM_NAMESPACE is pinned to 'ma'" {
+  [ "$HELM_NAMESPACE" = "ma" ]
 }
 
-# ---------- (2) wizard default is "ma" ----------
+@test "helm.sh no longer reads STAGE_NAME for the helm release / namespace" {
+  # Regression guard: the old code did
+  #   local stage=\$(state_get STAGE_NAME …)
+  #   helm upgrade --install "\$stage" --namespace "\$stage"
+  # Operators with --stage prod would then get a release named "prod"
+  # in namespace "prod", which the chart can't render.
+  ! grep -E 'helm.*upgrade --install "\$stage"' "$PROJECT_ROOT/lib/helm.sh"
+  ! grep -E 'local HELM_NS="\$stage"'           "$PROJECT_ROOT/lib/helm.sh"
+}
+
+@test "helm_install_or_upgrade uses HELM_RELEASE_NAME and HELM_NAMESPACE" {
+  grep -qE 'local release="\$HELM_RELEASE_NAME"' "$PROJECT_ROOT/lib/helm.sh"
+  grep -qE 'local HELM_NS="\$HELM_NAMESPACE"'    "$PROJECT_ROOT/lib/helm.sh"
+}
+
+# ---------- wizard: stage stays operator-chosen ----------
 
 @test "wizard prompts default STAGE_NAME=ma when state is empty" {
-  # ui_prompt writes the default into the named variable when input is empty.
-  # We stub ui_prompt to return whatever default it was given.
   ui_prompt() {
     local varname="${3:-}"
     if [[ -n "$varname" ]]; then
@@ -63,9 +73,9 @@ teardown() {
 }
 
 @test "wizard pre-populates STAGE_NAME from existing state on resume" {
-  # If state already has STAGE_NAME, wizard's default should be that value.
   state_load
   state_set STAGE_NAME "prod"
+  state_set AWS_REGION "us-east-1"
   state_save
 
   ui_prompt() {
@@ -82,18 +92,4 @@ teardown() {
   wizard_collect
   run state_get STAGE_NAME
   [ "$output" = "prod" ]
-}
-
-# ---------- (3) static checks: helm.sh derives namespace from STAGE_NAME ----------
-
-@test "helm_install_or_upgrade declares 'local HELM_NS=\"\$stage\"'" {
-  # The release-name vs namespace tie. If this line is removed or the
-  # binding is changed, the chart's argo-templates Job will break again.
-  grep -E 'local HELM_NS="\$stage"' "$PROJECT_ROOT/lib/helm.sh"
-}
-
-@test "helm_install_or_upgrade reads STAGE_NAME with HELM_DEFAULT_NS as fallback" {
-  # The wizard sets STAGE_NAME, but on a fresh run state may be empty.
-  # state_get STAGE_NAME "$HELM_DEFAULT_NS" gives us the safe default.
-  grep -E 'state_get STAGE_NAME "\$HELM_DEFAULT_NS"' "$PROJECT_ROOT/lib/helm.sh"
 }
