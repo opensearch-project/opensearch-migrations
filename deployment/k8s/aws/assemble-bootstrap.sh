@@ -55,13 +55,14 @@ cp -R "$CLI_DIR/bin" "$CLI_DIR/lib" \
 cp -R "$CLI_DIR/skills/." \
       "$stage/migration-assistant-cli-${CLI_VERSION}/skills/"
 
-MANIFEST_SRC="$SCRIPT_DIR/../../charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh"
+MANIFEST_SRC="$SCRIPT_DIR/../charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh"
 if [[ -f "$MANIFEST_SRC" ]]; then
   cp "$MANIFEST_SRC" \
      "$stage/migration-assistant-cli-${CLI_VERSION}/skills/privateEcrManifest.sh"
 else
-  printf 'WARN: %s missing; vendored manifest will be absent from tarball\n' \
+  printf 'ERROR: %s missing; cannot bundle image manifest\n' \
     "$MANIFEST_SRC" >&2
+  exit 1
 fi
 
 [[ -f "$CLI_DIR/LICENSE" ]] && cp "$CLI_DIR/LICENSE" \

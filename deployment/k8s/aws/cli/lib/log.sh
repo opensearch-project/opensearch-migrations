@@ -90,7 +90,24 @@ log_debug() { [[ "$MIGRATE_VERBOSE" -eq 1 ]] && log DEBUG "$@"; }
 
 # log_announce_exit — on_exit_register hook: print the log path one more
 # time as the very last operator-visible line. Receives <rc> as $1.
+#
+# When the run failed (rc != 0) AND we're non-interactive (no TTY OR
+# MIGRATE_NONINTERACTIVE=1), dump the tail of migrate.log to stderr too.
+# The log path string alone is useless to a CI operator looking at a
+# Jenkins console — they need to see WHY it failed without rerunning.
 log_announce_exit() {
+  local rc="${1:-0}"
+  if [[ "$rc" -ne 0 ]] \
+     && [[ "$LOG_FILE" != "/dev/null" && -n "$LOG_FILE" && -f "$LOG_FILE" ]]; then
+    if [[ "${MIGRATE_NONINTERACTIVE:-0}" -eq 1 ]] || [[ ! -t 2 ]]; then
+      local n="${MIGRATE_FAIL_LOG_TAIL_LINES:-200}"
+      printf '\n%s== migrate.log (last %s lines) ==%s\n' \
+        "$__UI_C_DIM" "$n" "$__UI_C_RESET" >&2
+      tail -n "$n" "$LOG_FILE" >&2 || true
+      printf '%s== end migrate.log ==%s\n' \
+        "$__UI_C_DIM" "$__UI_C_RESET" >&2
+    fi
+  fi
   log_announce --exit
 }
 

@@ -158,14 +158,15 @@ run_aws_bootstrap() {
   mkdir -p "${MIGRATE_HOME}"
   echo "MIGRATE_HOME=${MIGRATE_HOME}"
 
-  # Wrap CLI invocation so we can dump the migrate.log on failure. The
-  # log is the only artifact with the actual error context; without it
-  # the operator just sees `+ exit 255` in the Jenkins console.
+  # --verbose so all log-file content also lands on the Jenkins
+  # console live (rather than only-on-failure as a tail). Then if the
+  # CLI dies before our trap fires we still see what happened.
   set +e
   if [[ ${#BOOTSTRAP_ARGS[@]} -gt 0 ]]; then
     echo "Invoking migration-assistant with extra args: ${BOOTSTRAP_ARGS[*]}"
     "${CLI_BIN}" \
       --non-interactive \
+      --verbose \
       --skip-console-exec \
       --skip-setting-k8s-context \
       --stage "${STAGE}" \
@@ -174,6 +175,7 @@ run_aws_bootstrap() {
     echo "Invoking migration-assistant with default args (public images)."
     "${CLI_BIN}" \
       --non-interactive \
+      --verbose \
       --skip-console-exec \
       --skip-setting-k8s-context \
       --use-public-images \

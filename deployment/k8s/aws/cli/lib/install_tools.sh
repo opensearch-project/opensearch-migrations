@@ -45,12 +45,27 @@ ensure_tools_extended() { local t; for t in helm crane;       do ensure_tool "$t
 # Internal: package-manager dispatch with confirmation.
 _install_with() {
   local pm="$1" name="$2"
-  local cmd
+  local pkg cmd
   case "$pm" in
-    brew) cmd="brew install $(_brew_pkg "$name")" ;;
-    apt)  cmd="sudo apt-get update -y && sudo apt-get install -y $(_apt_pkg "$name")" ;;
-    dnf)  cmd="sudo dnf install -y $(_dnf_pkg "$name")" ;;
-    yum)  cmd="sudo yum install -y $(_dnf_pkg "$name")" ;;
+    brew) pkg=$(_brew_pkg "$name") ;;
+    apt|dnf|yum) pkg=$(_apt_pkg "$name") ;;
+  esac
+
+  # Some tools (e.g. crane) have no system package — _apt_pkg returns
+  # empty. Skip the package-manager call entirely and go straight to
+  # the static-binary path; otherwise we'd run `sudo dnf install -y`
+  # with no package name, which fails with a usage error.
+  if [[ -z "$pkg" ]]; then
+    log_info "$pm has no package for $name; using static binary"
+    _install_static "$name"
+    return
+  fi
+
+  case "$pm" in
+    brew) cmd="brew install $pkg" ;;
+    apt)  cmd="sudo apt-get update -y && sudo apt-get install -y $pkg" ;;
+    dnf)  cmd="sudo dnf install -y $pkg" ;;
+    yum)  cmd="sudo yum install -y $pkg" ;;
   esac
 
   if [[ "$pm" != brew && -z "${MIGRATE_AUTO_SUDO:-}" ]]; then
