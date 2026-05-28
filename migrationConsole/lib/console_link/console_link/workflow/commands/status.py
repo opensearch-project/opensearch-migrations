@@ -487,7 +487,9 @@ class LiveCheckProcessor:
 @click.option('--live-status/--no-live-status', default=True,
               help='Run a current status check for each snapshot and backfill still running')
 @click.option('--resource-view/--step-view', default=False, show_default='step-view',
-              help='Choose the resource-centric view or the Argo workflow step tree')
+              help='Show the resource-centric view (--resource-view) or the current Argo '
+                   "Workflow's step tree (--step-view). The step tree does not show "
+                   'historical actions from prior runs.')
 @click.pass_context
 def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, insecure, token, show_all, live_status,
                    resource_view):
@@ -503,49 +505,63 @@ def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, in
         workflow status --resource-view
     """
     if resource_view:
+        _run_resource_view(ctx, workflow_name, argo_server, namespace, insecure, token, live_status)
+    else:
+        _run_step_view(ctx, workflow_name, all_workflows, argo_server, namespace, insecure, token,
+                       show_all, live_status)
+
+
+def _run_resource_view(ctx, workflow_name, argo_server, namespace, insecure, token, live_status):
+    """Display the resource-centric status view."""
+    try:
+        from ..resource_tree import (
+            build_resource_tree, display_resource_tree,
+            extract_workflow_steps_by_resource, mark_not_configured_groups,
+        )
+        from ..models.utils import load_k8s_config
+        from ..tree_utils import build_nested_workflow_tree, filter_tree_nodes
+        load_k8s_config()
+        sections = build_resource_tree(namespace)
+
+        workflow_unavailable = False
         try:
-            from ..resource_tree import (
-                build_resource_tree, display_resource_tree,
-                extract_workflow_steps_by_resource, mark_not_configured_groups,
-            )
-            from ..models.utils import load_k8s_config
-            from ..tree_utils import build_nested_workflow_tree, filter_tree_nodes
-            load_k8s_config()
-            groups = build_resource_tree(namespace)
-
-            # Try to fetch Argo workflow data for progress info
-            workflow_unavailable = False
-            try:
-                service = WorkflowService()
-                fetcher = WorkflowDataFetcher(service, token)
-                workflow_data = fetcher.get_workflow_data(
-                    workflow_name, argo_server, namespace, insecure)
-                if workflow_data and workflow_data.get('status', {}).get('nodes'):
-                    tree_nodes = build_nested_workflow_tree(workflow_data)
-                    if live_status:
-                        LiveCheckProcessor(ConfigConverter()).enrich_tree_with_live_checks(tree_nodes)
-                    filtered_tree = filter_tree_nodes(tree_nodes)
-                    steps = extract_workflow_steps_by_resource(filtered_tree)
-                    for section in groups:
-                        for group in section.groups:
-                            for resource in group.resources:
-                                if resource.name in steps:
-                                    resource.workflow_progress = steps[resource.name]
-                                for child in resource.children:
-                                    if child.name in steps:
-                                        child.workflow_progress = steps[child.name]
-                    mark_not_configured_groups(groups, filtered_tree)
-                elif not workflow_data:
-                    workflow_unavailable = True
-            except Exception:
+            service = WorkflowService()
+            fetcher = WorkflowDataFetcher(service, token)
+            workflow_data = fetcher.get_workflow_data(
+                workflow_name, argo_server, namespace, insecure)
+            if workflow_data and workflow_data.get('status', {}).get('nodes'):
+                tree_nodes = build_nested_workflow_tree(workflow_data)
+                if live_status:
+                    LiveCheckProcessor(ConfigConverter()).enrich_tree_with_live_checks(tree_nodes)
+                filtered_tree = filter_tree_nodes(tree_nodes)
+                steps = extract_workflow_steps_by_resource(filtered_tree)
+                _assign_workflow_progress(sections, steps)
+                mark_not_configured_groups(sections, filtered_tree)
+            elif not workflow_data:
                 workflow_unavailable = True
+        except Exception:
+            workflow_unavailable = True
 
-            display_resource_tree(groups, workflow_unavailable=workflow_unavailable)
-        except Exception as e:
-            click.echo(f"Error: {str(e)}", err=True)
-            ctx.exit(ExitCode.FAILURE.value)
-        return
+        display_resource_tree(sections, workflow_unavailable=workflow_unavailable)
+    except Exception as e:
+        click.echo(f"Error: {str(e)}", err=True)
+        ctx.exit(ExitCode.FAILURE.value)
 
+
+def _assign_workflow_progress(sections, steps):
+    """Attach workflow step subtrees (list of Argo step dicts) to matching resource nodes."""
+    for section in sections:
+        for group in section.groups:
+            for resource in group.resources:
+                if resource.name in steps:
+                    resource.workflow_progress = steps[resource.name]
+                for child in resource.children:
+                    if child.name in steps:
+                        child.workflow_progress = steps[child.name]
+
+
+def _run_step_view(ctx, workflow_name, all_workflows, argo_server, namespace, insecure, token, show_all, live_status):
+    """Display the Argo workflow step tree view."""
     if all_workflows and ctx.get_parameter_source('workflow_name') != click.core.ParameterSource.DEFAULT:
         click.echo("Error: --workflow-name and --all-workflows are mutually exclusive", err=True)
         ctx.exit(ExitCode.FAILURE.value)
