@@ -238,7 +238,7 @@ public class DocumentMigrationBootstrap {
         }
     }
 
-    private static void flushDlqOrThrow(DlqSink dlqSink, IWorkCoordinator.WorkItemAndDuration.WorkItem wi) {
+    static void flushDlqOrThrow(DlqSink dlqSink, IWorkCoordinator.WorkItemAndDuration.WorkItem wi) {
         if (dlqSink == null) {
             return;
         }

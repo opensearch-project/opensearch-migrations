@@ -831,7 +831,7 @@ public class RfsMigrateDocuments {
      * Argo workflow UID, then a worker-scoped fallback. The result drives the S3
      * prefix that isolates this run's DLQ entries from prior runs.
      */
-    private static String resolveSessionId(Args arguments, String workerId) {
+    static String resolveSessionId(Args arguments, String workerId) {
         if (arguments.dlqArgs.dlqSessionId != null && !arguments.dlqArgs.dlqSessionId.isBlank()) {
             return arguments.dlqArgs.dlqSessionId;
         }
@@ -849,7 +849,7 @@ public class RfsMigrateDocuments {
      * provisions and exposes to the pod as MIGRATIONS_DEFAULT_S3_BUCKET. The per-
      * session prefix keeps DLQ and snapshot objects in their own keyspace.
      */
-    private static DlqSink buildDlqSink(Args arguments, String workerId, String sessionId) {
+    static DlqSink buildDlqSink(Args arguments, String workerId, String sessionId) {
         String bucket = arguments.dlqArgs.dlqS3Bucket;
         if (bucket == null || bucket.isBlank()) {
             var fromEnv = System.getenv("MIGRATIONS_DEFAULT_S3_BUCKET");
@@ -891,7 +891,7 @@ public class RfsMigrateDocuments {
      * is swallowed and treated as "not done" so the caller falls through to the normal
      * flow, which creates the index and seeds work items via ShardWorkPreparer.
      */
-    private static boolean isCoordinatorWorkAlreadyDone(
+    static boolean isCoordinatorWorkAlreadyDone(
             IWorkCoordinator workCoordinator,
             RootDocumentMigrationContext context) {
         try {
@@ -999,7 +999,7 @@ public class RfsMigrateDocuments {
      * <p>A null {@code dlqSink} (DLQ disabled) returns {@code true} immediately. The 5-min
      * timeout mirrors {@link DocumentMigrationBootstrap}'s flush deadline.
      */
-    private static boolean flushDlqBeforeComplete(DlqSink dlqSink, String workItemId) {
+    static boolean flushDlqBeforeComplete(DlqSink dlqSink, String workItemId) {
         if (dlqSink == null) {
             return true;
         }

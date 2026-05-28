@@ -113,4 +113,53 @@ class BulkResponseParserPartitionTest {
             equalTo("some_brand_new_exception")
         );
     }
+
+    @Test
+    void malformedItemInsideValidItemsArrayBecomesRetryable() {
+        // An items entry that doesn't follow the {"op": {...}} shape — e.g. just
+        // an empty object — falls into the malformed_response_item bucket. We
+        // mark it retryable so we don't silently drop it.
+        var body = "{\"took\":1,\"errors\":true,\"items\":[{}]}";
+        var partition = BulkResponseParser.partitionItems(body, DocumentExceptionAllowlist.empty());
+
+        assertThat(partition.getSuccessPositions(), empty());
+        assertThat(partition.getNonRetryableFailures(), empty());
+        assertThat(partition.getRetryableFailures(), hasSize(1));
+        var f = partition.getRetryableFailures().get(0);
+        assertThat(f.getPosition(), equalTo(0));
+        assertThat(f.getErrorType(), equalTo("malformed_response_item"));
+        assertThat(f.getDocumentId(), equalTo(null));
+        // Even malformed items carry their raw JSON so the DLQ can capture them.
+        assertThat(f.getResponseItemJson(), equalTo("{}"));
+    }
+
+    @Test
+    void itemWithoutResultAndWithoutErrorIsRetryable() {
+        // An item with neither "result" nor "error" — degenerate but plausible
+        // for partial responses. classifyItemFromRaw should NOT count it as
+        // success and should default to retryable.
+        var weird = "{\"index\":{\"_index\":\"movies\",\"_id\":\"y\",\"status\":200}}";
+        var partition = BulkResponseParser.partitionItems(response(weird), DocumentExceptionAllowlist.empty());
+
+        assertThat(partition.getSuccessPositions(), empty());
+        assertThat(partition.getNonRetryableFailures(), empty());
+        assertThat(partition.getRetryableFailures(), hasSize(1));
+        assertThat(partition.getRetryableFailures().get(0).getErrorType(), equalTo(null));
+    }
+
+    @Test
+    void allowlistOnlySuppressesMatchingErrorTypes() {
+        // If allowlist is set but the item's error doesn't match, the item
+        // still gets bucketed by NON_RETRYABLE vs retryable normally.
+        var allowlist = new DocumentExceptionAllowlist(Set.of("strict_dynamic_mapping_exception"));
+        var body = response(
+            String.format(NON_RETRYABLE_ITEM, "a"),    // mapper_parsing_exception — NOT allowlisted
+            String.format(RETRYABLE_ITEM, "b")         // es_rejected — NOT allowlisted
+        );
+        var partition = BulkResponseParser.partitionItems(body, allowlist);
+
+        assertThat(partition.getSuccessPositions(), empty());
+        assertThat(partition.getNonRetryableFailures(), hasSize(1));
+        assertThat(partition.getRetryableFailures(), hasSize(1));
+    }
 }
