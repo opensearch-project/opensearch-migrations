@@ -97,7 +97,7 @@ EOF
   kill -KILL "$fake_parent" 2>/dev/null || true
   wait "$fake_parent" 2>/dev/null || true
 
-  grep -q 'no default-helm-installer pod reached Running' "$LOG_FILE"
+  grep -q 'no default-helm-installer pod appeared within' "$LOG_FILE"
   wait "$watch_pid" 2>/dev/null || true
 }
 

@@ -149,9 +149,10 @@ exit 0
 EOF
   chmod +x "$STUB_DIR/kubectl"
 
-  WATCH_INTERVAL=0.2 helm_watch_pods ma &
+  # WATCH_INTERVAL=0.1 + ≥1.0s sleep gives multiple cycles even on slow CI.
+  WATCH_INTERVAL=0.1 helm_watch_pods ma &
   local pid=$!
-  sleep 0.5
+  sleep 1.2
   kill "$pid" 2>/dev/null
   wait "$pid" 2>/dev/null || true
 

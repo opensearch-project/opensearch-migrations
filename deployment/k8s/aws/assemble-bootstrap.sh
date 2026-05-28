@@ -65,13 +65,24 @@ set -o pipefail
 CLI_VERSION='${CLI_VERSION}'
 PREFIX="\${MIGRATE_PREFIX:-\$HOME/.opensearch-migrate/cli/\$CLI_VERSION}"
 BIN="\$PREFIX/bin/migration-assistant"
-TARBALL_URL='https://github.com/opensearch-project/opensearch-migrations/releases/download/'\${CLI_VERSION}'/migration-assistant-cli-'\${CLI_VERSION}'.tar.gz'
+TARBALL_NAME="migration-assistant-cli-\${CLI_VERSION}.tar.gz"
+TARBALL_URL='https://github.com/opensearch-project/opensearch-migrations/releases/download/'\${CLI_VERSION}'/'\${TARBALL_NAME}
+
+# Shim's directory — used to find a sibling tarball when one is shipped
+# alongside (Jenkins/CI build, repo checkout, S3 dist bundle, etc.). Falls
+# back to the GitHub release URL when no sibling exists.
+SHIM_DIR=\$(cd "\$(dirname "\${BASH_SOURCE[0]:-\$0}")" && pwd)
+LOCAL_TARBALL="\$SHIM_DIR/\$TARBALL_NAME"
 
 if [[ ! -x "\$BIN" ]]; then
   mkdir -p "\$PREFIX"
   tmp=\$(mktemp -d)
-  curl -fsSL --max-time 120 -o "\$tmp/cli.tgz" "\$TARBALL_URL" \\
-    || { echo "could not download \$TARBALL_URL" >&2; rm -rf "\$tmp"; exit 1; }
+  if [[ -f "\$LOCAL_TARBALL" ]]; then
+    cp "\$LOCAL_TARBALL" "\$tmp/cli.tgz"
+  else
+    curl -fsSL --max-time 120 -o "\$tmp/cli.tgz" "\$TARBALL_URL" \\
+      || { echo "could not download \$TARBALL_URL" >&2; rm -rf "\$tmp"; exit 1; }
+  fi
   tar -xzf "\$tmp/cli.tgz" -C "\$PREFIX" --strip-components=1
   rm -rf "\$tmp"
   chmod +x "\$BIN"

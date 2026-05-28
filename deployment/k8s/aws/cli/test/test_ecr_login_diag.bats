@@ -258,7 +258,9 @@ EOF
   run_split _ecr_login "r.example.com" us-east-1
   [ "$STATUS" -eq 0 ]
   # Either path is fine: empty token OR auth failed are both tolerated.
-  grep -qE '(public\.ecr\.aws get-login-password returned empty|public\.ecr\.aws auth failed)' "$LOG_FILE"
+  # crane.sh logs "aws ecr-public get-login-password returned empty"
+  # OR "ecr-login: public.ecr.aws auth failed"; match either.
+  grep -qE '(ecr-public get-login-password returned empty|public\.ecr\.aws auth failed)' "$LOG_FILE"
 }
 
 @test "_ecr_login writes detailed errors to LOG_FILE for post-mortem" {
