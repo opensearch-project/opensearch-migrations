@@ -119,6 +119,16 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   activeDeadlineSeconds: 120
+  podFailurePolicy:
+    rules:
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+      - action: FailJob
+        onExitCodes:
+          containerName: apply-monitor
+          operator: NotIn
+          values: [0]
   template:
     metadata:
       annotations:
@@ -131,6 +141,7 @@ spec:
         command: ["/bin/sh", "-c"]
         args:
         - |
+          set -e
           echo "Waiting for ServiceMonitor CRD to be established..."
           kubectl wait --for=condition=Established crd/servicemonitors.monitoring.coreos.com --timeout=120s
           echo "Creating ServiceMonitor for otel-collector..."
