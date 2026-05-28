@@ -21,6 +21,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.Conta
 import org.opensearch.migrations.bulkload.framework.SnapshotFixtureCache;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneReader;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
@@ -168,7 +169,7 @@ public class SnapshotReaderEndToEndTest {
         ShardMetadata shardMeta = snapshotReader.getShardMetadata().fromRepo(SNAPSHOT_NAME, indexName, shardId);
         Path shardPath = luceneDir.resolve(indexName).resolve(String.valueOf(shardId));
         LuceneIndexReader indexReader = readerFactory.getReader(shardPath);
-        return indexReader.streamDocumentChanges(shardMeta.getSegmentFileName());
+        return LuceneReader.streamDocumentChanges(indexReader, shardMeta.getSegmentFileName());
     }
 
     private static void deleteDir(Path dir) {

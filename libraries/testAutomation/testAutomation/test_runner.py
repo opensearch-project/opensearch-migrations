@@ -384,10 +384,15 @@ class TestRunner:
                             mc_repo = f"{prefix}migrations/migration_console"
                             chart_values.update({
                                 "images.captureProxy.repository": f"{prefix}migrations/capture_proxy",
+                                "images.captureProxy.pullPolicy": "Always",
                                 "images.trafficReplayer.repository": f"{prefix}migrations/traffic_replayer",
+                                "images.trafficReplayer.pullPolicy": "Always",
                                 "images.reindexFromSnapshot.repository": f"{prefix}migrations/reindex_from_snapshot",
+                                "images.reindexFromSnapshot.pullPolicy": "Always",
                                 "images.migrationConsole.repository": mc_repo,
+                                "images.migrationConsole.pullPolicy": "Always",
                                 "images.installer.repository": mc_repo,
+                                "images.installer.pullPolicy": "Always",
                                 # Kyverno image overrides
                                 "charts.kyverno.values.webhooksCleanup.image.repository": mc_repo,
                                 "charts.kyverno.values.test.image.repository": mc_repo,
