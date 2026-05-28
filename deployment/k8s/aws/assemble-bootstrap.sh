@@ -65,8 +65,17 @@ else
   exit 1
 fi
 
-[[ -f "$CLI_DIR/LICENSE" ]] && cp "$CLI_DIR/LICENSE" \
-                              "$stage/migration-assistant-cli-${CLI_VERSION}/"
+# Pull LICENSE from the repo root (Apache-2.0) rather than vendoring a
+# per-CLI copy. Hard-fail if absent so the published tarball never lacks
+# its license.
+LICENSE_SRC="$SCRIPT_DIR/../../../LICENSE"
+if [[ -f "$LICENSE_SRC" ]]; then
+  cp "$LICENSE_SRC" "$stage/migration-assistant-cli-${CLI_VERSION}/LICENSE"
+else
+  printf 'ERROR: %s missing; refusing to build a tarball without a LICENSE\n' \
+    "$LICENSE_SRC" >&2
+  exit 1
+fi
 tar -czf "$TARBALL" -C "$stage" "migration-assistant-cli-${CLI_VERSION}"
 rm -rf "$stage"
 

@@ -10,6 +10,9 @@
 CLI_VERSION ?= 0.1.0
 DIST_DIR    := dist
 TARBALL     := $(DIST_DIR)/migrate-cli-$(CLI_VERSION).tar.gz
+# License lives at the repo root (Apache-2.0). We pull it into the
+# tarball at build time rather than vendoring a per-CLI copy.
+LICENSE_SRC := $(firstword $(wildcard ../../../../LICENSE) $(wildcard $(CURDIR)/LICENSE))
 
 SHELL_FILES := bin/migration-assistant install.sh $(wildcard lib/*.sh) $(wildcard test/helpers/*.sh)
 
@@ -27,9 +30,11 @@ test:
 	bats test/
 
 $(TARBALL): | $(DIST_DIR)
+	@[ -n "$(LICENSE_SRC)" ] || { echo "could not locate LICENSE (looked at ../../../../LICENSE and ./LICENSE)"; exit 1; }
 	@stage=$$(mktemp -d) && \
 	    mkdir -p "$$stage/migrate-cli-$(CLI_VERSION)" && \
-	    cp -R bin lib skills install.sh README.md LICENSE "$$stage/migrate-cli-$(CLI_VERSION)/" && \
+	    cp -R bin lib skills install.sh README.md "$$stage/migrate-cli-$(CLI_VERSION)/" && \
+	    cp "$(LICENSE_SRC)" "$$stage/migrate-cli-$(CLI_VERSION)/LICENSE" && \
 	    tar -czf $@ -C "$$stage" "migrate-cli-$(CLI_VERSION)" && \
 	    rm -rf "$$stage" && \
 	    printf 'wrote %s\n' $@
