@@ -221,43 +221,68 @@ agent_exec() {
   aws sts get-caller-identity --output table 2>/dev/null \
     || ui_warn "could not call sts:GetCallerIdentity"
 
+  # Resume only when state shows we already handed off AND the agent's
+  # own session storage has a conversation rooted at THIS working
+  # directory. claude --continue / codex resume both exit 0 even when
+  # they print "No conversation found", so we can't trust their rc;
+  # check the session storage up front instead.
   local resuming=0
-  if [[ "$(state_get last_step '')" == "agent_handoff" ]]; then
+  if [[ "$(state_get last_step '')" == "agent_handoff" ]] \
+     && _agent_has_session "$agent"; then
     resuming=1
   fi
 
-  # Try resume first; fall back to fresh session on failure. We can't
-  # use `exec` for the resume attempt because exec replaces the
-  # process (no fallback possible). Instead, run resume as a child;
-  # if it exits cleanly we exit with its rc; if it fails fast (e.g.
-  # "no prior conversation found"), we exec the fresh-session form.
   local fresh_prompt='Read Startup.md and skills/migrating-to-opensearch/SKILL.md, then give the user next steps.'
-  if (( resuming )); then
-    ui_dim "  trying $bin session resume…"
-    case "$agent" in
-      claude) "$bin" --continue           ;;
-      codex)  "$bin" resume --last        ;;
-      q)      "$bin" chat --resume        ;;
-      kiro)   "$bin" chat --agent opensearch-migration --resume ;;
-      *)      false ;;
-    esac
-    local rc=$?
-    if (( rc == 0 )); then
-      exit 0
-    fi
-    ui_warn "no resumable session found (rc=$rc); starting a fresh agent session"
-  fi
-
-  ui_dim "  exec $bin"
+  ui_dim "  exec $bin (resume=$resuming)"
   case "$agent" in
-    kiro)
-      exec "$bin" chat --agent opensearch-migration
-      ;;
+    claude)
+      if (( resuming )); then exec "$bin" --continue
+      else exec "$bin" "$fresh_prompt"
+      fi ;;
+    codex)
+      if (( resuming )); then exec "$bin" resume --last
+      else exec "$bin" "$fresh_prompt"
+      fi ;;
     q)
-      exec "$bin" chat "$fresh_prompt"
-      ;;
+      if (( resuming )); then exec "$bin" chat --resume
+      else exec "$bin" chat "$fresh_prompt"
+      fi ;;
+    kiro)
+      if (( resuming )); then exec "$bin" chat --agent opensearch-migration --resume
+      else exec "$bin" chat --agent opensearch-migration
+      fi ;;
     *)
       exec "$bin" "$fresh_prompt"
+      ;;
+  esac
+}
+
+# _agent_has_session <agent> → exit 0 if the agent's session storage
+# has at least one conversation rooted in our current working
+# directory (which agent_exec set to $STAGE_DIR).
+#
+# Each agent stores sessions differently:
+#   claude  → ~/.claude/projects/<cwd-with-slash-replaced-by-dash>/*.jsonl
+#   codex   → ~/.codex/sessions/ has globally-keyed jsonl; codex
+#             resolves cwd internally. We optimistically return 0 here
+#             — codex's `resume --last` is harmless on no-history
+#             (just shows a picker that auto-exits).
+#   q       → no public session file format; assume yes.
+#   kiro    → ~/.kiro/conversations/ — same pragma as q; assume yes.
+_agent_has_session() {
+  local agent="$1"
+  case "$agent" in
+    claude)
+      # Claude's session dir: replace `/` and `.` with `-` in the CWD.
+      local key="${PWD//\//-}"
+      key="${key//./-}"
+      local dir="$HOME/.claude/projects/$key"
+      [[ -d "$dir" ]] || return 1
+      # At least one .jsonl file present?
+      compgen -G "$dir/*.jsonl" >/dev/null 2>&1
+      ;;
+    *)
+      return 0
       ;;
   esac
 }
