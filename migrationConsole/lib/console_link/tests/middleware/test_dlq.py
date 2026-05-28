@@ -261,10 +261,10 @@ class TestListRecords:
 
     def test_blank_lines_are_skipped(self, mocker):
         body = _gz(
-            json.dumps({"timestamp": "t1", "documentId": "a"})
-            + "\n\n   \n"
-            + json.dumps({"timestamp": "t2", "documentId": "b"})
-            + "\n"
+            json.dumps({"timestamp": "t1", "documentId": "a"}) +
+            "\n\n   \n" +
+            json.dumps({"timestamp": "t2", "documentId": "b"}) +
+            "\n"
         )
         s3 = _make_s3_mock([("k.gz", body)])
         mocker.patch.object(dlq, "_s3_client", return_value=s3)

@@ -1480,7 +1480,6 @@ def test_backfill_status_no_dlq_section_when_not_configured(runner, mocker):
 def test_backfill_status_json_deep_check_includes_dlq_keys(runner, mocker):
     """The --json --deep-check path goes through _augment_status_with_dlq
     rather than the trailing click.echo block."""
-    from console_link.middleware.dlq import DlqConfig
     mocked_status = {
         "status": "Completed",
         "percentage_completed": 100.0,
