@@ -322,22 +322,29 @@ public class BulkResponseParser {
         ItemPartition.ItemPartitionBuilder partition,
         DocumentExceptionAllowlist allowlist
     ) throws IOException {
-        DocInfo parsed = parseItemFields(rawJson);
+        classifyParsed(parseItemFields(rawJson), rawJson, position, partition, allowlist);
+    }
+
+    private static void classifyParsed(
+        DocInfo parsed,
+        String rawJson,
+        int position,
+        ItemPartition.ItemPartitionBuilder partition,
+        DocumentExceptionAllowlist allowlist
+    ) {
         if (parsed == null) {
             partition.retryableFailure(new ItemFailure(position, null, MALFORMED_RESPONSE_ITEM, rawJson));
             return;
         }
-        String result = parsed.getResult();
-        String errorType = parsed.getErrorType();
-        String docId = parsed.getId();
-        if (result != null || (errorType != null && allowlist.isAllowed(errorType))) {
+        if (parsed.getResult() != null
+            || (parsed.getErrorType() != null && allowlist.isAllowed(parsed.getErrorType()))) {
             partition.successPosition(position);
             return;
         }
-        if (errorType != null && BulkDocErrorTypes.NON_RETRYABLE.contains(errorType)) {
-            partition.nonRetryableFailure(new ItemFailure(position, docId, errorType, rawJson));
+        if (parsed.getErrorType() != null && BulkDocErrorTypes.NON_RETRYABLE.contains(parsed.getErrorType())) {
+            partition.nonRetryableFailure(new ItemFailure(position, parsed.getId(), parsed.getErrorType(), rawJson));
         } else {
-            partition.retryableFailure(new ItemFailure(position, docId, errorType, rawJson));
+            partition.retryableFailure(new ItemFailure(position, parsed.getId(), parsed.getErrorType(), rawJson));
         }
     }
 
