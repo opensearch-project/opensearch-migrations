@@ -3,7 +3,6 @@ package org.opensearch.migrations.bulkload.common;
 import java.net.URI;
 
 import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.common.bulk.BulkOperationSpec;
 import org.opensearch.migrations.bulkload.common.bulk.IndexOp;
 import org.opensearch.migrations.bulkload.common.bulk.operations.IndexOperationMeta;
 import org.opensearch.migrations.bulkload.common.http.CompressionMode;
