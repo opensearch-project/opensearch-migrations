@@ -116,7 +116,7 @@ agent_path() {
 _agent_print_install_hints() {
   ui_info "Install one of:"
   printf '  %sclaude%s  Anthropic Claude Code   https://docs.claude.com/code\n' "$__UI_C_BOLD" "$__UI_C_RESET" >&2
-  printf '  %scodex%s   OpenAI Codex            https://github.com/openai/codex\n' "$__UI_C_BOLD" "$__UI_C_RESET" >&2
+  printf '  %scodex%s   OpenAI Codex CLI        https://developers.openai.com/codex/cli\n' "$__UI_C_BOLD" "$__UI_C_RESET" >&2
   printf '  %skiro%s    AWS Kiro                https://kiro.dev\n' "$__UI_C_BOLD" "$__UI_C_RESET" >&2
 }
 
@@ -136,7 +136,7 @@ _agent_print_install_hints_for_missing() {
   for a in "${missing[@]}"; do
     case "$a" in
       claude) ui_dim "    claude — https://docs.claude.com/code" ;;
-      codex)  ui_dim "    codex  — https://github.com/openai/codex" ;;
+      codex)  ui_dim "    codex  — https://developers.openai.com/codex/cli" ;;
       kiro)   ui_dim "    kiro   — https://kiro.dev" ;;
     esac
   done
