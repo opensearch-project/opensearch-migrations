@@ -119,7 +119,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
                                 sh "kubectl config unset current-context || true"
-                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5000/' --kube-context=minikube"
+                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5000/' --kube-context=minikube --capture-proxy-service-type=ClusterIP"
                             }
                         }
                     }

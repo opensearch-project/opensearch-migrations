@@ -378,6 +378,12 @@
             {
               "name": "resourceName",
               "value": ""
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
             }
           ]
         },
@@ -427,6 +433,14 @@
                   {
                     "name": "version",
                     "value": "{{inputs.parameters.version}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                   },
                   {
                     "name": "clusterConfig",
@@ -756,7 +770,7 @@
           [
             {
               "templateRef": {
-                "template": "waitforcaptureproxy",
+                "template": "waitindefinitelyforcaptureproxy",
                 "name": "resource-management"
               },
               "withParam": "{{=fromJSON(inputs.parameters.snapshotItemConfig)['dependsOnProxySetups']}}",
@@ -785,13 +799,13 @@
                   }
                 ]
               },
-              "name": "waitForProxyDeps"
+              "name": "waitIndefinitelyForProxyDeps"
             }
           ],
           [
             {
               "templateRef": {
-                "template": "waitfordatasnapshot",
+                "template": "waitindefinitelyfordatasnapshot",
                 "name": "resource-management"
               },
               "when": "{{=steps.readSnapshotPhase.outputs.parameters.phase == 'Pending' && steps.readSnapshotPhase.outputs.parameters.configChecksum == inputs.parameters.configChecksum}}",
@@ -819,7 +833,7 @@
                   }
                 ]
               },
-              "name": "waitForSnapshot"
+              "name": "waitIndefinitelyForSnapshot"
             }
           ],
           [
@@ -1375,7 +1389,7 @@
           [
             {
               "templateRef": {
-                "template": "waitfordatasnapshot",
+                "template": "waitindefinitelyfordatasnapshot",
                 "name": "resource-management"
               },
               "when": "{{=true && !(steps.reconcileSnapshotMigrationResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum) && 'dataSnapshotResourceName' in fromJSON(inputs.parameters.snapshotMigrationConfig)['snapshotNameResolution']}}",
@@ -1403,7 +1417,7 @@
                   }
                 ]
               },
-              "name": "waitForSnapshot"
+              "name": "waitIndefinitelyForSnapshot"
             }
           ],
           [
@@ -1696,7 +1710,7 @@
           [
             {
               "templateRef": {
-                "template": "waitforsnapshotmigration",
+                "template": "waitindefinitelyforsnapshotmigration",
                 "name": "resource-management"
               },
               "withParam": "{{inputs.parameters.dependsOnSnapshotMigrations}}",
@@ -1725,13 +1739,13 @@
                   }
                 ]
               },
-              "name": "waitForSnapshotMigrationDeps"
+              "name": "waitIndefinitelyForSnapshotMigrationDeps"
             }
           ],
           [
             {
               "templateRef": {
-                "template": "waitforcaptureproxy",
+                "template": "waitindefinitelyforcaptureproxy",
                 "name": "resource-management"
               },
               "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
@@ -1759,14 +1773,14 @@
                   }
                 ]
               },
-              "name": "waitForProxy"
+              "name": "waitIndefinitelyForProxy"
             }
           ],
           [
             {
               "templateRef": {
                 "template": "waitforkafkacluster",
-                "name": "resource-management"
+                "name": "setup-kafka"
               },
               "when": "{{=true && !(steps.reconcileTrafficReplayResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum) && sprig.dig('managedByWorkflow', false, fromJSON(inputs.parameters.kafkaConfig))}}",
               "arguments": {
@@ -2021,6 +2035,14 @@
               "when": "{{='kafkaClusters' in fromJSON(inputs.parameters.config)}}",
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
                   {
                     "name": "kafkaClusterConfig",
                     "value": "{{=toJSON(sprig.dict(\"name\", item['name'], \"version\", item['version'], \"config\", fromJSON(item['config']), \"topics\", fromJSON(item['topics']), \"configChecksum\", item['configChecksum'], \"resourceUid\", item['resourceUid']))}}"

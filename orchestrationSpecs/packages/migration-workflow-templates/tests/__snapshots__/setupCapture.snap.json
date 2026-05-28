@@ -46,13 +46,17 @@
               "name": "ownerUid"
             },
             {
+              "name": "serviceType",
+              "value": "LoadBalancer"
+            },
+            {
               "name": "internetFacing",
               "value": "false"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: v1\nkind: Service\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: CaptureProxy\n      name: {{inputs.parameters.proxyName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  annotations:\n    service.beta.kubernetes.io/aws-load-balancer-type: external\n    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip\n    service.beta.kubernetes.io/aws-load-balancer-scheme: \"{{=((fromJSON(inputs.parameters.internetFacing)) ? ('internet-facing') : ('internal'))}}\"\nspec:\n  type: LoadBalancer\n  selector:\n    migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  ports:\n    - port: {{inputs.parameters.listenPort}}\n      targetPort: {{inputs.parameters.listenPort}}\n      protocol: TCP\n",
+          "manifest": "apiVersion: v1\nkind: Service\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\n  ownerReferences:\n    - apiVersion: migrations.opensearch.org/v1alpha1\n      kind: CaptureProxy\n      name: {{inputs.parameters.proxyName}}\n      uid: {{inputs.parameters.ownerUid}}\n      controller: true\n      blockOwnerDeletion: true\n  annotations:\n    service.beta.kubernetes.io/aws-load-balancer-type: external\n    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip\n    service.beta.kubernetes.io/aws-load-balancer-scheme: \"{{=((fromJSON(inputs.parameters.internetFacing)) ? ('internet-facing') : ('internal'))}}\"\nspec:\n  type: \"{{inputs.parameters.serviceType}}\"\n  selector:\n    migrations/proxy: \"{{inputs.parameters.proxyName}}\"\n  ports:\n    - port: {{inputs.parameters.listenPort}}\n      targetPort: {{inputs.parameters.listenPort}}\n      protocol: TCP\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -128,6 +132,7 @@
           "setOwnerReference": false,
           "successCondition": "status.readyReplicas > 0"
         },
+        "activeDeadlineSeconds": 1200,
         "retryStrategy": {
           "limit": "6",
           "retryPolicy": "OnError",
@@ -199,6 +204,7 @@
           "setOwnerReference": false,
           "successCondition": "status.readyReplicas > 0"
         },
+        "activeDeadlineSeconds": 1200,
         "retryStrategy": {
           "limit": "6",
           "retryPolicy": "OnError",
@@ -308,8 +314,108 @@
           "action": "get",
           "successCondition": "status.conditions.0.status == True"
         },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
         "outputs": {
           "parameters": []
+        }
+      },
+      {
+        "name": "waitforproxyendpointready",
+        "inputs": {
+          "parameters": [
+            {
+              "name": "proxyName"
+            },
+            {
+              "name": "listenPort"
+            },
+            {
+              "name": "serviceType",
+              "value": "LoadBalancer"
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
+            }
+          ]
+        },
+        "container": {
+          "env": [
+            {
+              "name": "NAMESPACE",
+              "value": "{{workflow.namespace}}"
+            },
+            {
+              "name": "PROXY_NAME",
+              "value": "{{inputs.parameters.proxyName}}"
+            },
+            {
+              "name": "LISTEN_PORT",
+              "value": "{{inputs.parameters.listenPort}}"
+            },
+            {
+              "name": "SERVICE_TYPE",
+              "value": "{{inputs.parameters.serviceType}}"
+            },
+            {
+              "name": "TIMEOUT_SECONDS",
+              "value": "1200"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "command": [
+            "/bin/bash",
+            "-lc"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            }
+          },
+          "args": [
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/waitForProxyEndpointReady.sh\""
+          ]
+        },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "outputs": {
+          "parameters": [
+            {
+              "name": "serviceEndpoint",
+              "valueFrom": {
+                "path": "/tmp/service-endpoint"
+              }
+            },
+            {
+              "name": "loadBalancerEndpoint",
+              "valueFrom": {
+                "path": "/tmp/load-balancer-endpoint"
+              }
+            }
+          ]
         }
       },
       {
@@ -338,6 +444,15 @@
               "name": "sourceK8sLabel"
             },
             {
+              "name": "configChecksum"
+            },
+            {
+              "name": "checksumForSnapshot"
+            },
+            {
+              "name": "checksumForReplayer"
+            },
+            {
               "name": "resolvedKafkaConnection",
               "value": ""
             },
@@ -348,6 +463,12 @@
             {
               "name": "resolvedKafkaAuthType",
               "value": ""
+            },
+            {
+              "name": "imageMigrationConsoleLocation"
+            },
+            {
+              "name": "imageMigrationConsolePullPolicy"
             },
             {
               "name": "imageCaptureProxyLocation"
@@ -384,6 +505,10 @@
                   {
                     "name": "listenPort",
                     "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "serviceType",
+                    "value": "{{=sprig.dig('serviceType', 'LoadBalancer', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}"
                   },
                   {
                     "name": "internetFacing",
@@ -464,6 +589,28 @@
           ],
           [
             {
+              "templateRef": {
+                "template": "waitforsecretkey",
+                "name": "resource-management"
+              },
+              "when": "{{=((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])) == 'scram-sha-512'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "secretName",
+                    "value": "{{=fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['secretName']}}"
+                  },
+                  {
+                    "name": "secretKey",
+                    "value": "password"
+                  }
+                ]
+              },
+              "name": "waitForKafkaAuthSecret"
+            }
+          ],
+          [
+            {
               "template": "deployproxydeployment",
               "when": "{{=!(sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'certManager' || sprig.dig('tls', 'mode', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']) == 'existingSecret')}}",
               "arguments": {
@@ -518,7 +665,7 @@
                   },
                   {
                     "name": "jsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'internetFacing', 'podReplicas', 'resources', 'tls'), sprig.merge(((sprig.dig('proxyConfig', 'noCapture', false, fromJSON(inputs.parameters.proxyConfig))) ? (sprig.dict()) : (sprig.dict(\"kafkaConnection\", ((!(inputs.parameters.resolvedKafkaConnection == '')) ? (inputs.parameters.resolvedKafkaConnection) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaConnection']))))), sprig.merge(sprig.dict(\"destinationUri\", sprig.dig('sourceConfig', 'endpoint', '', fromJSON(inputs.parameters.proxyConfig)), \"insecureDestination\", sprig.dig('sourceConfig', 'allowInsecure', false, fromJSON(inputs.parameters.proxyConfig)), \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic'), \"kafkaListenerName\", ((!(inputs.parameters.resolvedKafkaListenerName == '')) ? (inputs.parameters.resolvedKafkaListenerName) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['listenerName'])), \"kafkaAuthType\", ((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])), \"kafkaSecretName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['secretName'], \"kafkaUserName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaUserName']), ((((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])) == 'scram-sha-512') ? (sprig.dict(\"kafkaPropertyFile\", '/config/kafka-auth/client.properties')) : (sprig.dict()))))))}}"
+                    "value": "{{=toJSON(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'serviceType', 'internetFacing', 'podReplicas', 'resources', 'tls'), sprig.merge(((sprig.dig('proxyConfig', 'noCapture', false, fromJSON(inputs.parameters.proxyConfig))) ? (sprig.dict()) : (sprig.dict(\"kafkaConnection\", ((!(inputs.parameters.resolvedKafkaConnection == '')) ? (inputs.parameters.resolvedKafkaConnection) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaConnection']))))), sprig.merge(sprig.dict(\"destinationUri\", sprig.dig('sourceConfig', 'endpoint', '', fromJSON(inputs.parameters.proxyConfig)), \"insecureDestination\", sprig.dig('sourceConfig', 'allowInsecure', false, fromJSON(inputs.parameters.proxyConfig)), \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic'), \"kafkaListenerName\", ((!(inputs.parameters.resolvedKafkaListenerName == '')) ? (inputs.parameters.resolvedKafkaListenerName) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['listenerName'])), \"kafkaAuthType\", ((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])), \"kafkaSecretName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['secretName'], \"kafkaUserName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaUserName']), ((((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])) == 'scram-sha-512') ? (sprig.dict(\"kafkaPropertyFile\", '/config/kafka-auth/client.properties')) : (sprig.dict()))))))}}"
                   }
                 ]
               },
@@ -583,16 +730,100 @@
                   },
                   {
                     "name": "jsonConfig",
-                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'internetFacing', 'podReplicas', 'resources', 'tls'), sprig.merge(((sprig.dig('proxyConfig', 'noCapture', false, fromJSON(inputs.parameters.proxyConfig))) ? (sprig.dict()) : (sprig.dict(\"kafkaConnection\", ((!(inputs.parameters.resolvedKafkaConnection == '')) ? (inputs.parameters.resolvedKafkaConnection) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaConnection']))))), sprig.merge(sprig.dict(\"destinationUri\", sprig.dig('sourceConfig', 'endpoint', '', fromJSON(inputs.parameters.proxyConfig)), \"insecureDestination\", sprig.dig('sourceConfig', 'allowInsecure', false, fromJSON(inputs.parameters.proxyConfig)), \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic'), \"kafkaListenerName\", ((!(inputs.parameters.resolvedKafkaListenerName == '')) ? (inputs.parameters.resolvedKafkaListenerName) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['listenerName'])), \"kafkaAuthType\", ((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])), \"kafkaSecretName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['secretName'], \"kafkaUserName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaUserName']), ((((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])) == 'scram-sha-512') ? (sprig.dict(\"kafkaPropertyFile\", '/config/kafka-auth/client.properties')) : (sprig.dict()))))), sprig.dict(\"sslCertChainFile\", '/etc/proxy-tls/tls.crt', \"sslKeyFile\", '/etc/proxy-tls/tls.key')))}}"
+                    "value": "{{=toJSON(sprig.merge(sprig.merge(sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'serviceType', 'internetFacing', 'podReplicas', 'resources', 'tls'), sprig.merge(((sprig.dig('proxyConfig', 'noCapture', false, fromJSON(inputs.parameters.proxyConfig))) ? (sprig.dict()) : (sprig.dict(\"kafkaConnection\", ((!(inputs.parameters.resolvedKafkaConnection == '')) ? (inputs.parameters.resolvedKafkaConnection) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaConnection']))))), sprig.merge(sprig.dict(\"destinationUri\", sprig.dig('sourceConfig', 'endpoint', '', fromJSON(inputs.parameters.proxyConfig)), \"insecureDestination\", sprig.dig('sourceConfig', 'allowInsecure', false, fromJSON(inputs.parameters.proxyConfig)), \"kafkaTopic\", jsonpath(inputs.parameters.proxyConfig, '$.kafkaConfig.kafkaTopic'), \"kafkaListenerName\", ((!(inputs.parameters.resolvedKafkaListenerName == '')) ? (inputs.parameters.resolvedKafkaListenerName) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['listenerName'])), \"kafkaAuthType\", ((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])), \"kafkaSecretName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['secretName'], \"kafkaUserName\", fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['kafkaUserName']), ((((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.proxyConfig)['kafkaConfig']['authType'])) == 'scram-sha-512') ? (sprig.dict(\"kafkaPropertyFile\", '/config/kafka-auth/client.properties')) : (sprig.dict()))))), sprig.dict(\"sslCertChainFile\", '/etc/proxy-tls/tls.crt', \"sslKeyFile\", '/etc/proxy-tls/tls.key')))}}"
                   }
                 ]
               },
               "name": "deployProxyWithTls"
             }
+          ],
+          [
+            {
+              "template": "waitforproxyendpointready",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "proxyName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "listenPort",
+                    "value": "{{inputs.parameters.listenPort}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "serviceType",
+                    "value": "{{=sprig.dig('serviceType', 'LoadBalancer', fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])}}"
+                  }
+                ]
+              },
+              "name": "waitForProxyEndpointReady"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "patchcaptureproxyready",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.proxyName}}"
+                  },
+                  {
+                    "name": "phase",
+                    "value": "Ready"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "checksumForSnapshot",
+                    "value": "{{inputs.parameters.checksumForSnapshot}}"
+                  },
+                  {
+                    "name": "checksumForReplayer",
+                    "value": "{{inputs.parameters.checksumForReplayer}}"
+                  },
+                  {
+                    "name": "serviceEndpoint",
+                    "value": "{{steps.waitForProxyEndpointReady.outputs.parameters.serviceEndpoint}}"
+                  },
+                  {
+                    "name": "loadBalancerEndpoint",
+                    "value": "{{steps.waitForProxyEndpointReady.outputs.parameters.loadBalancerEndpoint}}"
+                  }
+                ]
+              },
+              "name": "patchCaptureProxyReady"
+            }
           ]
         ],
         "outputs": {
-          "parameters": []
+          "parameters": [
+            {
+              "name": "serviceEndpoint",
+              "valueFrom": {
+                "expression": "steps.waitForProxyEndpointReady.outputs.parameters.serviceEndpoint"
+              }
+            },
+            {
+              "name": "loadBalancerEndpoint",
+              "valueFrom": {
+                "expression": "steps.waitForProxyEndpointReady.outputs.parameters.loadBalancerEndpoint"
+              }
+            }
+          ]
         }
       },
       {
@@ -722,7 +953,7 @@
             {
               "templateRef": {
                 "template": "waitforkafkacluster",
-                "name": "resource-management"
+                "name": "setup-kafka"
               },
               "when": "{{=true && !(steps.reconcileCapturedTrafficResource.outputs.parameters.currentConfigChecksum == inputs.parameters.topicConfigChecksum) && sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.proxyConfig))}}",
               "arguments": {
@@ -788,6 +1019,24 @@
                 ]
               },
               "name": "createKafkaTopic"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforkafkatopicready",
+                "name": "resource-management"
+              },
+              "when": "{{=true && !(steps.reconcileCapturedTrafficResource.outputs.parameters.currentConfigChecksum == inputs.parameters.topicConfigChecksum) && sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.proxyConfig))}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "topicName",
+                    "value": "{{inputs.parameters.kafkaTopicName}}"
+                  }
+                ]
+              },
+              "name": "waitForKafkaTopicReady"
             }
           ],
           [
@@ -936,6 +1185,26 @@
                     "value": "{{inputs.parameters.sourceK8sLabel}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "checksumForSnapshot",
+                    "value": "{{inputs.parameters.checksumForSnapshot}}"
+                  },
+                  {
+                    "name": "checksumForReplayer",
+                    "value": "{{inputs.parameters.checksumForReplayer}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
                     "name": "imageCaptureProxyLocation",
                     "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
                   },
@@ -998,6 +1267,26 @@
                     "value": "{{inputs.parameters.sourceK8sLabel}}"
                   },
                   {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
+                  {
+                    "name": "checksumForSnapshot",
+                    "value": "{{inputs.parameters.checksumForSnapshot}}"
+                  },
+                  {
+                    "name": "checksumForReplayer",
+                    "value": "{{inputs.parameters.checksumForReplayer}}"
+                  },
+                  {
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
                     "name": "imageCaptureProxyLocation",
                     "value": "{{inputs.parameters.imageCaptureProxyLocation}}"
                   },
@@ -1011,40 +1300,6 @@
               "continueOn": {
                 "failed": true
               }
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "patchcaptureproxyready",
-                "name": "resource-management"
-              },
-              "when": "{{=steps.setupProxy.status == 'Succeeded' || steps.setupProxyWithConfiguredKafka.status == 'Succeeded'}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.proxyName}}"
-                  },
-                  {
-                    "name": "phase",
-                    "value": "Ready"
-                  },
-                  {
-                    "name": "configChecksum",
-                    "value": "{{inputs.parameters.configChecksum}}"
-                  },
-                  {
-                    "name": "checksumForSnapshot",
-                    "value": "{{inputs.parameters.checksumForSnapshot}}"
-                  },
-                  {
-                    "name": "checksumForReplayer",
-                    "value": "{{inputs.parameters.checksumForReplayer}}"
-                  }
-                ]
-              },
-              "name": "patchCaptureProxyReady"
             }
           ],
           [

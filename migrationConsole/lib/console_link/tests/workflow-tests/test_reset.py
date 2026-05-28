@@ -15,6 +15,7 @@ from console_link.workflow.commands.reset import (
     _find_ancestors,
     _find_dependents,
     _prune_ancestors_of_protected_proxies,
+    _wait_for_owned_deletion,
     _wait_until_gone,
 )
 
@@ -139,6 +140,70 @@ class TestDeleteCrd:
                           'strimzi.io/cluster', 'default')
             for call in mock_wait_for_owned.call_args_list
         )
+
+    @patch('console_link.workflow.commands.reset._wait_for_owned_deletion', return_value=True)
+    @patch('console_link.workflow.commands.reset._delete_owned_resource')
+    @patch('console_link.workflow.commands.reset._find_owned', return_value=[])
+    def test_capture_proxy_cleanup_keeps_certificate_until_last(
+        self, _mock_find_owned, _mock_delete_owned, mock_wait_for_owned
+    ):
+        assert _cleanup_owned_resources('ma', 'captureproxies', 'capture-proxy') is True
+
+        assert [call.args[2] for call in mock_wait_for_owned.call_args_list] == [
+            'deployments',
+            'services',
+            'certificates',
+        ]
+
+    @patch('console_link.workflow.commands.reset._wait_for_owned_deletion')
+    @patch('console_link.workflow.commands.reset._delete_owned_resource')
+    @patch('console_link.workflow.commands.reset._find_owned')
+    def test_kafka_cleanup_stops_when_topic_deletion_times_out(
+        self, mock_find_owned, mock_delete_owned, mock_wait_for_owned
+    ):
+        topic = {'metadata': {'name': 'capture-proxy'}}
+        kafka = {'metadata': {'name': 'default'}}
+        mock_find_owned.side_effect = lambda _ns, _api_gv, plural, _label, _name: (
+            [topic] if plural == 'kafkatopics'
+            else [kafka] if plural == 'kafkas'
+            else []
+        )
+        mock_wait_for_owned.side_effect = lambda _ns, _api_gv, plural, _label, _name: (
+            False if plural == 'kafkatopics' else True
+        )
+
+        assert _cleanup_owned_resources('ma', 'kafkaclusters', 'default') is False
+
+        mock_delete_owned.assert_called_once_with(
+            'ma',
+            'kafka.strimzi.io/v1',
+            'kafkatopics',
+            'capture-proxy',
+        )
+        assert all(call.args[2] != 'kafkas' for call in mock_delete_owned.call_args_list)
+
+    @patch('console_link.workflow.commands.reset.time.sleep')
+    @patch('console_link.workflow.commands.reset.time.time')
+    @patch('console_link.workflow.commands.reset.click.echo')
+    @patch('console_link.workflow.commands.reset.client')
+    def test_wait_for_owned_deletion_returns_false_on_timeout(
+        self, _mock_client, mock_echo, mock_time, _mock_sleep
+    ):
+        topic = {'metadata': {'name': 'capture-proxy', 'finalizers': []}}
+        with patch('console_link.workflow.commands.reset._find_owned', return_value=[topic]):
+            mock_time.side_effect = [0, 2, 2]
+
+            assert _wait_for_owned_deletion(
+                'ma',
+                'kafka.strimzi.io/v1',
+                'kafkatopics',
+                'strimzi.io/cluster',
+                'default',
+                timeout=1,
+            ) is False
+
+        messages = [call.args[0] for call in mock_echo.call_args_list]
+        assert any('Timed out waiting for kafkatopics deletion: capture-proxy' in message for message in messages)
 
     @patch('console_link.workflow.commands.reset.time.sleep')
     @patch('console_link.workflow.commands.reset.time.time')
@@ -295,6 +360,26 @@ class TestDeleteCrd:
         mock_wait.return_value = False
 
         assert _delete_and_wait('ma', 'datasnapshots', 'snap-a') == ('snap-a', False)
+
+    @patch('console_link.workflow.commands.reset._delete_crd')
+    @patch('console_link.workflow.commands.reset._cleanup_output_artifacts')
+    @patch('console_link.workflow.commands.reset._cleanup_owned_resources')
+    @patch('console_link.workflow.commands.reset._mark_deleting')
+    @patch('console_link.workflow.commands.reset._resource_metadata')
+    def test_delete_and_wait_stops_when_owned_cleanup_fails(
+        self,
+        mock_metadata,
+        _mock_mark,
+        mock_cleanup_owned,
+        mock_cleanup_artifacts,
+        mock_delete,
+    ):
+        mock_metadata.return_value = ('uid-a', '2026-05-20T00:00:00Z')
+        mock_cleanup_owned.return_value = False
+
+        assert _delete_and_wait('ma', 'kafkaclusters', 'default') == ('default', False)
+        mock_cleanup_artifacts.assert_not_called()
+        mock_delete.assert_not_called()
 
 
 class TestResetCommandList:

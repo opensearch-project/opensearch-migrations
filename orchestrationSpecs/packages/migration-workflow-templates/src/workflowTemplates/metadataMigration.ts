@@ -408,14 +408,14 @@ export const MetadataMigration = addMetadataTransformTemplates(metadataMigration
     .addTemplate("approveEvaluate", t => t
         .addRequiredInput("name", typeToken<string>())
         .addSteps(b => b
-            .addStep("waitForApproval", ResourceManagement, "waitForApproval", c =>
+            .addStep("waitForUserApproval", ResourceManagement, "waitForUserApproval", c =>
                 c.register({resourceName: b.inputs.name}))
         )
     )
     .addTemplate("approveMigrate", t => t
         .addRequiredInput("name", typeToken<string>())
         .addSteps(b => b
-            .addStep("waitForApproval", ResourceManagement, "waitForApproval", c =>
+            .addStep("waitForUserApproval", ResourceManagement, "waitForUserApproval", c =>
                 c.register({resourceName: b.inputs.name}))
         )
     )

@@ -108,6 +108,7 @@
           "setOwnerReference": false,
           "successCondition": "status.readyReplicas > 0"
         },
+        "activeDeadlineSeconds": 1200,
         "retryStrategy": {
           "limit": "6",
           "retryPolicy": "OnError",
@@ -197,6 +198,7 @@
           "setOwnerReference": false,
           "successCondition": "status.readyReplicas > 0"
         },
+        "activeDeadlineSeconds": 1200,
         "retryStrategy": {
           "limit": "6",
           "retryPolicy": "OnError",
@@ -286,6 +288,7 @@
           "setOwnerReference": false,
           "successCondition": "status.readyReplicas > 0"
         },
+        "activeDeadlineSeconds": 1200,
         "retryStrategy": {
           "limit": "6",
           "retryPolicy": "OnError",
@@ -748,6 +751,28 @@
                 ]
               },
               "name": "createKafkaClientConfig"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "waitforsecretkey",
+                "name": "resource-management"
+              },
+              "when": "{{=((!(inputs.parameters.resolvedKafkaAuthType == '')) ? (inputs.parameters.resolvedKafkaAuthType) : (fromJSON(inputs.parameters.kafkaConfig)['authType'])) == 'scram-sha-512'}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "secretName",
+                    "value": "{{=fromJSON(inputs.parameters.kafkaConfig)['secretName']}}"
+                  },
+                  {
+                    "name": "secretKey",
+                    "value": "password"
+                  }
+                ]
+              },
+              "name": "waitForKafkaAuthSecret"
             }
           ],
           [

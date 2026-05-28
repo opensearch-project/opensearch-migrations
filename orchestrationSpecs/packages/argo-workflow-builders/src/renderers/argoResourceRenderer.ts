@@ -190,12 +190,14 @@ function formatBody(body: GenericScope) {
         } else if (body.dag !== undefined) {
             return {dag: {tasks: (body.dag as []).map(t => formatStepOrTask(t))}};
         } else if (body.resource !== undefined) {
-            const {manifest, ...rest} = body.resource;
+            const {resource, ...restOfBody} = body;
+            const {manifest, ...rest} = resource;
             return {
                 resource: {
                     manifest: unwrapPlaceholdersAndStringify(transformExpressionsDeep(manifest)),
                     ...transformExpressionsDeep(rest)
-                }
+                },
+                ...transformExpressionsDeep(restOfBody)
             };
         } else if (body.container !== undefined) {
             const {container, ...restOfBody} = body;

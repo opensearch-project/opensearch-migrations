@@ -134,7 +134,7 @@
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CaptureProxy\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{workflow.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/source: \"{{=sprig.dig('sourceConfig', 'label', '', fromJSON(inputs.parameters.proxyConfig))}}\"\n    migrations.opensearch.org/task: captureProxy\nspec: {{=sprig.merge(sprig.dict(\"dependsOn\", [inputs.parameters.topicCrName], \"loggingConfigurationOverrideConfigMap\", sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']), \"internetFacing\", sprig.dig('internetFacing', false, fromJSON(inputs.parameters.proxyConfig)['proxyConfig']), \"podReplicas\", sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.proxyConfig)['proxyConfig']), \"resources\", fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['resources'], \"tls\", sprig.dig('tls', sprig.dict(), fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])), sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'internetFacing', 'podReplicas', 'resources', 'tls'))}}\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CaptureProxy\nmetadata:\n  name: \"{{inputs.parameters.proxyName}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{workflow.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/source: \"{{=sprig.dig('sourceConfig', 'label', '', fromJSON(inputs.parameters.proxyConfig))}}\"\n    migrations.opensearch.org/task: captureProxy\nspec: {{=sprig.merge(sprig.dict(\"dependsOn\", [inputs.parameters.topicCrName], \"loggingConfigurationOverrideConfigMap\", sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.proxyConfig)['proxyConfig']), \"internetFacing\", sprig.dig('internetFacing', false, fromJSON(inputs.parameters.proxyConfig)['proxyConfig']), \"podReplicas\", sprig.dig('podReplicas', 1, fromJSON(inputs.parameters.proxyConfig)['proxyConfig']), \"resources\", fromJSON(inputs.parameters.proxyConfig)['proxyConfig']['resources'], \"tls\", sprig.dig('tls', sprig.dict(), fromJSON(inputs.parameters.proxyConfig)['proxyConfig'])), sprig.omit(fromJSON(inputs.parameters.proxyConfig)['proxyConfig'], 'loggingConfigurationOverrideConfigMap', 'serviceType', 'internetFacing', 'podReplicas', 'resources', 'tls'))}}\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -291,7 +291,7 @@
         }
       },
       {
-        "name": "waitforapproval",
+        "name": "waitforuserapproval",
         "inputs": {
           "parameters": [
             {
@@ -303,6 +303,15 @@
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: ApprovalGate\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
           "action": "get",
           "successCondition": "status.phase == Approved"
+        },
+        "retryStrategy": {
+          "limit": "20",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "15",
+            "factor": "2",
+            "cap": "180"
+          }
         },
         "outputs": {
           "parameters": []
@@ -640,7 +649,7 @@
           ],
           [
             {
-              "template": "waitforapproval",
+              "template": "waitforuserapproval",
               "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
@@ -834,7 +843,7 @@
           ],
           [
             {
-              "template": "waitforapproval",
+              "template": "waitforuserapproval",
               "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
@@ -1024,7 +1033,7 @@
           ],
           [
             {
-              "template": "waitforapproval",
+              "template": "waitforuserapproval",
               "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
@@ -1270,7 +1279,7 @@
           ],
           [
             {
-              "template": "waitforapproval",
+              "template": "waitforuserapproval",
               "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
@@ -1460,7 +1469,7 @@
           ],
           [
             {
-              "template": "waitforapproval",
+              "template": "waitforuserapproval",
               "when": "{{=steps.tryApply.status == 'Failed'}}",
               "arguments": {
                 "parameters": [
@@ -1702,11 +1711,17 @@
             },
             {
               "name": "checksumForReplayer"
+            },
+            {
+              "name": "serviceEndpoint"
+            },
+            {
+              "name": "loadBalancerEndpoint"
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CaptureProxy\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n  checksumForSnapshot: \"{{inputs.parameters.checksumForSnapshot}}\"\n  checksumForReplayer: \"{{inputs.parameters.checksumForReplayer}}\"\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CaptureProxy\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\nstatus:\n  phase: \"{{inputs.parameters.phase}}\"\n  configChecksum: \"{{inputs.parameters.configChecksum}}\"\n  checksumForSnapshot: \"{{inputs.parameters.checksumForSnapshot}}\"\n  checksumForReplayer: \"{{inputs.parameters.checksumForReplayer}}\"\n  serviceEndpoint: \"{{inputs.parameters.serviceEndpoint}}\"\n  loadBalancerEndpoint: \"{{inputs.parameters.loadBalancerEndpoint}}\"\n",
           "action": "patch",
           "flags": [
             "--type",
@@ -1993,7 +2008,7 @@
             "wait",
             "--for=create",
             "{{='kafka/'+inputs.parameters.resourceName}}",
-            "--timeout=31536000s"
+            "--timeout=60s"
           ],
           "resources": {
             "limits": {
@@ -2011,13 +2026,13 @@
             "karpenter.sh/do-not-disrupt": "true"
           }
         },
-        "activeDeadlineSeconds": "31536000",
+        "activeDeadlineSeconds": "1200",
         "outputs": {
           "parameters": []
         }
       },
       {
-        "name": "waitforkafkaclusterready",
+        "name": "waitforkafkaclusterreadyresource",
         "inputs": {
           "parameters": [
             {
@@ -2031,13 +2046,53 @@
             }
           ]
         },
-        "resource": {
-          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: Kafka\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n",
-          "action": "get",
-          "successCondition": "status.listeners"
+        "container": {
+          "env": [
+            {
+              "name": "NAMESPACE",
+              "value": "{{workflow.namespace}}"
+            },
+            {
+              "name": "KAFKA_CLUSTER_NAME",
+              "value": "{{inputs.parameters.resourceName}}"
+            },
+            {
+              "name": "TIMEOUT_SECONDS",
+              "value": "2700"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
+            }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "command": [
+            "/bin/bash",
+            "-lc"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            }
+          },
+          "args": [
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/waitForKafkaClusterReady.sh\""
+          ]
         },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
+          }
+        },
+        "activeDeadlineSeconds": 2760,
         "retryStrategy": {
-          "limit": "6",
+          "limit": "3",
           "retryPolicy": "OnError",
           "backoff": {
             "duration": "10",
@@ -2050,66 +2105,58 @@
         }
       },
       {
-        "name": "waitforkafkacluster",
+        "name": "waitforkafkatopicready",
         "inputs": {
           "parameters": [
             {
-              "name": "resourceName"
-            },
-            {
-              "name": "imageMigrationConsoleLocation"
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy"
+              "name": "topicName"
             }
           ]
         },
-        "steps": [
-          [
+        "resource": {
+          "manifest": "apiVersion: kafka.strimzi.io/v1\nkind: KafkaTopic\nmetadata:\n  name: \"{{inputs.parameters.topicName}}\"\n",
+          "action": "get",
+          "successCondition": "status.conditions.0.type == Ready, status.conditions.0.status == True"
+        },
+        "retryStrategy": {
+          "limit": "6",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "10",
+            "factor": "2",
+            "cap": "60"
+          }
+        },
+        "outputs": {
+          "parameters": []
+        }
+      },
+      {
+        "name": "waitforsecretkey",
+        "inputs": {
+          "parameters": [
             {
-              "template": "waitforkafkaclustercreated",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.resourceName}}"
-                  },
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  }
-                ]
-              },
-              "name": "waitForCreation"
-            }
-          ],
-          [
+              "name": "secretName"
+            },
             {
-              "template": "waitforkafkaclusterready",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{inputs.parameters.resourceName}}"
-                  },
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  }
-                ]
-              },
-              "name": "waitForReady"
+              "name": "secretKey"
             }
           ]
-        ],
+        },
+        "resource": {
+          "manifest": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: \"{{inputs.parameters.secretName}}\"\n",
+          "action": "get",
+          "successCondition": "{{='data.'+inputs.parameters.secretKey}}"
+        },
+        "retryStrategy": {
+          "limit": "10",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "5",
+            "factor": "2",
+            "cap": "30"
+          }
+        },
         "outputs": {
           "parameters": []
         }
@@ -2160,7 +2207,7 @@
         }
       },
       {
-        "name": "waitforcapturedtraffic",
+        "name": "waitindefinitelyforcapturedtraffic",
         "inputs": {
           "parameters": [
             {
@@ -2187,12 +2234,12 @@
           "failureCondition": "status.phase == Error"
         },
         "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
+          "limit": "20",
+          "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
             "factor": "2",
-            "cap": "60"
+            "cap": "120"
           }
         },
         "outputs": {
@@ -2200,7 +2247,7 @@
         }
       },
       {
-        "name": "waitforcaptureproxy",
+        "name": "waitindefinitelyforcaptureproxy",
         "inputs": {
           "parameters": [
             {
@@ -2227,12 +2274,12 @@
           "failureCondition": "status.phase == Error"
         },
         "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
+          "limit": "20",
+          "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
             "factor": "2",
-            "cap": "60"
+            "cap": "120"
           }
         },
         "outputs": {
@@ -2240,7 +2287,7 @@
         }
       },
       {
-        "name": "waitfordatasnapshot",
+        "name": "waitindefinitelyfordatasnapshot",
         "inputs": {
           "parameters": [
             {
@@ -2267,12 +2314,12 @@
           "failureCondition": "status.phase == Error"
         },
         "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
+          "limit": "20",
+          "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
             "factor": "2",
-            "cap": "60"
+            "cap": "120"
           }
         },
         "outputs": {
@@ -2280,7 +2327,7 @@
         }
       },
       {
-        "name": "waitforsnapshotmigration",
+        "name": "waitindefinitelyforsnapshotmigration",
         "inputs": {
           "parameters": [
             {
@@ -2307,12 +2354,12 @@
           "failureCondition": "status.phase == Error"
         },
         "retryStrategy": {
-          "limit": "6",
-          "retryPolicy": "OnError",
+          "limit": "20",
+          "retryPolicy": "Always",
           "backoff": {
             "duration": "10",
             "factor": "2",
-            "cap": "60"
+            "cap": "120"
           }
         },
         "outputs": {

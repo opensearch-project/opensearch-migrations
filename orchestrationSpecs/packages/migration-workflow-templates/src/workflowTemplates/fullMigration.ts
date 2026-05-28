@@ -146,6 +146,7 @@ export const FullMigration = WorkflowBuilder.create({
         .addOptionalInput("groupName_view", c => "Kafka Cluster")
         .addOptionalInput("sortOrder_view", c => 999)
         .addOptionalInput("resourceName", c => "")
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => {
             return b
@@ -159,6 +160,7 @@ export const FullMigration = WorkflowBuilder.create({
                 )
                 .addStep("deployCluster", SetupKafka, "deployKafkaClusterAndTopics", c =>
                     c.register({
+                        ...selectInputsForRegister(b, c),
                         clusterName: b.inputs.clusterName,
                         version: b.inputs.version,
                         clusterConfig: expr.jsonPathStrictSerialized(b.inputs.kafkaClusterConfig, "config"),
@@ -255,7 +257,7 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: b.inputs.resourceName,
                 })
             )
-            .addStep("waitForProxyDeps", ResourceManagement, "waitForCaptureProxy", c =>
+            .addStep("waitIndefinitelyForProxyDeps", ResourceManagement, "waitIndefinitelyForCaptureProxy", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
                         resourceName: expr.get(c.item, "name"),
@@ -276,7 +278,7 @@ export const FullMigration = WorkflowBuilder.create({
                     )}),
                 }
             )
-            .addStep("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c =>
+            .addStep("waitIndefinitelyForSnapshot", ResourceManagement, "waitIndefinitelyForDataSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.resourceName,
@@ -452,7 +454,7 @@ export const FullMigration = WorkflowBuilder.create({
                     });
                 },
             )
-            .addStep("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c => {
+            .addStep("waitIndefinitelyForSnapshot", ResourceManagement, "waitIndefinitelyForDataSnapshot", c => {
                 const config = expr.deserializeRecord(b.inputs.snapshotMigrationConfig);
                 const snapshotNameRes = expr.get(config, "snapshotNameResolution");
                 return c.register({
@@ -609,7 +611,7 @@ export const FullMigration = WorkflowBuilder.create({
                     retryGroupName_view: expr.concat(expr.literal("TrafficReplay: "), b.inputs.name),
                 }),
             )
-            .addStep("waitForSnapshotMigrationDeps", ResourceManagement, "waitForSnapshotMigration", c => {
+            .addStep("waitIndefinitelyForSnapshotMigrationDeps", ResourceManagement, "waitIndefinitelyForSnapshotMigration", c => {
                     return c.register({
                         ...selectInputsForRegister(b, c),
                         resourceName: expr.concat(
@@ -636,7 +638,7 @@ export const FullMigration = WorkflowBuilder.create({
                     )}),
                 }
             )
-            .addStep("waitForProxy", ResourceManagement, "waitForCaptureProxy", c =>
+            .addStep("waitIndefinitelyForProxy", ResourceManagement, "waitIndefinitelyForCaptureProxy", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.fromProxy,
@@ -645,7 +647,7 @@ export const FullMigration = WorkflowBuilder.create({
                 }),
                 {when: c => ({templateExp: checksumNotDone(c.reconcileTrafficReplayResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
             )
-            .addStep("waitForKafkaCluster", ResourceManagement, "waitForKafkaCluster", c =>
+            .addStep("waitForKafkaCluster", SetupKafka, "waitForKafkaCluster", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.kafkaClusterName,
@@ -717,6 +719,7 @@ export const FullMigration = WorkflowBuilder.create({
             )
             .addStep("createKafka", INTERNAL, "setupSingleKafkaCluster", c =>
                 c.register({
+                    ...selectInputsForRegister(b, c),
                     kafkaClusterConfig: expr.serialize(expr.makeDict({
                         name: expr.get(c.item, "name"),
                         version: expr.get(c.item, "version"),
