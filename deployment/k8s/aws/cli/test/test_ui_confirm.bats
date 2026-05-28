@@ -168,3 +168,39 @@ reset_queue()  { __MOCK_ANSWER=""; }
   run_split
   [ -z "$STDOUT" ]
 }
+
+# ---------- regression: REAL ui_prompt + caller's local var ----------
+#
+# Bug: ui_prompt declared `local answer …` while writing `printf -v
+# "$varname"`. When the caller passed varname="answer" and had its own
+# `local answer=""`, our local shadowed theirs, so the real value never
+# propagated. Caller saw empty answer; ui_confirm classified it as no.
+#
+# These tests exercise the REAL ui_prompt — no per-test mock — driving
+# input via stdin (MIGRATE_NONINTERACTIVE escape doesn't help: it
+# returns the default, not piped input). We verify the caller's local
+# var is updated.
+
+@test "ui_prompt: caller's 'answer' local is updated when real ui_prompt is used" {
+  # Re-source ui.sh so we get the REAL ui_prompt (not the test's mock).
+  # The lib has a load guard, so unset both before sourcing.
+  unset -f ui_prompt
+  unset __MIGRATE_UI_LOADED
+  # shellcheck disable=SC1091
+  source "$BATS_TEST_DIRNAME/../lib/ui.sh"
+  # Force non-interactive so /dev/tty isn't needed.
+  local answer=""
+  MIGRATE_NONINTERACTIVE=1 ui_prompt "Test?" "the-default-value" answer
+  [ "$answer" = "the-default-value" ]
+}
+
+@test "ui_confirm: real ui_prompt + 'answer' var name doesn't get shadow-collided" {
+  unset -f ui_prompt
+  unset __MIGRATE_UI_LOADED
+  # shellcheck disable=SC1091
+  source "$BATS_TEST_DIRNAME/../lib/ui.sh"
+  MIGRATE_NONINTERACTIVE=1 run ui_confirm "Test?" "Y"
+  [ "$status" -eq 0 ]
+  MIGRATE_NONINTERACTIVE=1 run ui_confirm "Test?" "N"
+  [ "$status" -eq 1 ]
+}

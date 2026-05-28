@@ -78,53 +78,51 @@ ui_banner() {
 # An empty input → default value. A read error → default value. The function
 # never returns the prompt text, the default hint, or any chrome on stdout.
 ui_prompt() {
-  local prompt="$1" default="$2" varname="${3:-}"
-  local answer prompt_str
+  local prompt="$1" default="$2" __ui_varname="${3:-}"
+  # Locals are prefixed with __ui_ to avoid name-collision with the
+  # caller's varname argument. Bash 3.2 `printf -v "$varname"` resolves
+  # to whatever the caller passed; if our function declared a `local
+  # answer` AND the caller asked us to write into THEIR `answer` via
+  # `ui_prompt … answer`, our local shadowed theirs and the result
+  # never propagated. (That's the bug ui_confirm hit: caller's
+  # `answer` stayed empty even when we'd read 'y' here.) Naming our
+  # locals __ui_<x> sidesteps the issue completely — no real-world
+  # caller passes a varname that starts with our reserved prefix.
+  local __ui_answer __ui_prompt_str __ui_rd_rc=0
   if [[ -n "$default" ]]; then
-    prompt_str=$(printf '%s%s%s [%s]: ' "$__UI_C_BOLD" "$prompt" "$__UI_C_RESET" "$default")
+    __ui_prompt_str=$(printf '%s%s%s [%s]: ' "$__UI_C_BOLD" "$prompt" "$__UI_C_RESET" "$default")
   else
-    prompt_str=$(printf '%s%s%s: ' "$__UI_C_BOLD" "$prompt" "$__UI_C_RESET")
+    __ui_prompt_str=$(printf '%s%s%s: ' "$__UI_C_BOLD" "$prompt" "$__UI_C_RESET")
   fi
   # Non-interactive mode: skip the read, always use the default.
-  # This is what makes Jenkins / CI runs reproducible — every prompt
-  # auto-answers with whatever the wizard would have suggested.
   if [[ "${MIGRATE_NONINTERACTIVE:-0}" == "1" ]]; then
-    answer="$default"
+    __ui_answer="$default"
   else
-    # Try /dev/tty first; if the write actually fails (e.g. sandbox or
-    # piped-stdin context where tty isn't usable), fall back to stderr.
-    if ! { printf '%s' "$prompt_str" >/dev/tty; } 2>/dev/null; then
-      printf '%s' "$prompt_str" >&2
+    # Try /dev/tty first; fall back to stderr if not writable.
+    if ! { printf '%s' "$__ui_prompt_str" >/dev/tty; } 2>/dev/null; then
+      printf '%s' "$__ui_prompt_str" >&2
     fi
 
-    # Likewise for input: prefer /dev/tty, fall back to stdin if that fails.
-    #
-    # IMPORTANT: with `set -o pipefail` + `set -e` + `if ! { … }`, a
-    # non-zero `read` rc inside the brace group can leave the function
-    # in a state where `$answer` looks unset on bash 3.2 even though
-    # the user typed something. Pull `read` out of the if-condition
-    # and check rc explicitly.
-    answer=""
-    local rd_rc=0
+    # Read from /dev/tty; fall back to stdin if not readable.
+    __ui_answer=""
     {
-      IFS= read -r answer </dev/tty
-      rd_rc=$?
-    } 2>/dev/null || rd_rc=$?
-    if (( rd_rc != 0 )); then
-      # /dev/tty wasn't readable — fall back to stdin.
-      IFS= read -r answer 2>/dev/null || answer=""
+      IFS= read -r __ui_answer </dev/tty
+      __ui_rd_rc=$?
+    } 2>/dev/null || __ui_rd_rc=$?
+    if (( __ui_rd_rc != 0 )); then
+      IFS= read -r __ui_answer 2>/dev/null || __ui_answer=""
     fi
     if [[ "${MIGRATE_DEBUG_PROMPT:-0}" -eq 1 ]]; then
       printf '  [debug] ui_prompt: rd_rc=%s answer=[%s] (len=%s)\n' \
-        "$rd_rc" "$answer" "${#answer}" >&2
+        "$__ui_rd_rc" "$__ui_answer" "${#__ui_answer}" >&2
     fi
-    [[ -z "${answer:-}" ]] && answer="$default"
+    [[ -z "${__ui_answer:-}" ]] && __ui_answer="$default"
   fi
 
-  if [[ -n "$varname" ]]; then
-    printf -v "$varname" '%s' "$answer"
+  if [[ -n "$__ui_varname" ]]; then
+    printf -v "$__ui_varname" '%s' "$__ui_answer"
   else
-    printf '%s\n' "$answer"
+    printf '%s\n' "$__ui_answer"
   fi
 }
 
@@ -151,11 +149,6 @@ ui_confirm() {
   local answer=""
   ui_prompt "$prompt" "$hint" answer
 
-  if [[ "${MIGRATE_DEBUG_PROMPT:-0}" -eq 1 ]]; then
-    printf '  [debug] ui_confirm: hint=%s default_yn=%s answer=[%s]\n' \
-      "$hint" "$default_yn" "$answer" >&2
-  fi
-
   # If ui_prompt returned the hint string itself, the user just hit Enter
   # and ui_prompt's "default fallback" kicked in — collapse that to the
   # canonical default_yn for the comparison below.
@@ -166,10 +159,6 @@ ui_confirm() {
   # Lowercase first letter for the comparison. Bash 3.2 has no ${var,,}.
   local first
   first=$(printf '%s' "$answer" | cut -c1 | tr '[:upper:]' '[:lower:]')
-  if [[ "${MIGRATE_DEBUG_PROMPT:-0}" -eq 1 ]]; then
-    printf '  [debug] ui_confirm: first=[%s] → %s\n' "$first" \
-      "$([[ "$first" == y ]] && echo 'YES (rc 0)' || echo 'NO (rc 1)')" >&2
-  fi
   case "$first" in
     y) return 0 ;;
     n) return 1 ;;
