@@ -130,7 +130,15 @@ crane_mirror_or_skip() {
 _crane_mirror_ma_images() {
   local registry="$1" ma_ver="$2" region="$3"
 
+  # Source registry: --ma-images-source overrides public.ecr.aws so
+  # restricted accounts can copy from another ECR they already have
+  # access to. When set, legacy bootstrap reads tag "latest" rather
+  # than $MA_VERSION because that flow is for already-tagged images.
+  local ma_src; ma_src=$(state_get MA_IMAGES_SOURCE "")
   ui_step "Mirroring 5 MA-team images to $registry (single-repo, disambiguating tags)"
+  if [[ -n "$ma_src" ]]; then
+    ui_dim "  source: --ma-images-source=$ma_src"
+  fi
 
   # build_name|public_suffix — must match upstream aws-bootstrap.sh's
   # MA_IMAGES table (lines ~1534).
@@ -146,7 +154,11 @@ _crane_mirror_ma_images() {
     ((i++))
     build_name=${pair%%|*}
     suffix=${pair##*|}
-    src="public.ecr.aws/opensearchproject/opensearch-migrations-${suffix}:${ma_ver}"
+    if [[ -n "$ma_src" ]]; then
+      src="${ma_src}:migrations_${build_name}_latest"
+    else
+      src="public.ecr.aws/opensearchproject/opensearch-migrations-${suffix}:${ma_ver}"
+    fi
     dst="${registry}:migrations_${build_name}_${ma_ver}"
     printf '  [%d/%d] %s → %s ' "$i" "$total" "$src" "$dst"
 

@@ -77,9 +77,6 @@ cmd_resume() {
       --version)           state_set MA_VERSION "$2"; shift 2 ;;
       --version=*)         state_set MA_VERSION "${1#--version=}"; shift ;;
       --use-public-images) state_set MIRROR_IMAGES "N"; shift ;;
-      --build)             state_set BUILD_FROM_SOURCE "Y"; shift ;;
-      --image-tag)         state_set IMAGE_TAG "$2"; shift 2 ;;
-      --image-tag=*)       state_set IMAGE_TAG "${1#--image-tag=}"; shift ;;
       --skip-cfn-deploy)   state_set SKIP_CFN_DEPLOY "Y"; shift ;;
       --skip-console-exec) state_set SKIP_CONSOLE_EXEC "Y"; shift ;;
       --skip-setting-k8s-context) state_set SKIP_KUBECONFIG_UPDATE "Y"; shift ;;
@@ -89,28 +86,38 @@ cmd_resume() {
       --namespace=*)       state_set STAGE_NAME "${1#--namespace=}"; shift ;;
       --helm-values)       state_set HELM_EXTRA_VALUES_FILE "$2"; shift 2 ;;
       --helm-values=*)     state_set HELM_EXTRA_VALUES_FILE "${1#--helm-values=}"; shift ;;
-      --deploy-create-vpc-cfn) state_set CFN_TEMPLATE_VARIANT "create-vpc"; shift ;;
-      --deploy-import-vpc-cfn) state_set CFN_TEMPLATE_VARIANT "import-vpc"; shift ;;
-      --vpc-id)            state_set IMPORT_VPC_ID "$2"; shift 2 ;;
-      --vpc-id=*)          state_set IMPORT_VPC_ID "${1#--vpc-id=}"; shift ;;
-      --subnet-ids)        state_set IMPORT_SUBNET_IDS "$2"; shift 2 ;;
-      --subnet-ids=*)      state_set IMPORT_SUBNET_IDS "${1#--subnet-ids=}"; shift ;;
-      --tls-mode)          state_set TLS_MODE "$2"; shift 2 ;;
-      --tls-mode=*)        state_set TLS_MODE "${1#--tls-mode=}"; shift ;;
-      --pca-arn)           state_set PCA_ARN "$2"; shift 2 ;;
-      --pca-arn=*)         state_set PCA_ARN "${1#--pca-arn=}"; shift ;;
+      # --deploy-create-vpc-cfn is the only supported CFN mode; accept
+      # it as a no-op for legacy callers.
+      --deploy-create-vpc-cfn) shift ;;
       --eks-access-principal-arn)   state_set EKS_ACCESS_PRINCIPAL_ARN "$2"; shift 2 ;;
       --eks-access-principal-arn=*) state_set EKS_ACCESS_PRINCIPAL_ARN "${1#--eks-access-principal-arn=}"; shift ;;
       --ma-images-source)  state_set MA_IMAGES_SOURCE "$2"; shift 2 ;;
       --ma-images-source=*) state_set MA_IMAGES_SOURCE "${1#--ma-images-source=}"; shift ;;
-      --ma-chart-dir)      state_set MA_CHART_DIR "$2"; shift 2 ;;
-      --ma-chart-dir=*)    state_set MA_CHART_DIR "${1#--ma-chart-dir=}"; shift ;;
-      --use-general-node-pool|--disable-general-purpose-pool|--skip-test-images|--ignore-checks|--base-dir|--base-dir=*)
-                           # Documented but not wired today. Pass through
-                           # as state so a future implementation can
-                           # honor them; warn so the operator knows.
-                           ui_warn "flag '$1' parsed but not yet implemented in migrate-cli"
-                           shift ;;
+
+      # Flags accepted by aws-bootstrap.sh that this CLI does not yet
+      # implement. Warn loudly and continue rather than silently
+      # storing-and-ignoring (which makes a "bad invocation" look
+      # successful at first and fail much later).
+      --use-general-node-pool|--disable-general-purpose-pool \
+        |--skip-test-images|--ignore-checks \
+        |--base-dir|--base-dir=* \
+        |--build|--image-tag|--image-tag=* \
+        |--ma-chart-dir|--ma-chart-dir=* \
+        |--tls-mode|--tls-mode=* \
+        |--pca-arn|--pca-arn=* \
+        |--deploy-import-vpc-cfn \
+        |--vpc-id|--vpc-id=* \
+        |--subnet-ids|--subnet-ids=* \
+        |--create-vpc-endpoints|--create-vpc-endpoints=*)
+                           ui_warn "flag '$1' is not implemented in migrate-cli; ignoring"
+                           # Eat the value too if it's a value-taking flag.
+                           case "$1" in
+                             --base-dir|--image-tag|--ma-chart-dir|--tls-mode \
+                              |--pca-arn|--vpc-id|--subnet-ids \
+                              |--create-vpc-endpoints) shift 2 ;;
+                             *) shift ;;
+                           esac
+                           ;;
       --) shift; break ;;
       *)  args+=("$1"); shift ;;
     esac

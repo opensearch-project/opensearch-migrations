@@ -149,6 +149,19 @@ run_aws_bootstrap() {
 
   echo "Running migration-assistant from ${CLI_DIR}."
 
+  # Pin MIGRATE_HOME to a per-build workspace dir so each Jenkins run
+  # starts from a clean state directory (no leftover state.env / cached
+  # artifacts from previous PR builds).
+  MIGRATE_HOME="${WORKSPACE:-$PWD}/.migrate-home-${BUILD_NUMBER:-local}"
+  export MIGRATE_HOME
+  rm -rf "${MIGRATE_HOME}"
+  mkdir -p "${MIGRATE_HOME}"
+  echo "MIGRATE_HOME=${MIGRATE_HOME}"
+
+  # Wrap CLI invocation so we can dump the migrate.log on failure. The
+  # log is the only artifact with the actual error context; without it
+  # the operator just sees `+ exit 255` in the Jenkins console.
+  set +e
   if [[ ${#BOOTSTRAP_ARGS[@]} -gt 0 ]]; then
     echo "Invoking migration-assistant with extra args: ${BOOTSTRAP_ARGS[*]}"
     "${CLI_BIN}" \
@@ -165,6 +178,17 @@ run_aws_bootstrap() {
       --skip-setting-k8s-context \
       --use-public-images \
       --stage "${STAGE}"
+  fi
+  cli_rc=$?
+  set -e
+
+  if [[ $cli_rc -ne 0 ]]; then
+    echo
+    echo "=== migration-assistant FAILED (rc=$cli_rc) — dumping migrate.log ==="
+    cat "${MIGRATE_HOME}/${STAGE}/log/migrate.log" 2>&1 || \
+      echo "(migrate.log not found at ${MIGRATE_HOME}/${STAGE}/log/migrate.log)"
+    echo "=== end migrate.log ==="
+    fail "migration-assistant exited rc=$cli_rc"
   fi
 
   echo "migration-assistant completed successfully."

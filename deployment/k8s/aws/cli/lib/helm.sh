@@ -133,6 +133,24 @@ helm_install_or_upgrade() {
 
   local region; region=$(state_get AWS_REGION)
   local account; account=$(state_get AWS_ACCOUNT)
+  # CFN-derived values: snapshot role for S3 IRSA. Pull from outputs we
+  # already loaded above (and tolerate older templates that don't export
+  # SNAPSHOT_ROLE — chart defaults handle that path).
+  local snapshot_role
+  snapshot_role=$(_cfn_pick "$outputs" SNAPSHOT_ROLE SnapshotRole)
+  local snapshot_args=()
+  if [[ -n "$snapshot_role" ]]; then
+    snapshot_args+=(--set "defaultBucketConfiguration.snapshotRoleArn=$snapshot_role")
+  fi
+
+  # Operator-supplied --helm-values FILE. Appended LAST so it can override
+  # everything (the chart's values.yaml + valuesEks.yaml + ours).
+  local extra_values_file; extra_values_file=$(state_get HELM_EXTRA_VALUES_FILE "")
+  local extra_values_args=()
+  if [[ -n "$extra_values_file" ]]; then
+    [[ -f "$extra_values_file" ]] || die "--helm-values file not found: $extra_values_file"
+    extra_values_args+=(--values "$extra_values_file")
+  fi
 
   # Spawn parallel watchers so the operator sees movement while
   # `helm --wait` blocks. Tracked TWO ways for each:
@@ -165,8 +183,11 @@ helm_install_or_upgrade() {
     --values "$chart_extract/values.yaml" \
     --values "$chart_extract/valuesEks.yaml" \
     --values "$values_file" \
+    "${extra_values_args[@]+"${extra_values_args[@]}"}" \
+    --set "stageName=$stage" \
     --set "aws.region=$region" \
     --set "aws.account=$account" \
+    "${snapshot_args[@]+"${snapshot_args[@]}"}" \
     "${image_flags[@]}" \
     --timeout 25m \
     --wait

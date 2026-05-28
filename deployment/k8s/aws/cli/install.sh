@@ -6,7 +6,7 @@
 # isn't on PATH yet.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/opensearch-project/migrate-cli/main/install.sh | bash
 #   curl -fsSL .../install.sh | MIGRATE_VERSION=0.1.0 bash
 #   curl -fsSL .../install.sh | INSTALL_FROM_LOCAL=/path/to/repo bash   # for testing
 
@@ -73,8 +73,11 @@ main() {
     cp -R "$INSTALL_FROM_LOCAL/lib" "$install_dir/"
     cp -R "$INSTALL_FROM_LOCAL/skills" "$install_dir/"
   else
-    local tarball="migrate-cli-${version}.tar.gz"
-    local url="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${version}/${tarball}"
+    # Tag convention matches assemble-bootstrap.sh + release-drafter:
+    # tag is the bare version (no "v" prefix), asset is
+    # migration-assistant-cli-<version>.tar.gz.
+    local tarball="migration-assistant-cli-${version}.tar.gz"
+    local url="https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${version}/${tarball}"
     printf 'Downloading %s …\n' "$url"
     local tmp; tmp=$(mktemp -d)
     curl -fsSL --max-time 60 -o "$tmp/$tarball" "$url"
