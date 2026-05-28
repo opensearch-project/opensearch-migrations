@@ -21,6 +21,11 @@ cmd_cleanup() {
   local stack;   stack=$(state_get CFN_STACK_NAME "")
   local release; release=$(state_get HELM_RELEASE "")
   local region;  region=$(state_get AWS_REGION "")
+  # Release-name == namespace per chart contract; STAGE_NAME holds both.
+  local helm_ns; helm_ns=$(state_get STAGE_NAME "$release")
+  # Pick up KUBECTL_CONTEXT from state so cleanup operates on the right
+  # cluster when the operator's active context is something else.
+  helm_kctx_init
 
   if [[ -z "$stack" && -z "$release" ]]; then
     ui_warn "nothing to clean up; state is empty for stage '$STAGE'"
@@ -29,7 +34,7 @@ cmd_cleanup() {
 
   ui_banner "Cleanup stage: $STAGE"
   if [[ -n "$release" ]]; then
-    ui_info "  helm release : $release (namespace: $HELM_NS)"
+    ui_info "  helm release : $release (namespace: $helm_ns)"
   fi
   if [[ -n "$stack" ]]; then
     ui_info "  CFN stack    : $stack (region: $region)"
@@ -42,7 +47,7 @@ cmd_cleanup() {
 
   if [[ -n "$release" ]]; then
     ui_step "helm uninstall $release"
-    helm uninstall "$release" --namespace "$HELM_NS" --wait \
+    "${HELM[@]}" uninstall "$release" --namespace "$helm_ns" --wait \
       || ui_warn "helm uninstall returned non-zero (continuing)"
   fi
 

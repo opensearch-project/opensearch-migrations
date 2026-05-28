@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
 # crane.sh — mirror images from public registries to a private ECR registry.
 #
-# The opensearch-migrations release does NOT publish a standalone image
-# manifest — instead, the canonical image list lives inside aws-bootstrap.sh
-# as a heredoc-style IMAGES="…" variable. We download the bootstrap script
-# (which IS published as a release asset), extract that list with awk, and
-# iterate `crane copy` over it.
+# The canonical image list lives in privateEcrManifest.sh inside the
+# opensearch-migrations repo. It's a tiny pinned manifest:
+#     IMAGES="
+#       quay.io/jetstack/cert-manager-controller:v1.17.2
+#       …
+#     "
+#     CHARTS="…"
+# We source it (or, in CI/local-build, read a vendored copy) and iterate
+# `crane copy` over it.
 #
 # Skipped entirely when MIRROR_IMAGES=N (operator chose --use-public-images).
 
 [[ -n "${__MIGRATE_CRANE_LOADED:-}" ]] && return 0
 __MIGRATE_CRANE_LOADED=1
 
-CRANE_BOOTSTRAP_NAME='aws-bootstrap.sh'
+# Path of privateEcrManifest.sh inside the opensearch-migrations repo.
+# Pulled from the tag matching MA_VERSION via raw.githubusercontent.com
+# (so we match the exact image versions the chart expects).
+CRANE_MANIFEST_REL_PATH='deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh'
 
 crane_mirror_or_skip() {
   local mirror; mirror=$(state_get MIRROR_IMAGES Y)
@@ -40,15 +47,11 @@ crane_mirror_or_skip() {
   local registry; registry=$(_cfn_pick "$outputs" MIGRATIONS_ECR_REGISTRY ECRRegistry)
   [[ -z "$registry" ]] && registry="${account}.dkr.ecr.${region}.amazonaws.com"
 
-  ui_step "Downloading aws-bootstrap.sh (image list source, MA v$ma_ver)"
-  local bootstrap
-  bootstrap=$(artifacts_fetch "$CRANE_BOOTSTRAP_NAME" "$ma_ver")
-
-  ui_step "Extracting image list from aws-bootstrap.sh"
+  ui_step "Loading image manifest (MA v$ma_ver)"
   local image_list
-  image_list=$(_extract_images "$bootstrap")
+  image_list=$(_crane_load_manifest "$ma_ver")
   if [[ -z "$image_list" ]]; then
-    die "could not extract IMAGES list from $bootstrap (release format may have changed)"
+    die "could not load image manifest for MA $ma_ver"
   fi
 
   local total
@@ -165,20 +168,39 @@ _crane_mirror_ma_images() {
   return 0
 }
 
-# _extract_images <path-to-bootstrap.sh> → emits one image:tag per line.
+# _crane_load_manifest <ma_version> → emits one image:tag per line.
 #
-# Awk-based: scan lines between `IMAGES="` and the closing `"` line, drop
-# blanks and comments, keep anything that looks like a registry/path:tag.
-# Robust to upstream comment churn and section headers.
-_extract_images() {
-  local path="$1"
-  awk '
-    /^IMAGES="/   { in_block=1; next }
-    in_block && /^"$/ { in_block=0; exit }
-    in_block && /^[[:space:]]*$/  { next }
-    in_block && /^[[:space:]]*#/  { next }
-    in_block { sub(/^[[:space:]]+/, ""); print }
-  ' "$path"
+# Resolves privateEcrManifest.sh in this preference order:
+#   1. ./skills/privateEcrManifest.sh (vendored alongside the CLI tarball)
+#   2. ../../charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh
+#      (in-repo dev mode — when running from a checkout)
+#   3. raw.githubusercontent.com tag <ver> (release fetch via artifacts_fetch)
+#
+# Then sources it in a subshell to read $IMAGES, strips blanks/comments,
+# emits one entry per line.
+_crane_load_manifest() {
+  local ma_ver="$1"
+  local cli_root manifest=""
+  cli_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+  # 1. Vendored copy alongside the CLI (assemble-bootstrap.sh ships this).
+  if [[ -f "$cli_root/skills/privateEcrManifest.sh" ]]; then
+    manifest="$cli_root/skills/privateEcrManifest.sh"
+  # 2. In-repo dev mode (when invoked from a clone).
+  elif [[ -f "$cli_root/../../charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh" ]]; then
+    manifest="$cli_root/../../charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh"
+  # 3. Fetch from the release tag.
+  else
+    manifest=$(artifacts_fetch_raw "privateEcrManifest.sh" "$ma_ver" \
+        "$CRANE_MANIFEST_REL_PATH") || return 1
+  fi
+
+  # Source in a subshell so $IMAGES doesn't leak into our state.
+  ( # shellcheck disable=SC1090
+    . "$manifest"
+    printf '%s\n' "$IMAGES" \
+      | awk 'NF>0 && $1 !~ /^#/ {print $1}'
+  )
 }
 
 # _dst_for <src> <ecr-host>  →  destination URL for crane copy.

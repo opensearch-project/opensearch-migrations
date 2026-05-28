@@ -25,9 +25,10 @@ console_exec() {
   fi
 
   local ns; ns=$(state_get STAGE_NAME "$HELM_DEFAULT_NS")
+  helm_kctx_init
   ui_step "Handing off to migration-console-0 (kubectl exec)"
   ui_dim "  Press Ctrl-D or 'exit' to leave the console."
-  exec kubectl exec --stdin --tty \
+  exec "${KUBECTL[@]}" exec --stdin --tty \
     --namespace "$ns" \
     migration-console-0 -- /bin/bash
 }

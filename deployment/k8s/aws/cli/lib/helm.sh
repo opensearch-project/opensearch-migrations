@@ -8,6 +8,22 @@
 [[ -n "${__MIGRATE_HELM_LOADED:-}" ]] && return 0
 __MIGRATE_HELM_LOADED=1
 
+# Context-bound kubectl + helm. helm_install_or_upgrade rebinds these to
+# `--kube-context X` / `--context X` after looking up state.
+# Default to bare invocations so tests / pre-context callers still work.
+HELM=(helm)
+KUBECTL=(kubectl)
+
+# Allow other modules (cleanup.sh, console.sh) to refresh their copies
+# from the saved KUBECTL_CONTEXT without re-implementing this logic.
+helm_kctx_init() {
+  local ctx; ctx=$(state_get KUBECTL_CONTEXT "")
+  if [[ -n "$ctx" ]]; then
+    HELM=(helm --kube-context "$ctx")
+    KUBECTL=(kubectl --context "$ctx")
+  fi
+}
+
 HELM_CHART_NAME='migration-assistant'
 # IMPORTANT: the chart templates `.Release.Name` into the
 # default-create-argo-migration-templates Job's NAMESPACE env var. The
@@ -40,12 +56,26 @@ helm_install_or_upgrade() {
   fi
   registry_from_cfn=$(_cfn_pick "$outputs" MIGRATIONS_ECR_REGISTRY ECRRegistry)
 
+  # Match legacy aws-bootstrap.sh: always create the kubeconfig entry
+  # (with --alias so multi-cluster hosts get a stable context name), and
+  # only skip the *active context switch* when --skip-setting-k8s-context
+  # is set. Default alias is the cluster name; --kubectl-context overrides.
+  local kube_ctx; kube_ctx=$(state_get KUBECTL_CONTEXT "$cluster_name")
+  aws eks update-kubeconfig --region "$region" --name "$cluster_name" \
+    --alias "$kube_ctx" >/dev/null
   if [[ "$(state_get SKIP_KUBECONFIG_UPDATE N)" == "Y" ]]; then
-    log_info "skipping aws eks update-kubeconfig (--skip-setting-k8s-context)"
+    log_info "kubeconfig entry created (alias=$kube_ctx); active context unchanged"
   else
-    aws eks update-kubeconfig --region "$region" --name "$cluster_name" >/dev/null
+    kubectl config use-context "$kube_ctx" >/dev/null 2>&1 || true
   fi
   state_set EKS_CLUSTER "$cluster_name"
+  state_set KUBECTL_CONTEXT "$kube_ctx"
+  export KUBE_CONTEXT="$kube_ctx"
+
+  # Define context-bound helm/kubectl arrays so every later call routes
+  # through the operator-selected context. Only one definition site.
+  HELM=(helm --kube-context "$kube_ctx")
+  KUBECTL=(kubectl --context "$kube_ctx")
 
   ui_step "Downloading helm chart (MA v$ma_ver)"
   local chart
@@ -130,7 +160,7 @@ helm_install_or_upgrade() {
   # gets nothing but the bare "Error: …" line. Don't remove the set +e.
   local helm_rc=0
   set +e
-  log_stream "helm" helm upgrade --install "$stage" "$chart" \
+  log_stream "helm" "${HELM[@]}" upgrade --install "$stage" "$chart" \
     --namespace "$HELM_NS" \
     --values "$chart_extract/values.yaml" \
     --values "$chart_extract/valuesEks.yaml" \
@@ -162,7 +192,7 @@ helm_install_or_upgrade() {
   # Same set +e guard for the readiness wait.
   local wait_rc=0
   set +e
-  log_stream "kubectl-wait" kubectl wait --namespace "$HELM_NS" \
+  log_stream "kubectl-wait" "${KUBECTL[@]}" wait --namespace "$HELM_NS" \
     --for=condition=ready pod/migration-console-0 \
     --timeout=10m
   wait_rc=$?
@@ -185,12 +215,12 @@ helm_install_or_upgrade() {
 # we create it and announce it on a single line. No YAML spam.
 helm_ensure_namespace() {
   local ns="$1"
-  if kubectl get namespace "$ns" >/dev/null 2>&1; then
+  if "${KUBECTL[@]}" get namespace "$ns" >/dev/null 2>&1; then
     log_info "namespace $ns already exists; skipping create"
     return 0
   fi
   ui_dim "  creating namespace: $ns"
-  if ! kubectl create namespace "$ns" >>"$LOG_FILE" 2>&1; then
+  if ! "${KUBECTL[@]}" create namespace "$ns" >>"$LOG_FILE" 2>&1; then
     die "could not create namespace $ns; see $LOG_FILE"
   fi
   log_info "namespace $ns created"
@@ -248,7 +278,7 @@ helm_recover_if_stuck() {
       case "$pick" in
         1)
           ui_dim "  rolling back ${release}…"
-          if log_stream "helm-rollback" helm rollback "$release" --namespace "$ns" --wait --timeout 5m; then
+          if log_stream "helm-rollback" "${HELM[@]}" rollback "$release" --namespace "$ns" --wait --timeout 5m; then
             ui_ok "rollback complete"
           else
             ui_warn "rollback failed; falling back to uninstall"
@@ -302,7 +332,7 @@ helm_recover_if_stuck() {
 helm_recover_orphan_jobs() {
   local release="$1" ns="$2"
   local stuck_jobs
-  stuck_jobs=$(kubectl get jobs --namespace "$ns" \
+  stuck_jobs=$("${KUBECTL[@]}" get jobs --namespace "$ns" \
     --no-headers \
     -o custom-columns=NAME:.metadata.name,COMPLETIONS:.status.succeeded \
     2>/dev/null \
@@ -328,7 +358,7 @@ helm_recover_orphan_jobs() {
     [[ -z "$job" ]] && continue
     set +e
     log_stream "kubectl-del-job-$job" \
-      kubectl delete job "$job" --namespace "$ns" --wait=true --timeout=60s
+      "${KUBECTL[@]}" delete job "$job" --namespace "$ns" --wait=true --timeout=60s
     set -e
   done <<<"$stuck_jobs"
   ui_ok "orphan Jobs cleared"
@@ -341,7 +371,7 @@ helm_recover_orphan_jobs() {
 _helm_release_status() {
   local release="$1" ns="$2"
   local json
-  json=$(helm status "$release" --namespace "$ns" -o json 2>/dev/null) || return 0
+  json=$("${HELM[@]}" status "$release" --namespace "$ns" -o json 2>/dev/null) || return 0
   [[ -z "$json" ]] && return 0
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$json" | jq -r '.info.status // empty'
@@ -359,12 +389,12 @@ _helm_release_status() {
 _helm_uninstall_quiet() {
   local release="$1" ns="$2"
   ui_dim "  uninstalling release: $release"
-  if log_stream "helm-uninstall" helm uninstall "$release" --namespace "$ns" --wait --timeout 5m; then
+  if log_stream "helm-uninstall" "${HELM[@]}" uninstall "$release" --namespace "$ns" --wait --timeout 5m; then
     ui_ok "release $release uninstalled"
   else
     # Last-ditch: --no-hooks so a stuck pre/post hook doesn't block forever.
     ui_warn "uninstall blocked; retrying with --no-hooks"
-    log_stream "helm-uninstall-force" helm uninstall "$release" --namespace "$ns" --no-hooks
+    log_stream "helm-uninstall-force" "${HELM[@]}" uninstall "$release" --namespace "$ns" --no-hooks
   fi
 }
 
@@ -384,12 +414,12 @@ helm_dump_diagnostics() {
   local release="$1" ns="$2"
   ui_step "Collecting diagnostics for failed helm operation"
 
-  log_stream "diag-helm" helm status "$release" --namespace "$ns" || true
-  log_stream "diag-pods" kubectl get pods --namespace "$ns" -o wide || true
+  log_stream "diag-helm" "${HELM[@]}" status "$release" --namespace "$ns" || true
+  log_stream "diag-pods" "${KUBECTL[@]}" get pods --namespace "$ns" -o wide || true
 
   # Per-pod describe for unhealthy pods.
   local unhealthy
-  unhealthy=$(kubectl get pods --namespace "$ns" \
+  unhealthy=$("${KUBECTL[@]}" get pods --namespace "$ns" \
     --no-headers \
     -o custom-columns=NAME:.metadata.name,PHASE:.status.phase 2>/dev/null \
     | awk '$2!="Running" && $2!="Succeeded" {print $1}')
@@ -397,20 +427,20 @@ helm_dump_diagnostics() {
     local pod
     while IFS= read -r pod; do
       [[ -z "$pod" ]] && continue
-      log_stream "diag-pod-$pod" kubectl describe pod "$pod" --namespace "$ns" || true
+      log_stream "diag-pod-$pod" "${KUBECTL[@]}" describe pod "$pod" --namespace "$ns" || true
     done <<<"$unhealthy"
   fi
 
   # Recent events (most recent 30, ordered).
   log_stream "diag-events" \
-    kubectl get events --namespace "$ns" \
+    "${KUBECTL[@]}" get events --namespace "$ns" \
       --sort-by=.lastTimestamp 2>/dev/null \
     | tail -30 || true
 
   # Helm hook jobs — if any are stuck, describe them. Common culprits:
   # default-helm-installer, default-helm-uninstaller.
   local stuck_jobs
-  stuck_jobs=$(kubectl get jobs --namespace "$ns" \
+  stuck_jobs=$("${KUBECTL[@]}" get jobs --namespace "$ns" \
     --no-headers \
     -o custom-columns=NAME:.metadata.name,COMPLETIONS:.status.succeeded 2>/dev/null \
     | awk '$2=="" || $2=="0" {print $1}')
@@ -418,7 +448,7 @@ helm_dump_diagnostics() {
     local job
     while IFS= read -r job; do
       [[ -z "$job" ]] && continue
-      log_stream "diag-job-$job" kubectl describe job "$job" --namespace "$ns" || true
+      log_stream "diag-job-$job" "${KUBECTL[@]}" describe job "$job" --namespace "$ns" || true
     done <<<"$stuck_jobs"
   fi
 
@@ -471,7 +501,7 @@ helm_watch_installer_logs() {
     # us spot the pod even when it's stuck in Pending / ImagePullBackOff
     # so we can surface diagnostics instead of timing out silently.
     local snapshot
-    snapshot=$(kubectl get pods --namespace "$ns" \
+    snapshot=$("${KUBECTL[@]}" get pods --namespace "$ns" \
             --selector "job-name=$pod_name" \
             --no-headers \
             -o custom-columns=NAME:.metadata.name,PHASE:.status.phase \
@@ -519,7 +549,7 @@ helm_watch_installer_logs() {
   # with the "installer│" prefix. `kubectl logs -f` exits naturally when
   # the pod's containers complete; if our parent dies first, the SIGTERM
   # from the trap kills us mid-follow.
-  log_stream "installer" kubectl logs -f \
+  log_stream "installer" "${KUBECTL[@]}" logs -f \
     --namespace "$ns" "$pod" \
     --all-containers=true \
     --prefix=false \
@@ -553,7 +583,7 @@ _helm_dump_install_notes() {
     if [[ -n "$parent_pid" ]] && ! kill -0 "$parent_pid" 2>/dev/null; then
       return 0
     fi
-    if kubectl get configmap "$cm" --namespace "$ns" >/dev/null 2>&1; then
+    if "${KUBECTL[@]}" get configmap "$cm" --namespace "$ns" >/dev/null 2>&1; then
       break
     fi
     sleep "$poll_s"
@@ -568,11 +598,11 @@ _helm_dump_install_notes() {
   # Pull the all-notes.txt key. Falls back to dumping the entire CM if
   # that key is missing for any reason.
   local notes
-  notes=$(kubectl get configmap "$cm" --namespace "$ns" \
+  notes=$("${KUBECTL[@]}" get configmap "$cm" --namespace "$ns" \
     -o jsonpath='{.data.all-notes\.txt}' 2>/dev/null) || notes=""
   if [[ -z "$notes" ]]; then
     _helm_inst_log "ConfigMap/$cm has no all-notes.txt key; falling back to describe"
-    log_stream "install-notes" kubectl describe configmap "$cm" --namespace "$ns" || true
+    log_stream "install-notes" "${KUBECTL[@]}" describe configmap "$cm" --namespace "$ns" || true
     return 0
   fi
 
@@ -610,12 +640,12 @@ _helm_inst_dump_pending_pod() {
   local pod="$1" ns="$2"
   _helm_inst_log "container statuses for $pod:"
   log_stream "diag-pod-status" \
-    kubectl get pod "$pod" --namespace "$ns" \
+    "${KUBECTL[@]}" get pod "$pod" --namespace "$ns" \
       -o 'custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[*].image,STATUS:.status.containerStatuses[*].state,REASON:.status.containerStatuses[*].state.waiting.reason,MESSAGE:.status.containerStatuses[*].state.waiting.message' \
       || true
   _helm_inst_log "recent events for $pod:"
   log_stream "diag-pod-events" \
-    kubectl get events --namespace "$ns" \
+    "${KUBECTL[@]}" get events --namespace "$ns" \
       --field-selector "involvedObject.name=$pod" \
       --sort-by=.lastTimestamp \
       || true
@@ -664,7 +694,7 @@ helm_watch_pods() {
       exit 0
     fi
     local snapshot
-    snapshot=$(kubectl get pods -n "$ns" \
+    snapshot=$("${KUBECTL[@]}" get pods -n "$ns" \
       --no-headers \
       -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[*].ready \
       2>/dev/null) || snapshot=""

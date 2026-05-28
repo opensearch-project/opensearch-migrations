@@ -53,8 +53,11 @@ cmd_resume() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       # Native flags
-      --stage)        shift 2 ;;
-      --stage=*)      shift ;;
+      # --stage doubles as STAGE_NAME (helm release + k8s namespace + CFN
+      # suffix). The first pass already set STAGE/STAGE_DIR; here we
+      # write STAGE_NAME so wizard/cfn/helm see it without re-prompting.
+      --stage)        state_set STAGE_NAME "$2"; shift 2 ;;
+      --stage=*)      state_set STAGE_NAME "${1#--stage=}"; shift ;;
       --switch)       force_switch=1; shift ;;
       --verbose|-v)   export MIGRATE_VERBOSE=1; shift ;;
       --reset-cache)  artifacts_reset_cache; shift ;;

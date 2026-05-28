@@ -40,12 +40,30 @@ done
 mkdir -p "$OUTPUT_DIR"
 
 # 1. Tarball the CLI tree.
+#
+# Vendored payload: privateEcrManifest.sh (the chart's image list, source
+# of truth for crane mirror). Tagged-release URL works at runtime, but the
+# in-repo copy is what this CLI version was tested against; bundling it
+# means `migration-assistant` is self-contained in the CI/local build flow
+# and only fetches at runtime when the operator overrides MA_VERSION.
 TARBALL="$OUTPUT_DIR/migration-assistant-cli-${CLI_VERSION}.tar.gz"
 stage=$(mktemp -d)
-mkdir -p "$stage/migration-assistant-cli-${CLI_VERSION}"
-cp -R "$CLI_DIR/bin" "$CLI_DIR/lib" "$CLI_DIR/skills" \
+mkdir -p "$stage/migration-assistant-cli-${CLI_VERSION}/skills"
+cp -R "$CLI_DIR/bin" "$CLI_DIR/lib" \
       "$CLI_DIR/install.sh" "$CLI_DIR/README.md" \
       "$stage/migration-assistant-cli-${CLI_VERSION}/"
+cp -R "$CLI_DIR/skills/." \
+      "$stage/migration-assistant-cli-${CLI_VERSION}/skills/"
+
+MANIFEST_SRC="$SCRIPT_DIR/../../charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh"
+if [[ -f "$MANIFEST_SRC" ]]; then
+  cp "$MANIFEST_SRC" \
+     "$stage/migration-assistant-cli-${CLI_VERSION}/skills/privateEcrManifest.sh"
+else
+  printf 'WARN: %s missing; vendored manifest will be absent from tarball\n' \
+    "$MANIFEST_SRC" >&2
+fi
+
 [[ -f "$CLI_DIR/LICENSE" ]] && cp "$CLI_DIR/LICENSE" \
                               "$stage/migration-assistant-cli-${CLI_VERSION}/"
 tar -czf "$TARBALL" -C "$stage" "migration-assistant-cli-${CLI_VERSION}"

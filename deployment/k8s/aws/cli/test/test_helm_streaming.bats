@@ -49,8 +49,8 @@ run_split() {
   # Static check: helm.sh must use log_stream for the long-running ops so
   # operators always get tee'd output. If a future edit reverts to
   # `tee -a` or silent invocation, this test will fail loudly.
-  grep -q 'log_stream "helm" helm upgrade' "$PROJECT_ROOT/lib/helm.sh"
-  grep -q 'log_stream "kubectl-wait" kubectl wait' "$PROJECT_ROOT/lib/helm.sh"
+  grep -qE 'log_stream "helm" .*upgrade --install' "$PROJECT_ROOT/lib/helm.sh"
+  grep -qE 'log_stream "kubectl-wait" .* wait' "$PROJECT_ROOT/lib/helm.sh"
 }
 
 @test "helm.sh tracks the pod-watcher PID for SIGINT cleanup" {

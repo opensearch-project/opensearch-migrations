@@ -43,16 +43,12 @@ run_split() {
   # Static check: the very specific failure mode we hit was set -e aborting
   # before the diagnostics dump. The fix MUST keep the set +e/set -e pair
   # around the log_stream "helm" call.
-  awk '/log_stream "helm" helm upgrade/ {found=1; getline; while($0 !~ /helm_rc=\$\?/) {getline; if (NR > 200) exit}; print prev}
-       {prev=$0}' "$PROJECT_ROOT/lib/helm.sh" >/dev/null
-  # Stronger: the file must have `set +e` somewhere immediately before
-  # `log_stream "helm" helm upgrade`.
-  grep -B1 -F 'log_stream "helm" helm upgrade' "$PROJECT_ROOT/lib/helm.sh" \
+  grep -B1 -E 'log_stream "helm" .* upgrade --install' "$PROJECT_ROOT/lib/helm.sh" \
     | grep -q 'set +e'
 }
 
 @test "helm.sh wraps the kubectl wait call with 'set +e' too" {
-  grep -B1 -F 'log_stream "kubectl-wait" kubectl wait' "$PROJECT_ROOT/lib/helm.sh" \
+  grep -B1 -E 'log_stream "kubectl-wait" .* wait' "$PROJECT_ROOT/lib/helm.sh" \
     | grep -q 'set +e'
 }
 

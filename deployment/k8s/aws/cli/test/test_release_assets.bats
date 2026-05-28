@@ -67,10 +67,13 @@ require_network() {
   [ "$status" -eq 0 ]
 }
 
-@test "artifact: aws-bootstrap.sh (HEAD 200) — used as image-list source" {
+@test "raw repo: privateEcrManifest.sh (HEAD 200) — image-list source" {
   require_network
+  # New canonical image-list source is the chart's privateEcrManifest.sh
+  # via raw.githubusercontent.com (not a release asset).
+  local rel='deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh'
   run curl -fsSI --max-time 10 \
-    "https://github.com/${REPO}/releases/download/${TARGET_VERSION}/aws-bootstrap.sh"
+    "https://raw.githubusercontent.com/${REPO}/${TARGET_VERSION}/${rel}"
   [ "$status" -eq 0 ]
 }
 
@@ -93,27 +96,20 @@ require_network() {
 
 # ---------- Image-list extraction must yield > 10 images ----------
 
-@test "_extract_images yields >10 images from real aws-bootstrap.sh" {
+@test "_crane_load_manifest yields >10 images from privateEcrManifest.sh" {
   require_network
   load_libs crane.sh
 
   state_load
   state_save
-  local bootstrap
-  bootstrap=$(artifacts_fetch "aws-bootstrap.sh" "$TARGET_VERSION")
-  [ -f "$bootstrap" ]
 
-  # A real release should have dozens of images. Anything <10 means our
-  # awk extractor regressed (e.g., upstream renamed IMAGES, changed
-  # delimiters, dropped trailing quote).
   local count
-  count=$(_extract_images "$bootstrap" | wc -l | tr -d ' ')
+  count=$(_crane_load_manifest "$TARGET_VERSION" | wc -l | tr -d ' ')
   [ "$count" -gt 10 ]
 
   # Sanity-check shape: every line should look like host/path:tag.
   local lines bad
-  lines=$(_extract_images "$bootstrap")
+  lines=$(_crane_load_manifest "$TARGET_VERSION")
   bad=$(printf '%s\n' "$lines" | grep -cvE '^[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)+:[a-zA-Z0-9._-]+$' || true)
-  # Allow up to 2 oddballs (latest tags, mirror.gcr.io patterns).
   [ "$bad" -le 5 ]
 }

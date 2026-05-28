@@ -71,6 +71,32 @@ artifacts_fetch() {
   printf '%s\n' "$link"
 }
 
+# artifacts_fetch_raw <name> <version> <repo-relative-path>
+#   → echoes the local symlink path.
+#
+# Direct fetch from raw.githubusercontent.com — used for in-repo files
+# that are NOT published as standalone release assets (e.g. the chart's
+# privateEcrManifest.sh image list). Bypasses the release-asset probe.
+artifacts_fetch_raw() {
+  local name="$1" version="$2" repo_path="$3"
+  local tag="${ART_TAG_PREFIX}${version}"
+  local url="https://raw.githubusercontent.com/${ART_REPO}/${tag}/${repo_path}"
+
+  local key; key=$(_sha256_of_string "$url")
+  local cache_dir="$STAGE_DIR/artifacts/.cache/$key"
+  local cached_file="$cache_dir/$name"
+
+  if [[ ! -f "$cached_file" ]]; then
+    mkdir -p "$cache_dir"
+    log_info "artifacts: downloading $url"
+    curl -fsSL --max-time 60 -o "$cached_file" "$url" \
+      || die "could not download $url"
+  fi
+  local link="$STAGE_DIR/artifacts/$name"
+  ln -sfn "$cached_file" "$link"
+  printf '%s\n' "$link"
+}
+
 # artifacts_reset_cache — wipe the entire artifact cache for this stage.
 artifacts_reset_cache() {
   rm -rf "$STAGE_DIR/artifacts/.cache"
