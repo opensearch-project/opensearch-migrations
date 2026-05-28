@@ -254,10 +254,18 @@ helm_install_or_upgrade() {
 
 # helm_ensure_namespace <ns>
 #
-# Idempotent: if the namespace exists, nothing is printed; if it doesn't,
-# we create it and announce it on a single line. No YAML spam.
+# Idempotent: if the namespace exists in Active phase, nothing is
+# printed; if it doesn't, we create it.
+#
+# Handles the race after `helm uninstall`: kubernetes drops the
+# namespace into `Terminating` and finalizers can take 30-90 seconds
+# to drain. Re-creating during that window 403s with "unable to create
+# new content in namespace X because it is being terminated". Wait for
+# the namespace to disappear or come back Active before continuing.
 helm_ensure_namespace() {
   local ns="$1"
+  _helm_wait_namespace_settled "$ns" || die "namespace $ns did not settle; see $LOG_FILE"
+
   if "${KUBECTL[@]}" get namespace "$ns" >/dev/null 2>&1; then
     log_info "namespace $ns already exists; skipping create"
     return 0
@@ -267,6 +275,44 @@ helm_ensure_namespace() {
     die "could not create namespace $ns; see $LOG_FILE"
   fi
   log_info "namespace $ns created"
+}
+
+# _helm_wait_namespace_settled <ns> [<timeout_s>]
+#
+# Wait until the namespace is either fully gone OR back in Active
+# phase. While it sits in Terminating, helm + kubectl create both
+# 403. Default timeout: 180s.
+_helm_wait_namespace_settled() {
+  local ns="$1" timeout="${2:-${NAMESPACE_SETTLE_TIMEOUT_S:-180}}"
+  local started; started=$(date +%s)
+  local printed_warning=0
+  while :; do
+    local phase
+    phase=$("${KUBECTL[@]}" get namespace "$ns" -o jsonpath='{.status.phase}' 2>/dev/null) || phase=""
+    case "$phase" in
+      "")
+        # Namespace doesn't exist (helm uninstall + finalizers
+        # finished, or never existed).
+        return 0
+        ;;
+      Active)
+        return 0
+        ;;
+      Terminating)
+        if (( ! printed_warning )); then
+          ui_dim "  namespace $ns is Terminating; waiting up to ${timeout}s for finalizers"
+          printed_warning=1
+        fi
+        ;;
+    esac
+    local now; now=$(date +%s)
+    if (( now - started >= timeout )); then
+      ui_err "namespace $ns still in '$phase' after ${timeout}s"
+      ui_dim "  hint: kubectl get namespace $ns -o yaml  (look for stuck finalizers)"
+      return 1
+    fi
+    sleep 5
+  done
 }
 
 # helm_recover_if_stuck <release> <namespace>
