@@ -159,8 +159,15 @@ cmd_resume() {
         if ui_confirm "Resume from this point?" "Y"; then
           resuming=1
         else
-          ui_warn "starting over (state preserved, but flow restarts from discovery)"
+          # Operator chose "start over". Clear last_step AND the wizard
+          # inputs so the wizard re-prompts every value rather than
+          # silently reusing the saved config (which is the opposite of
+          # what they asked for).
+          ui_warn "starting over: re-prompting wizard for stage / mirror / version"
           state_set last_step ""
+          state_set STAGE_NAME ""
+          state_set MIRROR_IMAGES ""
+          state_set MA_VERSION ""
           state_save
           resuming=0
         fi
