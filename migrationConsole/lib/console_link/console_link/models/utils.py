@@ -7,7 +7,7 @@ import requests.utils
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 from requests.models import PreparedRequest
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 
 from console_link.models.client_options import ClientOptions
@@ -79,23 +79,32 @@ def append_user_agent_header_for_requests(headers: Optional[dict], user_agent_ex
 
 
 class SigV4AuthPlugin(requests.auth.AuthBase):
-    def __init__(self, service, region):
+    def __init__(self, service, region, signing_endpoint: Optional[str] = None):
         self.service = service
         self.region = region
+        self.signing_endpoint = signing_endpoint
         session = boto3.Session()
         self.credentials = session.get_credentials()
+
+    def _get_signing_url(self, request_url: str) -> str:
+        if self.signing_endpoint is None:
+            return request_url
+        request_parts = urlparse(request_url)
+        signing_parts = urlparse(self.signing_endpoint)
+        return urlunparse(request_parts._replace(scheme=signing_parts.scheme, netloc=signing_parts.netloc))
 
     def __call__(self, r: PreparedRequest) -> PreparedRequest:
         # Exclude signing headers that may change after signing
         default_headers = requests.utils.default_headers()
         excluded_headers = default_headers.keys()
+        signing_url = self._get_signing_url(r.url)
 
         # Opensearch has unique port signing behavior where it cannot be in the signature
         # Thus adding a custom Host header streamline auth edge cases
-        r.headers['Host'] = urlparse(r.url).hostname
+        r.headers['Host'] = urlparse(signing_url).hostname
 
         filtered_headers = {k: v for k, v in r.headers.items() if k.lower() not in excluded_headers}
-        aws_request = AWSRequest(method=r.method, url=r.url, data=r.body, headers=filtered_headers)
+        aws_request = AWSRequest(method=r.method, url=signing_url, data=r.body, headers=filtered_headers)
         signer = SigV4Auth(self.credentials, self.service, self.region)
         if aws_request.body is not None:
             aws_request.headers['x-amz-content-sha256'] = signer.payload(aws_request)

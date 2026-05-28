@@ -9,7 +9,10 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
-import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {
+    K8S_INFRA_READY_TIMEOUT_SECONDS,
+    K8S_RESOURCE_RETRY_STRATEGY,
+} from "./commonUtils/resourceRetryStrategy";
 
 export function getRfsCoordinatorClusterName(sessionName: BaseExpression<string>): BaseExpression<string> {
     return expr.concat(sessionName, expr.literal("-rfs-coordinator"));
@@ -302,6 +305,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
+                activeDeadlineSeconds: K8S_INFRA_READY_TIMEOUT_SECONDS,
                 setOwnerReference: false,
                 successCondition: "status.readyReplicas > 0",
                 manifest: createRfsCoordinatorStatefulSetManifest(

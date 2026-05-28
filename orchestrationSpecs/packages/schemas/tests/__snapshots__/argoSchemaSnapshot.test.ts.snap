@@ -499,6 +499,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "default": ""
                     },
+                    "serviceType": {
+                      "type": "string",
+                      "enum": [
+                        "LoadBalancer",
+                        "ClusterIP"
+                      ],
+                      "default": "LoadBalancer"
+                    },
                     "internetFacing": {
                       "type": "boolean",
                       "default": false
@@ -3163,10 +3171,20 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "default": "",
                     "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                   },
+                  "serviceType": {
+                    "type": "string",
+                    "enum": [
+                      "LoadBalancer",
+                      "ClusterIP"
+                    ],
+                    "default": "LoadBalancer",
+                    "description": "Expert setting controlling how the capture proxy Kubernetes Service is exposed. 'LoadBalancer' provisions a cloud/load-balancer-backed Service and waits for load balancer ingress before the proxy is Ready. 'ClusterIP' exposes the proxy only inside the Kubernetes cluster and waits for the cluster-local Service endpoint before the proxy is Ready.",
+                    "changeRestriction": "impossible"
+                  },
                   "internetFacing": {
                     "type": "boolean",
                     "default": false,
-                    "description": "When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.",
+                    "description": "When true and serviceType is 'LoadBalancer', the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.",
                     "changeRestriction": "impossible"
                   },
                   "podReplicas": {
