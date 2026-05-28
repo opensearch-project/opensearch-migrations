@@ -94,18 +94,25 @@ CLI_VERSION='${CLI_VERSION}'
 PREFIX="\${MIGRATE_PREFIX:-\$HOME/.opensearch-migrate/cli/\$CLI_VERSION}"
 BIN="\$PREFIX/bin/migration-assistant"
 TARBALL_NAME="migration-assistant-cli-\${CLI_VERSION}.tar.gz"
-TARBALL_URL='https://github.com/opensearch-project/opensearch-migrations/releases/download/'\${CLI_VERSION}'/'\${TARBALL_NAME}
 
-# Shim's directory — used to find a sibling tarball when one is shipped
-# alongside (Jenkins/CI build, repo checkout, S3 dist bundle, etc.). Falls
-# back to the GitHub release URL when no sibling exists.
-SHIM_DIR=\$(cd "\$(dirname "\${BASH_SOURCE[0]:-\$0}")" && pwd)
-LOCAL_TARBALL="\$SHIM_DIR/\$TARBALL_NAME"
+# Tarball resolution order (each can be overridden):
+#   1. \$MIGRATE_TARBALL_URL — operator-supplied URL (use this for fork
+#      previews / staging mirrors).
+#   2. sibling tarball next to this shim (assemble-bootstrap.sh ships
+#      both files together; Jenkins/CI flow lives here).
+#   3. \$MIGRATE_REPO override of the upstream repo (also useful for forks).
+#   4. opensearch-project upstream release (the published curl-pipe path).
+DEFAULT_REPO='opensearch-project/opensearch-migrations'
+REPO="\${MIGRATE_REPO:-\$DEFAULT_REPO}"
+TARBALL_URL="\${MIGRATE_TARBALL_URL:-https://github.com/\${REPO}/releases/download/\${CLI_VERSION}/\${TARBALL_NAME}}"
+
+SHIM_DIR=\$(cd "\$(dirname "\${BASH_SOURCE[0]:-\$0}")" && pwd 2>/dev/null) || SHIM_DIR=""
+LOCAL_TARBALL="\${SHIM_DIR:+\$SHIM_DIR/\$TARBALL_NAME}"
 
 if [[ ! -x "\$BIN" ]]; then
   mkdir -p "\$PREFIX"
   tmp=\$(mktemp -d)
-  if [[ -f "\$LOCAL_TARBALL" ]]; then
+  if [[ -n "\$LOCAL_TARBALL" && -f "\$LOCAL_TARBALL" ]]; then
     cp "\$LOCAL_TARBALL" "\$tmp/cli.tgz"
   else
     curl -fsSL --max-time 120 -o "\$tmp/cli.tgz" "\$TARBALL_URL" \\
