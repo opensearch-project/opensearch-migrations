@@ -18,6 +18,58 @@ __MIGRATE_AGENT_LOADED=1
 
 AGENT_CANDIDATES=(claude q kiro codex opencode gemini)
 
+# cmd_agent — `migration-assistant agent [<name>] [--stage <name>]`. Skip
+# the resume/discover/wizard/CFN/helm flow and go straight to the agent
+# handoff. Picks up the saved AGENT from state when no <name> argument
+# is given. Errors clearly when the stage isn't deployed.
+#
+# Honors the same MIGRATE_ENABLE_AGENT=1 gate as `--mode Agent`. When the
+# gate is off, the agent path is preview-only and unsupported.
+cmd_agent() {
+  if [[ "${MIGRATE_ENABLE_AGENT:-0}" != "1" ]]; then
+    die "the agent path is preview-only; set MIGRATE_ENABLE_AGENT=1 to opt in"
+  fi
+  local picked="" args=("$@") i
+  # shellcheck disable=SC2034  # STAGE_DIR is read by state_load / log_init
+  for ((i = 0; i < ${#args[@]}; i++)); do
+    case "${args[$i]}" in
+      --stage)    STAGE="${args[$((i + 1))]}"; STAGE_DIR="$MIGRATE_HOME/$STAGE" ;;
+      --stage=*)  STAGE="${args[$i]#--stage=}"; STAGE_DIR="$MIGRATE_HOME/$STAGE" ;;
+      --*)        : ;;
+      *)          [[ -z "$picked" ]] && picked="${args[$i]}" ;;
+    esac
+  done
+  log_init
+  state_load
+  local ns; ns=$(state_get STAGE_NAME "")
+  if [[ -z "$ns" ]]; then
+    die "no deployed stage found in state. Run \`migration-assistant\` first or pass --stage <name>."
+  fi
+  helm_kctx_init
+
+  if [[ -z "$picked" ]]; then
+    picked=$(state_get AGENT "")
+  fi
+  if [[ -z "$picked" ]]; then
+    local agents_list
+    agents_list=$(discover_agents) \
+      || die "no supported agent CLI found on PATH"
+    # shellcheck disable=SC2086
+    IFS=$'\n' read -r -d '' -a agents <<<"$agents_list"$'\0' || true
+    picked=$(ui_select "Which agent should drive this migration?" "${agents[@]}")
+  elif ! command -v "$picked" >/dev/null 2>&1; then
+    die "agent not on PATH: $picked"
+  fi
+
+  state_set AGENT "$picked"
+  state_set last_step "agent_handoff"
+  state_save
+
+  agent_setup "$picked"
+  ui_ok "Handing off to: $picked"
+  agent_exec "$picked"
+}
+
 # discover_agents — print one agent per line of those found on PATH.
 discover_agents() {
   local found=()
@@ -144,6 +196,19 @@ _agent_install_aws_mcp_claude() {
 }
 
 # agent_exec <agent> — replace this process with the agent. Never returns.
+#
+# Tries the agent's native session-resume flag when state indicates the
+# operator already started a session in this $STAGE_DIR. The agent's
+# own resume picks up the conversation in ~1s instead of re-reading
+# Startup.md cold for ~25s.
+#
+#   claude --continue      → resume the latest claude session
+#   codex resume --last    → resume the latest codex session
+#   q chat --resume        → resume the latest q-developer session
+#   kiro chat --agent opensearch-migration --resume
+#
+# When state has no prior agent_handoff, fall through to the
+# fresh-session command form with a Startup.md instruction.
 agent_exec() {
   local agent="$1"
   local bin
@@ -156,13 +221,31 @@ agent_exec() {
   aws sts get-caller-identity --output table 2>/dev/null \
     || ui_warn "could not call sts:GetCallerIdentity"
 
-  ui_dim "  exec $bin"
+  local resuming=0
+  if [[ "$(state_get last_step '')" == "agent_handoff" ]]; then
+    resuming=1
+  fi
+
+  ui_dim "  exec $bin (resume=$resuming)"
   case "$agent" in
+    claude)
+      if (( resuming )); then exec "$bin" --continue
+      else exec "$bin" "Read Startup.md and skills/migrating-to-opensearch/SKILL.md, then give the user next steps."
+      fi ;;
+    codex)
+      if (( resuming )); then exec "$bin" resume --last
+      else exec "$bin" "Read Startup.md and skills/migrating-to-opensearch/SKILL.md, then give the user next steps."
+      fi ;;
+    q)
+      if (( resuming )); then exec "$bin" chat --resume
+      else exec "$bin" chat "Read Startup.md and skills/migrating-to-opensearch/SKILL.md, then give the user next steps."
+      fi ;;
     kiro)
       # kiro chat with the bundled opensearch-migration agent
       # definition (.kiro/agents/opensearch-migration.json).
-      exec "$bin" chat --agent opensearch-migration
-      ;;
+      if (( resuming )); then exec "$bin" chat --agent opensearch-migration --resume
+      else exec "$bin" chat --agent opensearch-migration
+      fi ;;
     *)
       exec "$bin" "Read Startup.md and skills/migrating-to-opensearch/SKILL.md, then give the user next steps."
       ;;

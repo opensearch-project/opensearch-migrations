@@ -1,244 +1,161 @@
-# Deploying the Migration Assistant on AWS EKS
+# Migration Assistant on AWS EKS
 
-This guide is for **developers** that are interested in building everything and
-deploying those artifacts directly to EKS themselves.
+Deploy the Migration Assistant to a new or existing EKS cluster, then run
+your migration from a console pod inside the cluster.
 
-For a more details about Kubernetes, see the [README](../README.md)
-for the overall K8s deployment project.
+This page is for **operators** running a deploy. The architecture and
+build details for the CLI itself live in [`cli/README.md`](cli/README.md).
+For a high-level overview of all Kubernetes deployment options see the
+[K8s README](../README.md). For broader Migration Assistant documentation
+see the [project wiki](https://github.com/opensearch-project/opensearch-migrations/wiki).
 
-See the [project wiki](https://github.com/opensearch-project/opensearch-migrations/wiki)
-for instructions of how to deploy directly from AWS without installing anything.
+## What you get
 
-
-## Difference from the ECS version
-
-The EKS solution requires less AWS resources and fewer upfront configuration
-options than the previous release build upon ECS.  You'll need some permissions,
-but the CloudFormation should deploy in < 15 minutes.  Once that succeeds, you
-should have all the permissions that you need to deploy and run the
-Migration Assistant on Kubernetes.
-
-
-## Overview
-
-The deploy entry point is `deployment/k8s/aws/cli/bin/migration-assistant`,
-a modular bash CLI under [cli/](cli/) with ~170 bats tests + shellcheck CI.
-It replaces the previous monolithic `aws-bootstrap.sh` (released versions
-of that file remain valid for older releases; the source is gone from
-this branch and forward).
-
-The CLI handles:
-
-1. **CloudFormation deployment** — creates the EKS cluster, ECR registry,
-   IAM roles, and networking (new VPC or imported VPC).
-2. **EKS configuration** — sets up kubectl access, namespaces, and node pools.
-3. **Helm chart installation** — installs the Migration Assistant with all
-   sub-charts (Argo Workflows, Kafka, Prometheus, etc.). Live-streams the
-   pre-install hook Job's logs so you see per-sub-chart progress instead
-   of a 15-minute silent wait.
-4. **CloudWatch dashboards** — deploys monitoring dashboards.
-
-By default, all artifacts come from the latest published release.
-
-What's new compared to the old single-file `aws-bootstrap.sh`:
-
-- **Resumable**: state lives at `~/.opensearch-migrate/<stage>/state.env`.
-  Re-running picks up where the last run left off (post-CFN, post-helm, …).
-- **Live diagnostics**: CFN events, helm output, installer-Job pod logs,
-  and a per-cycle pod-status snapshot are streamed to stderr AND tee'd
-  into `~/.opensearch-migrate/<stage>/log/migrate.log`.
-- **Stuck-release recovery**: detects a previous helm release stuck in
-  `pending-install`/`pending-upgrade`/`failed` and offers rollback or
-  uninstall. Cleans up orphan `<release>-helm-installer` Jobs that
-  block re-installs.
-- **Non-interactive mode**: `--non-interactive` for Jenkins/CI.
-
-### Prerequisites
-
-- [kubectl](https://kubernetes.io/docs/tasks/tools/)
-- [helm](https://helm.sh/docs/intro/install/) (auto-installed if missing)
-- [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
-  with valid credentials
-- `jq`, `curl`
-
-### Deploy latest with a new VPC
+A single command:
 
 ```bash
-./deployment/k8s/aws/cli/bin/migration-assistant \
-  --deploy-create-vpc-cfn \
-  --stack-name MA \
-  --stage prod \
-  --region us-east-2
+./deployment/k8s/aws/cli/bin/migration-assistant
 ```
 
-For end-users without a repo checkout, the same flags work via the
-release-published curl-pipe shim:
+…brings up a CloudFormation stack (EKS cluster, ECR, IAM, VPC), mirrors
+the chart's images to your private ECR, installs the Migration Assistant
+helm chart, waits for everything to be Ready, and drops you into the
+`migration-console-0` pod where the migration itself runs.
+
+Re-running the same command on a partially-completed deploy resumes from
+the last successful step (state lives at
+`~/.opensearch-migrate/<stage>/state.env`). Re-running once everything's
+deployed drops you straight back into the console.
+
+## Prerequisites
+
+- [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+  with credentials authorized for CloudFormation, EKS, ECR, and IAM
+- `curl`, `jq`, `tar` (the CLI auto-installs `kubectl`, `helm`, and
+  `crane` if missing)
+- ~15 minutes for the CloudFormation stack to come up
+
+## Quick start
+
+```bash
+./deployment/k8s/aws/cli/bin/migration-assistant
+```
+
+The CLI is interactive on first run: it prompts for stage name, image
+mirroring, and Migration Assistant version, then deploys.
+
+If you have an existing `MigrationAssistant-*` CloudFormation stack
+(deployed previously, or via Terraform / external CDK) the CLI offers
+to adopt it instead of asking for a stage name. CFN is skipped in that
+case and the CLI goes straight to helm.
+
+To deploy without a repo checkout, use the curl-pipe shim from any
+release:
 
 ```bash
 curl -fsSL https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/aws-bootstrap.sh \
-  | bash -s -- --deploy-create-vpc-cfn --stack-name MA --stage prod --region us-east-2
+  | bash
 ```
 
-(`assemble-bootstrap.sh` produces both the shim and the CLI tarball at
-release time. The shim downloads the tarball into `~/.opensearch-migrate/cli/<version>/`
-and execs the unpacked binary.)
+The shim is a 30-line script that downloads the CLI tarball into
+`~/.opensearch-migrate/cli/<version>/` and execs the unpacked binary.
+Older releases that shipped the monolithic `aws-bootstrap.sh` keep
+working; this CLI is the new entry point.
 
-### Deploy into an existing VPC
-
-Run without `--vpc-id` first to discover available VPCs and subnets:
+## Common subcommands
 
 ```bash
-./deployment/k8s/aws/cli/bin/migration-assistant \
-  --deploy-import-vpc-cfn \
-  --stack-name MA-Production \
-  --stage prod \
-  --region us-east-2
+migration-assistant                # deploy / resume
+migration-assistant console        # exec into migration-console-0 (skip the deploy flow)
+migration-assistant diag           # full diagnostics dump
+migration-assistant cleanup        # tear down a deploy + archive state
+migration-assistant version
+migration-assistant help
 ```
 
-Then re-run with the IDs:
+## Common flags
 
 ```bash
-./deployment/k8s/aws/cli/bin/migration-assistant \
-  --deploy-import-vpc-cfn \
-  --stack-name MA-Production \
-  --stage prod \
-  --vpc-id vpc-0abc123 \
-  --subnet-ids subnet-111,subnet-222 \
-  --region us-east-2
+--stage NAME                      # stage name (default "ma"). Used as the
+                                  # helm release, k8s namespace, and CFN
+                                  # stack suffix.
+--region REGION                   # AWS region (default us-east-1)
+--version VER                     # pin Migration Assistant artifact version
+--use-public-images               # skip image mirror; pull from public.ecr.aws
+--non-interactive, -y             # accept all defaults; for Jenkins / CI
+--verbose, -v                     # mirror logs to stderr live
+--switch                          # re-prompt the deploy wizard
 ```
 
-### Grant EKS access to a CI role or teammate
+`--non-interactive` plus `--stage <name>` plus `--region <region>` is
+the typical CI invocation. `--skip-console-exec` keeps the run
+non-interactive (no console handoff).
+
+Run `migration-assistant help` for the complete list including legacy
+`aws-bootstrap.sh` flags. A few legacy flags are not yet implemented in
+this CLI (`--build`, `--tls-mode`, `--deploy-import-vpc-cfn`,
+`--vpc-id`, `--subnet-ids`, `--use-general-node-pool`, …); the CLI
+warns and ignores them rather than silently pretending to honor them.
+
+## Adopting a stack you deployed elsewhere
+
+If you provisioned the CFN stack with Terraform, CDK, or a previous
+hand-run of `aws cloudformation deploy`, the CLI's discovery step finds
+all `MigrationAssistant-*` stacks in the configured account/region.
+On a fresh stage with no prior state, it offers:
+
+- exactly one stack found → "Adopt `<stack>`?" (Y/n)
+- multiple found → numbered picker
+- none found → standard fresh-deploy prompts
+
+You can also bypass discovery and force adoption:
 
 ```bash
-./deployment/k8s/aws/cli/bin/migration-assistant \
+migration-assistant \
   --skip-cfn-deploy \
-  --eks-access-principal-arn arn:aws:iam::123456789012:role/MyRole \
-  --stage dev \
-  --region us-east-2 \
-  --skip-console-exec
-```
-
-Run `./deployment/k8s/aws/cli/bin/migration-assistant help` for the full list of options.
-
-### Jenkins / CI invocation
-
-Non-interactive runs accept the same flags + `--non-interactive`:
-
-```bash
-./deployment/k8s/aws/cli/bin/migration-assistant \
-  --non-interactive \
-  --skip-console-exec \
-  --skip-setting-k8s-context \
-  --use-public-images \
-  --stage ma \
-  --region us-east-1
-```
-
-See the [project wiki](https://github.com/opensearch-project/opensearch-migrations/wiki)
-for additional deployment guidance, and [`cli/README.md`](cli/README.md) for
-the CLI's architecture.
-
-
-## Isolated / Air-Gapped Networks
-
-Since the bootstrap script mirrors all images to private ECR by default, isolated
-subnets work out of the box. You just need VPC endpoints for EKS to pull from ECR.
-Add `--create-vpc-endpoints` (unless you're managing those endpoints elsewhere)
-and the script handles the rest.
-
-```bash
-./deployment/k8s/aws/cli/bin/migration-assistant \
-  --deploy-import-vpc-cfn \
-  --create-vpc-endpoints \
-  --stack-name MA-Prod \
+  --stack-name MigrationAssistant-prod \
   --stage prod \
-  --vpc-id vpc-xxx \
-  --subnet-ids subnet-aaa,subnet-bbb \
-  --region us-east-1 \
-  --version 2.6.4
-```
-
-The mirroring step runs from your machine (which has internet), copies ~50 images
-and 11 helm charts to ECR, then the EKS cluster pulls everything through VPC
-endpoints. Seven endpoints are created: ECR API, ECR Docker, S3, CloudWatch Logs,
-EFS, STS, and EKS Auth.
-
-
-## Developer Workflow
-
-### Prerequisites
-
-In addition to the general prerequisites above, if building any of the
-artifacts directly, you'll also need to install:
-- Java Development Kit (JDK) 11-17
-- Docker: for image builds, including builder support for buildkit remote builds
-- The opensearch-migrations repo
-
-### Build everything from source
-
-```bash
-# From the repo root
-./deployment/k8s/aws/cli/bin/migration-assistant \
-  --deploy-create-vpc-cfn \
-  --build \
-  --stack-name MA-Dev \
-  --stage dev \
   --region us-east-2
 ```
 
-## Customizing the workloads node pool
+## Resuming after Ctrl-C
 
-The Migration Assistant chart creates a `general-work-pool` NodePool. By
-default, both `amd64` and `arm64` architectures are enabled (see
-`valuesEks.yaml`). The bootstrap script queries this pool to determine which
-architectures to build when using `--build`.
+State persists between runs. After a Ctrl-C, just re-run the same
+command (no flags needed, no re-prompting through the wizard). The CLI
+detects the stage's prior progress (`crane_done`, `helm_done`, etc.)
+and continues from there.
 
-To customize, pass `--helm-values` with a file containing:
+If a previous helm install left a stuck release (`pending-install`,
+`pending-upgrade`, `failed`), the CLI reports the exact failure cause
+(failed Job name, console pod readiness) and offers rollback /
+uninstall / abort. Choose abort to investigate without destroying a
+working deploy.
 
-```yaml
-workloadsNodePool:
-  architectures: ["arm64"]
-  limits:
-    cpu: "128"
-    memory: "256Gi"
-```
-
-Or to use only amd64:
-
-```yaml
-workloadsNodePool:
-  architectures: ["amd64"]
-```
-
-For more details on the K8s deployment, see the [k8s README](../README.md).
-To update images, see [buildImages](../../../buildImages/README.md).
-
-
-## In-K8s Source/Target Test Clusters
-
-Integration tests spin up Elasticsearch/OpenSearch clusters through Argo
-workflows. For development, you can deploy source and target clusters
-that remain indefinitely.  Notice that these clusters are NOT configured to
-use persistent data storage though to make them as lightweight as possible.
+## Diagnostics
 
 ```bash
-cd $(git rev-parse --show-toplevel)
-
-eval $(aws cloudformation list-exports \
-  --query "Exports[?starts_with(Name, \`MigrationsExportString\`)].Value" \
-  --output text)
-
-export ELASTIC_SEARCH_IMAGE_TAG=migrations_elasticsearch_searchguard_latest
-
-helm upgrade --install -n ma tc \
-  deployment/k8s/charts/aggregates/testClusters \
-  -f deployment/k8s/charts/aggregates/testClusters/valuesEks.yaml \
-  --set "source.image=$MIGRATIONS_ECR_REGISTRY" \
-  --set "source.imageTag=$ELASTIC_SEARCH_IMAGE_TAG" \
-  --set "source.extraInitContainers[0].image=$MIGRATIONS_ECR_REGISTRY:$ELASTIC_SEARCH_IMAGE_TAG" \
-  --set "source.extraContainers[0].image=$MIGRATIONS_ECR_REGISTRY:$ELASTIC_SEARCH_IMAGE_TAG" \
-  --post-renderer deployment/k8s/charts/aggregates/testClusters/patchElasticsearchEntrypointToIgnorePodIdentity.py
+migration-assistant diag
 ```
 
-The `--post-renderer` patches the Elasticsearch StatefulSet entrypoint to work
-correctly with EKS Pod Identity.
+Dumps `helm status`, `kubectl get pods -o wide`, `kubectl describe`
+for any unhealthy pod, sorted events, and the install-notes
+ConfigMap to `~/.opensearch-migrate/<stage>/log/migrate.log`.
+
+The same dump runs automatically on a failed `helm upgrade --install`.
+
+## Cleanup
+
+```bash
+migration-assistant cleanup --stage prod
+```
+
+Helm-uninstalls the release, deletes the CFN stack, and archives state
+to `~/.opensearch-migrate/<stage>/archive/<timestamp>/`.
+
+## See also
+
+- [`cli/README.md`](cli/README.md) — CLI architecture, lib layout, tests.
+- [Project wiki](https://github.com/opensearch-project/opensearch-migrations/wiki)
+  — full Migration Assistant documentation including deploy-from-AWS
+  options that don't require a repo checkout.
+- [`../README.md`](../README.md) — overall K8s deployment project.

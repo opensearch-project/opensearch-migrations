@@ -7,6 +7,32 @@
 [[ -n "${__MIGRATE_CONSOLE_LOADED:-}" ]] && return 0
 __MIGRATE_CONSOLE_LOADED=1
 
+# cmd_console — `migration-assistant console [--stage <name>]`. Skip the
+# whole resume/discover/wizard/CFN/helm flow and jump straight into the
+# migration-console pod. Errors clearly when the stage isn't deployed.
+cmd_console() {
+  local args=("$@") i
+  # shellcheck disable=SC2034  # STAGE_DIR is read by state_load / log_init
+  for ((i = 0; i < ${#args[@]}; i++)); do
+    case "${args[$i]}" in
+      --stage)    STAGE="${args[$((i + 1))]}"; STAGE_DIR="$MIGRATE_HOME/$STAGE" ;;
+      --stage=*)  STAGE="${args[$i]#--stage=}"; STAGE_DIR="$MIGRATE_HOME/$STAGE" ;;
+    esac
+  done
+  log_init
+  state_load
+  local ns; ns=$(state_get STAGE_NAME "")
+  if [[ -z "$ns" ]]; then
+    die "no deployed stage found in state. Run \`migration-assistant\` first or pass --stage <name>."
+  fi
+  helm_kctx_init
+  ui_step "Handing off to migration-console-0 (kubectl exec)"
+  ui_dim "  Press Ctrl-D or 'exit' to leave the console."
+  exec "${KUBECTL[@]}" exec --stdin --tty \
+    --namespace "$ns" \
+    migration-console-0 -- /bin/bash
+}
+
 console_exec() {
   ui_ok "Migration Assistant deployment complete."
   ui_info "AWS identity at handoff:"

@@ -8,7 +8,8 @@
 [[ -n "${__MIGRATE_CFN_LOADED:-}" ]] && return 0
 __MIGRATE_CFN_LOADED=1
 
-CFN_TEMPLATE_NAME='Migration-Assistant-Infra-Create-VPC-eks.template.json'
+CFN_TEMPLATE_CREATE_VPC='Migration-Assistant-Infra-Create-VPC-eks.template.json'
+CFN_TEMPLATE_IMPORT_VPC='Migration-Assistant-Infra-Import-VPC-eks.template.json'
 
 cfn_deploy_or_skip() {
   # Allow flag override of the stack name (--stack-name) so the
@@ -34,30 +35,49 @@ cfn_deploy_or_skip() {
     return 0
   fi
 
-  ui_step "Downloading CFN template (MA v$ma_ver)"
+  # Template + parameter overrides depend on the deploy mode. Default:
+  # Create-VPC. --deploy-import-vpc-cfn flips to Import-VPC and requires
+  # VPC_ID and SUBNET_IDS (validated up front so the operator gets a
+  # clear error before AWS runs the deploy).
+  local variant; variant=$(state_get CFN_TEMPLATE_VARIANT "create-vpc")
+  local template_name params=("Stage=$(state_get STAGE_NAME)")
+  case "$variant" in
+    create-vpc)
+      template_name="$CFN_TEMPLATE_CREATE_VPC"
+      ;;
+    import-vpc)
+      template_name="$CFN_TEMPLATE_IMPORT_VPC"
+      local vpc_id; vpc_id=$(state_get IMPORT_VPC_ID "")
+      local subnets; subnets=$(state_get IMPORT_SUBNET_IDS "")
+      [[ -z "$vpc_id" ]] && die "--deploy-import-vpc-cfn requires --vpc-id"
+      [[ -z "$subnets" ]] && die "--deploy-import-vpc-cfn requires --subnet-ids"
+      params+=("VPCId=$vpc_id" "VPCSubnetIds=$subnets")
+      ;;
+    *)
+      die "unknown CFN_TEMPLATE_VARIANT: $variant"
+      ;;
+  esac
+
+  ui_step "Downloading CFN template (MA v$ma_ver, variant=$variant)"
   local tmpl
-  tmpl=$(artifacts_fetch "$CFN_TEMPLATE_NAME" "$ma_ver")
+  tmpl=$(artifacts_fetch "$template_name" "$ma_ver")
   ui_dim "  template: $tmpl"
 
   ui_step "Deploying CFN stack: $stack_name (region=$region)"
-  local stage_param; stage_param=$(state_get STAGE_NAME)
   local deploy_log="$STAGE_DIR/log/cfn-deploy.log"
 
   ui_dim "  events tailed live below; full deploy output: $deploy_log"
-  log_info "cfn: aws cloudformation deploy stack=$stack_name region=$region"
+  log_info "cfn: aws cloudformation deploy stack=$stack_name region=$region variant=$variant"
 
   # Kick the deploy off in the background. Its stdout+stderr stream into
   # cfn-deploy.log; we tee that file into the main log periodically too.
-  # The subprocess runs in its own process group (`set -m`-equivalent via
-  # `setsid`-style backgrounding) so SIGINT can take it + children down
-  # together via `kill -- -<pgid>`.
   set +e
   ( aws cloudformation deploy \
       --region "$region" \
       --stack-name "$stack_name" \
       --template-file "$tmpl" \
       --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
-      --parameter-overrides "Stage=$stage_param" \
+      --parameter-overrides "${params[@]}" \
       --no-fail-on-empty-changeset \
       >"$deploy_log" 2>&1
   ) &

@@ -77,9 +77,21 @@ helm_install_or_upgrade() {
   HELM=(helm --kube-context "$kube_ctx")
   KUBECTL=(kubectl --context "$kube_ctx")
 
-  ui_step "Downloading helm chart (MA v$ma_ver)"
-  local chart
-  chart=$(artifacts_fetch "${HELM_CHART_NAME}-${ma_ver}.tgz" "$ma_ver")
+  # Chart resolution. --ma-chart-dir lets the operator point at a local
+  # chart directory (in-repo, customized fork, etc.) and skip the
+  # release fetch entirely.
+  local chart chart_dir
+  chart_dir=$(state_get MA_CHART_DIR "")
+  if [[ -n "$chart_dir" ]]; then
+    [[ -d "$chart_dir" ]] || die "--ma-chart-dir not found or not a directory: $chart_dir"
+    [[ -f "$chart_dir/Chart.yaml" ]] \
+      || die "--ma-chart-dir is not a helm chart (no Chart.yaml): $chart_dir"
+    ui_step "Using local helm chart: $chart_dir"
+    chart="$chart_dir"
+  else
+    ui_step "Downloading helm chart (MA v$ma_ver)"
+    chart=$(artifacts_fetch "${HELM_CHART_NAME}-${ma_ver}.tgz" "$ma_ver")
+  fi
 
   # Extract the chart's bundled valuesEks.yaml (and base values.yaml). The
   # chart's default values.yaml targets LocalStack — running it on EKS
@@ -152,6 +164,15 @@ helm_install_or_upgrade() {
     extra_values_args+=(--values "$extra_values_file")
   fi
 
+  # NodePool flags. The chart's general-work-pool is on by default; the
+  # only flag with a real effect is --disable-general-purpose-pool, which
+  # we translate to a `workloadsNodePool.enabled=false` --set.
+  # --use-general-node-pool is a no-op (matches legacy semantics).
+  local nodepool_args=()
+  if [[ "$(state_get DISABLE_GENERAL_NODE_POOL N)" == "Y" ]]; then
+    nodepool_args+=(--set "workloadsNodePool.enabled=false")
+  fi
+
   # Spawn parallel watchers so the operator sees movement while
   # `helm --wait` blocks. Tracked TWO ways for each:
   #   1. on_signal_track_pid → SIGINT trap kills them
@@ -188,6 +209,7 @@ helm_install_or_upgrade() {
     --set "aws.region=$region" \
     --set "aws.account=$account" \
     "${snapshot_args[@]+"${snapshot_args[@]}"}" \
+    "${nodepool_args[@]+"${nodepool_args[@]}"}" \
     "${image_flags[@]}" \
     --timeout 25m \
     --wait
@@ -392,17 +414,25 @@ helm_recover_orphan_jobs() {
 #
 # Surfaces:
 #   * helm's own DESCRIPTION line (often names the failed hook resource)
+#   * the failed Job (named in the description) — its events, and the
+#     events for any pods it spawned (logs are best-effort: if the pod
+#     was GC'd, surface the GC events so the operator can re-run)
 #   * migration-console-0's pod phase + container readiness (so a
 #     "release failed but pod is Running/Ready" case is visible up front)
 #
 # Stderr only, dim color — informational, not an error.
 _helm_explain_failure() {
   local release="$1" ns="$2"
-  local desc console
+  local desc console job
   desc=$("${HELM[@]}" status "$release" --namespace "$ns" -o json 2>/dev/null \
         | jq -r '.info.description // empty' 2>/dev/null)
   if [[ -n "$desc" ]]; then
     printf '%s  why: %s%s\n' "$__UI_C_DIM" "$desc" "$__UI_C_RESET" >&2
+    # "name: <job-name>, kind: Job" is the canonical helm failure shape.
+    job=$(printf '%s' "$desc" | sed -nE 's/.*name: ([A-Za-z0-9_.-]+), kind: Job.*/\1/p' | head -1)
+    if [[ -n "$job" ]]; then
+      _helm_dump_failed_job "$job" "$ns"
+    fi
   fi
   console=$("${KUBECTL[@]}" get pod migration-console-0 --namespace "$ns" \
               -o jsonpath='{.status.phase}|{range .status.containerStatuses[*]}{.ready},{end}' \
@@ -410,6 +440,59 @@ _helm_explain_failure() {
   if [[ -n "$console" ]]; then
     printf '%s  migration-console-0: %s%s\n' \
       "$__UI_C_DIM" "$console" "$__UI_C_RESET" >&2
+  fi
+  printf '%s  full diagnostics: migration-assistant diag%s\n' \
+    "$__UI_C_DIM" "$__UI_C_RESET" >&2
+}
+
+# _helm_dump_failed_job <job> <ns>
+#
+# When a post-install Job fails, its pod is often already deleted (by
+# job-controller GC, by the chart's hook-delete-policy, or by Karpenter
+# consolidation). `kubectl logs <pod>` then 404s and the operator is
+# stuck. This helper prints what's still discoverable AND tells the
+# operator how to capture logs by re-running the Job.
+_helm_dump_failed_job() {
+  local job="$1" ns="$2"
+  printf '%s  failed job: %s%s\n' "$__UI_C_DIM" "$job" "$__UI_C_RESET" >&2
+
+  # Job events (deadline / backoff / image-pull failures).
+  local events
+  events=$("${KUBECTL[@]}" get events --namespace "$ns" \
+             --field-selector "involvedObject.kind=Job,involvedObject.name=$job" \
+             --sort-by=.lastTimestamp \
+             -o custom-columns='LAST:.lastTimestamp,REASON:.reason,MESSAGE:.message' \
+             --no-headers 2>/dev/null | tail -8) || events=""
+  if [[ -n "$events" ]]; then
+    printf '%s    job events:%s\n' "$__UI_C_DIM" "$__UI_C_RESET" >&2
+    printf '%s\n' "$events" | sed 's/^/      /' >&2
+  fi
+
+  # Pod logs (best-effort — pod is often GC'd).
+  local pods pod
+  pods=$("${KUBECTL[@]}" get pods --namespace "$ns" \
+           --selector "job-name=$job" \
+           -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
+           2>/dev/null) || pods=""
+  if [[ -n "$pods" ]]; then
+    while IFS= read -r pod; do
+      [[ -z "$pod" ]] && continue
+      printf '%s    pod %s logs:%s\n' "$__UI_C_DIM" "$pod" "$__UI_C_RESET" >&2
+      "${KUBECTL[@]}" logs "$pod" --namespace "$ns" --all-containers --tail=50 2>&1 \
+        | sed 's/^/      /' >&2
+    done <<<"$pods"
+  else
+    printf '%s    pod logs unavailable (pod was GC'\''d after failure)%s\n' \
+      "$__UI_C_DIM" "$__UI_C_RESET" >&2
+    printf '%s    re-run the job to capture logs:%s\n' "$__UI_C_DIM" "$__UI_C_RESET" >&2
+    printf '%s      kubectl get job %s -n %s -o yaml > /tmp/%s.yaml%s\n' \
+      "$__UI_C_DIM" "$job" "$ns" "$job" "$__UI_C_RESET" >&2
+    printf '%s      kubectl delete job %s -n %s%s\n' \
+      "$__UI_C_DIM" "$job" "$ns" "$__UI_C_RESET" >&2
+    printf '%s      kubectl create -f /tmp/%s.yaml%s\n' \
+      "$__UI_C_DIM" "$job" "$__UI_C_RESET" >&2
+    printf '%s      kubectl logs -f -l job-name=%s -n %s --all-containers%s\n' \
+      "$__UI_C_DIM" "$job" "$ns" "$__UI_C_RESET" >&2
   fi
 }
 
@@ -821,13 +904,21 @@ _helm_extract_chart_values() {
   local chart="$1"
   local dir="$STAGE_DIR/chart-values"
   mkdir -p "$dir"
-  # The tarball top-level is `migration-assistant/`. We strip it to land
-  # the files at the bottom of $dir.
-  tar -xzf "$chart" -C "$dir" --strip-components=1 \
-    migration-assistant/values.yaml \
-    migration-assistant/valuesEks.yaml \
-    2>/dev/null \
-    || die "could not extract values from chart: $chart"
+  if [[ -d "$chart" ]]; then
+    # --ma-chart-dir path: the values files are already on disk.
+    [[ -f "$chart/values.yaml" ]]    || die "chart dir missing values.yaml: $chart"
+    [[ -f "$chart/valuesEks.yaml" ]] || die "chart dir missing valuesEks.yaml: $chart"
+    cp -f "$chart/values.yaml"    "$dir/values.yaml"
+    cp -f "$chart/valuesEks.yaml" "$dir/valuesEks.yaml"
+  else
+    # The tarball top-level is `migration-assistant/`. We strip it to land
+    # the files at the bottom of $dir.
+    tar -xzf "$chart" -C "$dir" --strip-components=1 \
+      migration-assistant/values.yaml \
+      migration-assistant/valuesEks.yaml \
+      2>/dev/null \
+      || die "could not extract values from chart: $chart"
+  fi
   printf '%s\n' "$dir"
 }
 

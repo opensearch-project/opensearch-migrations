@@ -40,7 +40,7 @@ cmd_resume() {
   ui_dim "  cli=$CLI_VERSION  stage=$STAGE  workdir=$STAGE_DIR"
   log_announce
   on_exit_register log_announce_exit
-  version_check
+  upgrade_notice_for_cli
 
   # Load existing state BEFORE the second flag pass so the flag-driven
   # `state_set` calls merge into the loaded values rather than start
@@ -86,38 +86,50 @@ cmd_resume() {
       --namespace=*)       state_set STAGE_NAME "${1#--namespace=}"; shift ;;
       --helm-values)       state_set HELM_EXTRA_VALUES_FILE "$2"; shift 2 ;;
       --helm-values=*)     state_set HELM_EXTRA_VALUES_FILE "${1#--helm-values=}"; shift ;;
-      # --deploy-create-vpc-cfn is the only supported CFN mode; accept
-      # it as a no-op for legacy callers.
-      --deploy-create-vpc-cfn) shift ;;
+      # CFN deploy modes. Mutually exclusive; the LAST flag wins, but
+      # we save and surface a warning if both are seen.
+      --deploy-create-vpc-cfn) state_set CFN_TEMPLATE_VARIANT "create-vpc"; shift ;;
+      --deploy-import-vpc-cfn) state_set CFN_TEMPLATE_VARIANT "import-vpc"; shift ;;
+      --vpc-id)                state_set IMPORT_VPC_ID "$2"; shift 2 ;;
+      --vpc-id=*)              state_set IMPORT_VPC_ID "${1#--vpc-id=}"; shift ;;
+      --subnet-ids)            state_set IMPORT_SUBNET_IDS "$2"; shift 2 ;;
+      --subnet-ids=*)          state_set IMPORT_SUBNET_IDS "${1#--subnet-ids=}"; shift ;;
+
       --eks-access-principal-arn)   state_set EKS_ACCESS_PRINCIPAL_ARN "$2"; shift 2 ;;
       --eks-access-principal-arn=*) state_set EKS_ACCESS_PRINCIPAL_ARN "${1#--eks-access-principal-arn=}"; shift ;;
       --ma-images-source)  state_set MA_IMAGES_SOURCE "$2"; shift 2 ;;
       --ma-images-source=*) state_set MA_IMAGES_SOURCE "${1#--ma-images-source=}"; shift ;;
 
-      # Flags accepted by aws-bootstrap.sh that this CLI does not yet
-      # implement. Warn loudly and continue rather than silently
-      # storing-and-ignoring (which makes a "bad invocation" look
-      # successful at first and fail much later).
-      --use-general-node-pool|--disable-general-purpose-pool \
-        |--skip-test-images|--ignore-checks \
-        |--base-dir|--base-dir=* \
-        |--build|--image-tag|--image-tag=* \
-        |--ma-chart-dir|--ma-chart-dir=* \
+      # Local chart override: skip artifacts_fetch and use a chart on
+      # disk instead. Useful for chart development.
+      --ma-chart-dir)      state_set MA_CHART_DIR "$2"; shift 2 ;;
+      --ma-chart-dir=*)    state_set MA_CHART_DIR "${1#--ma-chart-dir=}"; shift ;;
+
+      # NodePool selection. The chart's general-work-pool is the default;
+      # --use-general-node-pool is a no-op (matches legacy semantics).
+      # --disable-general-purpose-pool flips it off via helm --set.
+      --use-general-node-pool)        state_set USE_GENERAL_NODE_POOL "Y"; shift ;;
+      --disable-general-purpose-pool) state_set DISABLE_GENERAL_NODE_POOL "Y"; shift ;;
+
+      # Flags whose backing behavior is not yet implemented. We accept
+      # them so legacy invocations don't crash, but warn loudly so
+      # operators don't think "bad invocation succeeded".
+      --skip-test-images|--ignore-checks)
+        ui_warn "flag '$1' has no effect in migrate-cli (was specific to --build flow)"; shift ;;
+      --base-dir|--base-dir=*)
+        # Repo root pointer for --build. We don't build, so this is a
+        # no-op.
+        case "$1" in --base-dir) shift 2 ;; *) shift ;; esac ;;
+      --build|--image-tag|--image-tag=* \
         |--tls-mode|--tls-mode=* \
         |--pca-arn|--pca-arn=* \
-        |--deploy-import-vpc-cfn \
-        |--vpc-id|--vpc-id=* \
-        |--subnet-ids|--subnet-ids=* \
         |--create-vpc-endpoints|--create-vpc-endpoints=*)
-                           ui_warn "flag '$1' is not implemented in migrate-cli; ignoring"
-                           # Eat the value too if it's a value-taking flag.
-                           case "$1" in
-                             --base-dir|--image-tag|--ma-chart-dir|--tls-mode \
-                              |--pca-arn|--vpc-id|--subnet-ids \
-                              |--create-vpc-endpoints) shift 2 ;;
-                             *) shift ;;
-                           esac
-                           ;;
+        ui_warn "flag '$1' is not yet implemented in migrate-cli; ignoring"
+        case "$1" in
+          --image-tag|--tls-mode|--pca-arn|--create-vpc-endpoints) shift 2 ;;
+          *) shift ;;
+        esac
+        ;;
       --) shift; break ;;
       *)  args+=("$1"); shift ;;
     esac
@@ -134,21 +146,44 @@ cmd_resume() {
   local resuming=0
   local prev_step; prev_step=$(state_resumable_step)
   if [[ -n "$prev_step" ]]; then
-    ui_info "previous run progressed to: $prev_step"
-    if ui_confirm "Resume from this point?" "Y"; then
-      resuming=1
-    else
-      ui_warn "starting over (state preserved, but flow restarts from discovery)"
-      state_set last_step ""
-      state_save
-      resuming=0
-    fi
+    case "$prev_step" in
+      agent_handoff|console_handoff|ready)
+        # The deploy is finished. The operator is re-running solely
+        # to get back into the agent / console. Skip the resume
+        # prompt — there's no "start over from discovery" answer
+        # that's right here, and the prompt costs them a turn.
+        resuming=1
+        ;;
+      *)
+        ui_info "previous run progressed to: $prev_step"
+        if ui_confirm "Resume from this point?" "Y"; then
+          resuming=1
+        else
+          ui_warn "starting over (state preserved, but flow restarts from discovery)"
+          state_set last_step ""
+          state_save
+          resuming=0
+        fi
+        ;;
+    esac
   fi
 
+  # Mode selection. The Agent path is gated behind MIGRATE_ENABLE_AGENT=1
+  # (or `--mode Agent` / `agent` subcommand) until the agent UX is
+  # production-ready. When the gate is off, Manual is the only mode and
+  # we never prompt — there is no choice to make.
   local mode; mode=$(state_get MODE "")
-  # Explicit --mode wins over both saved state and any prompts.
   if [[ -n "$force_mode" ]]; then
+    # Explicit --mode wins. Agent still requires the gate (or a
+    # dedicated `agent` subcommand path that sets MIGRATE_ENABLE_AGENT).
+    if [[ "$force_mode" == "Agent" && "${MIGRATE_ENABLE_AGENT:-0}" != "1" ]]; then
+      die "--mode Agent requires MIGRATE_ENABLE_AGENT=1 (the agent path is preview-only)"
+    fi
     mode="$force_mode"
+    state_set MODE "$mode"
+    state_save
+  elif [[ "${MIGRATE_ENABLE_AGENT:-0}" != "1" ]]; then
+    mode="Manual"
     state_set MODE "$mode"
     state_save
   elif [[ -z "$mode" || $force_switch -eq 1 ]]; then
@@ -231,43 +266,41 @@ cmd_help() {
 migration-assistant — OpenSearch Migration Assistant CLI
 
 Usage:
-  migration-assistant                            Resume (default subcommand)
-  migration-assistant resume [flags]             Same as default
-  migration-assistant cleanup [--stage NAME]     Tear down deploy + archive state
+  migration-assistant [flags]                    Deploy / resume (default)
+  migration-assistant resume   [flags]           Same as default
+  migration-assistant console  [--stage NAME]    kubectl exec migration-console-0
+  migration-assistant agent    [--stage NAME] [<agent>]
+                                                 Open the agent (preview;
+                                                 requires MIGRATE_ENABLE_AGENT=1)
+  migration-assistant diag     [--stage NAME]    Dump diagnostics to migrate.log
+  migration-assistant cleanup  [--stage NAME]    Tear down deploy + archive state
   migration-assistant version                    Print CLI version
   migration-assistant help                       This help
 
-Native flags:
-  --stage NAME            Named stage; also k8s namespace and helm release.
-                          Default: ma  (must equal namespace per chart contract)
-  --switch                Re-prompt Manual/Agent at startup
-  --mode Manual|Agent     Force a mode without prompting
-  --non-interactive, -y   Auto-accept every default; for Jenkins/CI
-  --reset-cache           Wipe artifact cache before resume
-  --verbose, -v           Mirror logs to stderr
+Common flags:
+  --stage NAME            Stage name. Used as helm release, k8s namespace,
+                          and CFN stack suffix. Default: ma.
+  --region REGION         AWS region. Default: us-east-1.
+  --version VER           Pin Migration Assistant artifact version.
+                          Default: latest published release.
+  --use-public-images     Skip image mirror; pull from public.ecr.aws.
+  --non-interactive, -y   Accept defaults; for Jenkins / CI.
+  --verbose, -v           Mirror logs to stderr live.
+  --reset-cache           Wipe artifact cache before run.
+  --switch                Re-prompt the deploy wizard.
 
-aws-bootstrap.sh-compat flags (this CLI replaces aws-bootstrap.sh):
-  --region REGION                   AWS region (default us-east-1)
-  --stack-name NAME                 Override CFN stack name
-  --version VER                     Migration Assistant artifact version
-  --use-public-images               Skip mirroring; pull from public.ecr.aws
-  --build                           Build images from source (developer)
-  --image-tag TAG                   Image tag for --build
-  --skip-cfn-deploy                 Reuse the existing CFN stack
-  --skip-console-exec               Don't `kubectl exec` after install
-  --skip-setting-k8s-context        Don't run `aws eks update-kubeconfig`
-  --kubectl-context CTX             Override the kube context name
-  --namespace NS                    Same as --stage (alias)
-  --helm-values FILE                Extra helm values file (last-applied)
-  --deploy-create-vpc-cfn           Use the Create-VPC CFN template
-  --deploy-import-vpc-cfn           Use the Import-VPC CFN template
-  --vpc-id ID                       Existing VPC for --deploy-import-vpc-cfn
-  --subnet-ids LIST                 Existing subnets for --deploy-import-vpc-cfn
-  --tls-mode MODE                   TLS configuration mode
-  --pca-arn ARN                     ACM Private CA ARN
-  --eks-access-principal-arn ARN    Extra principal granted EKS access
-  --ma-images-source SRC            Pull images from a different ECR
-  --ma-chart-dir DIR                Use a local chart dir instead of release
+CFN / EKS flags:
+  --stack-name NAME                 Override CFN stack name.
+  --skip-cfn-deploy                 Adopt an existing stack.
+  --skip-setting-k8s-context        Create kubeconfig entry but don't switch active context.
+  --kubectl-context CTX             Set the kubeconfig alias name.
+  --eks-access-principal-arn ARN    Extra principal granted EKS access.
+
+Helm flags:
+  --skip-console-exec               Don't `kubectl exec` after install.
+  --namespace NS                    Alias for --stage.
+  --helm-values FILE                Extra helm values file.
+  --ma-images-source SRC            Pull MA images from a different ECR.
 
 State layout:
   ~/.opensearch-migrate/<stage>/state.env        (sourceable bash)
@@ -275,18 +308,23 @@ State layout:
   ~/.opensearch-migrate/<stage>/log/migrate.log  (run log + rotation)
   ~/.opensearch-migrate/<stage>/artifacts/       (sha-pinned downloads)
 
-Modes:
-  Manual : runs CFN + crane + helm, then kubectl exec migration-console-0.
-  Agent  : same prerequisites; exec's claude/q/kiro/codex/… in its place.
-
 Examples:
-  # Interactive (a la aws-bootstrap.sh):
-  migration-assistant --deploy-create-vpc-cfn --stage prod --region us-east-2
+  # Default interactive deploy:
+  migration-assistant
+
+  # Re-enter the console after a deploy:
+  migration-assistant console
 
   # Jenkins / CI:
   migration-assistant --non-interactive --skip-console-exec \
     --skip-setting-k8s-context --use-public-images \
     --stage ma --region us-east-1
+
+Legacy aws-bootstrap.sh flags accepted-but-not-yet-implemented (warn-and-ignore):
+  --build, --image-tag, --base-dir, --ma-chart-dir,
+  --tls-mode, --pca-arn, --skip-test-images, --ignore-checks,
+  --use-general-node-pool, --disable-general-purpose-pool,
+  --deploy-import-vpc-cfn, --vpc-id, --subnet-ids, --create-vpc-endpoints
 EOF
   printf '\nVersion: %s\n' "$CLI_VERSION"
 }

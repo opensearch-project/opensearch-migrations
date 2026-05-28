@@ -15,8 +15,9 @@ setup() {
   setup_isolated_home
   load_libs _common.sh ui.sh log.sh state.sh artifacts.sh
 
-  # Pin to the version this CLI's defaults target. Bump in lockstep with
-  # lib/version.sh::DEFAULT_MA_VERSION.
+  # Pin to a known-good version for assertions. ma_default_version()
+  # resolves dynamically at runtime; this fixture just needs SOME real
+  # release to test artifact resolution.
   TARGET_VERSION="3.2.1"
   REPO="opensearch-project/opensearch-migrations"
 }

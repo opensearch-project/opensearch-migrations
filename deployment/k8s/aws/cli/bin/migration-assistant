@@ -58,11 +58,16 @@ source "$LIB_DIR/console.sh"
 source "$LIB_DIR/agent.sh"
 # shellcheck source=lib/cleanup.sh
 source "$LIB_DIR/cleanup.sh"
+# shellcheck source=lib/diag.sh
+source "$LIB_DIR/diag.sh"
 # shellcheck source=lib/resume.sh
 source "$LIB_DIR/resume.sh"
 
 case "${1:-resume}" in
   resume|"")             cmd_resume   "${@:2}" ;;
+  console)               cmd_console  "${@:2}" ;;
+  agent)                 cmd_agent    "${@:2}" ;;
+  diag)                  cmd_diag     "${@:2}" ;;
   cleanup)               cmd_cleanup  "${@:2}" ;;
   version|--version|-V)  printf '%s\n' "$CLI_VERSION" ;;
   help|--help|-h)        cmd_help ;;
