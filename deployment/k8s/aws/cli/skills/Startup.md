@@ -46,12 +46,32 @@ at their shell. The CLI's job is done; yours is not.
    authenticate** (which credential store / env var / SSM path). Never
    store credentials in this directory. Pointers only.
 
-5. **Plan the migration.** Write a step-by-step plan to `plan/<n>.md` (next
-   ordinal under `plan/`). Each plan goes in its own file; do not edit
-   prior plans. The plan should reference: snapshot, metadata migration,
-   reindex (or backfill), live-traffic capture/replay if needed, and
-   cutover/teardown. Show the plan to the user. **Wait for explicit
-   approval** before executing anything that modifies the source or target.
+5. **Load the migration assessment SOP.** Read
+   `skills/migrating-to-opensearch/SKILL.md` end-to-end. It is the
+   canonical methodology for assessing the migration: source family
+   detection, persona-aware intake, version compatibility, target
+   shape (managed vs Serverless), six-tool ranking
+   (Migration Assistant for Amazon OpenSearch Service, snapshot/
+   restore, OpenSearch Ingestion, reindex from remote, Logstash/EMR/
+   Spark, in-place blue/green), sizing, and the 0-100 readiness score.
+   `skills/migrating-to-opensearch/references/` has the per-topic
+   deep-dive docs; `assets/` has the report templates.
+
+6. **Use the AWS MCP server for version-specific facts.** The CLI
+   tries to register `aws-mcp` with your client at handoff time. If
+   `aws___read_documentation` is available as a tool, prefer it over
+   web fetch for AWS-doc lookups (instance types, plugin support,
+   X-Pack parity rows, k-NN engines, sizing limits). The SOP has a
+   hard pre-condition: do NOT assert version-specific claims from
+   training memory; retrieve them.
+
+7. **Plan the migration.** Write a step-by-step plan to `plan/<n>.md`
+   (next ordinal under `plan/`). Each plan goes in its own file; do
+   not edit prior plans. The plan should reference: snapshot,
+   metadata migration, reindex (or backfill), live-traffic
+   capture/replay if needed, and cutover/teardown. Show the plan to
+   the user. **Wait for explicit approval** before executing anything
+   that modifies the source or target.
 
 ## Where to put things
 

@@ -57,28 +57,90 @@ agent_path() {
   agent_exec "$picked"
 }
 
-# agent_setup <agent> — write Startup.md (and any per-agent paths) into the
-# stage dir. Source skill is the bundled $LIB_DIR/../skills/Startup.md.
+# agent_setup <agent> — write Startup.md, drop the bundled skill tree
+# (the migrating-to-opensearch SOP), wire up agent-specific config (kiro
+# steering for kiro, .mcp.json + AWS MCP for claude). Source skill is
+# the bundled $LIB_DIR/../skills/.
 agent_setup() {
   local agent="$1"
-  local src="$LIB_DIR/../skills/Startup.md"
-  [[ -f "$src" ]] || die "missing bundled skill: $src"
+  local skills_src="$LIB_DIR/../skills"
+  [[ -f "$skills_src/Startup.md" ]] || die "missing bundled skill: $skills_src/Startup.md"
+
+  # Always drop a copy of the SOP and Startup.md at the stage root so
+  # any agent (even those without a skills convention) can find them.
+  cp -f "$skills_src/Startup.md" "$STAGE_DIR/Startup.md"
+  if [[ -d "$skills_src/migrating-to-opensearch" ]]; then
+    mkdir -p "$STAGE_DIR/skills"
+    cp -R "$skills_src/migrating-to-opensearch" "$STAGE_DIR/skills/"
+  fi
 
   local dest_dir
   case "$agent" in
-    claude)              dest_dir="$STAGE_DIR/.claude/skills/opensearch-migration" ;;
-    q)                   dest_dir="$STAGE_DIR/.q/skills/opensearch-migration" ;;
-    kiro)                dest_dir="$STAGE_DIR/.kiro" ;;
-    codex)               dest_dir="$STAGE_DIR/.codex" ;;
-    *)                   dest_dir="$STAGE_DIR" ;;
+    claude)
+      dest_dir="$STAGE_DIR/.claude/skills/opensearch-migration"
+      mkdir -p "$dest_dir"
+      cp -f "$skills_src/Startup.md" "$dest_dir/Startup.md"
+      [[ -d "$skills_src/migrating-to-opensearch" ]] \
+        && cp -R "$skills_src/migrating-to-opensearch" "$STAGE_DIR/.claude/skills/"
+      _agent_install_aws_mcp_claude
+      ;;
+    kiro)
+      # Drop the upstream kiro-cli-config tree (agents, prompts,
+      # settings, steering) directly into .kiro/ so `kiro chat` picks
+      # them up automatically.
+      dest_dir="$STAGE_DIR/.kiro"
+      mkdir -p "$dest_dir"
+      cp -f "$skills_src/Startup.md" "$dest_dir/Startup.md"
+      if [[ -d "$skills_src/kiro" ]]; then
+        cp -R "$skills_src/kiro/." "$dest_dir/"
+      fi
+      ;;
+    q)
+      dest_dir="$STAGE_DIR/.q/skills/opensearch-migration"
+      mkdir -p "$dest_dir"
+      cp -f "$skills_src/Startup.md" "$dest_dir/Startup.md"
+      ;;
+    codex)
+      dest_dir="$STAGE_DIR/.codex"
+      mkdir -p "$dest_dir"
+      cp -f "$skills_src/Startup.md" "$dest_dir/Startup.md"
+      ;;
+    *)
+      dest_dir="$STAGE_DIR"
+      ;;
   esac
-  mkdir -p "$dest_dir"
-  cp -f "$src" "$dest_dir/Startup.md"
-
-  # Also drop a top-level copy so any agent without skill-folder support sees it.
-  cp -f "$src" "$STAGE_DIR/Startup.md"
 
   log_info "agent_setup: agent=$agent skill_dir=$dest_dir"
+}
+
+# _agent_install_aws_mcp_claude — register the AWS MCP server with the
+# operator's claude config so `aws___read_documentation` and the rest of
+# the AWS MCP tool surface are available in the handoff session.
+#
+# Idempotent: skips when claude already knows about a server named
+# "aws-mcp", or when the user has set MIGRATE_SKIP_MCP=1.
+_agent_install_aws_mcp_claude() {
+  if [[ "${MIGRATE_SKIP_MCP:-0}" -eq 1 ]]; then
+    ui_dim "  MIGRATE_SKIP_MCP=1 → skipping aws-mcp registration"
+    return 0
+  fi
+  if ! command -v claude >/dev/null 2>&1; then
+    return 0
+  fi
+  if claude mcp list 2>/dev/null | grep -q '^aws-mcp\b'; then
+    ui_dim "  aws-mcp already registered with claude"
+    return 0
+  fi
+  ui_step "Registering aws-mcp with claude (provides aws___read_documentation)"
+  local region; region=$(state_get AWS_REGION us-east-1)
+  local cfg
+  cfg=$(printf '{"command":"uvx","args":["mcp-proxy-for-aws@latest","https://aws-mcp.us-east-1.api.aws/mcp","--metadata","AWS_REGION=%s"]}' "$region")
+  if claude mcp add-json aws-mcp --scope user "$cfg" >>"$LOG_FILE" 2>&1; then
+    ui_ok "aws-mcp registered (region metadata=$region)"
+  else
+    ui_warn "claude mcp add-json failed; agent will fall back to web fetch"
+    ui_dim "  retry manually: claude mcp add-json aws-mcp --scope user '$cfg'"
+  fi
 }
 
 # agent_exec <agent> — replace this process with the agent. Never returns.
@@ -95,5 +157,14 @@ agent_exec() {
     || ui_warn "could not call sts:GetCallerIdentity"
 
   ui_dim "  exec $bin"
-  exec "$bin" "Read skill Startup.md and give the user next steps."
+  case "$agent" in
+    kiro)
+      # kiro chat with the bundled opensearch-migration agent
+      # definition (.kiro/agents/opensearch-migration.json).
+      exec "$bin" chat --agent opensearch-migration
+      ;;
+    *)
+      exec "$bin" "Read Startup.md and skills/migrating-to-opensearch/SKILL.md, then give the user next steps."
+      ;;
+  esac
 }
