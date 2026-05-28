@@ -322,24 +322,22 @@ public class BulkResponseParser {
         ItemPartition.ItemPartitionBuilder partition,
         DocumentExceptionAllowlist allowlist
     ) throws IOException {
-        var info = parseItemFields(rawJson);
-        if (info == null) {
+        DocInfo parsed = parseItemFields(rawJson);
+        if (parsed == null) {
             partition.retryableFailure(new ItemFailure(position, null, MALFORMED_RESPONSE_ITEM, rawJson));
             return;
         }
-        if (info.getResult() != null) {
+        String result = parsed.getResult();
+        String errorType = parsed.getErrorType();
+        String docId = parsed.getId();
+        if (result != null || (errorType != null && allowlist.isAllowed(errorType))) {
             partition.successPosition(position);
             return;
         }
-        if (info.getErrorType() != null && allowlist.isAllowed(info.getErrorType())) {
-            partition.successPosition(position);
-            return;
-        }
-        var failure = new ItemFailure(position, info.getId(), info.getErrorType(), rawJson);
-        if (info.getErrorType() != null && BulkDocErrorTypes.NON_RETRYABLE.contains(info.getErrorType())) {
-            partition.nonRetryableFailure(failure);
+        if (errorType != null && BulkDocErrorTypes.NON_RETRYABLE.contains(errorType)) {
+            partition.nonRetryableFailure(new ItemFailure(position, docId, errorType, rawJson));
         } else {
-            partition.retryableFailure(failure);
+            partition.retryableFailure(new ItemFailure(position, docId, errorType, rawJson));
         }
     }
 
