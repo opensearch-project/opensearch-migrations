@@ -170,49 +170,6 @@ def _find_resource_object(namespace, resource_name):
     return None
 
 
-def get_resource_logs(namespace: str, resource_path: str) -> str:
-    """Fetch merged logs for a migration resource. Returns log text."""
-    resource = _find_resource_object(namespace, resource_path)
-    if not resource:
-        return f"(No migration resource matching '{resource_path}')"
-    labels = resource.get('metadata', {}).get('labels', {}) or {}
-    prefix = 'migrations.opensearch.org/'
-    selectors = [
-        f"{key}={value}"
-        for key, value in sorted(labels.items())
-        if (key.startswith(prefix) or key in _RESOURCE_OUTPUT_LABELS) and value
-    ]
-    if not selectors:
-        return f"(No log labels for '{resource_path}')"
-    selector = ",".join(selectors)
-    v1 = client.CoreV1Api()
-    pods = v1.list_namespaced_pod(namespace, label_selector=selector)
-    if not pods.items:
-        return "(No pods found matching this resource)"
-    all_logs = []
-    for pod in pods.items:
-        try:
-            containers = [c.name for c in pod.spec.containers if c.name != 'wait']
-            for container in containers:
-                try:
-                    log = v1.read_namespaced_pod_log(
-                        pod.metadata.name, namespace, container=container, timestamps=True)
-                    if log:
-                        all_logs.append(log)
-                except Exception:
-                    pass
-        except Exception:
-            pass
-    if not all_logs:
-        return "(No logs available)"
-    # Merge by timestamp (each line starts with RFC3339 timestamp)
-    lines = []
-    for log in all_logs:
-        lines.extend(log.splitlines())
-    lines.sort()
-    return "\n".join(lines)
-
-
 def _resource_label_selectors(ctx, namespace, resource_name, prefix):
     resource = _find_resource_object(namespace, resource_name)
     if not resource:

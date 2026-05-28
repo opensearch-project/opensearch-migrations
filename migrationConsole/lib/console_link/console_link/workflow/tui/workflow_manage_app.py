@@ -323,18 +323,15 @@ class WorkflowTreeApp(App):
             self._logs.show_in_pager(self, pod_name, node_data.get('display_name', ''))
 
     def action_view_resource_logs(self) -> None:
-        """View logs for a migration resource."""
+        """View logs for a migration resource via the workflow log CLI."""
         node = self.current_node_data
         if not node or not node.get('resource_path'):
             return
         resource_path = node['resource_path']
-        try:
-            from ..commands.log import get_resource_logs
-            logs = get_resource_logs(self._namespace, resource_path)
-            self._logs.show_output_texts_in_pager(
-                self, [(resource_path, logs)], resource_path, clean=True)
-        except Exception as e:
-            self.notify(f"Log error: {e}", severity="error")
+        with self.suspend():
+            os.system('clear')
+            cmd = f"workflow log resource {resource_path} | less -R"
+            os.system(cmd)
 
     def action_copy_pod_name(self) -> None:
         if not self.current_node_data:
