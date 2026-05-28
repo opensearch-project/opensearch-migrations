@@ -151,6 +151,11 @@ ui_confirm() {
   local answer=""
   ui_prompt "$prompt" "$hint" answer
 
+  if [[ "${MIGRATE_DEBUG_PROMPT:-0}" -eq 1 ]]; then
+    printf '  [debug] ui_confirm: hint=%s default_yn=%s answer=[%s]\n' \
+      "$hint" "$default_yn" "$answer" >&2
+  fi
+
   # If ui_prompt returned the hint string itself, the user just hit Enter
   # and ui_prompt's "default fallback" kicked in — collapse that to the
   # canonical default_yn for the comparison below.
@@ -161,6 +166,10 @@ ui_confirm() {
   # Lowercase first letter for the comparison. Bash 3.2 has no ${var,,}.
   local first
   first=$(printf '%s' "$answer" | cut -c1 | tr '[:upper:]' '[:lower:]')
+  if [[ "${MIGRATE_DEBUG_PROMPT:-0}" -eq 1 ]]; then
+    printf '  [debug] ui_confirm: first=[%s] → %s\n' "$first" \
+      "$([[ "$first" == y ]] && echo 'YES (rc 0)' || echo 'NO (rc 1)')" >&2
+  fi
   case "$first" in
     y) return 0 ;;
     n) return 1 ;;

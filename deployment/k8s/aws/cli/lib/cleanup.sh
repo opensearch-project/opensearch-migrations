@@ -90,9 +90,21 @@ cmd_clear() {
   ui_dim "  workdir: $STAGE_DIR"
   ui_dim "  this removes state.env / state.json / log / plan / history"
   ui_dim "  this does NOT touch AWS resources or kubernetes (use 'cleanup' for that)"
-  if (( ! force )) && ! ui_confirm "Wipe local state for stage '$STAGE'?" "N"; then
-    ui_info "clear cancelled"
-    return 0
+  if [[ "${MIGRATE_DEBUG_PROMPT:-0}" -eq 1 ]]; then
+    printf '  [debug] cmd_clear: force=%s\n' "$force" >&2
+  fi
+  if (( force )); then
+    :  # skip prompt
+  else
+    local _confirm_rc=0
+    ui_confirm "Wipe local state for stage '$STAGE'?" "N" || _confirm_rc=$?
+    if [[ "${MIGRATE_DEBUG_PROMPT:-0}" -eq 1 ]]; then
+      printf '  [debug] cmd_clear: ui_confirm rc=%s (0=yes, 1=no)\n' "$_confirm_rc" >&2
+    fi
+    if (( _confirm_rc != 0 )); then
+      ui_info "clear cancelled"
+      return 0
+    fi
   fi
   rm -rf "$STAGE_DIR"
   ui_ok "stage '$STAGE' state cleared"
