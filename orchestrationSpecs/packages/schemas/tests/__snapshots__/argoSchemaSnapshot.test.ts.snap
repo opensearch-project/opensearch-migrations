@@ -227,7 +227,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version": {
                       "type": "string",
                       "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
-                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.6'."
+                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
                     },
                     "snapshotInfo": {
                       "type": "object",
@@ -498,6 +498,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "loggingConfigurationOverrideConfigMap": {
                       "type": "string",
                       "default": ""
+                    },
+                    "serviceType": {
+                      "type": "string",
+                      "enum": [
+                        "LoadBalancer",
+                        "ClusterIP"
+                      ],
+                      "default": "LoadBalancer"
                     },
                     "internetFacing": {
                       "type": "boolean",
@@ -908,6 +916,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "configChecksum": {
                         "type": "string"
+                      },
+                      "resourceUid": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -918,7 +929,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "semaphoreConfigMapName",
                       "semaphoreKey",
                       "dependsOnProxySetups",
-                      "configChecksum"
+                      "configChecksum",
+                      "resourceUid"
                     ]
                   },
                   "minItems": 1
@@ -1017,7 +1029,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "version": {
                       "type": "string",
                       "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
-                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.6'."
+                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
                     },
                     "label": {
                       "type": "string"
@@ -1565,6 +1577,9 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "checksumForReplayer": {
                   "type": "string"
                 },
+                "workloadIdentityChecksum": {
+                  "type": "string"
+                },
                 "resourceUid": {
                   "type": "string"
                 }
@@ -1580,6 +1595,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "snapshotConfig",
                 "configChecksum",
                 "checksumForReplayer",
+                "workloadIdentityChecksum",
                 "resourceUid"
               ]
             },
@@ -2389,7 +2405,7 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "version": {
             "type": "string",
             "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
-            "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.6'."
+            "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
           },
           "snapshotInfo": {
             "type": "object",
@@ -2820,12 +2836,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "enableSourcelessMigrations": {
                         "type": "boolean",
                         "default": false,
-                        "description": "Enable migration of indices that have _source disabled or partially filtered (includes/excludes). When enabled, document backfill will reconstruct documents from stored fields and doc_values. Without this flag, metadata migration will fail if any selected index has _source disabled or partially filtered."
+                        "description": "Enable migration of indices that have _source disabled or partially filtered (includes/excludes). When enabled, document backfill will reconstruct documents from stored fields and doc_values. Without this flag, metadata migration will fail if any selected index has _source disabled or partially filtered.",
+                        "changeRestriction": "impossible"
                       },
                       "useRecoverySource": {
                         "type": "boolean",
                         "default": false,
-                        "description": "When enabled, treat the _recovery_source stored field (present in ES 7+ / OpenSearch snapshots with soft-deletes) as _source. This field is transient and may not be present for all documents, so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient."
+                        "description": "When enabled, treat the _recovery_source stored field (present in ES 7+ / OpenSearch snapshots with soft-deletes) as _source. This field is transient and may not be present for all documents, so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.",
+                        "changeRestriction": "impossible"
                       }
                     },
                     "description": "Configuration for migrating index metadata (mappings, settings, templates) from the snapshot to the target. Omit to skip metadata migration."
@@ -3153,10 +3171,20 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "default": "",
                     "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                   },
+                  "serviceType": {
+                    "type": "string",
+                    "enum": [
+                      "LoadBalancer",
+                      "ClusterIP"
+                    ],
+                    "default": "LoadBalancer",
+                    "description": "Expert setting controlling how the capture proxy Kubernetes Service is exposed. 'LoadBalancer' provisions a cloud/load-balancer-backed Service and waits for load balancer ingress before the proxy is Ready. 'ClusterIP' exposes the proxy only inside the Kubernetes cluster and waits for the cluster-local Service endpoint before the proxy is Ready.",
+                    "changeRestriction": "impossible"
+                  },
                   "internetFacing": {
                     "type": "boolean",
                     "default": false,
-                    "description": "When true, the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.",
+                    "description": "When true and serviceType is 'LoadBalancer', the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.",
                     "changeRestriction": "impossible"
                   },
                   "podReplicas": {

@@ -1020,7 +1020,7 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
     docker buildx rm "$BUILDER_NAME" 2>/dev/null || true
     # EKS/bootstrap builds are always Kubernetes-hosted; they cannot assume
     # direct access to a local Docker daemon from the target environment.
-    source "${base_dir}/buildImages/backends/k8sHostedBuildkit.sh"
+    source "${base_dir}/buildImages/backends/eksKubernetesBuildkit.sh"
     setup_build_backend
   fi
 

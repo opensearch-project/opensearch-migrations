@@ -246,6 +246,53 @@ describe('MigrationConfigTransformer validation', () => {
         ]);
     });
 
+    it('should preserve transform image pull policy from transform sources', async () => {
+        const config = cloneBaseConfig();
+        config.transformsSources = {
+            "my-transforms": {
+                image: "example.com/transforms:latest",
+                pullPolicy: "Always"
+            }
+        };
+        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [
+            {
+                metadataMigrationConfig: {
+                    transformsSource: "my-transforms",
+                    metadataTransforms: {
+                        language: "javascript"
+                    }
+                },
+                documentBackfillConfig: {
+                    transformsSource: "my-transforms",
+                    documentTransforms: {
+                        language: "javascript"
+                    }
+                }
+            }
+        ];
+        config.traffic.replayers.replay1.replayerConfig = {
+            transformsSource: "my-transforms",
+            requestTransforms: {
+                language: "javascript"
+            }
+        };
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.snapshotMigrations[0].metadataMigrationConfig).toMatchObject({
+            transformsImage: "example.com/transforms:latest",
+            transformsImagePullPolicy: "Always"
+        });
+        expect(result.snapshotMigrations[0].documentBackfillConfig).toMatchObject({
+            transformsImage: "example.com/transforms:latest",
+            transformsImagePullPolicy: "Always"
+        });
+        expect(result.trafficReplays[0].replayerConfig).toMatchObject({
+            transformsImage: "example.com/transforms:latest",
+            transformsImagePullPolicy: "Always"
+        });
+    });
+
     it('should reject transform pipelines without a transformsSource', () => {
         const config = cloneBaseConfig();
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [
@@ -279,6 +326,60 @@ describe('MigrationConfigTransformer validation', () => {
             .toThrow(/Unknown transformsSource 'missing'/);
     });
 
+    it('should keep workload identity stable across gated RFS changes only', async () => {
+        const withBackfill = JSON.parse(JSON.stringify(baseConfig));
+        withBackfill.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig = {
+            maxConnections: 4,
+        };
+
+        const gatedChange = JSON.parse(JSON.stringify(withBackfill));
+        gatedChange.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig.maxConnections = 5;
+
+        const impossibleChange = JSON.parse(JSON.stringify(withBackfill));
+        impossibleChange.snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig.indexAllowlist = [
+            "logs-*",
+        ];
+
+        const baselineMigration = (await transformer.processFromObject(withBackfill)).snapshotMigrations[0];
+        const gatedMigration = (await transformer.processFromObject(gatedChange)).snapshotMigrations[0];
+        const impossibleMigration = (await transformer.processFromObject(impossibleChange)).snapshotMigrations[0];
+
+        expect(gatedMigration.configChecksum).not.toEqual(baselineMigration.configChecksum);
+        expect(gatedMigration.workloadIdentityChecksum).toEqual(baselineMigration.workloadIdentityChecksum);
+        expect(impossibleMigration.workloadIdentityChecksum).not.toEqual(baselineMigration.workloadIdentityChecksum);
+    });
+
+    it('should include source connection changes in snapshot and migration identity', async () => {
+        const sourceEndpointChange = JSON.parse(JSON.stringify(baseConfig));
+        sourceEndpointChange.sourceClusters.source1.endpoint = "https://alternate-source:9200";
+
+        const baseline = await transformer.processFromObject(baseConfig);
+        const changed = await transformer.processFromObject(sourceEndpointChange);
+
+        const baselineSnapshot = baseline.snapshots[0].createSnapshotConfig[0];
+        const changedSnapshot = changed.snapshots[0].createSnapshotConfig[0];
+        const baselineMigration = baseline.snapshotMigrations[0];
+        const changedMigration = changed.snapshotMigrations[0];
+
+        expect(changedSnapshot.configChecksum).not.toEqual(baselineSnapshot.configChecksum);
+        expect(changedMigration.sourceEndpoint).toBe("https://alternate-source:9200");
+        expect(changedMigration.snapshotConfigChecksum).not.toEqual(baselineMigration.snapshotConfigChecksum);
+        expect(changedMigration.configChecksum).not.toEqual(baselineMigration.configChecksum);
+        expect(changedMigration.workloadIdentityChecksum).not.toEqual(baselineMigration.workloadIdentityChecksum);
+    });
+
+    it('should include target connection changes in snapshot migration workload identity', async () => {
+        const targetEndpointChange = JSON.parse(JSON.stringify(baseConfig));
+        targetEndpointChange.targetClusters.target1.endpoint = "https://alternate-target:9200";
+
+        const baselineMigration = (await transformer.processFromObject(baseConfig)).snapshotMigrations[0];
+        const changedMigration = (await transformer.processFromObject(targetEndpointChange)).snapshotMigrations[0];
+
+        expect(changedMigration.targetConfig.label).toBe(baselineMigration.targetConfig.label);
+        expect(changedMigration.configChecksum).not.toEqual(baselineMigration.configChecksum);
+        expect(changedMigration.workloadIdentityChecksum).not.toEqual(baselineMigration.workloadIdentityChecksum);
+    });
+
     it('should normalize workflow-managed Kafka auth and drop empty kafkaTopic placeholders before AJV validation', () => {
         const parsed = OVERALL_MIGRATION_CONFIG.parse(baseConfig);
         const normalized = normalizeUserConfig(parsed);
@@ -291,6 +392,18 @@ describe('MigrationConfigTransformer validation', () => {
             }
         });
         expect(normalized.traffic?.proxies?.proxy1).not.toHaveProperty("kafkaTopic");
+    });
+
+    it('should preserve the expert proxy Service type setting', async () => {
+        const configWithClusterIpProxy = cloneBaseConfig();
+        configWithClusterIpProxy.traffic.proxies.proxy1.proxyConfig.serviceType = "ClusterIP";
+
+        const result = await transformer.processFromObject(configWithClusterIpProxy);
+
+        expect(result.proxies?.[0]?.proxyConfig).toMatchObject({
+            listenPort: 9201,
+            serviceType: "ClusterIP",
+        });
     });
 
     it('should derive managed Kafka auth profile for auto-created SCRAM clusters', async () => {

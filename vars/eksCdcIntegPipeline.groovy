@@ -17,7 +17,7 @@ def call(Map config = [:]) {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: gitBranchDefault, description: 'Git branch to use for repository')
             string(name: 'GIT_COMMIT', defaultValue: '', description: '(Optional) Specific commit to checkout after cloning branch')
-            string(name: 'TEST_IDS', defaultValue: "${defaultTestIds}", description: 'Comma-separated test IDs to run (e.g. 0031,0041)')
+            string(name: 'TEST_IDS', defaultValue: "${defaultTestIds}", description: 'Comma-separated test IDs to run (e.g. 0031,0042)')
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
             choice(
                     name: 'SOURCE_VERSION',
@@ -48,7 +48,7 @@ def call(Map config = [:]) {
 
         options {
             lock(label: lockLabel, quantity: 1)
-            timeout(time: 4, unit: 'HOURS')
+            timeout(time: 5, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
             skipDefaultCheckout(true)
         }
@@ -228,9 +228,9 @@ def call(Map config = [:]) {
                                             transforms_dir="migrationConsole/lib/integ_test/integ_test/transform_assets/mountable/${bank}"
                                             content_hash=\$(cd "\${transforms_dir}" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print substr(\$1,1,20)}')
                                             tag="transforms-${bank}-\${content_hash}"
-                                            output=\$(deployment/k8s/package-transforms.sh "\${transforms_dir}" "${env.registryEndpoint}" "\${tag}")
+                                            output=\$(deployment/k8s/package-transforms.sh "\${transforms_dir}" "${env.registryEndpoint}" "\${tag}" --output json)
                                             printf '%s\\n' "\${output}" >&2
-                                            pinned_ref=\$(printf '%s\\n' "\${output}" | grep -oE '[^[:space:]]+@sha256:[a-f0-9]{64}' | tail -n 1)
+                                            pinned_ref=\$(printf '%s\\n' "\${output}" | jq -r '.image // empty')
                                             test -n "\${pinned_ref}"
                                             printf '%s\\n' "\${pinned_ref}"
                                         """,
@@ -250,7 +250,7 @@ def call(Map config = [:]) {
 
             stage('Perform CDC E2E Tests') {
                 steps {
-                    timeout(time: 2, unit: 'HOURS') {
+                    timeout(time: 3, unit: 'HOURS') {
                         dir('libraries/testAutomation') {
                             script {
                                 sh "pipenv install --deploy"

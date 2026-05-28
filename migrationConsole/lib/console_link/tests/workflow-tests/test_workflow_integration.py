@@ -1067,7 +1067,7 @@ class TestArgoWorkflows:
             runner = CliRunner()
             status_result = runner.invoke(
                 workflow_cli,
-                ['status', '--workflow-name', workflow_name, '--namespace', argo_namespace,
+                ['status', '--step-view', '--workflow-name', workflow_name, '--namespace', argo_namespace,
                  '--argo-server', 'https://localhost:2746', '--insecure']
             )
             assert status_result.exit_code == 0, (
@@ -1202,7 +1202,7 @@ class TestArgoWorkflows:
             runner = CliRunner()
             status_result = runner.invoke(
                 workflow_cli,
-                ['status', '--workflow-name', workflow_name, '--namespace', argo_namespace,
+                ['status', '--step-view', '--workflow-name', workflow_name, '--namespace', argo_namespace,
                  '--argo-server', 'https://localhost:2746', '--insecure']
             )
             assert status_result.exit_code == 0, (
@@ -1283,7 +1283,7 @@ def _test_status_command_for_workflow(runner, workflow_name, namespace):
     # Invoke status command with explicit argo-server URL (HTTPS with insecure flag for self-signed cert)
     result = runner.invoke(
         workflow_cli,
-        ['status', '--workflow-name', workflow_name, '--namespace', namespace,
+        ['status', '--step-view', '--workflow-name', workflow_name, '--namespace', namespace,
          '--argo-server', 'https://localhost:2746', '--insecure']
     )
 

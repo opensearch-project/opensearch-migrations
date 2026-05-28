@@ -103,3 +103,24 @@ def test_source_cluster_proxy_is_attached_and_inherits_auth():
     assert env.proxy is not None
     assert env.proxy.endpoint == "http://capture-proxy:9201"
     assert env.proxy.auth_type == env.source_cluster.auth_type
+
+
+def test_source_cluster_sigv4_proxy_signs_with_source_endpoint():
+    env = Environment(config={
+        "source_cluster": {
+            "endpoint": "https://search-source.us-east-1.es.amazonaws.com",
+            "allow_insecure": True,
+            "sigv4": {
+                "region": "us-east-1",
+                "service": "es"
+            },
+            "proxy": {
+                "name": "capture-proxy",
+                "endpoint": "https://capture-proxy:9201",
+                "allow_insecure": True
+            }
+        }
+    })
+
+    assert env.proxy is not None
+    assert env.proxy.config["sigv4_signing_endpoint"] == "https://search-source.us-east-1.es.amazonaws.com"

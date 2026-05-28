@@ -33,13 +33,19 @@ pipenv run app --source-version=all --target-version=OS_3.1 \
 ```
 
 Supported versions:
-- **Sources:** `ES_1.5`, `ES_2.4`, `ES_5.6`, `ES_6.8`, `ES_7.10`, `OS_1.3`, `OS_2.19`
+- **Sources:** `ES_1.5`, `ES_2.4`, `ES_5.6`, `ES_6.8`, `ES_7.10`, `OS_1.3`, `OS_2.19`, `SOLR_6.6`, `SOLR_7.7`, `SOLR_8.11`, `SOLR_9.8`
 - **Targets:** `OS_1.3`, `OS_2.19`, `OS_3.1`
 
 **Run specific tests:**
 ```bash
 pipenv run app --test-ids=0001 --source-version=ES_7.10 --target-version=OS_2.19
 pipenv run app --test-ids=0001,0004 --source-version=ES_7.10 --target-version=OS_2.19
+```
+
+For local kind/minikube CDC tests that deploy a capture proxy, disable external load balancer provisioning:
+```bash
+pipenv run app --test-ids=0031 --source-version=ES_8.19 --target-version=OS_3.1 \
+  --capture-proxy-service-type=ClusterIP
 ```
 
 ## Development Mode

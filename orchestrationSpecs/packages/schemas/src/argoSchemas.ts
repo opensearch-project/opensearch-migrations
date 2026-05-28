@@ -185,6 +185,7 @@ export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
 );
 export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick({
     loggingConfigurationOverrideConfigMap: true,
+    serviceType: true,
     internetFacing: true,
     podReplicas: true,
     resources: true,
@@ -247,6 +248,7 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     sourceAuth: z.any().optional(),
     configChecksum: z.string(),
     checksumForReplayer: z.string(),
+    workloadIdentityChecksum: z.string(),
     resourceUid: z.string(),
 });
 
@@ -286,6 +288,7 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
         configChecksum: z.string(),
     })),
     configChecksum: z.string(),
+    resourceUid: z.string(),
 });
 
 export const ENRICHED_SNAPSHOT_MIGRATION_FILTER = SNAPSHOT_MIGRATION_FILTER.extend({
@@ -330,6 +333,14 @@ export const ARGO_MIGRATION_CONFIG = z.object({
 });
 
 function makePreEnrichMigrationConfigSchema() {
+    const preEnrichCreateSnapshotsConfig = DENORMALIZED_CREATE_SNAPSHOTS_CONFIG.extend({
+        createSnapshotConfig: z.array(
+            PER_SOURCE_CREATE_SNAPSHOTS_CONFIG.extend({
+                resourceUid: z.string().optional(),
+            })
+        ).min(1),
+    });
+
     return ARGO_MIGRATION_CONFIG.extend({
         kafkaClusters: z.array(
             makeResourceUidOptional(NAMED_KAFKA_CLUSTER_CONFIG)
@@ -337,6 +348,7 @@ function makePreEnrichMigrationConfigSchema() {
         proxies: z.array(
             makeResourceUidOptional(DENORMALIZED_PROXY_CONFIG)
         ).default([]),
+        snapshots: z.array(preEnrichCreateSnapshotsConfig).default([]),
         snapshotMigrations: z.array(
             makeResourceUidOptional(SNAPSHOT_MIGRATION_CONFIG)
         ).default([]),

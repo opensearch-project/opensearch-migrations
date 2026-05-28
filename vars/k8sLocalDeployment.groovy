@@ -57,47 +57,23 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Check Minikube Status') {
+            stage('Recreate Minikube') {
                 steps {
-                    timeout(time: 5, unit: 'MINUTES') {
-                        script {
-                            def status = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
-                            if (status == "Running") {
-                                echo "✅ Minikube is running"
-                            } else {
-                                echo "Minikube is not running, status: " + status
-                                sh(script: "minikube delete", returnStdout: true)
-                                sh(script: "minikube start", returnStdout: true)
-                                def status2 = sh(script: "minikube status --format='{{.Host}}'", returnStdout: true).trim()
-                                if (status2 == "Running") {
-                                    echo "✅ Minikube was started as is running"
-                                } else {
-                                    error("❌ Minikube failed to start")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            stage('Cleanup Previous MA Deployment') {
-                steps {
-                    timeout(time: 3, unit: 'MINUTES') {
-                        script {
-                            sh "kubectl config unset current-context || true"
-                            sh """
-                                # Delete all webhook configurations first — stale webhooks can block all API calls
-                                kubectl --context=minikube delete mutatingwebhookconfigurations --all --ignore-not-found || true
-                                kubectl --context=minikube delete validatingwebhookconfigurations --all --ignore-not-found || true
-
-                                # Helm uninstall with --no-hooks to avoid failing pre-delete hooks on terminating namespaces
-                                helm --kube-context=minikube uninstall ma -n ma --no-hooks || true
-
-                                # Force-delete namespaces if they still exist
-                                kubectl --context=minikube delete namespace kyverno-ma --ignore-not-found --grace-period=0 || true
-                                kubectl --context=minikube delete namespace ma --ignore-not-found --grace-period=0 --force || true
-                            """
-                        }
+                    // Always recreate. The shared docker-hosted registry/buildkit containers
+                    // and their registry-data + buildkit-cache volumes live on host Docker,
+                    // so they survive `minikube delete` and image layers are reused.
+                    // Use minikube's default cri-dockerd runtime + bridge CNI: forcing
+                    // containerd makes minikube install kindnet, which pulls a docker.io
+                    // image at every cluster start and breaks under Docker Hub rate limits
+                    // in CI. `--insecure-registry=docker-registry:5000` lets dockerd accept
+                    // plain HTTP from our in-cluster registry name.
+                    timeout(time: 10, unit: 'MINUTES') {
+                        sh 'minikube delete || true'
+                        // minikube delete sometimes leaves the "minikube" docker network behind
+                        // with its 192.168.49.0/24 subnet; drop it so the next start can recreate
+                        // it without "address already in use".
+                        sh 'docker network rm minikube 2>/dev/null || true'
+                        sh 'minikube start --driver=docker --insecure-registry=docker-registry:5000'
                     }
                 }
             }
@@ -107,12 +83,21 @@ def call(Map config = [:]) {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
                             sh "kubectl config unset current-context || true"
-                            sh "helm --kube-context=minikube uninstall buildkit -n buildkit 2>/dev/null || true"
-                            sh "USE_LOCAL_REGISTRY=true KUBE_CONTEXT=minikube BUILDKIT_HELM_ARGS='--set buildkitd.maxParallelism=16 --set buildkitd.resources.requests.cpu=0 --set buildkitd.resources.requests.memory=0 --set buildkitd.resources.limits.cpu=0 --set buildkitd.resources.limits.memory=0' sh -c '. ./buildImages/backends/k8sHostedBuildkit.sh && setup_build_backend'"
+                            // Bring up the docker-hosted registry/buildkit, then attach the minikube node
+                            // container to the same docker network so dockerd can pull docker-registry:5000.
+                            sh '''
+                                set -eu
+                                . ./buildImages/backends/dockerHostedBuildkit.sh
+                                KUBE_CONTEXT=minikube setup_build_backend
+                                mk_nodes=()
+                                while IFS= read -r node; do
+                                    [ -n "$node" ] && mk_nodes+=("$node")
+                                done < <(minikube node list 2>/dev/null | awk '{print $1}')
+                                connect_cluster_to_registry_network minikube "${mk_nodes[@]}"
+                            '''
                             def pullThroughCacheEndpoint = sh(script: 'bash -l -c \'echo -n $ECR_PULL_THROUGH_ENDPOINT\'', returnStdout: true).trim()
-                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 -Pbuilder=builder-minikube -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
-                            sh "docker buildx rm builder-minikube 2>/dev/null || true"
-                            sh "helm --kube-context=minikube uninstall buildkit -n buildkit 2>/dev/null || true"
+                            sh "./gradlew :buildImages:buildImagesToRegistry_amd64 :buildImages:buildKitTestAll_amd64 -Pbuilder=builder-minikube -PregistryEndpoint=localhost:5001 -x test --info --stacktrace --profile --scan${pullThroughCacheEndpoint ? " -PpullThroughCacheEndpoint=${pullThroughCacheEndpoint}" : ""}"
+                            // Keep builder-minikube alive across runs so the buildkit cache persists.
                         }
                     }
                 }
@@ -134,8 +119,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
                                 sh "kubectl config unset current-context || true"
-                                def registryIp = sh(script: "kubectl --context=minikube get svc -n buildkit docker-registry -o jsonpath='{.spec.clusterIP}'", returnStdout: true).trim()
-                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='${registryIp}:5000/' --kube-context=minikube"
+                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5000/' --kube-context=minikube --capture-proxy-service-type=ClusterIP"
                             }
                         }
                     }

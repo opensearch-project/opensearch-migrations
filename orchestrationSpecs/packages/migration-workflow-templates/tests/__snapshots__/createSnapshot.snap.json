@@ -20,6 +20,14 @@
         {
           "name": "approvalConfigMapName",
           "value": "approval-config"
+        },
+        {
+          "name": "migrationRunNumber",
+          "value": "0"
+        },
+        {
+          "name": "workflowScriptsRoot",
+          "value": "/root/workflows/.workflowScripts"
         }
       ]
     },
@@ -146,21 +154,29 @@
         }
       },
       {
-        "name": "checksnapshotstatusinternal",
+        "name": "applysnapshotdonecronjob",
         "inputs": {
           "parameters": [
             {
               "name": "configContents"
             },
             {
+              "name": "dataSnapshotName"
+            },
+            {
+              "name": "dataSnapshotUid"
+            },
+            {
+              "name": "snapshotName"
+            },
+            {
+              "name": "configChecksum"
+            },
+            {
               "name": "sourceK8sLabel"
             },
             {
               "name": "snapshotK8sLabel"
-            },
-            {
-              "name": "taskK8sLabel",
-              "value": "snapshotStatusCheck"
             },
             {
               "name": "imageMigrationConsoleLocation"
@@ -170,119 +186,115 @@
             }
           ]
         },
-        "steps": [
-          [
+        "container": {
+          "env": [
             {
-              "templateRef": {
-                "template": "runmigrationcommandforstatus",
-                "name": "migration-console"
-              },
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "configContents",
-                    "value": "{{inputs.parameters.configContents}}"
-                  },
-                  {
-                    "name": "sourceK8sLabel",
-                    "value": "{{inputs.parameters.sourceK8sLabel}}"
-                  },
-                  {
-                    "name": "snapshotK8sLabel",
-                    "value": "{{inputs.parameters.snapshotK8sLabel}}"
-                  },
-                  {
-                    "name": "taskK8sLabel",
-                    "value": "{{inputs.parameters.taskK8sLabel}}"
-                  },
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  },
-                  {
-                    "name": "command",
-                    "value": "set -e\n  touch /tmp/status-output.txt\n  touch /tmp/phase-output.txt\n  \n  # Quick status check - if SUCCESS, we're done\n  status=$(console --config-file=/config/migration_services.yaml snapshot status)\n  if [ \"$status\" = \"SUCCESS\" ]; then\n    echo \"Snapshot completed successfully\" > /tmp/status-output.txt\n    exit 0\n  fi\n\n  # If snapshot has permanently failed, stop retrying\n  if [ \"$status\" = \"FAILED\" ]; then\n    echo \"Snapshot failed\" > /tmp/status-output.txt\n    echo Failed > /tmp/phase-output.txt\n    exit 0\n  fi\n  \n  # Deep check and save output in case there was a race condition\n  deep_output=$(console --config-file=/config/migration_services.yaml snapshot status --deep-check)\n  \n  # Check if deep check also returned SUCCESS (snapshot completed during execution)\n  if [ \"$deep_output\" = \"SUCCESS\" ]; then\n    echo \"Snapshot completed successfully\" > /tmp/status-output.txt\n    exit 0\n  fi\n  \n  # Process deep check output with awk for in-progress snapshots\n  echo \"$deep_output\" | awk '\n    /Total shards:/ { total = $3 }\n    /Successful shards:/ { successful = $3 }\n    /Data processed:/ { data = $3; unit = $4 }\n    /Estimated time to completion:/ { \n      sub(/.*: /, \"\");\n      eta = $0\n    }\n    END {\n      if (total) {\n        output = \"Shards: \" successful \"/\" total \" | Data: \" data \" \" unit\n        if (eta != \"0h 0m 0s\") {\n          output = output \" | ETA: \" eta\n        }\n        print output\n      }\n    }\n  ' > /tmp/status-output.txt\n  echo Checked > /tmp/phase-output.txt\n  \n  exit 1"
-                  }
-                ]
-              },
-              "name": "checkSnapshotCompletion"
+              "name": "CRONJOB_NAME",
+              "value": "{{=inputs.parameters.dataSnapshotName+'-snapshot-done'}}"
+            },
+            {
+              "name": "SESSION_NAME",
+              "value": "{{inputs.parameters.dataSnapshotName}}"
+            },
+            {
+              "name": "WORKFLOW_NAME",
+              "value": "{{workflow.name}}"
+            },
+            {
+              "name": "WORKFLOW_UID",
+              "value": "{{workflow.uid}}"
+            },
+            {
+              "name": "PARENT_WORKFLOW_NAME",
+              "value": "{{workflow.name}}"
+            },
+            {
+              "name": "PARENT_WORKFLOW_UID",
+              "value": "{{workflow.uid}}"
+            },
+            {
+              "name": "DATASNAPSHOT_NAME",
+              "value": "{{inputs.parameters.dataSnapshotName}}"
+            },
+            {
+              "name": "DATASNAPSHOT_UID",
+              "value": "{{inputs.parameters.dataSnapshotUid}}"
+            },
+            {
+              "name": "SNAPSHOT_NAME",
+              "value": "{{inputs.parameters.snapshotName}}"
+            },
+            {
+              "name": "CONFIG_CHECKSUM",
+              "value": "{{inputs.parameters.configChecksum}}"
+            },
+            {
+              "name": "CONSOLE_IMAGE",
+              "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+            },
+            {
+              "name": "CONSOLE_IMAGE_PULL_POLICY",
+              "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+            },
+            {
+              "name": "SOURCE_LABEL",
+              "value": "{{inputs.parameters.sourceK8sLabel}}"
+            },
+            {
+              "name": "SNAPSHOT_LABEL",
+              "value": "{{inputs.parameters.snapshotK8sLabel}}"
+            },
+            {
+              "name": "CONSOLE_CONFIG_BASE64",
+              "value": "{{=toBase64(inputs.parameters.configContents)}}"
+            },
+            {
+              "name": "SNAPSHOT_MONITOR_WORKFLOW_UID_LABEL",
+              "value": "migrations.opensearch.org/snapshot-monitor-workflow-uid"
+            },
+            {
+              "name": "SNAPSHOT_MONITOR_SESSION_LABEL",
+              "value": "migrations.opensearch.org/snapshot-monitor-session"
+            },
+            {
+              "name": "WORKFLOW_SCRIPTS_ROOT",
+              "value": "{{workflow.parameters.workflowScriptsRoot}}"
             }
+          ],
+          "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
+          "imagePullPolicy": "{{inputs.parameters.imageMigrationConsolePullPolicy}}",
+          "command": [
+            "/bin/bash",
+            "-lc"
+          ],
+          "resources": {
+            "limits": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            },
+            "requests": {
+              "cpu": "500m",
+              "memory": "500Mi"
+            }
+          },
+          "args": [
+            "exec \"${WORKFLOW_SCRIPTS_ROOT}/applySnapshotMonitorCronJob.sh\""
           ]
-        ],
-        "retryStrategy": {
-          "limit": "200",
-          "retryPolicy": "Always",
-          "backoff": {
-            "duration": "5",
-            "factor": "2",
-            "cap": "300"
+        },
+        "metadata": {
+          "annotations": {
+            "karpenter.sh/do-not-disrupt": "true"
           }
         },
-        "outputs": {
-          "parameters": []
-        }
-      },
-      {
-        "name": "checksnapshotstatus",
-        "inputs": {
-          "parameters": [
-            {
-              "name": "configContents"
-            },
-            {
-              "name": "sourceK8sLabel"
-            },
-            {
-              "name": "snapshotK8sLabel"
-            },
-            {
-              "name": "groupName_view",
-              "value": "checks"
-            },
-            {
-              "name": "imageMigrationConsoleLocation"
-            },
-            {
-              "name": "imageMigrationConsolePullPolicy"
-            }
-          ]
+        "retryStrategy": {
+          "limit": "5",
+          "retryPolicy": "Always",
+          "backoff": {
+            "duration": "2",
+            "factor": "2",
+            "cap": "30"
+          }
         },
-        "steps": [
-          [
-            {
-              "template": "checksnapshotstatusinternal",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "configContents",
-                    "value": "{{inputs.parameters.configContents}}"
-                  },
-                  {
-                    "name": "sourceK8sLabel",
-                    "value": "{{inputs.parameters.sourceK8sLabel}}"
-                  },
-                  {
-                    "name": "snapshotK8sLabel",
-                    "value": "{{inputs.parameters.snapshotK8sLabel}}"
-                  },
-                  {
-                    "name": "imageMigrationConsoleLocation",
-                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
-                  },
-                  {
-                    "name": "imageMigrationConsolePullPolicy",
-                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
-                  }
-                ]
-              },
-              "name": "runStatusChecks"
-            }
-          ]
-        ],
         "outputs": {
           "parameters": []
         }
@@ -308,6 +320,12 @@
             },
             {
               "name": "configChecksum"
+            },
+            {
+              "name": "dataSnapshotName"
+            },
+            {
+              "name": "dataSnapshotUid"
             },
             {
               "name": "imageMigrationConsoleLocation"
@@ -379,9 +397,21 @@
           ],
           [
             {
-              "template": "checksnapshotstatus",
+              "template": "applysnapshotdonecronjob",
               "arguments": {
                 "parameters": [
+                  {
+                    "name": "dataSnapshotName",
+                    "value": "{{inputs.parameters.dataSnapshotName}}"
+                  },
+                  {
+                    "name": "dataSnapshotUid",
+                    "value": "{{inputs.parameters.dataSnapshotUid}}"
+                  },
+                  {
+                    "name": "configChecksum",
+                    "value": "{{inputs.parameters.configChecksum}}"
+                  },
                   {
                     "name": "imageMigrationConsoleLocation",
                     "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
@@ -395,6 +425,10 @@
                     "value": "{{steps.getConsoleConfig.outputs.parameters.configContents}}"
                   },
                   {
+                    "name": "snapshotName",
+                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.snapshotName')}}"
+                  },
+                  {
                     "name": "sourceK8sLabel",
                     "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')}}"
                   },
@@ -404,40 +438,40 @@
                   }
                 ]
               },
-              "name": "waitForCompletion"
+              "name": "applySnapshotDoneCronJob"
             }
           ],
           [
             {
               "templateRef": {
-                "template": "patchdatasnapshotcompleted",
+                "template": "waitindefinitelyfordatasnapshot",
                 "name": "resource-management"
               },
               "arguments": {
                 "parameters": [
                   {
-                    "name": "resourceName",
-                    "value": "{{=jsonpath(inputs.parameters.sourceConfig, '$.label')+'-'+jsonpath(inputs.parameters.snapshotConfig, '$.label')}}"
-                  },
-                  {
-                    "name": "phase",
-                    "value": "Completed"
-                  },
-                  {
-                    "name": "snapshotName",
-                    "value": "{{=jsonpath(inputs.parameters.snapshotConfig, '$.snapshotName')}}"
-                  },
-                  {
                     "name": "configChecksum",
                     "value": "{{inputs.parameters.configChecksum}}"
                   },
                   {
-                    "name": "checksumForSnapshotMigration",
-                    "value": "{{inputs.parameters.configChecksum}}"
+                    "name": "imageMigrationConsoleLocation",
+                    "value": "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                  },
+                  {
+                    "name": "imageMigrationConsolePullPolicy",
+                    "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                  },
+                  {
+                    "name": "resourceName",
+                    "value": "{{inputs.parameters.dataSnapshotName}}"
+                  },
+                  {
+                    "name": "checksumField",
+                    "value": "checksumForSnapshotMigration"
                   }
                 ]
               },
-              "name": "patchDataSnapshotCompleted"
+              "name": "waitIndefinitelyForCompletion"
             }
           ]
         ],

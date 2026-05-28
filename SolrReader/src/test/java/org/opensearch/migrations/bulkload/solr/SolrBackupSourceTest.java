@@ -68,12 +68,69 @@ class SolrBackupSourceTest {
     }
 
     @Test
-    void fallsBackToSingleShardForEmptyDir() throws IOException {
-        // Empty directory — falls back to treating it as single shard
-        var source = new SolrBackupSource(tempDir, "test", emptySchema(), 8);
+    void discoversSolr6SnapshotShardDirectories() throws IOException {
+        // Solr 6 SolrCloud BACKUP produces snapshot.shardN/ dirs (one per shard),
+        // each containing Lucene segment files directly.
+        var shard1 = tempDir.resolve("snapshot.shard1");
+        var shard2 = tempDir.resolve("snapshot.shard2");
+        Files.createDirectories(shard1);
+        Files.createDirectories(shard2);
+        Files.createFile(shard1.resolve("segments_1"));
+        Files.createFile(shard1.resolve("_0.cfs"));
+        Files.createFile(shard2.resolve("segments_1"));
+        Files.createFile(shard2.resolve("_0.nvm"));
+        Files.createFile(tempDir.resolve("backup.properties"));
+
+        var source = new SolrBackupSource(tempDir, "test", emptySchema(), 6);
         var partitions = source.listPartitions("test");
 
-        assertThat("Fallback to single shard", partitions.size(), equalTo(1));
+        assertThat("Two Solr 6 snapshot shards discovered", partitions.size(), equalTo(2));
+        assertThat(partitions.get(0).collectionName(), equalTo("test"));
+    }
+
+    @Test
+    void discoversSolr6SnapshotShardStubDirs() throws IOException {
+        // collectionPreparer creates empty snapshot.shardN/ stubs before shardPreparer
+        // downloads the actual index files. discoverShardDirs must count them anyway.
+        Files.createDirectories(tempDir.resolve("snapshot.shard1"));
+        Files.createDirectories(tempDir.resolve("snapshot.shard2"));
+        Files.createFile(tempDir.resolve("backup.properties"));
+
+        var source = new SolrBackupSource(tempDir, "test", emptySchema(), 6);
+        var partitions = source.listPartitions("test");
+
+        assertThat("Empty snapshot stubs still count as shards", partitions.size(), equalTo(2));
+    }
+
+    @Test
+    void solr6SnapshotPartitionsHaveNoFileNameMapping() throws IOException {
+        // Solr 6 backups use plain Lucene filenames — no UUID mapping should be set.
+        var shard1 = tempDir.resolve("snapshot.shard1");
+        Files.createDirectories(shard1);
+        Files.createFile(shard1.resolve("segments_1"));
+
+        var source = new SolrBackupSource(tempDir, "test", emptySchema(), 6);
+        var partitions = source.listPartitions("test");
+
+        assertThat(partitions.size(), equalTo(1));
+        var solrPartition = (SolrShardPartition) partitions.get(0);
+        assertThat("No UUID mapping for Solr 6", solrPartition.fileNameMapping(), org.hamcrest.CoreMatchers.nullValue());
+    }
+
+    @Test
+    void returnsEmptyPartitionsForNonExistentBackupDir() {
+        // only backup.properties in S3, local dir never created.
+        var missingDir = tempDir.resolve("nonexistent_collection");
+        var source = new SolrBackupSource(missingDir, "test", emptySchema(), 6);
+        var partitions = source.listPartitions("test");
+        assertThat("No partitions for missing backup dir", partitions.size(), equalTo(0));
+    }
+
+    @Test
+    void throwsOnEmptyDir() {
+        var source = new SolrBackupSource(tempDir, "test", emptySchema(), 8);
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+            () -> source.listPartitions("test"));
     }
 
     @Test

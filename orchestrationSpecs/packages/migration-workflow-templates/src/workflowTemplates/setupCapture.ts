@@ -10,9 +10,10 @@ import {
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
-import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {
     ARGO_PROXY_WORKFLOW_OPTION_KEYS,
+    DEFAULT_RESOURCES,
     DENORMALIZED_PROXY_CONFIG,
     PROXY_TLS_CONFIG,
     ResourceRequirementsType,
@@ -20,7 +21,12 @@ import {
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {SetupKafka} from "./setupKafka";
 import {z} from "zod";
-import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {
+    CERT_MANAGER_WEBHOOK_RETRY_STRATEGY,
+    K8S_INFRA_READY_RETRY_STRATEGY,
+    K8S_INFRA_READY_TIMEOUT_SECONDS,
+    K8S_RESOURCE_RETRY_STRATEGY,
+} from "./commonUtils/resourceRetryStrategy";
 import {CONTAINER_NAMES} from "../containerNames";
 import {ResourceManagement} from "./resourceManagement";
 
@@ -45,6 +51,7 @@ function makeOwnerReferences(
 function makeProxyServiceManifest(
     proxyName: BaseExpression<string>,
     listenPort: BaseExpression<Serialized<number>>,
+    serviceType: BaseExpression<string>,
     internetFacing: BaseExpression<boolean>,
     ownerUid: BaseExpression<string>,
 ) {
@@ -55,7 +62,7 @@ function makeProxyServiceManifest(
             name: proxyName,
             ownerReferences: makeOwnerReferences(proxyName, ownerUid),
             annotations: {
-                // NLB IP mode for EKS Auto Mode — ignored on minikube/standard K8s
+                // NLB IP mode for EKS Auto Mode — ignored on non-EKS and non-LoadBalancer Services.
                 "service.beta.kubernetes.io/aws-load-balancer-type": "external",
                 "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "ip",
                 "service.beta.kubernetes.io/aws-load-balancer-scheme": makeStringTypeProxy(
@@ -64,7 +71,7 @@ function makeProxyServiceManifest(
             }
         },
         spec: {
-            type: "LoadBalancer",
+            type: makeStringTypeProxy(serviceType),
             selector: {"migrations/proxy": proxyName},
             ports: [{
                 port: makeDirectTypeProxy(listenPort),
@@ -333,6 +340,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("ownerUid", typeToken<string>())
+        .addOptionalInput("serviceType", c => "LoadBalancer")
         .addOptionalInput("internetFacing", c => false)
         .addResourceTask(b => b
             .setDefinition({
@@ -341,6 +349,7 @@ export const SetupCapture = WorkflowBuilder.create({
                 manifest: makeProxyServiceManifest(
                     b.inputs.proxyName,
                     b.inputs.listenPort,
+                    b.inputs.serviceType,
                     expr.deserializeRecord(b.inputs.internetFacing),
                     b.inputs.ownerUid,
                 )
@@ -367,6 +376,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
+                activeDeadlineSeconds: K8S_INFRA_READY_TIMEOUT_SECONDS,
                 setOwnerReference: false,
                 successCondition: "status.readyReplicas > 0",
                 manifest: makeProxyDeploymentManifest({
@@ -409,6 +419,7 @@ export const SetupCapture = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
+                activeDeadlineSeconds: K8S_INFRA_READY_TIMEOUT_SECONDS,
                 setOwnerReference: false,
                 successCondition: "status.readyReplicas > 0",
                 manifest: makeProxyDeploymentManifest({
@@ -474,7 +485,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     ownerUid: b.inputs.ownerUid,
                 })
             }))
-        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+        .addRetryParameters(CERT_MANAGER_WEBHOOK_RETRY_STRATEGY)
     )
 
 
@@ -490,7 +501,31 @@ export const SetupCapture = WorkflowBuilder.create({
                 conditions: {
                     successCondition: "status.conditions.0.status == True",
                 }
-            }))
+            })
+            .addRetryParameters(K8S_INFRA_READY_RETRY_STRATEGY))
+    )
+
+    .addTemplate("waitForProxyEndpointReady", t => t
+        .addRequiredInput("proxyName", typeToken<string>())
+        .addRequiredInput("listenPort", typeToken<number>())
+        .addOptionalInput("serviceType", c => "LoadBalancer")
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addContainer(b => b
+            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
+            .addCommand(["/bin/bash", "-lc"])
+            .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
+            .addEnvVarsFromRecord({
+                NAMESPACE: expr.getWorkflowValue("namespace"),
+                PROXY_NAME: b.inputs.proxyName,
+                LISTEN_PORT: expr.asString(b.inputs.listenPort),
+                SERVICE_TYPE: b.inputs.serviceType,
+                TIMEOUT_SECONDS: expr.literal(String(K8S_INFRA_READY_TIMEOUT_SECONDS)),
+                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
+            })
+            .addArgs([workflowScriptCommand("waitForProxyEndpointReady.sh")])
+            .addPathOutput("serviceEndpoint", "/tmp/service-endpoint", typeToken<string>())
+            .addPathOutput("loadBalancerEndpoint", "/tmp/load-balancer-endpoint", typeToken<string>())
+        )
     )
 
 
@@ -502,10 +537,13 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
+        .addRequiredInput("checksumForSnapshot", typeToken<string>())
+        .addRequiredInput("checksumForReplayer", typeToken<string>())
         .addOptionalInput("resolvedKafkaConnection", c => "")
         .addOptionalInput("resolvedKafkaListenerName", c => "")
         .addOptionalInput("resolvedKafkaAuthType", c => "")
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["CaptureProxy"]))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole", "CaptureProxy"]))
 
         .addSteps(b => {
             const config = expr.deserializeRecord(b.inputs.proxyConfig);
@@ -528,6 +566,7 @@ export const SetupCapture = WorkflowBuilder.create({
                 b.inputs.resolvedKafkaAuthType,
                 expr.getLoose(kafkaConfig, "authType")
             );
+            const shouldUseScramAuth = expr.equals(effectiveKafkaAuthType, expr.literal("scram-sha-512"));
             const kafkaAuthConfigMapName = expr.concat(b.inputs.proxyName, expr.literal("-kafka-auth"));
             // Issuer fields for cert provisioning
             const issuerName = expr.dig(proxyOpts, ["tls", "issuerRef", "name"], expr.literal(""));
@@ -536,6 +575,7 @@ export const SetupCapture = WorkflowBuilder.create({
             const tlsDnsNames = expr.dig(proxyOpts, ["tls", "dnsNames"], expr.literal([]));
             const tlsDuration = expr.dig(proxyOpts, ["tls", "duration"], expr.literal("2160h"));
             const tlsRenewBefore = expr.dig(proxyOpts, ["tls", "renewBefore"], expr.literal("360h"));
+            const serviceType = expr.dig(proxyOpts, ["serviceType"], expr.literal("LoadBalancer"));
 
             return b
                 .addStep("createKafkaClientConfig", INTERNAL, "createKafkaClientPropertiesConfigMap", c =>
@@ -548,6 +588,7 @@ export const SetupCapture = WorkflowBuilder.create({
                         c.register({
                             proxyName: b.inputs.proxyName,
                             listenPort: b.inputs.listenPort,
+                            serviceType,
                             internetFacing: expr.dig(proxyOpts, ["internetFacing"], false),
                             ownerUid: b.inputs.ownerUid,
                         })
@@ -573,6 +614,13 @@ export const SetupCapture = WorkflowBuilder.create({
                             certName: certManagerSecretName,
                         }),
                     {when: {templateExp: hasCertManagerTls}}
+                )
+                .addStep("waitForKafkaAuthSecret", ResourceManagement, "waitForSecretKey", c =>
+                        c.register({
+                            secretName: expr.getLoose(kafkaConfig, "secretName"),
+                            secretKey: expr.literal("password"),
+                        }),
+                    {when: {templateExp: shouldUseScramAuth}}
                 )
                 .addStepGroup(g => g
                     .addStep("deployProxyNoTls", INTERNAL, "deployProxyDeployment", c =>
@@ -628,8 +676,29 @@ export const SetupCapture = WorkflowBuilder.create({
                             }),
                         {when: {templateExp: hasTls}}
                     )
+                )
+                .addStep("waitForProxyEndpointReady", INTERNAL, "waitForProxyEndpointReady", c =>
+                    c.register({
+                        ...selectInputsForRegister(b, c),
+                        proxyName: b.inputs.proxyName,
+                        listenPort: b.inputs.listenPort,
+                        serviceType,
+                    })
+                )
+                .addStep("patchCaptureProxyReady", ResourceManagement, "patchCaptureProxyReady", c =>
+                    c.register({
+                        resourceName: b.inputs.proxyName,
+                        phase: expr.literal("Ready"),
+                        configChecksum: b.inputs.configChecksum,
+                        checksumForSnapshot: b.inputs.checksumForSnapshot,
+                        checksumForReplayer: b.inputs.checksumForReplayer,
+                        serviceEndpoint: c.steps.waitForProxyEndpointReady.outputs.serviceEndpoint,
+                        loadBalancerEndpoint: c.steps.waitForProxyEndpointReady.outputs.loadBalancerEndpoint,
+                    })
                 );
         })
+        .addExpressionOutput("serviceEndpoint", c => c.steps.waitForProxyEndpointReady.outputs.serviceEndpoint)
+        .addExpressionOutput("loadBalancerEndpoint", c => c.steps.waitForProxyEndpointReady.outputs.loadBalancerEndpoint)
     )
 
     .addTemplate("reconcileCaptureTopicAndProxy", t => t
@@ -670,11 +739,12 @@ export const SetupCapture = WorkflowBuilder.create({
                     partitions: b.inputs.topicPartitions,
                     replicas: b.inputs.topicReplicas,
                     topicConfig: b.inputs.topicConfig,
+                    configChecksum: b.inputs.topicConfigChecksum,
                     retryGateName: expr.concat(expr.literal("capturedtraffic."), b.inputs.topicCrName, expr.literal(".vapretry")),
                     retryGroupName_view: expr.concat(expr.literal("CapturedTraffic: "), b.inputs.topicCrName),
                 })
             )
-            .addStep("waitForKafkaCluster", ResourceManagement, "waitForKafkaCluster", c =>
+            .addStep("waitForKafkaCluster", SetupKafka, "waitForKafkaCluster", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.kafkaClusterName,
@@ -688,13 +758,22 @@ export const SetupCapture = WorkflowBuilder.create({
                 c.register({
                     clusterName: b.inputs.kafkaClusterName,
                     topicName: b.inputs.kafkaTopicName,
-                    workflowUid: expr.getWorkflowValue("uid"),
+                    migrationRunNumber: t.inputs.workflowParameters.migrationRunNumber,
                     ownerUid: b.inputs.kafkaClusterOwnerUid,
                     sourceLabel: b.inputs.sourceK8sLabel,
                     partitions: b.inputs.topicPartitions,
                     replicas: b.inputs.topicReplicas,
                     topicConfig: b.inputs.topicConfig,
                 }),
+                { when: c => ({templateExp: expr.and(
+                    checksumNotDone(c.reconcileCapturedTrafficResource.outputs.currentConfigChecksum, b.inputs.topicConfigChecksum),
+                    managedByWorkflow
+                )}) }
+            )
+            .addStep("waitForKafkaTopicReady", ResourceManagement, "waitForKafkaTopicReady", c =>
+                    c.register({
+                        topicName: b.inputs.kafkaTopicName,
+                    }),
                 { when: c => ({templateExp: expr.and(
                     checksumNotDone(c.reconcileCapturedTrafficResource.outputs.currentConfigChecksum, b.inputs.topicConfigChecksum),
                     managedByWorkflow
@@ -720,6 +799,7 @@ export const SetupCapture = WorkflowBuilder.create({
                     proxyConfig: b.inputs.proxyConfig,
                     proxyName: b.inputs.proxyName,
                     topicCrName: b.inputs.topicCrName,
+                    configChecksum: b.inputs.configChecksum,
                     retryGateName: expr.concat(expr.literal("captureproxy."), b.inputs.proxyName, expr.literal(".vapretry")),
                     retryGroupName_view: expr.concat(expr.literal("CaptureProxy: "), b.inputs.proxyName),
                 })
@@ -734,10 +814,10 @@ export const SetupCapture = WorkflowBuilder.create({
                     managedByWorkflow
                 )}) }
             )
-            .addStep("patchCaptureProxyRunning", ResourceManagement, "patchCaptureProxyRunning", c =>
+            .addStep("patchCaptureProxyPending", ResourceManagement, "patchCaptureProxyPending", c =>
                 c.register({
                     resourceName: b.inputs.proxyName,
-                    phase: expr.literal("Running"),
+                    phase: expr.literal("Pending"),
                 }),
                 { when: c => ({templateExp: checksumNotDone(
                     c.reconcileCaptureProxyResource.outputs.currentConfigChecksum,
@@ -753,6 +833,9 @@ export const SetupCapture = WorkflowBuilder.create({
                     ownerUid: b.inputs.ownerUid,
                     listenPort: b.inputs.listenPort,
                     podReplicas: b.inputs.podReplicas,
+                    configChecksum: b.inputs.configChecksum,
+                    checksumForSnapshot: b.inputs.checksumForSnapshot,
+                    checksumForReplayer: b.inputs.checksumForReplayer,
                     resolvedKafkaConnection: c.steps.readKafkaConnectionProfile.outputs.bootstrapServers,
                     resolvedKafkaListenerName: c.steps.readKafkaConnectionProfile.outputs.listenerName,
                     resolvedKafkaAuthType: c.steps.readKafkaConnectionProfile.outputs.authType,
@@ -774,6 +857,9 @@ export const SetupCapture = WorkflowBuilder.create({
                     ownerUid: b.inputs.ownerUid,
                     listenPort: b.inputs.listenPort,
                     podReplicas: b.inputs.podReplicas,
+                    configChecksum: b.inputs.configChecksum,
+                    checksumForSnapshot: b.inputs.checksumForSnapshot,
+                    checksumForReplayer: b.inputs.checksumForReplayer,
                 }),
                 {
                     when: c => ({templateExp: expr.and(
@@ -782,19 +868,6 @@ export const SetupCapture = WorkflowBuilder.create({
                     )}),
                     continueOn: {failed: true}
                 }
-            )
-            .addStep("patchCaptureProxyReady", ResourceManagement, "patchCaptureProxyReady", c =>
-                c.register({
-                    resourceName: b.inputs.proxyName,
-                    phase: expr.literal("Ready"),
-                    configChecksum: b.inputs.configChecksum,
-                    checksumForSnapshot: b.inputs.checksumForSnapshot,
-                    checksumForReplayer: b.inputs.checksumForReplayer,
-                }),
-                {when: c => ({templateExp: expr.or(
-                    expr.equals(c.setupProxy.status, "Succeeded"),
-                    expr.equals(c.setupProxyWithConfiguredKafka.status, "Succeeded")
-                )})}
             )
             .addStep("patchCaptureProxyError", ResourceManagement, "patchCaptureProxyError", c =>
                 c.register({

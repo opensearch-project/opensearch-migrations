@@ -3,8 +3,7 @@ import uuid
 
 from .cdc_base import (
     MATestBase, MigrationType, MATestUserArguments,
-    CDC_SOURCE_TARGET_COMBINATIONS, REPLAYER_LABEL_SELECTOR,
-    wait_for_pod_ready, wait_for_replayer_consuming,
+    CDC_SOURCE_TARGET_COMBINATIONS, wait_for_replayer_consuming,
     run_generate_data,
 )
 
@@ -30,6 +29,7 @@ class Test0032CdcOnlyGenerateData(MATestBase):
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
         self.workflow_template = "cdc-only-imported-clusters"
+        self.parameters["capture-proxy-service-type"] = self.capture_proxy_service_type
 
     def prepare_clusters(self):
         pass
@@ -37,9 +37,7 @@ class Test0032CdcOnlyGenerateData(MATestBase):
     def workflow_perform_migrations(self, timeout_seconds: int = 3600):
         if not self.workflow_name:
             raise ValueError("Workflow name is not available")
-        logger.info("Waiting for replayer to start...")
-        wait_for_pod_ready(self.argo_service.namespace, REPLAYER_LABEL_SELECTOR, timeout_seconds)
-        logger.info("Replayer is running, ready for CDC traffic")
+        logger.info("CDC workflow submitted; replayer readiness is checked before traffic is sent")
 
     def post_migration_actions(self):
         logger.info("Waiting for replayer to join Kafka consumer group...")

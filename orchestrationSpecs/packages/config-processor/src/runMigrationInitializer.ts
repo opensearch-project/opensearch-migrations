@@ -22,6 +22,7 @@ Arguments:
   --user-config <file>         (stdin: '-') User-specified YAML/JSON configuration file ('-' for stdin)
   --transformed-config <file>  (stdin: '-') Workflow-ready YAML/JSON configuration file (output of MigrationConfigTransformer)
   --output-dir <dir>           Directory to write output files (workflowMigration.config.yaml, approvalConfigMaps.yaml, concurrencyConfigMaps.yaml)
+  --run-number <number>        Required with --output-dir. Millisecond run number to stamp on generated resources and pass to the workflow
 
   -h, --help               Show this help message
 `;
@@ -54,6 +55,7 @@ export async function main() {
     let workflowConfigFile = process.env.TRANSFORMED_WORKFLOW_CONFIGURATION;
     let outputDir: string | undefined;
     let workflowName: string | undefined;
+    let runNumber: number | undefined;
 
     for (let i = 0; i < args.length; i++) {
         const arg = args[i];
@@ -66,6 +68,12 @@ export async function main() {
             outputDir = args[++i];
         } else if (arg === '--workflow-name' && i + 1 < args.length) {
             workflowName = args[++i];
+        } else if (arg === '--run-number' && i + 1 < args.length) {
+            runNumber = Number(args[++i]);
+            if (!Number.isInteger(runNumber) || runNumber < 0) {
+                console.error('Error: --run-number must be a non-negative integer.');
+                process.exit(5);
+            }
         } else {
             console.error('Error: unknown arg: `' + arg + '`.');
             process.stderr.write(COMMAND_LINE_HELP_MESSAGE);
@@ -101,8 +109,18 @@ export async function main() {
 
         // Generate output files
         if (outputDir) {
+            if (runNumber === undefined) {
+                console.error('Error: --run-number is required when --output-dir is provided.');
+                process.exit(5);
+            }
             const initializer = new MigrationInitializer();
-            await initializer.generateOutputFiles(workflows, outputDir, userConfigFile ? await parseInput(userConfigFile) : null, workflowName);
+            await initializer.generateOutputFiles(
+                workflows,
+                outputDir,
+                userConfigFile ? await parseInput(userConfigFile) : null,
+                workflowName,
+                {runNumber}
+            );
         }
 
         // Output transformed workflow to stdout if no output directory specified - ignoring auxiliary configmap values

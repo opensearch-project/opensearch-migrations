@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 AuthMethod = Enum("AuthMethod", ["NO_AUTH", "BASIC_AUTH", "SIGV4"])
 HttpMethod = Enum("HttpMethod", ["GET", "POST", "PUT", "DELETE", "HEAD"])
+SIGV4_SIGNING_ENDPOINT_KEY = "sigv4_signing_endpoint"
 
 
 NO_AUTH_SCHEMA = {
@@ -88,6 +89,7 @@ SCHEMA = {
             "endpoint": {"type": "string", "required": True},
             "allow_insecure": {"type": "boolean", "required": False},
             "version": {"type": "string", "required": False},
+            SIGV4_SIGNING_ENDPOINT_KEY: {"type": "string", "required": False},
             "no_auth": NO_AUTH_SCHEMA,
             "basic_auth": BASIC_AUTH_SCHEMA,
             "sigv4": SIGV4_SCHEMA
@@ -112,6 +114,7 @@ SOURCE_CLUSTER_SCHEMA = {
             "endpoint": {"type": "string", "required": True},
             "allow_insecure": {"type": "boolean", "required": False},
             "version": {"type": "string", "required": False},
+            SIGV4_SIGNING_ENDPOINT_KEY: {"type": "string", "required": False},
             "no_auth": NO_AUTH_SCHEMA,
             "basic_auth": BASIC_AUTH_SCHEMA,
             "sigv4": SIGV4_SCHEMA,
@@ -282,7 +285,11 @@ class Cluster:
             return HTTPBasicAuth(auth_details.username, auth_details.password)
         elif self.auth_type == AuthMethod.SIGV4:
             service_name, region_name = self._get_sigv4_details(force_region=True)
-            return SigV4AuthPlugin(service_name, region_name)
+            return SigV4AuthPlugin(
+                service_name,
+                region_name,
+                signing_endpoint=self.config.get(SIGV4_SIGNING_ENDPOINT_KEY)
+            )
         elif self.auth_type is AuthMethod.NO_AUTH:
             return None
         raise NotImplementedError(f"Auth type {self.auth_type} not implemented")
@@ -438,6 +445,8 @@ class SourceCluster(Cluster):
                 "endpoint": proxy_config["endpoint"],
                 "allow_insecure": proxy_config.get("allow_insecure", False),
             }
+            if self.auth_type == AuthMethod.SIGV4:
+                merged_proxy_config[SIGV4_SIGNING_ENDPOINT_KEY] = self.endpoint
             self.proxy = Cluster(config=merged_proxy_config, client_options=client_options)
             self.proxy_name = proxy_config.get("name")
 

@@ -22,19 +22,29 @@ import {
     ARGO_PROXY_WORKFLOW_OPTION_KEYS,
     ARGO_REPLAYER_OPTIONS,
     ARGO_REPLAYER_WORKFLOW_OPTION_KEYS,
+    DEFAULT_RESOURCES,
     DENORMALIZED_PROXY_CONFIG,
     NAMED_KAFKA_CLUSTER_CONFIG,
     PER_SOURCE_CREATE_SNAPSHOTS_CONFIG,
     SNAPSHOT_MIGRATION_CONFIG,
 } from '@opensearch-migrations/schemas';
-import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
+import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
-import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {
+    KAFKA_CLUSTER_READY_TIMEOUT_SECONDS,
+    KAFKA_READY_WAIT_POD_RETRY_STRATEGY,
+    K8S_INFRA_READY_RETRY_STRATEGY,
+    K8S_INFRA_READY_TIMEOUT_SECONDS,
+    K8S_RESOURCE_RETRY_STRATEGY,
+    K8S_INDEFINITE_RESOURCE_WAIT_RETRY_STRATEGY,
+    K8S_SECRET_READY_RETRY_STRATEGY,
+    K8S_USER_APPROVAL_WAIT_RETRY_STRATEGY,
+} from "./commonUtils/resourceRetryStrategy";
 
-const SECONDS_IN_DAYS = 24 * 3600;
-const LONGEST_POSSIBLE_MIGRATION = 365 * SECONDS_IN_DAYS;
 const CRD_API_VERSION = "migrations.opensearch.org/v1alpha1";
-const RUN_UID_LABEL = "workflows.argoproj.io/run-uid";
+const RUN_NUMBER_LABEL = "migrations.opensearch.org/run-number";
+const APPROVED_DURING_RUN_ANNOTATION = "migrations.opensearch.org/approved-during-run";
+const MIGRATION_RUN_NUMBER_VALUE = "{{workflow.parameters.migrationRunNumber}}";
 const WORKFLOW_LABEL = "workflows.argoproj.io/workflow";
 const SOURCE_LABEL = "migrations.opensearch.org/source";
 const TARGET_LABEL = "migrations.opensearch.org/target";
@@ -43,6 +53,7 @@ const MIGRATION_LABEL = "migrations.opensearch.org/from-snapshot-migration";
 const TASK_LABEL = "migrations.opensearch.org/task";
 const KAFKA_CLUSTER_LABEL = "migrations.opensearch.org/kafka-cluster";
 const STRIMZI_CLUSTER_LABEL = "strimzi.io/cluster";
+const KAFKA_READY_WAIT_ACTIVE_DEADLINE_SECONDS = KAFKA_CLUSTER_READY_TIMEOUT_SECONDS + 60;
 
 type ReservedPatchInputNames = "resourceName" | "phase";
 type StringStatusFields = Readonly<Record<string, AllowLiteralOrExpression<string>>>;
@@ -144,7 +155,7 @@ function buildPatchOutputTemplate<ParentWorkflowScope extends WorkflowAndTemplat
                                 s3Key: "{{inputs.parameters.s3Key}}",
                                 resourceUid: "{{inputs.parameters.resourceUid}}",
                                 workflowName: "{{workflow.name}}",
-                                workflowUid: "{{workflow.uid}}",
+                                migrationRunNumber: MIGRATION_RUN_NUMBER_VALUE,
                                 workflowCreationTimestamp: "{{workflow.creationTimestamp}}",
                                 configChecksum: "{{inputs.parameters.configChecksum}}"
                             }
@@ -167,7 +178,7 @@ function makeKafkaClusterManifest(
             name: makeStringTypeProxy(expr.get(kc, "name")),
             labels: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                 [STRIMZI_CLUSTER_LABEL]: makeStringTypeProxy(expr.get(kc, "name")),
             }
         },
@@ -217,7 +228,7 @@ function makeCapturedTrafficManifest(
             name: makeStringTypeProxy(topicCrName),
             labels: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                 [SOURCE_LABEL]: makeStringTypeProxy(sourceLabel),
                 [KAFKA_CLUSTER_LABEL]: makeStringTypeProxy(kafkaClusterName),
             }
@@ -259,7 +270,7 @@ function makeCaptureProxyManifest(
             name: makeStringTypeProxy(proxyName),
             labels: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                 [SOURCE_LABEL]: makeStringTypeProxy(expr.dig(config, ["sourceConfig", "label"], "")),
                 [TASK_LABEL]: "captureProxy",
             }
@@ -283,7 +294,7 @@ function makeSnapshotMigrationManifest(
             name: makeStringTypeProxy(resourceName),
             labels: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                 [SOURCE_LABEL]: makeStringTypeProxy(expr.get(config, "sourceLabel")),
                 [TARGET_LABEL]: makeStringTypeProxy(expr.dig(config, ["targetConfig", "label"], expr.literal(""))),
                 [SNAPSHOT_LABEL]: makeStringTypeProxy(expr.dig(config, ["snapshotConfig", "label"], expr.literal(""))),
@@ -373,7 +384,7 @@ function makeTrafficReplayManifest(
             name: makeStringTypeProxy(name),
             labels: {
                 [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                 [SOURCE_LABEL]: makeStringTypeProxy(sourceLabel),
                 [TARGET_LABEL]: makeStringTypeProxy(targetLabel),
                 [TASK_LABEL]: "trafficReplayer",
@@ -465,7 +476,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                         name: b.inputs.resourceName,
                         labels: {
                             [WORKFLOW_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("name")),
-                            [RUN_UID_LABEL]: makeStringTypeProxy(expr.getWorkflowValue("uid")),
+                            [RUN_NUMBER_LABEL]: MIGRATION_RUN_NUMBER_VALUE,
                             [SOURCE_LABEL]: makeStringTypeProxy(b.inputs.sourceLabel),
                             [SNAPSHOT_LABEL]: makeStringTypeProxy(expr.get(snapshotItemConfig, "label")),
                         }
@@ -531,7 +542,7 @@ export const ResourceManagement = WorkflowBuilder.create({
 
     // ── Approval gate primitives ─────────────────────────────────────────
 
-    .addTemplate("waitForApproval", t => t
+    .addTemplate("waitForUserApproval", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addWaitForExistingResource(b => b
             .setDefinition({
@@ -542,6 +553,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                 },
                 conditions: {successCondition: "status.phase == Approved"}
             })
+            .addRetryParameters(K8S_USER_APPROVAL_WAIT_RETRY_STRATEGY)
         )
     )
 
@@ -559,8 +571,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     metadata: {
                         name: b.inputs.resourceName,
                         annotations: {
-                            "migrations.opensearch.org/approved-by-run":
-                                makeStringTypeProxy(expr.getWorkflowValue("uid"))
+                            [APPROVED_DURING_RUN_ANNOTATION]: MIGRATION_RUN_NUMBER_VALUE
                         }
                     }
                 }
@@ -585,10 +596,18 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
+    .addTemplate("patchKafkaClusterPending", t => buildPatchStatusTemplate(t, "KafkaCluster", {}))
+    .addTemplate("patchCapturedTrafficPending", t => buildPatchStatusTemplate(t, "CapturedTraffic", {}))
+    .addTemplate("patchCaptureProxyPending", t => buildPatchStatusTemplate(t, "CaptureProxy", {}))
+    .addTemplate("patchDataSnapshotPending", t => buildPatchStatusTemplate(t, "DataSnapshot", {}))
+    .addTemplate("patchSnapshotMigrationPending", t => buildPatchStatusTemplate(t, "SnapshotMigration", {}))
+    .addTemplate("patchTrafficReplayPending", t => buildPatchStatusTemplate(t, "TrafficReplay", {}))
+
     // ── Root reconcile wrappers ──────────────────────────────────────────
 
     .addTemplate("reconcileKafkaClusterResource", t => t
         .addRequiredInput("kafkaClusterConfig", typeToken<z.infer<typeof NAMED_KAFKA_CLUSTER_CONFIG>>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("retryGateName", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
@@ -599,7 +618,17 @@ export const ResourceManagement = WorkflowBuilder.create({
                 }),
                 {continueOn: {failed: true}}
             )
-            .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
+            .addStep("markPending", INTERNAL, "patchKafkaClusterPending", c =>
+                c.register({
+                    resourceName: expr.jsonPathStrict(b.inputs.kafkaClusterConfig, "name"),
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.equals(c.tryApply.status, "Succeeded"),
+                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
+                )})}
+            )
+            .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
                     resourceName: b.inputs.retryGateName,
                 }),
@@ -623,6 +652,7 @@ export const ResourceManagement = WorkflowBuilder.create({
             .addStepToSelf("retryLoop", c =>
                 c.register({
                     kafkaClusterConfig: b.inputs.kafkaClusterConfig,
+                    configChecksum: b.inputs.configChecksum,
                     retryGateName: b.inputs.retryGateName,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
@@ -645,6 +675,7 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("replicas", typeToken<number>())
         .addRequiredInput("topicConfig", typeToken<Serialized<Record<string, any>>>())
         .addRequiredInput("sourceLabel", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("retryGateName", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
@@ -661,7 +692,17 @@ export const ResourceManagement = WorkflowBuilder.create({
                 }),
                 {continueOn: {failed: true}}
             )
-            .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
+            .addStep("markPending", INTERNAL, "patchCapturedTrafficPending", c =>
+                c.register({
+                    resourceName: b.inputs.topicCrName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.equals(c.tryApply.status, "Succeeded"),
+                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
+                )})}
+            )
+            .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
                     resourceName: b.inputs.retryGateName,
                 }),
@@ -691,6 +732,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     partitions: b.inputs.partitions,
                     replicas: b.inputs.replicas,
                     topicConfig: b.inputs.topicConfig,
+                    configChecksum: b.inputs.configChecksum,
                     retryGateName: b.inputs.retryGateName,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
@@ -709,6 +751,7 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("proxyConfig", typeToken<z.infer<typeof DENORMALIZED_PROXY_CONFIG>>())
         .addRequiredInput("proxyName", typeToken<string>())
         .addRequiredInput("topicCrName", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("retryGateName", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
@@ -721,7 +764,17 @@ export const ResourceManagement = WorkflowBuilder.create({
                 }),
                 {continueOn: {failed: true}}
             )
-            .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
+            .addStep("markPending", INTERNAL, "patchCaptureProxyPending", c =>
+                c.register({
+                    resourceName: b.inputs.proxyName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.equals(c.tryApply.status, "Succeeded"),
+                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
+                )})}
+            )
+            .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
                     resourceName: b.inputs.retryGateName,
                 }),
@@ -747,6 +800,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     proxyConfig: b.inputs.proxyConfig,
                     proxyName: b.inputs.proxyName,
                     topicCrName: b.inputs.topicCrName,
+                    configChecksum: b.inputs.configChecksum,
                     retryGateName: b.inputs.retryGateName,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
@@ -765,6 +819,7 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("snapshotItemConfig", typeToken<z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>>())
         .addRequiredInput("sourceLabel", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
         .addSteps(b => b
@@ -775,6 +830,16 @@ export const ResourceManagement = WorkflowBuilder.create({
                     sourceLabel: b.inputs.sourceLabel,
                 }),
                 {continueOn: {failed: true}}
+            )
+            .addStep("markPending", INTERNAL, "patchDataSnapshotPending", c =>
+                c.register({
+                    resourceName: b.inputs.resourceName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.equals(c.tryApply.status, "Succeeded"),
+                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
+                )})}
             )
         )
         .addExpressionOutput("currentConfigChecksum", c =>
@@ -788,6 +853,7 @@ export const ResourceManagement = WorkflowBuilder.create({
     .addTemplate("reconcileSnapshotMigrationResource", t => t
         .addRequiredInput("snapshotMigrationConfig", typeToken<z.infer<typeof SNAPSHOT_MIGRATION_CONFIG>>())
         .addRequiredInput("resourceName", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("retryGateName", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
@@ -799,7 +865,17 @@ export const ResourceManagement = WorkflowBuilder.create({
                 }),
                 {continueOn: {failed: true}}
             )
-            .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
+            .addStep("markPending", INTERNAL, "patchSnapshotMigrationPending", c =>
+                c.register({
+                    resourceName: b.inputs.resourceName,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.equals(c.tryApply.status, "Succeeded"),
+                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
+                )})}
+            )
+            .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
                     resourceName: b.inputs.retryGateName,
                 }),
@@ -824,6 +900,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                 c.register({
                     snapshotMigrationConfig: b.inputs.snapshotMigrationConfig,
                     resourceName: b.inputs.resourceName,
+                    configChecksum: b.inputs.configChecksum,
                     retryGateName: b.inputs.retryGateName,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
@@ -850,6 +927,7 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRequiredInput("replayerOptions", typeToken<z.infer<typeof ARGO_REPLAYER_OPTIONS>>())
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("targetLabel", typeToken<string>())
+        .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("retryGateName", typeToken<string>())
         .addOptionalInput("retryGroupName_view", c => "Apply")
 
@@ -864,7 +942,17 @@ export const ResourceManagement = WorkflowBuilder.create({
                 }),
                 {continueOn: {failed: true}}
             )
-            .addStep("waitForFix", INTERNAL, "waitForApproval", c =>
+            .addStep("markPending", INTERNAL, "patchTrafficReplayPending", c =>
+                c.register({
+                    resourceName: b.inputs.name,
+                    phase: expr.literal("Pending"),
+                }),
+                {when: c => ({templateExp: expr.and(
+                    expr.equals(c.tryApply.status, "Succeeded"),
+                    expr.not(expr.equals(c.tryApply.outputs.currentConfigChecksum, b.inputs.configChecksum))
+                )})}
+            )
+            .addStep("waitForFix", INTERNAL, "waitForUserApproval", c =>
                 c.register({
                     resourceName: b.inputs.retryGateName,
                 }),
@@ -892,6 +980,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     replayerOptions: b.inputs.replayerOptions,
                     sourceLabel: b.inputs.sourceLabel,
                     targetLabel: b.inputs.targetLabel,
+                    configChecksum: b.inputs.configChecksum,
                     retryGateName: b.inputs.retryGateName,
                     retryGroupName_view: b.inputs.retryGroupName_view,
                 }),
@@ -911,18 +1000,18 @@ export const ResourceManagement = WorkflowBuilder.create({
     .addTemplate("patchKafkaClusterReady", t => buildPatchStatusTemplate(t, "KafkaCluster", {
         configChecksum: ""
     }))
-    .addTemplate("patchCapturedTrafficRunning", t => buildPatchStatusTemplate(t, "CapturedTraffic", {}))
     .addTemplate("patchCapturedTrafficReady", t => buildPatchStatusTemplate(t, "CapturedTraffic", {
         configChecksum: "",
         checksumForSnapshot: "",
         checksumForReplayer: ""
     }))
     .addTemplate("patchCapturedTrafficError", t => buildPatchStatusTemplate(t, "CapturedTraffic", {}))
-    .addTemplate("patchCaptureProxyRunning", t => buildPatchStatusTemplate(t, "CaptureProxy", {}))
     .addTemplate("patchCaptureProxyReady", t => buildPatchStatusTemplate(t, "CaptureProxy", {
         configChecksum: "",
         checksumForSnapshot: "",
-        checksumForReplayer: ""
+        checksumForReplayer: "",
+        serviceEndpoint: "",
+        loadBalancerEndpoint: "",
     }))
     .addTemplate("patchCaptureProxyError", t => buildPatchStatusTemplate(t, "CaptureProxy", {}))
     .addTemplate("patchDataSnapshotCompleted", t => buildPatchStatusTemplate(t, "DataSnapshot", {
@@ -944,6 +1033,11 @@ export const ResourceManagement = WorkflowBuilder.create({
 
 
     // ── Wait templates (resource get with retry) ─────────────────────────
+    // Leaf Kubernetes/Strimzi/cert-manager waits use bounded infra retries.
+    // Waits on our own migration status resources can run much longer in a
+    // single attempt because another workflow branch is responsible for moving
+    // the CR to Ready/Completed/Error. Their retry limit only protects against
+    // wait pod eviction or transient API failures.
 
     .addTemplate("waitForKafkaClusterCreated", t => t
         .addRequiredInput("resourceName", typeToken<string>())
@@ -954,42 +1048,74 @@ export const ResourceManagement = WorkflowBuilder.create({
                 waitForCreation: {
                     kubectlImage: b.inputs.imageMigrationConsoleLocation,
                     kubectlImagePullPolicy: b.inputs.imageMigrationConsolePullPolicy,
-                    maxDurationSeconds: LONGEST_POSSIBLE_MIGRATION
+                    maxDurationSeconds: K8S_INFRA_READY_TIMEOUT_SECONDS,
+                    maxKubeWaitDuration: 60,
+                    retryLimit: 15,
+                    retryInitialBackoffDuration: 10,
+                    retryFactor: 2,
                 }
             })
         )
     )
 
 
-    .addTemplate("waitForKafkaClusterReady", t => t
+    // Argo resource-template conditions are Kubernetes label selectors evaluated
+    // against JSON paths. They cannot search status.conditions by type, so
+    // `status.conditions.0.type == Ready` breaks whenever Strimzi emits Warning
+    // conditions before Ready. Use a tiny kubectl+jq loop for exact Strimzi
+    // Ready semantics while still keeping this as a ResourceManagement wait.
+    .addTemplate("waitForKafkaClusterReadyResource", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addContainer(b => b
+            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
+            .addCommand(["/bin/bash", "-lc"])
+            .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
+            .addEnvVarsFromRecord({
+                NAMESPACE: expr.getWorkflowValue("namespace"),
+                KAFKA_CLUSTER_NAME: b.inputs.resourceName,
+                TIMEOUT_SECONDS: expr.literal(String(KAFKA_CLUSTER_READY_TIMEOUT_SECONDS)),
+                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
+            })
+            .addArgs([workflowScriptCommand("waitForKafkaClusterReady.sh")])
+            .addActiveDeadlineSeconds(() => KAFKA_READY_WAIT_ACTIVE_DEADLINE_SECONDS)
+        )
+        .addRetryParameters(KAFKA_READY_WAIT_POD_RETRY_STRATEGY)
+    )
+
+    .addTemplate("waitForKafkaTopicReady", t => t
+        .addRequiredInput("topicName", typeToken<string>())
         .addWaitForExistingResource(b => b
             .setDefinition({
                 resource: {
                     apiVersion: "kafka.strimzi.io/v1",
-                    kind: "Kafka",
-                    name: b.inputs.resourceName
+                    kind: "KafkaTopic",
+                    name: b.inputs.topicName
                 },
                 conditions: {
-                    successCondition: expr.literal("status.listeners")
+                    successCondition: "status.conditions.0.type == Ready, status.conditions.0.status == True"
                 }
             })
-            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+            .addRetryParameters(K8S_INFRA_READY_RETRY_STRATEGY)
         )
     )
 
 
-    .addTemplate("waitForKafkaCluster", t => t
-        .addRequiredInput("resourceName", typeToken<string>())
-        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
-        .addSteps(b => b
-            .addStep("waitForCreation", INTERNAL, "waitForKafkaClusterCreated", c =>
-                c.register({...selectInputsForRegister(b, c), resourceName: b.inputs.resourceName})
-            )
-            .addStep("waitForReady", INTERNAL, "waitForKafkaClusterReady", c =>
-                c.register({...selectInputsForRegister(b, c), resourceName: b.inputs.resourceName})
-            )
+    .addTemplate("waitForSecretKey", t => t
+        .addRequiredInput("secretName", typeToken<string>())
+        .addRequiredInput("secretKey", typeToken<string>())
+        .addWaitForExistingResource(b => b
+            .setDefinition({
+                resource: {
+                    apiVersion: "v1",
+                    kind: "Secret",
+                    name: b.inputs.secretName
+                },
+                conditions: {
+                    successCondition: expr.concat(expr.literal("data."), b.inputs.secretKey)
+                }
+            })
+            .addRetryParameters(K8S_SECRET_READY_RETRY_STRATEGY)
         )
     )
 
@@ -1011,7 +1137,7 @@ export const ResourceManagement = WorkflowBuilder.create({
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
-    .addTemplate("waitForCapturedTraffic", t => t
+    .addTemplate("waitIndefinitelyForCapturedTraffic", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("checksumField", typeToken<string>())
@@ -1033,12 +1159,12 @@ export const ResourceManagement = WorkflowBuilder.create({
                     failureCondition: "status.phase == Error"
                 }
             })
-            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+            .addRetryParameters(K8S_INDEFINITE_RESOURCE_WAIT_RETRY_STRATEGY)
         )
     )
 
 
-    .addTemplate("waitForCaptureProxy", t => t
+    .addTemplate("waitIndefinitelyForCaptureProxy", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("checksumField", typeToken<string>())
@@ -1060,12 +1186,12 @@ export const ResourceManagement = WorkflowBuilder.create({
                     failureCondition: "status.phase == Error"
                 }
             })
-            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+            .addRetryParameters(K8S_INDEFINITE_RESOURCE_WAIT_RETRY_STRATEGY)
         )
     )
 
 
-    .addTemplate("waitForDataSnapshot", t => t
+    .addTemplate("waitIndefinitelyForDataSnapshot", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("checksumField", typeToken<string>())
@@ -1087,12 +1213,12 @@ export const ResourceManagement = WorkflowBuilder.create({
                     failureCondition: "status.phase == Error"
                 }
             })
-            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+            .addRetryParameters(K8S_INDEFINITE_RESOURCE_WAIT_RETRY_STRATEGY)
         )
     )
 
 
-    .addTemplate("waitForSnapshotMigration", t => t
+    .addTemplate("waitIndefinitelyForSnapshotMigration", t => t
         .addRequiredInput("resourceName", typeToken<string>())
         .addRequiredInput("configChecksum", typeToken<string>())
         .addRequiredInput("checksumField", typeToken<string>())
@@ -1114,7 +1240,7 @@ export const ResourceManagement = WorkflowBuilder.create({
                     failureCondition: "status.phase == Error"
                 }
             })
-            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
+            .addRetryParameters(K8S_INDEFINITE_RESOURCE_WAIT_RETRY_STRATEGY)
         )
     )
 

@@ -617,3 +617,146 @@ def test_get_cluster_config_from_workflow_invalid_json(mock_get_json, argo_servi
 
     with pytest.raises(json.JSONDecodeError):
         argo_service.get_cluster_config_from_workflow("test-workflow", "source")
+
+
+@patch('integ_test.integration_test_argo_service.list_artifacts')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_logs')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._run_kubectl_command')
+def test_collect_namespace_diagnostics_includes_cr_state_and_pod_logs(mock_kubectl, mock_workflow_logs,
+                                                                      mock_list_artifacts,
+                                                                      argo_service):
+    """Test failure diagnostics include migration CRs and logs from non-workflow pods."""
+    def command_result(stdout):
+        return CommandResult(
+            success=True,
+            value="",
+            output=CompletedProcess(args=["kubectl"], returncode=0, stdout=stdout, stderr="")
+        )
+
+    def run_command(args):
+        if args.get("get") == "pods" and args.get("-o") == "json":
+            return command_result(json.dumps({
+                "items": [
+                    {"metadata": {"name": "rfs-worker-0"}},
+                    {"metadata": {"name": "migration-console-0"}}
+                ]
+            }))
+        if args.get("logs") == "pod/rfs-worker-0":
+            return command_result("rfs worker log")
+        if args.get("logs") == "pod/migration-console-0":
+            return command_result("console log")
+        if args.get("get", "").startswith("kafkaclusters"):
+            return command_result("snapshotmigration yaml")
+        return command_result("kubectl output")
+
+    mock_kubectl.side_effect = run_command
+    mock_workflow_logs.return_value = command_result("workflow pod logs")
+    mock_list_artifacts.return_value = []
+
+    diagnostics = argo_service.collect_namespace_diagnostics(workflow_name="test-workflow")
+
+    assert "kubectl get kafkaclusters,capturedtraffics,captureproxies,datasnapshots" in diagnostics
+    assert "snapshotmigrations,trafficreplays,approvalgates,migrationruns -o yaml" in diagnostics
+    assert "snapshotmigration yaml" in diagnostics
+    assert "kubectl logs for workflow test-workflow" in diagnostics
+    assert "workflow pod logs" in diagnostics
+    assert "logs for pod/rfs-worker-0" in diagnostics
+    assert "rfs worker log" in diagnostics
+
+
+@patch('integ_test.integration_test_argo_service.read_artifact_text')
+@patch('integ_test.integration_test_argo_service.list_artifacts')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_logs')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._run_kubectl_command')
+def test_collect_namespace_diagnostics_includes_diagnostic_artifacts_by_default(
+        mock_kubectl, mock_workflow_logs, mock_list_artifacts, mock_read_artifact, argo_service):
+    """Test failure diagnostics inline all explicitly stored diagnostic artifacts."""
+    def command_result(stdout):
+        return CommandResult(
+            success=True,
+            value="",
+            output=CompletedProcess(args=["kubectl"], returncode=0, stdout=stdout, stderr="")
+        )
+
+    def run_command(args):
+        if args.get("get") == "pods" and args.get("-o") == "json":
+            return command_result(json.dumps({"items": []}))
+        return command_result("kubectl output")
+
+    mock_kubectl.side_effect = run_command
+    mock_workflow_logs.return_value = command_result("workflow pod logs")
+    mock_list_artifacts.return_value = [
+        {
+            "key": "diagnostics/workflow-a/kafkaReadinessDiagnostics",
+            "size": 10,
+        },
+        {
+            "key": "diagnostics/workflow-b/otherDiagnostics",
+            "size": 12,
+        }
+    ]
+    mock_read_artifact.side_effect = lambda key: f"contents for {key}"
+
+    diagnostics = argo_service.collect_namespace_diagnostics(workflow_name="test-workflow")
+
+    assert "Diagnostic artifacts under diagnostics/" in diagnostics
+    assert "diagnostics/workflow-a/kafkaReadinessDiagnostics" in diagnostics
+    assert "contents for diagnostics/workflow-a/kafkaReadinessDiagnostics" in diagnostics
+    assert "diagnostics/workflow-b/otherDiagnostics" in diagnostics
+    assert "contents for diagnostics/workflow-b/otherDiagnostics" in diagnostics
+    mock_list_artifacts.assert_called_once_with("diagnostics/")
+
+
+@patch('integ_test.integration_test_argo_service.read_artifact_text')
+@patch('integ_test.integration_test_argo_service.list_artifacts')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_status_json')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._get_workflow_logs')
+@patch('integ_test.integration_test_argo_service.IntegrationTestArgoService._run_kubectl_command')
+def test_collect_namespace_diagnostics_includes_all_workflow_output_artifacts_when_enabled(
+        mock_kubectl, mock_workflow_logs, mock_workflow_status, mock_list_artifacts, mock_read_artifact,
+        argo_service):
+    """Test opt-in failure diagnostics inline all Argo output artifacts recorded on workflow nodes."""
+    def command_result(stdout):
+        return CommandResult(
+            success=True,
+            value="",
+            output=CompletedProcess(args=["kubectl"], returncode=0, stdout=stdout, stderr="")
+        )
+
+    def run_command(args):
+        if args.get("get") == "pods" and args.get("-o") == "json":
+            return command_result(json.dumps({"items": []}))
+        return command_result("kubectl output")
+
+    mock_kubectl.side_effect = run_command
+    mock_workflow_logs.return_value = command_result("workflow pod logs")
+    mock_list_artifacts.return_value = []
+    mock_workflow_status.return_value = {
+        "status": {
+            "nodes": {
+                "node-1": {
+                    "displayName": "diagnoseFailure",
+                    "outputs": {
+                        "artifacts": [
+                            {
+                                "name": "kafkaReadinessDiagnostics",
+                                "path": "/tmp/kafka-readiness-diagnostics.log",
+                                "s3": {"key": "argo-artifacts/test-wf/node-1/kafkaReadinessDiagnostics"},
+                            }
+                        ]
+                    },
+                }
+            }
+        }
+    }
+    mock_read_artifact.return_value = "full kafka diagnostic log"
+
+    diagnostics = argo_service.collect_namespace_diagnostics(
+        workflow_name="test-workflow",
+        include_all_workflow_output_artifacts=True,
+    )
+
+    assert "All Argo output artifacts for workflow test-workflow" in diagnostics
+    assert "kafkaReadinessDiagnostics" in diagnostics
+    assert "argo-artifacts/test-wf/node-1/kafkaReadinessDiagnostics" in diagnostics
+    assert "full kafka diagnostic log" in diagnostics

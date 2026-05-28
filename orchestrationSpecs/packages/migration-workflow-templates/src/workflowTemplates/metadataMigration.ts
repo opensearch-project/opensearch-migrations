@@ -23,9 +23,9 @@ import {
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
-import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
+import {makeSourceParamDict, makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
-import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
+import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {
     getApprovalMap,
@@ -115,12 +115,16 @@ function makeSnapshotParamsDict(
 
 function makeSourceHostParamsDict(
     sourceVersion: BaseExpression<string>,
-    sourceEndpoint: BaseExpression<string>
+    sourceEndpoint: BaseExpression<string>,
+    sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>>
 ) {
-    return expr.makeDict({
-        "sourceHost": sourceEndpoint,
-        "sourceVersion": sourceVersion
-    });
+    return expr.mergeDicts(
+        makeSourceParamDict(sourceConfig),
+        expr.makeDict({
+            "sourceHost": sourceEndpoint,
+            "sourceVersion": sourceVersion
+        })
+    );
 }
 
 function makeParamsDict(
@@ -128,7 +132,8 @@ function makeParamsDict(
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
     options: BaseExpression<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>,
-    sourceEndpoint?: BaseExpression<string>
+    sourceEndpoint?: BaseExpression<string>,
+    sourceConfig?: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>>
 ) {
     const targetAndOptions = expr.mergeDicts(
         makeTargetParamDict(targetConfig),
@@ -152,12 +157,12 @@ function makeParamsDict(
 
     // When sourceEndpoint is non-empty at runtime, add sourceHost param.
     // MetadataMigration CLI prioritizes --source-host over snapshot params.
-    if (sourceEndpoint) {
+    if (sourceEndpoint && sourceConfig) {
         return expr.mergeDicts(base,
             expr.ternary(
                 expr.isEmpty(sourceEndpoint),
                 expr.makeDict({}),
-                makeSourceHostParamsDict(sourceVersion, sourceEndpoint)
+                makeSourceHostParamsDict(sourceVersion, sourceEndpoint, sourceConfig)
             )
         );
     }
@@ -191,6 +196,9 @@ const runMetadataInputs = {
     snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),
     metadataMigrationConfig: defineRequiredParam<z.infer<typeof ARGO_METADATA_OPTIONS>>(),
     sourceEndpoint: defineParam<string>({expression: expr.literal("")}),
+    sourceConfig: defineParam<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>({
+        expression: expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>()
+    }),
     ...makeRequiredImageParametersForKeys(["MigrationConsole"]),
     sourceK8sLabel: defineRequiredParam<string>(),
     targetK8sLabel: defineRequiredParam<string>(),
@@ -293,6 +301,7 @@ function buildMetadataContainer<
             expr.dig(expr.deserializeRecord(inputs.metadataMigrationConfig), ["jvmArgs"], "")
         )
         .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(inputs.targetConfig)))
+        .addEnvVarsFromRecord(getSourceHttpAuthCreds(getHttpAuthSecretName(inputs.sourceConfig)))
         .addResources(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI)
         .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
         .addArgs([
@@ -300,7 +309,8 @@ function buildMetadataContainer<
             expr.literal("---INLINE-JSON"),
             expr.asString(expr.serialize(
                 makeParamsDict(inputs.sourceVersion, inputs.targetConfig, inputs.snapshotConfig, inputs.metadataMigrationConfig,
-                    inputs.sourceEndpoint
+                    inputs.sourceEndpoint,
+                    inputs.sourceConfig
                 )
             ))
         ])
@@ -362,6 +372,7 @@ export const MetadataMigration = addMetadataTransformTemplates(metadataMigration
                     c.register({
                         ...selectInputsForRegister(b, c),
                         sourceEndpoint: b.inputs.sourceEndpoint,
+                        sourceConfig: b.inputs.sourceConfig,
                         workflowCreationTimestamp: b.inputs.workflowCreationTimestamp,
                         workflowUid: b.inputs.workflowUid,
                         taskK8sLabel: b.inputs.taskK8sLabel
@@ -372,6 +383,7 @@ export const MetadataMigration = addMetadataTransformTemplates(metadataMigration
                     c.register({
                         ...selectInputsForRegister(b, c),
                         sourceEndpoint: b.inputs.sourceEndpoint,
+                        sourceConfig: b.inputs.sourceConfig,
                         workflowCreationTimestamp: b.inputs.workflowCreationTimestamp,
                         workflowUid: b.inputs.workflowUid,
                         taskK8sLabel: b.inputs.taskK8sLabel
@@ -382,6 +394,7 @@ export const MetadataMigration = addMetadataTransformTemplates(metadataMigration
                     c.register({
                         ...selectInputsForRegister(b, c),
                         sourceEndpoint: b.inputs.sourceEndpoint,
+                        sourceConfig: b.inputs.sourceConfig,
                         workflowCreationTimestamp: b.inputs.workflowCreationTimestamp,
                         workflowUid: b.inputs.workflowUid,
                         taskK8sLabel: b.inputs.taskK8sLabel
@@ -395,14 +408,14 @@ export const MetadataMigration = addMetadataTransformTemplates(metadataMigration
     .addTemplate("approveEvaluate", t => t
         .addRequiredInput("name", typeToken<string>())
         .addSteps(b => b
-            .addStep("waitForApproval", ResourceManagement, "waitForApproval", c =>
+            .addStep("waitForUserApproval", ResourceManagement, "waitForUserApproval", c =>
                 c.register({resourceName: b.inputs.name}))
         )
     )
     .addTemplate("approveMigrate", t => t
         .addRequiredInput("name", typeToken<string>())
         .addSteps(b => b
-            .addStep("waitForApproval", ResourceManagement, "waitForApproval", c =>
+            .addStep("waitForUserApproval", ResourceManagement, "waitForUserApproval", c =>
                 c.register({resourceName: b.inputs.name}))
         )
     )
@@ -411,6 +424,8 @@ export const MetadataMigration = addMetadataTransformTemplates(metadataMigration
     .addTemplate("migrateMetaData", t => t
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof ARGO_METADATA_OPTIONS>>())
         .addOptionalInput("sourceEndpoint", c => expr.literal(""))
+        .addOptionalInput("sourceConfig", c =>
+            expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addInputsFromRecord(COMMON_METADATA_PARAMETERS)
         .addInputsFromRecord(
             getApprovalMap(t.inputs.workflowParameters.approvalConfigMapName, typeToken<{}>()))
@@ -434,6 +449,7 @@ export const MetadataMigration = addMetadataTransformTemplates(metadataMigration
             .addStep("evaluateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
+                    sourceConfig: b.inputs.sourceConfig,
                     commandMode: "evaluate",
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
@@ -471,6 +487,7 @@ export const MetadataMigration = addMetadataTransformTemplates(metadataMigration
             .addStep("migrateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
+                    sourceConfig: b.inputs.sourceConfig,
                     commandMode: "migrate",
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),

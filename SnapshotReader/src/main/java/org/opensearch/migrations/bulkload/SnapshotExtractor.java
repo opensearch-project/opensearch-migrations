@@ -23,6 +23,7 @@ import org.opensearch.migrations.bulkload.delta.DeltaLuceneReader;
 import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
 import org.opensearch.migrations.bulkload.lucene.LuceneDirectoryReader;
 import org.opensearch.migrations.bulkload.lucene.LuceneIndexReader;
+import org.opensearch.migrations.bulkload.lucene.LuceneReader;
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -178,7 +179,7 @@ public class SnapshotExtractor {
         // Read documents from startDocIdx (binary search to segment)
         Path shardPath = workDir.resolve(shard.indexName()).resolve(String.valueOf(shard.shardId()));
         LuceneIndexReader indexReader = readerFactory.getReader(shardPath);
-        return indexReader.streamDocumentChanges(shard.metadata().getSegmentFileName(), startDocIdx, mappingContext, useRecoverySource);
+        return LuceneReader.streamDocumentChanges(indexReader, shard.metadata().getSegmentFileName(), startDocIdx, mappingContext, useRecoverySource);
     }
 
     /**

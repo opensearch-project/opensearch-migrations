@@ -95,15 +95,18 @@ def _initialize_k8s_client(ctx):
 @click.option('--namespace', default=get_current_namespace, hidden=True, envvar='WORKFLOW_NAMESPACE')
 @click.option('--insecure', is_flag=True, default=True, hidden=True, envvar='WORKFLOW_INSECURE')
 @click.option('--token', hidden=True, envvar='ARGO_TOKEN')
+@click.option('--resource-view/--step-view', default=False, show_default='step-view',
+              help='Choose the resource-centric view or the Argo workflow step tree')
 @click.pass_context
-def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token):
+def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token, resource_view):
     _configure_file_logging()  # Configure logging when command actually runs
     try:
         app = WorkflowTreeApp(namespace, workflow_name,
                               make_argo_service(argo_server, insecure, token),
                               make_k8s_pod_scraper(_initialize_k8s_client(ctx)),
                               WaiterInterface.default(workflow_name, namespace),
-                              3.0)
+                              3.0,
+                              resource_view=resource_view)
         app.run()
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)

@@ -29,14 +29,17 @@ public class SolrSnapshotReader implements ClusterReader {
     /**
      * Discover Solr collection names from a backup directory.
      * A valid collection directory contains backup_0.properties or an index/ subdirectory.
+     * Solr 6/7 backups use backup.properties (no numeric suffix) and snapshot.shardN/ dirs.
      */
     public static List<String> discoverCollections(Path backupDir) throws IOException {
         var collections = new ArrayList<String>();
         try (var dirs = Files.list(backupDir)) {
             dirs.filter(Files::isDirectory)
                 .filter(d -> Files.exists(d.resolve("backup_0.properties"))
+                    || Files.exists(d.resolve("backup.properties"))
                     || Files.exists(d.resolve("index"))
-                    || hasSegmentsFile(d))
+                    || hasSegmentsFile(d)
+                    || hasSnapshotShardDir(d))
                 .map(p -> p.getFileName().toString())
                 .forEach(collections::add);
         }
@@ -47,6 +50,15 @@ public class SolrSnapshotReader implements ClusterReader {
     private static boolean hasSegmentsFile(Path dir) {
         try (var stream = Files.list(dir)) {
             return stream.anyMatch(p -> p.getFileName().toString().startsWith("segments_"));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private static boolean hasSnapshotShardDir(Path dir) {
+        try (var stream = Files.list(dir)) {
+            return stream.anyMatch(p -> Files.isDirectory(p)
+                && p.getFileName().toString().startsWith("snapshot."));
         } catch (IOException e) {
             return false;
         }
@@ -81,7 +93,7 @@ public class SolrSnapshotReader implements ClusterReader {
 
     @Override
     public IndexMetadata.Factory getIndexMetadata() {
-        return new SolrBackupIndexMetadataFactory(backupDir, schemas, null, version.getMajor());
+        return new SolrBackupIndexMetadataFactory(backupDir, schemas, null);
     }
 
     @Override

@@ -20,6 +20,14 @@
         {
           "name": "approvalConfigMapName",
           "value": "approval-config"
+        },
+        {
+          "name": "migrationRunNumber",
+          "value": "0"
+        },
+        {
+          "name": "workflowScriptsRoot",
+          "value": "/root/workflows/.workflowScripts"
         }
       ]
     },
@@ -114,6 +122,7 @@
           "setOwnerReference": false,
           "successCondition": "status.readyReplicas > 0"
         },
+        "activeDeadlineSeconds": 1200,
         "retryStrategy": {
           "limit": "6",
           "retryPolicy": "OnError",

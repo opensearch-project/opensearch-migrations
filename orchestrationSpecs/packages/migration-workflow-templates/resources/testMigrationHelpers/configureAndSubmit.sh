@@ -20,6 +20,8 @@ fail() { echo "$1" | tee /dev/termination-log >&2; exit 1; }
 
 WORKFLOW_NAMESPACE="${WORKFLOW_NAMESPACE:-ma}"
 MIGRATION_CONSOLE_POD="${MIGRATION_CONSOLE_POD:-migration-console-0}"
+UUID="$(date +%s)"
+RUN_NONCE="${RUN_NONCE:-$UUID}"
 
 wait_for_console_pod() {
   kubectl wait \
@@ -48,6 +50,6 @@ echo "$CONFIG_OUTPUT"
 echo "Submitting workflow..."
 WORKFLOW_OUTPUT=$(
   kubectl exec --namespace "$WORKFLOW_NAMESPACE" "$MIGRATION_CONSOLE_POD" -- \
-    /bin/bash -lc 'workflow submit' 2>&1
+    /bin/bash -lc "workflow submit --unique-run-nonce $RUN_NONCE" 2>&1
 ) || fail "Submit failed: $WORKFLOW_OUTPUT"
 echo "Workflow submit output: $WORKFLOW_OUTPUT"

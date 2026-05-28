@@ -74,6 +74,11 @@ def pytest_addoption(parser):
                      help="Digest-pinned transform image containing the basic transform fixture bank")
     parser.addoption("--transform_image_sequence", action="store", default="",
                      help="Digest-pinned transform image containing the sequence transform fixture bank")
+    parser.addoption("--capture_proxy_service_type", action="store", default="LoadBalancer",
+                     choices=("LoadBalancer", "ClusterIP"),
+                     help="Capture proxy Kubernetes Service type for CDC workflow tests")
+    parser.addoption("--dump_all_workflow_output_artifacts", action="store_true", default=False,
+                     help="On failure, additionally read every output artifact from current workflow nodes")
 
 
 def pytest_configure(config):
@@ -108,13 +113,15 @@ def pytest_generate_tests(metafunc):
         observed_packet_timeout = metafunc.config.getoption("observed_packet_timeout")
         transform_image_basic = metafunc.config.getoption("transform_image_basic")
         transform_image_sequence = metafunc.config.getoption("transform_image_sequence")
+        capture_proxy_service_type = metafunc.config.getoption("capture_proxy_service_type")
         user_args = MATestUserArguments(source_version=source_version, target_version=target_version,
                                         target_type=target_type, unique_id=unique_id, reuse_clusters=reuse_clusters,
                                         image_registry_prefix=image_registry_prefix,
                                         speedup_factor=speedup_factor,
                                         observed_packet_timeout=observed_packet_timeout,
                                         transform_image_basic=transform_image_basic,
-                                        transform_image_sequence=transform_image_sequence)
+                                        transform_image_sequence=transform_image_sequence,
+                                        capture_proxy_service_type=capture_proxy_service_type)
         test_cases_param = _generate_test_cases(user_args=user_args, test_ids_list=test_ids_list)
         metafunc.config.test_summary["expected"] = len(test_cases_param)
         if not test_cases_param and not test_ids_list:
@@ -129,22 +136,22 @@ def pytest_generate_tests(metafunc):
 def _filter_test_cases(test_ids_list: List[str]) -> List:
     """
     Filter test cases based on test_ids_list.
-    
+
     - If test_ids_list is empty: return all tests EXCEPT those with requires_explicit_selection=True
-    - If test_ids_list is provided: return only tests matching the IDs (including explicit-only tests)
-    
-    Note: Matching uses substring search (e.g., '000' matches Test0001, Test0002, etc.).
+    - If test_ids_list is provided: return only tests whose class name begins with Test{id}.
+
+    Matching is anchored on the Test{id} prefix so a stray substring
+    (e.g. '004' inside a longer numeric, description, or file path)
+    cannot leak into the selection set. Test IDs are themselves expected
+    to be unique per class.
     """
     if not test_ids_list:
         # Default run: exclude tests that require explicit selection
         return [case for case in ALL_TEST_CASES if not getattr(case, 'requires_explicit_selection', False)]
-    
+
     # Explicit selection: include matching tests regardless of requires_explicit_selection
-    filtered_cases = []
-    for case in ALL_TEST_CASES:
-        if any(tid in str(case) for tid in test_ids_list):
-            filtered_cases.append(case)
-    return filtered_cases
+    prefixes = tuple(f"Test{tid}" for tid in test_ids_list)
+    return [case for case in ALL_TEST_CASES if case.__name__.startswith(prefixes)]
 
 
 def _generate_test_cases(user_args: MATestUserArguments, test_ids_list: List[str]):
@@ -224,3 +231,8 @@ def unique_id(pytestconfig):
 @pytest.fixture
 def keep_workflows(pytestconfig):
     return pytestconfig.getoption("keep_workflows")
+
+
+@pytest.fixture
+def dump_all_workflow_output_artifacts(pytestconfig):
+    return pytestconfig.getoption("dump_all_workflow_output_artifacts")

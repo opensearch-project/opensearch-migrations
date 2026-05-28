@@ -12,6 +12,7 @@ import java.util.stream.IntStream;
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -31,6 +32,35 @@ public class LuceneReader {
 
     private LuceneReader() {}
 
+    /**
+     * Stream document changes from a Lucene index via the given reader.
+     * Version-agnostic orchestrator — delegates to {@link #readDocsByLeavesFromStartingPosition}.
+     */
+    public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName) {
+        return streamDocumentChanges(indexReader, segmentsFileName, 0);
+    }
+
+    public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx) {
+        return streamDocumentChanges(indexReader, segmentsFileName, startDocIdx, null);
+    }
+
+    public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext) {
+        return streamDocumentChanges(indexReader, segmentsFileName, startDocIdx, mappingContext, false);
+    }
+
+    public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return Flux.using(
+            () -> indexReader.getReader(segmentsFileName),
+            reader -> readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext, useRecoverySource),
+            reader -> {
+                try {
+                    reader.close();
+                } catch (IOException e) {
+                    throw Lombok.sneakyThrow(e);
+                }
+            });
+    }
+
     /* Start reading docs from a specific segment and document id.
        If the startSegmentIndex is 0, it will start from the first segment.
        If the startDocId is 0, it will start from the first document in the segment.
@@ -38,10 +68,6 @@ public class LuceneReader {
        concurrency (matching the Lucene I/O scheduler thread count) via flatMapSequential
        to keep the source feeding batches fast enough.
      */
-    public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId, FieldMappingContext mappingContext) {
-        return readDocsByLeavesFromStartingPosition(reader, startDocId, mappingContext, false);
-    }
-
     public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId, FieldMappingContext mappingContext, boolean useRecoverySource) {
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)
@@ -59,11 +85,6 @@ public class LuceneReader {
             .subscribeOn(LUCENE_IO_SCHEDULER);
     }
 
-    /** Backwards-compatible overload without mapping context */
-    public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId) {
-        return readDocsByLeavesFromStartingPosition(reader, startDocId, null);
-    }
-
     /**
      * Retrieves, sorts, and processes document segments, returning a {@link Flux} of segments
      * starting from the first segment where the cumulative document base is less than or equal
@@ -74,7 +95,7 @@ public class LuceneReader {
      * @return A {@link Flux} emitting the sorted segments starting from the identified segment,
      *         wrapped in {@link ReaderAndBase}.
      */
-    static Flux<ReaderAndBase> getSegmentsFromStartingSegment(List<? extends LuceneLeafReaderContext> originalLeaves, int startDocId) {
+    public static Flux<ReaderAndBase> getSegmentsFromStartingSegment(List<? extends LuceneLeafReaderContext> originalLeaves, int startDocId) {
         if (originalLeaves.isEmpty()) {
             return Flux.empty();
         }
@@ -113,12 +134,6 @@ public class LuceneReader {
 
     public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
                                                 Path indexDirectoryPath, DocumentChangeType operation,
-                                                FieldMappingContext mappingContext) {
-        return readDocsFromSegment(readerAndBase, docStartingId, indexDirectoryPath, operation, mappingContext, false);
-    }
-
-    public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
-                                                Path indexDirectoryPath, DocumentChangeType operation,
                                                 FieldMappingContext mappingContext, boolean useRecoverySource) {
         var segmentReader = readerAndBase.getReader();
         var liveDocs = readerAndBase.getLiveDocs();
@@ -128,11 +143,7 @@ public class LuceneReader {
         // Start at
         int startDocIdInSegment = (docStartingId <= segmentDocBase) ? 0 : docStartingId - segmentDocBase;
 
-        // Per-segment term position cache. Built lazily on first need. Backed by an on-disk
-        // spill directory so the in-heap footprint stays bounded even for large segments
-        // (a 3GB shard's analyzed-text TreeMap can otherwise OOM at 64GB JVM). Spill data
-        // lives under the same Lucene scratch dir as the unpacked segment, so cleanup
-        // follows the worker's existing --lucene-dir lifecycle.
+        // Per-segment spill prevents cross-segment memory accumulation (3GB shard can OOM otherwise)
         final Path spillRoot = SourcelessSpillConfig.newSegmentSpillRoot(indexDirectoryPath);
         final SegmentTermIndex termIndex = new SegmentTermIndex(
                 spillRoot, SourcelessSpillConfig.sortBufferBytes());
@@ -171,24 +182,35 @@ public class LuceneReader {
             .doFinally(sig -> termIndex.close());
     }
 
-    /** Backwards-compatible overload without mapping context */
-    public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
-                                                Path indexDirectoryPath, DocumentChangeType operation) {
-        return readDocsFromSegment(readerAndBase, docStartingId, indexDirectoryPath, operation, null);
+
+    /**
+     * Iterate live documents in a segment with bounded concurrency, applying a custom
+     * per-document function. Used by Solr to share the live-doc filtering and concurrency
+     * logic without coupling to ES-specific document extraction.
+     */
+    public static <T> Flux<T> readLiveDocsFromSegment(
+        ReaderAndBase readerAndBase,
+        int docStartingId,
+        int concurrency,
+        reactor.core.scheduler.Scheduler scheduler,
+        DocReader<T> docReader
+    ) {
+        var segmentReader = readerAndBase.getReader();
+        var liveDocs = readerAndBase.getLiveDocs();
+        int segmentDocBase = readerAndBase.getDocBaseInParent();
+        int startDocIdInSegment = (docStartingId <= segmentDocBase) ? 0 : docStartingId - segmentDocBase;
+
+        var idxStream = (liveDocs != null) ? liveDocs.stream().filter(idx -> idx >= startDocIdInSegment) :
+            IntStream.range(startDocIdInSegment, segmentReader.maxDoc());
+        return Flux.fromStream(idxStream.boxed())
+            .flatMapSequential(docIdx -> Mono.defer(() ->
+                docReader.read(segmentReader, docIdx, segmentDocBase)
+            ).subscribeOn(scheduler), concurrency, 1);
     }
 
-    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
-            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
-            FieldMappingContext mappingContext) {
-        return getDocument(reader, luceneDocId, isLive, segmentDocBase, getSegmentReaderDebugInfo,
-            indexDirectoryPath, operation, mappingContext, null, false);
-    }
-
-    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
-            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
-            FieldMappingContext mappingContext, SegmentTermIndex termIndex) {
-        return getDocument(reader, luceneDocId, isLive, segmentDocBase, getSegmentReaderDebugInfo,
-            indexDirectoryPath, operation, mappingContext, termIndex, false);
+    @FunctionalInterface
+    public interface DocReader<T> {
+        Mono<T> read(LuceneLeafReader reader, int docIdx, int segmentDocBase);
     }
 
     public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
@@ -213,12 +235,12 @@ public class LuceneReader {
                 String fieldName = field.name();
                 switch (fieldName) {
                     case "_id": {
-                        // Lucene >= 7 (ES 6+ created segments)
+                        // ES 6+ stores id separately; pre-6 baked type+id into _uid
                         openSearchDocId = field.asUid();
                         break;
                     }
                     case "_uid": {
-                        // Lucene <= 6 (ES <= 5 created segments)
+                        // ES 5 and earlier: _uid = "type#id"
                         var combinedTypeId = field.stringValue().split("#", 2);
                         type = combinedTypeId[0];
                         openSearchDocId = combinedTypeId[1];
@@ -230,8 +252,7 @@ public class LuceneReader {
                         break;
                     }
                     case "_recovery_source": {
-                        // ES 7+ / OpenSearch soft-deletes field. When opted in, treat as _source
-                        // for documents where _source is absent (disabled or filtered).
+                        // Only use as fallback when _source is missing (disabled or filtered)
                         if (useRecoverySource && sourceBytes == null) {
                             sourceBytes = field.utf8Value();
                         }
@@ -340,9 +361,4 @@ public class LuceneReader {
         return reconstructed.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
-    /** Backwards-compatible overload without mapping context */
-    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, 
-            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation) {
-        return getDocument(reader, luceneDocId, isLive, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, null);
-    }
 }
