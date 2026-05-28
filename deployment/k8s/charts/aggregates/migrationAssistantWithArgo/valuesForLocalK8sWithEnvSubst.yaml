@@ -29,6 +29,17 @@ images:
 
 # Kyverno chart configuration
 charts:
+  # Preserve local developer install speed for charts that previously did not
+  # use helm --wait before installer.defaultWaitForInstallation became true.
+  aws-privateca-issuer:
+    waitForInstallation: false
+
+  ack-acmpca-controller:
+    waitForInstallation: false
+
+  opentelemetry-operator:
+    waitForInstallation: false
+
   kyverno:
     values:
       webhooksCleanup:
@@ -38,11 +49,13 @@ charts:
           tag: latest
 
   localstack:
+    waitForInstallation: false
     values:
       persistence:
         enabled: true
 
   strimzi-kafka-operator:
+    waitForInstallation: false
     values:
       # Decrease probe thresholds to make deployment times faster (but less reliable under stress)
       readinessProbe:
@@ -88,6 +101,7 @@ charts:
 
 
   argo-workflows:
+    waitForInstallation: false
     values:
       # LocalStack uses static credentials for S3 artifact storage
       useStaticCredentials: true
@@ -108,3 +122,15 @@ charts:
         replicas: 1
         pdb:
           enabled: false
+
+  fluent-bit:
+    waitForInstallation: false
+
+  kube-prometheus-stack:
+    waitForInstallation: false
+
+  grafana:
+    waitForInstallation: false
+
+  jaeger:
+    waitForInstallation: false

@@ -183,7 +183,7 @@ charts:
           readOnly: true
 
   strimzi-kafka-operator:
-     # Use EKS-specific node selectors or tolerations if you have dedicated infra
+    # Use EKS-specific node selectors or tolerations if you have dedicated infra
 #    nodeSelector:
 #    workload-type: "operator-control-plane"
 
@@ -203,4 +203,3 @@ charts:
         value: "120000" # 2 minutes (slows down background chatter)
       - name: KUBERNETES_CLIENT_READ_TIMEOUT_MS
         value: "30000"  # Avoid timing out on heavy K8s API responses
-
