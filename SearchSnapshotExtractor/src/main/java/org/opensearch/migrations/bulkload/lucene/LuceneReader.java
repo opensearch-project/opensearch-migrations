@@ -12,6 +12,7 @@ import java.util.stream.IntStream;
 import org.opensearch.migrations.bulkload.common.DocumentChangeType;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -26,57 +27,39 @@ public class LuceneReader {
         100, Integer.MAX_VALUE, "lucene-io", 60, true
     );
 
-    /**
-     * Per-segment reader parallelism — N independent {@link LuceneLeafReader} views over the
-     * same underlying segment, each with its own forward-only DocValues iterators, advancing
-     * a round-robin slice of the segment's docId space ({@code docIdx % N == workerId}).
-     *
-     * <p>Why N views and not N threads on one view: the LeafReader's cached DocValues
-     * iterators are stateful, forward-only, and must be advanced monotonically. A single
-     * shared iterator set therefore caps reconstruction at concurrency=1. Each
-     * {@link LuceneLeafReader#newView()} produces an independent wrapper that maintains its
-     * own iterator state but shares the underlying on-disk codec, so the per-segment open
-     * cost is paid once and the per-worker overhead is just the iterator HashMaps.
-     *
-     * <p>The same N is used for the {@code _source}-available path (where reconstruction is
-     * a no-op) — there the wins come from overlapping {@code reader.document(docId)} calls
-     * across cores. With N=1 the topology degenerates to today's sequential read.
-     *
-     * <p>Tunable via {@code -Drfs.reader.parallelism} or {@code RFS_READER_PARALLELISM} env var.
-     * Default: availableProcessors - 1 (min 1). Diminishing returns expected at the
-     * {@link SegmentTermIndex} synchronized ceiling (analyzed-text recovery serializes through
-     * one monitor per segment) and at the bulk-loader's {@code activeBatches=10/10} write-side cap.
-     */
-    private static final int READER_PARALLELISM = readerParallelism();
-
-    private static int readerParallelism() {
-        // Prefer system property (passes through JDK_JAVA_OPTIONS without WorkflowTemplate
-        // edits); fall back to env var for direct kubectl set env.
-        // Default: availableProcessors - 1 (min 1) — saturate CPU without starving the
-        // reactor event loop and GC threads.
-        String raw = System.getProperty(RfsTunables.READER_PARALLELISM_PROP);
-        if (raw == null || raw.isBlank()) raw = System.getenv(RfsTunables.READER_PARALLELISM_ENV);
-        if (raw == null || raw.isBlank()) {
-            int cpus = Runtime.getRuntime().availableProcessors();
-            int defaultParallelism = Math.max(1, cpus - 1);
-            log.atInfo().setMessage("reader-parallelism not set, defaulting to {} (cpus={})")
-                .addArgument(defaultParallelism).addArgument(cpus).log();
-            return defaultParallelism;
-        }
-        try {
-            int n = Integer.parseInt(raw.trim());
-            if (n < 1) {
-                log.atWarn().setMessage("reader-parallelism={} below 1, clamping to 1").addArgument(n).log();
-                return 1;
-            }
-            return n;
-        } catch (NumberFormatException e) {
-            log.atWarn().setMessage("reader-parallelism={} not a valid integer, defaulting to 1").addArgument(raw).log();
-            return 1;
-        }
-    }
+    /** Per-segment read concurrency for the bounded-elastic flatMap. */
+    private static final int SEGMENT_READ_CONCURRENCY = 100;
 
     private LuceneReader() {}
+
+    /**
+     * Stream document changes from a Lucene index via the given reader.
+     * Version-agnostic orchestrator — delegates to {@link #readDocsByLeavesFromStartingPosition}.
+     */
+    public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName) {
+        return streamDocumentChanges(indexReader, segmentsFileName, 0);
+    }
+
+    public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx) {
+        return streamDocumentChanges(indexReader, segmentsFileName, startDocIdx, null);
+    }
+
+    public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext) {
+        return streamDocumentChanges(indexReader, segmentsFileName, startDocIdx, mappingContext, false);
+    }
+
+    public static Flux<LuceneDocumentChange> streamDocumentChanges(LuceneIndexReader indexReader, String segmentsFileName, int startDocIdx, FieldMappingContext mappingContext, boolean useRecoverySource) {
+        return Flux.using(
+            () -> indexReader.getReader(segmentsFileName),
+            reader -> readDocsByLeavesFromStartingPosition(reader, startDocIdx, mappingContext, useRecoverySource),
+            reader -> {
+                try {
+                    reader.close();
+                } catch (IOException e) {
+                    throw Lombok.sneakyThrow(e);
+                }
+            });
+    }
 
     /* Start reading docs from a specific segment and document id.
        If the startSegmentIndex is 0, it will start from the first segment.
@@ -85,10 +68,6 @@ public class LuceneReader {
        concurrency (matching the Lucene I/O scheduler thread count) via flatMapSequential
        to keep the source feeding batches fast enough.
      */
-    public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId, FieldMappingContext mappingContext) {
-        return readDocsByLeavesFromStartingPosition(reader, startDocId, mappingContext, false);
-    }
-
     public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId, FieldMappingContext mappingContext, boolean useRecoverySource) {
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)
@@ -106,11 +85,6 @@ public class LuceneReader {
             .subscribeOn(LUCENE_IO_SCHEDULER);
     }
 
-    /** Backwards-compatible overload without mapping context */
-    public static Flux<LuceneDocumentChange> readDocsByLeavesFromStartingPosition(LuceneDirectoryReader reader, int startDocId) {
-        return readDocsByLeavesFromStartingPosition(reader, startDocId, null);
-    }
-
     /**
      * Retrieves, sorts, and processes document segments, returning a {@link Flux} of segments
      * starting from the first segment where the cumulative document base is less than or equal
@@ -121,7 +95,7 @@ public class LuceneReader {
      * @return A {@link Flux} emitting the sorted segments starting from the identified segment,
      *         wrapped in {@link ReaderAndBase}.
      */
-    static Flux<ReaderAndBase> getSegmentsFromStartingSegment(List<? extends LuceneLeafReaderContext> originalLeaves, int startDocId) {
+    public static Flux<ReaderAndBase> getSegmentsFromStartingSegment(List<? extends LuceneLeafReaderContext> originalLeaves, int startDocId) {
         if (originalLeaves.isEmpty()) {
             return Flux.empty();
         }
@@ -160,12 +134,6 @@ public class LuceneReader {
 
     public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
                                                 Path indexDirectoryPath, DocumentChangeType operation,
-                                                FieldMappingContext mappingContext) {
-        return readDocsFromSegment(readerAndBase, docStartingId, indexDirectoryPath, operation, mappingContext, false);
-    }
-
-    public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
-                                                Path indexDirectoryPath, DocumentChangeType operation,
                                                 FieldMappingContext mappingContext, boolean useRecoverySource) {
         var segmentReader = readerAndBase.getReader();
         var liveDocs = readerAndBase.getLiveDocs();
@@ -175,16 +143,7 @@ public class LuceneReader {
         // Start at
         int startDocIdInSegment = (docStartingId <= segmentDocBase) ? 0 : docStartingId - segmentDocBase;
 
-        // Per-worker term position caches. Each worker gets its own SegmentTermIndex because
-        // the streaming postings cursors inside are forward-only: they can only advance to
-        // higher docIds, never rewind. With round-robin partitioning each worker sees a
-        // strictly-ascending docId subsequence, so per-worker cursors advance monotonically.
-        // A shared cursor would race: if worker-1 advances to doc 3 before worker-0 requests
-        // doc 0, the cursor can never go back and doc 0 is silently lost.
-        final List<SegmentTermIndex> workerTermIndexes = new ArrayList<>(Math.max(1, READER_PARALLELISM));
-        for (int i = 0; i < Math.max(1, READER_PARALLELISM); i++) {
-            workerTermIndexes.add(new SegmentTermIndex());
-        }
+        final SegmentTermIndex termIndex = new SegmentTermIndex();
 
         // For any errors, we want to log the segment reader debug info so we can see which segment is causing the issue.
         // This allows us to pass the supplier to getDocument without having to recompute the debug info
@@ -194,171 +153,69 @@ public class LuceneReader {
             s == null ? segmentReader.toString() : s
         );
 
-        // Open N independent LuceneLeafReader views over the same underlying segment data.
-        // Each view holds its own forward-only DocValues iterator HashMaps populated via
-        // initDocValueIterators — required because Lucene DocValues iterators are stateful
-        // and must be advanced monotonically per-instance. With N views, N workers can
-        // each process a strictly-ascending round-robin slice ({@code docIdx % N == workerId})
-        // of the segment without iterator cursor contention.
-        //
-        // For mappingContext != null (sourceless reconstruction), we eagerly initialize each
-        // view's DV iterators against the segment's full doc-value field set so subsequent
-        // per-doc getDocValue calls are cache hits. For the regular _source-available path
-        // we still allocate views (so the parallel topology is uniform) but skip the iterator
-        // init since DV reads are not on the hot path.
-        final int parallelism = Math.max(1, READER_PARALLELISM);
-        log.atInfo()
-                .setMessage("readDocsFromSegment: segment={} startDocId={} parallelism={} sourceless={}")
-                .addArgument(segmentReader.getSegmentInfoString())
-                .addArgument(docStartingId)
-                .addArgument(parallelism)
-                .addArgument(mappingContext != null)
+        log.atDebug().setMessage("For segment: {}, migrating from doc: {}. Will process {} docs in segment.")
+                .addArgument(readerAndBase.getReader())
+                .addArgument(startDocIdInSegment)
+                .addArgument(() -> segmentReader.maxDoc() - startDocIdInSegment)
                 .log();
-        final List<LuceneLeafReader> workerReaders;
-        try {
-            workerReaders = initWorkerReaders(segmentReader, parallelism, mappingContext);
-        } catch (IOException e) {
-            return Flux.error(new RuntimeException("Failed to initialize per-worker DocValues iterators", e));
-        }
 
-        // Build N round-robin worker fluxes. Each worker:
-        //  - sees a strictly-ascending subsequence of segment-local docIds
-        //  - drives its own LuceneLeafReader view (own DV iterator cursors)
-        //  - emits LuceneDocumentChange tagged with the global luceneDocNumber (segmentDocBase+docId)
-        //  - subscribes on LUCENE_IO_SCHEDULER so the reads parallelize across pool threads
-        //
-        // We then mergeOrderedBy luceneDocNumber to restore strict global ordering of the
-        // emitted documents. Reordering buffer per merge is bounded — at most one in-flight
-        // doc per worker — so memory is O(N).
         var idxStream = (liveDocs != null) ? liveDocs.stream().filter(idx -> idx >= startDocIdInSegment) :
             IntStream.range(startDocIdInSegment, segmentReader.maxDoc());
-        final List<Integer> allDocIds = idxStream.boxed().toList();
-
-        if (parallelism == 1) {
-            // Fast path: no merge, no per-doc round-robin overhead. Equivalent to the prior
-            // single-threaded reconstruction loop.
-            final SegmentTermIndex singleTermIndex = workerTermIndexes.get(0);
-            return Flux.fromIterable(allDocIds)
-                .flatMapSequential(docIdx -> Mono.defer(() -> readOneDoc(
-                        workerReaders.get(0), docIdx, segmentDocBase, getSegmentReaderDebugInfo,
-                        indexDirectoryPath, operation, mappingContext, singleTermIndex, useRecoverySource))
-                    .subscribeOn(LUCENE_IO_SCHEDULER), 1, 1)
-                .doFinally(sig -> singleTermIndex.close());
-        }
-
-        // Round-robin partition into N worker buckets. We materialize per-worker lists up
-        // front rather than using groupBy to avoid Reactor's groupBy backpressure quirks
-        // (groupBy can stall if any single group buffers above the prefetch limit).
-        final List<List<Integer>> workerBuckets = new ArrayList<>(parallelism);
-        for (int i = 0; i < parallelism; i++) {
-            workerBuckets.add(new ArrayList<>(allDocIds.size() / parallelism + 1));
-        }
-        for (int i = 0; i < allDocIds.size(); i++) {
-            workerBuckets.get(i % parallelism).add(allDocIds.get(i));
-        }
-
-        List<Flux<LuceneDocumentChange>> workerFluxes = new ArrayList<>(parallelism);
-        for (int w = 0; w < parallelism; w++) {
-            final LuceneLeafReader workerReader = workerReaders.get(w);
-            final List<Integer> bucket = workerBuckets.get(w);
-            final int workerId = w;
-            final SegmentTermIndex workerTermIndex = workerTermIndexes.get(w);
-            workerFluxes.add(
-                Flux.fromIterable(bucket)
-                    .concatMap(docIdx -> Mono.fromCallable(() -> readOneDocBlocking(
-                            workerReader, docIdx, segmentDocBase, getSegmentReaderDebugInfo,
-                            indexDirectoryPath, operation, mappingContext, workerTermIndex, useRecoverySource))
-                        .subscribeOn(LUCENE_IO_SCHEDULER))
-                    .filter(java.util.Objects::nonNull)
-                    .doOnSubscribe(s -> log.atDebug().setMessage("worker {} subscribing on segment {} ({} docs)")
-                            .addArgument(workerId)
-                            .addArgument(() -> readerAndBase.getReader().getSegmentName())
-                            .addArgument(bucket.size())
-                            .log())
-            );
-        }
-
-        // mergeOrdered preserves luceneDocNumber order across worker fluxes by pulling one
-        // element per source flux at a time, picking the smallest by comparator, and
-        // emitting in sorted order. Since each worker emits in strictly-ascending docId
-        // order and worker buckets partition the domain, the global merged stream is
-        // strictly-ascending in luceneDocNumber.
-        @SuppressWarnings("unchecked")
-        Flux<LuceneDocumentChange>[] workerFluxArray = workerFluxes.toArray(new Flux[0]);
-        return Flux.mergeOrdered(
-                java.util.Comparator.comparingInt((LuceneDocumentChange c) -> c.luceneDocNumber),
-                workerFluxArray)
-            .doFinally(sig -> workerTermIndexes.forEach(SegmentTermIndex::close));
+        // When sourceless reconstruction is active (mappingContext != null), the per-segment
+        // SegmentTermIndex holds forward-only streaming cursors that require monotonically
+        // non-decreasing docIds. flatMapSequential preserves output ORDER but subscribes
+        // inner publishers concurrently — concurrent advance from out-of-order docIds throws
+        // IllegalStateException, which getDocument's catch (RuntimeException) swallows by
+        // returning null, silently dropping documents. Serialize the inner pipeline when
+        // sourceless to honor the cursor's monotonic-docId contract. For stored-source
+        // (non-sourceless) reads the cursor is unused, so we keep the parallel fast path.
+        int innerConcurrency = (mappingContext != null) ? 1 : SEGMENT_READ_CONCURRENCY;
+        return Flux.fromStream(idxStream.boxed())
+            .flatMapSequential(docIdx -> Mono.defer(() -> {
+                    try {
+                        LuceneDocumentChange document = LuceneReader.getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex, useRecoverySource);
+                        return Mono.justOrEmpty(document);
+                    } catch (Exception e) {
+                        log.atError().setMessage("Error reading document from reader {} with index: {}")
+                            .addArgument(getSegmentReaderDebugInfo)
+                            .addArgument(docIdx)
+                            .setCause(e)
+                            .log();
+                        return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
+                            + " from segment " + getSegmentReaderDebugInfo.get(), e));
+                    }
+                }).subscribeOn(LUCENE_IO_SCHEDULER), innerConcurrency, 1)
+            .doFinally(sig -> termIndex.close());
     }
 
     /**
-     * Per-doc read entry point used by both the N=1 fast path and the N>1 worker path.
-     * Throws unchecked on failure; callers that need null-on-error should use
-     * {@link #readOneDocBlocking}.
+     * Iterate live documents in a segment with bounded concurrency, applying a custom
+     * per-document function. Used by Solr to share the live-doc filtering and concurrency
+     * logic without coupling to ES-specific document extraction.
      */
-    private static List<LuceneLeafReader> initWorkerReaders(LuceneLeafReader segmentReader,
-            int parallelism, FieldMappingContext mappingContext) throws IOException {
-        List<LuceneLeafReader> workerReaders = new ArrayList<>(parallelism);
-        workerReaders.add(segmentReader);
-        for (int i = 1; i < parallelism; i++) {
-            workerReaders.add(segmentReader.newView());
-        }
-        if (mappingContext != null) {
-            List<DocValueFieldInfo> dvFields = new ArrayList<>();
-            for (DocValueFieldInfo fi : segmentReader.getDocValueFields()) {
-                dvFields.add(fi);
-            }
-            for (LuceneLeafReader workerReader : workerReaders) {
-                workerReader.initDocValueIterators(dvFields);
-            }
-        }
-        return workerReaders;
+    public static <T> Flux<T> readLiveDocsFromSegment(
+        ReaderAndBase readerAndBase,
+        int docStartingId,
+        int concurrency,
+        reactor.core.scheduler.Scheduler scheduler,
+        DocReader<T> docReader
+    ) {
+        var segmentReader = readerAndBase.getReader();
+        var liveDocs = readerAndBase.getLiveDocs();
+        int segmentDocBase = readerAndBase.getDocBaseInParent();
+        int startDocIdInSegment = (docStartingId <= segmentDocBase) ? 0 : docStartingId - segmentDocBase;
+
+        var idxStream = (liveDocs != null) ? liveDocs.stream().filter(idx -> idx >= startDocIdInSegment) :
+            IntStream.range(startDocIdInSegment, segmentReader.maxDoc());
+        return Flux.fromStream(idxStream.boxed())
+            .flatMapSequential(docIdx -> Mono.defer(() ->
+                docReader.read(segmentReader, docIdx, segmentDocBase)
+            ).subscribeOn(scheduler), concurrency, 1);
     }
 
-    private static Mono<LuceneDocumentChange> readOneDoc(LuceneLeafReader reader, int docIdx, int segmentDocBase,
-            Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
-            FieldMappingContext mappingContext, SegmentTermIndex termIndex, boolean useRecoverySource) {
-        try {
-            LuceneDocumentChange document = LuceneReader.getDocument(reader, docIdx, true, segmentDocBase,
-                    getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex, useRecoverySource);
-            return Mono.justOrEmpty(document);
-        } catch (Exception e) {
-            log.atError().setMessage("Error reading document from reader {} with index: {}")
-                .addArgument(getSegmentReaderDebugInfo)
-                .addArgument(docIdx)
-                .setCause(e)
-                .log();
-            return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
-                + " from segment " + getSegmentReaderDebugInfo.get(), e));
-        }
-    }
-
-    /** Synchronous variant for the N>1 worker path. Returns null on skipped documents. */
-    private static LuceneDocumentChange readOneDocBlocking(LuceneLeafReader reader, int docIdx, int segmentDocBase,
-            Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
-            FieldMappingContext mappingContext, SegmentTermIndex termIndex, boolean useRecoverySource) {
-        return LuceneReader.getDocument(reader, docIdx, true, segmentDocBase,
-                getSegmentReaderDebugInfo, indexDirectoryPath, operation, mappingContext, termIndex, useRecoverySource);
-    }
-
-    /** Backwards-compatible overload without mapping context */
-    public static Flux<LuceneDocumentChange> readDocsFromSegment(ReaderAndBase readerAndBase, int docStartingId,
-                                                Path indexDirectoryPath, DocumentChangeType operation) {
-        return readDocsFromSegment(readerAndBase, docStartingId, indexDirectoryPath, operation, null);
-    }
-
-    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
-            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
-            FieldMappingContext mappingContext) {
-        return getDocument(reader, luceneDocId, isLive, segmentDocBase, getSegmentReaderDebugInfo,
-            indexDirectoryPath, operation, mappingContext, null, false);
-    }
-
-    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
-            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation,
-            FieldMappingContext mappingContext, SegmentTermIndex termIndex) {
-        return getDocument(reader, luceneDocId, isLive, segmentDocBase, getSegmentReaderDebugInfo,
-            indexDirectoryPath, operation, mappingContext, termIndex, false);
+    @FunctionalInterface
+    public interface DocReader<T> {
+        Mono<T> read(LuceneLeafReader reader, int docIdx, int segmentDocBase);
     }
 
     public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase,
@@ -383,12 +240,12 @@ public class LuceneReader {
                 String fieldName = field.name();
                 switch (fieldName) {
                     case "_id": {
-                        // Lucene >= 7 (ES 6+ created segments)
+                        // ES 6+ stores id separately; pre-6 baked type+id into _uid
                         openSearchDocId = field.asUid();
                         break;
                     }
                     case "_uid": {
-                        // Lucene <= 6 (ES <= 5 created segments)
+                        // ES 5 and earlier: _uid = "type#id"
                         var combinedTypeId = field.stringValue().split("#", 2);
                         type = combinedTypeId[0];
                         openSearchDocId = combinedTypeId[1];
@@ -400,8 +257,7 @@ public class LuceneReader {
                         break;
                     }
                     case "_recovery_source": {
-                        // ES 7+ / OpenSearch soft-deletes field. When opted in, treat as _source
-                        // for documents where _source is absent (disabled or filtered).
+                        // Only use as fallback when _source is missing (disabled or filtered)
                         if (useRecoverySource && sourceBytes == null) {
                             sourceBytes = field.utf8Value();
                         }
@@ -510,9 +366,4 @@ public class LuceneReader {
         return reconstructed.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
-    /** Backwards-compatible overload without mapping context */
-    public static LuceneDocumentChange getDocument(LuceneLeafReader reader, int luceneDocId, boolean isLive, int segmentDocBase, 
-            final Supplier<String> getSegmentReaderDebugInfo, Path indexDirectoryPath, DocumentChangeType operation) {
-        return getDocument(reader, luceneDocId, isLive, segmentDocBase, getSegmentReaderDebugInfo, indexDirectoryPath, operation, null);
-    }
 }

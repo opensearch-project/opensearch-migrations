@@ -12,7 +12,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
@@ -635,33 +634,36 @@ public class SourcelessMigrationTest extends SourceTestBase {
                 workItemRef::set
             )) {
                 var clientFactory = new OpenSearchClientFactory(connectionContext);
-                return RfsMigrateDocuments.runWithPipeline(
-                    extractor,
-                    clientFactory.determineVersionAndCreate(),
-                    snapshotName,
-                    tempDir,
-                    () -> docTransformer,
-                    false,
-                    DocumentExceptionAllowlist.empty(),
-                    1000,
-                    Long.MAX_VALUE,
-                    10,
-                    0,              // no shard size limit in tests
-                    progressCursor,
-                    workCoordinator,
-                    Duration.ofMinutes(10),
-                    processManager,
-                    null,           // no WorkItemTimeProvider in tests
-                    sourceResourceProvider.getIndexMetadata(),
-                    indexAllowlist,
-                    context,
-                    new AtomicReference<>(),
-                    null,           // no previous snapshot
-                    null,           // no delta mode
-                    true,           // ENABLE SOURCELESS MIGRATIONS
-                    false,          // don't use _recovery_source
-                    false           // don't emit _type
-                );
+                var indexMetadataFactory = sourceResourceProvider.getIndexMetadata();
+                var cache = new java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<org.opensearch.migrations.bulkload.lucene.FieldMappingContext>>();
+                var sourceBuilder = org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource.builder(extractor, snapshotName, tempDir)
+                    .sourcelessMappingContextProvider(indexName -> cache.computeIfAbsent(indexName, name -> {
+                        try {
+                            var meta = indexMetadataFactory.fromRepo(snapshotName, name);
+                            if (!meta.needsSourceReconstruction()) return java.util.Optional.empty();
+                            return java.util.Optional.of(new org.opensearch.migrations.bulkload.lucene.FieldMappingContext(meta.getMappings()));
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    }).orElse(null));
+                var documentSource = sourceBuilder.build();
+
+                var scopedWorkCoordinator = RfsMigrateDocuments.prepareWorkCoordination(
+                    workCoordinator, processManager, documentSource,
+                    indexAllowlist, context);
+
+                var runner = org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap.builder()
+                    .documentSource(documentSource)
+                    .targetClient(clientFactory.determineVersionAndCreate())
+                    .maxDocsPerBatch(1000)
+                    .maxBytesPerBatch(Long.MAX_VALUE)
+                    .batchConcurrency(10)
+                    .transformerSupplier(() -> docTransformer)
+                    .workCoordinator(scopedWorkCoordinator)
+                    .maxInitialLeaseDuration(Duration.ofMinutes(10))
+                    .cursorConsumer(progressCursor::set)
+                    .build();
+                return runner.migrateOneShard(context::createReindexContext);
             }
         } finally {
             FileSystemUtils.deleteDirectories(tempDir.toString());

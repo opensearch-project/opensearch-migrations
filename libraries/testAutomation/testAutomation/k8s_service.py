@@ -1,5 +1,6 @@
 from subprocess import CompletedProcess
 
+from dataclasses import dataclass
 from kubernetes import client, config, stream
 from kubernetes.client import V1Pod
 from kubernetes.stream.ws_client import WSClient
@@ -7,7 +8,7 @@ import logging
 import shlex
 import subprocess
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 class HelmCommandFailed(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class MigrationConsolePodIdentity:
+    name: str
+    uid: str
 
 
 class K8sService:
@@ -106,7 +113,7 @@ class K8sService:
                 return False
         return True
 
-    def get_migration_console_pod_id(self) -> str:
+    def _get_migration_console_pod(self) -> V1Pod:
         logger.debug("Retrieving the latest migration console pod...")
         pods = self.k8s_client.list_namespaced_pod(
             namespace=self.namespace,
@@ -118,66 +125,116 @@ class K8sService:
         if not pods:
             raise RuntimeError("No running migration console pod found.")
 
-        console_pod_id = pods[-1].metadata.name
-        return console_pod_id
+        return pods[-1]
 
-    def exec_background_cmd(self, command_list: List, log_file: str, exit_code_file: str) -> None:
+    def get_migration_console_pod_identity(self) -> MigrationConsolePodIdentity:
+        pod = self._get_migration_console_pod()
+        return MigrationConsolePodIdentity(name=pod.metadata.name, uid=pod.metadata.uid)
+
+    def get_migration_console_pod_id(self) -> str:
+        return self.get_migration_console_pod_identity().name
+
+    def exec_background_cmd(self, command_list: List, log_file: str,
+                            exit_code_file: str) -> MigrationConsolePodIdentity:
         """Launch a command in the background inside the migration console pod.
 
         The command's output is written to log_file so Jenkins can tail it.
         On completion, the exit code is written to exit_code_file.
         """
+        pod_identity = self.get_migration_console_pod_identity()
         inner_cmd = " ".join(shlex.quote(arg) for arg in command_list)
         # Clean up stale files from any previous run
         self.exec_migration_console_cmd(
             command_list=["sh", "-c", f"rm -f {log_file} {exit_code_file}"],
-            unbuffered=False)
+            unbuffered=False,
+            console_pod_id=pod_identity.name)
         script = f"{inner_cmd} > {shlex.quote(log_file)} 2>&1; echo $? > {shlex.quote(exit_code_file)}"
         wrapper = f"nohup sh -c {shlex.quote(script)} > /dev/null 2>&1 &"
-        self.exec_migration_console_cmd(command_list=["sh", "-c", wrapper], unbuffered=False)
+        self.exec_migration_console_cmd(
+            command_list=["sh", "-c", wrapper],
+            unbuffered=False,
+            console_pod_id=pod_identity.name)
         time.sleep(2)
         check = self.exec_migration_console_cmd(
             command_list=["sh", "-c", f"test -f {log_file} && echo ok || echo missing"],
-            unbuffered=False)
+            unbuffered=False,
+            console_pod_id=pod_identity.name)
         if "missing" in (check or ""):
             raise RuntimeError(f"Background command failed to start — {log_file} not created")
-        logger.info(f"Background command launched. Log: {log_file}, exit code: {exit_code_file}")
+        logger.info(
+            f"Background command launched in {pod_identity.name} uid={pod_identity.uid}. "
+            f"Log: {log_file}, exit code: {exit_code_file}"
+        )
+        return pod_identity
 
     def poll_cmd_completion(self, log_file: str, exit_code_file: str,
-                            poll_interval: int = 30, timeout: int = 0) -> int:
+                            poll_interval: int = 30, timeout: int = 0,
+                            expected_console_pod: Optional[MigrationConsolePodIdentity] = None) -> int:
         """Poll until a background command completes, tailing its log for Jenkins console output.
 
         Returns the exit code of the background command.
         """
         start_time = time.time()
         next_byte = 0
+        log_was_observed = False
+        state_was_observed = False
+        consecutive_missing_state_polls = 0
+        consecutive_missing_pod_polls = 0
         while True:
             if timeout > 0 and (time.time() - start_time) > timeout:
                 raise TimeoutError(f"Background command did not complete within {timeout}s")
             time.sleep(poll_interval)
 
+            poll_console_pod_id = None
+            if expected_console_pod:
+                try:
+                    current_pod = self.get_migration_console_pod_identity()
+                    consecutive_missing_pod_polls = 0
+                except Exception as e:
+                    consecutive_missing_pod_polls += 1
+                    logger.info(f"Migration console pod identity check failed (may be transient): {e}")
+                    if consecutive_missing_pod_polls >= 2:
+                        raise RuntimeError(
+                            "Background command state was lost because no running migration-console pod "
+                            f"was found while polling {log_file}, {exit_code_file}"
+                        ) from e
+                else:
+                    if current_pod.uid != expected_console_pod.uid:
+                        raise RuntimeError(
+                            "Background command state was lost because migration-console was replaced. "
+                            f"Started in {expected_console_pod.name} uid={expected_console_pod.uid}; "
+                            f"now polling {current_pod.name} uid={current_pod.uid}. "
+                            f"Pod-local files are not recoverable: {log_file}, {exit_code_file}"
+                        )
+                    poll_console_pod_id = current_pod.name
+
             # Print new log bytes since last poll (no filtering/rewrapping for Jenkins parity)
             try:
                 resp = self.exec_migration_console_cmd(
                     command_list=["tail", "-c", f"+{next_byte + 1}", log_file],
-                    unbuffered=False)
+                    unbuffered=False,
+                    console_pod_id=poll_console_pod_id)
                 if resp:
                     print(resp, end="", flush=True)
                     next_byte += len(resp.encode("utf-8"))
+                    log_was_observed = True
             except Exception as e:
                 logger.info(f"Log tail failed (may be transient): {e}")
 
             # Check if the command has finished
             try:
                 result = self.exec_migration_console_cmd(
-                    command_list=["cat", exit_code_file], unbuffered=False)
+                    command_list=["cat", exit_code_file],
+                    unbuffered=False,
+                    console_pod_id=poll_console_pod_id)
                 if result and result.strip():
                     exit_code = int(result.strip())
                     # Print any remaining log output
                     try:
                         resp = self.exec_migration_console_cmd(
                             command_list=["tail", "-c", f"+{next_byte + 1}", log_file],
-                            unbuffered=False)
+                            unbuffered=False,
+                            console_pod_id=poll_console_pod_id)
                         if resp:
                             print(resp, end="", flush=True)
                     except Exception:
@@ -188,9 +245,39 @@ class K8sService:
                 # exit_code_file doesn't exist yet — command still running
                 pass
 
-    def exec_migration_console_cmd(self, command_list: List, unbuffered: bool = True) -> str | WSClient:
+            try:
+                state = self.exec_migration_console_cmd(
+                    command_list=[
+                        "sh",
+                        "-c",
+                        f"if test -f {shlex.quote(log_file)} || test -f {shlex.quote(exit_code_file)}; "
+                        "then echo present; else echo missing; fi",
+                    ],
+                    unbuffered=False,
+                    console_pod_id=poll_console_pod_id)
+                state_exists = "present" in (state or "")
+            except Exception:
+                state = None
+                state_exists = False
+
+            if state_exists:
+                state_was_observed = True
+                consecutive_missing_state_polls = 0
+                continue
+
+            if state_was_observed or log_was_observed or next_byte > 0:
+                consecutive_missing_state_polls += 1
+                if consecutive_missing_state_polls >= 2:
+                    raise RuntimeError(
+                        "Background command state was lost after the command started. "
+                        "This usually means the migration-console pod was replaced and "
+                        f"its pod-local files disappeared: {log_file}, {exit_code_file}"
+                    )
+
+    def exec_migration_console_cmd(self, command_list: List, unbuffered: bool = True,
+                                   console_pod_id: Optional[str] = None) -> str | WSClient:
         """Executes a command inside the latest migration console pod"""
-        console_pod_id = self.get_migration_console_pod_id()
+        console_pod_id = console_pod_id or self.get_migration_console_pod_id()
         printable_cmd = " ".join(command_list)
         logger.info(f"Executing command [{printable_cmd}] in pod: {console_pod_id}")
 

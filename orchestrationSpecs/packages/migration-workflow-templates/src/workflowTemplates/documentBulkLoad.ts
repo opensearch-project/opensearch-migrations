@@ -508,7 +508,7 @@ export const DocumentBulkLoad = addDocumentBulkLoadTransformTemplates(documentBu
                         rfsCoordinatorConfig
                     }))
 
-                .addStep("waitForSnapshotMigration", ResourceManagement, "waitForSnapshotMigration", c =>
+                .addStep("waitIndefinitelyForSnapshotMigration", ResourceManagement, "waitIndefinitelyForSnapshotMigration", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
                         resourceName: b.inputs.crdName,

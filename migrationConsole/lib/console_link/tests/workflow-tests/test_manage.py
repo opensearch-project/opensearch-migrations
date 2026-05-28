@@ -152,7 +152,7 @@ async def test_waiter_loop_and_rediscovery(mock_workflow_with_two_pods):
         mock_waiter.trigger.reset_mock()
 
         assert await wait_until(pilot, lambda: "Waiting for Workflow" in get_clean_text_label(tree.root))
-        assert mock_waiter.trigger.call_count >= 1
+        assert await wait_until(pilot, lambda: mock_waiter.trigger.call_count >= 1)
 
 
 @pytest.mark.asyncio

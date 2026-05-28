@@ -394,6 +394,18 @@ describe('MigrationConfigTransformer validation', () => {
         expect(normalized.traffic?.proxies?.proxy1).not.toHaveProperty("kafkaTopic");
     });
 
+    it('should preserve the expert proxy Service type setting', async () => {
+        const configWithClusterIpProxy = cloneBaseConfig();
+        configWithClusterIpProxy.traffic.proxies.proxy1.proxyConfig.serviceType = "ClusterIP";
+
+        const result = await transformer.processFromObject(configWithClusterIpProxy);
+
+        expect(result.proxies?.[0]?.proxyConfig).toMatchObject({
+            listenPort: 9201,
+            serviceType: "ClusterIP",
+        });
+    });
+
     it('should derive managed Kafka auth profile for auto-created SCRAM clusters', async () => {
         const configWithScramKafka = {
             ...baseConfig,

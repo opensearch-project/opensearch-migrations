@@ -1,0 +1,164 @@
+# templates/migrationsResources
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-install-migrations-resources
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 3
+  activeDeadlineSeconds: 900
+  podFailurePolicy:
+    rules:
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+      - action: FailJob
+        onExitCodes:
+          containerName: migration-console-for-resources
+          operator: NotIn
+          values: [0]
+  template:
+    metadata:
+      labels:
+        app: install-migrations-resources
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      serviceAccountName: {{ .Values.installer.serviceAccount.name }}
+      restartPolicy: Never
+      containers:
+        - name: migration-console-for-resources
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}
+          imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              set -eux
+              echo "Installing migration resources and Argo workflow templates."
+              NAMESPACE="{{ .Release.Name }}"
+              APP_NAME="{{ .Release.Name }}"
+              OWNER="{{ .Release.Name }}"
+              VERSION="0.0.1"
+
+              apply_workflows() {
+                dir="$1"
+                echo "Installing workflow templates from $dir"
+                (
+                  cd "$dir"
+                  for f in *.yaml; do
+                    [ -f "$f" ] || continue
+                    resource_json="/tmp/${f%.yaml}-resource.json"
+                    labelled_json="/tmp/${f%.yaml}-labelled.json"
+                    kubectl create --dry-run=client -o json -f "$f" > "$resource_json"
+                    jq --arg app "$APP_NAME" \
+                        --arg version "$VERSION" \
+                        --arg managedBy "$OWNER" \
+                        '.metadata.labels.app = $app |
+                        .metadata.labels.version = $version |
+                        .metadata.labels."managed-by" = $managedBy' \
+                        "$resource_json" > "$labelled_json"
+                    kubectl apply -f "$labelled_json" -n "$NAMESPACE"
+                  done
+                )
+              }
+
+              apply_migration_resources() {
+                dir="${MIGRATION_RESOURCES_DIR:-/root/migrationResources}"
+                generated_selector="migrations.opensearch.org/generated=true"
+                echo "Installing generated migration CRDs and admission policies from $dir"
+
+                kubectl apply -f "$dir/migrationCrds.yaml"
+                crds_json="/tmp/migration-crds.json"
+                crd_names="/tmp/migration-crd-names.txt"
+                kubectl create --dry-run=client -o json -f "$dir/migrationCrds.yaml" > "$crds_json"
+                jq -r 'if .items then .items[].metadata.name else .metadata.name end' "$crds_json" > "$crd_names"
+                while read -r crd_name; do
+                  [ -n "$crd_name" ] || continue
+                  kubectl wait --for=condition=Established --timeout=60s "crd/$crd_name"
+                done < "$crd_names"
+
+                kubectl delete validatingadmissionpolicybindings.admissionregistration.k8s.io \
+                  -l "$generated_selector" --ignore-not-found
+                kubectl delete validatingadmissionpolicies.admissionregistration.k8s.io \
+                  -l "$generated_selector" --ignore-not-found
+                kubectl apply -f "$dir/validatingAdmissionPolicies.yaml"
+                vap_json="/tmp/validating-admission-policies.json"
+                vap_resources="/tmp/validating-admission-policy-resources.txt"
+                kubectl create --dry-run=client -o json -f "$dir/validatingAdmissionPolicies.yaml" > "$vap_json"
+                jq -r 'if .items then .items[] | "\(.kind)/\(.metadata.name)" else "\(.kind)/\(.metadata.name)" end' \
+                  "$vap_json" > "$vap_resources"
+                while read -r resource; do
+                  [ -n "$resource" ] || continue
+                  case "$resource" in
+                    ValidatingAdmissionPolicy/*)
+                      kubectl get "validatingadmissionpolicies.admissionregistration.k8s.io/${resource#*/}"
+                      ;;
+                    ValidatingAdmissionPolicyBinding/*)
+                      kubectl get "validatingadmissionpolicybindings.admissionregistration.k8s.io/${resource#*/}"
+                      ;;
+                    *)
+                      echo "Skipping admission policy verification for unsupported resource kind: $resource"
+                      ;;
+                  esac
+                done < "$vap_resources"
+              }
+              apply_migration_resources
+              apply_workflows "workflows"
+              apply_workflows "lib/integ_test/testWorkflows"
+---
+# templates/remove-argo-migration-templates
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-remove-argo-migration-templates
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  podFailurePolicy:
+    rules:
+      - action: Ignore
+        onPodConditions:
+          - type: DisruptionTarget
+      - action: FailJob
+        onExitCodes:
+          containerName: migration-console-for-resources
+          operator: NotIn
+          values: [0]
+  template:
+    metadata:
+      labels:
+        app: remove-argo-migration-templates
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      serviceAccountName: {{ .Values.installer.serviceAccount.name }}
+      restartPolicy: Never
+      containers:
+        - name: migration-console-for-resources
+          image: {{ include "migration.image" (dict "root" . "image" .Values.images.migrationConsole) }}
+          imagePullPolicy: {{ .Values.images.migrationConsole.pullPolicy }}
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              set -e
+              echo "Checking for Argo WorkflowTemplates managed by {{ .Release.Name }}..."
+              templates=$(kubectl get workflowtemplates.argoproj.io -l managed-by={{ .Release.Name }} -o name || true)
+
+              if [ -z "$templates" ]; then
+                echo "No matching WorkflowTemplates found. Nothing to delete."
+              else
+                echo "Deleting WorkflowTemplates:"
+                echo "$templates"
+                echo "$templates" | xargs kubectl delete
+              fi

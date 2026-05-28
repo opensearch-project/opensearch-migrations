@@ -74,6 +74,11 @@ def pytest_addoption(parser):
                      help="Digest-pinned transform image containing the basic transform fixture bank")
     parser.addoption("--transform_image_sequence", action="store", default="",
                      help="Digest-pinned transform image containing the sequence transform fixture bank")
+    parser.addoption("--capture_proxy_service_type", action="store", default="LoadBalancer",
+                     choices=("LoadBalancer", "ClusterIP"),
+                     help="Capture proxy Kubernetes Service type for CDC workflow tests")
+    parser.addoption("--dump_all_workflow_output_artifacts", action="store_true", default=False,
+                     help="On failure, additionally read every output artifact from current workflow nodes")
 
 
 def pytest_configure(config):
@@ -108,13 +113,15 @@ def pytest_generate_tests(metafunc):
         observed_packet_timeout = metafunc.config.getoption("observed_packet_timeout")
         transform_image_basic = metafunc.config.getoption("transform_image_basic")
         transform_image_sequence = metafunc.config.getoption("transform_image_sequence")
+        capture_proxy_service_type = metafunc.config.getoption("capture_proxy_service_type")
         user_args = MATestUserArguments(source_version=source_version, target_version=target_version,
                                         target_type=target_type, unique_id=unique_id, reuse_clusters=reuse_clusters,
                                         image_registry_prefix=image_registry_prefix,
                                         speedup_factor=speedup_factor,
                                         observed_packet_timeout=observed_packet_timeout,
                                         transform_image_basic=transform_image_basic,
-                                        transform_image_sequence=transform_image_sequence)
+                                        transform_image_sequence=transform_image_sequence,
+                                        capture_proxy_service_type=capture_proxy_service_type)
         test_cases_param = _generate_test_cases(user_args=user_args, test_ids_list=test_ids_list)
         metafunc.config.test_summary["expected"] = len(test_cases_param)
         if not test_cases_param and not test_ids_list:
@@ -224,3 +231,8 @@ def unique_id(pytestconfig):
 @pytest.fixture
 def keep_workflows(pytestconfig):
     return pytestconfig.getoption("keep_workflows")
+
+
+@pytest.fixture
+def dump_all_workflow_output_artifacts(pytestconfig):
+    return pytestconfig.getoption("dump_all_workflow_output_artifacts")

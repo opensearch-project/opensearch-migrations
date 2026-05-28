@@ -127,12 +127,10 @@ class SolrBackupSourceTest {
     }
 
     @Test
-    void fallsBackToSingleShardForEmptyDir() throws IOException {
-        // Empty directory — falls back to treating it as single shard
+    void throwsOnEmptyDir() {
         var source = new SolrBackupSource(tempDir, "test", emptySchema(), 8);
-        var partitions = source.listPartitions("test");
-
-        assertThat("Fallback to single shard", partitions.size(), equalTo(1));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+            () -> source.listPartitions("test"));
     }
 
     @Test

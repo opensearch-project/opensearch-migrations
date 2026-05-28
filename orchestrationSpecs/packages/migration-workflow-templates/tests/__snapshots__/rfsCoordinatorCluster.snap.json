@@ -122,6 +122,7 @@
           "setOwnerReference": false,
           "successCondition": "status.readyReplicas > 0"
         },
+        "activeDeadlineSeconds": 1200,
         "retryStrategy": {
           "limit": "6",
           "retryPolicy": "OnError",
