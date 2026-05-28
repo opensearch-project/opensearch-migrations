@@ -185,6 +185,7 @@ export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
 );
 export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick({
     loggingConfigurationOverrideConfigMap: true,
+    serviceType: true,
     internetFacing: true,
     podReplicas: true,
     resources: true,

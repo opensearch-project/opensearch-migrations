@@ -6,8 +6,7 @@ import time
 
 from .cdc_base import (
     MATestBase, MigrationType, MATestUserArguments,
-    CDC_SOURCE_TARGET_COMBINATIONS, REPLAYER_LABEL_SELECTOR, PROXY_LABEL_SELECTOR,
-    wait_for_pod_ready, wait_for_replayer_consuming,
+    CDC_SOURCE_TARGET_COMBINATIONS, wait_for_proxy_ready, wait_for_replayer_consuming,
     make_proxy_cluster,
 )
 from .ma_argo_test_base import ClusterVersionCombinationUnsupported
@@ -99,6 +98,7 @@ class Test0042CdcFullE2eMountableTransforms(MATestBase):
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
         self.workflow_template = "cdc-full-e2e-imported-clusters"
+        self.parameters["capture-proxy-service-type"] = self.capture_proxy_service_type
         if not self.transform_image_basic or not self.transform_image_sequence:
             raise ValueError("Test0042 requires --transform_image_basic and --transform_image_sequence")
 
@@ -183,10 +183,8 @@ class Test0042CdcFullE2eMountableTransforms(MATestBase):
         ns = self.argo_service.namespace
 
         logger.info("Waiting for capture-proxy to be ready...")
-        wait_for_pod_ready(ns, PROXY_LABEL_SELECTOR, timeout_seconds)
+        wait_for_proxy_ready(ns, timeout_seconds)
 
-        logger.info("Waiting for replayer to start...")
-        wait_for_pod_ready(ns, REPLAYER_LABEL_SELECTOR, timeout_seconds)
         logger.info("Waiting for replayer to join Kafka consumer group...")
         wait_for_replayer_consuming(namespace=ns, timeout_seconds=300)
 

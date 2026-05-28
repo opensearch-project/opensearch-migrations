@@ -42,6 +42,12 @@ pipenv run app --test-ids=0001 --source-version=ES_7.10 --target-version=OS_2.19
 pipenv run app --test-ids=0001,0004 --source-version=ES_7.10 --target-version=OS_2.19
 ```
 
+For local kind/minikube CDC tests that deploy a capture proxy, disable external load balancer provisioning:
+```bash
+pipenv run app --test-ids=0031 --source-version=ES_8.19 --target-version=OS_3.1 \
+  --capture-proxy-service-type=ClusterIP
+```
+
 ## Development Mode
 
 The `--dev` flag combines options for fast iteration: `--skip-delete`, `--reuse-clusters`, `--keep-workflows`.

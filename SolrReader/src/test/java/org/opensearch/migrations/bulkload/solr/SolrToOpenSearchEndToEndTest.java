@@ -33,6 +33,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.hamcrest.CoreMatchers.equalTo;
+import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.closeTo;
 import static org.hamcrest.Matchers.greaterThan;
@@ -184,7 +185,7 @@ public class SolrToOpenSearchEndToEndTest {
             assertThat("stored_long value", doc.path("stored_long").asLong(), equalTo(1234567890L));
             assertThat("stored_float value", (double) doc.path("stored_float").floatValue(), closeTo(3.14, 0.01));
             assertThat("stored_double value", doc.path("stored_double").doubleValue(), closeTo(2.718281828, 0.0001));
-            assertThat("stored_date value", doc.path("stored_date").asLong(), equalTo(1705314600000L));
+            assertThat("stored_date value", doc.path("stored_date").asText(), equalTo("2024-01-15T10:30:00Z"));
             assertThat("stored_bool value", doc.path("stored_bool").asBoolean(), equalTo(true));
 
             assertTrue(doc.path("multi_string").isArray(), "multi_string should be an array");
@@ -422,6 +423,103 @@ public class SolrToOpenSearchEndToEndTest {
 
             assertThat("Should have cursors from both shards", cursors.size(), greaterThan(1));
             verifyDocCount(target, COLLECTION_NAME, 12); // 5 + 7
+        }
+    }
+
+    /**
+     * E2E (Solr 6 / 7): non-incremental "shard-per-directory" backup layout.
+     *
+     * <p>Solr 6 and 7's only Cloud-API BACKUP option is non-incremental, and copying the
+     * raw on-disk SolrCloud node data also yields the same shape:
+     * <pre>
+     *   &lt;collection&gt;/
+     *     shard1/data/index/segments_N + Lucene files
+     *     shard2/data/index/segments_N + Lucene files
+     *     zk_backup/configs/&lt;configName&gt;/...   (bare, no numeric suffix on Solr 6/7)
+     * </pre>
+     *
+     * <p>This test asserts that all three code paths agree on the same shard count and
+     * locate the bare {@code zk_backup/} sibling:
+     * <ol>
+     *   <li>{@link SolrBackupLayout#findLatestZkBackup(Path)} bare-{@code zk_backup} fallback</li>
+     *   <li>{@link SolrBackupLayout#countShards(Path)} directory-based fallback (no
+     *       {@code shard_backup_metadata/}, so it descends to {@code shardN/data/index/})</li>
+     *   <li>{@link SolrBackupSource#discoverShardDirs()} multi-shard path</li>
+     * </ol>
+     * and finishes with a full migration so docs round-trip end-to-end.
+     */
+    @ParameterizedTest(name = "shard-per-dir non-incremental: {0} → {1}")
+    @MethodSource("solr6And7ToOpenSearch")
+    void shardPerDirectoryNonIncrementalLayoutMigration(
+        SolrClusterContainer.SolrVersion solrVersion,
+        SearchClusterContainer.ContainerVersion targetVersion
+    ) throws Exception {
+        try (
+            var solr = new SolrClusterContainer(solrVersion);
+            var target = new SearchClusterContainer(targetVersion)
+        ) {
+            solr.start();
+            target.start();
+
+            // Two single-shard standalone backups give us real Lucene segments per shard,
+            // which we then re-assemble into the Solr 6/7 SolrCloud-on-disk layout.
+            var core1 = "spd_core_1";
+            var core2 = "spd_core_2";
+            createSolrCollection(solr, core1);
+            createSolrCollection(solr, core2);
+            populateSolrDocuments(solr, core1, 4, "spd1_");
+            populateSolrDocuments(solr, core2, 6, "spd2_");
+            var shardBackup1 = createAndCopyBackup(solr, core1, "spd_backup_1");
+            var shardBackup2 = createAndCopyBackup(solr, core2, "spd_backup_2");
+
+            // Assemble: <root>/shardN/data/index/<segments + Lucene files>, plus a bare zk_backup/
+            var collectionDir = tempDir.toPath().resolve("solr67_shard_per_dir");
+            Files.createDirectories(collectionDir);
+            var shard1Index = collectionDir.resolve("shard1").resolve("data").resolve("index");
+            var shard2Index = collectionDir.resolve("shard2").resolve("data").resolve("index");
+            copyDirectory(shardBackup1, shard1Index);
+            copyDirectory(shardBackup2, shard2Index);
+
+            // Bare zk_backup/ — no numeric suffix, the Solr 6/7 fallback target.
+            var zkBackup = collectionDir.resolve("zk_backup");
+            Files.createDirectories(zkBackup.resolve("configs").resolve("default"));
+            Files.writeString(
+                zkBackup.resolve("configs").resolve("default").resolve("schema.xml"),
+                "<schema name=\"solr67-spd-fixture\" version=\"1.6\"/>"
+            );
+            // backup.properties is the Solr 6/7 marker file — ensures resolveCollectionDataDir
+            // recognises this as the data dir directly (no descent).
+            Files.writeString(collectionDir.resolve("backup.properties"),
+                "snapshotName=solr67_shard_per_dir\nstartTime=2024-01-15T10:30:00Z\n");
+
+            // (1) findLatestZkBackup: must find the bare zk_backup/ (no numeric suffix).
+            var latestZk = SolrBackupLayout.findLatestZkBackup(collectionDir);
+            assertThat("findLatestZkBackup should resolve bare zk_backup/", latestZk, notNullValue());
+            assertThat("findLatestZkBackup should return the bare zk_backup directory",
+                latestZk.getFileName().toString(), equalTo("zk_backup"));
+
+            // (2) countShards: no shard_backup_metadata/, so the directory-based fallback
+            //     must descend into shardN/data/index/ and count two shards.
+            assertThat("countShards directory fallback should agree with shardN/data/index layout",
+                SolrBackupLayout.countShards(collectionDir), equalTo(2));
+
+            // (3) discoverShardDirs (via listPartitions): multi-shard path with nested data/index
+            //     yields one partition per shard, each pointing at its data/index directory.
+            var schema = fetchSolrSchema(solr, core1);
+            var source = new SolrBackupSource(collectionDir, COLLECTION_NAME, schema, solrVersion.major());
+            var partitions = source.listPartitions(COLLECTION_NAME);
+            assertThat("listPartitions size should match shard count from layout fixture",
+                partitions.size(), equalTo(2));
+
+            // End-to-end: all 4+6 docs migrate from the synthesised shard-per-dir backup.
+            var targetClient = createOpenSearchClient(target);
+            var sink = new OpenSearchDocumentSink(
+                targetClient, null, false, DocumentExceptionAllowlist.empty(), null
+            );
+            var pipeline = new DocumentMigrationPipeline(source, sink, 100, Long.MAX_VALUE, 2, 10);
+            var cursors = pipeline.migrateAll().collectList().block();
+            assertThat("Should have cursors from both shards", cursors.size(), greaterThan(1));
+            verifyDocCount(target, COLLECTION_NAME, 10); // 4 + 6
         }
     }
 

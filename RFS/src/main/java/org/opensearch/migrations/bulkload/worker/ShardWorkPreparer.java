@@ -6,8 +6,7 @@ import java.util.List;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.FilterScheme;
-import org.opensearch.migrations.bulkload.common.SnapshotRepo;
-import org.opensearch.migrations.bulkload.models.IndexMetadata;
+import org.opensearch.migrations.bulkload.pipeline.source.DocumentSource;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
@@ -29,8 +28,7 @@ public class ShardWorkPreparer {
 
     public void run(
         ScopedWorkCoordinator scopedWorkCoordinator,
-        IndexMetadata.Factory metadataFactory,
-        String snapshotName,
+        DocumentSource documentSource,
         List<String> indexAllowlist,
         IRootDocumentMigrationContext rootContext
     ) throws IOException, InterruptedException {
@@ -40,14 +38,13 @@ public class ShardWorkPreparer {
         );
 
         try (var context = rootContext.createDocsMigrationSetupContext()) {
-            setupShardWorkItems(scopedWorkCoordinator, metadataFactory, snapshotName, indexAllowlist, context);
+            setupShardWorkItems(scopedWorkCoordinator, documentSource, indexAllowlist, context);
         }
     }
 
     private void setupShardWorkItems(
         ScopedWorkCoordinator scopedWorkCoordinator,
-        IndexMetadata.Factory metadataFactory,
-        String snapshotName,
+        DocumentSource documentSource,
         List<String> indexAllowlist,
         IDocumentMigrationContexts.IShardSetupAttemptContext context
     ) throws IOException, InterruptedException {
@@ -75,8 +72,7 @@ public class ShardWorkPreparer {
                 log.atInfo().setMessage("Acquired work to set the shard workitems").log();
                 prepareShardWorkItems(
                     scopedWorkCoordinator.workCoordinator,
-                    metadataFactory,
-                    snapshotName,
+                    documentSource,
                     indexAllowlist,
                     context
                 );
@@ -93,49 +89,48 @@ public class ShardWorkPreparer {
     @SneakyThrows
     private static void prepareShardWorkItems(
         IWorkCoordinator workCoordinator,
-        IndexMetadata.Factory metadataFactory,
-        String snapshotName,
+        DocumentSource documentSource,
         List<String> indexAllowlist,
         IDocumentMigrationContexts.IShardSetupAttemptContext context
     ) {
         log.atInfo()
             .setMessage("Setting up the Documents Work Items...")
             .log();
-        SnapshotRepo.Provider repoDataProvider = metadataFactory.getRepoDataProvider();
         var allowedIndexes = FilterScheme.filterByAllowList(indexAllowlist, FilterScheme.FilterContext.INDEX);
-        var indicesInSnapshot = repoDataProvider.getIndicesInSnapshot(snapshotName);
-        if (indicesInSnapshot.isEmpty()) {
+        var collections = documentSource.listCollections();
+        if (collections.isEmpty()) {
             log.atWarn().setMessage("After filtering the snapshot no indices were found.").log();
         }
-        indicesInSnapshot
+        collections
             .stream()
-            .filter(index -> {
-                var accepted = allowedIndexes.test(index.getName());
+            .filter(indexName -> {
+                var accepted = allowedIndexes.test(indexName);
                 if (!accepted) {
                     log.atInfo()
                         .setMessage("None of the documents in index {} will be reindexed, it was not included in the allowlist: {} ")
-                        .addArgument(index.getName())
+                        .addArgument(indexName)
                         .addArgument(indexAllowlist)
                         .log();
                 }
                 return accepted;
             })
-            .forEach(index -> {
-                IndexMetadata indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
+            .forEach(indexName -> {
+                var partitions = documentSource.listPartitions(indexName);
+                var shardCount = partitions.size();
                 log.atInfo()
                     .setMessage("Index {} has {} shards")
-                    .addArgument(indexMetadata.getName())
-                    .addArgument(indexMetadata.getNumberOfShards())
+                    .addArgument(indexName)
+                    .addArgument(shardCount)
                     .log();
-                IntStream.range(0, indexMetadata.getNumberOfShards()).forEach(shardId -> {
+                IntStream.range(0, shardCount).forEach(shardId -> {
                     log.atInfo()
                         .setMessage("Creating Documents Work Item for index: {}, shard: {}")
-                        .addArgument(indexMetadata.getName())
+                        .addArgument(indexName)
                         .addArgument(shardId)
                         .log();
                     try (var shardSetupContext = context.createShardWorkItemContext()) {
                         workCoordinator.createUnassignedWorkItem(
-                            new IWorkCoordinator.WorkItemAndDuration.WorkItem(indexMetadata.getName(), shardId, 0L).toString(),
+                            new IWorkCoordinator.WorkItemAndDuration.WorkItem(indexName, shardId, 0L).toString(),
                             shardSetupContext::createUnassignedWorkItemContext
                         );
                     } catch (IOException e) {

@@ -5,13 +5,18 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'testAutomation'))
 
-from k8s_service import K8sService
+from k8s_service import K8sService, MigrationConsolePodIdentity
 
 
 def _make_service():
     with patch("k8s_service.config.load_kube_config"):
         service = K8sService(namespace="ma")
-    service.get_migration_console_pod_id = MagicMock(return_value="migration-console-0")
+    service.get_migration_console_pod_identity = MagicMock(
+        return_value=MigrationConsolePodIdentity(
+            name="migration-console-0",
+            uid="migration-console-uid",
+        )
+    )
     return service
 
 
@@ -20,7 +25,8 @@ def test_exec_background_cmd_preserves_single_quoted_arguments():
     service.k8s_client.connect_get_namespaced_pod_exec = MagicMock()
     executed_commands = []
 
-    def fake_exec(command_list, unbuffered=True):
+    def fake_exec(command_list, unbuffered=True, console_pod_id=None):
+        assert console_pod_id == "migration-console-0"
         executed_commands.append(command_list)
         if "test -f" in command_list[-1]:
             return "ok"

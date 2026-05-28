@@ -4,6 +4,9 @@ import {CreateSnapshot} from "../src/workflowTemplates/createSnapshot";
 import {DocumentBulkLoad} from "../src/workflowTemplates/documentBulkLoad";
 import {FullMigration} from "../src/workflowTemplates/fullMigration";
 import {MigrationConsole} from "../src/workflowTemplates/migrationConsole";
+import {ResourceManagement} from "../src/workflowTemplates/resourceManagement";
+import {SetupCapture} from "../src/workflowTemplates/setupCapture";
+import {SetupKafka} from "../src/workflowTemplates/setupKafka";
 import {TestMigrationWithWorkflowCli} from "../src/workflowTemplates/testMigrationWithWorkflowCli";
 import {
     DEFAULT_WORKFLOW_SCRIPTS_ROOT,
@@ -62,6 +65,24 @@ describe("workflow script path rendering", () => {
             workflowName: "migration-console",
             rendered: renderWorkflowTemplate(MigrationConsole),
             scriptName: "runMigrationConsoleCommand.sh",
+            expectedScriptRootValue: WORKFLOW_SCRIPTS_ROOT,
+        },
+        {
+            workflowName: "setup-capture",
+            rendered: renderWorkflowTemplate(SetupCapture),
+            scriptName: "waitForProxyEndpointReady.sh",
+            expectedScriptRootValue: WORKFLOW_SCRIPTS_ROOT,
+        },
+        {
+            workflowName: "resource-management",
+            rendered: renderWorkflowTemplate(ResourceManagement),
+            scriptName: "waitForKafkaClusterReady.sh",
+            expectedScriptRootValue: WORKFLOW_SCRIPTS_ROOT,
+        },
+        {
+            workflowName: "setup-kafka",
+            rendered: renderWorkflowTemplate(SetupKafka),
+            scriptName: "diagnoseKafkaClusterNotReady.sh",
             expectedScriptRootValue: WORKFLOW_SCRIPTS_ROOT,
         },
         {
