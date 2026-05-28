@@ -175,22 +175,12 @@ cmd_resume() {
     esac
   fi
 
-  # Mode selection. The Agent path is gated behind MIGRATE_ENABLE_AGENT=1
-  # (or `--mode Agent` / `agent` subcommand) until the agent UX is
-  # production-ready. When the gate is off, Manual is the only mode and
-  # we never prompt — there is no choice to make.
+  # Mode selection. Picker fires on first run (no MODE in state) or
+  # when --switch forces it; the choice persists for every subsequent
+  # invocation. --mode <name> bypasses the picker entirely.
   local mode; mode=$(state_get MODE "")
   if [[ -n "$force_mode" ]]; then
-    # Explicit --mode wins. Agent still requires the gate (or a
-    # dedicated `agent` subcommand path that sets MIGRATE_ENABLE_AGENT).
-    if [[ "$force_mode" == "Agent" && "${MIGRATE_ENABLE_AGENT:-0}" != "1" ]]; then
-      die "--mode Agent requires MIGRATE_ENABLE_AGENT=1 (the agent path is preview-only)"
-    fi
     mode="$force_mode"
-    state_set MODE "$mode"
-    state_save
-  elif [[ "${MIGRATE_ENABLE_AGENT:-0}" != "1" ]]; then
-    mode="Manual"
     state_set MODE "$mode"
     state_save
   elif [[ -z "$mode" || $force_switch -eq 1 ]]; then
@@ -333,8 +323,8 @@ Usage:
   migration-assistant resume   [flags]           Same as default
   migration-assistant console  [--stage NAME]    kubectl exec migration-console-0
   migration-assistant agent    [--stage NAME] [<agent>]
-                                                 Open the agent (preview;
-                                                 requires MIGRATE_ENABLE_AGENT=1)
+                                                 Open an LLM coding agent
+                                                 (claude / codex / q / kiro)
   migration-assistant diag     [--stage NAME]    Dump diagnostics to migrate.log
   migration-assistant cleanup  [--stage NAME]    Tear down deploy + archive state
   migration-assistant version                    Print CLI version

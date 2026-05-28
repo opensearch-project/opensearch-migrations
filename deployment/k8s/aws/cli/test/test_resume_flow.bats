@@ -64,58 +64,48 @@ _diag() {
   printf '%s\n' "--- end ---" >&3
 }
 
-@test "default run forces Manual mode (no driver prompt)" {
-  # The Agent path is gated behind MIGRATE_ENABLE_AGENT=1 until the
-  # agent UX is production-ready. With the gate off (default), the
-  # CLI must NOT show the mode picker at all.
-  run bash -c "timeout 8 '$CLI_BIN' resume 2>&1"
+@test "first run prompts the mode picker" {
+  # No MODE in state yet → the CLI must show the AI/Manual picker.
+  run bash -c "printf '1\n' | timeout 8 '$CLI_BIN' resume 2>&1"
 
   if [[ "$output" == *"unknown mode"* ]]; then
-    _diag "default run: 'unknown mode' bug regression"
+    _diag "first run: 'unknown mode' bug regression"
     return 1
   fi
-  if [[ "$output" != *"OpenSearch Migration Assistant"* ]]; then
-    _diag "default run: banner missing — CLI likely failed to boot"
-    return 1
-  fi
-  if [[ "$output" == *"How do you want to drive"* ]]; then
-    _diag "default run: mode picker should be suppressed when MIGRATE_ENABLE_AGENT is unset"
+  if [[ "$output" != *"How do you want to drive"* ]]; then
+    _diag "first run: mode picker missing"
     return 1
   fi
 }
 
-@test "MIGRATE_ENABLE_AGENT=1 + Mode=Manual progresses past mode-select" {
-  # Send "1" (Manual). Subsequent prompts read empty (no TTY) and use
-  # defaults until the flow reaches a real-AWS / real-helm call.
-  run bash -c "printf '1\n' | MIGRATE_ENABLE_AGENT=1 timeout 8 '$CLI_BIN' resume 2>&1"
-
+@test "Mode=1 (Manual) progresses past mode-select" {
+  run bash -c "printf '1\n' | timeout 8 '$CLI_BIN' resume 2>&1"
   if [[ "$output" == *"unknown mode"* ]]; then
     _diag "Mode=Manual: 'unknown mode' bug regression"
     return 1
   fi
-  if [[ "$output" != *"How do you want to drive"* ]]; then
-    _diag "Mode=Manual: mode picker missing when gate is on"
+  if [[ "$output" != *"OpenSearch Migration Assistant"* ]]; then
+    _diag "Mode=Manual: banner missing"
     return 1
   fi
 }
 
-@test "MIGRATE_ENABLE_AGENT=1 + Mode=Agent progresses past mode-select" {
-  run bash -c "printf '2\n' | MIGRATE_ENABLE_AGENT=1 timeout 8 '$CLI_BIN' resume 2>&1"
-
+@test "Mode=2 (AI) progresses past mode-select" {
+  run bash -c "printf '2\n' | timeout 8 '$CLI_BIN' resume 2>&1"
   if [[ "$output" == *"unknown mode"* ]]; then
-    _diag "Mode=Agent: 'unknown mode' bug regression"
+    _diag "Mode=AI: 'unknown mode' bug regression"
     return 1
   fi
   if [[ "$output" != *"OpenSearch Migration Assistant"* ]]; then
-    _diag "Mode=Agent: banner missing"
+    _diag "Mode=AI: banner missing"
     return 1
   fi
 }
 
-@test "--mode Agent without gate is rejected" {
-  run bash -c "timeout 4 '$CLI_BIN' resume --mode Agent 2>&1"
-  if [[ "$output" != *"requires MIGRATE_ENABLE_AGENT=1"* ]]; then
-    _diag "--mode Agent: gate-required message missing"
+@test "--mode Agent is accepted (no gate)" {
+  run bash -c "timeout 6 '$CLI_BIN' resume --mode Agent 2>&1"
+  if [[ "$output" == *"unknown mode"* ]]; then
+    _diag "--mode Agent: 'unknown mode' bug regression"
     return 1
   fi
 }
