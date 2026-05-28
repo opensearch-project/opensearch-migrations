@@ -26,11 +26,7 @@ cmd_console() {
     die "no deployed stage found in state. Run \`migration-assistant\` first or pass --stage <name>."
   fi
   helm_kctx_init
-  ui_step "Handing off to migration-console-0 (kubectl exec)"
-  ui_dim "  Press Ctrl-D or 'exit' to leave the console."
-  exec "${KUBECTL[@]}" exec --stdin --tty \
-    --namespace "$ns" \
-    migration-console-0 -- /bin/bash
+  _console_exec_into_pod "$ns"
 }
 
 console_exec() {
@@ -52,9 +48,39 @@ console_exec() {
 
   local ns; ns=$(state_get STAGE_NAME "$HELM_DEFAULT_NS")
   helm_kctx_init
+  _console_exec_into_pod "$ns"
+}
+
+# _console_exec_into_pod <ns>
+#
+# Run the migration-console-0 shell as a child rather than exec-ing it.
+# Translate the operator's natural exit signals (Ctrl-C → 130, Ctrl-\
+# → 131, SIGTERM → 143) into a clean exit 0 so the user's outer shell
+# doesn't see a misleading "command terminated with exit code 130"
+# every time they Ctrl-C inside the console.
+_console_exec_into_pod() {
+  local ns="$1"
   ui_step "Handing off to migration-console-0 (kubectl exec)"
   ui_dim "  Press Ctrl-D or 'exit' to leave the console."
-  exec "${KUBECTL[@]}" exec --stdin --tty \
-    --namespace "$ns" \
+
+  set +e
+  "${KUBECTL[@]}" exec --stdin --tty --namespace "$ns" \
     migration-console-0 -- /bin/bash
+  local rc=$?
+  set -e
+
+  case "$rc" in
+    0|130|131|143)
+      # 0   = clean exit / Ctrl-D
+      # 130 = SIGINT (Ctrl-C inside the pod's shell)
+      # 131 = SIGQUIT (Ctrl-\)
+      # 143 = SIGTERM
+      # All operator-driven; not a CLI failure.
+      exit 0
+      ;;
+    *)
+      ui_warn "kubectl exec exited with rc=$rc"
+      exit "$rc"
+      ;;
+  esac
 }
