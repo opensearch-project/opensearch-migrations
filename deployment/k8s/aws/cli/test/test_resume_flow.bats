@@ -67,7 +67,7 @@ _diag() {
 @test "default run forces Manual mode (no driver prompt)" {
   # The Agent path is gated behind MIGRATE_ENABLE_AGENT=1 until the
   # agent UX is production-ready. With the gate off (default), the
-  # CLI must NOT show the "Choose driver" prompt at all.
+  # CLI must NOT show the mode picker at all.
   run bash -c "timeout 8 '$CLI_BIN' resume 2>&1"
 
   if [[ "$output" == *"unknown mode"* ]]; then
@@ -78,8 +78,8 @@ _diag() {
     _diag "default run: banner missing — CLI likely failed to boot"
     return 1
   fi
-  if [[ "$output" == *"Choose driver"* ]]; then
-    _diag "default run: 'Choose driver' prompt should be suppressed when MIGRATE_ENABLE_AGENT is unset"
+  if [[ "$output" == *"How do you want to drive"* ]]; then
+    _diag "default run: mode picker should be suppressed when MIGRATE_ENABLE_AGENT is unset"
     return 1
   fi
 }
@@ -93,8 +93,8 @@ _diag() {
     _diag "Mode=Manual: 'unknown mode' bug regression"
     return 1
   fi
-  if [[ "$output" != *"Choose driver"* ]]; then
-    _diag "Mode=Manual: 'Choose driver' prompt missing when gate is on"
+  if [[ "$output" != *"How do you want to drive"* ]]; then
+    _diag "Mode=Manual: mode picker missing when gate is on"
     return 1
   fi
 }

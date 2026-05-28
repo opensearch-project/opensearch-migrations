@@ -223,14 +223,21 @@ _select_mode() {
   local current="${1:-Manual}"
   local default
   if [[ "$current" == "Agent" ]]; then default=2; else default=1; fi
-  ui_step "Choose driver"
-  printf '  [1] Manual — interactive shell (kubectl exec migration-console-0)\n' >&2
-  printf '  [2] Agent  — let claude/q/kiro/… drive the migration\n' >&2
+  ui_step "How do you want to drive this migration?"
+  printf '  %s[1] Manual%s — you in control. CLI deploys the chart, then\n' \
+    "$__UI_C_BOLD" "$__UI_C_RESET" >&2
+  printf '             drops you into migration-console-0 to run the\n' >&2
+  printf '             migration commands yourself.\n' >&2
+  printf '  %s[2] AI%s     — an LLM coding agent (claude/codex/q/kiro) drives\n' \
+    "$__UI_C_BOLD" "$__UI_C_RESET" >&2
+  printf '             the migration. CLI deploys the chart, then hands\n' >&2
+  printf '             control to the agent with a pre-loaded skill set\n' >&2
+  printf '             (preview — refine your invocation as needed).\n' >&2
   local pick
   ui_prompt "Select" "$default" pick
   case "$pick" in
     1|Manual|manual) printf 'Manual\n' ;;
-    2|Agent|agent)   printf 'Agent\n' ;;
+    2|AI|ai|Agent|agent) printf 'Agent\n' ;;
     *)               die "invalid selection: $pick" ;;
   esac
 }
