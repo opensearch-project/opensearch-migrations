@@ -98,8 +98,25 @@ ui_prompt() {
     fi
 
     # Likewise for input: prefer /dev/tty, fall back to stdin if that fails.
-    if ! { IFS= read -r answer </dev/tty; } 2>/dev/null; then
-      IFS= read -r answer || answer=""
+    #
+    # IMPORTANT: with `set -o pipefail` + `set -e` + `if ! { … }`, a
+    # non-zero `read` rc inside the brace group can leave the function
+    # in a state where `$answer` looks unset on bash 3.2 even though
+    # the user typed something. Pull `read` out of the if-condition
+    # and check rc explicitly.
+    answer=""
+    local rd_rc=0
+    {
+      IFS= read -r answer </dev/tty
+      rd_rc=$?
+    } 2>/dev/null || rd_rc=$?
+    if (( rd_rc != 0 )); then
+      # /dev/tty wasn't readable — fall back to stdin.
+      IFS= read -r answer 2>/dev/null || answer=""
+    fi
+    if [[ "${MIGRATE_DEBUG_PROMPT:-0}" -eq 1 ]]; then
+      printf '  [debug] ui_prompt: rd_rc=%s answer=[%s] (len=%s)\n' \
+        "$rd_rc" "$answer" "${#answer}" >&2
     fi
     [[ -z "${answer:-}" ]] && answer="$default"
   fi
