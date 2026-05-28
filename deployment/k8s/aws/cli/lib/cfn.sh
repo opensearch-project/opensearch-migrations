@@ -15,7 +15,7 @@ cfn_deploy_or_skip() {
   # Allow flag override of the stack name (--stack-name) so the
   # aws-bootstrap.sh CLI surface is preserved. State holds the chosen
   # name; default is "MigrationAssistant-<stage>".
-  local stage_name; stage_name=$(state_get STAGE_NAME "$HELM_DEFAULT_NS")
+  local stage_name; stage_name=$(state_get STAGE_NAME "ma")
   local stack_name; stack_name=$(state_get CFN_STACK_NAME "MigrationAssistant-${stage_name}")
   state_set CFN_STACK_NAME "$stack_name"
   local region;     region=$(state_get AWS_REGION)
