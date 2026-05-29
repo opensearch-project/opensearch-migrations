@@ -228,6 +228,7 @@ agent_setup() {
           cp -R "$skills_src/$skill" "$dest_dir/"
         fi
       done
+      _agent_write_claude_settings
       ;;
     codex)
       # codex reads ~/.codex/config.toml (user-scope) and AGENTS.md
@@ -291,6 +292,95 @@ agent_setup() {
 # https://aws-mcp.us-east-1.api.aws/mcp with AWS_REGION metadata
 # matching the deploy region.
 #
+# _agent_write_claude_settings — drop a project-scope .claude/settings.json
+# at $STAGE_DIR with pre-approved permissions so the operator doesn't
+# answer the trust dialog over and over for safe read-only commands.
+#
+# What's allowed:
+#   * the aws-mcp tools (read-only AWS doc + region/quota lookups)
+#   * read-only AWS CLI verbs (sts get-caller-identity, eks list*,
+#     cloudformation describe* / list*)
+#   * read-only kubectl verbs (get / describe / logs / wait)
+#   * read-only filesystem on the migration runtime tree
+#
+# Anything that mutates AWS / k8s / source / target is NOT pre-approved
+# — those will still hit the trust dialog so the operator can confirm.
+#
+# Skipped when MIGRATE_NO_CLAUDE_SETTINGS=1 (operator wants vanilla
+# claude defaults).
+_agent_write_claude_settings() {
+  if [[ "${MIGRATE_NO_CLAUDE_SETTINGS:-0}" -eq 1 ]]; then
+    return 0
+  fi
+  local settings="$STAGE_DIR/.claude/settings.json"
+  mkdir -p "$STAGE_DIR/.claude"
+
+  # Idempotent: don't clobber an existing settings.json (operator may
+  # have customized it). Just announce that we left it alone.
+  if [[ -f "$settings" ]]; then
+    log_info "claude: $settings already exists; not overwriting"
+    return 0
+  fi
+
+  cat >"$settings" <<'JSON'
+{
+  "$schema": "https://claude.ai/schemas/claude-settings/v1.json",
+  "permissions": {
+    "allow": [
+      "mcp__aws-mcp__aws___read_documentation",
+      "mcp__aws-mcp__aws___search_documentation",
+      "mcp__aws-mcp__aws___get_regional_availability",
+      "mcp__aws-mcp__aws___list_service_quotas",
+      "Bash(aws sts get-caller-identity:*)",
+      "Bash(aws eks list-clusters:*)",
+      "Bash(aws eks describe-cluster:*)",
+      "Bash(aws cloudformation list-stacks:*)",
+      "Bash(aws cloudformation describe-stacks:*)",
+      "Bash(aws cloudformation describe-stack-events:*)",
+      "Bash(aws cloudformation describe-stack-resources:*)",
+      "Bash(aws ecr describe-repositories:*)",
+      "Bash(aws ecr list-images:*)",
+      "Bash(aws s3 ls:*)",
+      "Bash(aws iam get-role:*)",
+      "Bash(aws iam list-attached-role-policies:*)",
+      "Bash(kubectl get:*)",
+      "Bash(kubectl describe:*)",
+      "Bash(kubectl logs:*)",
+      "Bash(kubectl wait:*)",
+      "Bash(kubectl version:*)",
+      "Bash(kubectl config current-context:*)",
+      "Bash(kubectl config get-contexts:*)",
+      "Bash(helm status:*)",
+      "Bash(helm list:*)",
+      "Bash(helm history:*)",
+      "Bash(helm get values:*)",
+      "Bash(cat:*)",
+      "Bash(ls:*)",
+      "Bash(jq:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Read(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "Write(*)",
+      "Edit(*)",
+      "MultiEdit(*)",
+      "NotebookEdit(*)",
+      "Bash(mkdir:*)",
+      "Bash(touch:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)"
+    ]
+  }
+}
+JSON
+  log_info "claude: wrote pre-approved permissions to $settings"
+}
+
 # Per-agent registration paths:
 #   claude → `claude mcp add-json aws-mcp --scope user '<json>'`
 #   codex  → write [mcp_servers.aws-mcp] block to ~/.codex/config.toml
