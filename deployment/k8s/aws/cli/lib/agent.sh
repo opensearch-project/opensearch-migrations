@@ -209,7 +209,7 @@ agent_setup() {
   cp -f "$skills_src/Startup.md" "$STAGE_DIR/Startup.md"
   mkdir -p "$STAGE_DIR/skills"
   local skill
-  for skill in migration-assistant-operator migrating-to-opensearch aoss-nextgen; do
+  for skill in migration-assistant-operator migration-assistant-cli-reference migrating-to-opensearch aoss-nextgen; do
     if [[ -d "$skills_src/$skill" ]]; then
       cp -R "$skills_src/$skill" "$STAGE_DIR/skills/"
     fi
@@ -223,7 +223,7 @@ agent_setup() {
       dest_dir="$STAGE_DIR/.claude/skills"
       mkdir -p "$dest_dir/opensearch-migration"
       cp -f "$skills_src/Startup.md" "$dest_dir/opensearch-migration/Startup.md"
-      for skill in migration-assistant-operator migrating-to-opensearch aoss-nextgen; do
+      for skill in migration-assistant-operator migration-assistant-cli-reference migrating-to-opensearch aoss-nextgen; do
         if [[ -d "$skills_src/$skill" ]]; then
           cp -R "$skills_src/$skill" "$dest_dir/"
         fi

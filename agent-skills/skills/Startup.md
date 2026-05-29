@@ -33,17 +33,44 @@ at their shell. The CLI's job is done; yours is not.
    the account/region back to the user. **Stop and ask** if the account
    doesn't match `AWS_ACCOUNT` in state. Do not proceed silently.
 
-3. **Confirm cluster reachability.** Run `kubectl get pods -n ma`. Expect to
-   see `migration-console-0` plus the rest of the chart's workloads. If
-   `migration-console-0` is not Running, surface the reason and ask before
-   troubleshooting.
+3. **Confirm cluster reachability — and finish the deploy if needed.**
+   Run `kubectl get pods -n ma`. Expect to see `migration-console-0`
+   plus the rest of the chart's workloads.
 
-   The migration runs from inside `migration-console-0`. Two CLIs live on
-   that pod: **`workflow`** (modern, declarative, Argo-orchestrated — the
-   recommended path) and **`console`** (legacy per-stage commands like
+   If `kubectl` says "current-context is not set" / "connection refused"
+   OR state shows `last_step=agent_handoff` without `EKS_CLUSTER` /
+   `HELM_RELEASE` populated, the deploy isn't finished. **You can run
+   `migration-assistant` yourself** — it's on PATH, it's idempotent
+   (re-running picks up where the last run left off), and it owns the
+   CloudFormation → EKS → Helm pipeline. Do not bounce the operator
+   back to a separate shell; ask them for the missing inputs (region,
+   stage name) and run the deploy from this session. The CLI's source
+   ships in this skill bundle as a reference — see
+   `skills/migration-assistant-cli-reference/` for the lib/ layout
+   (cfn.sh, helm.sh, crane.sh, etc.) so you can troubleshoot per-step
+   failures instead of treating the CLI as a black box.
+
+   Typical non-interactive invocation (CI / agent-driven):
+
+   ```bash
+   migration-assistant --non-interactive \
+     --stage <STAGE_NAME> --region <AWS_REGION> --use-public-images
+   ```
+
+   Surface the deploy's stderr live; on failure, dump
+   `~/.opensearch-migrate/<stage>/log/migrate.log` and walk the
+   operator through the failure (the CLI's `_helm_explain_failure`
+   already names the failed Job + helm description; you can build on
+   that with `kubectl describe pod` + `kubectl logs`).
+
+   Once `migration-console-0` is Running, the migration itself runs
+   from inside that pod. Two CLIs live there: **`workflow`** (modern,
+   declarative, Argo-orchestrated — the recommended path) and
+   **`console`** (legacy per-stage commands like
    `console metadata migrate`, `console snapshot create`, etc.). Read
-   `skills/migration-assistant-operator/ (read SKILL.md first, then workflow.md)` BEFORE
-   suggesting any specific command — pick `workflow` first.
+   `skills/migration-assistant-operator/SKILL.md` first, then
+   `workflow.md` BEFORE suggesting any specific command — pick
+   `workflow` first.
 
 4. **Establish source-cluster facts.** The CLI deliberately does NOT
    collect source-cluster info — that lives with the migration, not the
