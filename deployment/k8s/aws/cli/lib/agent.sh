@@ -115,9 +115,9 @@ agent_path() {
 # on PATH and we have to bail).
 _agent_print_install_hints() {
   ui_info "Install one of:"
-  printf '  %sclaude%s  Anthropic Claude Code   https://docs.claude.com/code\n' "$__UI_C_BOLD" "$__UI_C_RESET" >&2
+  printf '  %sclaude%s  Anthropic Claude Code   https://code.claude.com/docs/en/quickstart\n' "$__UI_C_BOLD" "$__UI_C_RESET" >&2
   printf '  %scodex%s   OpenAI Codex CLI        https://developers.openai.com/codex/cli\n' "$__UI_C_BOLD" "$__UI_C_RESET" >&2
-  printf '  %skiro%s    AWS Kiro                https://kiro.dev\n' "$__UI_C_BOLD" "$__UI_C_RESET" >&2
+  printf '  %skiro%s    AWS Kiro CLI            https://kiro.dev/cli/\n' "$__UI_C_BOLD" "$__UI_C_RESET" >&2
 }
 
 # _agent_print_install_hints_for_missing <installed-agents…> — print a
@@ -135,9 +135,9 @@ _agent_print_install_hints_for_missing() {
   ui_dim "  other supported agents you could install:"
   for a in "${missing[@]}"; do
     case "$a" in
-      claude) ui_dim "    claude — https://docs.claude.com/code" ;;
+      claude) ui_dim "    claude — https://code.claude.com/docs/en/quickstart" ;;
       codex)  ui_dim "    codex  — https://developers.openai.com/codex/cli" ;;
-      kiro)   ui_dim "    kiro   — https://kiro.dev" ;;
+      kiro)   ui_dim "    kiro   — https://kiro.dev/cli/" ;;
     esac
   done
 }
