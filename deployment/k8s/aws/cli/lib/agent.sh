@@ -253,7 +253,6 @@ agent_setup() {
       # at agent-skills/kiro/.
       dest_dir="$STAGE_DIR/.kiro"
       mkdir -p "$dest_dir/steering"
-      cp -f "$skills_src/Startup.md" "$dest_dir/Startup.md"
       local kiro_src=""
       if [[ -d "$skills_src/kiro" ]]; then
         kiro_src="$skills_src/kiro"
@@ -263,6 +262,13 @@ agent_setup() {
       if [[ -n "$kiro_src" ]]; then
         cp -R "$kiro_src/." "$dest_dir/"
       fi
+      # Drop Startup.md as the FIRST steering doc so kiro auto-loads
+      # the same runbook claude/codex see via CLAUDE.md / AGENTS.md.
+      # Kiro reads steering/*.md alphabetically; prefix with `00-` so
+      # it sorts before the other docs.
+      cp -f "$skills_src/Startup.md" "$dest_dir/steering/00-Startup.md"
+      cp -f "$skills_src/Startup.md" "$dest_dir/Startup.md"
+
       # The migration-assistant-operator skill's workflow.md /
       # deployment.md / migration-prompt.md / product.md ARE Kiro's
       # canonical steering docs (they used to live at
@@ -558,7 +564,7 @@ agent_exec() {
       fi ;;
     kiro)
       if (( resuming )); then exec "$bin" chat --agent opensearch-migration --resume
-      else exec "$bin" chat --agent opensearch-migration
+      else exec "$bin" chat --agent opensearch-migration "$fresh_prompt"
       fi ;;
     *)
       die "unsupported agent: $agent"
