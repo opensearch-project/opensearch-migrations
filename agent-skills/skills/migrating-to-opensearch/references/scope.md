@@ -13,6 +13,9 @@
 - Solr schema mapping and query translation guidance via the bundled `solr-*` references.
 - Produce sizing inputs that the customer plugs into the AWS Pricing Calculator
   (<https://calculator.aws>); the skill itself does not estimate dollars.
+- Produce a **timeline** (calendar duration, by phase) and **resourcing** estimate
+  (engineer-weeks of effort + which roles) per [`timeline-and-resourcing.md`](timeline-and-resourcing.md).
+  Timeline and effort ARE in scope (they are skill IP); only the dollar conversion is out of scope.
 - Produce a written assessment report with citations retrieved live; per-domain retrieval
   primitives are catalogued in [`knowledge-retrieval.md`](knowledge-retrieval.md)
   (Three retrieval primitives section).

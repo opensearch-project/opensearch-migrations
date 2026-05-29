@@ -11,8 +11,26 @@
 
 - **Recommendation**: Proceed with **{{ migration_path.recommended }}** for the data movement.
 - **Readiness Score**: **{{ readiness.overall_score }}/100** ({{ readiness.tier }})
-- **Sizing inputs for Pricing Calculator**: see Sizing section in the full report; plug values into <https://calculator.aws> for monthly cost
-- **Estimated migration duration**: tier the duration from the readiness score (Skill IP — operational rule, not from upstream docs). This skill MUST NOT estimate dollar costs because pricing changes monthly and account-specific RI / Savings Plan / EDP discounts are out of scope.
+- **Timeline**: end-to-end **<X–Y weeks>**; critical path = **<phase that sets the date>** (see Timeline & Resourcing below).
+- **Resourcing**: **<N–M engineer-weeks>** total — **<which roles, how many, part-time/parallel>**.
+- **Sizing inputs for Pricing Calculator**: see Sizing section in the full report; plug values into <https://calculator.aws> for monthly cost.
+- This skill produces timeline (calendar) and resourcing (engineer-weeks + roles); it MUST NOT estimate dollar costs because pricing changes monthly and account-specific RI / Savings Plan / EDP discounts are out of scope — those route to <https://calculator.aws>.
+
+## Timeline & Resourcing
+
+The Business Stakeholder's primary ask. Phase plan, end-to-end calendar range, and headcount — composed per [`timeline-and-resourcing.md`](../references/timeline-and-resourcing.md). Ranges with assumptions, gated on the readiness tier.
+
+| Phase | Calendar | Effort (eng-wk) | Owner role |
+|---|---|---|---|
+| Assess + sign-off | | | Business Stakeholder + technical lead |
+| Provision + tooling stand-up | | | DevOps / Platform Engineer |
+| PoC + spike (required if readiness is YELLOW) | | | both technical roles |
+| Schema + query rebuild + relevance validation | | | Search Relevance Engineer |
+| Backfill (data movement) | _≈ source ÷ throughput `[verify]`_ | | DevOps / Platform Engineer |
+| Dual-write / delta-close / soak | | | application team |
+| Cutover + rollback window | | | both technical roles |
+
+**Total:** **<X–Y weeks>** · **<N–M engineer-weeks>** · critical path = **<phase>**. Commitment is **{{ readiness.tier }}**-gated (GREEN = committable; YELLOW = after the spike; RED = spike duration only).
 
 ## Why migrate
 

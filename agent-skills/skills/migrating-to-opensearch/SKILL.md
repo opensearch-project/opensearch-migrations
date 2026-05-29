@@ -32,7 +32,7 @@ The SOP is **draft-fast, then verify-in-one-pass**. You MUST draft the complete 
 - **source_engine** (required): One of `solr`, `elasticsearch`, or `opensearch`. The source-search-engine family.
 - **source_version** (required): Source major.minor (e.g. `8.11`, `7.10.2`, `1.7`). Drives compatibility scanning and migration-path scoring.
 - **target_region** (required): AWS region for Amazon OpenSearch Service or Serverless NextGen (e.g. `us-east-1`, `eu-west-1`).
-- **persona** (required): One of `SRE` (Search Relevance Engineer), `DOP` (DevOps / Platform Engineer), or `BSH` (Business Stakeholder). Drives report depth and emphasis. See [`references/intake.md`](references/intake.md).
+- **persona** (required): One of **Search Relevance Engineer**, **DevOps / Platform Engineer**, or **Business Stakeholder**. Drives report depth and emphasis. See [`references/intake.md`](references/intake.md).
 - **discovery_inputs** (required): The customer-provided artifacts to assess against — `_cat`/`_cluster`/`_nodes` JSON for ES/OS, or `schema.xml` + `solrconfig.xml` + sample queries for Solr. The intake checklist in [`references/intake.md`](references/intake.md) lists the full set per persona.
 - **downtime_tolerance** (optional, default: `short`): `none` | `short` | `long`. Drives migration-path scoring (zero-downtime → Capture & Replay; long window → snapshot/restore).
 - **target_shape_hint** (optional): `managed` | `serverless` if the customer has a preference; otherwise the SOP scores both per [`references/decision-trees.md`](references/decision-trees.md).
@@ -61,13 +61,13 @@ This is how the SOP delivers a detailed report quickly. Walk the numbered Steps 
 3. **Draft the full report** (Steps 3–7) directly from the embedded reference tables — schema mapping, query translation, compatibility/gap register, target shape + path, sizing, readiness — tagging every version-volatile value `[verify]`. Do NOT retrieve per claim.
 4. **Verify in one batch** (Step 8): retrieve live docs for every `[verify]` tag at once, resolve each, and assemble the Citations section. Then emit.
 
-Use the full stepwise intake (the per-persona interview in [`references/intake.md`](references/intake.md)) only when (a) the customer is **BSH** — business framing comes first — or (b) the customer explicitly asks for a deep discovery audit, or (c) the workload is high-risk (multi-major hop, `_source:false`, custom plugins) and the missing artifact would change the recommendation. Otherwise SRE/DOP customers get the drafted report immediately.
+Use the full stepwise intake (the per-persona interview in [`references/intake.md`](references/intake.md)) only when (a) the customer is a **Business Stakeholder** — business framing comes first — or (b) the customer explicitly asks for a deep discovery audit, or (c) the workload is high-risk (multi-major hop, `_source:false`, custom plugins) and the missing artifact would change the recommendation. Otherwise technical customers (Search Relevance Engineer or DevOps / Platform Engineer) get the drafted report immediately.
 
 ## Steps
 
 ### 1. Identify source family and persona, then restate-and-continue
 
-Restate the source name, version, target region, and persona back to the customer in the FIRST sentence (e.g. "You're on Apache Solr 8.11 SolrCloud, target Amazon OpenSearch Service us-east-1, DOP persona — here's the assessment for that source.") so the customer can correct a misread, then **keep going** to Step 2 in the same response. Do not pause for confirmation when the values were given in the customer's message.
+Restate the source name, version, target region, and persona back to the customer in the FIRST sentence (e.g. "You're on Apache Solr 8.11 SolrCloud, target Amazon OpenSearch Service us-east-1, DevOps / Platform Engineer persona — here's the assessment for that source.") so the customer can correct a misread, then **keep going** to Step 2 in the same response. Do not pause for confirmation when the values were given in the customer's message.
 
 **Constraints:**
 
@@ -118,9 +118,9 @@ For Solr sources, build the fingerprint by hand from `schema.xml`, `solrconfig.x
 
 **Constraints:**
 
-- For **BSH persona**, you MUST run the six-question business intake in [`intake.md`](references/intake.md) (BSH section) BEFORE any technical question. Ask them as a numbered list in your response. You MUST NOT ask BSH users for technical detail (versions, schema, instance types) until the six are complete.
-- For **SRE / DOP persona**, you MUST proceed straight to Steps 3–7 using whatever discovery inputs the customer provided in their opening message. You MUST NOT block on missing artifacts; capture what is available, mark the rest UNKNOWN, and surface assumptions inline in the report rather than as a "please confirm before I continue" prompt.
-- You MUST NOT ask the SRE/DOP customer to validate or confirm the inputs before producing the assessment because the customer asked for the assessment, not for a back-and-forth intake interview. Surface assumptions and UNKNOWNs inside the report itself (e.g. "Assumed `replicas=1` since not provided"), then proceed to Step 3.
+- For the **Business Stakeholder** persona, you MUST run the six-question business intake in [`intake.md`](references/intake.md) (Business Stakeholder section) BEFORE any technical question. Ask them as a numbered list in your response. You MUST NOT ask a Business Stakeholder for technical detail (versions, schema, instance types) until the six are complete.
+- For the technical personas (**Search Relevance Engineer** and **DevOps / Platform Engineer**), you MUST proceed straight to Steps 3–7 using whatever discovery inputs the customer provided in their opening message. You MUST NOT block on missing artifacts; capture what is available, mark the rest UNKNOWN, and surface assumptions inline in the report rather than as a "please confirm before I continue" prompt.
+- You MUST NOT ask the technical customer to validate or confirm the inputs before producing the assessment because the customer asked for the assessment, not for a back-and-forth intake interview. Surface assumptions and UNKNOWNs inside the report itself (e.g. "Assumed `replicas=1` since not provided"), then proceed to Step 3.
 - You SHOULD save the fingerprint JSON to `<workspace>/fingerprint.json` so subsequent steps can reference a single canonical artifact.
 
 ### 3. Compatibility scan and risk inventory
@@ -180,20 +180,21 @@ Score the workload across the seven dimensions in [`references/readiness-rubric.
 - You MUST tier the result: **GREEN ≥ 80** (proceed; surface top 3 risks); **YELLOW 60–79** (PoC + spike on the weakest dimension before committing); **RED < 60** (do not commit; revisit weakest dimension first).
 - You MUST cross-reference at least one applicable gotcha from [`references/nuggets.md`](references/nuggets.md) and cite it by number in the risk register because many of those gotchas are not in any AWS doc and missing them is the most common production-readiness gap.
 - You MUST NOT pad the risk register with all 20 nuggets because a 20-item parade buries the 2–3 risks that actually matter for this workload.
+- You MUST produce a **Timeline & Resourcing** estimate per [`references/timeline-and-resourcing.md`](references/timeline-and-resourcing.md): a phase table (phase · calendar duration · effort in engineer-weeks · owner role), a one-line total (end-to-end calendar range + total engineer-weeks + the critical-path driver), and a resourcing summary (how many people of which role). This is the most-requested output for the **Business Stakeholder** persona — a migration assessment without a timeline and resourcing estimate is incomplete. Compose it deterministically from the recommended path + data volume (Step 4/5), the gap register's effort tiers (Step 3), and the readiness tier above; no retrieval needed (mark only the data-movement duration `[verify]` when it drives the date). You MUST express timeline and effort as ranges with assumptions, and gate the commitment on the readiness tier (GREEN = committable; YELLOW = after the spike; RED = spike duration only). You MUST NOT convert engineer-weeks to dollars — resourcing is headcount-and-duration; dollar cost routes to <https://calculator.aws>.
 
 ### 7. Render the migration report
 
 Render the report into the templates under `assets/`:
 
 - `assets/report-template.md` → `MIGRATION_ASSESSMENT.md` (full assessment — source-agnostic; has ES and Solr conditional blocks)
-- `assets/executive-summary-template.md` → `EXECUTIVE_SUMMARY.md` (BSH summary)
-- `assets/tech-deepdive-template.md` → `TECHNICAL_DEEP_DIVE.md` (SRE / DOP deep dive)
+- `assets/executive-summary-template.md` → `EXECUTIVE_SUMMARY.md` (Business Stakeholder summary)
+- `assets/tech-deepdive-template.md` → `TECHNICAL_DEEP_DIVE.md` (deep dive for the technical personas — Search Relevance Engineer and DevOps / Platform Engineer)
 - For Solr sources: `assets/solr-report-template.md`, `assets/solr-index-template-skeleton.md`, `assets/solr-gap-register.md`
 - For Elasticsearch / OpenSearch sources: `assets/elasticsearch-report-template.md`, `assets/elasticsearch-index-template-skeleton.md`, `assets/elasticsearch-gap-register.md`
 
 **Constraints:**
 
-- You MUST emit every required section, in order: Executive Summary, Source, Target, Migration Path, Sizing, Readiness, Risks, Citations.
+- You MUST emit every required section, in order: Executive Summary, Source, Target, Migration Path, Sizing, Timeline & Resourcing, Readiness, Risks, Citations. The **Timeline & Resourcing** section (phase table + total + resourcing summary per [`references/timeline-and-resourcing.md`](references/timeline-and-resourcing.md)) is mandatory in every report and MUST appear near the top (right after the Executive Summary) for the **Business Stakeholder** persona, because timeline and resourcing are that persona's primary ask.
 - You MUST collect all provenance into the single **Citations** section (the canonical provenance record), with a retrieval timestamp on each entry. Inline per-claim citations are OPTIONAL — prefer a bare `[verify]` marker inline during drafting and resolve it in the Citations section. You MUST cite the version-volatile claims actually present in the report (typically ≥ 3 unique authoritative URLs); do not pad to an arbitrary floor with URLs you did not use.
 - You MUST surface <https://calculator.aws> for any cost-related question.
 - You MAY skip the templates and answer in-line when the user asked a focused operational question (e.g. "snapshot vs reindex for 50 GB?") that doesn't warrant the full report shape.
@@ -211,14 +212,15 @@ This is the ONE retrieval pass. After drafting the full report (Steps 3–7) fro
 Then, before declaring the assessment done, you MUST reproduce this checklist in your response and tick each box. Skipping this step is the most common cause of incomplete assessments.
 
 ```
-- [ ] All 8 required sections emitted, in order (Exec / Source / Target / Migration Path / Sizing / Readiness / Risks / Citations)
+- [ ] All 9 required sections emitted, in order (Exec / Source / Target / Migration Path / Sizing / Timeline & Resourcing / Readiness / Risks / Citations)
+- [ ] Timeline & Resourcing present: phase table (calendar + engineer-weeks + owner role), end-to-end range, critical-path driver, resourcing summary; commitment gated on readiness tier; no engineer-weeks→dollars conversion
 - [ ] Every [verify]-tagged claim resolved in the batched pass (no [verify] markers remain in the delivered report)
 - [ ] Citations section lists each version-volatile claim's source URL with a retrieval timestamp (typically ≥ 3 unique URLs; cite what you used, no arbitrary floor)
 - [ ] <https://calculator.aws> surfaced for the cost handoff
 - [ ] At least 1 nugget from references/nuggets.md cross-referenced by name
 - [ ] Target shape default = MANAGED unless workload explicitly justifies Serverless NextGen
 - [ ] Migration path was scored across all six families (you didn't default to Migration Assistant without scoring)
-- [ ] Persona-correct depth (BSH = exec summary; SRE/DOP = full technical body)
+- [ ] Persona-correct depth (Business Stakeholder = exec summary; technical personas — Search Relevance Engineer and DevOps / Platform Engineer — = full technical body)
 - [ ] No embedded credentials, endpoints, or master usernames anywhere in the report
 - [ ] Security section cites the canonical control list in references/security.md and confirms each control was assessed
 ```
@@ -288,10 +290,11 @@ Lucene 10 incompatibility — reindex before upgrade.
 References (loaded on demand):
 
 - [`references/decision-trees.md`](references/decision-trees.md) — target shape, migration-path matrix, k-NN engine, RI term, go/no-go gates, duration heuristics
-- [`references/intake.md`](references/intake.md) — personas + per-role intake (SRE / DOP / BSH; ES, OS, Solr)
+- [`references/intake.md`](references/intake.md) — personas + per-role intake (Search Relevance Engineer, DevOps / Platform Engineer, Business Stakeholder; ES, OS, Solr)
 - [`references/source-elasticsearch.md`](references/source-elasticsearch.md), [`references/source-opensearch.md`](references/source-opensearch.md) — ES stable-core tables (version-family path, always-flag, field-mapping) + OS upgrade invariants & breaking changes
 - [`references/compatibility-rubric.md`](references/compatibility-rubric.md), [`references/nuggets.md`](references/nuggets.md) — severity rubric, always-flag list, 20 production gotchas
 - [`references/sizing-formulas.md`](references/sizing-formulas.md), [`references/readiness-rubric.md`](references/readiness-rubric.md) — sizing IP + 7-dimension readiness score
+- [`references/timeline-and-resourcing.md`](references/timeline-and-resourcing.md) — calendar timeline + engineer-weeks effort + roles (skill IP; required report section)
 - [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md) — topic → tool → URL (canonical retrieval recipe with browser/CLI fallback)
 - [`references/scope.md`](references/scope.md), [`references/assumptions.md`](references/assumptions.md) — scope guardrails + standing assumptions
 - Solr deep dives: [`references/solr-schema-migration.md`](references/solr-schema-migration.md), [`references/solr-transformation-rules.md`](references/solr-transformation-rules.md), [`references/solr-query-behavior-edge-cases.md`](references/solr-query-behavior-edge-cases.md), [`references/solr-analysis.md`](references/solr-analysis.md), [`references/solr-legacy-features.md`](references/solr-legacy-features.md), [`references/solr-sizing-and-performance.md`](references/solr-sizing-and-performance.md)

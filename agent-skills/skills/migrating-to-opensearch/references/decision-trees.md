@@ -2,7 +2,7 @@
 
 Navigational core of the assessment. You MUST read this any time the workflow says "select" or "choose". You MUST default to **MANAGED** for target shape and **MIGRATION ASSISTANT** for path when ambiguous.
 
-Personas (definitions and intake checklists in [`intake.md`](intake.md)): SRE → `TECHNICAL_DEEP_DIVE.md`; DOP → `TECHNICAL_DEEP_DIVE.md`; BSH → `EXECUTIVE_SUMMARY.md`. For mixed personas you MUST pick the most technical voice and add a one-page exec header.
+Personas (definitions and intake checklists in [`intake.md`](intake.md)): Search Relevance Engineer → `TECHNICAL_DEEP_DIVE.md`; DevOps / Platform Engineer → `TECHNICAL_DEEP_DIVE.md`; Business Stakeholder → `EXECUTIVE_SUMMARY.md`. For mixed personas you MUST pick the most technical voice and add a one-page exec header.
 
 ---
 

@@ -81,6 +81,25 @@ You MUST plug the sizing JSON above into the **AWS Pricing Calculator** at <http
 
 ---
 
+## Timeline & Resourcing
+
+Phase plan with calendar duration, effort (engineer-weeks), and owner role, composed per [`timeline-and-resourcing.md`](../references/timeline-and-resourcing.md). Ranges with assumptions; commitment gated on the readiness tier. Not a dollar estimate (cost → <https://calculator.aws>).
+
+| Phase | Calendar | Effort (eng-wk) | Owner role |
+|---|---|---|---|
+| Assess + sign-off | _1 wk_ | _0.5_ | Business Stakeholder + technical lead |
+| Provision + tooling stand-up | | | DevOps / Platform Engineer |
+| PoC + spike (required if readiness is YELLOW) | | | both technical roles |
+| Schema + query rebuild + relevance validation | | | Search Relevance Engineer |
+| Backfill (data movement) | _≈ source ÷ throughput `[verify]`_ | | DevOps / Platform Engineer |
+| Dual-write / delta-close / soak | | | application team |
+| Cutover + rollback window | _1 wk_ | | both technical roles |
+| Decommission source | _after rollback window_ | | DevOps / Platform Engineer |
+
+**Total:** **<X–Y weeks>** · **<N–M engineer-weeks>** · critical path = **<phase>**. Resourcing: _<roles, headcount, parallelism>_. Commitment is **{{ readiness.tier }}**-gated.
+
+---
+
 ## Readiness — full breakdown
 
 ```json

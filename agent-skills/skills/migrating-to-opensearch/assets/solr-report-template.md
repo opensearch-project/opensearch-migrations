@@ -10,7 +10,7 @@ You MUST use this structure exactly when emitting the final Solr-to-OpenSearch m
 **Generated:** <ISO 8601 timestamp>
 **Source:** Apache Solr <version>, <SolrCloud | standalone>, <num collections>
 **Target:** Amazon OpenSearch Service in <region>
-**Stakeholder:** <SRE | DOP | BSH>
+**Stakeholder:** <Search Relevance Engineer | DevOps / Platform Engineer | Business Stakeholder>
 
 ## 1. Executive Summary
 
@@ -71,15 +71,24 @@ Required entries: every Solr feature you flagged in steps 3, 4, and 6 of the wor
 
 See SKILL.md "Security Considerations" for the canonical recommendations (auth, authorization, transport, encryption at rest, network, audit, throttling, secrets, alarms). You MUST confirm in the report that each control is in place. You MUST NOT duplicate the full text here because divergent copies will drift out of sync with the canonical source.
 
-## 8. Migration Plan
+## 8. Migration Plan, Timeline & Resourcing
 
-| Phase | Goal | Tooling | Exit criterion |
-|---|---|---|---|
-| Assess | Confirm gaps and finalize target topology | this report | sign-off |
-| Reindex | Move data | OpenSearch Migration Assistant Solr backfill (Reindex-from-Snapshot, RFS) | parity sample passes |
-| Dual-write | Validate live traffic on both | application changes | error rate within SLO |
-| Cutover | Flip read traffic | client config | rollback rehearsed |
-| Decommission | Retire Solr | — | data retained per policy |
+Phase plan with calendar duration, effort (engineer-weeks), and owner role, composed per [`timeline-and-resourcing.md`](../references/timeline-and-resourcing.md). Timeline and effort are ranges with assumptions — **not** dollar estimates (cost → <https://calculator.aws>).
+
+| Phase | Goal | Tooling | Calendar | Effort (eng-wk) | Owner role | Exit criterion |
+|---|---|---|---|---|---|---|
+| Assess | Confirm gaps and finalize target topology | this report | _1 wk_ | _0.5_ | Business Stakeholder + technical lead | sign-off |
+| Provision | Stand up domain + IaC + security + tooling | CloudFormation / Migration Assistant on EKS | | | DevOps / Platform Engineer | target reachable |
+| PoC + spike | Prove the weakest readiness dimension (required if YELLOW) | sample restore | | | both technical roles | approach confirmed |
+| Schema + query rebuild | Review MA mappings; re-implement query layer + relevance | MA metadata + OpenSearch DSL | | | Search Relevance Engineer | top-N parity ≥ 95% |
+| Reindex | Move data | OpenSearch Migration Assistant Solr backfill (RFS) | _≈ source ÷ throughput `[verify]`_ | | DevOps / Platform Engineer | parity sample passes |
+| Dual-write / delta-close | Validate live traffic on both | application changes | | | application team | error rate within SLO |
+| Cutover | Flip read traffic | client config | _1 wk_ | | both technical roles | rollback rehearsed |
+| Decommission | Retire Solr | — | _after rollback window_ | | DevOps / Platform Engineer | data retained per policy |
+
+**Total:** end-to-end **<X–Y weeks>** · **<N–M engineer-weeks>** · critical path = **<phase that sets the date>**.
+**Resourcing:** _<which roles, how many, part-time/parallel>._
+**Commitment:** readiness-tier gated — GREEN = committable; YELLOW = after the PoC/spike; RED = spike duration only.
 
 ## 9. Sizing Inputs for AWS Pricing Calculator
 

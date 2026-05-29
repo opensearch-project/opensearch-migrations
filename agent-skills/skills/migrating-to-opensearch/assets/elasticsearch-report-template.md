@@ -10,7 +10,7 @@ You MUST use this structure exactly when emitting the final Elasticsearch-to-Ope
 **Generated:** <ISO 8601 timestamp>
 **Source:** Elasticsearch <version>, <distribution: Elastic | OSS>, <license: ELv2/SSPL flag>, <node count> nodes, <index count> indexes
 **Target:** Amazon OpenSearch Service in <region>
-**Stakeholder:** <SRE | DOP | BSH>
+**Stakeholder:** <Search Relevance Engineer | DevOps / Platform Engineer | Business Stakeholder>
 
 ## 1. Executive Summary
 
@@ -72,15 +72,24 @@ Required entries: every ES feature you flagged in steps 3, 4, and 6. Severity va
 
 See SKILL.md "Security Considerations" for the canonical recommendations. You MUST confirm in the report that each control is in place. You MUST NOT duplicate the full text here.
 
-## 8. Migration Plan
+## 8. Migration Plan, Timeline & Resourcing
 
-| Phase | Goal | Tooling | Exit criterion |
-|---|---|---|---|
-| Assess | Confirm gaps and finalize target topology | this report | sign-off |
-| Reindex | Move data | <Snapshot/Restore if ES ≤ 7.10.2; else Migration Assistant RFS; OpenSearch source: in-place blue/green or snapshot> | parity sample passes |
-| Dual-write / Replay | Validate live traffic on both | <MA Capture & Replay for zero-downtime; else dual-write> | error rate within SLO |
-| Cutover | Flip read traffic | client config | rollback rehearsed |
-| Decommission | Retire source | — | data retained per policy |
+Phase plan with calendar duration, effort (engineer-weeks), and owner role, composed per [`timeline-and-resourcing.md`](../references/timeline-and-resourcing.md). Timeline and effort are ranges with assumptions — **not** dollar estimates (cost → <https://calculator.aws>).
+
+| Phase | Goal | Tooling | Calendar | Effort (eng-wk) | Owner role | Exit criterion |
+|---|---|---|---|---|---|---|
+| Assess | Confirm gaps and finalize target topology | this report | _1 wk_ | _0.5_ | Business Stakeholder + technical lead | sign-off |
+| Provision | Stand up domain + IaC + security + tooling | CloudFormation / Migration Assistant on EKS | | | DevOps / Platform Engineer | target reachable |
+| PoC + spike | Prove the weakest readiness dimension (required if YELLOW) | sample restore | | | both technical roles | approach confirmed |
+| Schema + query rebuild | Audit MA mappings; rebuild ILM→ISM / Watcher→Alerting / runtime fields | MA metadata + OpenSearch DSL | | | Search Relevance Engineer | top-N parity ≥ 95% |
+| Reindex | Move data | <Snapshot/Restore if ES ≤ 7.10.2; else Migration Assistant RFS; OpenSearch source: in-place blue/green or snapshot> | _≈ source ÷ throughput `[verify]`_ | | DevOps / Platform Engineer | parity sample passes |
+| Dual-write / Replay | Validate live traffic on both | <MA Capture & Replay for zero-downtime; else dual-write> | | | application team | error rate within SLO |
+| Cutover | Flip read traffic | client config | _1 wk_ | | both technical roles | rollback rehearsed |
+| Decommission | Retire source | — | _after rollback window_ | | DevOps / Platform Engineer | data retained per policy |
+
+**Total:** end-to-end **<X–Y weeks>** · **<N–M engineer-weeks>** · critical path = **<phase that sets the date>**.
+**Resourcing:** _<which roles, how many, part-time/parallel>._
+**Commitment:** readiness-tier gated — GREEN = committable; YELLOW = after the PoC/spike; RED = spike duration only.
 
 ## 9. Sizing Inputs for AWS Pricing Calculator
 

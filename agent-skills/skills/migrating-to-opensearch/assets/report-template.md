@@ -124,6 +124,29 @@ This skill produces sizing inputs only. You MUST plug them into the **AWS Pricin
 
 ---
 
+## Timeline & Resourcing
+
+Calendar timeline + engineer-weeks of effort + roles, composed per [`timeline-and-resourcing.md`](../references/timeline-and-resourcing.md) from the recommended path, the gap-register effort tiers, and the readiness tier. Effort and timeline are ranges with assumptions; this is **not** a dollar estimate (cost → <https://calculator.aws>).
+
+| Phase | Calendar | Effort (eng-wk) | Owner role |
+|---|---|---|---|
+| Assess + sign-off | _e.g. 1 wk_ | _0.5_ | Business Stakeholder + technical lead |
+| Provision + tooling stand-up | | | DevOps / Platform Engineer |
+| PoC + spike (required if readiness is YELLOW) | | | both technical roles |
+| Schema + query rebuild + relevance validation | | | Search Relevance Engineer |
+| Backfill (data movement) | _≈ source ÷ throughput `[verify]`_ | | DevOps / Platform Engineer |
+| Dual-write / delta-close / soak | | | application team |
+| Cutover + rollback window | | | both technical roles |
+| Decommission source | _after rollback window_ | | DevOps / Platform Engineer |
+
+**Total:** end-to-end **<X–Y weeks>** · **<N–M engineer-weeks>** · critical path = **<phase that sets the date>**.
+
+**Resourcing:** _<e.g. 1 Search Relevance Engineer + 1 DevOps / Platform Engineer (part-time) + application-team support; parallelizable>._
+
+**Commitment (readiness-tier gated):** {{ readiness.tier }} → GREEN = committable; YELLOW = quote "after the PoC/spike confirms the approach", do not commit a hard cutover date yet; RED = quote only the spike duration, then re-assess.
+
+---
+
 ## Readiness
 
 **Overall score**: **{{ readiness.overall_score }}/100** — Tier: **{{ readiness.tier }}**
