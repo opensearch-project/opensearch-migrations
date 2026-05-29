@@ -19,6 +19,7 @@ So to start fresh, u would do (from buildImages folder):
 
 Then you would run tests via:
 - ssh into migrationConsole pod: `kubectl -n ma exec --stdin --tty $(kubectl get pods -n ma -l app=migration-console --sort-by=.metadata.creationTimestamp -o jsonpath="{.items[-1].metadata.name}") -- /bin/bash` 
+  - `workflow manage`: gives tree structure overview 
 - within the pod, kick off the test (HOST_IP_FROM_MINIKUBE stands for the IP under which minikube has access to the host): 
   - find the ip by which minikube has access to the host to allow pulling images from the locally deployed registry: 
     - either from host via: `HOST_IP_FROM_MINIKUBE=$(minikube ssh -- ip route 2>/dev/null | awk '/default/ {print $3}' | tr -d '\r')`

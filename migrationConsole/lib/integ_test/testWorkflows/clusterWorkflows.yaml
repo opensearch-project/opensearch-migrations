@@ -2032,7 +2032,7 @@ spec:
             echo "Creating 'dummy' collection...(Note that collection.configName needs setting and the respective config be uploaded to zk (see Dockerfile))"
             SOLR_URL="http://${CLUSTER_NAME}.${NAMESPACE}.svc.cluster.local:8983"
             for i in $(seq 1 30); do
-              RESULT=$(curl -s "${SOLR_URL}/solr/admin/collections?action=CREATE&name=dummy&collection.configName=sample_techproducts_configs&numShards=1&replicationFactor=1&wt=json" 2>&1) && echo "$RESULT" | grep -q '"status":0' && echo "Collection 'dummy' created successfully" && break
+              RESULT=$(curl -s "${SOLR_URL}/solr/admin/collections?action=CREATE&name=dummy&collection.configName=data_driven_schema_configs&numShards=1&replicationFactor=1&wt=json" 2>&1) && echo "$RESULT" | grep -q '"status":0' && echo "Collection 'dummy' created successfully" && break
               echo "Attempt $i/30 - response: $RESULT"
               sleep 5
             done
