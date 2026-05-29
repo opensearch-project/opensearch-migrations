@@ -143,6 +143,14 @@ def call(Map config = [:]) {
                                 isolatedVpcId = vpc.vpcId
                                 env.isolatedVpcId = vpc.vpcId
 
+                                // Tag subnets so AWS Load Balancer Controller can discover them for internal NLBs.
+                                // CDK's Tags.of() is a no-op on imported subnets, so we tag them here at the source.
+                                sh """
+                                    aws ec2 create-tags --region ${params.REGION} \
+                                      --resources ${vpc.subnetIds.replace(',', ' ')} \
+                                      --tags Key=kubernetes.io/role/internal-elb,Value=1
+                                """
+
                                 // Deploy EKS + MA into isolated subnets
                                 def bootstrap = resolveBootstrap(
                                     useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
