@@ -20,6 +20,15 @@
 [[ -n "${__MIGRATE_AGENT_LOADED:-}" ]] && return 0
 __MIGRATE_AGENT_LOADED=1
 
+# Each entry is "<canonical-name>:<binary1>[ <binary2>…]". The canonical
+# name is what we display + persist in state. The binary list is the
+# names we'll search for on PATH (kiro ships its installed binary as
+# `kiro-cli`, not `kiro`).
+AGENT_CANDIDATES_SPEC=(
+  "claude:claude"
+  "codex:codex"
+  "kiro:kiro-cli kiro"
+)
 AGENT_CANDIDATES=(claude codex kiro)
 
 # cmd_agent — `migration-assistant agent [<name>] [--stage <name>]`. Skip
@@ -54,8 +63,8 @@ cmd_agent() {
     # shellcheck disable=SC2086
     IFS=$'\n' read -r -d '' -a agents <<<"$agents_list"$'\0' || true
     picked=$(ui_select "Which agent should drive this migration?" "${agents[@]}")
-  elif ! command -v "$picked" >/dev/null 2>&1; then
-    die "agent not on PATH: $picked"
+  elif [[ -z "$(_agent_bin_for "$picked")" ]]; then
+    die "agent not on PATH: $picked (binary candidates: $(_agent_bins_for "$picked"))"
   fi
 
   state_set AGENT "$picked"
@@ -67,19 +76,51 @@ cmd_agent() {
   agent_exec "$picked"
 }
 
-# discover_agents — print one agent per line of those found on PATH.
+# discover_agents — print one canonical agent name per line, for each
+# agent whose binary (any of the binaries in its SPEC) is on PATH.
 discover_agents() {
   local found=()
-  local a
-  for a in "${AGENT_CANDIDATES[@]}"; do
-    if command -v "$a" >/dev/null 2>&1; then
-      found+=("$a")
+  local spec
+  for spec in "${AGENT_CANDIDATES_SPEC[@]}"; do
+    local canonical="${spec%%:*}"
+    if [[ -n "$(_agent_bin_for "$canonical")" ]]; then
+      found+=("$canonical")
     fi
   done
   if [[ ${#found[@]} -eq 0 ]]; then
     return 1
   fi
   printf '%s\n' "${found[@]}"
+}
+
+# _agent_bin_for <canonical> → echo the path of the first binary on
+# PATH for the canonical agent name, or empty when none found.
+_agent_bin_for() {
+  local canonical="$1" spec
+  for spec in "${AGENT_CANDIDATES_SPEC[@]}"; do
+    if [[ "${spec%%:*}" != "$canonical" ]]; then continue; fi
+    local bins="${spec#*:}" b path
+    for b in $bins; do
+      path=$(command -v "$b" 2>/dev/null) || continue
+      if [[ -n "$path" ]]; then
+        printf '%s\n' "$path"
+        return 0
+      fi
+    done
+    return 0
+  done
+}
+
+# _agent_bins_for <canonical> → echo the comma-separated list of
+# candidate binaries for diagnostic messages.
+_agent_bins_for() {
+  local canonical="$1" spec
+  for spec in "${AGENT_CANDIDATES_SPEC[@]}"; do
+    if [[ "${spec%%:*}" == "$canonical" ]]; then
+      printf '%s\n' "${spec#*:}" | tr ' ' ','
+      return 0
+    fi
+  done
 }
 
 agent_path() {
@@ -254,10 +295,7 @@ _agent_install_aws_mcp() {
     ui_dim "  MIGRATE_SKIP_MCP=1 → skipping aws-mcp registration"
     return 0
   fi
-  if ! command -v uvx >/dev/null 2>&1; then
-    ui_warn "uvx not on PATH; aws-mcp not registered. Install uv: https://github.com/astral-sh/uv"
-    return 0
-  fi
+  _agent_ensure_uvx || die "aws-mcp registration requires uvx; rerun with MIGRATE_SKIP_MCP=1 to opt out"
   local region; region=$(state_get AWS_REGION us-east-1)
 
   case "$agent" in
@@ -265,6 +303,43 @@ _agent_install_aws_mcp() {
     codex)  _agent_mcp_codex  "$region" ;;
     kiro)   _agent_mcp_kiro   "$region" ;;
   esac
+}
+
+# _agent_ensure_uvx — uvx is required for AWS MCP registration. If it's
+# missing, offer to run astral's official installer; bail with a clear
+# error only when the operator declines or the install fails.
+#
+# Returns 0 if uvx is on PATH afterwards, 1 otherwise.
+_agent_ensure_uvx() {
+  if command -v uvx >/dev/null 2>&1; then
+    return 0
+  fi
+  ui_warn "uvx is required for AWS MCP registration but is not on PATH"
+  ui_dim  "  uv (the package manager that ships uvx) is a single-binary"
+  ui_dim  "  install — astral's official one-liner takes ~3 seconds and"
+  ui_dim  "  drops it at \$HOME/.local/bin/uvx (no sudo, no system changes)."
+  if ! ui_confirm "Install uv now via astral's official installer?" "Y"; then
+    ui_err "aws-mcp registration aborted; install uv yourself: https://github.com/astral-sh/uv"
+    return 1
+  fi
+
+  ui_step "Installing uv (curl -LsSf https://astral.sh/uv/install.sh | sh)"
+  if ! curl -LsSf --max-time 60 https://astral.sh/uv/install.sh | sh >>"$LOG_FILE" 2>&1; then
+    ui_err "uv install failed; see $LOG_FILE"
+    return 1
+  fi
+
+  # uv installs to ~/.local/bin (already on PATH for any shell where the
+  # operator could install via curl|bash). bash caches command lookups,
+  # so hash -r is the only thing needed before the next command -v probe.
+  hash -r 2>/dev/null || true
+  if ! command -v uvx >/dev/null 2>&1; then
+    ui_err "uv installed but uvx still not on PATH; add \$HOME/.local/bin to your PATH and rerun"
+    return 1
+  fi
+
+  ui_ok "uv installed: $(uvx --version 2>&1 | head -1)"
+  return 0
 }
 
 _agent_mcp_claude() {
@@ -341,7 +416,10 @@ EOF
 agent_exec() {
   local agent="$1"
   local bin
-  bin=$(command -v "$agent") || die "agent not on PATH: $agent"
+  bin=$(_agent_bin_for "$agent")
+  if [[ -z "$bin" ]]; then
+    die "agent not on PATH: $agent (binary candidates: $(_agent_bins_for "$agent"))"
+  fi
   cd "$STAGE_DIR" || die "could not enter stage dir: $STAGE_DIR"
 
   ui_info "Working directory at handoff:"

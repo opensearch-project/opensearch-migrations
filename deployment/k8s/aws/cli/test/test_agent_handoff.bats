@@ -105,11 +105,9 @@ teardown() {
   [ ! -f "$STAGE_DIR/.kiro/settings/mcp.json" ]
 }
 
-@test "_agent_install_aws_mcp skips when uvx not on PATH" {
-  # Strip uvx from the stub PATH; the real PATH may have it but we
-  # control it via $STUB_DIR.
-  PATH="$STUB_DIR:/bin:/usr/bin" _agent_install_aws_mcp codex
-  [ ! -f "$HOME/.codex/config.toml" ]
+@test "_agent_ensure_uvx returns 0 when uvx already on PATH" {
+  mkstub uvx ''
+  _agent_ensure_uvx
 }
 
 @test "_agent_install_aws_mcp codex appends [mcp_servers.aws-mcp] block" {
