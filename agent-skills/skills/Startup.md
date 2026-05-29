@@ -53,24 +53,49 @@ at their shell. The CLI's job is done; yours is not.
    authenticate** (which credential store / env var / SSM path). Never
    store credentials in this directory. Pointers only.
 
-5. **Load the migration assessment SOP.** Read
-   `skills/migrating-to-opensearch/SKILL.md` end-to-end. It is the
-   canonical methodology for assessing the migration: source family
-   detection, persona-aware intake, version compatibility, target
-   shape (managed vs Serverless), six-tool ranking
-   (Migration Assistant for Amazon OpenSearch Service, snapshot/
-   restore, OpenSearch Ingestion, reindex from remote, Logstash/EMR/
-   Spark, in-place blue/green), sizing, and the 0-100 readiness score.
-   `skills/migrating-to-opensearch/references/` has the per-topic
-   deep-dive docs; `assets/` has the report templates.
+5. **Pick the right skill(s) for the user's goal.** Three are
+   shipped under `skills/`. Read each as you need it; do not read them
+   all up front.
 
-   When the target shape is **Amazon OpenSearch Serverless**, ALSO
-   read `skills/aoss-nextgen/SKILL.md`. It covers the operator-side
-   gotchas the SOP doesn't have room for — NextGen vs Classic
-   collection signals, the SDK/CLI version pre-flight, end-to-end
-   create flow, vector index mapping that the NextGen engine
-   accepts, the 401-during-warmup window, and the cleanup ordering
-   that avoids stuck deletes.
+   - **`skills/migration-assistant-operator/`** — operator runbook for
+     driving an already-deployed Migration Assistant. Read `SKILL.md`,
+     then `workflow.md` for the CLI surface. The right load when state
+     shows the deploy is done (`last_step=ready` / `agent_handoff`)
+     AND the user wants to MOVE DATA.
+
+   - **`skills/migrating-to-opensearch/`** — structured migration
+     **ASSESSMENT**: source family detection, persona-aware intake,
+     version compatibility, target shape (managed vs Serverless),
+     ranked migration-path scoring across six tool families
+     (Migration Assistant for Amazon OpenSearch Service, snapshot/
+     restore, OpenSearch Ingestion, reindex from remote,
+     Logstash/EMR/Spark, in-place blue/green), sizing, 0-100
+     readiness score. `references/` has per-topic deep-dives;
+     `assets/` has report templates. Read `SKILL.md` first.
+
+   - **`skills/aoss-nextgen/`** — OpenSearch Serverless NextGen
+     target-side reference. Pair with the assessment SOP whenever
+     the target is Serverless. Covers NextGen vs Classic signals,
+     the SDK/CLI pre-flight, vector mapping, the 401-during-warmup
+     window, and cleanup ordering.
+
+   **HARD RULE**: do NOT assert source/target support boundaries
+   (what Migration Assistant supports, what targets are compatible,
+   what version transitions are allowed) from training memory.
+   Those drift per release. Migration Assistant supports
+   **Solr, Elasticsearch, and OpenSearch sources**, and supports
+   **OpenSearch Service domains AND OpenSearch Serverless targets** —
+   but the authoritative compatibility matrix lives in the
+   assessment SOP's `references/` directory and the AWS docs (see
+   step 6). If you'd say "X is not supported", load the assessment
+   SOP and verify first.
+
+   **Default behavior on uncertainty**: load
+   `skills/migrating-to-opensearch/SKILL.md` first. Its scoring
+   rubric routes you to the right tool — including back at the
+   operator skill when Migration Assistant is the answer. That's
+   strictly safer than committing to an operator path the
+   migration shape can't actually take.
 
 6. **Use the AWS MCP server for version-specific facts.** The CLI
    tries to register `aws-mcp` with your client at handoff time. If

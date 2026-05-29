@@ -448,16 +448,7 @@ agent_exec() {
     resuming=1
   fi
 
-  local fresh_prompt='Read Startup.md first.
-
-HARD RULE: do NOT assert support boundaries (what Migration Assistant supports, what targets work, etc.) from training memory. Those drift per release. Migration Assistant supports Solr, Elasticsearch, and OpenSearch sources, and supports OpenSearch Service domain AND OpenSearch Serverless targets — but the authoritative compatibility matrix lives in the migrating-to-opensearch skill'\''s references/ directory and you MUST consult it before saying "X is not supported".
-
-Three skills are available:
-- migration-assistant-operator (skills/migration-assistant-operator/SKILL.md, then workflow.md): drive an already-deployed Migration Assistant. The right read after state.env shows last_step=ready / agent_handoff and the user wants to MOVE DATA.
-- migrating-to-opensearch (skills/migrating-to-opensearch/SKILL.md): structured migration ASSESSMENT — schema mapping, query translation, ranked migration-path scoring across six tool families, sizing, readiness score. Load this whenever the user is planning, comparing approaches, or asking about a non-trivial source/target combination. Its references/ tree contains the version-by-version compatibility facts you need before claiming anything is "not supported".
-- aoss-nextgen (skills/aoss-nextgen/SKILL.md): OpenSearch Serverless NextGen target-side reference. Pair it with migrating-to-opensearch for any Serverless-target session.
-
-Read state.env. Ask the user one focused question — source engine + version, target shape, and what they want done — then load the right skill(s) on your next turn. If you are uncertain whether the operator path fits, default to loading migrating-to-opensearch first (its scoring rubric will point you to the right tool, including back at Migration Assistant when that fits).'
+  local fresh_prompt='Read Startup.md end-to-end and follow it. Skill selection, support-boundary rules, and the "ask one question, then load the right skill" pattern are all there. Do not assert what Migration Assistant supports from training memory — Startup.md says how to verify.'
   ui_dim "  exec $bin (resume=$resuming)"
   case "$agent" in
     claude)
