@@ -38,6 +38,13 @@ at their shell. The CLI's job is done; yours is not.
    `migration-console-0` is not Running, surface the reason and ask before
    troubleshooting.
 
+   The migration runs from inside `migration-console-0`. Two CLIs live on
+   that pod: **`workflow`** (modern, declarative, Argo-orchestrated — the
+   recommended path) and **`console`** (legacy per-stage commands like
+   `console metadata migrate`, `console snapshot create`, etc.). Read
+   `skills/migrating-to-opensearch/references/migration-console.md` BEFORE
+   suggesting any specific command — pick `workflow` first.
+
 4. **Establish source-cluster facts.** The CLI deliberately does NOT
    collect source-cluster info — that lives with the migration, not the
    deploy. Ask the operator (do not assume) for: source endpoint URL,
@@ -114,7 +121,10 @@ at their shell. The CLI's job is done; yours is not.
 - For migration-console-specific tooling (Argo workflows, kafka, etc.),
   hand the keyboard back: the operator can run
   `kubectl exec -n ma -it migration-console-0 -- /bin/bash` and continue
-  in the console's native CLI.
+  in the console's native CLI. Read
+  `skills/migrating-to-opensearch/references/migration-console.md` for
+  the full surface (`workflow` is the modern declarative path;
+  `console` is the per-stage legacy path).
 
 ## Final note
 
