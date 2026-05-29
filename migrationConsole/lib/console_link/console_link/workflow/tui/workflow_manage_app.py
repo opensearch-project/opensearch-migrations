@@ -74,7 +74,7 @@ class WorkflowTreeApp(App):
         self._pods = PodNameManager(self, pod_scraper, name, namespace)
         if resource_view:
             from .resource_tree_state_manager import ResourceTreeStateManager
-            self._tree_state = ResourceTreeStateManager(namespace=namespace)
+            self._tree_state = ResourceTreeStateManager(namespace=namespace, on_new_pod=self._pods.observe_node)
         else:
             self._tree_state = TreeStateManager(namespace=namespace, on_new_pod=self._pods.observe_node)
         self._logs = LogManager(pod_scraper, namespace)

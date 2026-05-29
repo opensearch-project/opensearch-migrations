@@ -11,17 +11,19 @@ from console_link.workflow.resource_tree import (
     collect_notable_steps, find_last_succeeded, step_timestamp,
     maybe_rewrite_wait_step,
 )
-from console_link.workflow.tree_utils import get_step_rich_label
+from console_link.workflow.tree_utils import get_step_rich_label, get_step_status_output
 from console_link.workflow.commands.crd_utils import DISPLAY_NAMES
 
 
 class ResourceTreeStateManager:
     """Builds and updates a resource-centric Textual Tree from CRs + Argo workflow data."""
 
-    def __init__(self, tree_widget: Optional[Tree] = None, namespace: str = ""):
+    def __init__(self, tree_widget: Optional[Tree] = None, namespace: str = "",
+                 on_new_pod=None):
         self.tree: Optional[Tree] = tree_widget
         self._namespace = namespace
         self._workflow_data: Dict = {}
+        self._on_new_pod = on_new_pod
 
     def set_tree_widget(self, tree_widget: Tree) -> None:
         self.tree = tree_widget
@@ -306,8 +308,11 @@ class ResourceTreeStateManager:
     def _add_workflow_step(self, parent: TreeNode, step: Dict) -> None:
         """Add a workflow step node (carries Argo dict for interactions)."""
         display_step = maybe_rewrite_wait_step(step)
-        label = get_step_rich_label(display_step, status_output=None, show_approval_name=False)
+        status_output = get_step_status_output(self._workflow_data, step.get('id', ''))
+        label = get_step_rich_label(display_step, status_output=status_output, show_approval_name=False)
         node = parent.add(label, data=step)
+        if step.get('type') == 'Pod' and self._on_new_pod:
+            self._on_new_pod(step['id'])
         live_check = step.get('live_check')
         if live_check and live_check.get('success') and 'value' in live_check:
             for line in live_check['value'].replace('\\n', '\n').strip().split('\n'):
