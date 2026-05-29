@@ -39,45 +39,197 @@ class ResourceTreeStateManager:
         self.tree.root.expand_all()
 
     def update(self, sections: List[ResourceSection], workflow_data: Dict = None) -> None:
-        """Rebuild preserving expand/collapse state."""
+        """Incremental update preserving cursor, scroll, and expand/collapse state."""
         self._workflow_data = workflow_data or {}
-        collapsed_ids = self._collect_collapsed_ids()
-        self.tree.clear()
-        self.tree.root.label = "[bold]Migration Status[/]"
-        self._populate_tree(sections)
-        self._restore_collapsed(collapsed_ids)
+        self._update_sections(self.tree.root, sections)
 
-    def _collect_collapsed_ids(self) -> set:
-        """Collect IDs of collapsed nodes."""
-        collapsed = set()
+    # --- Incremental diffing ---
 
-        def walk(node):
-            for child in node.children:
-                if child.data and not child.is_expanded:
-                    node_id = child.data.get('id') if isinstance(child.data, dict) else None
-                    if node_id:
-                        collapsed.add(node_id)
-                walk(child)
+    def _update_sections(self, root: TreeNode, sections: List[ResourceSection]) -> None:
+        """Diff sections against existing tree children."""
+        new_sections = [s for s in sections if any(g.resources or g.not_configured for g in s.groups)]
+        existing = self._existing_by_id(root)
+        new_ids = [f'section:{s.name}' for s in new_sections]
 
-        walk(self.tree.root)
-        return collapsed
+        if self._has_structural_change(existing, new_ids):
+            expanded = self._save_expanded(root)
+            self._remove_children(root)
+            for section in new_sections:
+                sid = f'section:{section.name}'
+                node = root.add(f"[bold]{section.name}[/]", data={'id': sid})
+                for group in section.groups:
+                    self._add_group(node, group)
+                if sid in expanded:
+                    node.expand()
+                else:
+                    node.expand()  # sections default expanded
+        else:
+            for section in new_sections:
+                sid = f'section:{section.name}'
+                section_node = existing[sid]
+                self._update_groups(section_node, section.groups)
 
-    def _restore_collapsed(self, collapsed_ids: set) -> None:
-        """Restore collapsed state by ID, expanding everything else."""
-        for child in self._all_tree_nodes():
-            node_id = child.data.get('id') if isinstance(child.data, dict) else None
-            if node_id and node_id in collapsed_ids:
-                child.collapse()
+    def _update_groups(self, section_node: TreeNode, groups: List[ResourceGroup]) -> None:
+        """Diff groups within a section."""
+        new_groups = [g for g in groups if g.resources or g.not_configured]
+        existing = self._existing_by_id(section_node)
+        new_ids = [f'group:{g.display_name}' for g in new_groups]
+
+        if self._has_structural_change(existing, new_ids):
+            expanded = self._save_expanded(section_node)
+            self._remove_children(section_node)
+            for group in new_groups:
+                gid = f'group:{group.display_name}'
+                node = section_node.add(f"[bold]{group.display_name}[/]", data={'id': gid})
+                if group.not_configured:
+                    node.add("[dim](not configured)[/dim]", data=None)
+                else:
+                    self._add_group_resources(node, group)
+                if gid in expanded:
+                    node.expand()
+                else:
+                    node.expand()  # groups default expanded
+        else:
+            for group in new_groups:
+                gid = f'group:{group.display_name}'
+                group_node = existing[gid]
+                if group.not_configured:
+                    continue
+                self._update_resources(group_node, group)
+
+    def _update_resources(self, group_node: TreeNode, group: ResourceGroup) -> None:
+        """Diff resources within a group."""
+        group_plurals = next(
+            (plurals for _, grps in RESOURCE_SECTIONS for plurals, _ in grps if plurals[0] == group.plural),
+            [group.plural]
+        )
+        plural_order = {p: i for i, p in enumerate(group_plurals)}
+        sorted_resources = sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name))
+
+        existing = self._existing_by_id(group_node)
+        new_ids = [f'resource:{r.name}' for r in sorted_resources]
+
+        if self._has_structural_change(existing, new_ids):
+            expanded = self._save_expanded(group_node)
+            self._remove_children(group_node)
+            for resource in sorted_resources:
+                self._add_resource(group_node, resource)
+            self._restore_expanded_set(group_node, expanded)
+        else:
+            for resource in sorted_resources:
+                rid = f'resource:{resource.name}'
+                resource_node = existing[rid]
+                # Update label if phase changed
+                old_phase = resource_node.data.get('phase')
+                if old_phase != resource.phase:
+                    resource_node.set_label(self._resource_label(resource))
+                # Always rebuild the subtree below the resource (details + workflow steps)
+                self._rebuild_resource_children(resource_node, resource)
+
+    def _rebuild_resource_children(self, resource_node: TreeNode, resource: ResourceNode) -> None:
+        """Rebuild spec details, deps, workflow progress, and child resources under a resource node."""
+        expanded = self._save_expanded_recursive(resource_node)
+        self._remove_children(resource_node)
+
+        details = format_spec_fields(resource)
+        if details:
+            resource_node.add(f"[dim]{details}[/dim]", data=None)
+        if resource.depends_on:
+            resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
+        self._add_workflow_progress(resource_node, resource)
+        for child in resource.children:
+            self._add_resource(resource_node, child)
+
+        self._restore_expanded_recursive(resource_node, expanded)
+
+    def _add_group_resources(self, group_node: TreeNode, group: ResourceGroup) -> None:
+        """Add sorted resources to a group node."""
+        group_plurals = next(
+            (plurals for _, grps in RESOURCE_SECTIONS for plurals, _ in grps if plurals[0] == group.plural),
+            [group.plural]
+        )
+        plural_order = {p: i for i, p in enumerate(group_plurals)}
+        for resource in sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name)):
+            self._add_resource(group_node, resource)
+
+    @staticmethod
+    def _resource_label(resource: ResourceNode) -> str:
+        symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
+        if resource.phase in DISPLAY_PHASES:
+            return f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold] [{color}]({resource.phase})[/{color}]"
+        return f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold]"
+
+    @staticmethod
+    def _existing_by_id(parent: TreeNode) -> Dict[str, TreeNode]:
+        """Map existing children by their stable ID."""
+        return {
+            child.data['id']: child
+            for child in parent.children
+            if child.data and isinstance(child.data, dict) and 'id' in child.data
+        }
+
+    @staticmethod
+    def _has_structural_change(existing: Dict[str, TreeNode], new_ids: List[str]) -> bool:
+        """Check if nodes were added, removed, or reordered."""
+        return list(existing.keys()) != new_ids
+
+    @staticmethod
+    def _save_expanded(parent: TreeNode) -> set:
+        """Save expanded node IDs under a parent."""
+        result = set()
+        for child in parent.children:
+            if child.data and isinstance(child.data, dict) and child.is_expanded:
+                nid = child.data.get('id')
+                if nid:
+                    result.add(nid)
+        return result
+
+    @staticmethod
+    def _remove_children(parent: TreeNode) -> None:
+        """Remove all children from a node."""
+        for child in list(parent.children):
+            child.remove()
+
+    def _restore_expanded_set(self, parent: TreeNode, expanded_ids: set) -> None:
+        """Restore expanded state for children, defaulting to expanded."""
+        for child in parent.children:
+            if child.data and isinstance(child.data, dict):
+                nid = child.data.get('id')
+                if nid and nid not in expanded_ids and expanded_ids:
+                    child.collapse()
+                else:
+                    child.expand()
             else:
                 child.expand()
 
-    def _all_tree_nodes(self):
-        """Yield all tree nodes depth-first."""
-        stack = list(self.tree.root.children)
+    @staticmethod
+    def _save_expanded_recursive(parent: TreeNode) -> set:
+        """Save expanded node IDs recursively under a parent."""
+        result = set()
+        stack = list(parent.children)
         while stack:
-            node = stack.pop()
-            yield node
-            stack.extend(node.children)
+            child = stack.pop()
+            if child.data and isinstance(child.data, dict) and child.is_expanded:
+                nid = child.data.get('id')
+                if nid:
+                    result.add(nid)
+            stack.extend(child.children)
+        return result
+
+    def _restore_expanded_recursive(self, parent: TreeNode, expanded_ids: set) -> None:
+        """Restore expanded state recursively, defaulting to expanded."""
+        stack = list(parent.children)
+        while stack:
+            child = stack.pop()
+            if child.data and isinstance(child.data, dict):
+                nid = child.data.get('id')
+                if nid and nid not in expanded_ids and expanded_ids:
+                    child.collapse()
+                else:
+                    child.expand()
+            else:
+                child.expand()
+            stack.extend(child.children)
 
     def _populate_tree(self, sections: List[ResourceSection]) -> None:
         """Populate the Textual Tree widget from resource sections."""
@@ -110,15 +262,12 @@ class ResourceTreeStateManager:
 
     def _add_resource(self, parent: TreeNode, resource: ResourceNode) -> None:
         """Add a resource node with its details and workflow subtree."""
-        symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
-        if resource.phase in DISPLAY_PHASES:
-            label = f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold] [{color}]({resource.phase})[/{color}]"
-        else:
-            label = f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold]"
+        label = self._resource_label(resource)
         resource_path = f"{DISPLAY_NAMES.get(resource.plural, resource.plural)}.{resource.name}"
         resource_node = parent.add(label, data={
             'id': f'resource:{resource.name}',
             'resource_path': resource_path,
+            'phase': resource.phase,
         })
 
         # Spec details
