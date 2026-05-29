@@ -67,11 +67,12 @@ cmd_cleanup() {
   ui_ok "stage '$STAGE' cleaned up; state archived under $STAGE_DIR/archive/"
 }
 
-# cmd_clear — wipe local state + history for the current stage WITHOUT
-# touching AWS / kubernetes. Useful when state has drifted from the
-# real world (e.g. AWS resources got deleted out of band) and the
-# operator wants a fresh deploy without `cleanup` failing on missing
-# stacks.
+# cmd_clear — wipe local state + history for the current stage AND any
+# agent session storage rooted in this stage's workdir, WITHOUT touching
+# AWS / kubernetes. Useful when state has drifted from the real world
+# (e.g. AWS resources got deleted out of band) and the operator wants
+# a fresh deploy + fresh agent conversation without `cleanup` failing
+# on missing stacks.
 cmd_clear() {
   local args=("$@") i force=0
   for ((i = 0; i < ${#args[@]}; i++)); do
@@ -83,21 +84,70 @@ cmd_clear() {
   done
   log_init
   ui_banner "Clear local state for stage: $STAGE"
-  if [[ ! -d "$STAGE_DIR" ]]; then
-    ui_info "nothing to clear; $STAGE_DIR does not exist"
+
+  # Build a list of paths we'll be removing so the operator sees
+  # exactly what's about to disappear before they confirm.
+  local stage_dir_exists=0 agent_paths=()
+  [[ -d "$STAGE_DIR" ]] && stage_dir_exists=1
+  _cmd_clear_agent_paths_for "$STAGE_DIR" agent_paths
+
+  if (( ! stage_dir_exists )) && (( ${#agent_paths[@]} == 0 )); then
+    ui_info "nothing to clear; no state or agent sessions for stage '$STAGE'"
     return 0
   fi
-  ui_dim "  workdir: $STAGE_DIR"
-  ui_dim "  this removes state.env / state.json / log / plan / history"
+
+  if (( stage_dir_exists )); then
+    ui_dim "  workdir: $STAGE_DIR"
+    ui_dim "  removes state.env / state.json / log / plan / history"
+  fi
+  if (( ${#agent_paths[@]} > 0 )); then
+    ui_dim "  agent sessions rooted in this stage's workdir:"
+    local p
+    for p in "${agent_paths[@]}"; do
+      ui_dim "    $p"
+    done
+  fi
   ui_dim "  this does NOT touch AWS resources or kubernetes (use 'cleanup' for that)"
+
   if (( ! force )); then
     local _confirm_rc=0
-    ui_confirm "Wipe local state for stage '$STAGE'?" "N" || _confirm_rc=$?
+    ui_confirm "Wipe local state + agent sessions for stage '$STAGE'?" "N" || _confirm_rc=$?
     if (( _confirm_rc != 0 )); then
       ui_info "clear cancelled"
       return 0
     fi
   fi
-  rm -rf "$STAGE_DIR"
-  ui_ok "stage '$STAGE' state cleared"
+
+  if (( stage_dir_exists )); then
+    rm -rf "$STAGE_DIR"
+  fi
+  local p
+  for p in "${agent_paths[@]}"; do
+    rm -rf "$p"
+  done
+  ui_ok "stage '$STAGE' state + agent sessions cleared"
+}
+
+# _cmd_clear_agent_paths_for <stage_dir> <out_array>
+#
+# Append every agent session-storage path that's keyed on $stage_dir
+# (or its encoded form) to the named output array. Skip paths that
+# don't exist — the picker already handles "missing" gracefully.
+#
+# Each agent encodes the cwd differently:
+#   claude → ~/.claude/projects/<cwd-with-/-and-.-replaced-by-->
+#   codex  → no public per-cwd storage; rely on conversation reset
+#            via the agent's own /clear (codex isn't pegged to cwd)
+#   kiro   → ~/.kiro/conversations is workspace-scoped; conversations
+#            for this STAGE_DIR aren't separately addressable, but
+#            kiro's own /clear handles new-conversation-in-workspace
+_cmd_clear_agent_paths_for() {
+  local stage_dir="$1" out_arr="$2"
+  # Claude: encode cwd → key by replacing / and . with -.
+  local key="${stage_dir//\//-}"
+  key="${key//./-}"
+  local claude_dir="$HOME/.claude/projects/$key"
+  if [[ -d "$claude_dir" ]]; then
+    eval "${out_arr}+=(\"\$claude_dir\")"
+  fi
 }
