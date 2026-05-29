@@ -73,15 +73,27 @@ artifacts {
 tasks.register('setupKiro', Copy) {
     description = 'Copy the kiro/ config tree + agent-agnostic skills into build/.kiro/'
     group = 'kiro'
-    // Kiro's own config (agents, prompts, settings, steering).
+    // Kiro's own config (agents, prompts, settings).
     from 'kiro'
-    // The agent-agnostic skills land in .kiro/skills/ so the Kiro agent
-    // can reference them via file://.kiro/skills/* in its resources glob.
+    // Agent-agnostic skill content lands in .kiro/skills/ so the Kiro
+    // agent can reference it via file://.kiro/skills/* in its resources
+    // glob.
     from(skillsBuildDir) {
         into 'skills'
     }
-    // Keep the previous behavior of folding agent-sops/*.md into Kiro's
-    // steering/ so they auto-load.
+    // Steering docs that Kiro auto-loads. The migration-assistant-operator
+    // skill is the single source of truth — these used to live at
+    // kiro/steering/ but are now in skills/migration-assistant-operator/
+    // so every supported agent (claude, codex, kiro) reads them.
+    from('skills/migration-assistant-operator') {
+        include 'workflow.md'
+        include 'deployment.md'
+        include 'migration-prompt.md'
+        include 'product.md'
+        into 'steering'
+    }
+    // Per-product SOPs (deploy + cluster integration playbooks) folded
+    // into steering as well.
     from('../agent-sops') {
         include '*.md'
         into 'steering'

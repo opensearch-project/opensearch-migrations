@@ -42,7 +42,7 @@ at their shell. The CLI's job is done; yours is not.
    that pod: **`workflow`** (modern, declarative, Argo-orchestrated — the
    recommended path) and **`console`** (legacy per-stage commands like
    `console metadata migrate`, `console snapshot create`, etc.). Read
-   `skills/migrating-to-opensearch/references/migration-console.md` BEFORE
+   `skills/migration-assistant-operator/ (read SKILL.md first, then workflow.md)` BEFORE
    suggesting any specific command — pick `workflow` first.
 
 4. **Establish source-cluster facts.** The CLI deliberately does NOT
@@ -122,7 +122,7 @@ at their shell. The CLI's job is done; yours is not.
   hand the keyboard back: the operator can run
   `kubectl exec -n ma -it migration-console-0 -- /bin/bash` and continue
   in the console's native CLI. Read
-  `skills/migrating-to-opensearch/references/migration-console.md` for
+  `skills/migration-assistant-operator/ (read SKILL.md first, then workflow.md)` for
   the full surface (`workflow` is the modern declarative path;
   `console` is the per-stage legacy path).
 

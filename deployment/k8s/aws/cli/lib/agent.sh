@@ -194,7 +194,7 @@ agent_setup() {
       # skills/kiro/. In a repo checkout it's a sibling to skills/
       # at agent-skills/kiro/.
       dest_dir="$STAGE_DIR/.kiro"
-      mkdir -p "$dest_dir"
+      mkdir -p "$dest_dir/steering"
       cp -f "$skills_src/Startup.md" "$dest_dir/Startup.md"
       local kiro_src=""
       if [[ -d "$skills_src/kiro" ]]; then
@@ -204,6 +204,22 @@ agent_setup() {
       fi
       if [[ -n "$kiro_src" ]]; then
         cp -R "$kiro_src/." "$dest_dir/"
+      fi
+      # The migration-assistant-operator skill's workflow.md /
+      # deployment.md / migration-prompt.md / product.md ARE Kiro's
+      # canonical steering docs (they used to live at
+      # kiro/steering/). Copy them back into .kiro/steering/ so
+      # `kiro chat` auto-loads them. The source of truth lives in
+      # skills/migration-assistant-operator/ so claude + codex see
+      # the same docs without Kiro-specific paths.
+      if [[ -d "$skills_src/migration-assistant-operator" ]]; then
+        local d
+        for d in workflow deployment migration-prompt product; do
+          if [[ -f "$skills_src/migration-assistant-operator/${d}.md" ]]; then
+            cp -f "$skills_src/migration-assistant-operator/${d}.md" \
+                  "$dest_dir/steering/${d}.md"
+          fi
+        done
       fi
       ;;
     *)
