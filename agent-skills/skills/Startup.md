@@ -46,6 +46,21 @@ at their shell. The CLI's job is done; yours is not.
    bounce the operator back to a separate shell; ask them for the
    missing inputs and run the deploy from this session.
 
+   **HARD RULE — you MUST ask for region and stage explicitly.**
+   The shell's `AWS_REGION` / `AWS_DEFAULT_REGION` env vars and
+   `aws configure get region` reflect the operator's default profile,
+   NOT the region they want for THIS deployment. CloudShell sessions
+   default to whatever region the user happened to be in when they
+   opened the terminal — usually `us-east-1` — and that's almost
+   never the answer. Same for stage: the workdir name
+   (`~/.opensearch-migrate/default/`) is per-stage scratch, not a
+   commitment that `default` is the right stage name. Ask once
+   (a single batched question is fine — region + stage in one
+   prompt), wait for the answer, and ONLY THEN propose the deploy
+   command. Do NOT show a deploy command with the inferred region
+   pre-filled; the operator might miss the inference and approve
+   something pointed at the wrong region.
+
    ### Driving the CLI without a TTY
 
    **HARD RULE**: your Bash tool can't answer interactive prompts.
