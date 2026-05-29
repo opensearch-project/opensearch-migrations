@@ -1,20 +1,28 @@
 #!/usr/bin/env bash
 # install.sh — curl-pipe installer for migration-assistant.
 #
-# Drops a versioned install at ~/.opensearch-migrate/cli/<version>/, symlinks
-# ~/.local/bin/migration-assistant, and (when run interactively) auto-launches
-# the CLI so the operator's first interaction is the deploy/resume flow.
+# Drops a workspace-local install at ./migration-assistant-workspace/cli/<version>/,
+# symlinks ./migration-assistant-workspace/bin/migration-assistant, and
+# (when run interactively) auto-launches the CLI so the operator's first
+# interaction is the deploy/resume flow.
+#
+# Per-stage runtime state (state.env, log/, plan/, history/, .claude/,
+# .codex/, .kiro/) lands under ./migration-assistant-workspace/<stage>/
+# — co-located with the install so the whole project is one removable
+# directory you can git-init, tar up, or rm -rf without touching $HOME.
 #
 # Usage:
 #   curl -fsSL https://github.com/<owner>/<repo>/releases/latest/download/install.sh | bash
 #
 # Env overrides:
-#   MIGRATE_REPO       owner/repo override (defaults below)
-#   MIGRATE_VERSION    pin to a specific release tag (default: latest)
-#   MIGRATE_PREFIX     install root  (default: ~/.opensearch-migrate/cli)
-#   BIN_DIR            symlink target (default: ~/.local/bin)
-#   INSTALL_FROM_LOCAL local path to install from (developer/test)
-#   MIGRATE_NO_LAUNCH  set to skip auto-launching after install
+#   MIGRATE_REPO        owner/repo override (defaults below)
+#   MIGRATE_VERSION     pin to a specific release tag (default: latest)
+#   MIGRATE_WORKSPACE   workspace root (default: ./migration-assistant-workspace)
+#   MIGRATE_HOME        per-stage state root (default: $MIGRATE_WORKSPACE)
+#   MIGRATE_PREFIX      install root (default: $MIGRATE_WORKSPACE/cli)
+#   BIN_DIR             symlink target (default: $MIGRATE_WORKSPACE/bin)
+#   INSTALL_FROM_LOCAL  local path to install from (developer/test)
+#   MIGRATE_NO_LAUNCH   set to skip auto-launching after install
 
 set -o errexit
 set -o nounset
@@ -37,8 +45,20 @@ if [[ "$DEFAULT_REPO" == "$(printf '@%s@' DEFAULT_REPO)" ]] || [[ -z "$DEFAULT_R
 fi
 REPO="${MIGRATE_REPO:-$DEFAULT_REPO}"
 VERSION="${MIGRATE_VERSION:-latest}"
-PREFIX="${MIGRATE_PREFIX:-$HOME/.opensearch-migrate/cli}"
-BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
+# Resolve the workspace to an absolute path so the symlink + per-stage
+# state still work after the operator cd's away from the install dir.
+WORKSPACE_DEFAULT="$PWD/migration-assistant-workspace"
+WORKSPACE="${MIGRATE_WORKSPACE:-$WORKSPACE_DEFAULT}"
+case "$WORKSPACE" in
+  /*) ;;                          # already absolute
+  *)  WORKSPACE="$PWD/$WORKSPACE" ;;
+esac
+PREFIX="${MIGRATE_PREFIX:-$WORKSPACE/cli}"
+BIN_DIR="${BIN_DIR:-$WORKSPACE/bin}"
+# MIGRATE_HOME is what the CLI itself reads (lib/_common.sh) to locate
+# per-stage state. Default it under the workspace too so a single
+# rm -rf migration-assistant-workspace cleans everything up.
+MIGRATE_HOME_DEFAULT="$WORKSPACE"
 INSTALL_FROM_LOCAL="${INSTALL_FROM_LOCAL:-}"
 NO_LAUNCH="${MIGRATE_NO_LAUNCH:-0}"
 
@@ -68,6 +88,14 @@ resolve_version() {
     | sed -E 's/.*"([^"]+)"$/\1/' || true)
   [[ -z "$tag" ]] && die "could not resolve latest version from https://api.github.com/repos/${REPO}/releases/latest"
   printf '%s\n' "${tag#v}"
+}
+
+_pretty_for_activate() {
+  case "$1" in
+    "$PWD"/*) printf './%s' "${1#"$PWD"/}" ;;
+    "$PWD")   printf '.' ;;
+    *)        printf '%s' "$1" ;;
+  esac
 }
 
 main() {
@@ -104,39 +132,74 @@ main() {
   chmod +x "$install_dir/bin/migration-assistant"
   ln -sfn "$install_dir/bin/migration-assistant" "$BIN_DIR/migration-assistant"
 
-  printf '%s Migration Assistant successfully installed!\n\n' "$(c_green '✔')"
-  printf '  Version:  %s\n' "$version"
-  printf '  Location: %s/migration-assistant\n\n' "${BIN_DIR/#$HOME/~}"
+  # Workspace activation script. `source ./migration-assistant-workspace/activate`
+  # sets MIGRATE_HOME + PATH for an existing shell so subsequent
+  # `migration-assistant` invocations use workspace-local state.
+  cat >"$WORKSPACE/activate" <<EOF
+# Source this file: \`source $(_pretty_for_activate "$WORKSPACE")/activate\`
+# Sets MIGRATE_HOME so per-stage state lands in this workspace, and
+# prepends bin/ to PATH so \`migration-assistant\` resolves here.
+export MIGRATE_HOME="$WORKSPACE"
+case ":\$PATH:" in
+  *":$BIN_DIR:"*) ;;
+  *) export PATH="$BIN_DIR:\$PATH" ;;
+esac
+EOF
 
-  # PATH hint, only if missing.
-  local path_warning=0
+  # Pretty-print paths relative to PWD when they're under it; otherwise
+  # fall back to the ~ form for paths under $HOME; otherwise raw.
+  # shellcheck disable=SC2088  # the literal '~/' is for display, not shell expansion
+  _pretty() {
+    local p="$1"
+    case "$p" in
+      "$PWD"/*)  printf './%s' "${p#"$PWD"/}" ;;
+      "$PWD")    printf '.' ;;
+      "$HOME"/*) printf '~/%s' "${p#"$HOME"/}" ;;
+      *)         printf '%s' "$p" ;;
+    esac
+  }
+
+  printf '%s Migration Assistant successfully installed!\n\n' "$(c_green '✔')"
+  printf '  Version:    %s\n' "$version"
+  printf '  Workspace:  %s\n' "$(_pretty "$WORKSPACE")"
+  printf '  Binary:     %s/migration-assistant\n\n' "$(_pretty "$BIN_DIR")"
+
+  # PATH hint. Workspace bin/ is unlikely to be on PATH, but the
+  # auto-launch below uses an absolute path so this is informational
+  # for follow-up invocations only — `source workspace/activate` is
+  # the recommended way to wire the rest of the operator's session.
   if ! printf '%s' "$PATH" | tr ':' '\n' | grep -qxF "$BIN_DIR"; then
-    path_warning=1
-    printf '%s %s is not on your PATH.\n' "$(c_yellow '!')" "${BIN_DIR/#$HOME/~}"
-    printf '  Add this line to your shell profile:\n\n'
-    # shellcheck disable=SC2016
-    printf '    export PATH="%s:$PATH"\n\n' "${BIN_DIR/#$HOME/~}"
+    printf '%s %s is not on your PATH.\n' "$(c_yellow '!')" "$(_pretty "$BIN_DIR")"
+    printf '  Easiest: %ssource %s/activate%s\n' \
+      "$(c_dim '')" "$(_pretty "$WORKSPACE")" "$(c_dim '')"
+    printf '  Or call the binary by its absolute path: %s\n\n' \
+      "$BIN_DIR/migration-assistant"
   fi
 
-  printf '  Next: Run %s to deploy or re-enter the migration console\n\n' \
+  printf '  Next: Run %s to deploy or re-enter the migration console\n' \
     "$(c_bold 'migration-assistant')"
+  printf '  State for each stage lives at %s/<stage>/\n' \
+    "$(_pretty "$WORKSPACE")"
+  printf '  In a new shell: %ssource %s/activate%s to wire PATH + MIGRATE_HOME\n\n' \
+    "$(c_dim '')" "$(_pretty "$WORKSPACE")" "$(c_dim '')"
   printf '%s Installation complete!\n' "$(c_green '✓')"
 
-  # Auto-launch when:
-  #   * /dev/tty is reachable (works for `curl|bash` since stdin is the
-  #     pipe, not a TTY — but /dev/tty still resolves to the operator's
-  #     terminal in any normal shell session)
-  #   * MIGRATE_NO_LAUNCH != 1
-  #   * BIN_DIR is on PATH (otherwise the operator needs to fix that first)
+  # Auto-launch when /dev/tty is reachable (works for curl|bash since
+  # stdin is the pipe, not a TTY — /dev/tty still resolves to the
+  # operator's terminal in any normal shell session) AND
+  # MIGRATE_NO_LAUNCH != 1. Pass MIGRATE_HOME so the launched CLI
+  # uses workspace-local state instead of $HOME/.opensearch-migrate/.
   if [[ "$NO_LAUNCH" != "1" ]] \
-     && [[ "$path_warning" -eq 0 ]] \
      && { : >/dev/tty; } 2>/dev/null; then
     printf '\n%s Launching %s now…\n\n' \
       "$(c_dim '↳')" "$(c_bold 'migration-assistant')"
-    # Re-attach stdin to /dev/tty so curl|bash auto-launch can read prompts
-    # (without this, the CLI's first prompt fails fast on EOF).
+    export MIGRATE_HOME="$MIGRATE_HOME_DEFAULT"
+    # Re-attach stdin to /dev/tty so curl|bash auto-launch can read
+    # prompts (without this, the CLI's first prompt fails fast on EOF).
     exec "$BIN_DIR/migration-assistant" "$@" </dev/tty
   fi
 }
+
+# main is invoked with the script's args at the end of the file.
 
 main "$@"
