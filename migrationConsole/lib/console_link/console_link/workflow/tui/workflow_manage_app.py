@@ -120,7 +120,59 @@ class WorkflowTreeApp(App):
     def _refresh_workflow_worker(self) -> None:
         """Worker: Fetch data and route back to main thread."""
         res, data = self._fetch_workflow_data()
-        self.call_from_thread(self._handle_workflow_data, data if res.get('success') else {})
+        workflow_data = data if res.get('success') else {}
+
+        if self._resource_view:
+            sections = self._build_resource_sections(workflow_data)
+            self.call_from_thread(self._handle_resource_data, sections, workflow_data)
+        else:
+            self.call_from_thread(self._handle_workflow_data, workflow_data)
+
+    def _build_resource_sections(self, workflow_data: Dict):
+        """Build resource sections with workflow steps merged (runs in worker thread)."""
+        from ..resource_tree import (
+            build_resource_tree, extract_workflow_steps_by_resource, mark_not_configured_groups,
+        )
+        from ..tree_utils import build_nested_workflow_tree, filter_tree_nodes
+        from ..commands.status import LiveCheckProcessor, ConfigConverter
+        sections = build_resource_tree(self._namespace)
+        if workflow_data and workflow_data.get('status', {}).get('nodes'):
+            tree_nodes = build_nested_workflow_tree(workflow_data)
+            LiveCheckProcessor(ConfigConverter()).enrich_tree_with_live_checks(tree_nodes)
+            filtered_tree = filter_tree_nodes(tree_nodes)
+            steps = extract_workflow_steps_by_resource(filtered_tree)
+            for section in sections:
+                for group in section.groups:
+                    for resource in group.resources:
+                        if resource.name in steps:
+                            resource.workflow_progress = steps[resource.name]
+                        for child in resource.children:
+                            if child.name in steps:
+                                child.workflow_progress = steps[child.name]
+            mark_not_configured_groups(sections, filtered_tree)
+        return sections
+
+    def _handle_resource_data(self, sections, workflow_data: Dict, force_reload: bool = False) -> None:
+        """Handle pre-built resource sections on the main thread."""
+        if not sections:
+            self._tree_state.reset(LOADING_ROOT_LABEL)
+            self.run_worker(self._wait_for_workflow_worker, thread=True, name="_wait_for_workflow_worker")
+            return
+
+        new_run_id = workflow_data.get('status', {}).get('startedAt') if workflow_data else None
+        is_restart = self.current_run_id != new_run_id
+
+        if is_restart:
+            self.current_run_id = new_run_id
+            self._pods.clear_cache()
+            self._tree_state.rebuild(sections, workflow_data)
+        else:
+            self._tree_state.update(sections, workflow_data)
+
+        self._pods.trigger_resolve(new_run_id, use_cache=not force_reload)
+        self.update_pod_status()
+        self._update_dynamic_bindings()
+        self.set_timer(self._refresh_interval, self.action_refresh_workflow)
 
     def _handle_workflow_data(self, new_data: Dict, force_reload: bool = False) -> None:
         """The Conductor routes data to the relevant managers."""
@@ -140,10 +192,7 @@ class WorkflowTreeApp(App):
             self._tree_state.update(new_data)
 
         self._pods.trigger_resolve(new_run_id, use_cache=not force_reload)
-
-        if not self._resource_view:
-            self._live.reconcile_tree_for_live_status_checks(self, self._tree_state.tree.root)
-
+        self._live.reconcile_tree_for_live_status_checks(self, self._tree_state.tree.root)
         self.update_pod_status()
         self._update_dynamic_bindings()
         self.set_timer(self._refresh_interval, self.action_refresh_workflow)
@@ -168,7 +217,12 @@ class WorkflowTreeApp(App):
     def _force_refresh_workflow(self) -> None:
         """Sequential fetch: Workflow Tree Data -> Trigger Strong Pod Resolution."""
         res, data = self._fetch_workflow_data()
-        self.call_from_thread(self._handle_workflow_data, data if res.get('success') else {}, True)
+        workflow_data = data if res.get('success') else {}
+        if self._resource_view:
+            sections = self._build_resource_sections(workflow_data)
+            self.call_from_thread(self._handle_resource_data, sections, workflow_data, True)
+        else:
+            self.call_from_thread(self._handle_workflow_data, workflow_data, True)
 
     # --- Event Handlers & Actions ---
 

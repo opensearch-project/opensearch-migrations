@@ -6,18 +6,13 @@ from textual.widgets._tree import TreeNode, Tree
 
 from console_link.workflow.resource_tree import (
     ResourceNode, ResourceGroup, ResourceSection,
-    build_resource_tree, extract_workflow_steps_by_resource,
-    mark_not_configured_groups, PHASE_SYMBOLS, RESOURCE_SECTIONS,
-    DISPLAY_PHASES, format_spec_fields, has_notable_steps,
+    PHASE_SYMBOLS, RESOURCE_SECTIONS, DISPLAY_PHASES,
+    format_spec_fields, has_notable_steps,
     collect_notable_steps, find_last_succeeded, step_timestamp,
     maybe_rewrite_wait_step,
 )
-from console_link.workflow.tree_utils import (
-    get_step_rich_label,
-    build_nested_workflow_tree, filter_tree_nodes,
-)
+from console_link.workflow.tree_utils import get_step_rich_label
 from console_link.workflow.commands.crd_utils import DISPLAY_NAMES
-from console_link.workflow.commands.status import LiveCheckProcessor, ConfigConverter
 
 
 class ResourceTreeStateManager:
@@ -35,24 +30,20 @@ class ResourceTreeStateManager:
         self.tree.clear()
         self.tree.root.label = root_label
 
-    def rebuild(self, workflow_data: Dict) -> None:
-        """Full rebuild of the resource tree."""
-        self._workflow_data = workflow_data
+    def rebuild(self, sections: List[ResourceSection], workflow_data: Dict = None) -> None:
+        """Full rebuild of the resource tree from pre-built sections."""
+        self._workflow_data = workflow_data or {}
         self.tree.clear()
         self.tree.root.label = "[bold]Migration Status[/]"
-
-        sections = self._build_sections(workflow_data)
         self._populate_tree(sections)
         self.tree.root.expand_all()
 
-    def update(self, workflow_data: Dict) -> None:
+    def update(self, sections: List[ResourceSection], workflow_data: Dict = None) -> None:
         """Rebuild preserving expand/collapse state."""
-        self._workflow_data = workflow_data
+        self._workflow_data = workflow_data or {}
         collapsed_ids = self._collect_collapsed_ids()
         self.tree.clear()
         self.tree.root.label = "[bold]Migration Status[/]"
-
-        sections = self._build_sections(workflow_data)
         self._populate_tree(sections)
         self._restore_collapsed(collapsed_ids)
 
@@ -87,36 +78,6 @@ class ResourceTreeStateManager:
             node = stack.pop()
             yield node
             stack.extend(node.children)
-
-    def _build_sections(self, workflow_data: Dict) -> List[ResourceSection]:
-        """Build the resource sections with workflow steps merged."""
-        sections = build_resource_tree(self._namespace)
-
-        if workflow_data and workflow_data.get('status', {}).get('nodes'):
-            tree_nodes = build_nested_workflow_tree(workflow_data)
-            LiveCheckProcessor(ConfigConverter()).enrich_tree_with_live_checks(tree_nodes)
-            filtered_tree = filter_tree_nodes(tree_nodes)
-            steps = extract_workflow_steps_by_resource(filtered_tree)
-            self._assign_workflow_progress(sections, steps)
-            mark_not_configured_groups(sections, filtered_tree)
-
-        return sections
-
-    @staticmethod
-    def _assign_workflow_progress(sections: List[ResourceSection], steps: Dict) -> None:
-        """Attach workflow step data to matching resource nodes."""
-        all_resources = (
-            resource
-            for section in sections
-            for group in section.groups
-            for resource in group.resources
-        )
-        for resource in all_resources:
-            if resource.name in steps:
-                resource.workflow_progress = steps[resource.name]
-            for child in resource.children:
-                if child.name in steps:
-                    child.workflow_progress = steps[child.name]
 
     def _populate_tree(self, sections: List[ResourceSection]) -> None:
         """Populate the Textual Tree widget from resource sections."""
