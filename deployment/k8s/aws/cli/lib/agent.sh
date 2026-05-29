@@ -203,22 +203,31 @@ agent_setup() {
     die "could not locate Startup.md (looked in lib/../skills + agent-skills/skills + MIGRATE_SKILLS_SRC)"
   fi
 
-  # Always drop a copy of the SOP and Startup.md at the stage root so
-  # any agent (even those without a skills convention) can find them.
+  # Always drop a copy of the Startup runbook + every shipped skill at
+  # the stage root so any agent (even those without a skills convention)
+  # can read them by relative path.
   cp -f "$skills_src/Startup.md" "$STAGE_DIR/Startup.md"
-  if [[ -d "$skills_src/migrating-to-opensearch" ]]; then
-    mkdir -p "$STAGE_DIR/skills"
-    cp -R "$skills_src/migrating-to-opensearch" "$STAGE_DIR/skills/"
-  fi
+  mkdir -p "$STAGE_DIR/skills"
+  local skill
+  for skill in migration-assistant-operator migrating-to-opensearch aoss-nextgen; do
+    if [[ -d "$skills_src/$skill" ]]; then
+      cp -R "$skills_src/$skill" "$STAGE_DIR/skills/"
+    fi
+  done
 
   local dest_dir
   case "$agent" in
     claude)
-      dest_dir="$STAGE_DIR/.claude/skills/opensearch-migration"
-      mkdir -p "$dest_dir"
-      cp -f "$skills_src/Startup.md" "$dest_dir/Startup.md"
-      [[ -d "$skills_src/migrating-to-opensearch" ]] \
-        && cp -R "$skills_src/migrating-to-opensearch" "$STAGE_DIR/.claude/skills/"
+      # Claude Code's auto-loadable skills live under .claude/skills/.
+      # Each subdir with a SKILL.md is detected as one skill.
+      dest_dir="$STAGE_DIR/.claude/skills"
+      mkdir -p "$dest_dir/opensearch-migration"
+      cp -f "$skills_src/Startup.md" "$dest_dir/opensearch-migration/Startup.md"
+      for skill in migration-assistant-operator migrating-to-opensearch aoss-nextgen; do
+        if [[ -d "$skills_src/$skill" ]]; then
+          cp -R "$skills_src/$skill" "$dest_dir/"
+        fi
+      done
       ;;
     codex)
       # codex reads ~/.codex/config.toml (user-scope) and AGENTS.md
@@ -439,7 +448,7 @@ agent_exec() {
     resuming=1
   fi
 
-  local fresh_prompt='Read Startup.md and skills/migrating-to-opensearch/SKILL.md, then give the user next steps.'
+  local fresh_prompt='Read Startup.md and skills/migration-assistant-operator/SKILL.md (then skills/migration-assistant-operator/workflow.md). The migrating-to-opensearch skill is for assessment-only sessions; do not load it unless the user explicitly asks for an assessment. Give the user next steps based on what state.env shows.'
   ui_dim "  exec $bin (resume=$resuming)"
   case "$agent" in
     claude)
