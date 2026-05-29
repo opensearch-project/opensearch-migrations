@@ -37,31 +37,69 @@ at their shell. The CLI's job is done; yours is not.
    Run `kubectl get pods -n ma`. Expect to see `migration-console-0`
    plus the rest of the chart's workloads.
 
-   If `kubectl` says "current-context is not set" / "connection refused"
-   OR state shows `last_step=agent_handoff` without `EKS_CLUSTER` /
-   `HELM_RELEASE` populated, the deploy isn't finished. **You can run
-   `migration-assistant` yourself** — it's on PATH, it's idempotent
-   (re-running picks up where the last run left off), and it owns the
-   CloudFormation → EKS → Helm pipeline. Do not bounce the operator
-   back to a separate shell; ask them for the missing inputs (region,
-   stage name) and run the deploy from this session. The CLI's source
-   ships in this skill bundle as a reference — see
-   `skills/migration-assistant-cli-reference/` for the lib/ layout
-   (cfn.sh, helm.sh, crane.sh, etc.) so you can troubleshoot per-step
-   failures instead of treating the CLI as a black box.
+   If `kubectl` says "current-context is not set" / "connection
+   refused" OR state shows `last_step=agent_handoff` without
+   `EKS_CLUSTER` / `HELM_RELEASE` populated, the deploy isn't
+   finished. **You can run `migration-assistant` yourself** — it's on
+   PATH, it's idempotent (re-running picks up where the last run left
+   off), and it owns the CloudFormation → EKS → Helm pipeline. Do not
+   bounce the operator back to a separate shell; ask them for the
+   missing inputs and run the deploy from this session.
 
-   Typical non-interactive invocation (CI / agent-driven):
+   ### Driving the CLI without a TTY
+
+   **HARD RULE**: your Bash tool can't answer interactive prompts.
+   `migration-assistant` without flags reads `Stage name [ma]:`,
+   `Mirror images?`, `Migration Assistant version [3.2.1]:`, and the
+   AI/Manual mode picker from `/dev/tty` — your shell hangs on the
+   first one. You MUST always pass `--non-interactive` AND every
+   value the prompts would have asked for, OR set
+   `MIGRATE_NONINTERACTIVE=1` in env. Every interactive prompt has a
+   corresponding flag.
+
+   Recommended agent-driven invocation:
 
    ```bash
    migration-assistant --non-interactive \
-     --stage <STAGE_NAME> --region <AWS_REGION> --use-public-images
+     --stage <STAGE_NAME>          \
+     --region <AWS_REGION>         \
+     --use-public-images           \
+     --skip-console-exec           \
+     --skip-setting-k8s-context
    ```
 
-   Surface the deploy's stderr live; on failure, dump
-   `~/.opensearch-migrate/<stage>/log/migrate.log` and walk the
-   operator through the failure (the CLI's `_helm_explain_failure`
-   already names the failed Job + helm description; you can build on
-   that with `kubectl describe pod` + `kubectl logs`).
+   Why each flag:
+   - `--non-interactive` (or `MIGRATE_NONINTERACTIVE=1`): suppresses
+     every `ui_prompt` / `ui_confirm` so the deploy runs without
+     blocking.
+   - `--stage <NAME>`: helm release + k8s namespace + CFN suffix.
+     ASK the operator for this; default `ma` is fine for a one-off.
+   - `--region <REGION>`: AWS region. ASK the operator. Cannot be
+     defaulted safely.
+   - `--use-public-images`: skips the ~10-minute crane image mirror
+     to private ECR. The chart pulls from `public.ecr.aws/*` instead.
+     **Strongly preferred** for agent-driven deploys — mirroring is
+     for restricted networks (no internet egress from the EKS data
+     plane), which is unusual.
+   - `--skip-console-exec`: don't `kubectl exec` into
+     migration-console-0 at the end. You're driving the migration
+     directly via `kubectl exec`s yourself; you don't want the CLI
+     to grab the terminal.
+   - `--skip-setting-k8s-context`: still creates the kubeconfig
+     entry (with `--alias`) but doesn't switch your active context.
+     Safer when the operator's machine has other clusters wired in.
+
+   Run the CLI as a regular Bash tool call. Surface its stderr live
+   to the operator. On failure, dump
+   `~/.opensearch-migrate/<stage>/log/migrate.log` and read the
+   `_helm_explain_failure` output the CLI already produced (it names
+   the failing Job + the helm description) — quote it verbatim, then
+   build on it with `kubectl describe pod` / `kubectl logs`.
+
+   Use `migration-assistant help` to see every flag if you need
+   something not covered here. Use the `migration-assistant-cli-reference`
+   skill (`lib/cfn.sh`, `lib/helm.sh`, `lib/crane.sh`) to look up
+   what the CLI actually does at any given step — don't guess.
 
    Once `migration-console-0` is Running, the migration itself runs
    from inside that pod. Two CLIs live there: **`workflow`** (modern,
