@@ -50,10 +50,10 @@ def is_approval_node(node: Dict[str, Any]) -> bool:
     if node.get('is_approval'):
         return True
     tref = node.get('templateRef') or node.get('template_ref')
-    if tref and tref.get('template') == 'waitforapproval':
+    if tref and tref.get('template') in ('waitforapproval', 'waitforuserapproval'):
         return True
     tname = node.get('templateName') or node.get('template_name')
-    return tname == 'waitforapproval'
+    return tname in ('waitforapproval', 'waitforuserapproval')
 
 
 def get_node_input_parameter(node: Dict[str, Any], param_name: str) -> Optional[str]:
