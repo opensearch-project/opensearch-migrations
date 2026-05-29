@@ -1,6 +1,35 @@
 # Solr to OpenSearch Schema Migration
 
-This document provides guidance on converting Apache Solr schema definitions (`schema.xml` or Schema API JSON) to OpenSearch index mappings.
+> **Migration Assistant does this for you.** RFS's metadata-migration phase
+> automatically translates Solr `schema.xml` / Schema API JSON into the
+> equivalent OpenSearch 3.x index mappings AND converts Solr documents
+> (segment files) into OpenSearch document format during backfill. You
+> do **NOT** put "translate the schema" in your migration plan as a
+> manual step. The CLI invokes the metadata transformer; the operator
+> reviews the resulting mapping after MA emits it.
+>
+> **When this reference matters:**
+>
+> - Auditing what MA's auto-translation will produce, BEFORE running it
+>   — so you can flag custom analyzers, `dynamicField` patterns, or
+>   `_version_` / `_root_` collisions that need an override.
+> - Customizing the auto-translation. RFS lets you supply transformer
+>   plugins / mapping overrides for any field MA wouldn't get right
+>   on its own (Solr 6.x legacy field types, regex `dynamicField`
+>   patterns, custom `solr.*FieldType` classes, etc.).
+> - Hand-rolled paths (export-then-bulk via Spark + opensearch-spark
+>   or SolrJ `cursorMark`) — those don't get MA's auto-translate, so
+>   the operator owns the schema conversion in the bulk-load app.
+> - Validating MA's output against the source schema during the
+>   readiness review.
+>
+> **Do NOT** treat the table below as a checklist the operator must
+> walk through before deploying. It's the lookup the operator (or you)
+> use when MA's auto-translate produces something unexpected.
+
+This document provides the field-type-by-field-type mapping that
+Migration Assistant uses internally and that you'd reach for when
+auditing or overriding the translation.
 
 ## 1. Field Type Mapping
 
@@ -98,9 +127,13 @@ Solr uses `copyField` to duplicate data from one field to another (e.g., for mul
 
 ## 5. Key Differences and Considerations
 
-- **Analysis and Tokenization**: Solr defines analyzers, tokenizers, and filters within `fieldType` in `schema.xml`. In OpenSearch, these are defined in the `settings` under `analysis`. You MUST migrate these custom analyzers separately and reference them by name in the mapping using the `analyzer` parameter.
-- **Internal Fields**: Fields like `_version_` and `_root_` are internal to Solr. You MUST omit them from OpenSearch mappings because they have no OpenSearch equivalent and cause mapping conflicts.
-- **Schema-less Mode**: OpenSearch supports dynamic mapping (schema-less). You SHOULD use explicit mappings for production because dynamic mapping causes type conflicts (e.g., a field being detected as `long` instead of `date`).
+These are the auto-translate edge cases — the things you audit MA's
+output for during the readiness review, and the things to call out as
+needing overrides if they don't translate cleanly.
+
+- **Analysis and Tokenization**: Solr defines analyzers, tokenizers, and filters within `fieldType` in `schema.xml`. In OpenSearch, these live under `settings.analysis` and are referenced from field mappings via `analyzer` / `search_analyzer`. MA's metadata transformer translates standard Solr analyzer chains automatically. **Custom analyzer chains (custom `solr.*TokenFilterFactory` or `CharFilterFactory` classes) MAY need a transformer override** — verify against MA's transformer release notes per [`knowledge-retrieval.md`](knowledge-retrieval.md) for the current auto-translate coverage.
+- **Internal Fields**: Fields like `_version_` and `_root_` are internal to Solr. MA strips them automatically during metadata migration. Audit MA's emitted mapping to confirm they're gone (they would cause mapping conflicts on the target).
+- **Schema-less Mode**: OpenSearch supports dynamic mapping (schema-less). MA emits explicit mappings for production targets; dynamic mapping is left only for fields that were dynamic on the source (`<dynamicField>`).
 
 ## 6. Worked example (skeleton)
 
