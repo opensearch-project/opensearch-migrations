@@ -5,16 +5,21 @@ plugins {
 // =============================================================================
 // deployment/k8s/aws/build.gradle
 //
-// Wraps assemble-bootstrap.sh in a Gradle pipeline so:
-//   * the agent-agnostic skill bundle (:agent-skills:agentSkillsTar)
-//     is a real declared dependency rather than a side-effect of being
-//     in the right relative path on disk
-//   * `./gradlew :deployment:k8s:aws:packageMigrationAssistantCli`
-//     produces the same artifacts as `./assemble-bootstrap.sh` does
-//     today, with consistent caching + change detection
+// Two distinct outputs, each its own Gradle task with declared inputs/outputs:
 //
-// assemble-bootstrap.sh keeps working as a standalone script for
-// dev/local use; this just gives us a Gradle entry point too.
+//   * generateAwsBootstrapShim — renders deployment/k8s/aws/aws-bootstrap.shim.tmpl
+//     into build/migrate-cli-dist/aws-bootstrap.sh by substituting CLI_VERSION
+//     and DEFAULT_REPO placeholders. Pure Gradle; no external script.
+//
+//   * packageMigrationAssistantCliTarball — wraps assemble-bootstrap.sh
+//     to build the CLI tarball (CLI tree + skills + privateEcrManifest +
+//     LICENSE). Consumes :agent-skills:agentSkillsTar as a producer
+//     dependency.
+//
+// `assemble` (the base plugin's lifecycle) depends on both. Output
+// directory is layout.buildDirectory.dir('migrate-cli-dist'), matching
+// Gradle convention; the legacy ./dist/ path used by assemble-bootstrap.sh
+// when run standalone is unchanged.
 // =============================================================================
 
 configurations {
@@ -26,9 +31,9 @@ configurations {
 
 dependencies {
     // Pull in agent-skills.tar.gz from the agent-skills module's
-    // declared producer artifact. This means a change to any skill
-    // file (Startup.md, the SOP, aoss-nextgen, kiro config) triggers
-    // a rebuild of the CLI tarball — no more copy-by-hand drift.
+    // declared producer artifact. A change to any skill file
+    // (Startup.md, the SOP, aoss-nextgen, kiro config) triggers a
+    // rebuild of the CLI tarball — no copy-by-hand drift.
     agentSkills project(path: ':agent-skills', configuration: 'agentSkills')
 }
 
@@ -49,21 +54,63 @@ def defaultRepo = providers.environmentVariable('DEFAULT_REPO')
         .orElse(providers.gradleProperty('defaultRepo'))
         .orElse('opensearch-project/opensearch-migrations')
 
-tasks.register('packageMigrationAssistantCli', Exec) {
-    description = 'Run assemble-bootstrap.sh to produce the CLI tarball + curl-pipe shim'
+def distDir = layout.buildDirectory.dir('migrate-cli-dist')
+
+// ---------- (1) curl-pipe shim ----------
+
+tasks.register('generateAwsBootstrapShim') {
+    description = 'Render aws-bootstrap.shim.tmpl with CLI_VERSION + DEFAULT_REPO baked in'
+    group = 'migrate-cli'
+    def template = file('aws-bootstrap.shim.tmpl')
+    def outFile = distDir.map { it.file('aws-bootstrap.sh') }
+    inputs.file template
+    inputs.property 'cliVersion', cliVersion
+    inputs.property 'defaultRepo', defaultRepo
+    outputs.file outFile
+    doLast {
+        def out = outFile.get().asFile
+        out.parentFile.mkdirs()
+        def text = template.text
+                .replace('@CLI_VERSION@',  cliVersion.get())
+                .replace('@DEFAULT_REPO@', defaultRepo.get())
+        out.text = text
+        out.setExecutable(true)
+        logger.lifecycle "wrote ${out}"
+    }
+}
+
+// ---------- (2) CLI tarball ----------
+
+tasks.register('packageMigrationAssistantCliTarball', Exec) {
+    description = 'Run assemble-bootstrap.sh to package the CLI tarball'
     group = 'migrate-cli'
     inputs.dir 'cli'
+    inputs.file 'assemble-bootstrap.sh'
     inputs.files configurations.agentSkills
     inputs.property 'cliVersion', cliVersion
     inputs.property 'defaultRepo', defaultRepo
-    outputs.dir layout.projectDirectory.dir('dist')
+    outputs.dir distDir
 
     workingDir = projectDir
+    // We pass --output-dir into the Gradle build directory rather than
+    // ./dist/ so the legacy path is undisturbed for standalone use.
+    doFirst {
+        distDir.get().asFile.mkdirs()
+    }
     commandLine 'bash', './assemble-bootstrap.sh',
-                '--cli-version', cliVersion.get(),
-                '--default-repo', defaultRepo.get()
+                '--cli-version',  cliVersion.get(),
+                '--default-repo', defaultRepo.get(),
+                '--output-dir',   distDir.get().asFile.absolutePath
     environment 'AGENT_SKILLS_TAR',
                 configurations.agentSkills.singleFile
 }
 
-build.dependsOn 'packageMigrationAssistantCli'
+// ---------- aggregator + lifecycle ----------
+
+tasks.register('packageMigrationAssistantCli') {
+    description = 'Build both the CLI tarball and the curl-pipe shim'
+    group = 'migrate-cli'
+    dependsOn 'packageMigrationAssistantCliTarball', 'generateAwsBootstrapShim'
+}
+
+assemble.dependsOn 'packageMigrationAssistantCli'
