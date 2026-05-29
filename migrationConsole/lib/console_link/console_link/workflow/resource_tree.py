@@ -275,14 +275,14 @@ def _render_resource(parent_node, resource: ResourceNode) -> None:
 
 def _add_resource_details(node, resource: ResourceNode) -> None:
     """Add spec/status detail lines under a resource node."""
-    details = _format_spec_fields(resource)
+    details = format_spec_fields(resource)
     if details:
         node.add(f"[dim]{details}[/dim]")
     if resource.depends_on:
         deps = ", ".join(resource.depends_on)
         node.add(f"[dim]Depends on: {deps}[/dim]")
     if resource.workflow_progress:
-        if _has_notable_steps(resource.workflow_progress):
+        if has_notable_steps(resource.workflow_progress):
             _add_workflow_subtree(node, resource.workflow_progress)
 
 
@@ -298,37 +298,37 @@ def _should_show_step(step: Dict[str, Any]) -> bool:
     return False
 
 
-def _has_notable_steps(steps: List[Dict[str, Any]]) -> bool:
+def has_notable_steps(steps: List[Dict[str, Any]]) -> bool:
     """Return True if any step in the subtree should be shown."""
     for step in steps:
         if _should_show_step(step):
             return True
-        if _has_notable_steps(step.get('children', [])):
+        if has_notable_steps(step.get('children', [])):
             return True
     return False
 
 
-def _step_timestamp(step: Dict[str, Any]) -> str:
+def step_timestamp(step: Dict[str, Any]) -> str:
     """Get the display timestamp for sorting (finished_at or started_at)."""
     return step.get('finished_at') or step.get('started_at') or ''
 
 
 def _add_workflow_subtree(parent_node, steps: List[Dict[str, Any]]) -> None:
     """Render only notable workflow steps under a resource."""
-    notable = _collect_notable_steps(steps)
+    notable = collect_notable_steps(steps)
     if not notable:
         return
     # Add the most recent succeeded step for transition context
-    last_succeeded = _find_last_succeeded(steps)
+    last_succeeded = find_last_succeeded(steps)
     if last_succeeded and last_succeeded not in notable:
         notable.append(last_succeeded)
-    notable.sort(key=_step_timestamp)
+    notable.sort(key=step_timestamp)
     workflow_node = parent_node.add("Workflow progress:")
     for step in notable:
         _render_workflow_step(workflow_node, step)
 
 
-def _find_last_succeeded(steps: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def find_last_succeeded(steps: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Find the most recently completed step (by finished_at) among top-level steps only."""
     best = None
     for step in steps:
@@ -339,7 +339,7 @@ def _find_last_succeeded(steps: List[Dict[str, Any]]) -> Optional[Dict[str, Any]
     return best
 
 
-def _collect_notable_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def collect_notable_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Filter steps to only those worth showing, preserving hierarchy for notable children."""
     result = []
     for step in steps:
@@ -347,12 +347,12 @@ def _collect_notable_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             result.append(step)
         else:
             # Check if any children are notable — if so, lift them up
-            notable_children = _collect_notable_steps(step.get('children', []))
+            notable_children = collect_notable_steps(step.get('children', []))
             result.extend(notable_children)
     return result
 
 
-def _maybe_rewrite_wait_step(step: Dict[str, Any]) -> Dict[str, Any]:
+def maybe_rewrite_wait_step(step: Dict[str, Any]) -> Dict[str, Any]:
     """Rewrite waitFor steps to show the resource being waited on."""
     if is_approval_node(step):
         return step
@@ -373,7 +373,7 @@ def _maybe_rewrite_wait_step(step: Dict[str, Any]) -> Dict[str, Any]:
 
 def _render_workflow_step(parent_node, step: Dict[str, Any]) -> None:
     """Recursively render a workflow step node using the same formatting as workflow status."""
-    display_step = _maybe_rewrite_wait_step(step)
+    display_step = maybe_rewrite_wait_step(step)
     label = get_step_rich_label(display_step, status_output=None, show_approval_name=False)
     node = parent_node.add(label)
     # Show live check results if present (from LiveCheckProcessor)
@@ -383,7 +383,7 @@ def _render_workflow_step(parent_node, step: Dict[str, Any]) -> None:
         for line in value.strip().split('\n'):
             if line.strip():
                 node.add(f"[cyan]{line.strip()}[/cyan]")
-    for child in sorted(_collect_notable_steps(step.get('children', [])), key=_step_timestamp):
+    for child in sorted(collect_notable_steps(step.get('children', [])), key=step_timestamp):
         _render_workflow_step(node, child)
 
 
@@ -392,7 +392,7 @@ def _node_phase(node: Dict[str, Any]) -> str:
     return node.get('phase', 'Unknown')
 
 
-def _format_spec_fields(resource: ResourceNode) -> str:
+def format_spec_fields(resource: ResourceNode) -> str:
     """Extract key spec fields for display."""
     fields = SPEC_DISPLAY_FIELDS.get(resource.plural, [])
     parts = []

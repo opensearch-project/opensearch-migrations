@@ -8,11 +8,15 @@ from console_link.workflow.resource_tree import (
     ResourceNode, ResourceGroup, ResourceSection,
     build_resource_tree, extract_workflow_steps_by_resource,
     mark_not_configured_groups, PHASE_SYMBOLS, RESOURCE_SECTIONS,
+    DISPLAY_PHASES, format_spec_fields, has_notable_steps,
+    collect_notable_steps, find_last_succeeded, step_timestamp,
+    maybe_rewrite_wait_step,
 )
 from console_link.workflow.tree_utils import (
     get_step_rich_label,
     build_nested_workflow_tree, filter_tree_nodes,
 )
+from console_link.workflow.commands.crd_utils import DISPLAY_NAMES
 from console_link.workflow.commands.status import LiveCheckProcessor, ConfigConverter
 
 
@@ -145,8 +149,6 @@ class ResourceTreeStateManager:
 
     def _add_resource(self, parent: TreeNode, resource: ResourceNode) -> None:
         """Add a resource node with its details and workflow subtree."""
-        from console_link.workflow.commands.crd_utils import DISPLAY_NAMES
-        from console_link.workflow.resource_tree import DISPLAY_PHASES
         symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
         if resource.phase in DISPLAY_PHASES:
             label = f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold] [{color}]({resource.phase})[/{color}]"
@@ -159,8 +161,7 @@ class ResourceTreeStateManager:
         })
 
         # Spec details
-        from console_link.workflow.resource_tree import _format_spec_fields
-        details = _format_spec_fields(resource)
+        details = format_spec_fields(resource)
         if details:
             resource_node.add(f"[dim]{details}[/dim]", data=None)
         if resource.depends_on:
@@ -177,18 +178,15 @@ class ResourceTreeStateManager:
         """Add filtered workflow progress subtree if notable steps exist."""
         if not resource.workflow_progress:
             return
-        from console_link.workflow.resource_tree import (
-            _has_notable_steps, _collect_notable_steps, _find_last_succeeded, _step_timestamp,
-        )
-        if not _has_notable_steps(resource.workflow_progress):
+        if not has_notable_steps(resource.workflow_progress):
             return
-        notable = _collect_notable_steps(resource.workflow_progress)
+        notable = collect_notable_steps(resource.workflow_progress)
         if not notable:
             return
-        last_succeeded = _find_last_succeeded(resource.workflow_progress)
+        last_succeeded = find_last_succeeded(resource.workflow_progress)
         if last_succeeded and last_succeeded not in notable:
             notable.append(last_succeeded)
-        notable.sort(key=_step_timestamp)
+        notable.sort(key=step_timestamp)
         wf_node = resource_node.add(
             "Workflow progress:",
             data={'id': f'workflow:{resource.name}'})
@@ -197,10 +195,7 @@ class ResourceTreeStateManager:
 
     def _add_workflow_step(self, parent: TreeNode, step: Dict) -> None:
         """Add a workflow step node (carries Argo dict for interactions)."""
-        from console_link.workflow.resource_tree import (
-            _collect_notable_steps, _step_timestamp, _maybe_rewrite_wait_step,
-        )
-        display_step = _maybe_rewrite_wait_step(step)
+        display_step = maybe_rewrite_wait_step(step)
         label = get_step_rich_label(display_step, status_output=None, show_approval_name=False)
         node = parent.add(label, data=step)
         live_check = step.get('live_check')
@@ -208,5 +203,5 @@ class ResourceTreeStateManager:
             for line in live_check['value'].replace('\\n', '\n').strip().split('\n'):
                 if line.strip():
                     node.add(f"[cyan]{line.strip()}[/cyan]", data=None)
-        for child in sorted(_collect_notable_steps(step.get('children', [])), key=_step_timestamp):
+        for child in sorted(collect_notable_steps(step.get('children', [])), key=step_timestamp):
             self._add_workflow_step(node, child)
