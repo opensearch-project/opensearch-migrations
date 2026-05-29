@@ -103,7 +103,7 @@ cmd_clear() {
   if (( ${#agent_paths[@]} > 0 )); then
     ui_dim "  agent sessions rooted in this stage's workdir:"
     local p
-    for p in "${agent_paths[@]}"; do
+    for p in "${agent_paths[@]+"${agent_paths[@]}"}"; do
       ui_dim "    $p"
     done
   fi
@@ -122,7 +122,7 @@ cmd_clear() {
     rm -rf "$STAGE_DIR"
   fi
   local p
-  for p in "${agent_paths[@]}"; do
+  for p in "${agent_paths[@]+"${agent_paths[@]}"}"; do
     rm -rf "$p"
   done
   ui_ok "stage '$STAGE' state + agent sessions cleared"
