@@ -147,8 +147,20 @@ _agent_print_install_hints_for_missing() {
 # register the AWS MCP server. Source skill is $LIB_DIR/../skills/.
 agent_setup() {
   local agent="$1"
-  local skills_src="$LIB_DIR/../skills"
-  [[ -f "$skills_src/Startup.md" ]] || die "missing bundled skill: $skills_src/Startup.md"
+  # Skill source resolution. In a release tarball, skills live next to
+  # bin/ + lib/ at $LIB_DIR/../skills. In a repo checkout (dev mode),
+  # they live at the repo root in agent-skills/skills.
+  local skills_src=""
+  if [[ -f "$LIB_DIR/../skills/Startup.md" ]]; then
+    skills_src="$LIB_DIR/../skills"
+  elif [[ -f "$LIB_DIR/../../../../agent-skills/skills/Startup.md" ]]; then
+    # cli/lib/ → cli/ → aws/ → k8s/ → deployment/ → repo-root
+    skills_src="$LIB_DIR/../../../../agent-skills/skills"
+  elif [[ -n "${MIGRATE_SKILLS_SRC:-}" && -f "${MIGRATE_SKILLS_SRC}/Startup.md" ]]; then
+    skills_src="$MIGRATE_SKILLS_SRC"
+  else
+    die "could not locate Startup.md (looked in lib/../skills + agent-skills/skills + MIGRATE_SKILLS_SRC)"
+  fi
 
   # Always drop a copy of the SOP and Startup.md at the stage root so
   # any agent (even those without a skills convention) can find them.
@@ -176,14 +188,22 @@ agent_setup() {
       cp -f "$skills_src/Startup.md" "$STAGE_DIR/AGENTS.md"
       ;;
     kiro)
-      # Drop the upstream kiro-cli-config tree (agents, prompts,
-      # settings, steering) directly into .kiro/ so `kiro chat` picks
-      # them up automatically.
+      # Drop the upstream kiro config tree (agents, prompts, settings,
+      # steering) directly into .kiro/ so `kiro chat` picks them up
+      # automatically. In a release tarball, kiro/ lives under
+      # skills/kiro/. In a repo checkout it's a sibling to skills/
+      # at agent-skills/kiro/.
       dest_dir="$STAGE_DIR/.kiro"
       mkdir -p "$dest_dir"
       cp -f "$skills_src/Startup.md" "$dest_dir/Startup.md"
+      local kiro_src=""
       if [[ -d "$skills_src/kiro" ]]; then
-        cp -R "$skills_src/kiro/." "$dest_dir/"
+        kiro_src="$skills_src/kiro"
+      elif [[ -d "$skills_src/../kiro" ]]; then
+        kiro_src="$skills_src/../kiro"
+      fi
+      if [[ -n "$kiro_src" ]]; then
+        cp -R "$kiro_src/." "$dest_dir/"
       fi
       ;;
     *)

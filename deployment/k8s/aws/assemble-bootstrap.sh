@@ -59,19 +59,43 @@ mkdir -p "$OUTPUT_DIR"
 
 # 1. Tarball the CLI tree.
 #
-# Vendored payload: privateEcrManifest.sh (the chart's image list, source
-# of truth for crane mirror). Tagged-release URL works at runtime, but the
-# in-repo copy is what this CLI version was tested against; bundling it
-# means `migration-assistant` is self-contained in the CI/local build flow
-# and only fetches at runtime when the operator overrides MA_VERSION.
+# Skill content lives in agent-skills/skills/ at the repo root and is
+# packaged by the :agent-skills:agentSkillsTar Gradle task. We accept
+# the path to that tarball via $AGENT_SKILLS_TAR (set by Gradle) OR
+# fall back to copying the source dirs directly when running this
+# script standalone (legacy / dev path). Either way the assembled
+# tarball ends up with skills/Startup.md + skills/migrating-to-opensearch/
+# + skills/aoss-nextgen/ + skills/kiro/.
 TARBALL="$OUTPUT_DIR/migration-assistant-cli-${CLI_VERSION}.tar.gz"
 stage=$(mktemp -d)
 mkdir -p "$stage/migration-assistant-cli-${CLI_VERSION}/skills"
 cp -R "$CLI_DIR/bin" "$CLI_DIR/lib" \
       "$CLI_DIR/install.sh" "$CLI_DIR/README.md" \
       "$stage/migration-assistant-cli-${CLI_VERSION}/"
-cp -R "$CLI_DIR/skills/." \
-      "$stage/migration-assistant-cli-${CLI_VERSION}/skills/"
+
+if [[ -n "${AGENT_SKILLS_TAR:-}" && -f "$AGENT_SKILLS_TAR" ]]; then
+  # Gradle path: extract the producer artifact directly.
+  tar -xzf "$AGENT_SKILLS_TAR" -C "$stage/migration-assistant-cli-${CLI_VERSION}/" \
+    --strip-components=0 || {
+    printf 'ERROR: could not extract %s\n' "$AGENT_SKILLS_TAR" >&2
+    exit 1
+  }
+else
+  # Standalone path: pull from the on-disk agent-skills tree at the
+  # repo root.
+  AGENT_SKILLS_SRC="$SCRIPT_DIR/../../../agent-skills"
+  if [[ ! -d "$AGENT_SKILLS_SRC/skills" ]]; then
+    printf 'ERROR: %s/skills not found; run from the repo or set AGENT_SKILLS_TAR\n' \
+      "$AGENT_SKILLS_SRC" >&2
+    exit 1
+  fi
+  cp -R "$AGENT_SKILLS_SRC/skills/." \
+        "$stage/migration-assistant-cli-${CLI_VERSION}/skills/"
+  if [[ -d "$AGENT_SKILLS_SRC/kiro" ]]; then
+    cp -R "$AGENT_SKILLS_SRC/kiro" \
+          "$stage/migration-assistant-cli-${CLI_VERSION}/skills/kiro"
+  fi
+fi
 
 MANIFEST_SRC="$SCRIPT_DIR/../charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh"
 if [[ -f "$MANIFEST_SRC" ]]; then

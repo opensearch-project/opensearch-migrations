@@ -1,0 +1,69 @@
+plugins {
+    id 'base'
+}
+
+// =============================================================================
+// deployment/k8s/aws/build.gradle
+//
+// Wraps assemble-bootstrap.sh in a Gradle pipeline so:
+//   * the agent-agnostic skill bundle (:agent-skills:agentSkillsTar)
+//     is a real declared dependency rather than a side-effect of being
+//     in the right relative path on disk
+//   * `./gradlew :deployment:k8s:aws:packageMigrationAssistantCli`
+//     produces the same artifacts as `./assemble-bootstrap.sh` does
+//     today, with consistent caching + change detection
+//
+// assemble-bootstrap.sh keeps working as a standalone script for
+// dev/local use; this just gives us a Gradle entry point too.
+// =============================================================================
+
+configurations {
+    agentSkills {
+        canBeConsumed = false
+        canBeResolved = true
+    }
+}
+
+dependencies {
+    // Pull in agent-skills.tar.gz from the agent-skills module's
+    // declared producer artifact. This means a change to any skill
+    // file (Startup.md, the SOP, aoss-nextgen, kiro config) triggers
+    // a rebuild of the CLI tarball — no more copy-by-hand drift.
+    agentSkills project(path: ':agent-skills', configuration: 'agentSkills')
+}
+
+def cliVersion = providers.environmentVariable('CLI_VERSION')
+        .orElse(providers.gradleProperty('cliVersion'))
+        .orElse(provider {
+            // Fall back to "0.0.0-dev-<git-short-sha>" so each commit
+            // gets its own cache slot.
+            def sha = providers.exec {
+                workingDir = rootDir
+                commandLine 'git', 'rev-parse', '--short=10', 'HEAD'
+                isIgnoreExitValue = true
+            }.standardOutput.asText.get().trim()
+            sha ? "0.0.0-dev-${sha}" : '0.0.0-dev'
+        })
+
+def defaultRepo = providers.environmentVariable('DEFAULT_REPO')
+        .orElse(providers.gradleProperty('defaultRepo'))
+        .orElse('opensearch-project/opensearch-migrations')
+
+tasks.register('packageMigrationAssistantCli', Exec) {
+    description = 'Run assemble-bootstrap.sh to produce the CLI tarball + curl-pipe shim'
+    group = 'migrate-cli'
+    inputs.dir 'cli'
+    inputs.files configurations.agentSkills
+    inputs.property 'cliVersion', cliVersion
+    inputs.property 'defaultRepo', defaultRepo
+    outputs.dir layout.projectDirectory.dir('dist')
+
+    workingDir = projectDir
+    commandLine 'bash', './assemble-bootstrap.sh',
+                '--cli-version', cliVersion.get(),
+                '--default-repo', defaultRepo.get()
+    environment 'AGENT_SKILLS_TAR',
+                configurations.agentSkills.singleFile
+}
+
+build.dependsOn 'packageMigrationAssistantCli'

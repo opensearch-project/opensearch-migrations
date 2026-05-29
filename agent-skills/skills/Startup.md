@@ -57,6 +57,14 @@ at their shell. The CLI's job is done; yours is not.
    `skills/migrating-to-opensearch/references/` has the per-topic
    deep-dive docs; `assets/` has the report templates.
 
+   When the target shape is **Amazon OpenSearch Serverless**, ALSO
+   read `skills/aoss-nextgen/SKILL.md`. It covers the operator-side
+   gotchas the SOP doesn't have room for — NextGen vs Classic
+   collection signals, the SDK/CLI version pre-flight, end-to-end
+   create flow, vector index mapping that the NextGen engine
+   accepts, the 401-during-warmup window, and the cleanup ordering
+   that avoids stuck deletes.
+
 6. **Use the AWS MCP server for version-specific facts.** The CLI
    tries to register `aws-mcp` with your client at handoff time. If
    `aws___read_documentation` is available as a tool, prefer it over

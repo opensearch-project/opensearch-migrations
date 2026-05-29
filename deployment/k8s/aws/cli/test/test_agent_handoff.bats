@@ -82,10 +82,14 @@ teardown() {
   [ -f "$STAGE_DIR/AGENTS.md" ]
 }
 
-@test "agent_setup kiro copies the kiro-cli-config tree" {
-  # The bundled skills/kiro/ tree should land under .kiro/ verbatim.
-  if [[ ! -d "$LIB_DIR/../skills/kiro" ]]; then
-    skip "skills/kiro not present in this tree"
+@test "agent_setup kiro copies the kiro config tree" {
+  # The kiro/ tree lives in two places:
+  #   - release tarball: $LIB_DIR/../skills/kiro/  (sibling of Startup.md)
+  #   - repo dev mode:   agent-skills/kiro/        (sibling of skills/)
+  # Skip only when neither resolves.
+  if [[ ! -d "$LIB_DIR/../skills/kiro" ]] \
+     && [[ ! -d "$LIB_DIR/../skills/../kiro" ]]; then
+    skip "kiro/ tree not present in this checkout"
   fi
   agent_setup kiro
   [ -f "$STAGE_DIR/.kiro/Startup.md" ]
