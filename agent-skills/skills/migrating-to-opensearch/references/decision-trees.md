@@ -21,7 +21,7 @@ Personas (definitions and intake checklists in [`intake.md`](intake.md)): SRE �
 
 You MUST run this after the Phase 1 fingerprint. You MUST default to **MANAGED** when ambiguous.
 
-**Terminology**: "Serverless NextGen" in this SOP refers exclusively to **Amazon OpenSearch Serverless NextGen collections**. The original Serverless NextGen collection model is being superseded; you MUST NOT recommend a non-NextGen collection without an explicit retrieval that confirms it's still the right answer for the customer's workload (NextGen vs Classic signals are covered by the companion `aoss-nextgen` skill — load it whenever target shape lands on Serverless NextGen). Capability + sizing + supported-engines facts for NextGen drift fast — you MUST retrieve them via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Serverless NextGen section) BEFORE quoting any specific NextGen feature, limit, or supported-source row.
+**Terminology**: "Serverless NextGen" in this SOP refers exclusively to **Amazon OpenSearch Serverless NextGen collections**. The original Serverless NextGen collection model is being superseded; you MUST NOT recommend a non-NextGen collection without an explicit retrieval that confirms it's still the right answer for the customer's workload (NextGen vs Classic signals are covered by the companion `aoss-nextgen` skill — load it whenever target shape lands on Serverless NextGen). Capability + sizing + supported-engines facts for NextGen drift fast — draft the NextGen recommendation from this tree, tag every specific NextGen feature / limit / supported-source row `[verify]`, and confirm them in the Step 8 batched pass via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Serverless NextGen section) before delivery.
 
 **MANAGED ONLY** if any: SIEM / Security Analytics, custom plugins, Lucene k-NN or FAISS IVF, CCR or CCS required, UltraWarm / Cold tiering required, geospatial beyond OS 2.1 parity, manual snapshots required, inline scripts, T-class burstable instances, user-tunable sharding required, predictable steady-state with RI savings opportunity, very small clusters (≤2 OCU steady — managed is cheaper).
 
@@ -29,7 +29,7 @@ You MUST run this after the Phase 1 fingerprint. You MUST default to **MANAGED**
 
 ### Standing topology / JVM / OCU defaults
 
-Standing operational defaults (cluster manager quorum, JVM heap caps, pressure thresholds, refresh / watermarks, UltraWarm threshold, Serverless NextGen OCU rule of thumb, and instance-class preferences) live in [`sizing-formulas.md`](sizing-formulas.md). You MUST confirm currency by retrieving the AWS sizing best-practice pages AND the Serverless NextGen capability + sizing pages each assessment per [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Service (managed) + Amazon OpenSearch Serverless NextGen sections).
+Standing operational defaults (cluster manager quorum, JVM heap caps, pressure thresholds, refresh / watermarks, UltraWarm threshold, Serverless NextGen OCU rule of thumb, and instance-class preferences) live in [`sizing-formulas.md`](sizing-formulas.md) and are stable-core — draft directly from them. Tag only the version-volatile values (current instance families, the live NextGen OCU caps) `[verify]` and confirm them in the Step 8 batch per [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Service (managed) + Amazon OpenSearch Serverless NextGen sections). Do not block the draft on these.
 
 ---
 
@@ -52,7 +52,7 @@ The six families:
 | **Snapshot / Restore** | NO | YES (single-major hop) | YES |
 | **OSI** | NO | YES (ES 7.x / OS 2.x sources) | YES |
 
-You MUST retrieve canonical Migration Assistant sources (AWS Solutions doc, project doc, upstream repo README) via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Migration Assistant section).
+The table above is stable-core — draft the path recommendation from it directly. Tag exact per-release caps (current supported-source minor versions, the GovCloud RFS shard-size cap) `[verify]` and confirm against the canonical Migration Assistant sources (AWS Solutions doc, project doc, upstream repo README) in the Step 8 batch per [`knowledge-retrieval.md`](knowledge-retrieval.md) (Migration Assistant section).
 
 ### Path selection rules
 

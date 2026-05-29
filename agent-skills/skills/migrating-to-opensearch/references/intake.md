@@ -1,6 +1,6 @@
 # Stakeholder-aware intake
 
-The first decision in every assessment is the user's role. Get it right and the rest follows; get it wrong and the report quality collapses. Once set, you MUST run the matching intake below. **You MUST NOT block on a missing artifact because intake stalls collapse the assessment** — capture what is available, mark the rest UNKNOWN, and surface assumptions.
+The first decision in every assessment is the user's role. Get it right and the rest follows; get it wrong and the report quality collapses. Once set, apply the matching intake below — the **BSH** six-question business intake is run in full and first (business framing precedes any technical question); the **SRE / DOP** intake defaults to the fast path (draft from supplied artifacts + embedded tables) and the full list is reserved for deep audits or recommendation-changing gaps. **You MUST NOT block on a missing artifact because intake stalls collapse the assessment** — capture what is available, mark the rest UNKNOWN, and surface assumptions.
 
 ## Personas
 
@@ -15,6 +15,10 @@ You MUST treat the user as **BSH** if any apply: self-identifies as PM / executi
 You MUST treat as **SRE** when they lead with queries, schema, relevance, feature questions, dashboards, or vector engine choice. You MUST treat as **DOP** when they lead with topology, sizing, JVM, networking, IaC, or operations. If unclear, you MUST ASK once. You MUST NOT re-ask because repeated persona prompts erode user trust.
 
 If a single user occupies multiple personas (a small team's lead is often SRE+DOP), you MUST default to the **most technical** voice and add a one-page executive header. You MUST NOT degrade depth because the technical user still needs the technical content — combine instead.
+
+## SRE / DOP fast path vs. full intake
+
+For **SRE / DOP** customers the default is the **fast path** (SKILL.md → Fast path): draft the report from whatever artifacts the opening message contained plus the embedded reference tables, mark gaps UNKNOWN, and deliver. Run the **full intake below only** when the customer explicitly asks for a deep discovery audit, or when a missing artifact would change the recommendation (multi-major hop, `_source:false`, custom plugins, vector workload). If zero artifacts were provided, ask once for the minimum viable set — ES/OS: `_cat/indices?v` + `_cluster/health` (+ `_cat/plugins?v` if parity matters); Solr: `schema.xml` + `solrconfig.xml` — then draft. The list below is the *full* intake; do not run it as a blocking interview on the fast path.
 
 ## SRE / DOP technical intake (one prompt, ALL of)
 

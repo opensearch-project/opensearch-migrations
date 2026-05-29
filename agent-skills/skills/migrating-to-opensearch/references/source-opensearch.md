@@ -2,13 +2,13 @@
 
 You MUST read this when the source is OpenSearch and the user is upgrading versions or moving between deployment shapes (self-managed → AOS, AOS → Serverless NextGen, cross-region, etc.).
 
-## Step 1 — Retrieve current AWS guidance
+## Step 1 — Draft from the invariants; verify the matrix in the batch
 
-Authoritative upgrade matrix, EOL schedule, and snapshot-based migration tutorial live in the AWS developer guide. You MUST retrieve every assessment per the recipe in [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Service (managed) section). For self-managed upgrades, the OpenSearch Project upgrade-or-migrate / upgrade-paths pages are catalogued in [`knowledge-retrieval.md`](knowledge-retrieval.md) (OpenSearch Project (engine docs) section).
+The critical upgrade invariants (Step 2) and the breaking-changes list (Step 3) are stable-core — draft the upgrade plan directly from them. The exact **EOL dates** and the **current supported-version matrix** are version-volatile: tag them `[verify]` and confirm in the Step 8 batch per [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Service (managed) section). For self-managed upgrades, the OpenSearch Project upgrade-or-migrate / upgrade-paths pages are catalogued in [`knowledge-retrieval.md`](knowledge-retrieval.md) (OpenSearch Project (engine docs) section).
 
-## Step 2 — Critical invariants (you MUST retrieve to confirm currency)
+## Step 2 — Critical invariants (draft directly; verify exact version / EOL numbers in the Step 8 batch)
 
-These rarely change. You MUST verify against the live doc every assessment:
+These rarely change — draft directly from them. Tag any exact version number or EOL date `[verify]` and confirm in the Step 8 batch:
 
 - **OS 1.3 / 2.x → OS 3.x is a two-step upgrade** — you MUST reach OS 2.19 first.
 - **Indexes from OS 1.3 / ES 7.10 or earlier are NOT readable in OS 3.x** (Lucene 10 incompatibility). You MUST reindex first.
@@ -18,11 +18,11 @@ These rarely change. You MUST verify against the live doc every assessment:
 
 Source: the AWS upgrade-path doc (Amazon OpenSearch Service (managed) section) and the rolling-upgrade page on the OpenSearch project docs (OpenSearch Project (engine docs) section) — both catalogued in [`knowledge-retrieval.md`](knowledge-retrieval.md).
 
-## Step 3 — Breaking changes (you MUST retrieve)
+## Step 3 — Breaking changes (draft from the stable list; `[verify]` exact effective-version dates in the Step 8 batch)
 
-The breaking-changes index lives in the documentation-website repo and is updated per minor release. Retrieve the raw markdown / browseable page and the 3.0 announcement per [`knowledge-retrieval.md`](knowledge-retrieval.md) (OpenSearch Project (engine docs) section).
+The breaking-changes items below are stable-core — draft the upgrade plan directly from them. Only the **exact effective-version date** for each item is version-volatile; tag those `[verify]` and confirm against the breaking-changes index (documentation-website repo, updated per minor release) and the 3.0 announcement in the Step 8 batch per [`knowledge-retrieval.md`](knowledge-retrieval.md) (OpenSearch Project (engine docs) section).
 
-Key OS 2.x → 3.x items you MUST always flag (you MUST verify currency by retrieval):
+Key OS 2.x → 3.x items you MUST always flag (the item is stable; tag the exact version `[verify]`):
 
 - **JDK 21 minimum** (per breaking-changes.md 3.0.0; OS 3.x bundled JDK is 21+)
 - **k-NN engine: NMSLIB deprecated** (3.0; not yet removed). FAISS (default since 2.18) or Lucene engine recommended.
@@ -37,7 +37,7 @@ Key OS 2.x → 3.x items you MUST always flag (you MUST verify currency by retri
 - **Romanian analyzer change** (cedilla→comma; reindex Romanian docs)
 - **`compatibility.override_main_response_version` setting REMOVED in 3.0** — legacy ES OSS clients that probe via `GET /` will not see the 7.10 response shape on a 3.x target
 
-> **Skill IP**: claims about a `LegacyBM25Similarity` → `BM25Similarity` default change are not present in the current OpenSearch breaking-changes file. You MUST verify any BM25-default-change claim against the live breaking-changes file via [`knowledge-retrieval.md`](knowledge-retrieval.md) (OpenSearch Project (engine docs) section) before quoting it to a customer.
+> **Skill IP**: whether a `LegacyBM25Similarity` → `BM25Similarity` default change is listed in the current OpenSearch breaking-changes file is itself version-volatile. Tag any BM25-default-change claim `[verify]` and confirm against the live breaking-changes file via [`knowledge-retrieval.md`](knowledge-retrieval.md) (OpenSearch Project (engine docs) section) before quoting it to a customer.
 
 Key OS 1.x → 2.x items:
 - Mapping `type` parameter removed everywhere (OS 2.0)
@@ -48,7 +48,7 @@ Key OS 1.x → 2.x items:
 
 ## Step 4 — Discovery checklist
 
-The standard intake (cluster topology, version, plugin list, index counts/sizes, ISM, role mappings) lives in [`intake.md`](intake.md) and [`source-elasticsearch.md`](source-elasticsearch.md) — both apply to OS sources. You MUST normalize the inputs into the fingerprint JSON shape documented in [`SKILL.md`](../SKILL.md) Step 2 with `engine: "opensearch"`.
+The standard intake (cluster topology, version, plugin list, index counts/sizes, ISM, role mappings) lives in [`intake.md`](intake.md) and [`source-elasticsearch.md`](source-elasticsearch.md) — both apply to OS sources. You MUST normalize the inputs into the fingerprint JSON shape documented in [`SKILL.md`](../SKILL.md) Step 2 with `source_engine: "opensearch"`.
 
 ## Step 5 — Self-managed → AOS / Serverless NextGen
 

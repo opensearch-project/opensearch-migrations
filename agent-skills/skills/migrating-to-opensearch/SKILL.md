@@ -1,6 +1,6 @@
 ---
 name: migrating-to-opensearch
-description: Assesses migrations to Amazon OpenSearch Service or Serverless NextGen from Apache Solr (any version), Elasticsearch (any version), or OpenSearch (in-place 1.x→2.x→3.x upgrades). Triggers on conversational phrasings — "should we migrate", "moving off Solr", "ES to OpenSearch", "Solr → OpenSearch path", "upgrade to OS 3.x", "Lucene 10 reindex", "ILM to ISM", "k-NN engine swap NMSLIB → FAISS", "snapshot vs Migration Assistant", "Capture-and-Replay vs dual-write", "Serverless NextGen or Managed", "sizing for OpenSearch" — and on artifact pastes (schema.xml, solrconfig.xml, eDisMax, _cat/indices, X-Pack ILM/Watcher/ELSER/runtime fields). Outputs schema mapping, query translation, target shape recommendation, ranked migration-path scoring across six tool families, sizing guidance (instances, shards, JVM heap, OCUs), a 0-100 readiness score, and an authoritative citation list. Does not move data (use Migration Assistant for Amazon OpenSearch Service) or estimate dollar cost (use AWS Pricing Calculator).
+description: Assesses migrations to Amazon OpenSearch Service or Serverless NextGen from Apache Solr (any version), Elasticsearch (any version), or OpenSearch (in-place 1.x→2.x→3.x upgrades). Triggers on conversational phrasings — "should we migrate", "moving off Solr", "ES to OpenSearch", "Solr → OpenSearch path", "upgrade to OS 3.x", "Lucene 10 reindex", "ILM to ISM", "k-NN engine swap NMSLIB → FAISS", "snapshot vs Migration Assistant", "Capture-and-Replay vs dual-write", "Serverless NextGen or Managed", "sizing for OpenSearch" — and on artifact pastes (schema.xml, solrconfig.xml, eDisMax, _cat/indices, X-Pack ILM/Watcher/ELSER/runtime fields). Outputs schema mapping, query translation, target shape recommendation, ranked migration-path scoring across six tool families, sizing guidance (instances, shards, JVM heap, OCUs), a 0-100 readiness score, and a verified citation list. Drafts the detailed report fast from embedded reference tables (first-class for both Solr and Elasticsearch/OpenSearch sources) and verifies version-volatile claims in a single batched pass, rather than blocking on a doc fetch per claim. Does not move data (use Migration Assistant for Amazon OpenSearch Service) or estimate dollar cost (use AWS Pricing Calculator).
 owner_team: OpenSearch-Migrations
 owner_cti: '"AWS OpenSearch"/Migrations/Primary'
 stages: [preprod]
@@ -18,11 +18,14 @@ metadata:
 
 This SOP produces a structured migration assessment for Apache Solr (6.x–9.x), Elasticsearch (1.x–8.x), or OpenSearch (in-place upgrades 1.x→2.x→3.x) workloads moving to Amazon OpenSearch Service (managed domain or Serverless NextGen). It is **analytical only**: it ranks six data-movement families — Migration Assistant for Amazon OpenSearch Service (RFS + Capture & Replay), snapshot/restore, OpenSearch Ingestion, reindex from remote, Logstash/EMR/Spark, in-place blue/green upgrade — and recommends whichever fits the workload.
 
-Outputs: target-shape recommendation, ranked migration-path scoring, sizing guidance (instances / shards / JVM heap / OCUs), 0–100 readiness score, ≥ 5 authoritative citations.
+Outputs: target-shape recommendation, ranked migration-path scoring, sizing guidance (instances / shards / JVM heap / OCUs), 0–100 readiness score, and a Citations section verifying every version-volatile claim. The report is drafted at conversation speed from the skill's embedded reference tables and verified in a single batched pass — see the **Fast path** section below. Both Solr and Elasticsearch / OpenSearch sources have first-class embedded tables and report templates, so the fast path produces the same detailed report shape for either family.
 
-The SOP is **retrieval-first**. The canonical recipe (topic → tool → URL, with browser/`curl`/AWS-CLI fallback when the AWS MCP server is not bound) lives in [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md). Every other step in this SOP assumes that pattern and does not duplicate the fallback prose.
+The SOP is **draft-fast, then verify-in-one-pass**. You MUST draft the complete assessment immediately from this skill's embedded reference tables (the `source-*`, `solr-*`, `compatibility-rubric`, `sizing-formulas`, `nuggets`, `decision-trees` files all carry the stable facts a detailed report needs), then run a SINGLE batched verification pass (Step 8) that retrieves live docs for everything you tagged `[verify]`. The canonical retrieval recipe (topic → tool → URL, with browser/`curl`/AWS-CLI fallback when the AWS MCP server is not bound) lives in [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md).
 
-**Hard pre-condition for every step below.** You MUST call `aws___read_documentation` (or the documented fallback) BEFORE writing any version-specific claim — instance types, plugin support, X-Pack parity row, Migration Assistant capability, k-NN engine support, sizing limit. You MUST NOT assert from training-data memory because version-compatibility tables drift per release and a stale claim is the #1 failure mode this skill exists to prevent.
+**Speed contract for every step below.** You MUST produce a full, detailed draft report from the embedded tables FIRST — do NOT serialize a separate `aws___read_documentation` call in front of each individual claim, because per-claim retrieval is the single biggest latency sink and the embedded tables already carry the stable answers. You MUST tag every **version-volatile** value with a trailing `[verify]` marker as you draft it, then resolve ALL `[verify]` tags together in the Step 8 batched pass before delivery.
+
+- **Stable-core (draft directly, no retrieval):** engine fork points (ES 7.10.2 → OpenSearch 1.0), type-system removals (ES 7.0 `_type`), `_source:false`/`stored=false` → MA RFS, ES 7.11+ snapshot prohibition, ES 8.x → MA-only, Solr Trie→Point and TF-IDF→BM25, schema field-type mappings, transformation rules, the severity rubric, readiness weights, sizing constants/formulas, and every gotcha-detection rule in [`references/nuggets.md`](references/nuggets.md). These do not drift per minor release.
+- **Version-volatile (draft with `[verify]`, confirm in the Step 8 batch):** current X-Pack / feature-parity rows, the supported-plugin list, current instance families + regional availability, the Serverless NextGen and Migration Assistant capability matrices, the per-version k-NN default engine, and exact per-version limits (shard caps, `max_clause_count`). You MUST NOT ship a `[verify]`-tagged claim unresolved, because a stale version-specific claim is the #1 failure mode this skill exists to prevent — but you resolve them in one batch at the end, not one network round-trip per fact.
 
 ## Parameters
 
@@ -46,6 +49,20 @@ The SOP is **retrieval-first**. The canonical recipe (topic → tool → URL, wi
   - URL: link to an internal artifact store
 - You MUST proceed to Step 2 once all four required parameters are either inferred or supplied. You MUST NOT ask the customer to "confirm" inferred values before proceeding because the Step 1 restate-and-continue pattern already gives them an opportunity to correct.
 
+## Fast path (default)
+
+This is how the SOP delivers a detailed report quickly. Walk the numbered Steps as the source of truth for *content*, but apply this *sequencing* so the report is drafted at conversation speed and verified once at the end:
+
+1. **Detect** source engine + version + persona from the opening message (Step 1). Proceed without re-confirming when inferable.
+2. **Fingerprint** from whatever artifacts the customer pasted (Step 2). If zero artifacts were provided, ask ONCE for the minimum viable set, then proceed:
+   - ES / OpenSearch: `_cat/indices?v`, `_cluster/health`, and (`_cat/plugins?v` if security/feature parity matters). Mark everything else UNKNOWN.
+   - Solr: `schema.xml` (or `GET /solr/<collection>/schema`) and `solrconfig.xml`. Mark everything else UNKNOWN.
+   - You MUST NOT run a multi-prompt interview before drafting — capture what is there, assume sensible defaults from [`references/assumptions.md`](references/assumptions.md), and surface them inline.
+3. **Draft the full report** (Steps 3–7) directly from the embedded reference tables — schema mapping, query translation, compatibility/gap register, target shape + path, sizing, readiness — tagging every version-volatile value `[verify]`. Do NOT retrieve per claim.
+4. **Verify in one batch** (Step 8): retrieve live docs for every `[verify]` tag at once, resolve each, and assemble the Citations section. Then emit.
+
+Use the full stepwise intake (the per-persona interview in [`references/intake.md`](references/intake.md)) only when (a) the customer is **BSH** — business framing comes first — or (b) the customer explicitly asks for a deep discovery audit, or (c) the workload is high-risk (multi-major hop, `_source:false`, custom plugins) and the missing artifact would change the recommendation. Otherwise SRE/DOP customers get the drafted report immediately.
+
 ## Steps
 
 ### 1. Identify source family and persona, then restate-and-continue
@@ -65,7 +82,7 @@ Walk the per-persona intake in [`references/intake.md`](references/intake.md). N
 
 ```json
 {
-  "engine": "elasticsearch | opensearch | solr",
+  "source_engine": "elasticsearch | opensearch | solr",
   "version": "7.10.2",
   "summary": {
     "node_count": 6,
@@ -73,7 +90,17 @@ Walk the per-persona intake in [`references/intake.md`](references/intake.md). N
     "total_docs": 3200000000,
     "total_gb": 8000,
     "plugin_count": 7,
-    "health_status": "green"
+    "health_status": "green",
+    "_comment": "Engine-specific boolean flags the report templates branch on. Set the ones that apply; omit or false otherwise.",
+    "ilm_used": false,
+    "watcher_used": false,
+    "runtime_fields_used": false,
+    "source_disabled": false,
+    "post_fork": false,
+    "dih_used": false,
+    "velocity_response_writer": false,
+    "xslt_response_writer": false,
+    "custom_lib_count": 0
   },
   "indices": [
     {"name": "logs-2024-11", "docs": 50000000, "store_size": "120gb", "primary": 6, "replica": 1}
@@ -114,9 +141,10 @@ Walk the source-engine surface and emit one entry per finding using the schema b
 
 **Constraints:**
 
-- You MUST tag each finding with the severity rubric defined in [`references/compatibility-rubric.md`](references/compatibility-rubric.md).
-- You MUST retrieve current X-Pack / k-NN / plugin-support tables per the recipe in [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md) — never quote stale numbers from this skill's body, because version-compatibility tables drift per release.
-- For Solr sources, you MUST flag legacy Trie field types and the Solr ≤ 5.x TF-IDF → BM25 similarity change per [`solr-schema-migration.md`](references/solr-schema-migration.md) §1. Trie types are HIGH severity (no direct OpenSearch equivalent); the similarity change is HIGH/MEDIUM behavioral incompatibility.
+- You MUST tag each finding with the severity rubric defined in [`references/compatibility-rubric.md`](references/compatibility-rubric.md). The rubric, the always-flag list, and the per-source feature tables are stable-core — draft them straight from the references.
+- For ES sources, draft the gap register straight from the embedded ES always-flag table in [`references/source-elasticsearch.md`](references/source-elasticsearch.md) (§ ES stable-core) and the always-flag list in [`compatibility-rubric.md`](references/compatibility-rubric.md). Tag only the **current** X-Pack / k-NN / plugin-support *parity rows* with `[verify]` (these drift per OpenSearch minor release); leave `citation_url` empty until the Step 8 batch fills it. Do NOT block the draft on retrieving those tables first.
+- For Solr sources, you MUST flag legacy Trie field types and the Solr ≤ 5.x TF-IDF → BM25 similarity change per [`solr-schema-migration.md`](references/solr-schema-migration.md) §1. Trie types are HIGH severity (no direct OpenSearch equivalent); the similarity change is HIGH/MEDIUM behavioral incompatibility. These are stable-core — no retrieval needed.
+- The `citation_url` field is populated in the Step 8 batched verification pass, not per finding. Draft findings with `citation_url` blank (or `[verify]`) and fill the volatile ones in one pass.
 - You SHOULD be conservative: a false-positive flag is far less harmful than a missed BLOCKING.
 
 ### 4. Select the target shape and migration path
@@ -126,12 +154,12 @@ Walk the trees in [`references/decision-trees.md`](references/decision-trees.md)
 **Constraints:**
 
 - You MUST default to **MANAGED** when the target-shape inputs are ambiguous, because Managed Domain is more flexible and re-evaluating to Serverless NextGen after stable traffic is straightforward.
-- "Serverless NextGen" in this skill means **Amazon OpenSearch Serverless NextGen collections** exclusively. The original Serverless NextGen collection model is being superseded; you MUST NOT assert NextGen support / non-support / sizing / supported-source rows from training memory. Retrieve the current Serverless NextGen capability matrix every assessment via [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md) (Amazon OpenSearch Serverless NextGen section). Pair this skill with the companion `aoss-nextgen` skill whenever target shape lands on Serverless NextGen.
+- "Serverless NextGen" in this skill means **Amazon OpenSearch Serverless NextGen collections** exclusively. The original Serverless NextGen collection model is being superseded. You MAY draft the NextGen recommendation from the decision tree, but you MUST tag every specific NextGen support / non-support / sizing / supported-source row `[verify]` and confirm it in the Step 8 batch — do NOT assert NextGen specifics from training memory, because the NextGen capability matrix drifts across iterations. Pair this skill with the companion `aoss-nextgen` skill whenever target shape lands on Serverless NextGen.
 - You MUST score all six migration-path families against the workload before recommending one. You MUST NOT assume Migration Assistant for Amazon OpenSearch Service is the answer just because the customer asked a "should we migrate" question — small workloads (< 100 GB) and same-major hops often have cheaper paths (snapshot/restore, reindex from remote). **Solr is the exception**: see the next bullet.
 - For **Solr** sources you MUST default to Migration Assistant Solr backfill (RFS) regardless of data volume, because RFS is the **only** tool that can recover Solr fields configured `stored="false"` in `schema.xml` / `managed-schema`. RFS reads the source's Lucene segments directly; non-RFS paths (Solr `/export`, SolrJ `cursorMark`, Spark + opensearch-spark) can only emit values stored in `_source`-equivalent records and will silently lose any field whose `stored` attribute is false. You MUST audit `<field>` and `<dynamicField>` definitions in the schema before recommending a non-RFS path; recommend a non-RFS path ONLY when (a) every needed field is `stored="true"` AND (b) the customer can trivially re-emit the source data from a system of record AND (c) the dataset is small (<100 GB). Flag the trade-off explicitly. See the source-engine row in [`references/decision-trees.md`](references/decision-trees.md).
 - **Migration Assistant auto-translates Solr schema → OpenSearch mappings AND auto-converts Solr documents → OpenSearch document format during backfill.** You MUST NOT put "translate the Solr schema to OpenSearch mappings" or "convert Solr documents to OpenSearch documents" as separate operator-driven steps in a Solr → OpenSearch migration plan when the path is MA RFS. The plan steps are: deploy MA → metadata migration (MA emits the OpenSearch mappings) → operator reviews + overrides if needed → backfill (MA converts the documents) → validate. The reference at [`references/solr-schema-migration.md`](references/solr-schema-migration.md) is for AUDITING MA's auto-translation output and identifying the rare cases that need a transformer override (custom analyzer chains, legacy field types, regex `dynamicField` patterns) — NOT a checklist the operator walks through manually. You MUST describe MA's auto-translate as the default behavior in the plan; you MUST NOT describe schema/document conversion as work the operator does.
-- You MUST retrieve the current Migration Assistant capability matrix before quoting source-engine support per [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md), because caps and source-version support change with each release. Migration Assistant supports **Apache Solr / SolrCloud** via the Solr backfill workflow (Reindex-from-Snapshot, RFS) AND **Elasticsearch / OpenSearch** sources — do NOT tell a customer Migration Assistant is "Elasticsearch-only" or that it "doesn't support Solr".
-- You MUST confirm regional availability of the recommended instance family per the Regional-availability recipe in [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md) before quoting.
+- Migration Assistant supports **Apache Solr / SolrCloud** via the Solr backfill workflow (Reindex-from-Snapshot, RFS) AND **Elasticsearch / OpenSearch** sources — this is stable-core; do NOT tell a customer Migration Assistant is "Elasticsearch-only" or that it "doesn't support Solr". Draft the path recommendation directly from the source-engine support table in [`references/decision-trees.md`](references/decision-trees.md). Tag only the exact per-release caps (e.g. the GovCloud RFS shard-size cap, current supported-source minor versions) `[verify]` and confirm them in the Step 8 batch.
+- You MUST tag the recommended instance family `[verify]` for regional availability and confirm it in the Step 8 batch (Regional-availability recipe in [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md)). Draft the family from the topology defaults in [`sizing-formulas.md`](references/sizing-formulas.md) first; do not block the draft on the availability check.
 
 ### 5. Produce sizing guidance
 
@@ -139,6 +167,7 @@ For every assessment, deliver Compute, Storage, Shards, JVM heap, Topology, and 
 
 **Constraints:**
 
+- You MUST tag every concrete instance-family recommendation `[verify]` — draft the family from the topology defaults in [`sizing-formulas.md`](references/sizing-formulas.md), then confirm it is current and available in the target region in the Step 8 batch. Instance families and the per-instance JVM heap recommendation are version-volatile; the storage / shard / topology formulas are stable-core and drafted directly.
 - You MUST NOT estimate dollar costs because pricing changes monthly and account-specific RI / Savings Plan / EDP discount math is outside an LLM's reliable scope. Plug into <https://calculator.aws> instead.
 - You MUST end the sizing section with: *"Plug these inputs into the AWS Pricing Calculator at <https://calculator.aws> for the dollar figure."*
 
@@ -156,28 +185,35 @@ Score the workload across the seven dimensions in [`references/readiness-rubric.
 
 Render the report into the templates under `assets/`:
 
-- `assets/report-template.md` → `MIGRATION_ASSESSMENT.md` (full assessment)
+- `assets/report-template.md` → `MIGRATION_ASSESSMENT.md` (full assessment — source-agnostic; has ES and Solr conditional blocks)
 - `assets/executive-summary-template.md` → `EXECUTIVE_SUMMARY.md` (BSH summary)
 - `assets/tech-deepdive-template.md` → `TECHNICAL_DEEP_DIVE.md` (SRE / DOP deep dive)
 - For Solr sources: `assets/solr-report-template.md`, `assets/solr-index-template-skeleton.md`, `assets/solr-gap-register.md`
+- For Elasticsearch / OpenSearch sources: `assets/elasticsearch-report-template.md`, `assets/elasticsearch-index-template-skeleton.md`, `assets/elasticsearch-gap-register.md`
 
 **Constraints:**
 
 - You MUST emit every required section, in order: Executive Summary, Source, Target, Migration Path, Sizing, Readiness, Risks, Citations.
-- You MUST cite ≥ 5 unique authoritative URLs with retrieval timestamps.
+- You MUST collect all provenance into the single **Citations** section (the canonical provenance record), with a retrieval timestamp on each entry. Inline per-claim citations are OPTIONAL — prefer a bare `[verify]` marker inline during drafting and resolve it in the Citations section. You MUST cite the version-volatile claims actually present in the report (typically ≥ 3 unique authoritative URLs); do not pad to an arbitrary floor with URLs you did not use.
 - You MUST surface <https://calculator.aws> for any cost-related question.
 - You MAY skip the templates and answer in-line when the user asked a focused operational question (e.g. "snapshot vs reindex for 50 GB?") that doesn't warrant the full report shape.
-- You SHOULD lead with the **decision and the top three risks** and use terse tables (not prose paragraphs) for schema mappings, gap registers, and feature-parity rows. For complex source workloads (X-Pack heavy, Solr 6.x with multiple breaking field types, multi-major hops) the agent has hit `max_tokens` limits with long-form prose; defer exhaustive enumeration to follow-up if the customer asks.
+- You SHOULD lead with the **decision and the top three risks** and use terse tables (not prose paragraphs) for schema mappings, gap registers, and feature-parity rows. Tables are the detail vehicle — they carry more information per token than prose and they are what makes the report both fast to emit and detailed. Avoid restating a table's contents in prose. This terse-table discipline is also what keeps complex source workloads (X-Pack heavy, Solr 6.x with multiple breaking field types, multi-major hops) under the `max_tokens` ceiling; if a register is very long, keep every row but drop the per-row prose commentary.
 - You MUST NOT include credentials, endpoints, or master usernames in examples or generated reports because reports are routinely shared with stakeholders and may end up in unapproved repos.
 
-### 8. Verify before delivery
+### 8. Batched verification pass, then verify before delivery
 
-Before declaring the assessment done, you MUST reproduce this checklist in your response and tick each box. Skipping this step is the most common cause of incomplete assessments.
+This is the ONE retrieval pass. After drafting the full report (Steps 3–7) from the embedded tables, collect every `[verify]`-tagged claim and resolve them together:
+
+1. **Gather** all `[verify]` markers from the draft into a single list (feature-parity rows, plugin-support, current instance families + regional availability, NextGen / MA capability rows, per-version k-NN default engine, exact per-version limits).
+2. **Retrieve** in as few calls as possible per the recipe in [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md) — batch by domain (one AWS-docs sweep, one OpenSearch-project sweep, one regional-availability call). You SHOULD run independent retrievals concurrently rather than serially.
+3. **Resolve** each tag: replace the `[verify]` marker with the confirmed value and add the source URL + retrieval timestamp to the Citations section. If a retrieval fails or the host has no MCP/web access, leave the value with an explicit `(unverified — confirm against <doc>)` note rather than dropping it.
+
+Then, before declaring the assessment done, you MUST reproduce this checklist in your response and tick each box. Skipping this step is the most common cause of incomplete assessments.
 
 ```
 - [ ] All 8 required sections emitted, in order (Exec / Source / Target / Migration Path / Sizing / Readiness / Risks / Citations)
-- [ ] ≥ 5 unique authoritative URLs cited, each with a retrieval timestamp
-- [ ] Every version-specific claim (Lucene, instance limit, plugin support) carries an inline citation
+- [ ] Every [verify]-tagged claim resolved in the batched pass (no [verify] markers remain in the delivered report)
+- [ ] Citations section lists each version-volatile claim's source URL with a retrieval timestamp (typically ≥ 3 unique URLs; cite what you used, no arbitrary floor)
 - [ ] <https://calculator.aws> surfaced for the cost handoff
 - [ ] At least 1 nugget from references/nuggets.md cross-referenced by name
 - [ ] Target shape default = MANAGED unless workload explicitly justifies Serverless NextGen
@@ -187,7 +223,7 @@ Before declaring the assessment done, you MUST reproduce this checklist in your 
 - [ ] Security section cites the canonical control list in references/security.md and confirms each control was assessed
 ```
 
-If any box can't be ticked, you MUST fix the gap before responding. You MUST NOT deliver a report with unticked items because the rubric grades on completeness and a missing citation drops the workload below the §4 ≥80% bar.
+If any box can't be ticked, you MUST fix the gap before responding. You MUST NOT deliver a report with unresolved `[verify]` markers because a stale version-specific claim is the failure mode this skill exists to prevent; a verified value with a citation is the bar.
 
 ## Security Considerations
 
@@ -215,7 +251,7 @@ Every assessment report MUST include a Security section. The full canonical reco
 1. Identifies the source (OS 1.7) in the first sentence.
 2. States OS 1.x cannot upgrade directly to 3.x; mandatory hop through OS 2.19.
 3. Identifies older-Lucene indexes carried forward from OS 1.x as incompatible with OS 3.x (Lucene 10 segment-format wall — see [`references/nuggets.md`](references/nuggets.md) #7) and notes they must be reindexed before reaching 3.x.
-4. Flags NMSLIB engine deprecation; recommends FAISS as the replacement.
+4. Flags NMSLIB engine deprecation (`[verify]` the exact release version in the batch); recommends FAISS as the replacement.
 5. Recommends in-place blue/green upgrade as the primary migration path.
 6. Provides a sizing recommendation appropriate for 50M × 768-dim vectors per [`references/sizing-formulas.md`](references/sizing-formulas.md).
 7. Cites at least one authoritative AWS doc URL.
@@ -253,13 +289,16 @@ References (loaded on demand):
 
 - [`references/decision-trees.md`](references/decision-trees.md) — target shape, migration-path matrix, k-NN engine, RI term, go/no-go gates, duration heuristics
 - [`references/intake.md`](references/intake.md) — personas + per-role intake (SRE / DOP / BSH; ES, OS, Solr)
-- [`references/source-elasticsearch.md`](references/source-elasticsearch.md), [`references/source-opensearch.md`](references/source-opensearch.md) — version matrices + breaking changes
+- [`references/source-elasticsearch.md`](references/source-elasticsearch.md), [`references/source-opensearch.md`](references/source-opensearch.md) — ES stable-core tables (version-family path, always-flag, field-mapping) + OS upgrade invariants & breaking changes
 - [`references/compatibility-rubric.md`](references/compatibility-rubric.md), [`references/nuggets.md`](references/nuggets.md) — severity rubric, always-flag list, 20 production gotchas
 - [`references/sizing-formulas.md`](references/sizing-formulas.md), [`references/readiness-rubric.md`](references/readiness-rubric.md) — sizing IP + 7-dimension readiness score
 - [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md) — topic → tool → URL (canonical retrieval recipe with browser/CLI fallback)
 - [`references/scope.md`](references/scope.md), [`references/assumptions.md`](references/assumptions.md) — scope guardrails + standing assumptions
 - Solr deep dives: [`references/solr-schema-migration.md`](references/solr-schema-migration.md), [`references/solr-transformation-rules.md`](references/solr-transformation-rules.md), [`references/solr-query-behavior-edge-cases.md`](references/solr-query-behavior-edge-cases.md), [`references/solr-analysis.md`](references/solr-analysis.md), [`references/solr-legacy-features.md`](references/solr-legacy-features.md), [`references/solr-sizing-and-performance.md`](references/solr-sizing-and-performance.md)
 
-Assets: `assets/{report-template, executive-summary-template, tech-deepdive-template, solr-report-template, solr-index-template-skeleton, solr-gap-register}.md`.
+Assets:
+- Source-agnostic: `assets/{report-template, executive-summary-template, tech-deepdive-template}.md`.
+- Solr renderings: `assets/{solr-report-template, solr-index-template-skeleton, solr-gap-register}.md`.
+- Elasticsearch / OpenSearch renderings: `assets/{elasticsearch-report-template, elasticsearch-index-template-skeleton, elasticsearch-gap-register}.md`.
 
-External: every URL the skill ever cites is centralized in [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md). The only inline URL anywhere in the skill is <https://calculator.aws> (every dollar-cost question routes there). Always retrieve before quoting — do NOT treat any URL list as a snapshot.
+External: every URL the skill ever cites is centralized in [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md). The only inline URL anywhere in the skill is <https://calculator.aws> (every dollar-cost question routes there). Draft from the embedded stable-core tables, then verify every `[verify]`-tagged version-volatile claim in the single Step 8 batched pass before delivery — do NOT treat a `[verify]` value as final until it is confirmed, and do NOT serialize a fetch per claim.

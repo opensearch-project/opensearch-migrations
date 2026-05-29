@@ -1,8 +1,6 @@
-# Compatibility — retrieval-first
+# Compatibility — draft from the embedded tables, verify the volatile rows
 
-Compatibility matrices drift fast (X-Pack ↔ OpenSearch parity, k-NN engine support, plugin lists, Lucene format). **You MUST retrieve the live tables. You MUST NOT quote from snapshots because feature-parity tables drift per release and stale numbers mislead the customer.**
-
-The skill owns one thing here: the **severity rubric** for tagging incompatibilities.
+The skill owns the stable-core here: the **severity rubric**, the **always-flag list** (Step 3), and the **plugin-rename cheat-sheet** (Step 4) — draft the gap register straight from them, no retrieval. What is version-volatile is the **exact minor-version parity row** (which OpenSearch minor first reaches feature X, k-NN default engine per release, current plugin-support list, Lucene format per major): tag those `[verify]` and confirm them in the single Step 8 batched pass. **You MUST NOT ship a `[verify]`-tagged parity number unverified** — but you draft first and verify in one batch, not one fetch per row.
 
 ## Step 1 — Severity rubric (skill IP)
 
@@ -15,13 +13,13 @@ When you find an incompatibility, you MUST tag it:
 
 When in doubt, you SHOULD flag at the higher severity because false positives are far less harmful than a missed BLOCKING.
 
-## Step 2 — Retrieve the canonical tables
+## Step 2 — The canonical tables (draft now, `[verify]` the volatile rows in the batch)
 
 > For Solr → OpenSearch compatibility, the schema, query, and analyzer mappings live in the `solr-*` references ([`solr-schema-migration.md`](solr-schema-migration.md), [`solr-query-behavior-edge-cases.md`](solr-query-behavior-edge-cases.md), [`solr-analysis.md`](solr-analysis.md), [`solr-legacy-features.md`](solr-legacy-features.md), [`solr-transformation-rules.md`](solr-transformation-rules.md)). You MUST tag Solr findings with the same BLOCKING / HIGH / MEDIUM / LOW vocabulary defined in Step 1 above.
 
 ### Elasticsearch → OpenSearch
 
-X-Pack feature parity changes per release. You MUST retrieve at assessment time:
+Draft from the embedded *ES → OpenSearch always-flag table* in [`source-elasticsearch.md`](source-elasticsearch.md). Only the exact minor-version parity rows are `[verify]` — confirm these in the Step 8 batch:
 
 - AWS-side managed-AOS plugin support — see [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Service (managed) section).
 - OpenSearch-side Alerting / Anomaly Detection / ISM landing pages — see [`knowledge-retrieval.md`](knowledge-retrieval.md) (OpenSearch Project (engine docs) section).
@@ -49,7 +47,7 @@ These are stable enough to mention before retrieval, but you **MUST verify** the
 - Watcher → Alerting (rebuild monitors)
 - ELSER → Neural Sparse (rewrite queries + retrain models)
 - ES `_parent` (5.x) → `join` field (reindex required)
-- NMSLIB k-NN indexes — NMSLIB engine deprecated in k-NN 2.19.0.0 / OpenSearch 3.0 (not yet removed). FAISS has been the default since k-NN 2.18.0.0; migrate to FAISS or Lucene engine.
+- NMSLIB k-NN indexes — NMSLIB engine deprecated in k-NN 2.19.0.0 `[verify]` / OpenSearch 3.0 `[verify]` (not yet removed). FAISS has been the default since k-NN 2.18.0.0 `[verify]`; migrate to FAISS or Lucene engine. (The deprecation itself is stable; the exact release numbers are version-volatile — confirm in the Step 8 batch.)
 
 ### Always MEDIUM
 
@@ -58,7 +56,7 @@ These are stable enough to mention before retrieval, but you **MUST verify** the
 - Romanian analyzer change (cedilla→comma — reindex Romanian docs; per OpenSearch 3.0 breaking changes)
 - ES SQL → OpenSearch SQL (mostly compatible; endpoint differs)
 
-> **Skill IP**: a `LegacyBM25Similarity` → `BM25Similarity` default change is sometimes cited for OS 3.x. This is **not present in the current OpenSearch breaking-changes file**. You MUST verify the BM25 default against the live breaking-changes file via [`knowledge-retrieval.md`](knowledge-retrieval.md) (OpenSearch Project (engine docs) section) before flagging it to a customer.
+> **Skill IP**: a `LegacyBM25Similarity` → `BM25Similarity` default change is sometimes cited for OS 3.x. Whether it is listed in the current breaking-changes file is itself version-volatile — tag any BM25-default-change claim `[verify]` and confirm against the live breaking-changes file via [`knowledge-retrieval.md`](knowledge-retrieval.md) (OpenSearch Project (engine docs) section) before flagging it to a customer, especially if the workload uses custom similarity settings.
 
 ### Always LOW
 

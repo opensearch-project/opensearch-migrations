@@ -1,6 +1,6 @@
 # Retrieval recipes — topic → tool → URL
 
-You MUST retrieve before quoting. You MUST NOT rely on offline fallback because the live docs drift faster than any embedded snapshot can track.
+You MUST draft from the skill's embedded reference tables first and verify the **version-volatile** claims in the single batched pass (SKILL.md Step 8) before delivery — NOT one retrieval per claim. Stable-core facts (fork points, type-system removals, schema field-type mappings, transformation rules, severity rubric, sizing constants, gotcha-detection rules) are embedded in the references and need no retrieval. Version-volatile facts (current feature-parity rows, supported-plugin list, current instance families, regional availability, NextGen / Migration Assistant capability matrices, per-version k-NN default engine, exact per-version limits) MUST be confirmed against the live docs in the batch — do not ship one unverified. This file is the recipe for that batch.
 
 ## Three retrieval primitives
 
@@ -38,7 +38,7 @@ All under `https://docs.aws.amazon.com/opensearch-service/latest/developerguide/
 
 ## Amazon OpenSearch Serverless NextGen
 
-NextGen capability + sizing + supported-source facts drift across NextGen iterations. **You MUST retrieve before quoting any specific NextGen feature, limit, supported collection type, or supported migration source row** — do NOT recite NextGen specifics from training memory. The companion `aoss-nextgen` skill packs the operator-side gotchas (NextGen vs Classic signals, the SDK/CLI version pre-flight, the 401-during-warmup window, cleanup ordering); load it whenever target shape lands on Serverless NextGen.
+NextGen capability + sizing + supported-source facts drift across NextGen iterations. **Tag any specific NextGen feature, limit, supported collection type, or supported migration source row `[verify]` and confirm it in the Step 8 batched pass** — do NOT recite NextGen specifics from training memory unverified. The companion `aoss-nextgen` skill packs the operator-side gotchas (NextGen vs Classic signals, the SDK/CLI version pre-flight, the 401-during-warmup window, cleanup ordering); load it whenever target shape lands on Serverless NextGen.
 
 Canonical pages (same base URL): `serverless-overview.html`, `serverless-comparison.html`, `serverless-scaling.html`, `serverless-vector-search.html`, `serverless-genref.html`.
 
@@ -99,11 +99,22 @@ Skill discovery: `aws___retrieve_skill skill_name=aws_setup` and `aws___search_d
 
 ## Citation discipline
 
-Every claim in a Migration Assessment report MUST:
+Every **version-volatile** claim in a Migration Assessment report MUST, after the Step 8 batched pass:
 
-1. Be retrieved from the live source (not embedded).
-2. Cite the live URL.
+1. Be confirmed against the live source (stable-core facts drafted from the embedded references do not need a live fetch, but you SHOULD still name the reference file/section they came from).
+2. Cite the live URL in the Citations section.
 3. Include a retrieval timestamp.
 4. Use the right tool for the domain (AWS Knowledge MCP refuses non-AWS URLs).
 
-You MUST self-check before delivery: ≥ 5 unique URLs cited; every URL accompanied by a retrieval timestamp; every claim traces to a cited URL.
+You MUST self-check before delivery: no `[verify]` markers remain; every version-volatile claim traces to a cited URL with a retrieval timestamp in the Citations section; cite the URLs you actually used (typically ≥ 3) rather than padding to a fixed floor. The Citations section — not inline-per-line citations — is the canonical provenance record, which keeps the report dense and under the `max_tokens` ceiling.
+
+## Batching the verification pass
+
+To keep the verification fast, gather all `[verify]` tags first, then retrieve by domain in as few calls as possible (and concurrently where the host allows):
+
+- **One AWS-docs sweep** — managed-AOS plugin support, instance families, NextGen capability/sizing, Migration Assistant caps, ISM. (`aws___read_documentation` / `aws___search_documentation`.)
+- **One OpenSearch-project sweep** — current k-NN default engine, breaking-changes for the version step, analyzer/tokenizer class names. (`WebFetch` / `gh api`.)
+- **One regional-availability call** — `aws___get_regional_availability` (or the CLI fallback below).
+- **One Elastic-docs fetch** if the report makes a type-removal or ES-feature claim.
+
+A typical assessment resolves in 3–4 batched calls, not dozens of per-claim calls.

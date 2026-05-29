@@ -1,6 +1,6 @@
 # Solr legacy features — migration strategies
 
-Solr features that **cannot be directly migrated** to OpenSearch and require a strategy change. The skill owns the **decision table per feature**. You MUST retrieve tool-specific configuration (Logstash JDBC, OSI blueprints, OpenSearch nested/join field syntax) live from product docs because that material drifts faster than any embedded copy.
+Solr features that **cannot be directly migrated** to OpenSearch and require a strategy change. The skill owns the **decision table per feature** — draft the strategy and the stable-core tool recommendations (Logstash / OSI / Spark / nested-or-join) directly from it. Only the current tool-version-specific configuration (Logstash JDBC connector settings, OSI blueprint syntax, exact nested/join field syntax) is version-volatile: tag those `[verify]` and confirm in the Step 8 batch rather than blocking the draft.
 
 ## Data Import Handler (DIH)
 

@@ -1,6 +1,6 @@
 # Solr → OpenSearch analysis pipelines, synonyms, and language analyzers
 
-This file owns the **operational rules** for migrating Solr analysis pipelines (tokenizers, token filters, char filters), synonyms, and language analyzers. The full per-class mapping tables live in the OpenSearch and Solr docs. You MUST retrieve them live. You MUST NOT embed them because the live tables drift faster than any embedded snapshot.
+This file owns the **operational rules** for migrating Solr analysis pipelines (tokenizers, token filters, char filters), synonyms, and language analyzers — these plus the high-leverage class-name mappings below are stable-core, so draft directly from them. Only the long-tail per-class mappings and parameter renames are version-volatile: tag those `[verify]` and confirm in the Step 8 batch rather than blocking the draft.
 
 ## Structural mapping
 
@@ -36,9 +36,9 @@ Key structural differences:
 - Solr `positionIncrementGap` → OpenSearch `position_increment_gap` (default 100 in both).
 - You MUST declare named filters/tokenizers in `settings.analysis` before reference.
 
-## Class-name mapping (you MUST retrieve, MUST NOT embed)
+## Class-name mapping (high-leverage set is stable-core; `[verify]` the long tail in the batch)
 
-You MUST NOT embed the full mapping table here because it drifts per release. For the full Solr-factory ↔ OpenSearch-class mapping (tokenizers, token filters, char filters, including parameter renames), you MUST retrieve the live docs each assessment — see [`knowledge-retrieval.md`](knowledge-retrieval.md) (OpenSearch Project (engine docs) section) for the OpenSearch tokenizer / token-filter / char-filter pages and the Apache Solr tokenizer / filter pages.
+Draft from the high-leverage class names below — they are stable and cover the common case. For the full Solr-factory ↔ OpenSearch-class mapping (the long tail of tokenizers, token filters, char filters, including parameter renames), tag the specific mapping `[verify]` and confirm in the Step 8 batch — see [`knowledge-retrieval.md`](knowledge-retrieval.md) (OpenSearch Project (engine docs) section) for the OpenSearch tokenizer / token-filter / char-filter pages and the Apache Solr tokenizer / filter pages.
 
 The high-leverage class names you will encounter most often: `solr.StandardTokenizerFactory` → `standard`; `solr.WhitespaceTokenizerFactory` → `whitespace`; `solr.LowerCaseFilterFactory` → `lowercase`; `solr.StopFilterFactory` → `stop`; `solr.SynonymGraphFilterFactory` → `synonym_graph`; `solr.WordDelimiterGraphFilterFactory` → `word_delimiter_graph`; `solr.HTMLStripCharFilterFactory` → `html_strip`; `solr.MappingCharFilterFactory` → `mapping`. Parameter names go camelCase → snake_case (e.g. `minGramSize` → `min_gram`, `generateWordParts` → `generate_word_parts`). All other mappings come from the live docs.
 

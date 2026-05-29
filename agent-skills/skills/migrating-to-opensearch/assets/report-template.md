@@ -1,3 +1,10 @@
+<!--
+Source-agnostic master template. The Source/Risks blocks below branch on
+{{ fingerprint.source_engine }}. For the engine-specific renderings (full
+section-by-section structure with the right schema/query columns) see
+solr-report-template.md (Solr) and elasticsearch-report-template.md (ES / OS).
+Use whichever matches the source; this master is the shared skeleton they share.
+-->
 # Migration Assessment Report — {{ fingerprint.source_engine }} {{ fingerprint.version | default:'(version unknown)' }} → Amazon OpenSearch
 
 **Date**: {{ date }}  
@@ -145,13 +152,20 @@ This skill produces sizing inputs only. You MUST plug them into the **AWS Pricin
 
 Severity-ordered. See [`nuggets.md`](../references/nuggets.md) for general anti-patterns and [`compatibility-rubric.md`](../references/compatibility-rubric.md) for the severity rubric. Specific incompatibilities discovered during the assessment go here.
 
+For the full per-incompatibility register use the engine-specific gap register: [`solr-gap-register.md`](solr-gap-register.md) for Solr sources, [`elasticsearch-gap-register.md`](elasticsearch-gap-register.md) for Elasticsearch / OpenSearch sources. The rows below are auto-seeded from the fingerprint; add one row per remaining finding.
+
 | ID | Severity | Description | Workaround |
 |---|---|---|---|
-{% if fingerprint.summary.dih_used %}| SOLR_DIH | HIGH | Solr Data Import Handler (DIH) was removed in Solr 9.0; no direct OpenSearch equivalent | Migrate ETL to OpenSearch Ingestion (OSI), Data Prepper, AWS DMS, or Logstash |
+{% if fingerprint.source_engine == 'solr' %}{% if fingerprint.summary.dih_used %}| SOLR_DIH | HIGH | Solr Data Import Handler (DIH) was removed in Solr 9.0; no direct OpenSearch equivalent | Migrate ETL to OpenSearch Ingestion (OSI), Data Prepper, AWS DMS, or Logstash |
 {% endif %}{% if fingerprint.summary.velocity_response_writer %}| SOLR_VELOCITY | HIGH | Velocity Response Writer is deprecated/removed in modern Solr; OpenSearch has no equivalent | Move templating into the application layer |
 {% endif %}{% if fingerprint.summary.xslt_response_writer %}| SOLR_XSLT | HIGH | XSLT Response Writer has no OpenSearch equivalent | Move templating into the application layer |
 {% endif %}{% if fingerprint.summary.custom_lib_count %}| SOLR_CUSTOM_PLUGIN | HIGH/BLOCKING | Custom plugin JARs ({{ fingerprint.summary.custom_lib_count }} `<lib>` directives) require port to OpenSearch | Re-implement as supported plugins, or submit RFC; not supported on Serverless NextGen |
-{% endif %}| _Add per-incompatibility rows here_ | | | |
+{% endif %}{% endif %}{% if fingerprint.source_engine == 'elasticsearch' %}{% if fingerprint.summary.ilm_used %}| ES_ILM | HIGH | ES Index Lifecycle Management (ILM); policy JSON does not import as ISM | Rewrite policies as ISM and re-attach (see [`source-elasticsearch.md`](../references/source-elasticsearch.md)) |
+{% endif %}{% if fingerprint.summary.watcher_used %}| ES_WATCHER | HIGH | X-Pack Watcher has no direct equivalent | Rebuild as OpenSearch Alerting monitors |
+{% endif %}{% if fingerprint.summary.runtime_fields_used %}| ES_RUNTIME_FIELDS | HIGH | ES runtime (schema-on-read) fields have no OpenSearch equivalent | Pre-compute at ingest or use scripted_field; reindex |
+{% endif %}{% if fingerprint.summary.source_disabled %}| ES_SOURCE_FALSE | HIGH | `_source: {enabled:false}` index — only MA RFS can recover documents (nugget #22) | Use Migration Assistant RFS; re-enable `_source` on target |
+{% endif %}{% if fingerprint.summary.post_fork %}| ES_POST_FORK | HIGH | Source is ES ≥ 7.11 (ELv2/SSPL) — Snapshot/Restore to AOS is NOT supported (nugget #21) | Use MA RFS (any volume) or `_reindex` from remote; flag legal review |
+{% endif %}{% endif %}| _Add per-incompatibility rows here_ | | | |
 
 ### What I assumed (defaults applied for UNKNOWN inputs)
 
@@ -166,7 +180,7 @@ Severity-ordered. See [`nuggets.md`](../references/nuggets.md) for general anti-
 
 ## Citations
 
-Authoritative sources used for this assessment. For the canonical retrieval recipe (every URL the skill ever cites, topic → tool → URL, with browser/CLI fallbacks when the AWS MCP server is not available), see [`knowledge-retrieval.md`](../references/knowledge-retrieval.md). You MUST cite, with retrieval timestamps, at minimum:
+The single canonical provenance record for this assessment (resolved in the Step 8 batched pass — no inline per-claim citations needed). For the canonical retrieval recipe (every URL the skill ever cites, topic → tool → URL, with browser/CLI fallbacks when the AWS MCP server is not available), see [`knowledge-retrieval.md`](../references/knowledge-retrieval.md). You MUST list, with retrieval timestamps, the version-volatile claims you actually verified — typically including:
 
 - The specific best-practice page used for the sizing math (Amazon OpenSearch Service (managed) section)
 - The AWS upgrade-path doc for any upgrade-path claim (Amazon OpenSearch Service (managed) section)

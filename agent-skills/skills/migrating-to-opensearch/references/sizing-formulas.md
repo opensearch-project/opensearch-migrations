@@ -1,6 +1,6 @@
-# Sizing — retrieval-first
+# Sizing — draft from the formulas, verify the per-instance numbers
 
-The authoritative formulas live in AWS docs (storage, sharding, instances, petabyte-scale, error handling, and Serverless NextGen scaling pages). You MUST retrieve every assessment via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Service (managed) section and Amazon OpenSearch Serverless NextGen section). You MUST NOT quote stale numbers from this file because the live AWS docs drift faster than any embedded snapshot can track.
+The storage / shard / topology formulas and constants below are stable-core (confirmed against AWS `bp-*` docs at the cited line) — draft the sizing section directly from them. What is version-volatile and MUST be tagged `[verify]` and confirmed in the Step 8 batch: the **per-instance JVM heap recommendation**, the **current instance families** (and their regional availability), and the **live Serverless NextGen OCU caps**. Everything else here is a formula or a stable constant — do not block the draft on a fetch.
 
 This file owns the **operational rules of thumb** that do not appear in any single doc, plus the k-NN engine selection IP.
 
@@ -38,7 +38,7 @@ Confirmed by `bp-sharding.html` and `bp.html`:
 - You MUST use exactly 3 dedicated cluster managers. You MUST NOT use 1, 2, 4, or 5 because cluster manager quorum requires odd counts and 3 is the minimum that survives a single-node failure.
 - ≥ 2 data nodes (Multi-AZ-with-Standby: data nodes in multiples of 3, 2 replicas, Auto-Tune ON)
 - 3 AZs for prod
-- You MUST NOT recommend `t2.*` or `t3.small` for prod data nodes because their CPU credits exhaust under sustained load and the cluster will throttle. You SHOULD prefer `r6g`/`r7g`/`r8g` for query latency, OR1/OR2/OM2 for write-heavy.
+- You MUST NOT recommend `t2.*` or `t3.small` for prod data nodes because their CPU credits exhaust under sustained load and the cluster will throttle. You SHOULD prefer graviton-based memory-optimized instances (e.g. `r6g`/`r7g`/`r8g` — tag the concrete family `[verify]` for current regional availability) for query latency, and write-optimized instances (e.g. `OR1`/`OR2`/`OM2` `[verify]`) for write-heavy. These names are examples, not an exhaustive or fixed list; confirm the current supported families in the Step 8 batch.
 - You SHOULD prefer gp3 EBS over gp2 because gp3 decouples IOPS from volume size and is cheaper at scale.
 
 ## k-NN engine selection (skill IP)
@@ -52,7 +52,7 @@ Confirmed by `bp-sharding.html` and `bp.html`:
 | Migrating from NMSLIB | FAISS migration (NMSLIB deprecated; default since 2.18 is FAISS) |
 | Targeting Serverless NextGen | FAISS HNSW only |
 
-For k-NN memory math, you MUST retrieve `knn-index/` and the `knn-methods-engines.md` reference per [`knowledge-retrieval.md`](knowledge-retrieval.md) (OpenSearch Project (engine docs) section). Standing rules of thumb: float HNSW `bytes_per_vector ≈ 1.1 × (4 × dim + 8 × m)`; multiply by `(1 + replicas)`. Default native-index circuit breaker: 50 % of non-heap RAM.
+For k-NN memory math, draft directly from the standing rules of thumb (skill IP, no retrieval): float HNSW `bytes_per_vector ≈ 1.1 × (4 × dim + 8 × m)`; multiply by `(1 + replicas)`; default native-index circuit breaker 50 % of non-heap RAM. Tag any engine-specific exact value `[verify]` and confirm in the Step 8 batch against `knn-index/` and the `knn-methods-engines.md` reference per [`knowledge-retrieval.md`](knowledge-retrieval.md) (OpenSearch Project (engine docs) section). Do not block the draft on this fetch.
 
 For UltraWarm k-NN: you MUST NOT use `uw.medium` for in-memory engines because the instance lacks the RAM headroom to hold k-NN graphs. You MUST size so cumulative graph size of actively-searched shards ≤ `knn.memory.circuit_breaker.limit × 61 GiB` per `uw.large` instance.
 
@@ -63,7 +63,7 @@ For UltraWarm k-NN: you MUST NOT use `uw.medium` for in-memory engines because t
 - Default maximum: 10 OCUs each for indexing and search; up to 1,700 OCUs each on request — confirmed by `serverless-scaling.html`: *"the default maximum OCU capacity is 10 OCUs for indexing and 10 OCUs for search ... the maximum allowed capacity is 1,700 OCUs for indexing and 1,700 OCUs for search."*
 - Sustained ingest / QPS rules of thumb (1 indexing OCU ≈ 100–200 MB/s sustained ingest, 1 search OCU ≈ 50–200 simple QPS or 10–50 complex aggregations/sec) are **Skill IP** (not in upstream docs) — verify under representative load with OpenSearch Benchmark before quoting.
 
-For caps and the current scaling model you MUST retrieve the Serverless NextGen scaling doc via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Serverless NextGen section).
+Draft the OCU recommendation from the standing defaults above (1 OCU = 6 GiB RAM + vCPU; redundancy-ON floor = 1 indexing + 1 search). Tag any exact cap or scaling-model change `[verify]` and confirm against the Serverless NextGen scaling doc in the Step 8 batch via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Serverless NextGen section). Do not block the draft on this fetch.
 
 ## Validate before cutover
 
