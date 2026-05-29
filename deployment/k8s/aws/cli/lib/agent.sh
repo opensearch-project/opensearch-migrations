@@ -324,7 +324,7 @@ _agent_write_claude_settings() {
 
   cat >"$settings" <<'JSON'
 {
-  "$schema": "https://claude.ai/schemas/claude-settings/v1.json",
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
       "mcp__aws-mcp__aws___read_documentation",
