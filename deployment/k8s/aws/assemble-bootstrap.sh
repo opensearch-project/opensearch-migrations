@@ -134,5 +134,13 @@ sed -e "s|@CLI_VERSION@|${CLI_VERSION}|g" \
     "$TEMPLATE" >"$OUTPUT_DIR/aws-bootstrap.sh"
 chmod +x "$OUTPUT_DIR/aws-bootstrap.sh"
 
+# 3. Bake DEFAULT_REPO into install.sh too so the published installer
+# points at the same repo/release the shim does. Operators get a
+# zero-env-var curl-pipe install for any release built from this repo.
+sed -e "s|@DEFAULT_REPO@|${DEFAULT_REPO}|g" \
+    "$CLI_DIR/install.sh" >"$OUTPUT_DIR/install.sh"
+chmod +x "$OUTPUT_DIR/install.sh"
+
 printf 'wrote %s\n' "$TARBALL"
 printf 'wrote %s (curl-pipe shim)\n' "$OUTPUT_DIR/aws-bootstrap.sh"
+printf 'wrote %s (installer)\n'      "$OUTPUT_DIR/install.sh"

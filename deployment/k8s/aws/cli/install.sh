@@ -20,10 +20,22 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-# Default to the upstream OSS repo. Operators installing a fork preview
-# pass MIGRATE_REPO=their-fork/repo on the command line OR set it in
-# their shell env BEFORE the curl|bash.
-REPO="${MIGRATE_REPO:-opensearch-project/opensearch-migrations}"
+# Repo path is baked at assemble time. assemble-bootstrap.sh substitutes
+# @DEFAULT_REPO@ with whatever it was built against (the upstream
+# opensearch-project repo for releases, AndreKurait/opensearch-migrations
+# for fork previews). Operators can still override at runtime via
+# MIGRATE_REPO if they're, e.g., installing one fork's tarball from a
+# mirror of another.
+# shellcheck disable=SC2016  # @DEFAULT_REPO@ is a literal sed placeholder
+DEFAULT_REPO='@DEFAULT_REPO@'
+# When this file is read from the source tree (developer flow), the
+# placeholder hasn't been substituted; fall back to the upstream repo.
+# Detect by joining the literal at runtime so sed never rewrites this
+# comparison line — only the assignment two lines up.
+if [[ "$DEFAULT_REPO" == "$(printf '@%s@' DEFAULT_REPO)" ]] || [[ -z "$DEFAULT_REPO" ]]; then
+  DEFAULT_REPO='opensearch-project/opensearch-migrations'
+fi
+REPO="${MIGRATE_REPO:-$DEFAULT_REPO}"
 VERSION="${MIGRATE_VERSION:-latest}"
 PREFIX="${MIGRATE_PREFIX:-$HOME/.opensearch-migrate/cli}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
