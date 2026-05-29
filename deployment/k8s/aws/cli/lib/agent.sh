@@ -203,10 +203,18 @@ agent_setup() {
     die "could not locate Startup.md (looked in lib/../skills + agent-skills/skills + MIGRATE_SKILLS_SRC)"
   fi
 
-  # Always drop a copy of the Startup runbook + every shipped skill at
-  # the stage root so any agent (even those without a skills convention)
-  # can read them by relative path.
+  # Drop the Startup runbook at the stage root under both names that
+  # the supported agents auto-load on session start:
+  #   CLAUDE.md  — Claude Code reads this from cwd at startup, no
+  #                tool call needed (eliminates the trust-prompt that
+  #                fires when the agent runs `find / -name Startup.md`)
+  #   AGENTS.md  — Codex CLI reads this from cwd at startup
+  # Startup.md is kept as the canonical filename for any future agent
+  # that doesn't recognize CLAUDE.md / AGENTS.md.
+  cp -f "$skills_src/Startup.md" "$STAGE_DIR/CLAUDE.md"
+  cp -f "$skills_src/Startup.md" "$STAGE_DIR/AGENTS.md"
   cp -f "$skills_src/Startup.md" "$STAGE_DIR/Startup.md"
+
   mkdir -p "$STAGE_DIR/skills"
   local skill
   for skill in migration-assistant-operator migration-assistant-cli-reference migrating-to-opensearch aoss-nextgen; do
@@ -231,12 +239,11 @@ agent_setup() {
       _agent_write_claude_settings
       ;;
     codex)
-      # codex reads ~/.codex/config.toml (user-scope) and AGENTS.md
-      # (project-scope). Drop Startup.md as project context.
+      # AGENTS.md at the stage root (above) is the auto-load target;
+      # also drop a copy in .codex/ for completeness.
       dest_dir="$STAGE_DIR/.codex"
       mkdir -p "$dest_dir"
       cp -f "$skills_src/Startup.md" "$dest_dir/Startup.md"
-      cp -f "$skills_src/Startup.md" "$STAGE_DIR/AGENTS.md"
       ;;
     kiro)
       # Drop the upstream kiro config tree (agents, prompts, settings,
@@ -538,7 +545,7 @@ agent_exec() {
     resuming=1
   fi
 
-  local fresh_prompt='Read Startup.md end-to-end and follow it. Skill selection, support-boundary rules, and the "ask one question, then load the right skill" pattern are all there. Do not assert what Migration Assistant supports from training memory — Startup.md says how to verify.'
+  local fresh_prompt='Greet the operator. Briefly (3-5 sentences max) introduce what you can help with — assess a migration, deploy + operate Migration Assistant, run a Solr/ES/OpenSearch migration end-to-end. Suggest 3-4 example asks (e.g. "I have a Solr cluster on EC2, help me move to OpenSearch Serverless", "Continue a deploy that was Ctrl-C'\''d", "Run a migration assessment for my ES 7.10 cluster"). DO NOT run any tools yet — no Read of state.env, no Bash, no kubectl. Wait for the operator to tell you what they want. The CLAUDE.md / AGENTS.md in this directory has been auto-loaded; you already know the rules. Be concise and friendly.'
   ui_dim "  exec $bin (resume=$resuming)"
   case "$agent" in
     claude)

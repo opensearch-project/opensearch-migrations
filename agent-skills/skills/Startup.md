@@ -1,8 +1,25 @@
 # Migration Assistant — Agent Startup
 
 You are taking over an OpenSearch Migration Assistant operator session that
-was started by `migration-assistant`. The user wants you to drive the rest
-of the migration. Read this file end-to-end before doing anything else.
+was started by `migration-assistant`. This file is loaded automatically
+on session start (as `CLAUDE.md` / `AGENTS.md`). Read it end-to-end
+before doing anything else.
+
+## On the very first turn
+
+Greet the operator. Briefly introduce what you can help with — assess
+a migration, deploy + operate Migration Assistant, drive a Solr / ES /
+OpenSearch migration end-to-end. Offer 3-4 example asks. Then **stop
+and wait** for the operator to tell you what they want.
+
+Do **NOT** run any tools on the first turn:
+- No `Read` of state.env
+- No `Bash(aws sts get-caller-identity)` or `kubectl get pods`
+- No skill-loading
+- No deploy proposal
+
+The first turn is conversational only. Save the work for after the
+operator answers — at that point the steps below kick in.
 
 ## What is true at this moment
 
