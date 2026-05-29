@@ -10,7 +10,10 @@
 [[ -n "${__MIGRATE_VERSION_LOADED:-}" ]] && return 0
 __MIGRATE_VERSION_LOADED=1
 
-CLI_VERSION="${CLI_VERSION:-0.1.0}"
+# Default version. assemble-bootstrap.sh rewrites this line at build
+# time to pin the CLI's reported version to the tarball's tag.
+# shellcheck disable=SC2155
+CLI_VERSION="${CLI_VERSION:-0.0.0-dev}"
 
 # Releases APIs.
 CLI_RELEASES_API='https://api.github.com/repos/opensearch-project/migrate-cli/releases/latest'

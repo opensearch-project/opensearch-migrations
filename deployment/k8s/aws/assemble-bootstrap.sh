@@ -118,7 +118,35 @@ else
     "$LICENSE_SRC" >&2
   exit 1
 fi
-tar -czf "$TARBALL" -C "$stage" "migration-assistant-cli-${CLI_VERSION}"
+
+# Bake the assembled version into lib/version.sh so the CLI banner
+# reports the right tag instead of the hardcoded source-tree default.
+VERSION_FILE="$stage/migration-assistant-cli-${CLI_VERSION}/lib/version.sh"
+if [[ -f "$VERSION_FILE" ]]; then
+  # macOS sed and GNU sed both accept this in-place form when given an
+  # explicit (empty) backup suffix.
+  sed -i.bak "s|CLI_VERSION=\"\\\${CLI_VERSION:-0.0.0-dev}\"|CLI_VERSION=\"\\\${CLI_VERSION:-${CLI_VERSION}}\"|" \
+    "$VERSION_FILE"
+  rm -f "$VERSION_FILE.bak"
+fi
+
+# Strip macOS extended attributes (com.apple.provenance, com.apple.macl,
+# AppleDouble files) so the tarball extracts cleanly on Linux without
+# the "tar: Ignoring unknown extended header keyword" spam.
+xattr -rc "$stage" 2>/dev/null || true
+find "$stage" \( -name '._*' -o -name '.DS_Store' \) -delete 2>/dev/null || true
+
+# Use --no-xattrs / --no-mac-metadata when supported (BSD tar) so the
+# tarball is portable. GNU tar (Linux CI) doesn't ship those flags but
+# also doesn't add the macOS metadata in the first place.
+TAR_FLAGS=(-czf "$TARBALL" -C "$stage")
+if tar --no-mac-metadata --version >/dev/null 2>&1; then
+  TAR_FLAGS=(--no-mac-metadata "${TAR_FLAGS[@]}")
+fi
+if tar --no-xattrs --version >/dev/null 2>&1; then
+  TAR_FLAGS=(--no-xattrs "${TAR_FLAGS[@]}")
+fi
+COPYFILE_DISABLE=1 tar "${TAR_FLAGS[@]}" "migration-assistant-cli-${CLI_VERSION}"
 rm -rf "$stage"
 
 # 2. Emit the curl-pipe shim by substituting placeholders in the
