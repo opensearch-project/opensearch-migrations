@@ -359,11 +359,13 @@ Helm flags:
   --helm-values FILE                Extra helm values file.
   --ma-images-source SRC            Pull MA images from a different ECR.
 
-State layout:
-  ~/.opensearch-migrate/<stage>/state.env        (sourceable bash)
-  ~/.opensearch-migrate/<stage>/state.json       (jq-canonical)
-  ~/.opensearch-migrate/<stage>/log/migrate.log  (run log + rotation)
-  ~/.opensearch-migrate/<stage>/artifacts/       (sha-pinned downloads)
+State layout ($MIGRATE_HOME defaults to ./migration-assistant-workspace
+in the directory you run from — that directory is your migration project;
+set MIGRATE_HOME to share one state root across projects):
+  $MIGRATE_HOME/<stage>/state.env        (sourceable bash)
+  $MIGRATE_HOME/<stage>/state.json       (jq-canonical)
+  $MIGRATE_HOME/<stage>/log/migrate.log  (run log + rotation)
+  $MIGRATE_HOME/<stage>/artifacts/       (sha-pinned downloads)
 
 Examples:
   # Default interactive deploy:

@@ -15,7 +15,16 @@ shopt -s extglob
 umask 077
 
 # Globals
-: "${MIGRATE_HOME:="$HOME/.opensearch-migrate"}"
+#
+# MIGRATE_HOME is the per-project state root: every stage's state.env,
+# logs, plan, and history live under $MIGRATE_HOME/<stage>/. When the
+# operator hasn't pinned it (CI and the `activate` script both export it
+# explicitly), default to a `migration-assistant-workspace/` directory in
+# the CURRENT directory — so wherever you run `migration-assistant` from
+# becomes your migration project, and `rm -rf migration-assistant-workspace`
+# cleans it up. Set MIGRATE_HOME to share one state root across projects
+# (e.g. the old `~/.opensearch-migrate` global) if you prefer.
+: "${MIGRATE_HOME:="$PWD/migration-assistant-workspace"}"
 : "${STAGE:=default}"
 STAGE_DIR="$MIGRATE_HOME/$STAGE"
 

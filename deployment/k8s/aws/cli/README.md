@@ -8,21 +8,40 @@ with a single-binary install of pure shell scripts.
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/main/install.sh | bash
+curl -fsSL https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/install.sh | bash
 ```
 
-This drops a versioned install at `~/.opensearch-migrate/cli/<version>/`
-and symlinks `~/.local/bin/migration-assistant`.
+Default (`path` mode): installs a versioned tree at
+`~/.opensearch-migrate/cli/<version>/` and symlinks
+`~/.local/bin/migration-assistant` onto your PATH. Nothing is dropped in
+the current directory and the CLI is **not** auto-launched — you then
+`cd` into the directory you want to use as your migration project and run
+`migration-assistant` there.
+
+Workspace mode (project-local, auto-launches the deploy flow):
+
+```sh
+curl -fsSL .../install.sh | MIGRATE_INSTALL=workspace bash
+```
+
+This unpacks under `./migration-assistant-workspace/`, writes an
+`activate` script, and launches the CLI.
 
 ## Use
 
 ```sh
-migration-assistant                  # default: resume (or start) for stage 'default'
-migration-assistant --stage staging  # named stage (P2)
-migration-assistant --switch         # re-prompt Manual / Agent
-migration-assistant cleanup          # tear down + archive
+cd ~/my-solr-migration                 # this dir becomes the project
+migration-assistant                    # default: resume (or start) for stage 'default'
+                                        #   state -> ./migration-assistant-workspace/default/
+migration-assistant --stage staging    # named stage
+migration-assistant --switch           # re-prompt Manual / Agent
+migration-assistant cleanup            # tear down + archive
 migration-assistant help
 ```
+
+Per-project state lives in `./migration-assistant-workspace/<stage>/`
+under the directory you run from. Set `MIGRATE_HOME` to share one state
+root across projects (e.g. the old global `~/.opensearch-migrate`).
 
 ## What it does
 
@@ -31,8 +50,9 @@ image mirror → helm install → either `kubectl exec migration-console-0`
 (Manual mode) **or** replaces itself with `claude|q|kiro|…` (Agent mode) and
 installs a `Startup.md` skill the agent reads first.
 
-State lives at `~/.opensearch-migrate/<stage>/` and survives terminal
-restarts. Resume from any step; switch modes any time.
+State lives at `./migration-assistant-workspace/<stage>/` under the
+directory you run from (override with `MIGRATE_HOME`) and survives
+terminal restarts. Resume from any step; switch modes any time.
 
 ## Layout
 
