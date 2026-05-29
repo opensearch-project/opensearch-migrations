@@ -5,7 +5,7 @@
 ## In scope
 
 - Profile a Solr / Elasticsearch / OpenSearch source cluster for migration assessment.
-- Recommend a target: Amazon OpenSearch Service or Amazon OpenSearch Serverless, plus collection
+- Recommend a target: Amazon OpenSearch Service or Amazon OpenSearch Serverless NextGen, plus collection
   type (search / time-series / vector) when applicable.
 - Recommend a migration mechanism: Migration Assistant for OpenSearch (Reindex-from-Snapshot
   / RFS + Capture & Replay, including the Solr backfill workflow), snapshot/restore, OpenSearch

@@ -17,7 +17,7 @@ You MUST use this structure exactly when emitting the final Solr-to-OpenSearch m
 - Migration complexity: **Low | Medium | High** (with one-line justification)
 - Estimated effort: **<S/M/L>** (engineer-weeks)
 - Top 3 risks: <bulleted, one line each>
-- Recommended target: <OpenSearch Service | OpenSearch Serverless> — one-sentence reason
+- Recommended target: <OpenSearch Service | OpenSearch Serverless NextGen> — one-sentence reason
 
 ## 2. Schema Mapping
 

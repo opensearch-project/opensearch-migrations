@@ -17,17 +17,19 @@ Personas (definitions and intake checklists in [`intake.md`](intake.md)): SRE �
 
 ---
 
-## Target shape (Managed Domain vs. Serverless)
+## Target shape (Managed Domain vs. Serverless NextGen)
 
 You MUST run this after the Phase 1 fingerprint. You MUST default to **MANAGED** when ambiguous.
 
+**Terminology**: "Serverless NextGen" in this SOP refers exclusively to **Amazon OpenSearch Serverless NextGen collections**. The original Serverless NextGen collection model is being superseded; you MUST NOT recommend a non-NextGen collection without an explicit retrieval that confirms it's still the right answer for the customer's workload (NextGen vs Classic signals are covered by the companion `aoss-nextgen` skill — load it whenever target shape lands on Serverless NextGen). Capability + sizing + supported-engines facts for NextGen drift fast — you MUST retrieve them via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Serverless NextGen section) BEFORE quoting any specific NextGen feature, limit, or supported-source row.
+
 **MANAGED ONLY** if any: SIEM / Security Analytics, custom plugins, Lucene k-NN or FAISS IVF, CCR or CCS required, UltraWarm / Cold tiering required, geospatial beyond OS 2.1 parity, manual snapshots required, inline scripts, T-class burstable instances, user-tunable sharding required, predictable steady-state with RI savings opportunity, very small clusters (≤2 OCU steady — managed is cheaper).
 
-**SERVERLESS OK** when: workload is full-text search / time-series logs / vector (HNSW + FAISS only); bursty traffic; no custom plugins; no CCR/CCS; no manual snapshots; no inline scripts. Bursty (10×+ swings) or zero-ops preference favors Serverless. Tiebreaker: vector + HNSW+FAISS-only → Serverless; logs > 2.5 TiB hot → time-series Serverless; otherwise you MUST default to MANAGED with a note "re-evaluate Serverless after stable traffic."
+**SERVERLESS NEXTGEN OK** when: workload fits a NextGen-supported collection type (verify the current supported-types matrix per [`knowledge-retrieval.md`](knowledge-retrieval.md) — typical: full-text search / time-series logs / vector); bursty traffic; no custom plugins; no CCR/CCS; no manual snapshots; no inline scripts. Bursty (10×+ swings) or zero-ops preference favors Serverless NextGen. Tiebreaker: workload is a NextGen first-class fit AND has bursty traffic → Serverless NextGen; otherwise you MUST default to MANAGED with a note "re-evaluate Serverless NextGen after stable traffic and after retrieving the latest NextGen capability matrix."
 
 ### Standing topology / JVM / OCU defaults
 
-Standing operational defaults (cluster manager quorum, JVM heap caps, pressure thresholds, refresh / watermarks, UltraWarm threshold, Serverless OCU rule of thumb, and instance-class preferences) live in [`sizing-formulas.md`](sizing-formulas.md). You MUST confirm currency by retrieving the AWS sizing best-practice pages each assessment per [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Service (managed) section).
+Standing operational defaults (cluster manager quorum, JVM heap caps, pressure thresholds, refresh / watermarks, UltraWarm threshold, Serverless NextGen OCU rule of thumb, and instance-class preferences) live in [`sizing-formulas.md`](sizing-formulas.md). You MUST confirm currency by retrieving the AWS sizing best-practice pages AND the Serverless NextGen capability + sizing pages each assessment per [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Service (managed) + Amazon OpenSearch Serverless NextGen sections).
 
 ---
 
@@ -56,8 +58,8 @@ You MUST retrieve canonical Migration Assistant sources (AWS Solutions doc, proj
 
 | Dimension | Rule |
 |---|---|
-| **Source engine** | Solr → Migration Assistant Solr backfill (RFS) for >1 TB or planned-downtime cutover (C&R is not available for Solr); for small datasets, document an export-then-bulk-load path. ES 1/2/5/6 → MA RFS (only practical multi-major path). ES 7 ≤ 7.10.2 → Snapshot OK (pre-fork). **ES ≥ 7.11 → MA RFS or `_reindex` from remote ONLY** because ES 7.11+ runs under ELv2/SSPL and Snapshot/Restore from ES ≥ 7.11 to OpenSearch is NOT a supported migration path on Amazon OpenSearch Service (see [`nuggets.md`](nuggets.md) #21 for the operational guidance). ES 8 → MA only. OS in-place → SNAPSHOT or in-place blue/green. OS self-managed → Serverless → MA preferred. |
-| **`_source` enabled?** | You MUST verify `_source` status on every source index before recommending a path. `_source: enabled` (default) → all paths above are open. `_source: false` → Migration Assistant RFS is the **ONLY** supported path; see [`nuggets.md`](nuggets.md) #22 for the mechanism + detection. |
+| **Source engine** | **Solr → default to Migration Assistant Solr backfill (RFS) at any data volume.** RFS reads the source's Lucene segments directly and is the **ONLY** tool that can recover Solr fields configured `stored="false"` in `schema.xml` / `managed-schema` — because non-stored field values exist only in the inverted index, not in any record the source can re-emit via `/select`, `/export`, or SolrJ `cursorMark`. Every Solr-source assessment MUST audit `<field>` and `<dynamicField>` definitions for `stored="false"` (and the index-time `copyField` graph) before recommending a non-RFS path. If any meaningful field is `stored="false"`, RFS is the only path that doesn't lose data. An export-then-bulk path is acceptable ONLY when (a) every needed field is `stored="true"` AND (b) the customer can trivially re-emit the source data from a system of record (CMS, RDBMS, message queue) — and you MUST flag this trade-off explicitly in the report. C&R is not available for Solr (backfill only). ES 1/2/5/6 → MA RFS (only practical multi-major path). ES 7 ≤ 7.10.2 → Snapshot OK (pre-fork). **ES ≥ 7.11 → MA RFS or `_reindex` from remote ONLY** because ES 7.11+ runs under ELv2/SSPL and Snapshot/Restore from ES ≥ 7.11 to OpenSearch is NOT a supported migration path on Amazon OpenSearch Service (see [`nuggets.md`](nuggets.md) #21 for the operational guidance). ES 8 → MA only. OS in-place → SNAPSHOT or in-place blue/green. OS self-managed → Serverless NextGen → MA preferred (verify NextGen-supported source matrix per [`knowledge-retrieval.md`](knowledge-retrieval.md)). |
+| **Field-store status (`_source` for ES/OS, `stored=` for Solr)** | You MUST verify field-store status on every source index before recommending a path. **Elasticsearch / OpenSearch**: `_source: enabled` (default) → all paths above are open. `_source: false` → Migration Assistant RFS is the **ONLY** supported path; see [`nuggets.md`](nuggets.md) #22 for the mechanism + detection. **Solr**: every Solr field has its own `stored` attribute (default depends on field type / schema version). Any meaningful field with `stored="false"` → MA RFS is the **ONLY** path that can extract its values, because RFS reads the segment files directly (the same way ES `_source: false` is handled). Audit `<field>` and `<dynamicField>` definitions in `schema.xml` / `managed-schema` and the index-time `copyField` graph. |
 | **Cutover** | Zero-downtime → **MA C&R** (only AWS-blessed option). Maintenance window OK → SNAPSHOT or REINDEX. Continuous replication → MA C&R or CCR (both ends OS+Service). |
 | **Data volume** | < 100 GB → REINDEX. 100 GB – 10 TB → MA RFS or SNAPSHOT. 10–100 TB → MA RFS (scales with shard count). > 100 TB → MA RFS with shard-count parallelism. |
 | **Transformations** | None / minor (`dense_vector`→`knn_vector`, `flattened`→`flat_object`) → MA built-ins. Field rewrites / PII redaction / joins → OSI (managed) or EMR/Spark. CDC live tail → Logstash with `tracking_field` or MA C&R. |
@@ -89,7 +91,7 @@ You MUST plug volume + region inputs into the AWS Pricing Calculator at <https:/
 | All reads recent (≤ 30 days) | Hot only on EBS gp3 |
 | 30–90 days warm reads | Hot + UltraWarm (≥ 2.5 TiB cold-tier breakeven) |
 | > 90 days, rare audits | Hot + UltraWarm + Cold |
-| All reads recent + bursty | Consider Serverless time-series collection |
+| All reads recent + bursty | Consider Serverless NextGen time-series collection (verify current support per [`knowledge-retrieval.md`](knowledge-retrieval.md)) |
 
 Tier-transition automation lives in ISM. For ES customers migrating, you MUST treat **ISM as distinct from ILM** because ILM JSON does not import as ISM and the policy must be rebuilt — see [`source-elasticsearch.md`](source-elasticsearch.md) and [`readiness-rubric.md`](readiness-rubric.md).
 
@@ -104,7 +106,7 @@ Tier-transition automation lives in ISM. For ES customers migrating, you MUST tr
 | 10M – tens of billions, RAM tight | FAISS / HNSW + PQ or fp16, or `mode=on_disk` |
 | Need fastest indexing, accept lower recall | FAISS / IVF (+ optional PQ) |
 | Migrating from NMSLIB | FAISS (default since k-NN 2.18.0.0; NMSLIB deprecated in k-NN 2.19.0.0 / OpenSearch 3.0) |
-| Targeting Serverless | FAISS / HNSW only |
+| Targeting Serverless NextGen | FAISS / HNSW only — verify current k-NN engine support per [`knowledge-retrieval.md`](knowledge-retrieval.md) |
 
 Memory formulas live in [`sizing-formulas.md`](sizing-formulas.md).
 
@@ -117,7 +119,7 @@ Memory formulas live in [`sizing-formulas.md`](sizing-formulas.md).
 | Predictable steady-state ≥ 1 year | 1-yr Reserved |
 | Predictable steady-state ≥ 3 years | 3-yr Reserved (best discount) |
 | Traffic shape uncertain | On-Demand for 90 days, re-evaluate |
-| Bursty | Serverless instead of RI |
+| Bursty | Serverless NextGen instead of RI |
 
 Upfront: All Upfront = max discount; Partial Upfront = mixed; No Upfront = opex-only. You MUST apply discounts in <https://calculator.aws>. You MUST NOT estimate dollar discounts in this skill because account-specific RI/Savings-Plan/EDP math is unverifiable by an LLM.
 
@@ -146,6 +148,6 @@ Operational reality, not in any single doc. You MUST validate against an OpenSea
 | Performance | p99 latency ≤ 1.2× source | Tune sizing, refresh interval, replica count |
 | Auth / RBAC | All roles round-trip tested | Audit role mappings |
 | Dashboards | All saved objects render | Re-import; check version compatibility |
-| Sizing | Within 10 % of customer's Pricing Calculator forecast | Right-size, consider RI/Serverless |
+| Sizing | Within 10 % of customer's Pricing Calculator forecast | Right-size, consider RI / Serverless NextGen |
 
 You MUST NOT declare a migration done without these gates passing because shipping with unresolved gates exposes the customer to silent data loss, query divergence, and rollback events.

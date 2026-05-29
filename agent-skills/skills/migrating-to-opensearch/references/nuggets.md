@@ -2,19 +2,19 @@
 
 The traps experienced practitioners hit. Each one is a real failure mode that silently breaks a migration plan. You MUST cite these in the risk register when the profile matches.
 
-## 1. Serverless rejects custom `_id` PUT/upsert on TIME_SERIES and VECTORSEARCH
+## 1. Serverless NextGen rejects custom `_id` PUT/upsert on TIME_SERIES and VECTORSEARCH
 
 Confirmed by `serverless-overview.html` (Choosing a collection type): *"For time series and vector search collections, you can't index by custom document ID or update by upsert requests. This operation is reserved for search use cases."* Idempotent client-keyed pipelines (Solr `uniqueKey`, ES `external` versioning, dedup-by-fingerprint) silently break on `TIME_SERIES`/`VECTORSEARCH`.
 
-**Detect:** mutable / bulk-reindex update pattern AND target is non-`SEARCH` Serverless.
-**Fix:** you MUST choose `SEARCH`, OR move to AOS managed, OR refactor the writer to let Serverless auto-generate `_id`. Cite `serverless-overview.html` and `serverless-genref.html` (per-permission caveats).
+**Detect:** mutable / bulk-reindex update pattern AND target is non-`SEARCH` Serverless NextGen.
+**Fix:** you MUST choose `SEARCH`, OR move to AOS managed, OR refactor the writer to let Serverless NextGen auto-generate `_id`. Cite `serverless-overview.html` and `serverless-genref.html` (per-permission caveats).
 
 ## 2. OS 2.17 changes the per-node shard cap
 
 Confirmed by `bp-sharding.html`: *"Elasticsearch 7.x and later, and all versions of OpenSearch up to 2.15, have a limit of 1,000 shards per node. To adjust the maximum shards per node, configure the `cluster.max_shards_per_node` setting. For OpenSearch 2.17 and later, OpenSearch Service supports 1000 shards for every 16GB of JVM heap memory up to a maximum of 4000 shards per node."* `managedomains-multiaz.html` further caps Multi-AZ-with-Standby clusters at 1,000 shards per node total. ES 7.x clusters that ran past 1,000/node by raising `cluster.max_shards_per_node` need to verify whether their target heap size accommodates the new heap-proportional rule.
 
 **Detect:** ES/OS source with shards/node > 800.
-**Fix:** you MUST consolidate via ISM rollover, denser r6g/r7g (16+ GiB heap), or move to Serverless where sharding is automatic.
+**Fix:** you MUST consolidate via ISM rollover, denser r6g/r7g (16+ GiB heap), or move to Serverless NextGen where sharding is automatic.
 
 ## 3. Cold storage is NOT directly queryable
 
@@ -23,19 +23,19 @@ Confirmed by `cold-storage.html`: *"When you need to query cold data, you can se
 **Detect:** "occasional queries on archived data".
 **Fix:** you MUST accept warm-up latency (minutes-to-hours), keep data in UltraWarm permanently, or use S3+Athena/OpenSearch direct-query for true on-demand archives.
 
-## 4. Serverless VECTORSEARCH cannot share OCUs with SEARCH/TIME_SERIES
+## 4. Serverless NextGen VECTORSEARCH cannot share OCUs with SEARCH/TIME_SERIES
 
 Confirmed by `serverless-scaling.html`: *"A vector search collection can't share OCUs with search and time series collections, even if the vector search collection uses the same KMS key as the search or time series collections. A new set of OCUs will be created for your first vector collection."* Adding one vector collection therefore roughly **doubles** the idle floor.
 
 **Detect:** mixed keyword + vector workload; user assumes one bill.
 **Fix:** you MUST project both floors via <https://calculator.aws>. If vector is exploratory, you SHOULD use AOS k-NN on the existing managed cluster.
 
-## 5. Serverless ignores most user-supplied index settings
+## 5. Serverless NextGen ignores most user-supplied index settings
 
-Confirmed by `serverless-overview.html` (Limitations): *"The number of shards, number of intervals, and refresh interval are not modifiable and are handled by OpenSearch Serverless."* `serverless-overview.html` also notes Serverless does not support manual snapshots, so any "restore to Serverless" path actually rebuilds via reindex/bulk and the underlying layout is whatever Serverless auto-picks. **Skill IP** (operational observation, not in upstream docs): `index.translog.*` and `index.routing.allocation.*` settings are also dropped.
+Confirmed by `serverless-overview.html` (Limitations): *"The number of shards, number of intervals, and refresh interval are not modifiable and are handled by OpenSearch Serverless NextGen."* `serverless-overview.html` also notes Serverless NextGen does not support manual snapshots, so any "restore to Serverless NextGen" path actually rebuilds via reindex/bulk and the underlying layout is whatever Serverless NextGen auto-picks. **Skill IP** (operational observation, not in upstream docs): `index.translog.*` and `index.routing.allocation.*` settings are also dropped.
 
-**Detect:** plan involves restoring an existing snapshot to Serverless.
-**Fix:** you MUST use Migration Assistant's metadata-migration Serverless-mode sanitizer, or hand-strip index settings before bulk. You MUST re-validate with `GET <idx>/_settings` post-load.
+**Detect:** plan involves restoring an existing snapshot to Serverless NextGen.
+**Fix:** you MUST use Migration Assistant's metadata-migration Serverless NextGen-mode sanitizer, or hand-strip index settings before bulk. You MUST re-validate with `GET <idx>/_settings` post-load.
 
 ## 6. SigV4 comma-encoding in `_cat` APIs — **Skill IP** (operational observation, not in upstream docs)
 
@@ -82,12 +82,12 @@ Self-managed Elasticsearch on EC2 across multiple AZs pays cross-AZ data-transfe
 
 **Fix:** you MUST plug the AOS-managed gp3 rate from <https://calculator.aws> into the customer's TCO model (RI / Savings Plan / EDP discounts apply only there).
 
-## 13. Serverless redundancy-ON floor is 2 OCUs (1 indexing + 1 search, each 0.5 OCU × 2)
+## 13. Serverless NextGen redundancy-ON floor is 2 OCUs (1 indexing + 1 search, each 0.5 OCU × 2)
 
 Confirmed by `serverless-overview.html` (Pricing): *"When you create a collection with redundant active replicas, you're billed for a minimum of 1 OCU (0.5 OCU × 2) for ingestion, including both primary and standby, and 1 OCU (0.5 OCU × 2) for search."* Redundancy OFF: minimum 1 OCU (0.5 OCU × 2) for the first collection. The floor is billed even when idle.
 
 **Detect:** bursty/low-volume user thinking "I'll only pay for what I use".
-**Fix:** you MUST quote both floors. For truly tiny **non-production / dev-test** workloads, you MAY consider a small managed instance (e.g. `t3.medium.search`) instead of Serverless — but you MUST NOT recommend `t2.*` or `t3.small.search` for production data nodes because their CPU credits exhaust under sustained load (`bp.html`: *"Avoid using T2 or `t3.small` instances for production domains because they can become unstable under sustained heavy load"*). For production, prefer `r6g.large.search` or larger.
+**Fix:** you MUST quote both floors. For truly tiny **non-production / dev-test** workloads, you MAY consider a small managed instance (e.g. `t3.medium.search`) instead of Serverless NextGen — but you MUST NOT recommend `t2.*` or `t3.small.search` for production data nodes because their CPU credits exhaust under sustained load (`bp.html`: *"Avoid using T2 or `t3.small` instances for production domains because they can become unstable under sustained heavy load"*). For production, prefer `r6g.large.search` or larger.
 
 ## 14. OSI persistent buffering steals OCUs from your declared max
 
@@ -122,13 +122,13 @@ Confirmed by `managedomains-snapshots.html`: *"OpenSearch Service stores automat
 There is **no segment-level migration**. You MUST NOT copy Solr index files directly because the codec and schema layout differ between Solr and OpenSearch and the segments will not load. All Solr migrations are document-level.
 
 **Detect:** "can I just copy the Solr index files?".
-**Fix:** you MUST use Migration Assistant Solr backfill (Reindex-from-Snapshot, RFS) for >1 TB or zero-downtime. For smaller pulls you MAY use Spark + opensearch-spark, Solr `/export`, or SolrJ `cursorMark`. See [`decision-trees.md`](decision-trees.md).
+**Fix:** you MUST default to Migration Assistant Solr backfill (Reindex-from-Snapshot, RFS) at any data volume — RFS reads the source's Lucene segments directly and is the **ONLY** tool that can recover Solr fields configured `stored="false"` in `schema.xml` / `managed-schema` (non-stored field values exist only in the inverted index, not in any record `/select`, `/export`, or SolrJ `cursorMark` can re-emit). For schemas where every needed field is `stored="true"` AND the customer can trivially re-emit data from a system of record, an export-then-bulk path (Spark + opensearch-spark, Solr `/export`, SolrJ `cursorMark`) is acceptable for small (<100 GB) datasets — flag the trade-off explicitly in the report. See [`decision-trees.md`](decision-trees.md).
 
-## 20. Serverless does not support manual `_snapshot` repositories
+## 20. Serverless NextGen does not support manual `_snapshot` repositories
 
-Confirmed by `serverless-overview.html` (Limitations): *"Automated snapshots are supported for OpenSearch Serverless collections. Manual snapshots are not supported."* The same Limitations list also says: *"There's currently no way to automatically migrate your data from a managed OpenSearch Service domain to a serverless collection. You must reindex your data from a domain to a collection."* You therefore MUST NOT bring an existing snapshot directly into Serverless. Available paths: Migration Assistant (Serverless-mode sanitizer), OSI pull pipelines, Logstash, or direct application bulk.
+You MUST retrieve the current Serverless NextGen Limitations + supported-migration-paths matrix per [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Serverless NextGen section) BEFORE quoting any specific Serverless NextGen path; the Limitations list and direct-migration capability has shifted across NextGen iterations and you MUST NOT assert support / non-support from training memory. Historic Limitations have included: no manual `_snapshot` repositories; no automatic migration directly from a managed domain to a collection (must reindex). Available paths typically include: Migration Assistant (Serverless NextGen-mode sanitizer), OSI pull pipelines, Logstash, or direct application bulk — but you MUST verify against the live page before recommending one.
 
-**Fix:** you SHOULD use Migration Assistant Metadata + RFS to *managed* AOS, validate, then reindex-from-remote into Serverless — or skip the hop and use OSI's S3 source.
+**Fix:** common pattern (verify currency first) — Migration Assistant Metadata + RFS to *managed* AOS, validate, then reindex-from-remote into Serverless NextGen — or skip the hop and use OSI's S3 source. Always verify against the latest Serverless NextGen capability matrix.
 
 ## 21. Snapshot/Restore is NOT safe from ES ≥ 7.11 → OpenSearch (post-fork)
 

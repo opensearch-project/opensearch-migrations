@@ -16,7 +16,7 @@ DIH was made an independent project as of Solr 9.0 (per the [Solr 9 upgrade note
 
 Delta-import equivalents: CDC (Debezium), `last_modified` polling in the ETL, or DB triggers.
 
-For Bulk API authentication on Amazon OpenSearch Service, you MUST use **IAM SigV4** with short-lived credentials from an IAM role (managed: service `es`; Serverless: service `aoss`). You MUST NOT hardcode credentials because hardcoded keys leak into source control and bypass rotation. The `opensearch-py` + `requests-aws4auth` pattern is the canonical client. Retrieve the current request-signing example via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Service (managed) section).
+For Bulk API authentication on Amazon OpenSearch Service, you MUST use **IAM SigV4** with short-lived credentials from an IAM role (managed: service `es`; Serverless NextGen: service `aoss`). You MUST NOT hardcode credentials because hardcoded keys leak into source control and bypass rotation. The `opensearch-py` + `requests-aws4auth` pattern is the canonical client. Retrieve the current request-signing example via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Service (managed) section).
 
 ## BlockJoin (nested / parent-child)
 

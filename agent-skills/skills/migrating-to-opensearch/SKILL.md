@@ -1,6 +1,6 @@
 ---
 name: migrating-to-opensearch
-description: Assesses migrations to Amazon OpenSearch Service or Serverless from Apache Solr (any version), Elasticsearch (any version), or OpenSearch (in-place 1.x→2.x→3.x upgrades). Triggers on conversational phrasings — "should we migrate", "moving off Solr", "ES to OpenSearch", "Solr → OpenSearch path", "upgrade to OS 3.x", "Lucene 10 reindex", "ILM to ISM", "k-NN engine swap NMSLIB → FAISS", "snapshot vs Migration Assistant", "Capture-and-Replay vs dual-write", "Serverless or Managed", "sizing for OpenSearch" — and on artifact pastes (schema.xml, solrconfig.xml, eDisMax, _cat/indices, X-Pack ILM/Watcher/ELSER/runtime fields). Outputs schema mapping, query translation, target shape recommendation, ranked migration-path scoring across six tool families, sizing guidance (instances, shards, JVM heap, OCUs), a 0-100 readiness score, and an authoritative citation list. Does not move data (use Migration Assistant for Amazon OpenSearch Service) or estimate dollar cost (use AWS Pricing Calculator).
+description: Assesses migrations to Amazon OpenSearch Service or Serverless NextGen from Apache Solr (any version), Elasticsearch (any version), or OpenSearch (in-place 1.x→2.x→3.x upgrades). Triggers on conversational phrasings — "should we migrate", "moving off Solr", "ES to OpenSearch", "Solr → OpenSearch path", "upgrade to OS 3.x", "Lucene 10 reindex", "ILM to ISM", "k-NN engine swap NMSLIB → FAISS", "snapshot vs Migration Assistant", "Capture-and-Replay vs dual-write", "Serverless NextGen or Managed", "sizing for OpenSearch" — and on artifact pastes (schema.xml, solrconfig.xml, eDisMax, _cat/indices, X-Pack ILM/Watcher/ELSER/runtime fields). Outputs schema mapping, query translation, target shape recommendation, ranked migration-path scoring across six tool families, sizing guidance (instances, shards, JVM heap, OCUs), a 0-100 readiness score, and an authoritative citation list. Does not move data (use Migration Assistant for Amazon OpenSearch Service) or estimate dollar cost (use AWS Pricing Calculator).
 owner_team: OpenSearch-Migrations
 owner_cti: '"AWS OpenSearch"/Migrations/Primary'
 stages: [preprod]
@@ -16,7 +16,7 @@ metadata:
 
 ## Overview
 
-This SOP produces a structured migration assessment for Apache Solr (6.x–9.x), Elasticsearch (1.x–8.x), or OpenSearch (in-place upgrades 1.x→2.x→3.x) workloads moving to Amazon OpenSearch Service (managed domain or Serverless). It is **analytical only**: it ranks six data-movement families — Migration Assistant for Amazon OpenSearch Service (RFS + Capture & Replay), snapshot/restore, OpenSearch Ingestion, reindex from remote, Logstash/EMR/Spark, in-place blue/green upgrade — and recommends whichever fits the workload.
+This SOP produces a structured migration assessment for Apache Solr (6.x–9.x), Elasticsearch (1.x–8.x), or OpenSearch (in-place upgrades 1.x→2.x→3.x) workloads moving to Amazon OpenSearch Service (managed domain or Serverless NextGen). It is **analytical only**: it ranks six data-movement families — Migration Assistant for Amazon OpenSearch Service (RFS + Capture & Replay), snapshot/restore, OpenSearch Ingestion, reindex from remote, Logstash/EMR/Spark, in-place blue/green upgrade — and recommends whichever fits the workload.
 
 Outputs: target-shape recommendation, ranked migration-path scoring, sizing guidance (instances / shards / JVM heap / OCUs), 0–100 readiness score, ≥ 5 authoritative citations.
 
@@ -28,7 +28,7 @@ The SOP is **retrieval-first**. The canonical recipe (topic → tool → URL, wi
 
 - **source_engine** (required): One of `solr`, `elasticsearch`, or `opensearch`. The source-search-engine family.
 - **source_version** (required): Source major.minor (e.g. `8.11`, `7.10.2`, `1.7`). Drives compatibility scanning and migration-path scoring.
-- **target_region** (required): AWS region for Amazon OpenSearch Service or Serverless (e.g. `us-east-1`, `eu-west-1`).
+- **target_region** (required): AWS region for Amazon OpenSearch Service or Serverless NextGen (e.g. `us-east-1`, `eu-west-1`).
 - **persona** (required): One of `SRE` (Search Relevance Engineer), `DOP` (DevOps / Platform Engineer), or `BSH` (Business Stakeholder). Drives report depth and emphasis. See [`references/intake.md`](references/intake.md).
 - **discovery_inputs** (required): The customer-provided artifacts to assess against — `_cat`/`_cluster`/`_nodes` JSON for ES/OS, or `schema.xml` + `solrconfig.xml` + sample queries for Solr. The intake checklist in [`references/intake.md`](references/intake.md) lists the full set per persona.
 - **downtime_tolerance** (optional, default: `short`): `none` | `short` | `long`. Drives migration-path scoring (zero-downtime → Capture & Replay; long window → snapshot/restore).
@@ -121,14 +121,15 @@ Walk the source-engine surface and emit one entry per finding using the schema b
 
 ### 4. Select the target shape and migration path
 
-Walk the trees in [`references/decision-trees.md`](references/decision-trees.md) for **target shape** (Managed Domain vs Serverless), **migration path** (six families), and **k-NN engine**.
+Walk the trees in [`references/decision-trees.md`](references/decision-trees.md) for **target shape** (Managed Domain vs Serverless NextGen), **migration path** (six families), and **k-NN engine**.
 
 **Constraints:**
 
-- You MUST default to **MANAGED** when the target-shape inputs are ambiguous, because Managed Domain is more flexible and re-evaluating to Serverless after stable traffic is straightforward.
-- You MUST score all six migration-path families against the workload before recommending one. You MUST NOT assume Migration Assistant for Amazon OpenSearch Service is the answer just because the customer asked a "should we migrate" question — small workloads (< 100 GB) and same-major hops often have cheaper paths (snapshot/restore, reindex from remote).
-- You MUST score Migration Assistant as a valid Solr source per the source-engine support table in [`decision-trees.md`](references/decision-trees.md). Migration Assistant supports Apache Solr / SolrCloud via its Solr backfill workflow (Reindex-from-Snapshot, RFS); retrieve the project doc citation via [`knowledge-retrieval.md`](references/knowledge-retrieval.md) (Migration Assistant section) — verify the source-engine support row against the live doc before quoting versions.
-- You MUST retrieve the current Migration Assistant capability matrix before quoting source-engine support per [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md), because caps and source-version support change with each release.
+- You MUST default to **MANAGED** when the target-shape inputs are ambiguous, because Managed Domain is more flexible and re-evaluating to Serverless NextGen after stable traffic is straightforward.
+- "Serverless NextGen" in this skill means **Amazon OpenSearch Serverless NextGen collections** exclusively. The original Serverless NextGen collection model is being superseded; you MUST NOT assert NextGen support / non-support / sizing / supported-source rows from training memory. Retrieve the current Serverless NextGen capability matrix every assessment via [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md) (Amazon OpenSearch Serverless NextGen section). Pair this skill with the companion `aoss-nextgen` skill whenever target shape lands on Serverless NextGen.
+- You MUST score all six migration-path families against the workload before recommending one. You MUST NOT assume Migration Assistant for Amazon OpenSearch Service is the answer just because the customer asked a "should we migrate" question — small workloads (< 100 GB) and same-major hops often have cheaper paths (snapshot/restore, reindex from remote). **Solr is the exception**: see the next bullet.
+- For **Solr** sources you MUST default to Migration Assistant Solr backfill (RFS) regardless of data volume, because RFS is the **only** tool that can recover Solr fields configured `stored="false"` in `schema.xml` / `managed-schema`. RFS reads the source's Lucene segments directly; non-RFS paths (Solr `/export`, SolrJ `cursorMark`, Spark + opensearch-spark) can only emit values stored in `_source`-equivalent records and will silently lose any field whose `stored` attribute is false. You MUST audit `<field>` and `<dynamicField>` definitions in the schema before recommending a non-RFS path; recommend a non-RFS path ONLY when (a) every needed field is `stored="true"` AND (b) the customer can trivially re-emit the source data from a system of record AND (c) the dataset is small (<100 GB). Flag the trade-off explicitly. See the source-engine row in [`references/decision-trees.md`](references/decision-trees.md).
+- You MUST retrieve the current Migration Assistant capability matrix before quoting source-engine support per [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md), because caps and source-version support change with each release. Migration Assistant supports **Apache Solr / SolrCloud** via the Solr backfill workflow (Reindex-from-Snapshot, RFS) AND **Elasticsearch / OpenSearch** sources — do NOT tell a customer Migration Assistant is "Elasticsearch-only" or that it "doesn't support Solr".
 - You MUST confirm regional availability of the recommended instance family per the Regional-availability recipe in [`references/knowledge-retrieval.md`](references/knowledge-retrieval.md) before quoting.
 
 ### 5. Produce sizing guidance
@@ -178,7 +179,7 @@ Before declaring the assessment done, you MUST reproduce this checklist in your 
 - [ ] Every version-specific claim (Lucene, instance limit, plugin support) carries an inline citation
 - [ ] <https://calculator.aws> surfaced for the cost handoff
 - [ ] At least 1 nugget from references/nuggets.md cross-referenced by name
-- [ ] Target shape default = MANAGED unless workload explicitly justifies Serverless
+- [ ] Target shape default = MANAGED unless workload explicitly justifies Serverless NextGen
 - [ ] Migration path was scored across all six families (you didn't default to Migration Assistant without scoring)
 - [ ] Persona-correct depth (BSH = exec summary; SRE/DOP = full technical body)
 - [ ] No embedded credentials, endpoints, or master usernames anywhere in the report
@@ -200,7 +201,7 @@ Every assessment report MUST include a Security section. The full canonical reco
 1. Recommends `_reindex` from remote as the cheapest path. Snapshot/Restore from ES ≥ 7.11 (under ELv2/SSPL) is NOT a supported migration path on Amazon OpenSearch Service — see [`nuggets.md`](references/nuggets.md) #21.
 2. Notes that Migration Assistant Reindex-from-Snapshot (RFS) is the supported fallback if `_reindex` from remote is not viable (e.g. source-side network restrictions); MA is heavier than needed for a 50 GB workload.
 3. Confirms the 2-hour window is sufficient for `_reindex` from remote on 50 GB.
-4. Provides sizing for a small Managed configuration (e.g. `m6g.large` × 3, gp3 storage) or a single-OCU dev/test Serverless plan.
+4. Provides sizing for a small Managed configuration (e.g. `m6g.large` × 3, gp3 storage) or a single-OCU dev/test Serverless NextGen plan.
 5. Lists the runbook (pre-create destination index, configure `reindex.remote.allowlist` on target, trigger reindex, validate doc count + top-N query parity, switch traffic).
 6. Names the AWS doc URLs cited.
 7. Surfaces <https://calculator.aws> for the dollar figure.
@@ -233,9 +234,9 @@ The tool enforces a domain allow list. Use `WebFetch` for non-AWS hosts (`docs.o
 
 In-place applies only to AWS-managed clusters. Flag the mismatch in the report and re-score with the customer's actual deployment shape.
 
-### Customer wants Serverless but workload uses custom plugins or Lucene k-NN
+### Customer wants Serverless NextGen but workload uses custom plugins or Lucene k-NN
 
-Serverless does not support either. Re-score for Managed Domain.
+Serverless NextGen does not support either. Re-score for Managed Domain.
 
 ### OpenSearch 1.x → 3.x in one hop
 

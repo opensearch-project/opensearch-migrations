@@ -36,9 +36,11 @@ Sharding blog (third-party but AWS-hosted) — <https://aws.amazon.com/blogs/big
 
 All under `https://docs.aws.amazon.com/opensearch-service/latest/developerguide/<page>` unless noted.
 
-## Amazon OpenSearch Serverless
+## Amazon OpenSearch Serverless NextGen
 
-`serverless-overview.html`, `serverless-comparison.html`, `serverless-scaling.html`, `serverless-vector-search.html`, `serverless-genref.html` — same base URL.
+NextGen capability + sizing + supported-source facts drift across NextGen iterations. **You MUST retrieve before quoting any specific NextGen feature, limit, supported collection type, or supported migration source row** — do NOT recite NextGen specifics from training memory. The companion `aoss-nextgen` skill packs the operator-side gotchas (NextGen vs Classic signals, the SDK/CLI version pre-flight, the 401-during-warmup window, cleanup ordering); load it whenever target shape lands on Serverless NextGen.
+
+Canonical pages (same base URL): `serverless-overview.html`, `serverless-comparison.html`, `serverless-scaling.html`, `serverless-vector-search.html`, `serverless-genref.html`.
 
 ## OpenSearch Ingestion (OSI)
 

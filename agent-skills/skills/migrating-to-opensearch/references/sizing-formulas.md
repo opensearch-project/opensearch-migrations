@@ -1,6 +1,6 @@
 # Sizing — retrieval-first
 
-The authoritative formulas live in AWS docs (storage, sharding, instances, petabyte-scale, error handling, and Serverless scaling pages). You MUST retrieve every assessment via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Service (managed) section and Amazon OpenSearch Serverless section). You MUST NOT quote stale numbers from this file because the live AWS docs drift faster than any embedded snapshot can track.
+The authoritative formulas live in AWS docs (storage, sharding, instances, petabyte-scale, error handling, and Serverless NextGen scaling pages). You MUST retrieve every assessment via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Service (managed) section and Amazon OpenSearch Serverless NextGen section). You MUST NOT quote stale numbers from this file because the live AWS docs drift faster than any embedded snapshot can track.
 
 This file owns the **operational rules of thumb** that do not appear in any single doc, plus the k-NN engine selection IP.
 
@@ -50,20 +50,20 @@ Confirmed by `bp-sharding.html` and `bp.html`:
 | 10M – tens of billions, RAM tight | FAISS HNSW + PQ or fp16, or `mode=on_disk` |
 | Need fastest indexing, accept lower recall | FAISS IVF (+ optional PQ) |
 | Migrating from NMSLIB | FAISS migration (NMSLIB deprecated; default since 2.18 is FAISS) |
-| Targeting Serverless | FAISS HNSW only |
+| Targeting Serverless NextGen | FAISS HNSW only |
 
 For k-NN memory math, you MUST retrieve `knn-index/` and the `knn-methods-engines.md` reference per [`knowledge-retrieval.md`](knowledge-retrieval.md) (OpenSearch Project (engine docs) section). Standing rules of thumb: float HNSW `bytes_per_vector ≈ 1.1 × (4 × dim + 8 × m)`; multiply by `(1 + replicas)`. Default native-index circuit breaker: 50 % of non-heap RAM.
 
 For UltraWarm k-NN: you MUST NOT use `uw.medium` for in-memory engines because the instance lacks the RAM headroom to hold k-NN graphs. You MUST size so cumulative graph size of actively-searched shards ≤ `knn.memory.circuit_breaker.limit × 61 GiB` per `uw.large` instance.
 
-## Serverless OCUs
+## Serverless NextGen OCUs
 
 - 1 OCU = 6 GiB RAM + matching vCPU + ~120 GiB ephemeral storage — confirmed by `serverless-scaling.html`: *"Each OCU is a combination of 6 GiB of memory and corresponding virtual CPU (vCPU) ... Each OCU includes enough hot ephemeral storage for 120 GiB of index data."*
 - Default minimum (redundancy ON): **1 indexing OCU (0.5 OCU × 2) + 1 search OCU (0.5 OCU × 2)** = 4 × 0.5 OCU billed — confirmed by `serverless-overview.html` (Pricing): *"a minimum of 1 OCU (0.5 OCU × 2) for ingestion ... and 1 OCU (0.5 OCU × 2) for search."*
 - Default maximum: 10 OCUs each for indexing and search; up to 1,700 OCUs each on request — confirmed by `serverless-scaling.html`: *"the default maximum OCU capacity is 10 OCUs for indexing and 10 OCUs for search ... the maximum allowed capacity is 1,700 OCUs for indexing and 1,700 OCUs for search."*
 - Sustained ingest / QPS rules of thumb (1 indexing OCU ≈ 100–200 MB/s sustained ingest, 1 search OCU ≈ 50–200 simple QPS or 10–50 complex aggregations/sec) are **Skill IP** (not in upstream docs) — verify under representative load with OpenSearch Benchmark before quoting.
 
-For caps and the current scaling model you MUST retrieve the Serverless scaling doc via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Serverless section).
+For caps and the current scaling model you MUST retrieve the Serverless NextGen scaling doc via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Serverless NextGen section).
 
 ## Validate before cutover
 

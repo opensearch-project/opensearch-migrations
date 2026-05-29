@@ -28,7 +28,7 @@ Migrate from {{ fingerprint.source_engine }} {{ fingerprint.version | default:'?
 
 ---
 
-## Target — Managed Domain or Serverless
+## Target — Managed Domain or Serverless NextGen
 
 Recommended: **{{ migration_path.decision_inputs.target | default:'managed' }}**.
 
@@ -120,7 +120,7 @@ Order: BLOCKING → HIGH → MEDIUM → LOW. See [`compatibility-rubric.md`](../
 
 ## Citations
 
-For the canonical retrieval recipe + URL/CLI fallback see [`knowledge-retrieval.md`](../references/knowledge-retrieval.md). You MUST cite, with retrieval timestamps, the specific `bp-*` page used for sizing math, `version-migration.html` for upgrade-path claims, the Migration Assistant doc when MA is the recommendation, the relevant Serverless page when targeting Serverless, and <https://calculator.aws> for the cost handoff.
+For the canonical retrieval recipe + URL/CLI fallback see [`knowledge-retrieval.md`](../references/knowledge-retrieval.md). You MUST cite, with retrieval timestamps, the specific `bp-*` page used for sizing math, `version-migration.html` for upgrade-path claims, the Migration Assistant doc when MA is the recommendation, the relevant Serverless NextGen page when targeting Serverless NextGen, and <https://calculator.aws> for the cost handoff.
 
 ---
 

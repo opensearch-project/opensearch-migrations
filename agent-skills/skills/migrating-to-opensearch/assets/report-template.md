@@ -78,7 +78,7 @@ A green tier (≥80) means you SHOULD proceed with the planned migration; yellow
 - Region: {{ sizing.region }}
 {% endif %}
 
-For target-shape reasoning (managed vs Serverless) see [`decision-trees.md`](../references/decision-trees.md). Sizing math: [`sizing-formulas.md`](../references/sizing-formulas.md).
+For target-shape reasoning (managed vs Serverless NextGen) see [`decision-trees.md`](../references/decision-trees.md). Sizing math: [`sizing-formulas.md`](../references/sizing-formulas.md).
 
 ---
 
@@ -113,7 +113,7 @@ Region: **{{ sizing.region | default:'us-east-1' }}** · Report date: **{{ date 
 
 ### How to compute monthly cost
 
-This skill produces sizing inputs only. You MUST plug them into the **AWS Pricing Calculator** at <https://calculator.aws>: add an estimate, pick **Amazon OpenSearch Service** or **Serverless**, enter the compute / storage / OCU values from the sizing block, and apply RI / Savings Plan / EDP discounts. You MUST add a separate calculator entry for migration tooling (Migration Assistant EKS infra, OSI OCUs, S3 snapshot storage) for the one-time cost.
+This skill produces sizing inputs only. You MUST plug them into the **AWS Pricing Calculator** at <https://calculator.aws>: add an estimate, pick **Amazon OpenSearch Service** or **Serverless NextGen**, enter the compute / storage / OCU values from the sizing block, and apply RI / Savings Plan / EDP discounts. You MUST add a separate calculator entry for migration tooling (Migration Assistant EKS infra, OSI OCUs, S3 snapshot storage) for the one-time cost.
 
 ---
 
@@ -150,7 +150,7 @@ Severity-ordered. See [`nuggets.md`](../references/nuggets.md) for general anti-
 {% if fingerprint.summary.dih_used %}| SOLR_DIH | HIGH | Solr Data Import Handler (DIH) was removed in Solr 9.0; no direct OpenSearch equivalent | Migrate ETL to OpenSearch Ingestion (OSI), Data Prepper, AWS DMS, or Logstash |
 {% endif %}{% if fingerprint.summary.velocity_response_writer %}| SOLR_VELOCITY | HIGH | Velocity Response Writer is deprecated/removed in modern Solr; OpenSearch has no equivalent | Move templating into the application layer |
 {% endif %}{% if fingerprint.summary.xslt_response_writer %}| SOLR_XSLT | HIGH | XSLT Response Writer has no OpenSearch equivalent | Move templating into the application layer |
-{% endif %}{% if fingerprint.summary.custom_lib_count %}| SOLR_CUSTOM_PLUGIN | HIGH/BLOCKING | Custom plugin JARs ({{ fingerprint.summary.custom_lib_count }} `<lib>` directives) require port to OpenSearch | Re-implement as supported plugins, or submit RFC; not supported on Serverless |
+{% endif %}{% if fingerprint.summary.custom_lib_count %}| SOLR_CUSTOM_PLUGIN | HIGH/BLOCKING | Custom plugin JARs ({{ fingerprint.summary.custom_lib_count }} `<lib>` directives) require port to OpenSearch | Re-implement as supported plugins, or submit RFC; not supported on Serverless NextGen |
 {% endif %}| _Add per-incompatibility rows here_ | | | |
 
 ### What I assumed (defaults applied for UNKNOWN inputs)
@@ -159,7 +159,7 @@ Severity-ordered. See [`nuggets.md`](../references/nuggets.md) for general anti-
 - Default replicas: 1 (per [`assumptions.md`](../references/assumptions.md))
 - Default `refresh_interval`: 30s (not 1s — Skill IP: operational guidance for prod, verify against `bp.html` in [`knowledge-retrieval.md`](../references/knowledge-retrieval.md))
 - Engineering hours estimate: Skill IP, derive from readiness tier
-- Defaulted to managed Multi-AZ-with-Standby topology unless Serverless was clearly indicated
+- Defaulted to managed Multi-AZ-with-Standby topology unless Serverless NextGen was clearly indicated
 - For Migration Assistant cost projections, follow the AWS Solutions cost guide cited in [`knowledge-retrieval.md`](../references/knowledge-retrieval.md) (Migration Assistant section)
 
 ---
@@ -171,7 +171,7 @@ Authoritative sources used for this assessment. For the canonical retrieval reci
 - The specific best-practice page used for the sizing math (Amazon OpenSearch Service (managed) section)
 - The AWS upgrade-path doc for any upgrade-path claim (Amazon OpenSearch Service (managed) section)
 - The Migration Assistant doc (AWS) and project doc when MA is the recommendation (Migration Assistant section)
-- The Serverless comparison and general reference docs for any Serverless claim (Amazon OpenSearch Serverless section)
+- The Serverless NextGen comparison and general reference docs for any Serverless NextGen claim (Amazon OpenSearch Serverless NextGen section)
 - The AWS Pricing Calculator URL — <https://calculator.aws> — for the cost handoff
 
 ---

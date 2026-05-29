@@ -1,6 +1,6 @@
 # Source: OpenSearch (upgrade)
 
-You MUST read this when the source is OpenSearch and the user is upgrading versions or moving between deployment shapes (self-managed → AOS, AOS → Serverless, cross-region, etc.).
+You MUST read this when the source is OpenSearch and the user is upgrading versions or moving between deployment shapes (self-managed → AOS, AOS → Serverless NextGen, cross-region, etc.).
 
 ## Step 1 — Retrieve current AWS guidance
 
@@ -50,11 +50,11 @@ Key OS 1.x → 2.x items:
 
 The standard intake (cluster topology, version, plugin list, index counts/sizes, ISM, role mappings) lives in [`intake.md`](intake.md) and [`source-elasticsearch.md`](source-elasticsearch.md) — both apply to OS sources. You MUST normalize the inputs into the fingerprint JSON shape documented in [`SKILL.md`](../SKILL.md) Step 2 with `engine: "opensearch"`.
 
-## Step 5 — Self-managed → AOS / Serverless
+## Step 5 — Self-managed → AOS / Serverless NextGen
 
 For self-managed → **AOS (managed)**: you MUST walk network (VPC vs public; PrivateLink), auth (SAML, IAM/SigV4, Cognito, FGAC), encryption (KMS at rest, TLS in transit), and plugins (only the supported list — retrieve via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Service (managed) section)).
 
-For self-managed → **Serverless**: no direct migration path. You MUST reindex from snapshot or via OSI (use the `AWS-OpenSearchDataMigrationPipeline` blueprint). Retrieve the serverless comparison and general reference docs via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Serverless section) for current limits. See [`decision-trees.md`](decision-trees.md) for the six-family selection matrix.
+For self-managed → **Serverless NextGen**: no direct migration path. You MUST reindex from snapshot or via OSI (use the `AWS-OpenSearchDataMigrationPipeline` blueprint). Retrieve the serverless comparison and general reference docs via [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Serverless NextGen section) for current limits. See [`decision-trees.md`](decision-trees.md) for the six-family selection matrix.
 
 ## Step 6 — Cross-cluster replication (CCR) for migration
 
@@ -65,7 +65,7 @@ Standing rules (you MUST verify the live numbers against the AWS replication doc
 - Active-passive (follower pulls from leader)
 - Minimum versions and FGAC + node-to-node encryption requirements — verify against the live `replication.html` doc per [`knowledge-retrieval.md`](knowledge-retrieval.md).
 - `index.soft_deletes.enabled=true` on leader (default since ES 7.0+; pre-7.0 indexes MUST be reindexed)
-- You MUST NOT use CCR between Serverless and self-managed because the Serverless service does not expose the CCR APIs. You MUST NOT replicate from follower→follower because the follower index is read-only and not a valid leader.
+- You MUST NOT use CCR between Serverless NextGen and self-managed because the Serverless NextGen service does not expose the CCR APIs. You MUST NOT replicate from follower→follower because the follower index is read-only and not a valid leader.
 - **Skill IP**: connection-count limits and pause-resume windows are quota-style numbers that drift. Retrieve the live values from the AWS replication doc per [`knowledge-retrieval.md`](knowledge-retrieval.md) (Amazon OpenSearch Service (managed) section) before quoting.
 - Upgrade order: **follower first**, then leader (verify against the live replication doc)
 
@@ -75,7 +75,7 @@ Every OS upgrade report MUST include (URLs catalogued in [`knowledge-retrieval.m
 - The AWS upgrade-path page — Amazon OpenSearch Service (managed) section
 - The specific breaking-changes file for the source/target major-version step — OpenSearch Project (engine docs) section
 - For 3.x targets: the opensearch.org 3.0 announcement (cites Lucene 10, JDK 21, removed settings) — OpenSearch Project (engine docs) section
-- For Serverless targets: the serverless comparison doc — Amazon OpenSearch Serverless section
+- For Serverless NextGen targets: the serverless comparison doc — Amazon OpenSearch Serverless NextGen section
 
 ## Read next
 

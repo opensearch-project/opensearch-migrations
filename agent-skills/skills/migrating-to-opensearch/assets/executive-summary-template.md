@@ -16,7 +16,7 @@
 
 ## Why migrate
 
-The current {{ fingerprint.source_engine }} stack has known operational and compatibility constraints (see Risks). Amazon OpenSearch Service / Serverless eliminates self-managed infrastructure, provides managed snapshots, multi-AZ HA, and access to the OpenSearch ecosystem (Anomaly Detection, Alerting, ISM, Security Analytics). Specifically for {{ fingerprint.source_engine }} sources, AWS publishes a prescriptive guide that informs every step of this assessment.
+The current {{ fingerprint.source_engine }} stack has known operational and compatibility constraints (see Risks). Amazon OpenSearch Service / Serverless NextGen eliminates self-managed infrastructure, provides managed snapshots, multi-AZ HA, and access to the OpenSearch ecosystem (Anomaly Detection, Alerting, ISM, Security Analytics). Specifically for {{ fingerprint.source_engine }} sources, AWS publishes a prescriptive guide that informs every step of this assessment.
 
 ## Three risks to watch
 
