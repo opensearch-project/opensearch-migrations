@@ -448,7 +448,11 @@ agent_exec() {
     resuming=1
   fi
 
-  local fresh_prompt='Read Startup.md and skills/migration-assistant-operator/SKILL.md (then skills/migration-assistant-operator/workflow.md). The migrating-to-opensearch skill is for assessment-only sessions; do not load it unless the user explicitly asks for an assessment. Give the user next steps based on what state.env shows.'
+  local fresh_prompt='Read Startup.md first. You have three skills available; read the SKILL.md of whichever fits the user'\''s goal:
+- migration-assistant-operator: drive an already-deployed Migration Assistant against an Elasticsearch/OpenSearch source. Workflow.md is the CLI reference.
+- migrating-to-opensearch: produce a migration assessment / readiness report when the source is Solr, the target is OpenSearch Serverless, the user wants an in-place upgrade, OR Migration Assistant is not the right tool. Load this PROACTIVELY whenever the migration shape doesn'\''t fit the operator path — do not require the user to say the word "assessment".
+- aoss-nextgen: target-side reference for OpenSearch Serverless NextGen collections.
+Read state.env, then ask the user one focused question (source + target + intent) so you can pick the right skill on your next turn.'
   ui_dim "  exec $bin (resume=$resuming)"
   case "$agent" in
     claude)
