@@ -129,34 +129,23 @@ Do not overload `pythonModulePath` as the Python entry-point selector. In the cu
 Context is shared by both selector forms, so it lives next to `entryPoint | transformName`.
 
 ```typescript
-const TRANSFORM_CONTEXT_READ_AS = z.enum([
-    "json",
-    "text",
-    "bytes",
-    "base64",
-    "path"
-]);
-
 const TRANSFORM_CONTEXT_VALUE_DIRECTORY = z.union([
     z.object({
-        configMap: z.string().min(1),
-        defaultReadAs: TRANSFORM_CONTEXT_READ_AS.optional()
+        configMap: z.string().min(1)
     }).strict(),
     z.object({
         image: z.string().min(1),
         pullPolicy: K8S_IMAGE_PULL_POLICY.default("IfNotPresent").optional(),
-        path: FILE_RELATIVE_PATH.optional(),
-        defaultReadAs: TRANSFORM_CONTEXT_READ_AS.optional()
+        path: FILE_RELATIVE_PATH.optional()
     }).strict()
 ]);
 
 const CONFIG_VALUE_FROM_FILE = z.object({
-    fromFile: FILE_REF,
-    readAs: TRANSFORM_CONTEXT_READ_AS.optional()
+    fromFile: FILE_REF
 }).strict();
 
 const TRANSFORM_CONTEXT_VALUE = z.union([
-    z.object({ value: z.any() }).strict(),
+    z.object({ value: INLINE_JSON_VALUE }).strict(),
     CONFIG_VALUE_FROM_FILE
 ]);
 
@@ -172,8 +161,7 @@ const TRANSFORM_CONTEXT = z.union([
 The wrapper keys are intentional:
 
 - `value` means "this is already the value."
-- `fromFile` means "mount this file, read it at runtime, parse it, and use the parsed result as the value."
-- `readAs` is a transformation-layer type hint. It tells the loader whether the value should be JSON, text, bytes, base64-encoded bytes, or a path string. It is not used by the workflow mount logic.
+- `fromFile` means "mount this file and let the transformer runtime materialize it according to the selected provider's expected type for that key."
 
 `valueDirectories` is intentionally not a list of file refs. Each entry identifies one mounted directory:
 
@@ -181,9 +169,9 @@ The wrapper keys are intentional:
 - An image entry uses `path` as the directory inside the image volume, or the image root when `path` is omitted.
 - Literal `value` entries are not allowed here because `valueDirectories` represents a directory of named values.
 
-At runtime, each immediate file in the directory becomes one context key. The key is derived from the file name, and the value is materialized according to provider metadata or `defaultReadAs`; `path` values remain runtime path strings instead of being read.
+At runtime, each immediate file in the directory becomes one context key. The key is the file name exactly as mounted, and the value is materialized according to the selected provider's expected type for that key. If the provider does not declare a type, the v1 runtime treats the value as UTF-8 text.
 
-For named providers, the preferred source of expected types is provider-owned metadata. A provider can declare that `regexMappings` is JSON, `certificateChain` is bytes, or `dictionaryPath` should remain a path. Users should only need `readAs` when a provider does not declare a type, when a script transform needs the value, or when a directory uses a default type for unknown keys.
+Provider-owned type metadata is part of the transformation layer. For example, `TypeMappingSanitizationTransformerProvider` declares file-backed `regexMappings`, `staticMappings`, `featureFlags`, and `sourceProperties` as JSON. The workflow never asks the user to specify those types.
 
 Avoid accepting bare scalars or objects inside `context.values` in v1. Requiring `value` keeps the file-vs-value distinction explicit.
 
@@ -192,7 +180,7 @@ Avoid accepting bare scalars or objects inside `context.values` in v1. Requiring
 The schema has three distinct concepts:
 
 - Script source, such as `entryPoint.javascript` or `entryPoint.javascriptFile`.
-- Runtime file paths derived from file-bearing fields, such as `clusterConfiguration.files.<name>` and `clientAuth.trustRoots`.
+- Runtime file paths derived from file-bearing fields, such as `clusterConfiguration.files.<name>` and `clientAuth.trustedClientCaFile`.
 - Context values, which become provider config values or script `bindingsObject` values.
 
 The config processor can embed inline values directly into generated JSON, but it cannot inline files from ConfigMaps or images because it cannot read them while transforming the user config. File refs become component-level volume arrays plus resolved runtime paths. File-backed context values become resolver instructions that Java reads after the files are mounted.
@@ -205,7 +193,7 @@ Non-context file and script fields translate directly:
 - `entryPoint.pythonFile` selects `JsonPythonTransformerProvider` and sets `initializationScriptFile` to the resolved path.
 - `transformName` selects the named provider used by `TransformationLoader`.
 - `clusterConfiguration.files.<name>` is a named source-cluster file declaration; a later projection can turn it into a resolved path plus mounts for each consuming component.
-- `clientAuth.trustRoots` becomes `sslTrustCertFile` with the resolved path.
+- `clientAuth.trustedClientCaFile` becomes `sslTrustCertFile` with the resolved path.
 
 Context translation has three stages:
 
@@ -240,28 +228,26 @@ Context translation rules:
 | --- | --- | --- | --- |
 | no `context` | no context keys | only entry-point keys | provider default config |
 | `context: "name"` | provider config is the string `"name"` | `bindingsObject: "name"` | the string value |
-| `context.valueDirectories[]` | `providerConfigDirs: ["<resolved dir>"]` | `bindingsObjectDirs: ["<resolved dir>"]` | each immediate file becomes one key/value |
+| `context.valueDirectories[]` | `providerConfigDirs: [{path: "<resolved dir>"}]` | `bindingsObjectDirs: [{path: "<resolved dir>"}]` | each immediate file becomes one key/value |
 | `context.values.foo.value` | `foo: <value>` | `bindingsObject.foo: <value>` | `foo` is the literal value |
-| `context.values.foo.fromFile` | `providerConfigFiles.foo: {path, readAs?}` | `bindingsObjectFiles.foo: {path, readAs?}` | `foo` is read according to provider metadata or `readAs` |
+| `context.values.foo.fromFile` | `providerConfigFiles.foo: {path}` | `bindingsObjectFiles.foo: {path}` | `foo` is materialized using provider-owned type metadata, or text for script bindings |
 
-Environment variables are not part of the v1 transform-context model. They can still be used by field-specific runtime features, such as inline proxy trust roots, but ConfigMap-backed transform context should use mounted files or directories. Existing component-specific env vars, such as auth secrets, JVM/logging flags, local test credentials, and config-processor input paths, remain explicit workflow plumbing rather than a generic user-facing context transport.
+Environment variables are not part of the v1 transform-context model. Existing component-specific env vars, such as auth secrets, JVM/logging flags, local test credentials, and config-processor input paths, remain explicit workflow plumbing rather than a generic user-facing context transport. Future field-specific runtime features can still add env vars directly when that is the smallest clear interface, but ConfigMap-backed transform context should use mounted files or directories.
 
-`ProviderConfigResolver` performs final flattening inside the Java runtime:
+The Java transformer runtime performs final flattening:
 
 - It reads `providerConfigDirs` and `bindingsObjectDirs`.
 - It reads files named by `providerConfigFiles` and `bindingsObjectFiles`.
-- It resolves each value's expected type from provider metadata, explicit `readAs`, or directory `defaultReadAs`.
-- It parses or materializes values according to that expected type.
+- For named providers, it asks the selected `IJsonTransformerProvider` what type each file-backed config key expects.
+- For script providers, it currently materializes file-backed bindings as UTF-8 text. Script authors can parse text in the script, or use inline `context.values.<name>.value` for structured YAML/JSON values.
 - It removes the reserved resolver keys before the provider receives its config.
 
 Expected type resolution:
 
-1. For named providers, ask the provider for an expected type for the specific config key.
-2. If the user supplied `readAs` and the provider also supplied metadata, they must agree; otherwise fail before creating the transformer.
-3. If only one of provider metadata or `readAs` is available, use that.
-4. For `valueDirectories`, use provider metadata for the derived key when available. Otherwise use the directory entry's `defaultReadAs`.
-5. For script providers, use explicit `readAs` or `defaultReadAs`; script entry points do not have provider-specific context metadata.
-6. If no expected type can be determined for a file-backed value, fail rather than guessing from the file extension.
+1. For named providers, use `provider.getFileBackedConfigValueType(configKey)`.
+2. For directory-loaded named-provider values, use the immediate file name as the `configKey`.
+3. If the provider does not declare a type for that key, default to `text`.
+4. For script-provider bindings, default to `text`.
 
 Supported value types:
 
@@ -296,12 +282,10 @@ context:
       fromFile:
         image: "repo/type-mapping-context@sha256:abc123"
         path: regexMappings.json
-        readAs: json
     featureFlags:
       fromFile:
         configMap: type-mapping-flags
         path: featureFlags.json
-        readAs: json
 ```
 
 Generated transformer config:
@@ -314,12 +298,10 @@ Generated transformer config:
     ],
     "providerConfigFiles": {
       "regexMappings": {
-        "path": "/file-sources/image-a81c2f/regexMappings.json",
-        "readAs": "json"
+        "path": "/file-sources/image-a81c2f/regexMappings.json"
       },
       "featureFlags": {
-        "path": "/file-sources/configmap-type-mapping-flags/featureFlags.json",
-        "readAs": "json"
+        "path": "/file-sources/configmap-type-mapping-flags/featureFlags.json"
       }
     },
     "sourceProperties": {
@@ -400,12 +382,10 @@ traffic:
                   fromFile:
                     configMap: prod-solr-config
                     path: regexMappings.json
-                    readAs: json
                 defaults:
                   fromFile:
                     configMap: prod-solr-config
                     path: defaults.json
-                    readAs: json
 ```
 
 the replayer pod should get one mount root:
@@ -417,7 +397,7 @@ the replayer pod should get one mount root:
 
 The repeated ConfigMap reference is intentional. This design does not automatically wire `sourceClusters.<source>.clusterConfiguration.files.clusterConfig` into transform context. If a transform provider needs source-cluster config, the user config or a later config-processor extension must place that value into the transform's `context`.
 
-The same transform context could also be implemented with `valueDirectories` if the mounted directory's file names match the provider's expected context keys, such as `regexMappings` and `featureFlags`. In that case the resolver would load each immediate file as one context value, using provider metadata or `defaultReadAs` to decide whether each value is a path, JSON, text, bytes, or base64.
+The same transform context could also be implemented with `valueDirectories` if the mounted directory's file names match the provider's expected context keys, such as `regexMappings` and `featureFlags`. In that case the resolver would load each immediate file as one context value, using provider-owned type metadata for those keys.
 
 This dedupe is per component. If MetadataMigration and Replayer both use `prod-solr-config`, each pod gets one mount. There is no global shared mount.
 
@@ -432,23 +412,21 @@ The config processor should translate user file refs into generic Kubernetes vol
 Suggested transformed shape:
 
 ```typescript
-const ARGO_FILE_SOURCE_VOLUME_SOURCE = z.union([
+const ARGO_FILE_SOURCE_VOLUME = z.union([
     z.object({
+        name: z.string().min(1),
         configMap: z.object({
             name: z.string().min(1)
         }).strict()
     }).strict(),
     z.object({
+        name: z.string().min(1),
         image: z.object({
             reference: z.string().min(1),
             pullPolicy: K8S_IMAGE_PULL_POLICY.default("IfNotPresent").optional()
         }).strict()
     }).strict(),
 ]);
-
-const ARGO_FILE_SOURCE_VOLUME = z.object({
-    name: z.string().min(1),
-}).and(ARGO_FILE_SOURCE_VOLUME_SOURCE);
 
 const ARGO_FILE_SOURCE_VOLUME_MOUNT = z.object({
     name: z.string().min(1),
@@ -556,8 +534,7 @@ The current `CLUSTER_VERSION_STRING` already accepts `SOLR 6`, `SOLR 7`, `SOLR 8
 
 ```typescript
 const SOURCE_CLUSTER_INLINE_VALUE = z.object({
-    value: z.string().min(1),
-    readAs: TRANSFORM_CONTEXT_READ_AS.default("text").optional()
+    value: INLINE_JSON_VALUE
 }).strict();
 
 const SOURCE_CLUSTER_CONFIGURATION = z.object({
@@ -600,7 +577,6 @@ sourceClusters:
         clusterConfigText:
           value: |
             <config>...</config>
-          readAs: text
 ```
 
 File entry rules:
@@ -632,7 +608,7 @@ For each provider config:
 
 ```java
 var rawConfiguration = c.get(providerName);
-var configuration = ProviderConfigResolver.resolve(provider, rawConfiguration);
+var configuration = resolveProviderConfig(rawConfiguration, provider);
 return provider.createTransformer(configuration);
 ```
 
@@ -643,20 +619,20 @@ The resolver must run in `TransformationLoader`, before provider-specific `creat
 The resolver should understand reserved config-loading keys:
 
 - `providerConfigDirs`: directories loaded as shallow key-value bags.
-- `providerConfigFiles`: map of provider config key to `{path, readAs?}`.
+- `providerConfigFiles`: map of provider config key to `{path}`.
 - `bindingsObjectDirs`: script-provider equivalent that merges directory values into `bindingsObject`.
 - `bindingsObjectFiles`: script-provider equivalent that merges named files into `bindingsObject`.
 
-Named providers can optionally expose expected config value types through a transformation-layer interface:
+Named providers expose expected config value types through the transformation-layer provider interface:
 
 ```java
-public interface TypedTransformerConfigProvider extends IJsonTransformerProvider {
-    Map<String, ConfigValueSpec> getConfigValueSpecs();
+public interface IJsonTransformerProvider {
+    default ConfigFileValueType getFileBackedConfigValueType(String configKey) {
+        return ConfigFileValueType.TEXT;
+    }
 }
 
-public record ConfigValueSpec(ConfigValueType readAs, boolean required) {}
-
-public enum ConfigValueType {
+public enum ConfigFileValueType {
     JSON,
     TEXT,
     BYTES,
@@ -665,7 +641,7 @@ public enum ConfigValueType {
 }
 ```
 
-`TransformationLoader` should pass the provider's specs into `ProviderConfigResolver`. This keeps type interpretation in the transformation library, where provider contracts are known, and keeps workflow rendering limited to mounts, paths, and resolver metadata.
+`TransformationLoader` uses this metadata when materializing `providerConfigDirs` and `providerConfigFiles`. For directory values, the config key is the immediate file name. The workflow does not carry type hints.
 
 Merge order:
 
@@ -678,9 +654,9 @@ Directory loading should be constrained in v1:
 
 - Load only immediate files.
 - Reject nested directories unless a later provider needs a manifest format.
-- Determine each file's type from provider metadata or `defaultReadAs`.
-- Remove known extensions such as `.json` and `.txt` when deriving config keys.
-- Fail if no expected type is available for a file-backed value.
+- Determine each file's type from provider-owned metadata, defaulting to `text`.
+- Use the exact mounted file name as the context key.
+- Use `context.values.<name>.fromFile` when a provider needs a different key name from the mounted file name.
 
 This keeps providers such as `TypeMappingSanitizationTransformerProvider` focused on typed config consumption. They should not read env vars or files directly.
 
@@ -696,8 +672,7 @@ Example generated transformer config:
       },
       "bindingsObjectFiles": {
         "sourceDefaults": {
-          "path": "/file-sources/configmap-prod-solr-config/defaults.json",
-          "readAs": "json"
+          "path": "/file-sources/configmap-prod-solr-config/defaults.json"
         }
       }
     }
@@ -709,8 +684,7 @@ Example generated transformer config:
       ],
       "providerConfigFiles": {
         "regexMappings": {
-          "path": "/file-sources/image-a81c2f/regexMappings.json",
-          "readAs": "json"
+          "path": "/file-sources/image-a81c2f/regexMappings.json"
         }
       },
       "sourceProperties": {
@@ -729,24 +703,19 @@ Example generated transformer config:
 The capture proxy Java process already has runtime knobs for front-side mTLS:
 
 - `--sslTrustCertFile`
+- `--sslTrustCertPemEnvVar`
 - `--requireClientAuth`
 
-The file-backed path needs schema/workflow support for mounting client root CAs and passing the resolved file path. Inline PEM roots should not use generic file materialization; the proxy runtime should accept the PEM value directly through an environment variable.
+The v1 path supports both file-backed and inline public client root CAs. File-backed roots mount a ConfigMap or image file and pass the resolved path. Inline PEM roots use a proxy-specific runtime field and are passed through a dedicated env var, not through generic file materialization.
 
 Extend TLS variants that terminate HTTPS:
 
 ```typescript
-const PROXY_TRUST_ROOTS_CONFIG = z.union([
-    FILE_REF,
-    z.object({
-        pem: z.string().min(1)
-    }).strict()
-]);
-
 const PROXY_CLIENT_AUTH_CONFIG = z.object({
-    mode: z.enum(["require"]).default("require").optional(),
-    trustRoots: PROXY_TRUST_ROOTS_CONFIG
-}).strict();
+    trustedClientCaFile: FILE_REF.optional(),
+    trustedClientCaPem: z.string().optional(),
+    required: z.boolean().default(true).optional()
+}).strict().superRefine(exactlyOneTrustSource);
 ```
 
 Example:
@@ -764,46 +733,21 @@ traffic:
           dnsNames:
             - capture.ma.svc.cluster.local
           clientAuth:
-            mode: require
-            trustRoots:
+            trustedClientCaFile:
               configMap: prod-client-root-cas
               path: client-ca.pem
-```
-
-Inline PEM example:
-
-```yaml
-traffic:
-  proxies:
-    capture:
-      source: prod-solr
-      proxyConfig:
-        tls:
-          mode: certManager
-          issuerRef:
-            name: migrations-ca
-          dnsNames:
-            - capture.ma.svc.cluster.local
-          clientAuth:
-            mode: require
-            trustRoots:
-              pem: |
-                -----BEGIN CERTIFICATE-----
-                ...
-                -----END CERTIFICATE-----
+            required: true
 ```
 
 Workflow translation:
 
-- Mount `prod-client-root-cas` into the proxy pod.
-- Add `sslTrustCertFile: /file-sources/configmap-prod-client-root-cas/client-ca.pem` to the proxy config.
-- For inline PEM, set a generated environment variable such as `CAPTURE_PROXY_CLIENT_CA_PEM` and pass a proxy config field such as `sslTrustCertPemEnvVar: CAPTURE_PROXY_CLIENT_CA_PEM`.
-- Add `requireClientAuth: true` when `clientAuth.mode` is `require`.
+- For `trustedClientCaFile`, mount `prod-client-root-cas` into the proxy pod and add `sslTrustCertFile: /file-sources/configmap-prod-client-root-cas/client-ca.pem` to the proxy config.
+- For `trustedClientCaPem`, pass the PEM through `sslTrustCertPem` and the dedicated `CAPTURE_PROXY_SSL_TRUST_CERT_PEM` env var.
+- Add `requireClientAuth: true` unless `clientAuth.required` is explicitly false.
+- Reject configs that specify both `trustedClientCaFile` and `trustedClientCaPem`.
 - Reject `clientAuth` when `tls.mode` is `plaintext`.
 
-Capture Proxy currently accepts `--sslTrustCertFile`, so inline PEM needs a small runtime addition such as `--sslTrustCertPemEnvVar`. The runtime should read the PEM from the named environment variable and build the trust manager from memory. Passing the PEM through an env var is reasonable here because client root CAs are public trust material. Do not use this pattern for server private keys; those should remain on the existing TLS Secret path.
-
-Public CA roots can live in a ConfigMap, OCI image, or inline PEM. Server private keys should remain in Kubernetes Secrets.
+Public CA roots can live in a ConfigMap, OCI image, or inline PEM field. Server private keys should remain in Kubernetes Secrets.
 
 ## End-To-End Example
 
@@ -837,7 +781,7 @@ traffic:
           dnsNames:
             - capture.ma.svc.cluster.local
           clientAuth:
-            trustRoots:
+            trustedClientCaFile:
               configMap: prod-client-root-cas
               path: client-ca.pem
   replayers:
@@ -883,56 +827,64 @@ traffic:
 
 This example intentionally repeats `prod-solr-config`. The config processor dedupes that source in the replayer and still preserves distinct resolved paths for `solrconfig.xml` and `defaults.json`.
 
-## Implementation Order
+## Implementation Status
 
-1. Add direct `FILE_REF` schemas to `orchestrationSpecs/packages/schemas/src/userSchemas.ts`.
-2. Remove `transformsSources` and per-component `transformsSource` from the accepted user schema.
-3. Add transform spec v2 with mutually exclusive `entryPoint | transformName` and shared optional `context`.
-4. Add config transformation for inline scripts, file-backed scripts, value directories, literal values, and `fromFile` values.
-5. Add a file-source registry in the config processor that canonicalizes and dedupes mounts per compute component.
-6. Add transformed Argo fields `fileSourceVolumes` and `fileSourceVolumeMounts` to MetadataMigration, RFS, Replayer, and Capture Proxy configs.
-7. Add those fields to each component's workflow-option key list so they are omitted from Java process parameter JSON.
-8. Add the Argo TS array-concat/rendering helper that appends `fileSourceVolumes` to static `volumes` and `fileSourceVolumeMounts` to static `volumeMounts`.
-9. Add deterministic runtime-produced resource support for workflow-generated files.
-10. Add generic `clusterConfiguration.files` and `clusterConfiguration.values` to source clusters. `CLUSTER_VERSION_STRING` already accepts Solr versions in this tree; preserve that validation.
-11. Add Java provider config value metadata so named providers can declare expected `readAs` types.
-12. Add Java `ProviderConfigResolver` support for provider config files, directories, and typed value materialization.
-13. Add capture proxy `clientAuth.trustRoots` schema and workflow translation for both file-backed roots and inline PEM roots.
-14. Add capture proxy runtime support for `sslTrustCertPemEnvVar` or equivalent.
-15. Update samples and docs from mountable transforms to direct file-source declarations.
+Completed in the first implementation pass:
+
+1. Added direct `FILE_REF` schemas to `orchestrationSpecs/packages/schemas/src/userSchemas.ts`.
+2. Removed `transformsSources` and per-component `transformsSource` from the accepted user schema.
+3. Added transform spec v2 with mutually exclusive `entryPoint | transformName` and shared optional `context`.
+4. Added config transformation for inline scripts, file-backed scripts, value directories, literal values, and `fromFile` values.
+5. Added a file-source registry in the config processor that canonicalizes and dedupes mounts per compute component.
+6. Added transformed Argo fields `fileSourceVolumes` and `fileSourceVolumeMounts` to MetadataMigration, RFS, Replayer, and Capture Proxy configs.
+7. Added those fields to each component's workflow-option key list so they are omitted from Java process parameter JSON.
+8. Added Argo TS array-concat/rendering support for appending `fileSourceVolumes` to static `volumes` and `fileSourceVolumeMounts` to static `volumeMounts`.
+9. Added generic `clusterConfiguration.files` and `clusterConfiguration.values` to source clusters, restricted to `SOLR ...` source versions.
+10. Added Java runtime support for provider config files, binding files, directories, and provider-owned value materialization.
+11. Added `TypeMappingSanitizationTransformerProvider` metadata so file-backed `regexMappings`, `staticMappings`, `featureFlags`, and `sourceProperties` are materialized as JSON without user-provided type hints.
+12. Added capture proxy `clientAuth.trustedClientCaFile` schema and workflow translation for file-backed roots.
+13. Added capture proxy `clientAuth.trustedClientCaPem` schema, workflow env-var projection, and runtime PEM loading.
+14. Added workflow-template support for dynamically appended file-source volumes and mounts.
+15. Updated samples and docs from mountable transforms to direct file-source declarations.
+
+The source-cluster projection and config-processor extension work is tracked in `ConfigProcessorExtensionsDesign.md`; it is not part of the FileBundles implementation pass.
+
+## Remaining Work
+
+There is no remaining implementation work for the FileBundles pass. The current implementation covers the user-facing schema, config transformation, per-component mount projection, workflow-template rendering, Java transformer runtime loading, provider-owned value materialization, and capture proxy mTLS trust-root handling.
+
+The remaining related work is intentionally outside this document:
+
+- Build the trusted config-processor extension hook described in `ConfigProcessorExtensionsDesign.md`.
+- Build a builder-specific TypeMappings extension pack if a downstream image should inject default TypeMappings transforms.
+- Add a full Kubernetes runtime smoke test for OCI image volumes if cluster-level validation is desired beyond Argo/template rendering and unit coverage.
 
 ## Testing Plan
 
-Add focused tests for schema, transformation, workflow rendering, and Java runtime resolution:
+Covered in the first implementation pass:
 
-- Schema accepts `FILE_REF` `configMap` and `image` forms everywhere a file-bearing field is allowed.
+- Schema accepts `FILE_REF` `configMap` and `image` forms where file-bearing fields are wired in v1.
 - Schema rejects absolute paths and `..` path traversal.
 - Schema rejects ConfigMap file refs whose `path` contains `/` or reserved dot paths; ConfigMap file refs address one key.
 - Schema rejects transform specs with both `entryPoint` and `transformName`, or neither.
+- Schema accepts Solr source versions and rejects `clusterConfiguration` for non-Solr source versions.
 - Transform translation maps inline JavaScript to `initializationScript`.
 - Transform translation maps `javascriptFile` to `initializationScriptFile`.
 - Transform translation maps inline Python and `pythonFile` to `JsonPythonTransformerProvider` with the same `initializationScript` / `initializationScriptFile` keys.
 - Transform translation maps `context.values.foo.value` into a provider config value.
-- Transform translation maps `context.values.foo.fromFile` into a resolver instruction plus a resolved mounted path and optional `readAs`, not an inlined value.
-- Java transformer runtime test verifies reserved resolver keys are removed before provider creation and that providers receive the final flattened config object.
-- Java transformer runtime test verifies provider-declared expected types are used when `readAs` is omitted.
-- Java transformer runtime test verifies an explicit `readAs` conflict with provider metadata fails before provider creation.
-- Java transformer runtime test verifies `json`, `text`, `bytes`, `base64`, and `path` value types.
-- Java transformer runtime test verifies file-backed values without provider metadata or explicit `readAs` fail rather than being guessed from extension.
+- Transform translation maps `context.values.foo.fromFile` into a resolver instruction plus a resolved mounted path, not an inlined value.
 - Config transformation dedupes identical ConfigMap refs into one component-level `fileSourceVolumes` / `fileSourceVolumeMounts` pair while preserving each resolved file path.
 - Config transformation dedupes identical image refs and treats different references or pull policies as separate mounts.
 - Component process JSON omits `fileSourceVolumes` and `fileSourceVolumeMounts`; they are workflow-only fields.
-- Replayer workflow snapshot with source-cluster config and transform context from the same ConfigMap renders one volume and one mount for that ConfigMap.
-- Workflow snapshot with two distinct ConfigMaps renders two volumes and two mounts.
-- Cross-component workflow snapshot verifies dedupe is per pod.
-- Argo helper tests verify file-source volume arrays append correctly for raw Deployment templates and `ContainerBuilder` templates.
-- Generated ConfigMap flow test verifies an extraction step creates a deterministic ConfigMap, a validator gates readiness, and the downstream replayer mounts the expected name.
-- Capture proxy mTLS rendering test verifies `clientAuth.trustRoots` from a ConfigMap sets `sslTrustCertFile` and `requireClientAuth`.
-- Capture proxy mTLS rendering test verifies inline PEM trust roots set an env var, pass `sslTrustCertPemEnvVar`, and do not create a mount.
-- Capture proxy runtime test verifies inline PEM trust roots are loaded from the env var and enable required client auth.
-- Source-cluster config test verifies inline `clusterConfiguration.values` are preserved in transformed source config and do not create mounts.
-- Java transformer runtime test verifies `ProviderConfigResolver` loads JSON files, text files, and shallow directories in the defined merge order.
-- Naked-container transformer test verifies inline JavaScript and inline context values work with no Kubernetes mounts.
+- Capture proxy mTLS lowering verifies `clientAuth.trustedClientCaFile` from a ConfigMap sets `sslTrustCertFile` and `requireClientAuth`.
+- Capture proxy mTLS lowering verifies `clientAuth.trustedClientCaPem` sets `sslTrustCertPem`, wires the dedicated env var, and does not create mounts.
+- Source-cluster config fixtures verify `clusterConfiguration.files` and `clusterConfiguration.values` are accepted for Solr sources.
+- Workflow template snapshots cover dynamic file-source volume and mount projection in MetadataMigration, RFS, Replayer, and Capture Proxy templates.
+- Argo builder unit coverage verifies `ContainerBuilder` can carry dynamic volume arrays, and parity coverage was added for `sprig.concat`.
+- Java transformer runtime tests verify named provider file-backed config is resolved before provider creation.
+- Java transformer runtime tests verify provider-owned JSON type metadata is applied to both `providerConfigFiles` and `providerConfigDirs`.
+- Java script provider tests verify text file-backed `bindingsObjectFiles` and `bindingsObjectDirs` merge with explicit bindings.
+- Capture proxy runtime tests verify inline PEM env-var handling and reject ambiguous file-plus-PEM trust roots.
 
 ## Migration From Mountable Transforms
 
@@ -954,12 +906,12 @@ If the same image is reused, users can repeat the direct image reference or use 
 
 ## Resolved Decisions
 
-**Value directory key derivation**: Keep v1 simple. `context.valueDirectories` derives each context key from the immediate file name, with known extensions such as `.json` or `.txt` removed. Users who need more control can cherry-pick individual values with `context.values.<name>.fromFile` or `context.values.<name>.value`.
+**Value directory key derivation**: Keep v1 simple. `context.valueDirectories` derives each context key from the immediate file name exactly as mounted. Users who need a different key name can cherry-pick individual values with `context.values.<name>.fromFile` or `context.values.<name>.value`.
 
 **ConfigMap usage**: ConfigMaps can be used in two ways in this design. A `FILE_REF` can point to one ConfigMap key/file and produce a mounted path; in v1 this is one key name, not a nested path. `context.valueDirectories[]` can mount a ConfigMap as a directory where each key/file becomes one context value. Env-var-based ConfigMap key reads are intentionally not part of the v1 transform-context model.
 
 **Environment variables**: Do not add a generic env-var value source for file bundles or transform context in v1. The current workflows already model the needed env vars directly: credentials from Secrets, runtime JVM/logging/localstack settings, and config-processor invocation settings. New env vars should be added as explicit component fields when a runtime actually needs them.
 
-**Inline file materialization**: Generic `FILE_REF.contents` remains out of scope. Inline content should stay value/script-only through fields such as `entryPoint.javascript`, `context.values.<name>.value`, `clusterConfiguration.values`, and inline proxy trust-root PEM. If a runtime truly needs a path, use a ConfigMap, OCI image, workflow-produced resource, or builder-owned config-processor extension.
+**Inline file materialization**: Generic `FILE_REF.contents` remains out of scope. Inline content should stay value/script-only through fields such as `entryPoint.javascript`, `context.values.<name>.value`, and `clusterConfiguration.values`. If a runtime truly needs a path, use a ConfigMap, OCI image, workflow-produced resource, or builder-owned config-processor extension.
 
 **Image pull policy**: Image file sources should accept `pullPolicy` and default to `IfNotPresent`. Pull policy remains part of the canonical image source identity because it changes the Kubernetes volume spec. Two otherwise identical image references with different pull policies should therefore produce distinct component mounts.
