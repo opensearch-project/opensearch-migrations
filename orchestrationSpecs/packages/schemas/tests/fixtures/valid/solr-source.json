@@ -2,7 +2,24 @@
   "sourceClusters": {
     "solr-source": {
       "version": "SOLR 8.11.4",
-      "endpoint": "http://solr:8983"
+      "endpoint": "http://solr:8983",
+      "clusterConfiguration": {
+        "files": {
+          "clusterConfig": {
+            "configMap": "solr-cluster-config",
+            "path": "cluster-config.json"
+          },
+          "defaults": {
+            "image": "example.com/solr-config@sha256:abc123",
+            "path": "defaults.json"
+          }
+        },
+        "values": {
+          "collection": {
+            "value": "gettingstarted"
+          }
+        }
+      }
     }
   },
   "targetClusters": {
