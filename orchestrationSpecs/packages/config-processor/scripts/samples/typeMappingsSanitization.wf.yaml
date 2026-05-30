@@ -1,0 +1,74 @@
+#ConfigMap: # named type-mappings-settings
+#  #featureFlags:
+#  staticMappings:
+#    ...
+#  regexMappings:
+#    ...
+#
+
+fileBundles:
+  transform-code:
+    image: "123456789012.dkr.ecr.us-east-1.amazonaws.com/replay-transforms@sha256:abc123"
+  prod-solr-config:
+    configMap: solr-config
+  proxy-client-roots:
+    configMap: prod-client-root-cas
+
+sourceClusters:
+  prod-solr:
+    version: "SOLR 8.11.4"
+    endpoint: "https://solr.example.com:8983"
+    clusterConfig:
+      configMap: ...
+      image: ...
+      reference: ...
+      inline:
+        ACTUAL CLUSTER CONFIG
+
+targetClusters:
+  prod-os:
+    endpoint: "https://target.example.com:9200"
+
+traffic:
+  proxies:
+    capture:
+      source: prod-solr
+      proxyConfig:
+        tls:
+          mode: certManager
+          issuerRef:
+            name: migrations-ca
+          dnsNames: [capture.ma.svc.cluster.local]
+          clientAuth:
+            trustRoots:
+              bundle: proxy-client-roots
+              path: client-ca.pem
+  replayers:
+    replay:
+      fromProxy: capture
+      toTarget: prod-os
+      replayerConfig:
+        requestTransforms:
+          - provider: TypeMappingsSanitization
+            # all env keys (configmaps) are prepended with a unique value that is shared with the instance of the transformer
+            # so that it can disambiguate from any other similarly named variables
+            context:
+              # Pull all the file/keys in for each of these bags
+              configMap: name # resource with keys that map to env vars that the specified transform will load in
+              image: name # image with files named each of the parameters.  A directory will be passed to the transformer bootstrap
+              bundleReference: # This has the same semantics as the image definition - files are mounted and read by the provider bootstrap
+                "type-mappings-settings"
+              inline: # We'll configure each of these individually as ENV_VAR -> name values, with the prefix
+                <NAME>: string | 
+                  {configMap:..., key: ...} |
+                  {image:..., filename: ...} |
+                  {bundleName:..., filename: ...}
+                regexMappings: string
+                ...
+          - entryPoint:
+              javascriptFile:
+                bundle: transform-code
+                path: request.js
+            context:
+              inline:
+                script: "request"
