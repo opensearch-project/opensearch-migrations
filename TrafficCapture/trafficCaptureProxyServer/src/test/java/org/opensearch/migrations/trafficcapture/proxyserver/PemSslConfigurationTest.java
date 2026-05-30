@@ -2,6 +2,7 @@ package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import javax.net.ssl.SSLEngine;
 
+import java.util.UUID;
 import java.util.function.Supplier;
 
 import com.beust.jcommander.ParameterException;
@@ -99,6 +100,24 @@ public class PemSslConfigurationTest {
             "--listenPort", "80",
             "--noCapture",
             "--sslCertChainFile", ssc.certificate().getAbsolutePath()
+        });
+        Assertions.assertThrows(ParameterException.class, () ->
+            CaptureProxy.buildSslEngineSupplier(params)
+        );
+        ssc.delete();
+    }
+
+    @Test
+    public void testBuildSslEngineSupplierRejectsMissingTrustCertPemEnvVar() throws Exception {
+        var ssc = createSelfSignedCert();
+        var params = CaptureProxy.parseArgs(new String[]{
+            "--destinationUri", "http://localhost:9200",
+            "--listenPort", "80",
+            "--noCapture",
+            "--sslCertChainFile", ssc.certificate().getAbsolutePath(),
+            "--sslKeyFile", ssc.privateKey().getAbsolutePath(),
+            "--sslTrustCertPemEnvVar", "MISSING_TEST_CERT_PEM_" + UUID.randomUUID(),
+            "--requireClientAuth"
         });
         Assertions.assertThrows(ParameterException.class, () ->
             CaptureProxy.buildSslEngineSupplier(params)
