@@ -31,11 +31,26 @@ export type FileSourceTraceRef =
 const FILE_SOURCES_MOUNT_PATH = "/file-sources";
 
 function sanitizeK8sNameSegment(value: string) {
-    const sanitized = value.toLowerCase()
-        .replace(/[^a-z0-9-]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 40)
-        .replace(/-+$/g, "");
+    const normalized = Array.from(value.toLowerCase()).reduce((result, char) => {
+        if ((char >= "a" && char <= "z") || (char >= "0" && char <= "9") || char === "-") {
+            return result + char;
+        }
+        return result.endsWith("-") ? result : `${result}-`;
+    }, "");
+
+    let start = 0;
+    let end = normalized.length;
+    while (start < end && normalized[start] === "-") {
+        start++;
+    }
+    while (end > start && normalized[end - 1] === "-") {
+        end--;
+    }
+
+    let sanitized = normalized.slice(start, end).slice(0, 40);
+    while (sanitized.endsWith("-")) {
+        sanitized = sanitized.slice(0, -1);
+    }
     return sanitized || "source";
 }
 
