@@ -52,6 +52,7 @@ cfn_deploy_or_skip() {
       [[ -z "$vpc_id" ]] && die "--deploy-import-vpc-cfn requires --vpc-id"
       [[ -z "$subnets" ]] && die "--deploy-import-vpc-cfn requires --subnet-ids"
       params+=("VPCId=$vpc_id" "VPCSubnetIds=$subnets")
+      _cfn_import_vpc_endpoint_params "$vpc_id" "$subnets" "$region" params
       ;;
     *)
       die "unknown CFN_TEMPLATE_VARIANT: $variant"
@@ -340,4 +341,96 @@ _cfn_pick() {
     fi
   done
   return 0
+}
+
+# _cfn_import_vpc_endpoint_params <vpc-id> <subnet-ids-csv> <region> <params-array>
+#
+# Translate the comma-separated --create-vpc-endpoints list into the
+# per-endpoint Create*Endpoint=true CFN parameters. Mirrors the legacy
+# aws-bootstrap.sh contract:
+#
+#   s3              → CreateS3Endpoint=true (+ S3EndpointRouteTableIds)
+#   ecr             → CreateECREndpoint=true
+#   ecrDocker       → CreateECRDockerEndpoint=true
+#   cloudwatchLogs  → CreateCloudWatchLogsEndpoint=true
+#   efs             → CreateEFSEndpoint=true
+#   sts             → CreateSTSEndpoint=true
+#   eksAuth         → CreateEKSAuthEndpoint=true
+#
+# S3 is special: it's a Gateway endpoint, which needs the route-table IDs
+# for every subnet we want to associate it with.
+_cfn_import_vpc_endpoint_params() {
+  local vpc_id="$1" subnets_csv="$2" region="$3" out_name="$4"
+  local list; list=$(state_get CREATE_VPC_ENDPOINTS "")
+  [[ -z "$list" ]] && return 0
+
+  # shellcheck disable=SC2034 # appended via eval
+  local __ep_extras=()
+  local IFS_SAVED=$IFS
+  IFS=','; read -r -a parts <<<"$list"; IFS=$IFS_SAVED
+  local ep
+  for ep in "${parts[@]}"; do
+    case "$ep" in
+      s3)
+        __ep_extras+=("CreateS3Endpoint=true")
+        local rt_ids
+        rt_ids=$(_cfn_subnet_route_table_ids "$vpc_id" "$subnets_csv" "$region")
+        if [[ -n "$rt_ids" ]]; then
+          __ep_extras+=("S3EndpointRouteTableIds=$rt_ids")
+        else
+          ui_warn "no route-table IDs resolved for S3 gateway endpoint; CFN may reject the deploy"
+        fi
+        ;;
+      ecr)            __ep_extras+=("CreateECREndpoint=true") ;;
+      ecrDocker)      __ep_extras+=("CreateECRDockerEndpoint=true") ;;
+      cloudwatchLogs) __ep_extras+=("CreateCloudWatchLogsEndpoint=true") ;;
+      efs)            __ep_extras+=("CreateEFSEndpoint=true") ;;
+      sts)            __ep_extras+=("CreateSTSEndpoint=true") ;;
+      eksAuth)        __ep_extras+=("CreateEKSAuthEndpoint=true") ;;
+      "" | *)
+        ui_warn "ignoring unknown --create-vpc-endpoints entry: '$ep' (expected: s3, ecr, ecrDocker, cloudwatchLogs, efs, sts, eksAuth)"
+        ;;
+    esac
+  done
+
+  # Append to the caller's params array. The caller is `cfn_deploy_or_skip`
+  # whose `params` is local; we extend it via eval.
+  if (( ${#__ep_extras[@]} > 0 )); then
+    eval "$out_name+=(\"\${__ep_extras[@]}\")"
+  fi
+}
+
+# _cfn_subnet_route_table_ids <vpc-id> <subnet-ids-csv> <region>
+#
+# Print a comma-separated list of route-table IDs for the given subnets,
+# falling back to the VPC's main route table when a subnet has no explicit
+# association. CFN expects one route-table per subnet in
+# S3EndpointRouteTableIds.
+_cfn_subnet_route_table_ids() {
+  local vpc_id="$1" subnets_csv="$2" region="$3"
+  local IFS_SAVED=$IFS
+  IFS=','; read -r -a sids <<<"$subnets_csv"; IFS=$IFS_SAVED
+  local out=() main_rt="" sid rt
+  for sid in "${sids[@]}"; do
+    rt=$(aws ec2 describe-route-tables \
+      ${region:+--region "$region"} \
+      --filters "Name=association.subnet-id,Values=$sid" \
+      --query 'RouteTables[0].RouteTableId' --output text 2>/dev/null \
+      || echo "None")
+    if [[ -z "$rt" || "$rt" == "None" ]]; then
+      if [[ -z "$main_rt" ]]; then
+        main_rt=$(aws ec2 describe-route-tables \
+          ${region:+--region "$region"} \
+          --filters "Name=vpc-id,Values=$vpc_id" "Name=association.main,Values=true" \
+          --query 'RouteTables[0].RouteTableId' --output text 2>/dev/null \
+          || echo "None")
+      fi
+      rt="$main_rt"
+    fi
+    [[ -n "$rt" && "$rt" != "None" ]] && out+=("$rt")
+  done
+  # Dedup and join with commas.
+  local deduped
+  deduped=$(printf '%s\n' "${out[@]+"${out[@]}"}" | awk 'NF && !seen[$0]++' | paste -sd, -)
+  printf '%s' "$deduped"
 }

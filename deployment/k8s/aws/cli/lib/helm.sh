@@ -39,10 +39,15 @@ HELM_CHART_NAME='migration-assistant'
 HELM_RELEASE_NAME='ma'
 HELM_NAMESPACE='ma'
 
-helm_install_or_upgrade() {
+# helm_kubeconfig_setup — read the EKS cluster name from CFN outputs,
+# `aws eks update-kubeconfig` it, and bind HELM=()/KUBECTL=() to the
+# resulting context. Idempotent. Must run after CFN deploy, before
+# anything that touches the cluster (build, crane, helm). Splits out
+# of helm_install_or_upgrade so the build path (`--build`) and any
+# resume fast-path can reuse it.
+helm_kubeconfig_setup() {
   local stack_name; stack_name=$(state_get CFN_STACK_NAME)
   local region;     region=$(state_get AWS_REGION)
-  local ma_ver;     ma_ver=$(state_get MA_VERSION)
 
   ui_step "Updating kubeconfig for EKS cluster"
 
@@ -57,6 +62,7 @@ helm_install_or_upgrade() {
     die "could not read EKS cluster name from CFN outputs of '$stack_name' (looked for MIGRATIONS_EKS_CLUSTER_NAME, EKSClusterName)"
   fi
   registry_from_cfn=$(_cfn_pick "$outputs" MIGRATIONS_ECR_REGISTRY ECRRegistry)
+  [[ -n "$registry_from_cfn" ]] && state_set CRANE_REGISTRY "$registry_from_cfn"
 
   # Match legacy aws-bootstrap.sh: always create the kubeconfig entry
   # (with --alias so multi-cluster hosts get a stable context name), and
@@ -72,12 +78,35 @@ helm_install_or_upgrade() {
   fi
   state_set EKS_CLUSTER "$cluster_name"
   state_set KUBECTL_CONTEXT "$kube_ctx"
+  state_save
   export KUBE_CONTEXT="$kube_ctx"
 
   # Define context-bound helm/kubectl arrays so every later call routes
   # through the operator-selected context. Only one definition site.
   HELM=(helm --kube-context "$kube_ctx")
   KUBECTL=(kubectl --context "$kube_ctx")
+}
+
+helm_install_or_upgrade() {
+  local stack_name; stack_name=$(state_get CFN_STACK_NAME)
+  local region;     region=$(state_get AWS_REGION)
+  local ma_ver;     ma_ver=$(state_get MA_VERSION)
+
+  # Kubeconfig may already be set up by manual_path (so build_images can
+  # run before helm). If not (legacy fast-path or test), do it now.
+  if [[ -z "${HELM[*]+x}" || ${#HELM[@]} -le 1 ]]; then
+    helm_kubeconfig_setup
+  fi
+
+  # Re-read CFN outputs here because we still need the SNAPSHOT_ROLE etc.
+  # for the helm --set flags. cfn_outputs is cached in shell-state-free
+  # form; the second call costs one extra describe-stacks.
+  local outputs cluster_name registry_from_cfn
+  outputs=$(cfn_outputs "$stack_name" "$region")
+  cluster_name=$(_cfn_pick "$outputs" MIGRATIONS_EKS_CLUSTER_NAME EKSClusterName)
+  registry_from_cfn=$(_cfn_pick "$outputs" MIGRATIONS_ECR_REGISTRY ECRRegistry)
+
+  local kube_ctx; kube_ctx=$(state_get KUBECTL_CONTEXT "$cluster_name")
 
   # Chart resolution. --ma-chart-dir lets the operator point at a local
   # chart directory (in-repo, customized fork, etc.) and skip the
@@ -133,10 +162,14 @@ helm_install_or_upgrade() {
   #   * MIRROR_IMAGES=Y → point images.* at the mirrored ECR (with the
   #                       per-image tag suffix used by the chart)
   #   * MIRROR_IMAGES=N → point images.* at public.ecr.aws/opensearchproject
+  #
+  # When --build pushed images (BUILD_IMAGE_TAG is set), the per-image tag
+  # suffix is the build's --image-tag, not the MA release version.
   local image_flags=()
+  local mirror_tag; mirror_tag=$(state_get BUILD_IMAGE_TAG "$ma_ver")
   if [[ "$mirror_chosen" == Y && -n "$registry" ]]; then
-    _helm_build_mirrored_image_flags "$registry" "$ma_ver" image_flags
-    log_info "helm: using mirrored images at $registry"
+    _helm_build_mirrored_image_flags "$registry" "$mirror_tag" image_flags
+    log_info "helm: using mirrored images at $registry (tag=$mirror_tag)"
   else
     _helm_build_public_image_flags "$ma_ver" image_flags
     log_info "helm: using public.ecr.aws/opensearchproject images @ $ma_ver"
@@ -163,14 +196,28 @@ helm_install_or_upgrade() {
     extra_values_args+=(--values "$extra_values_file")
   fi
 
-  # NodePool flags. The chart's general-work-pool is on by default; the
-  # only flag with a real effect is --disable-general-purpose-pool, which
-  # we translate to a `workloadsNodePool.enabled=false` --set.
-  # --use-general-node-pool is a no-op (matches legacy semantics).
+  # NodePool flags.
+  #
+  # The chart's `cluster.useCustomKarpenterNodePool` toggles whether to
+  # deploy the custom Karpenter NodePool 'general-work-pool' (defaults
+  # to true under valuesEks.yaml, which we always pass through -f).
+  # `--use-general-node-pool` flips it OFF so workloads schedule on the
+  # EKS Auto Mode general-purpose pool — the legacy semantics, used by
+  # every CI pipeline.
+  #
+  # `--disable-general-purpose-pool` is a different, rarer toggle: it
+  # asks AWS to drop "general-purpose" from the EKS Auto Mode compute
+  # config entirely (post-install via update-cluster-config). Wired
+  # below in _helm_apply_disable_general_purpose_pool.
   local nodepool_args=()
-  if [[ "$(state_get DISABLE_GENERAL_NODE_POOL N)" == "Y" ]]; then
-    nodepool_args+=(--set "workloadsNodePool.enabled=false")
+  if [[ "$(state_get USE_GENERAL_NODE_POOL N)" == "Y" ]]; then
+    nodepool_args+=(--set "cluster.useCustomKarpenterNodePool=false")
   fi
+
+  # TLS flags. Built once here so the legacy --tls-mode + --pca-arn
+  # surface lands as deterministic --set arguments. See _helm_tls_flags.
+  local tls_args=()
+  _helm_tls_flags tls_args || return 1
 
   # Spawn parallel watchers so the operator sees movement while
   # `helm --wait` blocks. Tracked TWO ways for each:
@@ -209,6 +256,7 @@ helm_install_or_upgrade() {
     --set "aws.account=$account" \
     "${snapshot_args[@]+"${snapshot_args[@]}"}" \
     "${nodepool_args[@]+"${nodepool_args[@]}"}" \
+    "${tls_args[@]+"${tls_args[@]}"}" \
     "${image_flags[@]}" \
     --timeout 25m \
     --wait
@@ -249,6 +297,14 @@ helm_install_or_upgrade() {
   state_set HELM_RELEASE "$release"
   state_set last_step "helm_done"
   state_save
+
+  # Post-install: --disable-general-purpose-pool removes "general-purpose"
+  # from EKS Auto Mode compute config. Done AFTER helm install so the
+  # workloads have already been scheduled (otherwise the pre-install
+  # Job would have nowhere to land).
+  if [[ "$(state_get DISABLE_GENERAL_NODE_POOL N)" == "Y" ]]; then
+    _helm_apply_disable_general_purpose_pool "$cluster_name" "$region" || return 1
+  fi
 }
 
 # helm_ensure_namespace <ns>
@@ -1109,4 +1165,84 @@ _helm_build_mirrored_image_flags() {
     __hf+=(--set "images.${name}.tag=${tag_prefix}_${ver}")
   done
   eval "$out_name=(\"\${__hf[@]}\")"
+}
+
+# _helm_tls_flags <out_array_name>
+#
+# Populate <out_array_name> with the helm `--set` arguments derived from
+# state.env's TLS_MODE and PCA_ARN.
+#
+# Modes (matching the legacy aws-bootstrap.sh contract):
+#   none, self-signed  → no extra flags (chart defaults handle these)
+#   pca-existing       → enables aws-privateca-issuer + sets awsPrivateCA.arn
+#                        and awsPrivateCA.region. Requires --pca-arn.
+#   pca-create         → enables aws-privateca-issuer + ack-acmpca-controller,
+#                        sets awsPrivateCA.create=true so the chart provisions
+#                        a PCA at install time.
+#
+# Returns non-zero (and dies via the caller) on validation failure
+# (unknown mode, or pca-existing without --pca-arn).
+_helm_tls_flags() {
+  local out_name="$1"
+  local mode; mode=$(state_get TLS_MODE "")
+  local pca;  pca=$(state_get PCA_ARN "")
+  local region; region=$(state_get AWS_REGION)
+  local __tf=()
+  case "$mode" in
+    "" | none | self-signed)
+      ;;
+    pca-existing)
+      [[ -z "$pca" ]] && die "--tls-mode pca-existing requires --pca-arn"
+      __tf+=(--set "conditionalPackageInstalls.aws-privateca-issuer=true")
+      __tf+=(--set "awsPrivateCA.arn=${pca}")
+      __tf+=(--set "awsPrivateCA.region=${region}")
+      ;;
+    pca-create)
+      __tf+=(--set "conditionalPackageInstalls.aws-privateca-issuer=true")
+      __tf+=(--set "conditionalPackageInstalls.ack-acmpca-controller=true")
+      __tf+=(--set "awsPrivateCA.create=true")
+      __tf+=(--set "awsPrivateCA.region=${region}")
+      ;;
+    *)
+      die "unknown --tls-mode: $mode (expected: none, self-signed, pca-existing, pca-create)"
+      ;;
+  esac
+  eval "$out_name=(\"\${__tf[@]+\"\${__tf[@]}\"}\")"
+  return 0
+}
+
+# _helm_apply_disable_general_purpose_pool <cluster> <region>
+#
+# Post-install hook: ask EKS Auto Mode to drop "general-purpose" from
+# the cluster's compute config. The legacy aws-bootstrap.sh did this at
+# the end of the deploy too — running it earlier breaks the chart's
+# pre-install Job, which has no nodes to schedule on.
+#
+# We need the cluster's existing nodeRoleArn to feed back into
+# update-cluster-config; aws cli requires the whole compute-config blob.
+_helm_apply_disable_general_purpose_pool() {
+  local cluster="$1" region="$2"
+  ui_step "Disabling EKS Auto Mode general-purpose pool (cluster=$cluster)"
+  local node_role_arn
+  node_role_arn=$(aws eks describe-cluster --name "$cluster" --region "$region" \
+    --query 'cluster.computeConfig.nodeRoleArn' --output text 2>/dev/null) \
+    || { ui_err "could not describe-cluster $cluster"; return 1; }
+  if [[ -z "$node_role_arn" || "$node_role_arn" == "None" ]]; then
+    ui_warn "cluster $cluster has no Auto Mode compute config; nothing to disable"
+    return 0
+  fi
+  set +e
+  log_stream "eks-update" aws eks update-cluster-config \
+    --name "$cluster" --region "$region" \
+    --compute-config '{"enabled":true,"nodePools":["system"],"nodeRoleArn":"'"$node_role_arn"'"}' \
+    --kubernetes-network-config '{"elasticLoadBalancing":{"enabled":true}}' \
+    --storage-config '{"blockStorage":{"enabled":true}}'
+  local rc=$?
+  set -e
+  if [[ $rc -ne 0 ]]; then
+    ui_err "aws eks update-cluster-config failed; see $LOG_FILE"
+    return $rc
+  fi
+  ui_ok "general-purpose pool disabled on $cluster"
+  return 0
 }

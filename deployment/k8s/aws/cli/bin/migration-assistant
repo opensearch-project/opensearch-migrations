@@ -52,6 +52,8 @@ source "$LIB_DIR/dashboard.sh"
 source "$LIB_DIR/cfn.sh"
 # shellcheck source=lib/crane.sh
 source "$LIB_DIR/crane.sh"
+# shellcheck source=lib/build.sh
+source "$LIB_DIR/build.sh"
 # shellcheck source=lib/helm.sh
 source "$LIB_DIR/helm.sh"
 # shellcheck source=lib/console.sh

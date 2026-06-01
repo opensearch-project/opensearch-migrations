@@ -107,31 +107,39 @@ cmd_resume() {
       --ma-chart-dir)      state_set MA_CHART_DIR "$2"; shift 2 ;;
       --ma-chart-dir=*)    state_set MA_CHART_DIR "${1#--ma-chart-dir=}"; shift ;;
 
-      # NodePool selection. The chart's general-work-pool is the default;
-      # --use-general-node-pool is a no-op (matches legacy semantics).
-      # --disable-general-purpose-pool flips it off via helm --set.
+      # NodePool selection. The chart's `cluster.useCustomKarpenterNodePool`
+      # decides whether to deploy the custom Karpenter NodePool resource.
+      # --use-general-node-pool flips it off (use EKS Auto Mode general-purpose
+      # pool instead). --disable-general-purpose-pool calls
+      # `aws eks update-cluster-config` post-install to remove the
+      # general-purpose pool from the cluster's compute config (reserved for
+      # the rare prod-isolation case).
       --use-general-node-pool)        state_set USE_GENERAL_NODE_POOL "Y"; shift ;;
       --disable-general-purpose-pool) state_set DISABLE_GENERAL_NODE_POOL "Y"; shift ;;
 
-      # Flags whose backing behavior is not yet implemented. We accept
-      # them so legacy invocations don't crash, but warn loudly so
-      # operators don't think "bad invocation succeeded".
-      --skip-test-images|--ignore-checks)
-        ui_warn "flag '$1' has no effect in migrate-cli (was specific to --build flow)"; shift ;;
-      --base-dir|--base-dir=*)
-        # Repo root pointer for --build. We don't build, so this is a
-        # no-op.
-        case "$1" in --base-dir) shift 2 ;; *) shift ;; esac ;;
-      --build|--image-tag|--image-tag=* \
-        |--tls-mode|--tls-mode=* \
-        |--pca-arn|--pca-arn=* \
-        |--create-vpc-endpoints|--create-vpc-endpoints=*)
-        ui_warn "flag '$1' is not yet implemented in migrate-cli; ignoring"
-        case "$1" in
-          --image-tag|--tls-mode|--pca-arn|--create-vpc-endpoints) shift 2 ;;
-          *) shift ;;
-        esac
-        ;;
+      # Build-from-source path. Wired through lib/build.sh.
+      --build)             state_set BUILD_FROM_SOURCE Y; shift ;;
+      --image-tag)         state_set IMAGE_TAG "$2"; shift 2 ;;
+      --image-tag=*)       state_set IMAGE_TAG "${1#--image-tag=}"; shift ;;
+      --base-dir)          state_set BASE_DIR "$2"; shift 2 ;;
+      --base-dir=*)        state_set BASE_DIR "${1#--base-dir=}"; shift ;;
+      --skip-test-images)  state_set SKIP_TEST_IMAGES Y; shift ;;
+
+      # TLS configuration. Threaded into helm install via _helm_tls_flags.
+      --tls-mode)          state_set TLS_MODE "$2"; shift 2 ;;
+      --tls-mode=*)        state_set TLS_MODE "${1#--tls-mode=}"; shift ;;
+      --pca-arn)           state_set PCA_ARN "$2"; shift 2 ;;
+      --pca-arn=*)         state_set PCA_ARN "${1#--pca-arn=}"; shift ;;
+
+      # Import-VPC endpoint control. Stored as a comma-separated list,
+      # expanded into Create*Endpoint=true CFN parameters in cfn.sh.
+      --create-vpc-endpoints)   state_set CREATE_VPC_ENDPOINTS "$2"; shift 2 ;;
+      --create-vpc-endpoints=*) state_set CREATE_VPC_ENDPOINTS "${1#--create-vpc-endpoints=}"; shift ;;
+
+      # Skip the import-VPC subnet-connectivity preflight check. The
+      # check warns when subnets have no NAT/IGW route AND the required
+      # VPC endpoints (S3 / ECR API / ECR Docker) are missing.
+      --ignore-checks)     state_set IGNORE_CHECKS Y; shift ;;
       --) shift; break ;;
       *)  args+=("$1"); shift ;;
     esac
@@ -269,6 +277,13 @@ manual_path() {
   wizard_collect
 
   cfn_deploy_or_skip
+
+  # Kubeconfig must be set up before --build (which talks to the EKS-hosted
+  # buildkit) and before crane (which logs into ECR for the operator's
+  # context). Idempotent: helm_install_or_upgrade no-ops on the setup if
+  # we've already done it here.
+  helm_kubeconfig_setup
+  build_images_or_skip
   crane_mirror_or_skip
   helm_install_or_upgrade
 
@@ -352,12 +367,45 @@ CFN / EKS flags:
   --skip-setting-k8s-context        Create kubeconfig entry but don't switch active context.
   --kubectl-context CTX             Set the kubeconfig alias name.
   --eks-access-principal-arn ARN    Extra principal granted EKS access.
+  --deploy-create-vpc-cfn           Deploy the Create-VPC EKS template (default).
+  --deploy-import-vpc-cfn           Deploy the Import-VPC EKS template.
+  --vpc-id VPC                      (with --deploy-import-vpc-cfn) target VPC.
+  --subnet-ids ID,ID                (with --deploy-import-vpc-cfn) target subnets.
+  --create-vpc-endpoints LIST       Comma-separated: s3, ecr, ecrDocker,
+                                    cloudwatchLogs, efs, sts, eksAuth. CFN
+                                    creates each as a VPC endpoint on
+                                    --vpc-id. S3 (gateway) endpoint pulls
+                                    route-table IDs from the subnets.
+  --ignore-checks                   Skip the import-VPC pre-flight checks.
+
+Build-from-source flags:
+  --build                           Build MA images from a local repo and
+                                    push to the per-stage ECR. Requires
+                                    docker buildx + a kube context.
+  --image-tag TAG                   Per-build image tag (default: latest).
+  --base-dir DIR                    opensearch-migrations repo root for
+                                    --build (auto-resolved from CLI install).
+  --ma-chart-dir DIR                Use a local helm chart instead of the
+                                    release tarball.
+  --skip-test-images                Skip the test-image build targets in
+                                    gradle (for CI smoke runs).
 
 Helm flags:
   --skip-console-exec               Don't `kubectl exec` after install.
   --namespace NS                    Alias for --stage.
   --helm-values FILE                Extra helm values file.
   --ma-images-source SRC            Pull MA images from a different ECR.
+  --use-general-node-pool           Disable the chart's custom Karpenter
+                                    NodePool; use EKS Auto Mode general-
+                                    purpose pool instead.
+  --disable-general-purpose-pool    Post-install: ask EKS to drop the
+                                    general-purpose pool from compute
+                                    config (rare prod-isolation case).
+
+TLS flags:
+  --tls-mode MODE                   none | self-signed | pca-existing | pca-create.
+  --pca-arn ARN                     ARN of the AWS PCA (required for
+                                    --tls-mode pca-existing).
 
 State layout ($MIGRATE_HOME defaults to ./migration-assistant-workspace
 in the directory you run from — that directory is your migration project;
@@ -374,16 +422,10 @@ Examples:
   # Re-enter the console after a deploy:
   migration-assistant console
 
-  # Jenkins / CI:
+  # Jenkins / CI from a checkout:
   migration-assistant --non-interactive --skip-console-exec \
-    --skip-setting-k8s-context --use-public-images \
-    --stage ma --region us-east-1
-
-Legacy aws-bootstrap.sh flags accepted-but-not-yet-implemented (warn-and-ignore):
-  --build, --image-tag, --base-dir, --ma-chart-dir,
-  --tls-mode, --pca-arn, --skip-test-images, --ignore-checks,
-  --use-general-node-pool, --disable-general-purpose-pool,
-  --deploy-import-vpc-cfn, --vpc-id, --subnet-ids, --create-vpc-endpoints
+    --skip-setting-k8s-context --build --skip-test-images \
+    --use-general-node-pool --stage ma --region us-east-1
 EOF
   printf '\nVersion: %s\n' "$CLI_VERSION"
 }

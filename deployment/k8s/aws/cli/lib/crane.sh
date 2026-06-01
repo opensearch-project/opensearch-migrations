@@ -35,6 +35,15 @@ crane_mirror_or_skip() {
     return 0
   fi
 
+  # When --build ran successfully it already pushed the MA images to the
+  # private ECR (with per-build tags). The ack/cert-manager/argo etc.
+  # third-party images still need mirroring, but we route those through a
+  # separate path that doesn't re-pull MA images.
+  if [[ -n "$(state_get BUILD_IMAGE_TAG "")" ]]; then
+    ui_info "--build pushed MA images already; mirroring third-party images only"
+    state_set MA_IMAGES_PREMIRRORED Y
+  fi
+
   local ma_ver; ma_ver=$(state_get MA_VERSION)
   local region; region=$(state_get AWS_REGION)
   local account; account=$(state_get AWS_ACCOUNT)
@@ -109,7 +118,11 @@ crane_mirror_or_skip() {
   # with name-disambiguating tags like `migrations_migration_console_3.2.1`.
   # _helm_build_mirrored_image_flags assumes that exact layout, so we
   # match it here.
-  if ! _crane_mirror_ma_images "$registry" "$ma_ver" "$region"; then
+  #
+  # Skip when --build already pushed them with a per-build tag.
+  if [[ "$(state_get MA_IMAGES_PREMIRRORED N)" == "Y" ]]; then
+    ui_dim "  skipping MA-image mirror — --build already pushed them"
+  elif ! _crane_mirror_ma_images "$registry" "$ma_ver" "$region"; then
     return 1
   fi
 
