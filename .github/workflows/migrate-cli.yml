@@ -74,10 +74,20 @@ jobs:
           curl -fsSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.13.0.tar.gz \
             | tar -xz -C /tmp
           sudo /tmp/bats-core-1.13.0/install.sh /usr/local
+      - name: Install uv (provides uvx for AWS MCP registration tests)
+        run: |
+          # The agent_setup tests call _agent_install_aws_mcp, which
+          # requires uvx on PATH. Install uv via astral's official one-
+          # liner so those tests don't fall through to the interactive
+          # "install uv now?" prompt and silently disappear from the
+          # bats output (the failure mode that hid tests 5/6/7).
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Versions
         run: |
           bats --version
           jq --version
+          uvx --version
           bash --version | head -1
       - name: Verify CLI binary is executable
         run: |
@@ -89,7 +99,18 @@ jobs:
           # --print-output-on-failure: dumps each failed test's stdout/stderr
           # --show-output-of-passing-tests: surfaces the _diag dumps we emit
           #   from test_resume_flow.bats on assertion failures
-          bats --print-output-on-failure --show-output-of-passing-tests test/
+          # tee + post-check: bats exits 0 on a "Executed N instead of M
+          # tests" warning, but any gap means a test silently died (e.g.
+          # via die/exit before reporting TAP). Treat that as a hard
+          # failure so it never escapes CI undetected again.
+          set -o pipefail
+          bats --print-output-on-failure --show-output-of-passing-tests test/ \
+            | tee /tmp/bats.tap
+          if grep -q '^# bats warning: Executed' /tmp/bats.tap; then
+            echo "::error::bats reported a test-count gap — at least one test died before emitting TAP output." >&2
+            grep '^# bats warning' /tmp/bats.tap >&2
+            exit 1
+          fi
 
   smoke:
     runs-on: ubuntu-22.04
