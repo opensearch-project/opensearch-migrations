@@ -880,6 +880,13 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
             "'ALWAYS': always use server-generated IDs (discards source IDs). " +
             "'NEVER': always preserve source document IDs (may fail on serverless TIMESERIES/VECTOR collections)."),
+    emitDocType: z.enum(["AUTO", "ON", "OFF"]).default("AUTO").optional()
+        .describe("Controls whether the ES _type field is propagated into bulk action-line metadata. " +
+            "'AUTO' (default): emit _type only when the source is ES 6 or older AND a document transformer " +
+            "is configured (e.g. TypeMappingSanitizationTransformerProvider for multi-type indices). " +
+            "'ON': always emit _type. 'OFF': never emit _type.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
     allowedDocExceptionTypes: z.array(z.string()).default([]).optional()
         .describe("List of document-level exception types to treat as successful operations during bulk migration. " +
             "Documents that fail with these errors are not retried and not counted as failures — they are silently accepted. " +
@@ -904,6 +911,19 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .describe("When enabled, treat the _recovery_source stored field (present in ES 7+ / OpenSearch snapshots " +
             "with soft-deletes) as _source. This field is transient and may not be present for all documents, " +
             "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
+    positionGapStopword: z.string().default("a").optional()
+        .describe("Token used to fill skipped Lucene positions when reconstructing analyzed-text fields from postings. " +
+            "ES preserves position increments for stop-word-filtered tokens (e.g. 'i like the tree' with stopword 'the' indexes " +
+            "at positions 0,1,3 — position 2 is consumed by 'the' but the term itself is dropped). Without filler the " +
+            "reconstructor joins on spaces and OS re-tokenizes the document at consecutive positions [0,1,2], silently " +
+            "changing slop / proximity / phrase semantics on migrated documents. The reconstructor splices this token " +
+            "into the gap so OS — assumed to have the same token configured as a stopword — re-creates the original " +
+            "[0,1,3] postings while indexing. The token MUST be on the target's stopword list or it leaks into search " +
+            "results; 'a' is a safe default for the english / standard analyzers. " +
+            "Pass an empty string to opt out and fall back to the legacy multi-space behaviour. " +
+            "Default: 'a'.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
 }).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");

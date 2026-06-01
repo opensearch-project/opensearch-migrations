@@ -16,6 +16,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -26,8 +27,7 @@ import static org.mockito.Mockito.when;
  * Comprehensive unit tests for {@link SourceReconstructor} covering every supported
  * field type across every reconstruction pathway the class supports.
  *
- * The reconstructor has four pathways, each corresponding to different Lucene /
- * Elasticsearch eras:
+ * The reconstructor has four pathways, each corresponding to different Lucene eras:
  *
  *   1. Stored fields (all versions) — {@link #reconstructFromStoredFields}
  *      Number / byte[] / String leaf values harvested from {@code _source}-less
@@ -489,7 +489,7 @@ class SourceReconstructorTest {
                 org.mockito.ArgumentMatchers.eq(name),
                 org.mockito.ArgumentMatchers.eq(esType),
                 org.mockito.ArgumentMatchers.any()))
-            .thenReturn(Optional.of(List.of(packed)));
+            .thenReturn(Optional.of(new RecoveredValue.PointBytes(List.of(packed))));
         return reader;
     }
 
@@ -571,7 +571,7 @@ class SourceReconstructorTest {
                 org.mockito.ArgumentMatchers.eq(name),
                 org.mockito.ArgumentMatchers.eq(esType),
                 org.mockito.ArgumentMatchers.any()))
-            .thenReturn(Optional.of(decoded));
+            .thenReturn(Optional.of(new RecoveredValue.NumericTerm(decoded)));
         return reader;
     }
 
@@ -658,7 +658,7 @@ class SourceReconstructorTest {
                 org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
                 org.mockito.ArgumentMatchers.any()))
             // SourceReconstructor receives the already-joined String from LuceneLeafReader.
-            .thenReturn(Optional.of("quick brown fox"));
+            .thenReturn(Optional.of(new RecoveredValue.TextTerm("quick brown fox")));
         var ctx = contextOf("body", mapping(EsFieldType.STRING, "text"));
         String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals("quick brown fox", parseField(json, "body").asText());
@@ -672,7 +672,7 @@ class SourceReconstructorTest {
                 org.mockito.ArgumentMatchers.eq("enabled"),
                 org.mockito.ArgumentMatchers.eq(EsFieldType.BOOLEAN),
                 org.mockito.ArgumentMatchers.any()))
-            .thenReturn(Optional.of("T"));
+            .thenReturn(Optional.of(new RecoveredValue.TextTerm("T")));
         var ctx = contextOf("enabled", mapping(EsFieldType.BOOLEAN, "boolean"));
         String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(true, parseField(json, "enabled").asBoolean());
@@ -712,7 +712,7 @@ class SourceReconstructorTest {
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any()))
-            .thenReturn(Optional.of(List.of(packLong(999L))));
+            .thenReturn(Optional.of(new RecoveredValue.PointBytes(List.of(packLong(999L)))));
         var ctx = contextOf("count", mapping(EsFieldType.NUMERIC, "long"));
         String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
         assertEquals(77L, parseField(json, "count").asLong());
@@ -914,7 +914,7 @@ class SourceReconstructorTest {
     }
 
     // ==========================================================================================
-    // 9. shouldSkipField — internal Elasticsearch fields (_id, _source, _type, etc) never appear.
+    // 9. shouldSkipField — internal fields (_id, _source, _type, etc) never appear.
     // ==========================================================================================
 
     @Test
@@ -1250,6 +1250,292 @@ class SourceReconstructorTest {
     }
 
     // ==========================================================================================
+    // 7. COPY_TO HANDLING
+    //
+    // ES's `copy_to: ["target1", "target2"]` mapping directive makes target1/target2 indexed
+    // copies of the source field's value. Targets are index-time only — they NEVER appear in
+    // the document's `_source`. Before this fix, the sourceless reconstructor treated every
+    // mapping leaf as a recoverable source field and emitted `users.to`, `users.all` etc. in
+    // the reconstructed _source even though they were never in the original doc.
+    //
+    // Two behaviors locked in here:
+    //   (a) copy_to TARGETS are filtered from output regardless of recovery path.
+    //   (b) when a source field has no retrievable value from its own stored/docvalues/points
+    //       chain, the reconstructor reverse-derives from its copy_to targets, preferring
+    //       less-lossy targets (keyword before text).
+    // ==========================================================================================
+
+    /** Build a FieldMappingContext by parsing a JSON mapping snippet (exercises the real copy_to parse path). */
+    private static FieldMappingContext contextFromJson(String propertiesJson) {
+        try {
+            JsonNode root = MAPPER.readTree("{\"properties\":" + propertiesJson + "}");
+            return new FieldMappingContext(root);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Build a FieldMappingContext with an explicit _source filter alongside the properties. */
+    private static FieldMappingContext contextFromJsonWithSourceFilter(
+            String propertiesJson, String sourceFilterJson) {
+        try {
+            JsonNode root = MAPPER.readTree(
+                "{\"_source\":" + sourceFilterJson + ",\"properties\":" + propertiesJson + "}");
+            return new FieldMappingContext(root);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void isSourceExcluded_supportsBareStarPrefixSuffixGlobs() {
+        // Jugal review: matchesGlob handled `*`, `.*`, `.**` but plain bare-`*` patterns
+        // (e.g. `prefix*`, `*suffix`, `prefix*suffix`) fell through to literal match. ES
+        // _source filtering supports those, so they must match here too.
+        var ctx = contextFromJsonWithSourceFilter(
+            "{\"a\":{\"type\":\"keyword\"}}",
+            "{\"excludes\":[\"secret*\",\"*_internal\",\"tmp*data\"]}"
+        );
+        // prefix* — `secret*`
+        assertTrue(ctx.isSourceExcluded("secret"), "prefix glob must match exact stem");
+        assertTrue(ctx.isSourceExcluded("secret_token"), "prefix glob must match suffix-extended path");
+        assertFalse(ctx.isSourceExcluded("public_secret"), "prefix glob must not match in-middle stem");
+        // *suffix — `*_internal`
+        assertTrue(ctx.isSourceExcluded("config_internal"), "suffix glob must match prefix-extended path");
+        assertTrue(ctx.isSourceExcluded("_internal"), "suffix glob must match exact suffix");
+        assertFalse(ctx.isSourceExcluded("internal_config"), "suffix glob must not match prefix-positioned stem");
+        // prefix*suffix — `tmp*data`
+        assertTrue(ctx.isSourceExcluded("tmpdata"), "prefix*suffix with empty middle must match");
+        assertTrue(ctx.isSourceExcluded("tmp_user_data"), "prefix*suffix must span middle content");
+        assertFalse(ctx.isSourceExcluded("tmp_user"), "prefix*suffix requires the suffix");
+        assertFalse(ctx.isSourceExcluded("user_data"), "prefix*suffix requires the prefix");
+    }
+
+    @Test
+    void getCopyToSourceFields_returnsOnlyFieldsWithCopyToEdges() {
+        // Jugal review: pass-5 reverse-derivation should iterate only fields that declare
+        // copy_to, not the whole mapping. Verify the new accessor returns exactly that set.
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":\"search_targets.from\"},"
+            + "\"sender\":{\"type\":\"text\",\"copy_to\":[\"search_targets.sender\",\"search_targets.all\"]},"
+            + "\"titleect\":{\"type\":\"keyword\"}," // NO copy_to
+            + "\"body\":{\"type\":\"text\"}," // NO copy_to
+            + "\"users\":{\"properties\":{"
+            + "\"from\":{\"type\":\"keyword\"},"
+            + "\"sender\":{\"type\":\"keyword\"},"
+            + "\"all\":{\"type\":\"text\"}"
+            + "}}}"
+        );
+        var sources = ctx.getCopyToSourceFields();
+        assertEquals(java.util.Set.of("from", "sender"), java.util.Set.copyOf(sources),
+            "only fields with copy_to edges should appear: " + sources);
+        // Sanity: total mapping has more fields than copy_to sources.
+        assertTrue(ctx.getFieldNames().size() > sources.size(),
+            "copy_to source set should be a strict subset of all mapped fields");
+    }
+
+    @Test
+    void fieldMappingContext_parsesCopyToString() {
+        // copy_to value can be a single string per ES docs.
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":\"users_all\"},"
+            + "\"users_all\":{\"type\":\"keyword\"}}"
+        );
+        assertTrue(ctx.isCopyToTarget("users_all"), "single-string copy_to target must register");
+        List<String> targets = ctx.getCopyToTargets("from");
+        assertEquals(List.of("users_all"), targets);
+        assertEquals(List.of("from"), ctx.getCopyToSources("users_all"));
+    }
+
+    @Test
+    void fieldMappingContext_parsesCopyToArray() {
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":[\"search_targets.from\",\"search_targets.all\"]},"
+            + "\"users\":{\"properties\":{"
+            + "\"from\":{\"type\":\"keyword\"},"
+            + "\"all\":{\"type\":\"text\"}"
+            + "}}}"
+        );
+        assertTrue(ctx.isCopyToTarget("search_targets.from"));
+        assertTrue(ctx.isCopyToTarget("search_targets.all"));
+        // Ranking: keyword target should come BEFORE text target (lossiness).
+        List<String> ranked = ctx.getCopyToTargets("from");
+        assertEquals(List.of("search_targets.from", "search_targets.all"), ranked,
+            "keyword target must rank before text target: " + ranked);
+    }
+
+    @Test
+    void fieldMappingContext_copyToRankingPrefersKeywordOverText() {
+        // Mapping declares targets in text-first order; ranking must still place keyword first.
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":[\"search_targets.all\",\"search_targets.from\"]},"
+            + "\"search_targets\":{\"properties\":{"
+            + "\"all\":{\"type\":\"text\"},"
+            + "\"from\":{\"type\":\"keyword\"}"
+            + "}}}"
+        );
+        List<String> ranked = ctx.getCopyToTargets("from");
+        assertEquals(List.of("search_targets.from", "search_targets.all"), ranked,
+            "keyword target must outrank text target regardless of declaration order: " + ranked);
+    }
+
+    @Test
+    void shouldSkipField_copyToTargets_strippedFromOutput() {
+        // Source field `from` has copy_to ["search_targets.all"]. Both are present in the segment as
+        // stored fields. The reconstruction must emit `from` but NOT `users.all`.
+        var reader = storedOnlyReader();
+        var doc = document(
+            storedString("from", "joe@example.com"),
+            storedString("search_targets.all", "joe@example.com")
+        );
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":\"search_targets.all\"},"
+            + "\"users\":{\"properties\":{\"all\":{\"type\":\"text\"}}}}"
+        );
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        JsonNode tree = parseField(json, "from") == null ? null : MAPPER.valueToTree(json);
+        assertEquals("joe@example.com", parseField(json, "from").asText());
+        try {
+            JsonNode full = MAPPER.readTree(json);
+            assertTrue(full.path("search_targets").isMissingNode() || !full.path("search_targets").has("all"),
+                "copy_to target `users.all` must NOT appear in reconstructed _source: " + json);
+        } catch (IOException e) { throw new RuntimeException(e); }
+    }
+
+    @Test
+    void reverseDerive_sourceRecoveredFromCopyToTarget_whenSourceHasNoData() {
+        // Source field `from` has neither stored nor doc_values (indexed-only with no recovery).
+        // Target `users.from` (keyword) has stored field with the verbatim value.
+        // Reconstruction must pull the value from the target and emit it under the source's path.
+        var reader = storedOnlyReader();
+        var doc = document(
+            storedString("search_targets.from", "joe@example.com")
+            // NOTE: no stored field for `from`.
+        );
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":\"search_targets.from\"},"
+            + "\"users\":{\"properties\":{\"from\":{\"type\":\"keyword\"}}}}"
+        );
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertNotNull(json, "reconstruction produced null output");
+        assertEquals("joe@example.com", parseField(json, "from").asText(),
+            "source `from` must be reverse-derived from copy_to target `users.from`: " + json);
+        try {
+            JsonNode full = MAPPER.readTree(json);
+            assertTrue(full.path("search_targets").isMissingNode() || !full.path("search_targets").has("from"),
+                "copy_to target `users.from` must still be stripped from output: " + json);
+        } catch (IOException e) { throw new RuntimeException(e); }
+    }
+
+    @Test
+    void reverseDerive_prefersLessLossyTarget_keywordBeforeText() {
+        // Two targets: keyword (exact) and text (tokenized).
+        // Both carry data for this doc. Reconstruction must pick the keyword target.
+        var reader = storedOnlyReader();
+        var doc = document(
+            storedString("search_targets.from", "joe@example.com"),
+            storedString("search_targets.all", "joe@example.com mary@example.com")
+        );
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":[\"search_targets.all\",\"search_targets.from\"]},"
+            + "\"search_targets\":{\"properties\":{"
+            + "\"from\":{\"type\":\"keyword\"},"
+            + "\"all\":{\"type\":\"text\"}"
+            + "}}}"
+        );
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertEquals("joe@example.com", parseField(json, "from").asText(),
+            "less-lossy keyword target must win over text target: " + json);
+    }
+
+    @Test
+    void reverseDerive_fallsBackToTextTarget_whenKeywordHasNothing() {
+        // Only `users.all` (text) has data. Reverse-derive must still fire and emit the
+        // tokenized best-effort value rather than dropping the source field silently.
+        // (Per Andre: "Probe anything including text, accept tokenized-garbage".)
+        var reader = storedOnlyReader();
+        var doc = document(
+            storedString("search_targets.all", "joe@example.com mary@example.com")
+        );
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":[\"search_targets.from\",\"search_targets.all\"]},"
+            + "\"users\":{\"properties\":{"
+            + "\"from\":{\"type\":\"keyword\"},"
+            + "\"all\":{\"type\":\"text\"}"
+            + "}}}"
+        );
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertNotNull(parseField(json, "from"),
+            "text target must be used as last-resort fallback: " + json);
+        assertEquals("joe@example.com mary@example.com", parseField(json, "from").asText(),
+            "text-target recovery preserves full analyzed token stream: " + json);
+    }
+
+    @Test
+    void reverseDerive_skippedWhenSourceAlreadyRecovered() {
+        // Source has its own stored value. Even if targets also have data, the source's own
+        // value wins (copy_to probe is LAST in the fallback chain).
+        var reader = storedOnlyReader();
+        var doc = document(
+            storedString("from", "original@source.com"),
+            storedString("search_targets.from", "wrong@target.com")
+        );
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":\"search_targets.from\"},"
+            + "\"users\":{\"properties\":{\"from\":{\"type\":\"keyword\"}}}}"
+        );
+        String json = SourceReconstructor.reconstructSource(reader, 0, doc, ctx);
+        assertEquals("original@source.com", parseField(json, "from").asText(),
+            "source's own stored value must win over copy_to target: " + json);
+    }
+
+    @Test
+    void reverseDerive_recoversSourceFromSortedSetDocValuesTarget_noClassCast() throws IOException {
+        // Regression for ClassCastException at SourceReconstructor.decodePointValue:
+        //   "class java.lang.String cannot be cast to class [B"
+        //
+        // Reproduces the original failure shape: the copy_to source `from` has no stored field;
+        // its target `users.from` is recovered via SORTED_SET doc_values (multi-valued keyword),
+        // which returns a List<String>. The previous code treated any List<?> in convertFallbackValue
+        // as a List<byte[]> from the points fallback and crashed when decoding point bytes.
+        //
+        // Expected: the keyword target's first doc_values entry is written verbatim into `from`,
+        // and no exception is thrown.
+        var reader = mock(LuceneLeafReader.class);
+        var info = new DocValueFieldInfo.Simple(
+                "search_targets.from", DocValueFieldInfo.DocValueType.SORTED_SET, false);
+        when(reader.getDocValueFields()).thenReturn(List.of(info));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.eq(info)))
+            .thenReturn(List.of("joe@example.com", "mary@example.com"));
+        when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+
+        var ctx = contextFromJson(
+            "{\"from\":{\"type\":\"keyword\",\"copy_to\":\"search_targets.from\"},"
+            + "\"users\":{\"properties\":{\"from\":{\"type\":\"keyword\"}}}}"
+        );
+
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+
+        assertNotNull(json, "reconstruction must not silently drop the doc with a CCE");
+        JsonNode from = parseField(json, "from");
+        assertNotNull(from, "source `from` must be reverse-derived from SORTED_SET target: " + json);
+        // SORTED_SET returns a List of values; when copy_to-recovered into the source, we keep
+        // the verbatim shape from the target's mapping pass — a list of strings here.
+        assertTrue(from.isArray() || from.isTextual(),
+            "expected array or string for keyword from SORTED_SET target, got: " + from);
+        if (from.isArray()) {
+            assertEquals("joe@example.com", from.get(0).asText());
+        } else {
+            assertEquals("joe@example.com", from.asText());
+        }
+    }
+
+    // ==========================================================================================
     // 11. OBJECT-ARRAY SUBFIELD DISTRIBUTION (mergeWithDocValues into seeded List<Map>)
     // ==========================================================================================
     // Real-world case: an index mapping has `files` as `type: object` with subfields
@@ -1292,7 +1578,7 @@ class SourceReconstructorTest {
 
     @Test
     void mergeWithDocValues_distributesSubfield_intoSeededObjectArray() throws IOException {
-        // Reproduces the enron2_archive.av5 case: seed _source carries `files` as List<Map> with
+        // Reproduces the case where seed _source carries `files` as List<Map> with
         // the non-excluded subfield `cksum`, and `files.size` arrives via multi-valued doc_values.
         // Expected: `size` distributes positionally into each array element.
         var reader = multiDocValueReader(java.util.Map.of(
@@ -1346,9 +1632,9 @@ class SourceReconstructorTest {
     }
 
     @Test
-    void mergeWithDocValues_sizeMismatch_dropsValueAndPreservesSeed() throws IOException {
-        // Positional distribution requires equal lengths. A size mismatch cannot safely distribute
-        // (no ordinal→element binding), so the branch warns and drops — seed stays intact.
+    void mergeWithDocValues_moreValuesThanElements_dropsValueAndPreservesSeed() throws IOException {
+        // When doc_values produces MORE values than the array has elements, positional binding is
+        // ambiguous (can't safely pick which values to assign), so the branch warns and drops.
         var reader = multiDocValueReader(java.util.Map.of(
             "files.size", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.SORTED_NUMERIC, false,
                 java.util.List.of(100L, 500L, 2000L))  // 3 values
@@ -1366,6 +1652,118 @@ class SourceReconstructorTest {
             "size must NOT be partially distributed on length mismatch: " + merged);
         assertEquals("h1", files.get(0).path("cksum").asText());
         assertEquals("h2", files.get(1).path("cksum").asText());
+    }
+
+    @Test
+    void mergeWithDocValues_fewerDocValues_distributesIntoPrefixBestEffort() throws IOException {
+        // SORTED_SET doc_values deduplicates and loses insertion order. When fewer values
+        // arrive than array elements, we do best-effort prefix distribution: values go into
+        // elements [0..N-1], trailing elements get nothing. Order is lexicographic (not
+        // original), but at least values are present and searchable.
+        var reader = multiDocValueReader(java.util.Map.of(
+            "files.conttype", new DocValueFieldSpec(DocValueFieldInfo.DocValueType.SORTED_SET, false,
+                java.util.List.of("application/pdf", "text/plain"))  // 2 values for 3 elements
+        ));
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.conttype", mapping(EsFieldType.STRING, "keyword"),
+            "files.name", mapping(EsFieldType.STRING, "keyword")
+        ));
+        String seed = "{\"files\":[{\"name\":\"a.txt\"},{\"name\":\"b.pdf\"},{\"name\":\"c.bin\"}]}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+
+        JsonNode files = MAPPER.readTree(merged).path("files");
+        assertEquals(3, files.size(), "seed array length preserved: " + merged);
+        assertEquals("application/pdf", files.get(0).path("conttype").asText(),
+            "element 0 gets first value (lexicographic): " + merged);
+        assertEquals("text/plain", files.get(1).path("conttype").asText(),
+            "element 1 gets second value: " + merged);
+        assertTrue(files.get(2).path("conttype").isMissingNode(),
+            "element 2 has no conttype (no more values to distribute): " + merged);
+    }
+
+    @Test
+    void mergeWithDocValues_textTermListShorterThanSeed_distributesIntoPrefix() throws IOException {
+        // TextTermList from position-gap splitting preserves insertion order. When some
+        // array elements had empty strings (no indexed tokens), the recovered list is shorter
+        // than the seed. Distributing into the prefix elements is safe.
+        var reader = mock(LuceneLeafReader.class);
+        when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
+        // files.ext: text field, 3-element array but element[2] was empty → 2 buckets
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq("files.ext"),
+                org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of(new RecoveredValue.TextTermList(
+                List.of("text/plain", "application/pdf"))));
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.argThat(s -> !"files.ext".equals(s)),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.ext", mapping(EsFieldType.STRING, "text"),
+            "files.name", mapping(EsFieldType.STRING, "keyword")
+        ));
+
+        // 3-element seed; files.ext has only 2 values (PerElementList) → prefix distribution
+        String seed = "{\"files\":[{\"name\":\"a.txt\"},{\"name\":\"b.pdf\"},{\"name\":\"c.bin\"}]}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        JsonNode files = MAPPER.readTree(merged).path("files");
+        assertTrue(files.isArray(), "files must be an array: " + merged);
+        assertEquals(3, files.size(), "array has 3 elements: " + merged);
+        assertEquals("text/plain", files.get(0).path("ext").asText(), "element 0: " + merged);
+        assertEquals("application/pdf", files.get(1).path("ext").asText(), "element 1: " + merged);
+        // Element[2] originally had a duplicate ext value (e.g. "text/plain") but Lucene's
+        // position-gap splitter only produced 2 buckets (the third element's empty/duplicate
+        // token didn't create a gap). The PerElementList is shorter than the seed, so
+        // prefix-distribution fills [0] and [1] and leaves [2] without the subfield.
+        assertTrue(files.get(2).path("ext").isMissingNode(),
+            "element 2 has no ext (shorter PerElementList, not recoverable): " + merged);
+        assertEquals("a.txt", files.get(0).path("name").asText());
+        assertEquals("b.pdf", files.get(1).path("name").asText());
+        assertEquals("c.bin", files.get(2).path("name").asText());
+    }
+
+    @Test
+    void mergeWithDocValues_overSplitPerElementList_coalescesTailingBucketsIntoLastElement() throws IOException {
+        // Simulates a small position_increment_gap (e.g. 5) that over-splits: the splitter
+        // produced 4 buckets but the seed only has 3 elements. The first 2 buckets map to
+        // elements [0] and [1]; the remaining 2 buckets are coalesced into element [2] with
+        // a single space between them.
+        var reader = mock(LuceneLeafReader.class);
+        when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
+        // files.content: text field, 4 position-gap buckets for a 3-element array
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq("files.content"),
+                org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of(new RecoveredValue.TextTermList(
+                List.of("hello world", "foo bar", "baz qux", "trailing stuff"))));
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.argThat(s -> !"files.content".equals(s)),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.content", mapping(EsFieldType.STRING, "text"),
+            "files.name", mapping(EsFieldType.STRING, "keyword")
+        ));
+
+        // 3-element seed; files.content has 4 buckets (over-split) → last 2 merge into element[2]
+        String seed = "{\"files\":[{\"name\":\"a.txt\"},{\"name\":\"b.pdf\"},{\"name\":\"c.bin\"}]}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        JsonNode files = MAPPER.readTree(merged).path("files");
+        assertEquals(3, files.size(), "array size preserved: " + merged);
+        assertEquals("hello world", files.get(0).path("content").asText(), "element 0: " + merged);
+        assertEquals("foo bar", files.get(1).path("content").asText(), "element 1: " + merged);
+        assertEquals("baz qux trailing stuff", files.get(2).path("content").asText(),
+            "element 2 gets coalesced tail (last 2 buckets joined with space): " + merged);
     }
 
     @Test
@@ -1518,6 +1916,72 @@ class SourceReconstructorTest {
     }
 
     @Test
+    void reconstructSource_objectArrayFromTextTermList_duplicateValues() throws IOException {
+        // Reproduces: files: [{name:"a.pdf", ext:"pdf"}, {name:"b.gif", ext:"gif"},
+        //                     {name:"c.pdf", ext:"pdf"}, {name:"d.gif", ext:"gif"}]
+        //
+        // For TEXT fields with positions, position-gap splitting preserves insertion order.
+        // For KEYWORD fields without positions, the multi-term recovery uses freq-aware
+        // term walking which recovers the full multiset (all 4 values including duplicates)
+        // but in dictionary order, not insertion order.
+        //
+        // This test validates that a TEXT field with position-gap splitting correctly
+        // reconstructs per-element values in the original order (the ideal path).
+        var reader = mock(LuceneLeafReader.class);
+        when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
+
+        // files.ext: TEXT field, recovered via position-gap splitting → 4 per-element values
+        // in original insertion order (positions preserve this).
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq("files.ext"),
+                org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of(new RecoveredValue.TextTermList(
+                List.of("pdf", "gif", "pdf", "gif"))));
+
+        // files.name: TEXT field, recovered via position-gap splitting → 4 unique per-element values
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq("files.name"),
+                org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of(new RecoveredValue.TextTermList(
+                List.of("a.pdf", "b.gif", "c.pdf", "d.gif"))));
+
+        // No other fields produce values
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.argThat(s -> !"files.ext".equals(s) && !"files.name".equals(s)),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+
+        var ctx = contextOfMany(java.util.Map.of(
+            "files.ext", mapping(EsFieldType.STRING, "text"),
+            "files.name", mapping(EsFieldType.STRING, "text")
+        ));
+
+        String json = SourceReconstructor.reconstructSource(reader, 0, document(), ctx);
+        assertNotNull(json, "reconstruction must not be null");
+        JsonNode tree = MAPPER.readTree(json);
+        JsonNode files = tree.path("files");
+        assertTrue(files.isArray(), "files must be an object array: " + json);
+        assertEquals(4, files.size(), "all 4 elements reconstructed: " + json);
+
+        // Position-gap splitting preserves insertion order for text fields
+        assertEquals("a.pdf", files.get(0).path("name").asText(), "element 0 name: " + json);
+        assertEquals("pdf", files.get(0).path("ext").asText(), "element 0 ext: " + json);
+        assertEquals("b.gif", files.get(1).path("name").asText(), "element 1 name: " + json);
+        assertEquals("gif", files.get(1).path("ext").asText(), "element 1 ext: " + json);
+        assertEquals("c.pdf", files.get(2).path("name").asText(), "element 2 name: " + json);
+        assertEquals("pdf", files.get(2).path("ext").asText(), "element 2 ext: " + json);
+        assertEquals("d.gif", files.get(3).path("name").asText(), "element 3 name: " + json);
+        assertEquals("gif", files.get(3).path("ext").asText(), "element 3 ext: " + json);
+    }
+
+
+    @Test
     void mergeWithDocValues_storedFieldSubfield_distributesAcrossObjectArray() throws IOException {
         // Stored-fields path into a List<Map> seed: when a subfield appears as a stored field
         // (not doc_values), it is emitted as a single scalar (LuceneDocument exposes per-doc
@@ -1538,5 +2002,151 @@ class SourceReconstructorTest {
         assertEquals(1L, files.get(1).path("tstatus").asLong(), "element 1 broadcast: " + merged);
         assertEquals("h1", files.get(0).path("cksum").asText());
         assertEquals("h2", files.get(1).path("cksum").asText());
+    }
+
+    // ==========================================================================================
+    // 12. ENRON MAPPING REGRESSION: copy_to leakage & source-excluded text field reconstruction
+    // ==========================================================================================
+
+    /**
+     * Builds a FieldMappingContext matching the key structure from the test mapping:
+     * - internal.from.user (index:false, doc_values:false, copy_to: users.from.user)
+     * - internal.to.user   (index:false, doc_values:false, copy_to: users.to.user)
+     * - users.from.user  (keyword, indexed, doc_values:true) — the copy_to TARGET
+     * - users.to.user    (keyword, indexed, doc_values:true) — the copy_to TARGET
+     * - body.main.content   (text, analyzed) — excluded from _source
+     * - body.main.raw  (text, index:false, copy_to: body.main.content) — excluded from _source
+     * - title (text, analyzed) — excluded from _source
+     */
+    private static FieldMappingContext copyToWithSourceExcludesContext() {
+        return contextFromJsonWithSourceFilter(
+            "{"
+            // internal source fields — index:false, doc_values:false, copy_to targets
+            + "\"internal\":{\"properties\":{"
+            + "  \"from\":{\"properties\":{\"user\":{\"type\":\"keyword\",\"index\":false,\"doc_values\":false,\"copy_to\":\"search_targets.from.user\"}}},"
+            + "  \"to\":{\"properties\":{\"user\":{\"type\":\"keyword\",\"index\":false,\"doc_values\":false,\"copy_to\":\"search_targets.to.user\"}}}"
+            + "}},"
+            // external source fields — same pattern
+            + "\"external\":{\"properties\":{"
+            + "  \"from\":{\"properties\":{\"user\":{\"type\":\"keyword\",\"index\":false,\"doc_values\":false,\"copy_to\":\"search_targets.from.user\"}}}"
+            + "}},"
+            // users — the copy_to TARGETS (indexed, doc_values)
+            + "\"users\":{\"properties\":{"
+            + "  \"from\":{\"properties\":{\"user\":{\"type\":\"keyword\"}}},"
+            + "  \"to\":{\"properties\":{\"user\":{\"type\":\"keyword\"}}}"
+            + "}},"
+            // body — excluded from source; content is indexed text, raw copies to content
+            + "\"body\":{\"properties\":{"
+            + "  \"main\":{\"properties\":{"
+            + "    \"content\":{\"type\":\"text\",\"norms\":false},"
+            + "    \"raw\":{\"type\":\"text\",\"index\":false,\"copy_to\":\"body.main.content\"}"
+            + "  }}"
+            + "}},"
+            // title — excluded text field
+            + "\"title\":{\"type\":\"text\",\"norms\":false}"
+            + "}",
+            // _source.excludes
+            "{\"excludes\":[\"title\",\"body\"]}"
+        );
+    }
+
+    @Test
+    void copyToTargets_neverLeakIntoSource() throws IOException {
+        // Bug: the reconstructor emits `internal.to`, `internal.cc`, `external.from` etc. in the
+        // output — these are index:false/doc_values:false fields whose values exist ONLY in
+        // _source. The copy_to targets (users.to.user etc.) have doc_values data, but reverse-
+        // derivation should NOT write into internal/external when those source fields are already
+        // present in the partial _source seed (they're NOT in _source.excludes).
+        var reader = mock(LuceneLeafReader.class);
+        // users.from.user has doc_values (it's the copy_to target)
+        var usersFromInfo = new DocValueFieldInfo.Simple(
+                "search_targets.from.user", DocValueFieldInfo.DocValueType.SORTED_SET, false);
+        var usersToInfo = new DocValueFieldInfo.Simple(
+                "search_targets.to.user", DocValueFieldInfo.DocValueType.SORTED_SET, false);
+        when(reader.getDocValueFields()).thenReturn(List.of(usersFromInfo, usersToInfo));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq(usersFromInfo)))
+            .thenReturn(List.of("alice@example.com"));
+        when(reader.getDocValue(org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq(usersToInfo)))
+            .thenReturn(List.of("bob@example.com"));
+        when(reader.getValueFromPointsOrTerms(org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+
+        var ctx = copyToWithSourceExcludesContext();
+
+        // Partial _source seed: internal.from and external.to are in _source (NOT excluded)
+        String seed = "{\"internal\":{\"from\":[{\"user\":\"alice@example.com\"}]}"
+                + ",\"external\":{\"from\":[{\"user\":\"alice@example.com\"}]}}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        JsonNode tree = MAPPER.readTree(merged);
+
+        // internal.to must NOT appear — it wasn't in the seed, and it's index:false/dv:false
+        // so there's no Lucene data to recover it from. Reverse-derivation from users.to.user
+        // should NOT write into internal.to.
+        assertTrue(tree.path("internal").path("to").isMissingNode(),
+            "internal.to must not be reverse-derived from copy_to target: " + merged);
+
+        // users.from and users.to are copy_to TARGETS — must NOT appear in _source
+        assertTrue(tree.path("search_targets").isMissingNode(),
+            "search_targets.* copy_to targets must never appear in reconstructed _source: " + merged);
+
+        // The seed values must be preserved
+        assertEquals("alice@example.com",
+            tree.path("internal").path("from").get(0).path("user").asText(),
+            "seed internal.from preserved: " + merged);
+    }
+
+    @Test
+    void sourceExcludedCopyToSource_reverseDerivesFromTarget() throws IOException {
+        // body.main.raw (index:false, copy_to: body.main.content) is source-excluded but
+        // reconstruction maximizes data recovery — reverse-derivation from the target recovers it.
+        var reader = mock(LuceneLeafReader.class);
+        when(reader.getDocValueFields()).thenReturn(Collections.emptyList());
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq("body.main.content"),
+                org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of(new RecoveredValue.TextTerm("lucy here few questions")));
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.eq(0),
+                org.mockito.ArgumentMatchers.eq("title"),
+                org.mockito.ArgumentMatchers.eq(EsFieldType.STRING),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.of(new RecoveredValue.TextTerm("bishops corner ltd buyout")));
+        when(reader.getValueFromPointsOrTerms(
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.argThat(s ->
+                    !"body.main.content".equals(s) && !"title".equals(s)),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any()))
+            .thenReturn(Optional.empty());
+
+        var ctx = copyToWithSourceExcludesContext();
+
+        String seed = "{\"gcid\":\"abc123\"}";
+        String merged = SourceReconstructor.mergeWithDocValues(seed, reader, 0, document(), ctx);
+        JsonNode tree = MAPPER.readTree(merged);
+
+        // body.main.raw reverse-derived from body.main.content (maximize recovery)
+        assertEquals("lucy here few questions",
+            tree.path("body").path("main").path("raw").asText(),
+            "body.main.raw must be reverse-derived from copy_to target: " + merged);
+
+        // body.main.content must NOT appear — it's a copy_to target, never in original _source
+        assertTrue(tree.path("body").path("main").path("content").isMissingNode(),
+            "body.main.content (copy_to target) must not appear in output: " + merged);
+
+        // title recovered directly from inverted index (maximize recovery)
+        assertEquals("bishops corner ltd buyout",
+            tree.path("title").asText(),
+            "title must be reconstructed from inverted index: " + merged);
+
+        // Seed fields preserved
+        assertEquals("abc123", tree.path("gcid").asText());
     }
 }
