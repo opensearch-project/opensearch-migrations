@@ -2076,8 +2076,9 @@ spec:
         args:
           - |
             set -euo pipefail
-            CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
-            NAMESPACE='{{inputs.parameters.namespace}}'
+            export CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
+            export NAMESPACE='{{inputs.parameters.namespace}}'
+            export IMAGE_REGISTRY_PREFIX='{{inputs.parameters.image-registry-prefix}}'
 
             cat > /tmp/solr.xml <<'SOLRXML'
             <?xml version="1.0" encoding="UTF-8" ?>
@@ -2102,10 +2103,29 @@ spec:
                 <int name="socketTimeout">${socketTimeout:600000}</int>
                 <int name="connTimeout">${connTimeout:60000}</int>
               </shardHandlerFactory>
-
-              <metrics enabled="${metricsEnabled:true}"/>
             </solr>
             SOLRXML
+            
+            cat > /tmp/zoo.cfg <<'ZOOCFG'                                                                                                                                               
+            # The number of milliseconds of each tick
+            tickTime=2000                                                                                                                                        
+                            
+            # The number of ticks that the initial                                                                                                               
+            # synchronization phase can take
+            initLimit=10                                                                                                                                         
+                            
+            # The number of ticks that can pass between                                                                                                          
+            # sending a request and getting an acknowledgement
+            syncLimit=5                                                                                                                                          
+                            
+            # the directory where the snapshot is stored.                                                                                                        
+            # dataDir=/opt/zookeeper/data
+            # NOTE: Solr defaults the dataDir to <solrHome>/zoo_data                                                                                             
+                                                                                                                                                                 
+            # the port at which the clients will connect                                                                                                         
+            # clientPort=2181                                                                                                                                    
+            # NOTE: Solr sets this based on zkRun / zkHost params
+            ZOOCFG
 
             kubectl create configmap "${CLUSTER_NAME}-solr-xml" \
               --from-file=solr.xml=/tmp/solr.xml \
@@ -2113,8 +2133,15 @@ spec:
               --dry-run=client -o yaml | \
               kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
               kubectl apply -f -
+            
+            kubectl create configmap "${CLUSTER_NAME}-zoo-cfg" \
+              --from-file=zoo.cfg=/tmp/zoo.cfg \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
 
-            cat <<EOF | kubectl apply -f -
+            cat <<'EOF' | envsubst '$CLUSTER_NAME $NAMESPACE $IMAGE_REGISTRY_PREFIX' | kubectl apply -f -
             apiVersion: apps/v1
             kind: Deployment
             metadata:
@@ -2139,7 +2166,7 @@ spec:
                   serviceAccountName: migration-console-access-role
                   containers:
                     - name: solr
-                      image: mirror.gcr.io/library/solr:7.7.3
+                      image: ${IMAGE_REGISTRY_PREFIX}migrations/custom-solr:6.6.0
                       imagePullPolicy: Always
                       securityContext:
                         runAsUser: 0
@@ -2159,11 +2186,110 @@ spec:
                           value: "false"
                         - name: ZK_CREATE_CHROOT
                           value: "true"
+                        - name: AWS_ACCESS_KEY_ID
+                          value: "test"
+                        - name: AWS_SECRET_ACCESS_KEY
+                          value: "test"
+                        - name: S3_BUCKET_NAME
+                          valueFrom:
+                            configMapKeyRef:
+                              name: migrations-default-s3-config
+                              key: BUCKET_NAME
+                        - name: S3_REGION
+                          valueFrom:
+                            configMapKeyRef:
+                              name: migrations-default-s3-config
+                              key: AWS_REGION
+                        - name: S3_ENDPOINT
+                          valueFrom:
+                            configMapKeyRef:
+                              name: migrations-default-s3-config
+                              key: ENDPOINT_HTTP
+                              optional: true
                       command: ["bash", "-c"]
                       args:
                         - |
-                          /opt/docker-solr/scripts/init-var-solr
-                          exec solr -f -force -cloud -DzkRun
+                          set -eo pipefail
+            
+                          
+                          # that is the id used as location when running backup command in the workflow, we need to create
+                          # symlink here to actual target folder. Note that the below is a fixed value for the 
+                          # local k8s migration tests only, thus creating folder with the given naming convention.
+                          # for other cases this needs to be reflected here / made configurable
+                          echo "Determining used suffix to create folder for backup and symlink into /var/solr/data/[suffix]"
+                          SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+                          echo "Found suffix: $SUFFIX"
+                          mkdir -p "/var/solr/data/$SUFFIX/source1_testsnapshot_1" "/$SUFFIX"
+                          ln -s "/var/solr/data/$SUFFIX/source1_testsnapshot_1" "/$SUFFIX/source1_testsnapshot_1"
+            
+                          # setting up direct sync to s3 on file system change in the backup storage.
+                          # Since Solr 6 and 7 do not bring a s3 backup implementation, we simulate this 
+                          # with file sync for now (might change later to variant without s3 involvement).
+                          AWS_LOC=$(which aws)
+                          cat > /tmp/sync_script.sh << EOF
+                          
+                          NEEDS_SYNC=0
+                          
+                          run_sync() {
+                              flock -n /tmp/s3_sync.lock bash -c "
+                                  echo 'Running backup sync job to s3'
+                                  $AWS_LOC s3 sync /var/solr/data/${SUFFIX} s3://${S3_BUCKET_NAME}/${SUFFIX} \
+                                      --endpoint-url '${S3_ENDPOINT}' \
+                                      --region '${S3_REGION:-us-east-2}' \
+                                      --no-verify-ssl
+                              " && NEEDS_SYNC=0 || NEEDS_SYNC=1
+                          }
+                        
+                          while inotifywait -r -q -e modify,create,move /var/solr/data/${SUFFIX}; do
+                              run_sync
+                              if [ \$NEEDS_SYNC -eq 1 ]; then
+                                  echo "Changes detected during sync, re-syncing..."
+                                  run_sync
+                              fi
+                          done >> /proc/1/fd/1 2>&1 &
+                          EOF
+                          echo "Backup sync script to s3 localstack"
+                          cat /tmp/sync_script.sh
+                          chmod +x /tmp/sync_script.sh
+                          /tmp/sync_script.sh &
+            
+                          echo "Starting up solr"
+                          solr -f -force -cloud -DzkRun &
+                          SOLR_PID=$!
+            
+                          SOLR=http://localhost:8983
+                          echo "Using solr endpoint $SOLR"
+                                                                                                                                                       
+                          echo "Wait for Solr to be reachable"
+                          until curl -fsS "$SOLR/solr/admin/info/system" >/dev/null 2>&1; do
+                            echo "waiting for Solr..."
+                            sleep 2
+                          done
+
+                          echo "Get the list of configsets already in ZK"                                                                                        
+                          existing=$(curl -fsS "$SOLR/solr/admin/configs?action=LIST&wt=json" \
+                                     | sed -n 's/.*"configSets":\[\([^]]*\)\].*/\1/p' \
+                                     | tr -d '"' | tr ',' '\n')
+                          echo "Available configsets: $existing"
+                                                                                                                                                                 
+                          echo "Upload every bundled configset not yet present"                                                                                 
+                          for dir in /opt/solr/server/solr/configsets/*/; do
+                            name=$(basename "$dir")                                                                                     
+                            if echo "$existing" | grep -qx "$name"; then
+                              echo "skip $name (already in ZK)"
+                              continue
+                            fi
+                            echo "uploading $name..."
+                            tmp=$(mktemp).zip
+                            (cd "$dir/conf" && zip -qr "$tmp" .)
+                            curl -fsS -X POST \
+                              -H 'Content-Type: application/octet-stream' \
+                              --data-binary "@$tmp" \
+                              "$SOLR/solr/admin/configs?action=UPLOAD&name=$name"
+                            rm -f "$tmp"
+                          done
+                          
+                          wait "$SOLR_PID"
                       readinessProbe:
                         httpGet:
                           path: /solr/admin/info/system?wt=json
@@ -2180,16 +2306,22 @@ spec:
                           memory: 2Gi
                       volumeMounts:
                         - name: solr-data
-                          mountPath: /var/solr
+                          mountPath: /var/solr/data
                         - name: solr-xml
-                          mountPath: /opt/solr/server/solr/solr.xml
+                          mountPath: /var/solr/data/solr.xml
                           subPath: solr.xml
+                        - name: zoo-cfg
+                          mountPath: /var/solr/data/zoo.cfg
+                          subPath: zoo.cfg
                   volumes:
                     - name: solr-data
                       emptyDir: {}
                     - name: solr-xml
                       configMap:
                         name: ${CLUSTER_NAME}-solr-xml
+                    - name: zoo-cfg
+                      configMap:
+                        name: ${CLUSTER_NAME}-zoo-cfg
             ---
             apiVersion: v1
             kind: Service
@@ -2211,21 +2343,11 @@ spec:
 
             echo "Waiting for Solr to be ready..."
             kubectl rollout status deployment/${CLUSTER_NAME} -n ${NAMESPACE} --timeout=300s
-            
-            # that is the id used as location when running backup command in the workflow, we need to create
-            # symlink here to actual target folder. Note that the below is a fixed value for the 
-            # local k8s migration tests only, thus creating folder with the given naming convention.
-            # for other cases this needs to be reflected here / made configurable
-            echo "Determining used suffix to create folder for backup and symlink into /var/solr/data/[suffix]"
-            SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
-            echo "Found suffix: $SUFFIX"
-            mkdir -p "/var/solr/data/$SUFFIX/source1_testsnapshot_1" "/$SUFFIX"
-            ln -s "/var/solr/data/$SUFFIX/source1_testsnapshot_1" "/$SUFFIX/source1_testsnapshot_1"
 
             echo "Creating 'dummy' collection..."
             SOLR_URL="http://${CLUSTER_NAME}.${NAMESPACE}.svc.cluster.local:8983"
             for i in $(seq 1 30); do
-              RESULT=$(curl -s "${SOLR_URL}/solr/admin/collections?action=CREATE&name=dummy&numShards=1&replicationFactor=1&wt=json" 2>&1) && echo "$RESULT" | grep -q '"status":0' && echo "Collection 'dummy' created successfully" && break
+              RESULT=$(curl -s "${SOLR_URL}/solr/admin/collections?action=CREATE&name=dummy&collection.configName=data_driven_schema_configs&numShards=1&replicationFactor=1&wt=json" 2>&1) && echo "$RESULT" | grep -q '"status":0' && echo "Collection 'dummy' created successfully" && break
               echo "Attempt $i/30 - response: $RESULT"
               sleep 5
             done
@@ -2384,9 +2506,11 @@ spec:
                       args:
                         - |
                           # Copy S3 repository jars to dist dir and start SolrCloud with embedded ZooKeeper
-                          SOLR_MODULES=s3-repository
+                          cp /opt/solr/modules/s3-repository/lib/*.jar /opt/solr/dist/
                           /opt/solr/docker/scripts/init-var-solr
-                          exec solr -f -force -cloud -DzkRun
+                          # in solr startup we explicitly need to set env vars as jvm properties (solr 8 automatically promotes
+                          # many env vars into JVM properties)
+                          exec solr -f -force -cloud -DzkRun -DS3_BUCKET_NAME="\${S3_BUCKET_NAME}" -DS3_REGION="\${S3_REGION}" -DS3_ENDPOINT="\${S3_ENDPOINT}"
                       readinessProbe:
                         httpGet:
                           path: /solr/admin/info/system?wt=json

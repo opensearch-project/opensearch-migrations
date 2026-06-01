@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# NOTE: this applies when running image standalone. K8S setup in migrationConsole overwrites entrypoint,
+# thus wont apply there. Take over to the corresponding config where / if needed.
+
 set -e
 
 SOLR_XML_FILE="/opt/solr/server/solr-template.solr.xml"
