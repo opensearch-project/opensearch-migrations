@@ -75,15 +75,28 @@ run_split() {
 # ---------- (3) elapsed formatter ----------
 
 @test "_dash_fmt_elapsed renders M m SS s" {
+  # _dash_fmt_elapsed re-reads `date +%s`, so the test's `now` and the
+  # function's `now` can drift by up to a second under load. Match the
+  # rendered output against a small tolerance window rather than an exact
+  # string so we don't flake when the CI runner pauses between calls.
+  _matches_within() {
+    local got="$1" expected_min="$2" expected_max="$3"
+    local s
+    for s in "$expected_min" "$expected_max"; do
+      [[ "$got" == "$s" ]] && return 0
+    done
+    return 1
+  }
+
   now=$(date +%s)
   out=$(_dash_fmt_elapsed "$(( now - 75 ))")     # 1 minute 15 seconds
-  [[ "$out" == "1m 15s" ]]
+  _matches_within "$out" "1m 15s" "1m 16s"
 
   out=$(_dash_fmt_elapsed "$(( now - 5 ))")
-  [[ "$out" == "0m 05s" ]]
+  _matches_within "$out" "0m 05s" "0m 06s"
 
   out=$(_dash_fmt_elapsed "$(( now - 3661 ))")
-  [[ "$out" == "61m 01s" ]]
+  _matches_within "$out" "61m 01s" "61m 02s"
 }
 
 # ---------- (4) char repeat including n=0 ----------

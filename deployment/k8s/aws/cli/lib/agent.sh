@@ -194,9 +194,9 @@ agent_setup() {
   local skills_src=""
   if [[ -f "$LIB_DIR/../skills/Startup.md" ]]; then
     skills_src="$LIB_DIR/../skills"
-  elif [[ -f "$LIB_DIR/../../../../agent-skills/skills/Startup.md" ]]; then
+  elif [[ -f "$LIB_DIR/../../../../../agent-skills/skills/Startup.md" ]]; then
     # cli/lib/ → cli/ → aws/ → k8s/ → deployment/ → repo-root
-    skills_src="$LIB_DIR/../../../../agent-skills/skills"
+    skills_src="$LIB_DIR/../../../../../agent-skills/skills"
   elif [[ -n "${MIGRATE_SKILLS_SRC:-}" && -f "${MIGRATE_SKILLS_SRC}/Startup.md" ]]; then
     skills_src="$MIGRATE_SKILLS_SRC"
   else

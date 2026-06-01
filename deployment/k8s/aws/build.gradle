@@ -42,11 +42,13 @@ def cliVersion = providers.environmentVariable('CLI_VERSION')
         .orElse(provider {
             // Fall back to "0.0.0-dev-<git-short-sha>" so each commit
             // gets its own cache slot.
-            def sha = providers.exec {
+            def execResult = providers.exec {
                 workingDir = rootDir
                 commandLine 'git', 'rev-parse', '--short=10', 'HEAD'
-                isIgnoreExitValue = true
-            }.standardOutput.asText.get().trim()
+                setIgnoreExitValue(true)
+            }
+            def rc = execResult.result.get().exitValue
+            def sha = rc == 0 ? execResult.standardOutput.asText.get().trim() : ''
             sha ? "0.0.0-dev-${sha}" : '0.0.0-dev'
         })
 

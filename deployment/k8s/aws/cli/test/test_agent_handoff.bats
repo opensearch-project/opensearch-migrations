@@ -88,7 +88,7 @@ teardown() {
   #   - repo dev mode:   agent-skills/kiro/        (sibling of skills/)
   # Skip only when neither resolves.
   if [[ ! -d "$LIB_DIR/../skills/kiro" ]] \
-     && [[ ! -d "$LIB_DIR/../skills/../kiro" ]]; then
+     && [[ ! -d "$LIB_DIR/../../../../../agent-skills/kiro" ]]; then
     skip "kiro/ tree not present in this checkout"
   fi
   agent_setup kiro

@@ -64,7 +64,11 @@ __on_exit() {
   fi
   exit "$rc"
 }
-trap __on_exit EXIT
+
+# The EXIT trap is gated on MIGRATE_OWNS_PROCESS=1 (set by bin/migration-assistant)
+# so it doesn't interfere with bats-core, which has its own EXIT-trap chain to
+# detect skips and report test results — our trap's `exit "$rc"` would short-
+# circuit bats' bookkeeping and the test would appear "not run".
 
 # ---------- Signal handling: Ctrl-C must always work ----------
 #
@@ -129,8 +133,9 @@ __on_signal() {
 # with bats-core (which uses its own SIGINT semantics) and any shell-script
 # that sources our libs without wanting global signal hijacking.
 if [[ "${MIGRATE_OWNS_PROCESS:-0}" == "1" ]]; then
-  trap '__on_signal INT'  INT
-  trap '__on_signal TERM' TERM
+  trap __on_exit            EXIT
+  trap '__on_signal INT'    INT
+  trap '__on_signal TERM'   TERM
 fi
 
 # arch_os — print "<os>/<arch>" using the convention used by binary releases:
