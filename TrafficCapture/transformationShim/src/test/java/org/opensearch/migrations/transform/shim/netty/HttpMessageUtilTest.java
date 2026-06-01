@@ -202,6 +202,120 @@ class HttpMessageUtilTest {
         assertNull(HttpMessageUtil.extractBodyString(map));
     }
 
+    // --- Ingress: form-encoded body ---
+
+    @Test
+    void requestToMap_formEncoded_parsedIntoStructuredMap() {
+        var request = buildRequestWithContentType(
+            "q=*:*&rows=10&facet.field=title&facet.field=author",
+            "application/x-www-form-urlencoded");
+
+        var map = HttpMessageUtil.requestToMap(request);
+
+        var payload = payloadOf(map);
+        assertNull(payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
+        @SuppressWarnings("unchecked")
+        var formBody = (Map<String, List<String>>) payload.get(
+            JsonKeysForHttpMessage.INLINED_FORM_ENCODED_BODY_DOCUMENT_KEY);
+        assertNotNull(formBody, "form-encoded body should be parsed");
+        assertEquals(List.of("*:*"), formBody.get("q"));
+        assertEquals(List.of("10"), formBody.get("rows"));
+        assertEquals(List.of("title", "author"), formBody.get("facet.field"));
+    }
+
+    @Test
+    void requestToMap_formEncoded_decodesPercentEncoding() {
+        var request = buildRequestWithContentType(
+            "q=hello+world&fq=status%3Aactive",
+            "application/x-www-form-urlencoded");
+
+        var map = HttpMessageUtil.requestToMap(request);
+
+        @SuppressWarnings("unchecked")
+        var formBody = (Map<String, List<String>>) payloadOf(map).get(
+            JsonKeysForHttpMessage.INLINED_FORM_ENCODED_BODY_DOCUMENT_KEY);
+        assertEquals(List.of("hello world"), formBody.get("q"));
+        assertEquals(List.of("status:active"), formBody.get("fq"));
+    }
+
+    @Test
+    void requestToMap_formEncodedWithCharset_parsedCorrectly() {
+        var request = buildRequestWithContentType(
+            "q=test",
+            "application/x-www-form-urlencoded; charset=UTF-8");
+
+        var map = HttpMessageUtil.requestToMap(request);
+
+        var payload = payloadOf(map);
+        assertNotNull(payload.get(JsonKeysForHttpMessage.INLINED_FORM_ENCODED_BODY_DOCUMENT_KEY));
+        assertNull(payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
+    }
+
+    // --- Ingress: content-type routing ---
+
+    @Test
+    void requestToMap_textXml_goesToInlinedTextBody() {
+        var request = buildRequestWithContentType("<doc><id>1</id></doc>", "text/xml");
+
+        var map = HttpMessageUtil.requestToMap(request);
+
+        var payload = payloadOf(map);
+        assertNull(payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
+        assertEquals("<doc><id>1</id></doc>",
+            payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY));
+    }
+
+    @Test
+    void requestToMap_noContentType_parsedAsJson() {
+        var request = buildRequest("{\"id\":\"1\"}");
+
+        var map = HttpMessageUtil.requestToMap(request);
+
+        var payload = payloadOf(map);
+        assertInstanceOf(Map.class, payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
+    }
+
+    @Test
+    void requestToMap_applicationJson_parsedAsJson() {
+        var request = buildRequestWithContentType("{\"id\":\"1\"}", "application/json");
+
+        var map = HttpMessageUtil.requestToMap(request);
+
+        var payload = payloadOf(map);
+        assertInstanceOf(Map.class, payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
+    }
+
+    // --- Egress: extractBodyString for form-encoded ---
+
+    @SuppressWarnings("null")
+    @Test
+    void extractBodyString_formEncodedBody_serializedCorrectly() {
+        var formBody = new LinkedHashMap<String, List<String>>();
+        formBody.put("q", List.of("*:*"));
+        formBody.put("rows", List.of("10"));
+        var map = buildMessageWithPayload(Map.of(
+            JsonKeysForHttpMessage.INLINED_FORM_ENCODED_BODY_DOCUMENT_KEY, formBody));
+
+        var body = HttpMessageUtil.extractBodyString(map);
+
+        assertNotNull(body);
+        assertTrue(body.contains("q=") && body.contains("rows="));
+    }
+
+    @SuppressWarnings("null")
+    @Test
+    void extractBodyString_formEncodedMultiValue_serializedWithRepeatedKeys() {
+        var formBody = new LinkedHashMap<String, List<String>>();
+        formBody.put("facet.field", List.of("title", "author"));
+        var map = buildMessageWithPayload(Map.of(
+            JsonKeysForHttpMessage.INLINED_FORM_ENCODED_BODY_DOCUMENT_KEY, formBody));
+
+        var body = HttpMessageUtil.extractBodyString(map);
+
+        assertNotNull(body);
+        assertEquals("facet.field=title&facet.field=author", body);
+    }
+
     // --- helpers ---
 
     private static FullHttpRequest buildRequest(String body) {
@@ -212,6 +326,12 @@ class HttpMessageUtilTest {
             "/test",
             Unpooled.wrappedBuffer(bytes)
         );
+    }
+
+    private static FullHttpRequest buildRequestWithContentType(String body, String contentType) {
+        var request = buildRequest(body);
+        request.headers().set("Content-Type", contentType);
+        return request;
     }
 
     @SuppressWarnings("unchecked")
