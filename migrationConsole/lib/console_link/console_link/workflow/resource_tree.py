@@ -281,6 +281,9 @@ def _add_resource_details(node, resource: ResourceNode) -> None:
     if resource.depends_on:
         deps = ", ".join(resource.depends_on)
         node.add(f"[dim]Depends on: {deps}[/dim]")
+    live = format_live_status(resource)
+    if live:
+        node.add(f"[cyan]{live}[/cyan]")
     if resource.workflow_progress:
         if has_notable_steps(resource.workflow_progress):
             _add_workflow_subtree(node, resource.workflow_progress)
@@ -406,6 +409,42 @@ def format_spec_fields(resource: ResourceNode) -> str:
                     value += '...'
             parts.append(f"{label}: {value}")
     return ' | '.join(parts)
+
+
+def format_live_status(resource: ResourceNode) -> Optional[str]:
+    """Format live progress from CR status fields (backfill or snapshot creation)."""
+    if resource.plural == 'snapshotmigrations':
+        backfill = resource.status.get('documentBackfill')
+        if isinstance(backfill, dict):
+            summary = backfill.get('summary') or {}
+            parts = []
+            pct = summary.get('percentageCompleted')
+            if pct is not None:
+                parts.append(f"{pct:.0f}%")
+            shards_total = summary.get('shardsTotal')
+            shards_migrated = summary.get('shardsMigrated')
+            if shards_total is not None:
+                parts.append(f"shards {shards_migrated or 0}/{shards_total}")
+            eta_ms = summary.get('etaMs')
+            if eta_ms:
+                secs = int(eta_ms / 1000)
+                m, s = divmod(secs, 60)
+                h, m = divmod(m, 60)
+                parts.append(f"ETA {h}h {m}m {s}s")
+            if parts:
+                return f"Backfill: {', '.join(parts)}"
+    elif resource.plural == 'datasnapshots':
+        creation = resource.status.get('snapshotCreation')
+        if isinstance(creation, dict):
+            summary = creation.get('summary') or {}
+            parts = []
+            shards_total = summary.get('shardsTotal')
+            shards_done = summary.get('shardsSuccessful')
+            if shards_total is not None:
+                parts.append(f"shards {shards_done or 0}/{shards_total}")
+            if parts:
+                return f"Snapshot: {', '.join(parts)}"
+    return None
 
 
 def _get_nested(d: Dict[str, Any], path: str) -> Any:

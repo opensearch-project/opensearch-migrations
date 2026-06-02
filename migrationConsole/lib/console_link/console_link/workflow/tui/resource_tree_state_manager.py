@@ -7,7 +7,7 @@ from textual.widgets._tree import TreeNode, Tree
 from console_link.workflow.resource_tree import (
     ResourceNode, ResourceGroup, ResourceSection,
     PHASE_SYMBOLS, RESOURCE_SECTIONS, DISPLAY_PHASES,
-    format_spec_fields, has_notable_steps,
+    format_spec_fields, format_live_status, has_notable_steps,
     collect_notable_steps, find_last_succeeded, step_timestamp,
     maybe_rewrite_wait_step,
 )
@@ -138,6 +138,9 @@ class ResourceTreeStateManager:
             resource_node.add(f"[dim]{details}[/dim]", data=None)
         if resource.depends_on:
             resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
+        live = format_live_status(resource)
+        if live:
+            resource_node.add(f"[cyan]{live}[/cyan]", data=None)
         self._add_workflow_progress(resource_node, resource)
         for child in resource.children:
             self._add_resource(resource_node, child)
@@ -278,6 +281,9 @@ class ResourceTreeStateManager:
             resource_node.add(f"[dim]{details}[/dim]", data=None)
         if resource.depends_on:
             resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
+        live = format_live_status(resource)
+        if live:
+            resource_node.add(f"[cyan]{live}[/cyan]", data=None)
 
         # Workflow subtree (nodes carry Argo dict data for interactions)
         self._add_workflow_progress(resource_node, resource)

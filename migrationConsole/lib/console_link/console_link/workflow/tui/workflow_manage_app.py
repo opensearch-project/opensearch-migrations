@@ -301,7 +301,31 @@ class WorkflowTreeApp(App):
                         data.get('id'),
                     )
             stack.extend(reversed(current.children))
+        # Fallback for resource nodes: search raw workflow data for patch-output steps
+        # (they may be filtered out of the tree by collect_notable_steps)
+        if not refs and selected_data.get('id', '').startswith('resource:'):
+            resource_name = selected_data.get('id', '').removeprefix('resource:')
+            refs = self._find_output_refs_in_workflow_data(resource_name)
         logger.info("Collected %s managed output ref(s)", len(refs))
+        return refs
+
+    def _find_output_refs_in_workflow_data(self, resource_name: str):
+        """Search raw workflow nodes for patch-output steps matching a resource."""
+        workflow_data = self._tree_state._workflow_data
+        if not workflow_data:
+            return []
+        refs = []
+        for node in (workflow_data.get('status', {}).get('nodes', {}) or {}).values():
+            display_name = node.get('displayName', '')
+            step_name = display_name.split('(')[0].strip()
+            patch_spec = PATCH_OUTPUT_STEPS.get(step_name)
+            if not patch_spec:
+                continue
+            plural, output_name = patch_spec
+            node_resource = self._input_parameter(node, 'resourceName')
+            if node_resource == resource_name:
+                resource_path = resource_display_name(plural, node_resource)
+                refs.append((resource_path, output_name))
         return refs
 
     def action_view_output(self) -> None:
