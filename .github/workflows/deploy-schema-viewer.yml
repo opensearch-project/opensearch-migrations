@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - gh-pages-schema-ref
     paths:
       - 'schema-viewer/**'
       - '.github/workflows/deploy-schema-viewer.yml'
