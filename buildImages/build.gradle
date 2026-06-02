@@ -25,7 +25,7 @@ def publishedRepoByImageName = [
         transformation_shim   : "opensearch-migrations-transformation-shim",
 ]
 
-def includeSolr660TestImage = project.hasProperty('includeSolr660TestImage') // pass -PincludeSolr660TestImage to include
+def excludeSolr660TestImage = project.hasProperty('excludeSolr660TestImage') // pass -PexcludeSolr660TestImage to include
 def includeSolr773TestImage = project.hasProperty('includeSolr773TestImage') // pass -PincludeSolr773TestImage to include
 def excludeESCustomTestImages = project.hasProperty('excludeESCustomTestImages') // pass -PexcludeESCustomTestImages to exclude custom ES test image builds
 
@@ -245,7 +245,7 @@ def customESEntries = [
 
 // Test/CI-only images — not built by buildKitAll, use buildKitTestAll instead
 def testBuildKitProjects = [
-    *(includeSolr660TestImage ? [solr660Entry] : []),
+    *(excludeSolr660TestImage ? [] : [solr660Entry]),
     *(includeSolr773TestImage ? [solr773Entry] : []),
     *(excludeESCustomTestImages ? [] : customESEntries),
 ]
