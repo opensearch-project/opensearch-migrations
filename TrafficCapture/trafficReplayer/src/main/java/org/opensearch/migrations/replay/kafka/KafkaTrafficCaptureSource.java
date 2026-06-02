@@ -83,8 +83,19 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     // historical "fence aggressively" rationale (the previous 60s override) is no longer needed.
     // The TOUCH frequency that keeps us inside this window is decoupled from the fence value and
     // pinned in DEFAULT_KEEP_ALIVE_PERIOD below; raising the fence threshold does NOT slow down
-    // our heartbeat. Operators can still override via --kafkaPropertyFile.
+    // our heartbeat. Operators can still override via --kafkaPropertyFile, and subclasses can
+    // override via {@link #defaultPollIntervalMs()} (note: a static field would be hidden, not
+    // overridden — the value is exposed through a method so subclass intent is honored).
     public static final String DEFAULT_POLL_INTERVAL_MS = "300000";
+
+    /**
+     * Default value for {@code max.poll.interval.ms} when no operator-supplied properties file
+     * sets it. Subclasses may override to vary the broker-enforced fence threshold.
+     */
+    protected static String defaultPollIntervalMs() {
+        return DEFAULT_POLL_INTERVAL_MS;
+    }
+
     // Touch period used to keep the consumer inside the max.poll.interval.ms window when the read
     // loop is back-pressured. Pinned to 30s so behavior matches what shipped with the historical
     // 60s default (60s / 2 = 30s). Decoupling this from max.poll.interval.ms preserves the
@@ -244,7 +255,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         @NonNull KafkaBehavioralPolicy behavioralPolicy
     ) throws IOException {
         var kafkaProps = buildKafkaProperties(brokers, groupId, authType, kafkaUserName, kafkaPassword, propertyFilePath);
-        kafkaProps.putIfAbsent(MAX_POLL_INTERVAL_KEY, DEFAULT_POLL_INTERVAL_MS);
+        kafkaProps.putIfAbsent(MAX_POLL_INTERVAL_KEY, defaultPollIntervalMs());
         return new KafkaTrafficCaptureSource(
             globalContext,
             new KafkaConsumer<>(kafkaProps),
