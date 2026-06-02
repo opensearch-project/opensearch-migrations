@@ -51,4 +51,10 @@ public class JsonKeysForHttpMessage {
      */
     public static final String INLINED_TEXT_BODY_DOCUMENT_KEY = "inlinedTextBody";
 
+    /**
+     * This key is used under the 'payload' object for application/x-www-form-urlencoded bodies.
+     * The value is a Map&lt;String, List&lt;String&gt;&gt; representing the parsed form parameters.
+     */
+    public static final String INLINED_FORM_ENCODED_BODY_DOCUMENT_KEY = "inlinedFormEncodedBody";
+
 }

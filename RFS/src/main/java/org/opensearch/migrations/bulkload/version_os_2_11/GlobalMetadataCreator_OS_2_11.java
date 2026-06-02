@@ -200,6 +200,12 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
                 }
                 return;
             } catch (Exception e) {
+                var removedTokenFilters = findRemovedTokenFilters(e);
+                if (!removedTokenFilters.isEmpty()) {
+                    ObjectNodeUtils.removeAnalyzerFilters(templateBody, removedTokenFilters);
+                    log.info("Reattempting creation of template '{}' after removing removed token filters: {}", templateName, removedTokenFilters);
+                    continue;
+                }
                 var unsupportedParams = findUnsupportedMappingParams(e);
                 if (unsupportedParams.isEmpty()) {
                     throw e;
@@ -220,6 +226,19 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         }
         return Set.of();
     }
+
+    private static Set<String> findRemovedTokenFilters(Throwable e) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof InvalidResponse ir) {
+                var filters = ir.getRemovedTokenFilters();
+                if (!filters.isEmpty()) {
+                    return filters;
+                }
+            }
+        }
+        return Set.of();
+    }
+
 
     private void removeUnsupportedMappingParams(String templateName, ObjectNode templateBody, Set<String> params) {
         // Legacy templates: mappings at top level; index/component templates: mappings under "template"
