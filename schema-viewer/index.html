@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Schema Viewer</title>
+    <link rel="stylesheet" href="viewer.css" />
+  </head>
+  <body>
+    <h1>Schema Viewer</h1>
+    <p class="subtitle">
+      Interactive browser for <code>workflowMigration.schema.json</code>.
+      Open the browser console to inspect the resolved schema object.
+    </p>
+
+    <div class="status-bar">
+      <span class="badge-pill info" id="status">Loading…</span>
+      <span class="badge-pill info" id="toggle-mode">Input: resolved (click to toggle)</span>
+    </div>
+
+    <div class="viewer">
+      <div class="sidebar">
+        <div class="search-wrap">
+          <input class="search-input" id="search" placeholder="Search fields…" />
+        </div>
+        <div class="tree-controls">
+          <a href="#" id="expand-all">Expand all</a>
+          <span>·</span>
+          <a href="#" id="collapse-all">Collapse all</a>
+        </div>
+        <div class="tree-scroll" id="tree"></div>
+      </div>
+      <div class="main" id="main">
+        <div class="empty-state">Select a field from the tree to see its details.</div>
+      </div>
+    </div>
+
+    <script type="module" src="viewer.js"></script>
+  </body>
+</html>
