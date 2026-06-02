@@ -7,14 +7,12 @@ on:
     branches: [main]
     paths:
       - 'deployment/k8s/aws/cli/**'
-      - 'deployment/k8s/aws/aws-bootstrap.sh'
-      - 'deployment/k8s/aws/assemble-bootstrap.sh'
+      - 'deployment/k8s/aws/build.gradle'
       - '.github/workflows/migrate-cli.yml'
   pull_request:
     paths:
       - 'deployment/k8s/aws/cli/**'
-      - 'deployment/k8s/aws/aws-bootstrap.sh'
-      - 'deployment/k8s/aws/assemble-bootstrap.sh'
+      - 'deployment/k8s/aws/build.gradle'
       - '.github/workflows/migrate-cli.yml'
   merge_group:
 
@@ -55,11 +53,9 @@ jobs:
             install.sh \
             lib/*.sh \
             test/helpers/stub.sh
-      - name: shellcheck assemble + Jenkins script
+      - name: shellcheck Jenkins helper script
         run: |
-          shellcheck \
-            deployment/k8s/aws/assemble-bootstrap.sh \
-            test/awsRunEksValidation.sh
+          shellcheck test/awsRunEksValidation.sh
 
   test:
     runs-on: ubuntu-22.04
@@ -117,16 +113,18 @@ jobs:
     needs: [lint]
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-env
       - name: Install jq
         run: sudo apt-get update -y && sudo apt-get install -y jq
       - name: migration-assistant version
         run: deployment/k8s/aws/cli/bin/migration-assistant version
       - name: migration-assistant help
         run: deployment/k8s/aws/cli/bin/migration-assistant help
-      - name: assemble-bootstrap.sh produces dist artifacts
+      - name: gradle packages CLI tarball + install.sh
         run: |
-          deployment/k8s/aws/assemble-bootstrap.sh --cli-version 0.0.0-ci
-          test -f deployment/k8s/aws/dist/migration-assistant-cli-0.0.0-ci.tar.gz
-          test -x deployment/k8s/aws/dist/aws-bootstrap.sh
-          # Sanity: the curl-pipe shim is well-formed bash.
-          bash -n deployment/k8s/aws/dist/aws-bootstrap.sh
+          ./gradlew :deployment:k8s:aws:packageMigrationAssistantCli \
+            -PcliVersion=0.0.0-ci
+          test -f deployment/k8s/aws/build/migrate-cli-dist/migration-assistant-cli-0.0.0-ci.tar.gz
+          test -x deployment/k8s/aws/build/migrate-cli-dist/install.sh
+          # Sanity: the rendered install.sh is well-formed bash.
+          bash -n deployment/k8s/aws/build/migrate-cli-dist/install.sh
