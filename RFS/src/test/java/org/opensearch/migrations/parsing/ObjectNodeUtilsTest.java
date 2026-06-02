@@ -115,4 +115,151 @@ class ObjectNodeUtilsTest {
         assertThat(expectedFields, equalTo(actualFields));
     }
 
+    // --- removeAnalyzerFilters tests ---
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /**
+     * Helper: builds settings.index.analysis.analyzer structure with given analyzers.
+     * Each entry in analyzerFilters maps analyzer-name to its filter list.
+     */
+    private ObjectNode buildIndexBody(Map<String, List<String>> analyzerFilters) {
+        ObjectNode body = MAPPER.createObjectNode();
+        ObjectNode settings = body.putObject("settings");
+        ObjectNode index = settings.putObject("index");
+        ObjectNode analysis = index.putObject("analysis");
+        ObjectNode analyzers = analysis.putObject("analyzer");
+        analyzerFilters.forEach((name, filters) -> {
+            ObjectNode analyzerDef = analyzers.putObject(name);
+            analyzerDef.put("type", "custom");
+            var filterArray = analyzerDef.putArray("filter");
+            filters.forEach(filterArray::add);
+        });
+        return body;
+    }
+
+    /** Helper: extracts the filter list for a named analyzer under settings.index.analysis */
+    private List<String> getFilters(ObjectNode body, String analyzerName) {
+        var filterNode = body.at("/settings/index/analysis/analyzer/" + analyzerName + "/filter");
+        List<String> result = new ArrayList<>();
+        filterNode.forEach(n -> result.add(n.asText()));
+        return result;
+    }
+
+    @Test
+    void removeAnalyzerFilters_removesFilterFromIndexAnalysis() {
+        ObjectNode body = buildIndexBody(Map.of(
+            "my_analyzer", List.of("lowercase", "word_delimiter_graph", "stop")
+        ));
+
+        ObjectNodeUtils.removeAnalyzerFilters(body, Set.of("word_delimiter_graph"));
+
+        assertThat(getFilters(body, "my_analyzer"), equalTo(List.of("lowercase", "stop")));
+    }
+
+    @Test
+    void removeAnalyzerFilters_multipleAnalyzers_onlyAffectsThoseWithFilter() {
+        ObjectNode body = buildIndexBody(Map.of(
+            "analyzer_a", List.of("lowercase", "stop", "word_delimiter_graph"),
+            "analyzer_b", List.of("lowercase", "stemmer")
+        ));
+
+        ObjectNodeUtils.removeAnalyzerFilters(body, Set.of("word_delimiter_graph"));
+
+        assertThat(getFilters(body, "analyzer_a"), equalTo(List.of("lowercase", "stop")));
+        assertThat(getFilters(body, "analyzer_b"), equalTo(List.of("lowercase", "stemmer")));
+    }
+
+    @Test
+    void removeAnalyzerFilters_noAnalysisSection_isNoOp() {
+        ObjectNode body = MAPPER.createObjectNode();
+        body.putObject("settings").put("number_of_shards", 1);
+
+        // Should not throw
+        ObjectNodeUtils.removeAnalyzerFilters(body, Set.of("stop"));
+
+        // settings unchanged
+        assertThat(body.get("settings").get("number_of_shards").asInt(), equalTo(1));
+    }
+
+    @Test
+    void removeAnalyzerFilters_filterNotPresent_isNoOp() {
+        ObjectNode body = buildIndexBody(Map.of(
+            "my_analyzer", List.of("lowercase", "stop")
+        ));
+
+        ObjectNodeUtils.removeAnalyzerFilters(body, Set.of("nonexistent_filter"));
+
+        assertThat(getFilters(body, "my_analyzer"), equalTo(List.of("lowercase", "stop")));
+    }
+
+    @Test
+    void removeAnalyzerFilters_templateBodyWithIndexPatterns() {
+        // Simulates an index template body where settings live under "template.settings"
+        ObjectNode body = MAPPER.createObjectNode();
+        body.putArray("index_patterns").add("logs-*");
+        ObjectNode template = body.putObject("template");
+        ObjectNode settings = template.putObject("settings");
+        ObjectNode analysis = settings.putObject("analysis");
+        ObjectNode analyzers = analysis.putObject("analyzer");
+        ObjectNode analyzerDef = analyzers.putObject("my_analyzer");
+        analyzerDef.put("type", "custom");
+        analyzerDef.putArray("filter").add("lowercase").add("word_delimiter_graph").add("stop");
+
+        ObjectNodeUtils.removeAnalyzerFilters(body, Set.of("word_delimiter_graph"));
+
+        var filterNode = body.at("/template/settings/analysis/analyzer/my_analyzer/filter");
+        List<String> result = new ArrayList<>();
+        filterNode.forEach(n -> result.add(n.asText()));
+        assertThat(result, equalTo(List.of("lowercase", "stop")));
+    }
+
+    @Test
+    void removeAnalyzerFilters_emptyFiltersToRemove_isNoOp() {
+        ObjectNode body = buildIndexBody(Map.of(
+            "my_analyzer", List.of("lowercase", "stop")
+        ));
+
+        ObjectNodeUtils.removeAnalyzerFilters(body, Set.of());
+
+        assertThat(getFilters(body, "my_analyzer"), equalTo(List.of("lowercase", "stop")));
+    }
+
+    @Test
+    void removeAnalyzerFilters_settingsAnalysisPathWithoutIndex() {
+        // Tests the settings.analysis.analyzer path (no "index" intermediary)
+        ObjectNode body = MAPPER.createObjectNode();
+        ObjectNode settings = body.putObject("settings");
+        ObjectNode analysis = settings.putObject("analysis");
+        ObjectNode analyzers = analysis.putObject("analyzer");
+        ObjectNode analyzerDef = analyzers.putObject("my_analyzer");
+        analyzerDef.put("type", "custom");
+        analyzerDef.putArray("filter").add("lowercase").add("stop").add("word_delimiter_graph");
+
+        ObjectNodeUtils.removeAnalyzerFilters(body, Set.of("word_delimiter_graph"));
+
+        var filterNode = body.at("/settings/analysis/analyzer/my_analyzer/filter");
+        List<String> result = new ArrayList<>();
+        filterNode.forEach(n -> result.add(n.asText()));
+        assertThat(result, equalTo(List.of("lowercase", "stop")));
+    }
+
+    @Test
+    void removeAnalyzerFilters_nullBody_isNoOp() {
+        // Should not throw
+        ObjectNodeUtils.removeAnalyzerFilters(null, Set.of("stop"));
+    }
+
+    @Test
+    void removeAnalyzerFilters_nullFiltersToRemove_isNoOp() {
+        ObjectNode body = buildIndexBody(Map.of(
+            "my_analyzer", List.of("lowercase", "stop")
+        ));
+
+        // Should not throw
+        ObjectNodeUtils.removeAnalyzerFilters(body, null);
+
+        assertThat(getFilters(body, "my_analyzer"), equalTo(List.of("lowercase", "stop")));
+    }
+
 }

@@ -1,93 +1,79 @@
 package org.opensearch.migrations.bulkload.lucene;
 
 import java.io.IOException;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.opensearch.migrations.bulkload.lucene.sidecar.SidecarBuilder;
-import org.opensearch.migrations.bulkload.lucene.sidecar.SidecarReader;
-import org.opensearch.migrations.bulkload.lucene.sidecar.TermEntry;
-
 import lombok.extern.slf4j.Slf4j;
-import shadow.lucene10.org.apache.lucene.util.IOUtils;
 
 /**
- * Per-segment cache of per-field term indexes.
+ * Per-segment cache of per-field term cursors and numeric indexes.
  *
- * <p>Two kinds of indexes are cached here, each lazily built on first access:
+ * <h3>What lives here, and for how long</h3>
+ *
+ * <p>Three kinds of structures are cached, each lazily built on first access:
  *
  * <ol>
- *   <li><b>byField</b>: fieldName -&gt; {@link SidecarReader}.
- *       Used by {@link SourceReconstructor} to reconstruct analyzed-text fields
- *       (STRING type) when neither stored fields nor doc_values are available.
- *       Backed by {@link SidecarBuilder}: the per-field posting stream is walked
- *       exactly once, spilled to disk as fixed-width 12-byte scratch tuples,
- *       externally merge-sorted using primitive int[] arrays (no boxing) keyed
- *       on (docId, position, termId), and encoded into a compact varint sidecar
- *       with a flat long[maxDoc] doc index. The reader mmaps the sidecar and
- *       serves {@code get(docId)} with zero heap allocation beyond the returned
- *       ArrayList. Heap footprint is bounded regardless of segment size.</li>
+ *   <li><b>{@link #streamingByField}</b>: fieldName &rarr; {@link StreamingFieldPostings}.
+ *       Position-aware streaming cursor for analyzed-text fields. Holds one
+ *       {@code PostingsEnum} + one term {@code String} per unique term in the field's
+ *       dictionary (heap is bounded by {@code uniqueTerms}, not by corpus size).</li>
  *
- *   <li><b>numericByField</b>: fieldName -&gt; docId -&gt; decoded Long.
- *       Used to reconstruct trie-encoded numeric fields
- *       (NUMERIC/IP/DATE/DATE_NANOS/SCALED_FLOAT/UNSIGNED_LONG) in Lucene 4/5
- *       segments. Stays in heap: 16 bytes per (docId, Long) entry times maxDoc
- *       is bounded and small (a 200k-doc segment is ~3 MB of numeric index).</li>
+ *   <li><b>{@link #numericByField}</b>: fieldName &rarr; docId &rarr; decoded {@code Long}.
+ *       Eager {@code HashMap} for trie-encoded numeric fields (Lucene 4-5 / ES 1.x-2.x).
+ *       Bounded: {@code 16 B × maxDoc} per cached field, e.g. ~3 MB for a 200k-doc segment.</li>
+ *
+ *   <li><b>{@link #multiTermStreamingByField}</b>: fieldName &rarr;
+ *       {@link StreamingMultiTermPostings}. FREQS-only streaming cursor for multi-valued
+ *       keyword / not-analyzed subfield recovery. Memory bounded by unique-term count —
+ *       replaces the previous eager {@code Map<Integer, List<String>>} that materialized
+ *       the entire posting list and OOMed on high-cardinality text segments.</li>
  * </ol>
  *
- * <p>Lifetime is scoped to a single call to
- * {@link LuceneReader#readDocsFromSegment}: a fresh instance is created there
- * with a per-segment {@code spillRoot}, and flows down to {@link SourceReconstructor}.
- * Once the segment's Flux terminates (success, error, or cancel), the Flux's
- * {@code doFinally} hook calls {@link #close()}, which closes all open sidecar
- * readers and deletes the spill root.
+ * <h3>Heap lifecycle — when entries become unreachable</h3>
  *
- * <p>Thread-safety: Lucene TermsEnum / PostingsEnum instances are not safe for
- * concurrent access. Access to the underlying maps and build phase is serialized
- * via {@code synchronized} to protect against the per-document concurrent reads
- * within a segment's Flux (see {@link LuceneReader#SEGMENT_READ_CONCURRENCY}).
- * Once a field's {@link SidecarReader} has been built, its {@link SidecarReader#get(int)}
- * is lock-free and safe for concurrent readers — the {@code synchronized} is
- * only needed to protect the build.
+ * <ul>
+ *   <li><b>Per-field upper bound</b>: each cursor's footprint is O(uniqueTerms) for
+ *       streaming maps, O(maxDoc) for numericByField. There is no per-doc accumulator —
+ *       emitted {@code List<String>} results are returned to the caller and become
+ *       eligible for GC as soon as the caller drops them.</li>
+ *   <li><b>Negative caching</b>: {@code put(fieldName, null)} caches the "no postings"
+ *       answer to avoid re-walking the dictionary. Cleared at {@link #close()}.</li>
+ *   <li><b>Per-segment owner</b>: a fresh instance is created in
+ *       {@link LuceneReader#readDocsFromSegment} per segment per worker, and flows down
+ *       to {@link SourceReconstructor}. The Flux's {@code doFinally} hook
+ *       {@code close()}s every {@code SegmentTermIndex} on success, error, or cancel.</li>
+ *   <li><b>No JVM-wide retention</b>: nothing static, nothing in a thread-local. Every
+ *       reference path roots to the segment-scoped Flux and dies with it.</li>
+ * </ul>
+ *
+ * <h3>Thread-safety</h3>
+ *
+ * <p>Lucene {@code TermsEnum} / {@code PostingsEnum} instances are not safe for
+ * concurrent access. All public methods are {@code synchronized} to serialize cursor
+ * advance and lazy-build operations within a single {@code SegmentTermIndex}. With
+ * {@code parallelism > 1}, each worker has its own instance, so contention on this
+ * monitor is bounded to the per-worker pipeline.
  */
 @Slf4j
 public class SegmentTermIndex implements AutoCloseable {
 
-    private final Path spillRoot;
-    private final long sortBufferBytes;
-    private final Map<String, SidecarReader> byField = new HashMap<>();
+    private final Map<String, StreamingFieldPostings> streamingByField = new HashMap<>();
     private final Map<String, Map<Integer, Long>> numericByField = new HashMap<>();
+    private final Map<String, StreamingMultiTermPostings> multiTermStreamingByField = new HashMap<>();
     private volatile boolean closed;
 
-    /**
-     * Creates an index scoped to {@code spillRoot} for on-disk term spill files.
-     * The directory is created lazily on first field build; callers can pass a
-     * path that does not yet exist.
-     *
-     * @param spillRoot per-segment directory owned by this index. Deleted on {@link #close()}.
-     * @param sortBufferBytes in-memory sort buffer budget for the external merge sort
-     *                        inside {@link SidecarBuilder}. Values larger than
-     *                        {@link Integer#MAX_VALUE} are clamped to fit the Builder's
-     *                        int-sized scratch buffer.
-     */
-    public SegmentTermIndex(Path spillRoot, long sortBufferBytes) {
-        this.spillRoot = spillRoot;
-        this.sortBufferBytes = Math.min(sortBufferBytes, Integer.MAX_VALUE);
+    /** Creates an empty index; fields are populated lazily on first access. */
+    public SegmentTermIndex() {
+        // No eager work — all caches are demand-built.
     }
 
     /**
      * Returns the position-ordered list of indexed terms for {@code docId} in
-     * {@code fieldName}, building the per-field index on first access.
-     *
-     * <p>The first call for a field walks the full terms dictionary once, spills
-     * scratch tuples to {@code spillRoot/fieldName/}, external-sorts them with
-     * primitive arrays, and writes the final varint-compact sidecar files.
-     * Subsequent calls are {@code O(1)} mmap lookups into the long[] doc index
-     * plus a short varint decode.
+     * {@code fieldName}, building the per-field streaming cursor on first access.
      */
     public synchronized List<String> getTermsForDocument(LuceneLeafReader reader, int docId, String fieldName)
             throws IOException {
@@ -100,34 +86,29 @@ public class SegmentTermIndex implements AutoCloseable {
     /**
      * Returns the {@link TermEntry} list for {@code docId} in {@code fieldName},
      * including character start/end offsets when the field was indexed with
-     * {@code index_options: offsets}. Building the per-field sidecar on first access.
+     * {@code index_options: offsets}. Opens a streaming cursor on first access.
      */
     public synchronized List<TermEntry> getTermEntriesForDocument(
             LuceneLeafReader reader, int docId, String fieldName) throws IOException {
         if (closed) {
             throw new IOException("SegmentTermIndex has been closed");
         }
-        try {
-            return byField.computeIfAbsent(fieldName, k -> {
-                try {
-                    return buildFieldIndex(reader, fieldName);
-                } catch (IOException e) {
-                    throw new java.io.UncheckedIOException(e);
-                }
-            }).get(docId);
-        } catch (java.io.UncheckedIOException e) {
-            throw e.getCause();
+        StreamingFieldPostings cursor = streamingByField.get(fieldName);
+        if (cursor == null && !streamingByField.containsKey(fieldName)) {
+            cursor = reader.openStreamingFieldPostings(fieldName);
+            streamingByField.put(fieldName, cursor); // may be null — cached as negative answer
         }
+        if (cursor != null) {
+            return cursor.advance(docId);
+        }
+        return Collections.emptyList();
     }
 
     /**
-     * Returns the decoded numeric value (as Long) for {@code docId} in {@code fieldName},
-     * building the per-field numeric index on first access. Returns null if the field has no
-     * trie-encoded numeric terms or the doc was not indexed with a value for the field.
-     *
-     * <p>The returned Long is the raw decoded value from the shift==0 term. Interpretation
-     * (int vs long vs float vs double vs IP string) is applied downstream via
-     * {@link FieldMappingInfo} in {@link SourceReconstructor}.
+     * Returns the decoded numeric value (as {@code Long}) for {@code docId} in
+     * {@code fieldName}, building the per-field numeric index on first access. Returns
+     * {@code null} if the field has no trie-encoded numeric terms or the doc was not
+     * indexed with a value.
      */
     public synchronized Long getNumericForDocument(LuceneLeafReader reader, int docId, String fieldName)
             throws IOException {
@@ -143,69 +124,87 @@ public class SegmentTermIndex implements AutoCloseable {
     }
 
     /**
-     * Builds the sidecar for {@code fieldName} by streaming the terms dict once into a
-     * {@link SidecarBuilder}.
+     * Returns the single decoded term string for {@code docId} in {@code fieldName} via
+     * the streaming multi-term cursor, taking the first emitted term. Returns {@code null}
+     * if the field has no terms or the doc was not indexed with a value.
      *
-     * <p>If the field has no terms (reader emits no tuples), returns a sidecar with an
-     * empty doc-index — lookups return {@link Collections#emptyList()} uniformly.
+     * <p>Replaces the previous eager {@code docId -> term} map. Streaming bounds memory by
+     * the field's unique-term count rather than its document count.
+     *
+     * <p>Note: the streaming cursor requires monotonically non-decreasing docIds. The
+     * caller must access docs in ascending order — this matches the per-segment Flux
+     * ordering. Regressions throw {@link IllegalStateException} from the cursor.
      */
-    private SidecarReader buildFieldIndex(LuceneLeafReader reader, String fieldName) throws IOException {
-        Path fieldSpillDir = spillRoot.resolve(sanitizeFieldName(fieldName));
-        int maxDoc = Math.max(1, reader.maxDoc());
-        // try-with-resources guarantees cleanup of partial spill files if
-        // streamFieldPostings or buildAndOpenReader throws. On the happy path
-        // buildAndOpenReader flips the builder's closed flag, so the subsequent
-        // close() is a no-op and does not touch the files SidecarReader now owns.
-        try (SidecarBuilder builder = new SidecarBuilder(fieldSpillDir, sortBufferBytes, maxDoc)) {
-            reader.streamFieldPostings(fieldName, builder);
-            return builder.buildAndOpenReader();
-        }
+    public synchronized String getSingleTermForDocument(LuceneLeafReader reader, int docId, String fieldName)
+            throws IOException {
+        List<String> all = getMultiTermsForDocument(reader, docId, fieldName);
+        return all.isEmpty() ? null : all.get(0);
     }
 
     /**
-     * Strips path-unsafe characters from the field name so the spill subdirectory name
-     * is filesystem-portable. Collisions are harmless here because {@code spillRoot} itself
-     * is per-segment and field names within a segment are already unique — but two fields
-     * with names differing only in path-unsafe characters would collide. The sanitized name
-     * is therefore suffixed with an index to avoid that edge case.
+     * Returns ALL terms for {@code docId} in {@code fieldName}, each repeated by its
+     * per-doc frequency. For multi-valued keyword fields (object-array subfields), this
+     * recovers the full multiset of values including duplicates — unlike SORTED_SET
+     * doc_values which deduplicates, or {@link #getSingleTermForDocument} which returns
+     * only one.
+     *
+     * <p>Order across distinct terms is unspecified (heap-internal); callers must
+     * consume the result as a multiset. The total count matches the original array
+     * size, enabling exact-size distribution.
+     *
+     * <p>Backed by {@link StreamingMultiTermPostings}: terms are decoded once at build
+     * time and reused via reference equality across docs and across the {@code freq}
+     * repetitions per doc, so memory is bounded by unique-term count, not corpus size.
      */
-    private String sanitizeFieldName(String fieldName) {
-        StringBuilder sb = new StringBuilder(fieldName.length() + 8);
-        for (int i = 0; i < fieldName.length(); i++) {
-            char c = fieldName.charAt(i);
-            if (c == '.' || c == '_' || Character.isLetterOrDigit(c)) {
-                sb.append(c);
-            } else {
-                sb.append('_');
-            }
+    public synchronized List<String> getMultiTermsForDocument(LuceneLeafReader reader, int docId, String fieldName)
+            throws IOException {
+        if (closed) {
+            throw new IOException("SegmentTermIndex has been closed");
         }
-        // append the insertion order so two sanitized-equal names don't collide
-        sb.append('-').append(byField.size());
-        return sb.toString();
+        StreamingMultiTermPostings cursor = multiTermStreamingByField.get(fieldName);
+        if (cursor == null && !multiTermStreamingByField.containsKey(fieldName)) {
+            cursor = reader.openStreamingMultiTermPostings(fieldName);
+            multiTermStreamingByField.put(fieldName, cursor); // may be null — cached as negative answer
+        }
+        if (cursor == null) {
+            return Collections.emptyList();
+        }
+        return cursor.advance(docId);
     }
 
     /**
-     * Closes every sidecar reader and recursively deletes the spill root.
-     * Safe to call multiple times. Exceptions from individual closes are logged
-     * and swallowed so one failing field doesn't leak the rest.
+     * Closes every streaming cursor and clears all caches.
+     * Safe to call multiple times. Exceptions from individual closes are logged and
+     * swallowed so one failing field doesn't leak the others.
+     *
+     * <p>After this returns, the maps hold no references and become eligible for GC
+     * along with the {@code SegmentTermIndex} once its caller releases it.
      */
     @Override
     public synchronized void close() {
         if (closed) return;
         closed = true;
-        for (Map.Entry<String, SidecarReader> e : byField.entrySet()) {
+        for (Map.Entry<String, StreamingFieldPostings> e : streamingByField.entrySet()) {
+            StreamingFieldPostings cursor = e.getValue();
+            if (cursor == null) continue;
             try {
-                e.getValue().close();
+                cursor.close();
             } catch (Exception ex) {
-                log.warn("Failed to close sidecar for field {}: {}", e.getKey(), ex.toString());
+                log.warn("Failed to close streaming postings for field {}: {}", e.getKey(), ex.toString());
             }
         }
-        byField.clear();
-        numericByField.clear();
-        try {
-            IOUtils.rm(spillRoot);
-        } catch (IOException e) {
-            log.warn("Failed to delete spill root {}: {}", spillRoot, e.toString());
+        for (Map.Entry<String, StreamingMultiTermPostings> e : multiTermStreamingByField.entrySet()) {
+            StreamingMultiTermPostings cursor = e.getValue();
+            if (cursor == null) continue;
+            try {
+                cursor.close();
+            } catch (Exception ex) {
+                log.warn("Failed to close streaming multi-term postings for field {}: {}",
+                        e.getKey(), ex.toString());
+            }
         }
+        streamingByField.clear();
+        numericByField.clear();
+        multiTermStreamingByField.clear();
     }
 }

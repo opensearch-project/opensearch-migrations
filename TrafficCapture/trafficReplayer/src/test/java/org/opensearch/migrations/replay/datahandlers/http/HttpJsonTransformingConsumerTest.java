@@ -416,6 +416,41 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         combinedOutputBuf.release();
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testFormEncodedBody_parsedIntoStructuredMap() throws Exception {
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
+        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
+        var formBodyInspectingTransformer = new JsonCompositeTransformer(incomingJson -> {
+            var payload = (Map<String, Object>) ((Map<String, Object>) incomingJson).get("payload");
+            Assertions.assertNull(payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
+            Assertions.assertNull(payload.get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY));
+            Assertions.assertNull(payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY));
+            var formBody = (Map<String, List<String>>) payload.get(
+                JsonKeysForHttpMessage.INLINED_FORM_ENCODED_BODY_DOCUMENT_KEY);
+            Assertions.assertNotNull(formBody, "form-encoded body should be present");
+            Assertions.assertEquals(List.of("hello world"), formBody.get("username"));
+            Assertions.assertEquals(List.of("10"), formBody.get("limit"));
+            Assertions.assertEquals(List.of("name", "date"), formBody.get("sort"));
+            return incomingJson;
+        });
+        var transformingHandler = new HttpJsonTransformingConsumer<AggregatedRawResponse>(
+            formBodyInspectingTransformer,
+            null,
+            testPacketCapture,
+            rootContext.getTestConnectionRequestContext(0)
+        );
+
+        byte[] testBytes;
+        try (var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
+            "/requests/raw/post_formUrlEncoded.txt")) {
+            testBytes = sampleStream.readAllBytes();
+        }
+        transformingHandler.consumeBytes(testBytes);
+        var returnedResponse = transformingHandler.finalizeRequest().get();
+        Assertions.assertEquals(HttpRequestTransformationStatus.completed(), returnedResponse.transformationStatus);
+    }
+
     public static List<byte[]> sliceRandomChunks(byte[] bytes, int numChunks) {
         Random random = new Random(0);
         List<Integer> chunkSizes = new ArrayList<>(numChunks);
