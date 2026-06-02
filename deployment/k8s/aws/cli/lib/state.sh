@@ -15,6 +15,10 @@
 [[ -n "${__MIGRATE_STATE_LOADED:-}" ]] && return 0
 __MIGRATE_STATE_LOADED=1
 
+# Defensive source: state_load uses trim_quotes from std.sh.
+# shellcheck source=lib/std.sh
+source "${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/std.sh"
+
 STATE_KEYS=()
 STATE_VALS=()
 
@@ -35,16 +39,19 @@ state_load() {
   STATE_VALS=()
   local env_file="$STAGE_DIR/state.env"
   if [[ -f "$env_file" ]]; then
-    local k v line
-    while IFS= read -r line || [[ -n "$line" ]]; do
+    local lines line k v
+    read_lines lines "$env_file"
+    for line in "${lines[@]+"${lines[@]}"}"; do
       [[ -z "$line" || "$line" == \#* ]] && continue
       k=${line%%=*}
       v=${line#*=}
-      v=${v%\"}; v=${v#\"}
+      # Strip wrapping double quotes (single chars only, matching how
+      # state_save serializes), then unescape any \" inside.
+      v=$(trim_quotes "$v")
       v=${v//\\\"/\"}
       STATE_KEYS+=("$k")
       STATE_VALS+=("$v")
-    done <"$env_file"
+    done
   fi
 }
 

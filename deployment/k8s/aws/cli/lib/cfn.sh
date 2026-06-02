@@ -8,6 +8,10 @@
 [[ -n "${__MIGRATE_CFN_LOADED:-}" ]] && return 0
 __MIGRATE_CFN_LOADED=1
 
+# Defensive source: uses array_contains, split_csv, join_by, is_interactive.
+# shellcheck source=lib/std.sh
+source "${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/std.sh"
+
 CFN_TEMPLATE_CREATE_VPC='Migration-Assistant-Infra-Create-VPC-eks.template.json'
 CFN_TEMPLATE_IMPORT_VPC='Migration-Assistant-Infra-Import-VPC-eks.template.json'
 
@@ -102,9 +106,11 @@ cfn_deploy_or_skip() {
 
   # Tee the final deploy output into the main log so it's all in one place.
   if [[ -f "$deploy_log" ]]; then
-    while IFS= read -r line; do
+    local cfn_lines line
+    read_lines cfn_lines "$deploy_log"
+    for line in "${cfn_lines[@]+"${cfn_lines[@]}"}"; do
       log_info "cfn-deploy: $line"
-    done <"$deploy_log"
+    done
   fi
 
   if [[ $rc -ne 0 ]]; then
@@ -147,12 +153,16 @@ _cfn_stack_healthy() {
 # resource state.
 _cfn_tail_events() {
   local stack="$1" region="$2" deploy_pid="$3"
-  local seen_log="$STAGE_DIR/log/cfn-events-seen-$$.txt"
-  : >"$seen_log"
+  # Seen-event tracking lives in memory now. The previous on-disk
+  # cfn-events-seen-<pid>.txt + `grep -qxF "$key" "$seen_log"` per event
+  # was the worst fork hotspot in the CLI: a 20-minute deploy with
+  # hundreds of events forked grep hundreds of times. Phase-level resume
+  # is handled by resume.sh; we don't need event-tail crash recovery.
+  local cfn_seen=()
 
   local started; started=$(date +%s)
   local dashboard_mode=0
-  if [[ -t 2 ]]; then
+  if is_interactive; then
     dashboard_mode=1
     _cfn_dashboard_init "$stack" "$region"
   fi
@@ -171,8 +181,8 @@ _cfn_tail_events() {
       while IFS=$'\t' read -r ts logical status reason; do
         [[ -z "$logical" ]] && continue
         local key="${ts}|${logical}|${status}"
-        if grep -qxF "$key" "$seen_log"; then continue; fi
-        printf '%s\n' "$key" >>"$seen_log"
+        if array_contains "$key" cfn_seen; then continue; fi
+        cfn_seen+=("$key")
 
         # Always log every event, regardless of render mode.
         _cfn_log_event "$ts" "$logical" "$status" "$reason"
@@ -199,7 +209,6 @@ _cfn_tail_events() {
   if [[ $dashboard_mode -eq 1 ]]; then
     _cfn_dashboard_finish "$started"
   fi
-  rm -f "$seen_log"
 }
 
 # ---------- Dashboard ----------
@@ -207,12 +216,18 @@ _cfn_tail_events() {
 # CFN-domain status classifier. Every other dashboard mechanic
 # (state, render, finish) is delegated to lib/dashboard.sh which
 # multiple modules share.
+#
+# ABI v2: classifiers set __DASH_CLS via _dash_set_cls instead of
+# printing to stdout. Zero forks per row — used to be the hottest fork
+# path when a CFN deploy had dozens of resources.
 _cfn_status_class() {
   case "$1" in
-    *FAILED|*ROLLBACK*) printf 'fail\n' ;;
-    *IN_PROGRESS)       printf 'prog\n' ;;
-    *COMPLETE)          printf 'done\n' ;;
-    *)                  printf 'other\n' ;;
+    *FAILED|*ROLLBACK*) _dash_set_cls fail    ;;
+    *IN_PROGRESS)       _dash_set_cls prog    ;;
+    # 'done' must be quoted — it's a bash reserved word and the cls value
+    # we use to denote completion. Quoted, it's a literal string arg.
+    *COMPLETE)          _dash_set_cls 'done'  ;;
+    *)                  _dash_set_cls other   ;;
   esac
 }
 
@@ -364,10 +379,12 @@ _cfn_import_vpc_endpoint_params() {
 
   # shellcheck disable=SC2034 # appended via eval
   local __ep_extras=()
-  local IFS_SAVED=$IFS
-  IFS=','; read -r -a parts <<<"$list"; IFS=$IFS_SAVED
+  # parts is populated by split_csv via eval; declare it locally so the
+  # for-loop expansion is clean and so we don't leak into globals.
+  local parts=()
+  split_csv "$list" parts
   local ep
-  for ep in "${parts[@]}"; do
+  for ep in "${parts[@]+"${parts[@]}"}"; do
     case "$ep" in
       s3)
         __ep_extras+=("CreateS3Endpoint=true")
@@ -406,10 +423,10 @@ _cfn_import_vpc_endpoint_params() {
 # S3EndpointRouteTableIds.
 _cfn_subnet_route_table_ids() {
   local vpc_id="$1" subnets_csv="$2" region="$3"
-  local IFS_SAVED=$IFS
-  IFS=','; read -r -a sids <<<"$subnets_csv"; IFS=$IFS_SAVED
+  local sids=()
+  split_csv "$subnets_csv" sids
   local out=() main_rt="" sid rt
-  for sid in "${sids[@]}"; do
+  for sid in "${sids[@]+"${sids[@]}"}"; do
     rt=$(aws ec2 describe-route-tables \
       ${region:+--region "$region"} \
       --filters "Name=association.subnet-id,Values=$sid" \
@@ -427,8 +444,13 @@ _cfn_subnet_route_table_ids() {
     fi
     [[ -n "$rt" && "$rt" != "None" ]] && out+=("$rt")
   done
-  # Dedup and join with commas.
-  local deduped
-  deduped=$(printf '%s\n' "${out[@]+"${out[@]}"}" | awk 'NF && !seen[$0]++' | paste -sd, -)
-  printf '%s' "$deduped"
+  # Dedup (linear bash) + join with commas.
+  local seen=() unique=() x
+  for x in "${out[@]+"${out[@]}"}"; do
+    if ! array_contains "$x" seen; then
+      seen+=("$x")
+      unique+=("$x")
+    fi
+  done
+  join_by , "${unique[@]+"${unique[@]}"}"
 }

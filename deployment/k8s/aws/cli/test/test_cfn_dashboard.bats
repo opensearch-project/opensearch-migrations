@@ -60,16 +60,20 @@ run_split() {
 }
 
 # ---------- (2) status classification ----------
+#
+# ABI v2: classifiers set __DASH_CLS via _dash_set_cls instead of
+# printing to stdout. The `_dash_classify <fn> <status>` wrapper is
+# what dashboard.sh calls; tests use it the same way.
 
 @test "_cfn_status_class classifies CFN states" {
-  [ "$(_cfn_status_class CREATE_IN_PROGRESS)"   = "prog" ]
-  [ "$(_cfn_status_class UPDATE_IN_PROGRESS)"   = "prog" ]
-  [ "$(_cfn_status_class CREATE_COMPLETE)"      = "done" ]
-  [ "$(_cfn_status_class UPDATE_COMPLETE)"      = "done" ]
-  [ "$(_cfn_status_class CREATE_FAILED)"        = "fail" ]
-  [ "$(_cfn_status_class ROLLBACK_IN_PROGRESS)" = "fail" ]
-  [ "$(_cfn_status_class UPDATE_ROLLBACK_COMPLETE)" = "fail" ]
-  [ "$(_cfn_status_class SOMETHING_NEW)"        = "other" ]
+  _dash_classify _cfn_status_class CREATE_IN_PROGRESS;        [ "$__DASH_CLS" = "prog"  ]
+  _dash_classify _cfn_status_class UPDATE_IN_PROGRESS;        [ "$__DASH_CLS" = "prog"  ]
+  _dash_classify _cfn_status_class CREATE_COMPLETE;           [ "$__DASH_CLS" = "done"  ]
+  _dash_classify _cfn_status_class UPDATE_COMPLETE;           [ "$__DASH_CLS" = "done"  ]
+  _dash_classify _cfn_status_class CREATE_FAILED;             [ "$__DASH_CLS" = "fail"  ]
+  _dash_classify _cfn_status_class ROLLBACK_IN_PROGRESS;      [ "$__DASH_CLS" = "fail"  ]
+  _dash_classify _cfn_status_class UPDATE_ROLLBACK_COMPLETE;  [ "$__DASH_CLS" = "fail"  ]
+  _dash_classify _cfn_status_class SOMETHING_NEW;             [ "$__DASH_CLS" = "other" ]
 }
 
 # ---------- (3) elapsed formatter ----------
@@ -137,7 +141,7 @@ run_split() {
   [[ "$STDERR" == *"total 3"* ]]
   [[ "$STDERR" == *"CREATE_FAILED"* ]]
   [[ "$STDERR" == *"Insufficient capacity"* ]]
-  _dash_cursor_restore
+  term_show_cursor
 }
 
 @test "dash_render percentage = completed/total" {
@@ -149,7 +153,7 @@ run_split() {
 
   run_split dash_render cfn "$(date +%s)"
   [[ "$STDERR" == *"75%"* ]]
-  _dash_cursor_restore
+  term_show_cursor
 }
 
 @test "dash_render handles empty resource set without crashing" {
@@ -158,7 +162,7 @@ run_split() {
   [ -z "$STDOUT" ]
   [[ "$STDERR" == *"S"* ]]
   [[ "$STDERR" == *"total 0"* ]]
-  _dash_cursor_restore
+  term_show_cursor
 }
 
 # ---------- (6) log-only event writer ----------
@@ -188,7 +192,7 @@ run_split() {
   [ "$STDOUT" = "3" ]
   rows=$(printf '%s\n' "$STDERR" | grep -c '↻' || true)
   [ "$rows" -eq 3 ]
-  _dash_cursor_restore
+  term_show_cursor
 }
 
 @test "_dash_emit_class returns 0 when cls_count is 0" {
@@ -196,5 +200,5 @@ run_split() {
   run_split _dash_emit_class cfn fail 0 5 _cfn_status_class
   [ "$STDOUT" = "0" ]
   [ -z "$STDERR" ]
-  _dash_cursor_restore
+  term_show_cursor
 }

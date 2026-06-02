@@ -8,6 +8,13 @@
 [[ -n "${__MIGRATE_HELM_LOADED:-}" ]] && return 0
 __MIGRATE_HELM_LOADED=1
 
+# Defensive source: uses regex_capture, optional_cmd; helm error sites
+# call term_link.
+# shellcheck source=lib/std.sh
+source "${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/std.sh"
+# shellcheck source=lib/term.sh
+source "${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/term.sh"
+
 # Context-bound kubectl + helm. helm_install_or_upgrade rebinds these to
 # `--kube-context X` / `--context X` after looking up state.
 # Default to bare invocations so tests / pre-context callers still work.
@@ -269,7 +276,7 @@ helm_install_or_upgrade() {
 
   if [[ $helm_rc -ne 0 ]]; then
     helm_dump_diagnostics "$release" "$HELM_NS"
-    ui_err "helm install/upgrade failed (rc=$helm_rc); diagnostics in $LOG_FILE"
+    ui_err "helm install/upgrade failed (rc=$helm_rc); diagnostics in $(term_link "file://$LOG_FILE" "$LOG_FILE")"
     ui_dim "  retry hint: rerun migration-assistant; recovery will clean up stuck releases AND orphan helm-hook Jobs"
     return $helm_rc
   fi
@@ -285,7 +292,7 @@ helm_install_or_upgrade() {
   set -e
   if [[ $wait_rc -ne 0 ]]; then
     helm_dump_diagnostics "$release" "$HELM_NS"
-    ui_err "migration-console-0 did not become Ready (rc=$wait_rc); diagnostics in $LOG_FILE"
+    ui_err "migration-console-0 did not become Ready (rc=$wait_rc); diagnostics in $(term_link "file://$LOG_FILE" "$LOG_FILE")"
     return $wait_rc
   fi
 
@@ -546,7 +553,7 @@ _helm_explain_failure() {
   if [[ -n "$desc" ]]; then
     printf '%s  why: %s%s\n' "$__UI_C_DIM" "$desc" "$__UI_C_RESET" >&2
     # "name: <job-name>, kind: Job" is the canonical helm failure shape.
-    job=$(printf '%s' "$desc" | sed -nE 's/.*name: ([A-Za-z0-9_.-]+), kind: Job.*/\1/p' | head -1)
+    job=$(regex_capture "$desc" 'name: ([A-Za-z0-9_.-]+), kind: Job')
     if [[ -n "$job" ]]; then
       _helm_dump_failed_job "$job" "$ns"
     fi
@@ -622,15 +629,14 @@ _helm_release_status() {
   local json
   json=$("${HELM[@]}" status "$release" --namespace "$ns" -o json 2>/dev/null) || return 0
   [[ -z "$json" ]] && return 0
-  if command -v jq >/dev/null 2>&1; then
+  if optional_cmd jq; then
     printf '%s' "$json" | jq -r '.info.status // empty'
   else
-    # Fallback parser. Looks for `"status":"<value>"` (with optional spaces)
-    # specifically inside the .info object — first occurrence wins.
-    printf '%s' "$json" \
-      | tr -d '\n' \
-      | sed -E 's/.*"info"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' \
-      | head -1
+    # Fallback parser. Strip newlines into one line, then capture the
+    # status field inside the .info object via BASH_REMATCH (no fork).
+    local flat="${json//$'\n'/}"
+    regex_capture "$flat" \
+      '"info"[[:space:]]*:[[:space:]]*\{[^}]*"status"[[:space:]]*:[[:space:]]*"([^"]+)"'
   fi
 }
 
@@ -1022,25 +1028,45 @@ helm_watch_pods() {
       continue
     fi
 
-    # Count fields with awk so we don't depend on `grep -c` (which returns
-    # rc=1 on zero matches and would trip `set -e + pipefail`).
-    local total running pending failed pending_names failed_names not_ready
-    total=$(printf   '%s\n' "$snapshot" | awk 'NF>0 {n++} END {print n+0}')
-    running=$(printf '%s\n' "$snapshot" | awk '$2=="Running" {n++} END {print n+0}')
-    pending=$(printf '%s\n' "$snapshot" | awk '$2=="Pending" {n++} END {print n+0}')
-    failed=$(printf  '%s\n' "$snapshot" | awk '$2=="Failed"  {n++} END {print n+0}')
-    # Names per non-Ready category — when the operator sees `pending=3`
-    # they need to know WHICH 3 pods are stuck so they can investigate.
-    pending_names=$(printf '%s\n' "$snapshot" \
-      | awk '$2=="Pending" {print $1}' \
-      | tr '\n' ',' | sed 's/,$//')
-    failed_names=$(printf '%s\n' "$snapshot" \
-      | awk '$2=="Failed" {print $1}' \
-      | tr '\n' ',' | sed 's/,$//')
-    # Pods that are Running but with at least one unready container.
-    not_ready=$(printf '%s\n' "$snapshot" \
-      | awk '$2=="Running" && $3 ~ /false/ {print $1}' \
-      | tr '\n' ',' | sed 's/,$//')
+    # Count fields + extract name lists in ONE awk pass instead of seven.
+    # Old code forked awk four times for counters + three more for the
+    # tr/sed join chains — at the WATCH_INTERVAL=10s default that's a
+    # 70-fork-per-minute regression on a busy cluster. One awk emits
+    # KEY=VALUE lines we eval into local vars.
+    local total=0 running=0 pending=0 failed=0
+    local pending_names="" failed_names="" not_ready=""
+    local awk_out
+    awk_out=$(printf '%s\n' "$snapshot" | awk '
+      BEGIN { sep="" }
+      NF>0 { total++ }
+      $2 == "Running" {
+        running++
+        if ($3 ~ /false/) {
+          not_ready = (not_ready == "" ? $1 : not_ready "," $1)
+        }
+      }
+      $2 == "Pending" {
+        pending++
+        pending_names = (pending_names == "" ? $1 : pending_names "," $1)
+      }
+      $2 == "Failed" {
+        failed++
+        failed_names = (failed_names == "" ? $1 : failed_names "," $1)
+      }
+      END {
+        print "total="   total+0
+        print "running=" running+0
+        print "pending=" pending+0
+        print "failed="  failed+0
+        print "pending_names=" pending_names
+        print "failed_names="  failed_names
+        print "not_ready="     not_ready
+      }
+    ')
+    # Eval is safe here: every key is fixed (above), every value is from
+    # `kubectl get pods` output filtered through awk (k8s names are
+    # /[a-z0-9-]+/; commas are added by us). No shell metacharacters.
+    eval "$awk_out"
 
     local summary
     summary=$(printf 'pods total=%d running=%d pending=%d failed=%d' \

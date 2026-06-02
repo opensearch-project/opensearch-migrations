@@ -16,14 +16,19 @@ LICENSE_SRC := $(firstword $(wildcard ../../../../LICENSE) $(wildcard $(CURDIR)/
 
 SHELL_FILES := bin/migration-assistant install.sh $(wildcard lib/*.sh) $(wildcard test/helpers/*.sh)
 
-.PHONY: lint test release install clean help
+.PHONY: lint lint-bash32 test release install clean help
 
 help:
 	@printf 'Targets:\n  make lint\n  make test\n  make release\n  make install\n  make clean\n'
 
-lint:
+lint: lint-bash32
 	@command -v shellcheck >/dev/null 2>&1 || { echo "install shellcheck"; exit 127; }
 	shellcheck -x -P lib $(SHELL_FILES)
+
+# bash-3.2 floor enforcement. Run as part of `make lint` so PRs that
+# introduce a bash 4+ feature fail before merge.
+lint-bash32:
+	./test/lint-bash32.sh
 
 test:
 	@command -v bats >/dev/null 2>&1 || { echo "install bats-core: brew install bats-core"; exit 127; }

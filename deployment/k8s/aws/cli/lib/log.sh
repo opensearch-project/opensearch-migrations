@@ -23,6 +23,10 @@
 [[ -n "${__MIGRATE_LOG_LOADED:-}" ]] && return 0
 __MIGRATE_LOG_LOADED=1
 
+# Defensive source: log_init uses is_macos.
+# shellcheck source=lib/std.sh
+source "${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/std.sh"
+
 : "${MIGRATE_VERBOSE:=0}"
 LOG_FILE="${LOG_FILE:-/dev/null}"
 
@@ -30,8 +34,15 @@ log_init() {
   stage_dir_init
   LOG_FILE="$STAGE_DIR/log/migrate.log"
   if [[ -f "$LOG_FILE" ]]; then
-    local sz
-    sz=$(wc -c <"$LOG_FILE" 2>/dev/null | tr -d ' ' || echo 0)
+    # Use stat (single fork) instead of `wc -c | tr -d ' '` (two forks
+    # plus a pipeline that broke the `|| echo 0` fallback semantics —
+    # tr always succeeded on empty input, masking a wc error).
+    local sz=0
+    if is_macos; then
+      sz=$(stat -f %z "$LOG_FILE" 2>/dev/null || echo 0)
+    else
+      sz=$(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0)
+    fi
     if [[ "$sz" -gt 5242880 ]]; then
       mv -f "$LOG_FILE" "$LOG_FILE.1"
     fi

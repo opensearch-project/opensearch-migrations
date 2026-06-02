@@ -12,6 +12,10 @@
 [[ -n "${__MIGRATE_CLEANUP_LOADED:-}" ]] && return 0
 __MIGRATE_CLEANUP_LOADED=1
 
+# Defensive source: cleanup confirmation uses term_panel.
+# shellcheck source=lib/term.sh
+source "${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/term.sh"
+
 cmd_cleanup() {
   # Accept --stage / --non-interactive / -y so callers (Jenkins, awsRun*)
   # can target the right stage and skip the confirm prompt.
@@ -49,13 +53,25 @@ cmd_cleanup() {
   fi
 
   ui_banner "Cleanup stage: $STAGE"
-  if [[ -n "$release" ]]; then
-    ui_info "  helm release : $release (namespace: $helm_ns)"
-  fi
+
+  # Build the panel body lines so the operator sees EXACTLY what's about
+  # to be deleted before they confirm — visceral safety. The previous
+  # code used a one-line ui_warn + a [y/N] prompt, which is too easy to
+  # autopilot through.
+  local panel_lines=()
   if [[ -n "$stack" ]]; then
-    ui_info "  CFN stack    : $stack (region: $region)"
+    panel_lines+=("CloudFormation stack    $stack")
+    [[ -n "$region" ]] && panel_lines+=("Region                  $region")
   fi
-  ui_warn "This will delete the EKS cluster, the VPC, and all migration-console state."
+  if [[ -n "$release" ]]; then
+    panel_lines+=("Helm release            $release  (namespace: $helm_ns)")
+  fi
+  panel_lines+=("Local state             $STAGE_DIR")
+  panel_lines+=("")
+  panel_lines+=("This will delete the EKS cluster, the VPC, and migration-console state.")
+
+  term_panel "Cleanup will remove" "${panel_lines[@]}"
+
   # Non-interactive callers (Jenkins, scripts) skip the confirm. Anyone
   # who got here without --non-interactive sees the prompt with a default
   # of N — they have to type y to proceed.

@@ -16,6 +16,10 @@
 [[ -n "${__MIGRATE_CRANE_LOADED:-}" ]] && return 0
 __MIGRATE_CRANE_LOADED=1
 
+# Defensive source: uses count_lines_var.
+# shellcheck source=lib/std.sh
+source "${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/std.sh"
+
 # Path of privateEcrManifest.sh inside the opensearch-migrations repo.
 # Pulled from the tag matching MA_VERSION via raw.githubusercontent.com
 # (so we match the exact image versions the chart expects).
@@ -64,7 +68,7 @@ crane_mirror_or_skip() {
   fi
 
   local total
-  total=$(printf '%s\n' "$image_list" | wc -l | tr -d ' ')
+  total=$(count_lines_var image_list)
   ui_info "found $total images to mirror"
 
   # The CFN-published `registry` is `<host>/<single-repo>`. We mirror under

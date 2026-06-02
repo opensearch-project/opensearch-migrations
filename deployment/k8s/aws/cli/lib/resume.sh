@@ -5,6 +5,10 @@
 [[ -n "${__MIGRATE_RESUME_LOADED:-}" ]] && return 0
 __MIGRATE_RESUME_LOADED=1
 
+# Defensive source: resume's pre-prompt uses timeline_render.
+# shellcheck source=lib/timeline.sh
+source "${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/timeline.sh"
+
 # cmd_resume — invoked by `migration-assistant` (the default subcommand) and
 # by `migration-assistant resume`. Parses CLI flags, dispatches to the
 # Manual or Agent path.
@@ -163,7 +167,9 @@ cmd_resume() {
         resuming=1
         ;;
       *)
-        ui_info "previous run progressed to: $prev_step"
+        ui_info "previous run progressed to: $(timeline_phase_label "$prev_step")"
+        timeline_render "$prev_step"
+        printf '\n' >&2
         if ui_confirm "Resume from this point?" "Y"; then
           resuming=1
         else

@@ -173,7 +173,12 @@ EOF
   # diving into discovery. We just need to see the prompt.
   run bash -c "printf 'n\n' | timeout 8 '$CLI_BIN' resume 2>&1"
 
-  if [[ "$output" != *"previous run progressed to: wizard_done"* ]]; then
+  # The CLI now shows the human-readable phase label
+  # ("Configure deploy") via timeline_phase_label() instead of the raw
+  # last_step key. Accept either form so this test is resilient to
+  # future relabeling.
+  if [[ "$output" != *"previous run progressed to: Configure deploy"* \
+     && "$output" != *"previous run progressed to: wizard_done"* ]]; then
     _diag "resume: did not show 'previous run progressed to' prompt — state was wiped"
     return 1
   fi

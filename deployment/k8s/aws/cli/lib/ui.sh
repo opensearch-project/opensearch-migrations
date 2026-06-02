@@ -2,7 +2,11 @@
 # ui.sh — terminal UI primitives. Color, prompts, spinner, banners.
 #
 # Design rules:
-#   * No external deps. Everything is printf + tput.
+#   * No external deps. Everything is printf — no tput, no ncurses.
+#     Color constants come from lib/term.sh (raw ANSI SGR via $'\e[…m'),
+#     which avoids the 8 cold-start subshells the old tput block forked
+#     and the latent `tput dim`-returns-non-zero crash on minimal
+#     terminfo (busybox, dumb terminals, Jenkins agents).
 #   * If stderr is not a TTY, drop colors silently (CI-safe output).
 #   * Prompts read from /dev/tty when stdin is not a TTY (curl-piped
 #     installer scenario), so install.sh can still ask questions.
@@ -23,29 +27,31 @@
 [[ -n "${__MIGRATE_UI_LOADED:-}" ]] && return 0
 __MIGRATE_UI_LOADED=1
 
-# Detect color support once. We check stderr (fd 2) since that's where chrome
-# goes; if stderr is a TTY we render colors, otherwise plain.
-if [[ -t 2 ]] && command -v tput >/dev/null 2>&1 && [[ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]]; then
-  __UI_C_RESET=$(tput sgr0)
-  __UI_C_RED=$(tput setaf 1)
-  __UI_C_GREEN=$(tput setaf 2)
-  __UI_C_YELLOW=$(tput setaf 3)
-  __UI_C_BLUE=$(tput setaf 4)
-  __UI_C_CYAN=$(tput setaf 6)
-  __UI_C_DIM=$(tput dim)
-  __UI_C_BOLD=$(tput bold)
-else
-  __UI_C_RESET=''
-  __UI_C_RED=''
-  __UI_C_GREEN=''
-  __UI_C_YELLOW=''
-  __UI_C_BLUE=''
-  __UI_C_CYAN=''
-  __UI_C_DIM=''
-  __UI_C_BOLD=''
-fi
+# ui.sh has a hard dependency on term.sh (color constants, cursor mgmt,
+# tty detection). Source it defensively so callers — including bats
+# tests that load _common.sh + ui.sh directly — get a working color
+# table without each of them having to know about term.sh.
+# shellcheck source=lib/term.sh
+source "${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/term.sh"
+
+# term.sh owns terminal detection, color constants, and cursor management.
+# We re-export the __TERM_C_* constants under their legacy __UI_C_* names
+# so existing call sites in cfn.sh / dashboard.sh / cleanup.sh / helm.sh
+# keep working unchanged. New code should reach for term.sh directly.
+term_init
+__UI_C_RESET="$__TERM_C_RESET"
+__UI_C_RED="$__TERM_C_RED"
+__UI_C_GREEN="$__TERM_C_GREEN"
+__UI_C_YELLOW="$__TERM_C_YELLOW"
+__UI_C_BLUE="$__TERM_C_BLUE"
+__UI_C_CYAN="$__TERM_C_CYAN"
+__UI_C_DIM="$__TERM_C_DIM"
+__UI_C_BOLD="$__TERM_C_BOLD"
 
 # Every chrome helper writes to stderr — see file header for the rule.
+# Embed clickable hyperlinks in any chrome message via $(term_link URL LABEL).
+# OSC 8 is rendered by iTerm2, kitty, Wezterm, vscode, recent gnome-terminal;
+# older terminals see plain text and don't break.
 ui_info()    { printf '%s%s%s %s\n' "$__UI_C_CYAN"   "ℹ"  "$__UI_C_RESET" "$*" >&2; }
 ui_ok()      { printf '%s%s%s %s\n' "$__UI_C_GREEN"  "✓"  "$__UI_C_RESET" "$*" >&2; }
 ui_warn()    { printf '%s%s%s %s\n' "$__UI_C_YELLOW" "!"  "$__UI_C_RESET" "$*" >&2; }
@@ -156,13 +162,13 @@ ui_confirm() {
     answer="$default_yn"
   fi
 
-  # Lowercase first letter for the comparison. Bash 3.2 has no ${var,,}.
-  local first
-  first=$(printf '%s' "$answer" | cut -c1 | tr '[:upper:]' '[:lower:]')
-  case "$first" in
-    y) return 0 ;;
-    n) return 1 ;;
-    *) return 1 ;;   # unknown input — be conservative
+  # Match on first letter, case-insensitive. Bash 3.2 has no ${var,,};
+  # earlier versions of this code forked `cut | tr` per call. Pure-pattern
+  # case matching is fork-free and identical in behavior.
+  case "$answer" in
+    [Yy]*) return 0 ;;
+    [Nn]*) return 1 ;;
+    *)     return 1 ;;   # unknown input — be conservative
   esac
 }
 
@@ -216,7 +222,11 @@ ui_spinner_start() {
     while :; do
       printf '\r%s %s ' "${frames:$((i % ${#frames})):1}" "$msg" >&2
       i=$((i + 1))
-      sleep 0.08
+      # 80 ms inter-frame interval, but interruptible: `read -t 0.08`
+      # from /dev/null returns immediately on SIGTERM. Plain `sleep
+      # 0.08` blocks SIGTERM until the sleep returns, which produced
+      # visible half-redrawn glyphs on Ctrl-C.
+      read -r -t 0.08 _ </dev/null || true
     done
   ) &
   local pid=$!
@@ -229,5 +239,5 @@ ui_spinner_stop() {
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
   on_signal_untrack_pid "$pid"
-  printf '\r\033[K' >&2
+  term_clear_line
 }

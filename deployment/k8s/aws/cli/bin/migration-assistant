@@ -30,6 +30,12 @@ export LIB_DIR
 
 # shellcheck source=lib/_common.sh
 source "$LIB_DIR/_common.sh"
+# std + term must load before ui.sh — ui.sh re-exports term.sh's color
+# constants under their legacy __UI_C_* names.
+# shellcheck source=lib/std.sh
+source "$LIB_DIR/std.sh"
+# shellcheck source=lib/term.sh
+source "$LIB_DIR/term.sh"
 # shellcheck source=lib/version.sh
 source "$LIB_DIR/version.sh"
 # shellcheck source=lib/ui.sh
@@ -48,6 +54,8 @@ source "$LIB_DIR/artifacts.sh"
 source "$LIB_DIR/wizard.sh"
 # shellcheck source=lib/dashboard.sh
 source "$LIB_DIR/dashboard.sh"
+# shellcheck source=lib/timeline.sh
+source "$LIB_DIR/timeline.sh"
 # shellcheck source=lib/cfn.sh
 source "$LIB_DIR/cfn.sh"
 # shellcheck source=lib/crane.sh

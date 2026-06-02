@@ -15,30 +15,34 @@
 [[ -n "${__MIGRATE_DISCOVER_LOADED:-}" ]] && return 0
 __MIGRATE_DISCOVER_LOADED=1
 
+# Defensive source: uses json_get / is_macos / is_linux / optional_cmd.
+# shellcheck source=lib/std.sh
+source "${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/std.sh"
+
 # discover_os — set OS_NAME, PKG_MGR.
 discover_os() {
   local os pm
-  case "$(uname -s)" in
-    Linux)
-      if grep -qi microsoft /proc/version 2>/dev/null; then
-        os=wsl
-      else
-        os=linux
-      fi
-      ;;
-    Darwin) os=darwin ;;
-    *)      os=other ;;
-  esac
+  if is_linux; then
+    if grep -qi microsoft /proc/version 2>/dev/null; then
+      os=wsl
+    else
+      os=linux
+    fi
+  elif is_macos; then
+    os=darwin
+  else
+    os=other
+  fi
 
-  if [[ "$os" == darwin ]] && command -v brew >/dev/null 2>&1; then
+  if [[ "$os" == darwin ]] && optional_cmd brew; then
     pm=brew
-  elif command -v apt-get >/dev/null 2>&1; then
+  elif optional_cmd apt-get; then
     pm=apt
-  elif command -v dnf >/dev/null 2>&1; then
+  elif optional_cmd dnf; then
     pm=dnf
-  elif command -v yum >/dev/null 2>&1; then
+  elif optional_cmd yum; then
     pm=yum
-  elif command -v brew >/dev/null 2>&1; then
+  elif optional_cmd brew; then
     pm=brew
   else
     pm=none
@@ -62,8 +66,8 @@ discover_aws() {
     return 1
   fi
   local account arn
-  account=$(printf '%s\n' "$out" | _jq_or_grep '.Account' 'Account')
-  arn=$(printf '%s\n' "$out" | _jq_or_grep '.Arn' 'Arn')
+  account=$(printf '%s\n' "$out" | json_get '.Account')
+  arn=$(printf '%s\n' "$out" | json_get '.Arn')
 
   local region="${AWS_REGION:-${AWS_DEFAULT_REGION:-}}"
   if [[ -z "$region" ]]; then
@@ -96,15 +100,10 @@ discover_resources() {
   fi
 }
 
-# Internal helper: extract a top-level JSON field. Uses jq if present,
-# otherwise a coarse grep+sed. Good enough for sts:GetCallerIdentity output.
+# _jq_or_grep was a single-key helper bolted on for sts:GetCallerIdentity;
+# json_get (lib/std.sh) generalizes it with the same fallback behavior.
+# This stub stays to keep any out-of-tree callers (none today) working.
 _jq_or_grep() {
-  local jq_expr="$1" grep_key="$2"
-  if command -v jq >/dev/null 2>&1; then
-    jq -r "$jq_expr"
-  else
-    grep -o "\"${grep_key}\":[[:space:]]*\"[^\"]*\"" \
-      | head -1 \
-      | sed -E 's/.*"([^"]+)"$/\1/'
-  fi
+  local jq_expr="$1"
+  json_get "$jq_expr"
 }
