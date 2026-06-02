@@ -1,11 +1,9 @@
 /**
- * Deploy the Migration Assistant CFN stack and capture exports.
+ * Run the migration-assistant CLI from the source checkout to deploy the
+ * Migration Assistant CFN stack. State and the run log land under
+ * ./migration-assistant-workspace/<stage>/ in the Jenkins workspace.
  *
- * Supports two VPC modes:
- *   - Create VPC (default): --deploy-create-vpc-cfn
- *   - Import VPC: --deploy-import-vpc-cfn (requires vpcId, subnetIds)
- *
- * Sets these env vars:
+ * Sets these env vars from CFN outputs after deploy:
  *   - env.MA_STACK_NAME
  *   - env.registryEndpoint
  *   - env.eksClusterName
@@ -15,63 +13,89 @@
  *
  * Usage:
  *   bootstrapMA(
- *       stackName: "...",
- *       stage: maStageName,
- *       region: params.REGION,
- *       bootstrap: bootstrap,           // from resolveBootstrap()
+ *       stackName:             "...",
+ *       stage:                 maStageName,
+ *       region:                params.REGION,
  *       eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
- *       kubectlContext: "my-custom-context",
+ *       kubectlContext:        "my-custom-context",
+ *       build:                 params.BUILD,
+ *       skipTestImages:        true,
+ *       useGeneralNodePool:    true,
+ *       version:               params.VERSION,  // ignored when build=true
  *       // Optional — import VPC mode:
- *       vpcId: "vpc-xxx",
- *       subnetIds: "subnet-a,subnet-b",
- *       createVpcEndpoints: true,
- *       // Optional — mirror images from another ECR:
- *       maImagesSource: "ecr-registry-url"
+ *       vpcId:               "vpc-xxx",
+ *       subnetIds:           "subnet-a,subnet-b",
+ *       createVpcEndpoints:  "s3,ecr,ecrDocker",
+ *       // Optional:
+ *       maImagesSource: "ecr-registry-url",
+ *       tlsMode:        "self-signed",
+ *       pcaArn:         "arn:aws:acm-pca:..."
  *   )
  */
 def call(Map config = [:]) {
     def stackName = config.stackName
     def stage = config.stage
     def region = config.region
-    def bootstrap = config.bootstrap
     def eksAccessPrincipalArn = config.eksAccessPrincipalArn
     def kubectlContext = config.kubectlContext
 
     if (!stackName) { error("bootstrapMA: 'stackName' is required") }
     if (!stage) { error("bootstrapMA: 'stage' is required") }
     if (!region) { error("bootstrapMA: 'region' is required") }
-    if (!bootstrap) { error("bootstrapMA: 'bootstrap' is required") }
     if (!eksAccessPrincipalArn) { error("bootstrapMA: 'eksAccessPrincipalArn' is required") }
     if (!kubectlContext) { error("bootstrapMA: 'kubectlContext' is required") }
 
     env.MA_STACK_NAME = stackName
     env.eksKubeContext = kubectlContext
 
-    def tlsMode = config.tlsMode
-    def tlsFlag = tlsMode ? "--tls-mode ${tlsMode}" : ''
+    def flags = []
 
-    // Determine VPC mode
-    def vpcId = config.vpcId
-    def subnetIds = config.subnetIds
-    def deployFlag = vpcId ? '--deploy-import-vpc-cfn' : '--deploy-create-vpc-cfn'
-    def vpcFlags = vpcId ? "--vpc-id ${vpcId} --subnet-ids ${subnetIds}" : ''
-    def endpointFlag = config.createVpcEndpoints ? '--create-vpc-endpoints' : ''
-    def imageSourceFlag = config.maImagesSource ? "--ma-images-source ${config.maImagesSource}" : ''
+    // VPC mode.
+    if (config.vpcId) {
+        flags << '--deploy-import-vpc-cfn'
+        flags << "--vpc-id ${config.vpcId}"
+        flags << "--subnet-ids ${config.subnetIds}"
+        if (config.createVpcEndpoints) {
+            flags << "--create-vpc-endpoints ${config.createVpcEndpoints}"
+        }
+    } else {
+        flags << '--deploy-create-vpc-cfn'
+    }
 
+    // Build-from-source vs released artifacts.
+    if (config.build) {
+        flags << '--build'
+        if (config.skipTestImages) flags << '--skip-test-images'
+        // base-dir defaults to the repo root the CLI was invoked out of;
+        // pwd is that root in the Jenkins workspace.
+    } else if (config.version && config.version != 'latest') {
+        flags << "--version ${config.version}"
+    }
+
+    if (config.useGeneralNodePool)        flags << '--use-general-node-pool'
+    if (config.disableGeneralPurposePool) flags << '--disable-general-purpose-pool'
+
+    if (config.tlsMode)        flags << "--tls-mode ${config.tlsMode}"
+    if (config.pcaArn)         flags << "--pca-arn ${config.pcaArn}"
+    if (config.maImagesSource) flags << "--ma-images-source ${config.maImagesSource}"
+
+    def flagStr = flags.join(' ')
+    def workspaceDir = "${env.WORKSPACE}/migration-assistant-workspace"
+
+    // Run the CLI. Stream stdout+stderr live (each line tagged with the
+    // wall-clock time so a hang is obvious in the Jenkins console). On
+    // non-zero exit, dump the full migrate.log so the failure root cause
+    // is in the same console output without a Jenkins archive round trip.
     sh """
         set +e
-        ${bootstrap.script} \
+        export MIGRATE_HOME="${workspaceDir}"
+        ./deployment/k8s/aws/cli/bin/migration-assistant \
           --non-interactive \
           --verbose \
-          ${deployFlag} \
           --stack-name "${stackName}" \
           --stage "${stage}" \
           --eks-access-principal-arn "${eksAccessPrincipalArn}" \
-          ${bootstrap.flags} \
-          ${tlsFlag} \
-          ${vpcFlags} \
-          ${endpointFlag} \
-          ${imageSourceFlag} \
+          ${flagStr} \
           --skip-console-exec \
           --skip-setting-k8s-context \
           --kubectl-context "${kubectlContext}" \
@@ -81,8 +105,8 @@ def call(Map config = [:]) {
         set -e
         if [ \$rc -ne 0 ]; then
           echo "=== migration-assistant FAILED (rc=\$rc) — full migrate.log ==="
-          cat "\$HOME/.opensearch-migrate/${stage}/log/migrate.log" 2>&1 || \
-            echo "(migrate.log not found at \$HOME/.opensearch-migrate/${stage}/log/migrate.log)"
+          cat "${workspaceDir}/${stage}/log/migrate.log" 2>&1 || \
+            echo "(migrate.log not found at ${workspaceDir}/${stage}/log/migrate.log)"
           echo "=== end migrate.log ==="
         fi
         exit \$rc
@@ -92,7 +116,7 @@ def call(Map config = [:]) {
     // both on success and failure so the log is always captureable.
     sh """
         mkdir -p migrate-cli-logs/${stage}
-        cp -R "\$HOME/.opensearch-migrate/${stage}/log/." migrate-cli-logs/${stage}/ 2>/dev/null || true
+        cp -R "${workspaceDir}/${stage}/log/." migrate-cli-logs/${stage}/ 2>/dev/null || true
     """
     archiveArtifacts(
         artifacts: "migrate-cli-logs/**",

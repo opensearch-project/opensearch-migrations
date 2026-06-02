@@ -12,9 +12,8 @@ CFN_TEMPLATE_CREATE_VPC='Migration-Assistant-Infra-Create-VPC-eks.template.json'
 CFN_TEMPLATE_IMPORT_VPC='Migration-Assistant-Infra-Import-VPC-eks.template.json'
 
 cfn_deploy_or_skip() {
-  # Allow flag override of the stack name (--stack-name) so the
-  # aws-bootstrap.sh CLI surface is preserved. State holds the chosen
-  # name; default is "MigrationAssistant-<stage>".
+  # State holds the chosen stack name (set by --stack-name); default is
+  # "MigrationAssistant-<stage>".
   local stage_name; stage_name=$(state_get STAGE_NAME "ma")
   local stack_name; stack_name=$(state_get CFN_STACK_NAME "MigrationAssistant-${stage_name}")
   state_set CFN_STACK_NAME "$stack_name"
@@ -266,7 +265,7 @@ _cfn_print_event() {
 #
 # The opensearch-migrations CFN stacks publish a single output called
 # MigrationsExportString — a long string of bash `export VAR=VALUE; …`
-# statements that aws-bootstrap.sh sources verbatim. To keep the rest of
+# statements. To keep the rest of
 # the CLI's logic tidy, we expand that here so callers see flat KEY=VALUE
 # pairs:
 #
@@ -346,8 +345,7 @@ _cfn_pick() {
 # _cfn_import_vpc_endpoint_params <vpc-id> <subnet-ids-csv> <region> <params-array>
 #
 # Translate the comma-separated --create-vpc-endpoints list into the
-# per-endpoint Create*Endpoint=true CFN parameters. Mirrors the legacy
-# aws-bootstrap.sh contract:
+# per-endpoint Create*Endpoint=true CFN parameters:
 #
 #   s3              → CreateS3Endpoint=true (+ S3EndpointRouteTableIds)
 #   ecr             → CreateECREndpoint=true

@@ -69,7 +69,7 @@ crane_mirror_or_skip() {
 
   # The CFN-published `registry` is `<host>/<single-repo>`. We mirror under
   # a `mirrored/` prefix INSIDE that account's ECR (matching upstream
-  # aws-bootstrap.sh's `mirrored/<image-no-tag>` layout). Each unique
+  # the `mirrored/<image-no-tag>` layout). Each unique
   # image-path becomes its own ECR repository (ECR repo names allow "/"
   # but each must be created before push).
   local ecr_host="${registry%%/*}"
@@ -112,12 +112,10 @@ crane_mirror_or_skip() {
   fi
   ui_ok "mirrored $ok/$total public images to $ecr_host (under mirrored/)"
 
-  # Now mirror the 5 MA-team images. They follow a different layout —
-  # upstream aws-bootstrap.sh pushes them all into a SINGLE ECR repo
+  # Now mirror the 5 MA-team images. They go into a SINGLE ECR repo
   # ($MIGRATIONS_ECR_REGISTRY = <host>/migration-ecr-<stage>-<region>)
   # with name-disambiguating tags like `migrations_migration_console_3.2.1`.
-  # _helm_build_mirrored_image_flags assumes that exact layout, so we
-  # match it here.
+  # _helm_build_mirrored_image_flags assumes that exact layout.
   #
   # Skip when --build already pushed them with a per-build tag.
   if [[ "$(state_get MA_IMAGES_PREMIRRORED N)" == "Y" ]]; then
@@ -145,16 +143,15 @@ _crane_mirror_ma_images() {
 
   # Source registry: --ma-images-source overrides public.ecr.aws so
   # restricted accounts can copy from another ECR they already have
-  # access to. When set, legacy bootstrap reads tag "latest" rather
-  # than $MA_VERSION because that flow is for already-tagged images.
+  # access to. With --ma-images-source the source tag is `latest` —
+  # the source images are already tagged, no per-version suffix.
   local ma_src; ma_src=$(state_get MA_IMAGES_SOURCE "")
   ui_step "Mirroring 5 MA-team images to $registry (single-repo, disambiguating tags)"
   if [[ -n "$ma_src" ]]; then
     ui_dim "  source: --ma-images-source=$ma_src"
   fi
 
-  # build_name|public_suffix — must match upstream aws-bootstrap.sh's
-  # MA_IMAGES table (lines ~1534).
+  # build_name|public_suffix — match the chart's image-overrides keys.
   local pairs=(
     "capture_proxy|traffic-capture-proxy"
     "traffic_replayer|traffic-replayer"
@@ -230,7 +227,6 @@ _crane_load_manifest() {
 
 # _dst_for <src> <ecr-host>  →  destination URL for crane copy.
 #
-# Layout matches upstream aws-bootstrap.sh's mirror_image_to_ecr:
 #
 #   src   = quay.io/strimzi/kafka:0.50.1-kafka-4.0.0
 #   dst   = <ecr-host>/mirrored/quay.io/strimzi/kafka:0.50.1-kafka-4.0.0
@@ -244,7 +240,7 @@ _dst_for() {
 
 # _crane_copy_retry <src> <dst>
 #
-# Runs `crane copy` with exponential backoff. Mirrors aws-bootstrap.sh's
+# Runs `crane copy` with exponential backoff.
 # retry policy: up to 5 attempts, sleeping 5/10/20/40s between them.
 # Total worst-case wait: ~75 seconds before giving up on one image.
 #

@@ -13,6 +13,17 @@
 __MIGRATE_CLEANUP_LOADED=1
 
 cmd_cleanup() {
+  # Accept --stage / --non-interactive / -y so callers (Jenkins, awsRun*)
+  # can target the right stage and skip the confirm prompt.
+  local args=("$@") i
+  for ((i = 0; i < ${#args[@]}; i++)); do
+    case "${args[$i]}" in
+      --stage)    STAGE="${args[$((i + 1))]}"; STAGE_DIR="$MIGRATE_HOME/$STAGE" ;;
+      --stage=*)  STAGE="${args[$i]#--stage=}"; STAGE_DIR="$MIGRATE_HOME/$STAGE" ;;
+      --non-interactive|-y) export MIGRATE_NONINTERACTIVE=1 ;;
+    esac
+  done
+
   log_init
   log_announce
   on_exit_register log_announce_exit
@@ -22,8 +33,8 @@ cmd_cleanup() {
   local release; release=$(state_get HELM_RELEASE "")
   local region;  region=$(state_get AWS_REGION "")
   # Release name AND namespace are pinned to "ma" (chart contract).
-  # If state has any deploy artifact AT ALL but no HELM_RELEASE row
-  # (legacy state files), assume the standard "ma" release.
+  # If state has any deploy artifact AT ALL but no HELM_RELEASE row,
+  # assume the standard "ma" release.
   local helm_ns="$HELM_NAMESPACE"
   if [[ -z "$release" && -n "$stack" ]]; then
     release="$HELM_RELEASE_NAME"
@@ -45,9 +56,14 @@ cmd_cleanup() {
     ui_info "  CFN stack    : $stack (region: $region)"
   fi
   ui_warn "This will delete the EKS cluster, the VPC, and all migration-console state."
-  if ! ui_confirm "Proceed with cleanup?" "N"; then
-    ui_info "cleanup cancelled"
-    return 0
+  # Non-interactive callers (Jenkins, scripts) skip the confirm. Anyone
+  # who got here without --non-interactive sees the prompt with a default
+  # of N — they have to type y to proceed.
+  if [[ "${MIGRATE_NONINTERACTIVE:-0}" != "1" ]]; then
+    if ! ui_confirm "Proceed with cleanup?" "N"; then
+      ui_info "cleanup cancelled"
+      return 0
+    fi
   fi
 
   if [[ -n "$release" ]]; then

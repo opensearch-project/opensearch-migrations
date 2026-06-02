@@ -70,9 +70,9 @@ jobs:
           git archive --format=tar.gz \
             -o opensearch-migrations-source.tar.gz \
             HEAD
-      - name: Create Kiro assistant archive
+      - name: Create agent-skills archive
         run: |
-          ./gradlew :kiro-cli:packageKiro
+          ./gradlew :agent-skills:agentSkillsTar
       - name: Build and Publish to Maven
         if: ${{ !github.event.act }}
         env:
@@ -240,8 +240,8 @@ jobs:
           solutionversion=${{ steps.get_data.outputs.version }}
       - name: Assemble migration-assistant CLI artifacts
         run: |
-          deployment/k8s/aws/assemble-bootstrap.sh \
-            --cli-version "${{ steps.get_data.outputs.version }}"
+          ./gradlew :deployment:k8s:aws:packageMigrationAssistantCli \
+            -PcliVersion="${{ steps.get_data.outputs.version }}"
       - name: Draft a release
         if: ${{ !github.event.act }}
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
@@ -252,10 +252,10 @@ jobs:
             deployment/migration-assistant-solution/cdk.out-minified/*-eks.template.json
             opensearch-migrations-source.tar.gz
             opensearch-migrations-build.tar.gz
-            kiro-cli/build/kiro-assistant.tar.gz
+            agent-skills/build/agent-skills.tar.gz
             bootstrap-kiro-agent.sh
             migration-assistant-${{ steps.get_data.outputs.version }}.tgz
             workflowMigration.schema.json
-            deployment/k8s/aws/dist/aws-bootstrap.sh
-            deployment/k8s/aws/dist/migration-assistant-cli-${{ steps.get_data.outputs.version }}.tar.gz
+            deployment/k8s/aws/build/migrate-cli-dist/install.sh
+            deployment/k8s/aws/build/migrate-cli-dist/migration-assistant-cli-${{ steps.get_data.outputs.version }}.tar.gz
             **/*.spdx.json

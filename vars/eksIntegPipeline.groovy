@@ -40,7 +40,6 @@ def call(Map config = [:]) {
             string(name: 'TEST_IDS', defaultValue: 'all', description: 'Test IDs to execute. Use comma separated list e.g. "0001,0004" or "all" for all tests')
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
             booleanParam(name: 'BUILD', defaultValue: true, description: 'Build all artifacts from source (images, CFN, chart). When false, downloads published release artifacts.')
-            booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
             string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download for images, chart, and CFN templates.')
         }
 
@@ -83,7 +82,6 @@ def call(Map config = [:]) {
     Source:                 ${params.SOURCE_VERSION}
     Target:                 ${params.TARGET_VERSION}
     Build:                  ${params.BUILD}
-    Use Release Bootstrap:  ${params.USE_RELEASE_BOOTSTRAP}
     Version:                ${params.VERSION}
     ================================================================
 """
@@ -102,7 +100,7 @@ def call(Map config = [:]) {
             // any artifacts from source (images/chart). The Gradle build is only needed
             // to produce JARs for Docker image builds and CDK synth for CFN templates.
             stage('Build') {
-                when { expression { !params.USE_RELEASE_BOOTSTRAP && params.BUILD } }
+                when { expression { params.BUILD } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         sh './gradlew clean build -x test --no-daemon --stacktrace'
@@ -119,14 +117,6 @@ def call(Map config = [:]) {
                             env.sourceClusterType = sourceClusterType ?: params.SOURCE_CLUSTER_TYPE
                             env.targetClusterType = targetClusterType ?: params.TARGET_CLUSTER_TYPE
                             env.MA_STACK_NAME = "Migration-Assistant-Infra-Create-VPC-eks-${maStageName}-${params.REGION}"
-
-                            def bootstrap = resolveBootstrap(
-                                useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
-                                build: params.BUILD,
-                                skipTestImages: true,
-                                version: params.VERSION,
-                                useGeneralNodePool: true
-                            )
 
                             parallel(
                                 'Deploy Clusters': {
@@ -148,7 +138,10 @@ def call(Map config = [:]) {
                                             stackName: env.MA_STACK_NAME,
                                             stage: maStageName,
                                             region: params.REGION,
-                                            bootstrap: bootstrap,
+                                            build: params.BUILD,
+                                            skipTestImages: true,
+                                            version: params.VERSION,
+                                            useGeneralNodePool: true,
                                             eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                             kubectlContext: "migration-eks-${maStageName}"
                                         )

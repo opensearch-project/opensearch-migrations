@@ -37,15 +37,15 @@ def call(Map config = [:]) {
                     timeout(time: 90, unit: 'MINUTES') {
                         script {
                             sh """
-                                ./deployment/k8s/aws/assemble-bootstrap.sh
-                                ./deployment/k8s/aws/dist/aws-bootstrap.sh \
+                                export MIGRATE_HOME="\$(pwd)/migration-assistant-workspace"
+                                ./deployment/k8s/aws/cli/bin/migration-assistant \
+                                  --non-interactive \
                                   --deploy-create-vpc-cfn \
                                   --build \
                                   --stack-name "${buildStackName}" \
                                   --stage "${buildStage}" \
                                   --region "${params.REGION}" \
                                   --skip-console-exec \
-                                  --base-dir "\$(pwd)" \
                                   2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
                             """
 
@@ -70,10 +70,12 @@ def call(Map config = [:]) {
                     timeout(time: 90, unit: 'MINUTES') {
                         script {
                             sh """
-                                ./deployment/k8s/aws/dist/aws-bootstrap.sh \
+                                export MIGRATE_HOME="\$(pwd)/migration-assistant-workspace"
+                                ./deployment/k8s/aws/cli/bin/migration-assistant \
+                                  --non-interactive \
                                   --deploy-import-vpc-cfn \
                                   --build \
-                                  --create-vpc-endpoints \
+                                  --create-vpc-endpoints s3,ecr,ecrDocker,cloudwatchLogs,efs,sts,eksAuth \
                                   --ma-images-source "${env.BUILD_ECR}" \
                                   --stack-name "${isolatedStackName}" \
                                   --stage "${isolatedStage}" \

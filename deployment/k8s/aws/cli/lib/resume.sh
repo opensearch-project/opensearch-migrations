@@ -9,9 +9,7 @@ __MIGRATE_RESUME_LOADED=1
 # by `migration-assistant resume`. Parses CLI flags, dispatches to the
 # Manual or Agent path.
 #
-# Flags are documented in `cmd_help`. The set here is the union of the
-# original migrate-cli flags AND the aws-bootstrap.sh flags it replaces,
-# so existing scripts (Jenkins, test/awsRunEksValidation.sh) keep working.
+# Flags are documented in `cmd_help`.
 cmd_resume() {
   local force_switch=0 force_mode=""
   local args=()
@@ -70,8 +68,8 @@ cmd_resume() {
       --mode)         force_mode="$2"; shift 2 ;;
       --mode=*)       force_mode="${1#--mode=}"; shift ;;
 
-      # aws-bootstrap.sh-compat flags. Stored as state.env entries so
-      # downstream lib/* picks them up the same way as the wizard.
+      # Deploy-control flags. Stored as state.env entries so downstream
+      # lib/* picks them up the same way as the wizard.
       --region)            state_set AWS_REGION "$2"; export AWS_REGION="$2"; shift 2 ;;
       --region=*)          local v=${1#--region=}; state_set AWS_REGION "$v"; export AWS_REGION="$v"; shift ;;
       --stack-name)        state_set CFN_STACK_NAME "$2"; shift 2 ;;

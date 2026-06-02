@@ -36,7 +36,6 @@ def call(Map config = [:]) {
             choice(name: 'TARGET_VERSION', choices: ['OS_2.19', 'OS_1.3', 'OS_3.1'], description: 'Target cluster version')
             string(name: 'TEST_IDS', defaultValue: '0040', description: 'Test IDs to run (comma-separated)')
             booleanParam(name: 'BUILD', defaultValue: true, description: 'Build all artifacts from source (images, CFN, chart). When false, downloads published release artifacts.')
-            booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
             string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download for images, chart, and CFN templates.')
         }
 
@@ -96,7 +95,7 @@ def call(Map config = [:]) {
             }
 
             stage('Build') {
-                when { expression { !params.USE_RELEASE_BOOTSTRAP && params.BUILD } }
+                when { expression { params.BUILD } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         sh './gradlew clean build -x test --no-daemon --stacktrace'
@@ -109,18 +108,15 @@ def call(Map config = [:]) {
                     timeout(time: 90, unit: 'MINUTES') {
                         withMigrationsTestAccount(region: params.REGION, duration: 5400) { accountId ->
                             script {
-                                def bootstrap = resolveBootstrap(
-                                    useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
-                                    build: params.BUILD,
-                                    skipTestImages: true,
-                                    version: params.VERSION
-                                )
 
                                 bootstrapMA(
                                     stackName: buildStackName,
                                     stage: env.buildStageName,
                                     region: params.REGION,
-                                    bootstrap: bootstrap,
+                                    build: params.BUILD,
+                                    skipTestImages: true,
+                                    version: params.VERSION,
+                                    useGeneralNodePool: true,
                                     eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                     kubectlContext: "migration-eks-build-${env.buildStageName}"
                                 )
@@ -144,22 +140,19 @@ def call(Map config = [:]) {
                                 env.isolatedVpcId = vpc.vpcId
 
                                 // Deploy EKS + MA into isolated subnets
-                                def bootstrap = resolveBootstrap(
-                                    useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
-                                    build: params.BUILD,
-                                    skipTestImages: true,
-                                    version: params.VERSION
-                                )
                                 bootstrapMA(
                                     stackName: isolatedStackName,
                                     stage: env.maStageName,
                                     region: params.REGION,
-                                    bootstrap: bootstrap,
+                                    build: params.BUILD,
+                                    skipTestImages: true,
+                                    version: params.VERSION,
+                                    useGeneralNodePool: true,
                                     eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                     kubectlContext: "migration-eks-${env.maStageName}",
                                     vpcId: vpc.vpcId,
                                     subnetIds: vpc.subnetIds,
-                                    createVpcEndpoints: true,
+                                    createVpcEndpoints: 's3,ecr,ecrDocker,cloudwatchLogs,efs,sts,eksAuth',
                                     maImagesSource: env.BUILD_ECR
                                 )
 

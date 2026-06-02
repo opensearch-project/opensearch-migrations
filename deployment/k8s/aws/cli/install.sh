@@ -37,10 +37,10 @@ set -o errexit
 set -o nounset
 set -o pipefail
 
-# Repo path is baked at assemble time. assemble-bootstrap.sh substitutes
-# @DEFAULT_REPO@ with whatever it was built against (the upstream
-# opensearch-project repo for releases, a fork for fork previews).
-# Operators can still override at runtime via MIGRATE_REPO.
+# Repo path is baked at release time. The Gradle renderInstallScript
+# task substitutes @DEFAULT_REPO@ with the repo it was built from (the
+# upstream opensearch-project for releases, a fork for fork previews).
+# Operators can override at runtime via MIGRATE_REPO.
 # shellcheck disable=SC2016  # @DEFAULT_REPO@ is a literal sed placeholder
 DEFAULT_REPO='@DEFAULT_REPO@'
 # When this file is read from the source tree (developer flow), the

@@ -19,7 +19,6 @@ def call(Map config = [:]) {
             string(name: 'STAGE', defaultValue: config.defaultStage ?: (isImportVpc ? "eksivpc" : "ekscvpc"), description: 'Stage name for deployment environment')
             string(name: 'REGION', defaultValue: "us-east-1", description: 'AWS region for deployment')
             booleanParam(name: 'BUILD', defaultValue: true, description: 'Build all artifacts from source (images, CFN, chart). When false, downloads published release artifacts.')
-            booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
             string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download for images, chart, and CFN templates.')
         }
 
@@ -61,7 +60,6 @@ def call(Map config = [:]) {
     Stage:                  ${env.maStageName}
     Region:                 ${params.REGION}
     Build:                  ${params.BUILD}
-    Use Release Bootstrap:  ${params.USE_RELEASE_BOOTSTRAP}
     Version:                ${params.VERSION}
     ================================================================
 """
@@ -115,13 +113,6 @@ def call(Map config = [:]) {
                             def bootstrapArgs = isImportVpc ?
                                 "--deploy-import-vpc-cfn --vpc-id ${env.TEST_VPC_ID} --subnet-ids ${env.TEST_SUBNET_IDS}" :
                                 "--deploy-create-vpc-cfn"
-
-                            def bootstrap = resolveBootstrap(
-                                useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
-                                build: params.BUILD,
-                                version: params.VERSION,
-                                useGeneralNodePool: true
-                            )
 
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "${params.REGION}", duration: 7200, roleSessionName: 'jenkins-session') {

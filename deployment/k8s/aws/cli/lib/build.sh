@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # build.sh — build Migration Assistant images from source via gradle.
 #
-# Triggered by `--build`. Mirrors the legacy aws-bootstrap.sh build path:
+# Triggered by `--build`. Builds Migration Assistant images from
+# source via gradle and pushes them to the per-stage ECR.
 #
 #   1. Resolve $base_dir (the opensearch-migrations repo root). Default
 #      walks up from the CLI install ($LIB_DIR/../../../../..). Override
@@ -11,7 +12,6 @@
 #   4. Set up the Kubernetes-hosted buildx builder (one per cluster
 #      context, name "builder-<context>"). Sourced from the repo's
 #      buildImages/backends/eksKubernetesBuildkit.sh, the same module the
-#      legacy script used.
 #   5. Run ./gradlew :buildImages:buildImagesToRegistry with -PregistryEndpoint,
 #      -Pbuilder, -PimageVersion, optionally -PskipTestImages=true, and -x test.
 #      One automatic retry after a 10-second sleep on first failure.
@@ -117,6 +117,23 @@ build_images_or_skip() {
   # tags) and pin the tag for that path.
   state_set MIRROR_IMAGES Y
   state_set BUILD_IMAGE_TAG "$image_tag"
+
+  # When the operator builds images from source, the chart's CRDs MUST
+  # come from the same source tree — otherwise the locally-built console
+  # submits CRDs with fields the released chart's CRDs don't recognize
+  # (e.g. spec.compressionEnabled on DataSnapshot, added after 3.2.1).
+# --build implies use the
+  # in-repo chart unless the operator explicitly passed --ma-chart-dir.
+  if [[ -z "$(state_get MA_CHART_DIR "")" ]]; then
+    local chart_dir="$base_dir/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
+    if [[ -d "$chart_dir" && -f "$chart_dir/Chart.yaml" ]]; then
+      state_set MA_CHART_DIR "$chart_dir"
+      ui_dim "  --build: using in-repo chart at $chart_dir"
+    else
+      ui_warn "--build: in-repo chart not found at $chart_dir; falling back to release tarball (CRD/code skew possible)"
+    fi
+  fi
+
   state_set last_step "build_done"
   state_save
   ui_ok "MA images built and pushed to $registry (tag=$image_tag)"
@@ -183,9 +200,8 @@ _build_ecr_login() {
 # _build_setup_buildkit <builder-name> <base-dir>
 #
 # Reuses an already-healthy builder; otherwise removes any stale entry
-# and runs the repo's existing eksKubernetesBuildkit.sh `setup_build_backend`
-# function. Same script the legacy aws-bootstrap.sh used, so the buildx
-# pod placement / tolerations stay consistent.
+# and runs the repo's eksKubernetesBuildkit.sh `setup_build_backend`
+# function so buildx pod placement / tolerations stay consistent.
 _build_setup_buildkit() {
   local builder="$1" base_dir="$2"
   if docker buildx inspect "$builder" --bootstrap >>"$LOG_FILE" 2>&1; then
@@ -203,7 +219,7 @@ _build_setup_buildkit() {
   fi
 
   # The backend script defines `setup_build_backend` and depends on
-  # KUBE_CONTEXT + BUILDER_NAME being exported — match the legacy contract.
+  # KUBE_CONTEXT + BUILDER_NAME being exported.
   export KUBE_CONTEXT="${KUBE_CONTEXT:-$(state_get KUBECTL_CONTEXT "")}"
   export BUILDER_NAME="$builder"
   # shellcheck disable=SC1090
@@ -224,8 +240,7 @@ _build_gradle_invoke() {
   shift 4
   local extra=("$@")
 
-  # MULTI_ARCH_NATIVE matches the legacy environment — buildImages
-  # toggles per-arch builds based on it.
+  # MULTI_ARCH_NATIVE toggles per-arch builds in :buildImages.
   export MULTI_ARCH_NATIVE=true
 
   local rc=0

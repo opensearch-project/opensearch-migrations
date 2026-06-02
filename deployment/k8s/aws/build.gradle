@@ -5,21 +5,20 @@ plugins {
 // =============================================================================
 // deployment/k8s/aws/build.gradle
 //
-// Two distinct outputs, each its own Gradle task with declared inputs/outputs:
+// One output: a release tarball of the migration-assistant CLI plus a
+// curl-pipe install.sh keyed to the same release.
 //
-//   * generateAwsBootstrapShim — renders deployment/k8s/aws/aws-bootstrap.shim.tmpl
-//     into build/migrate-cli-dist/aws-bootstrap.sh by substituting CLI_VERSION
-//     and DEFAULT_REPO placeholders. Pure Gradle; no external script.
+//   build/migrate-cli-dist/migration-assistant-cli-<version>.tar.gz
+//   build/migrate-cli-dist/install.sh
 //
-//   * packageMigrationAssistantCliTarball — wraps assemble-bootstrap.sh
-//     to build the CLI tarball (CLI tree + skills + privateEcrManifest +
-//     LICENSE). Consumes :agent-skills:agentSkillsTar as a producer
-//     dependency.
+// Operators install via:
+//   curl -fsSL https://github.com/<owner>/<repo>/releases/<ver>/download/install.sh | bash
 //
-// `assemble` (the base plugin's lifecycle) depends on both. Output
-// directory is layout.buildDirectory.dir('migrate-cli-dist'), matching
-// Gradle convention; the legacy ./dist/ path used by assemble-bootstrap.sh
-// when run standalone is unchanged.
+// `assemble` (the base plugin's lifecycle) depends on
+// packageMigrationAssistantCli. The CLI tarball is also runnable
+// directly out of the source checkout (deployment/k8s/aws/cli/bin/migration-assistant);
+// Jenkins / awsRunEksValidation.sh do exactly that and skip the tarball
+// entirely.
 // =============================================================================
 
 configurations {
@@ -58,61 +57,116 @@ def defaultRepo = providers.environmentVariable('DEFAULT_REPO')
 
 def distDir = layout.buildDirectory.dir('migrate-cli-dist')
 
-// ---------- (1) curl-pipe shim ----------
+// ---------- (1) CLI tarball ----------
 
-tasks.register('generateAwsBootstrapShim') {
-    description = 'Render aws-bootstrap.shim.tmpl with CLI_VERSION + DEFAULT_REPO baked in'
+tasks.register('packageMigrationAssistantCliTarball') {
+    description = 'Package the migration-assistant CLI into a release tarball'
     group = 'migrate-cli'
-    def template = file('aws-bootstrap.shim.tmpl')
-    def outFile = distDir.map { it.file('aws-bootstrap.sh') }
-    inputs.file template
+
+    def cliDir       = file('cli')
+    def licenseFile  = rootProject.file('LICENSE')
+    def manifestFile = rootProject.file('deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh')
+    def agentSkillsTar = configurations.agentSkills
+
+    inputs.dir cliDir
+    inputs.file licenseFile
+    inputs.file manifestFile
+    inputs.files agentSkillsTar
     inputs.property 'cliVersion', cliVersion
-    inputs.property 'defaultRepo', defaultRepo
-    outputs.file outFile
+    outputs.dir distDir
+
     doLast {
-        def out = outFile.get().asFile
-        out.parentFile.mkdirs()
-        def text = template.text
-                .replace('@CLI_VERSION@',  cliVersion.get())
-                .replace('@DEFAULT_REPO@', defaultRepo.get())
-        out.text = text
-        out.setExecutable(true)
-        logger.lifecycle "wrote ${out}"
+        def ver = cliVersion.get()
+        def out = distDir.get().asFile
+        out.mkdirs()
+        def tarballName = "migration-assistant-cli-${ver}.tar.gz"
+        def tarball = new File(out, tarballName)
+
+        def stage = File.createTempFile("migrate-cli-stage", "").with { delete(); mkdirs(); it }
+        try {
+            def root = new File(stage, "migration-assistant-cli-${ver}")
+            root.mkdirs()
+            project.copy {
+                from cliDir
+                into root
+                include 'bin/**'
+                include 'lib/**'
+                include 'install.sh'
+                include 'README.md'
+            }
+
+            // Bake CLI_VERSION into lib/version.sh so the banner reports the
+            // assembled version rather than "0.0.0-dev".
+            def versionFile = new File(root, 'lib/version.sh')
+            if (versionFile.exists()) {
+                def text = versionFile.text
+                versionFile.text = text.replaceAll(
+                    /CLI_VERSION="\$\{CLI_VERSION:-0\.0\.0-dev\}"/,
+                    "CLI_VERSION=\"\\\${CLI_VERSION:-${ver}}\""
+                )
+            }
+
+            // Drop the agent-skills tree under skills/ inside the tarball.
+            // The producer module emits its tarball with paths
+            //   skills/Startup.md, skills/migrating-to-opensearch/…, skills/kiro/…
+            // so untar-into-root matches the layout the CLI's agent.sh expects.
+            def skillsTarFile = agentSkillsTar.singleFile
+            project.copy {
+                from project.tarTree(project.resources.gzip(skillsTarFile))
+                into root
+            }
+
+            // Vendor privateEcrManifest.sh so the CLI can mirror images
+            // without requiring the operator to clone the chart repo.
+            project.copy {
+                from manifestFile
+                into new File(root, 'skills')
+            }
+            project.copy {
+                from licenseFile
+                into root
+                rename '.*', 'LICENSE'
+            }
+
+            // Tar it. Gradle's Tar task is more portable than shelling out
+            // to BSD/GNU tar — it always emits POSIX-clean entries.
+            project.exec {
+                workingDir stage
+                commandLine 'tar', '-czf', tarball.absolutePath, "migration-assistant-cli-${ver}"
+            }
+        } finally {
+            stage.deleteDir()
+        }
+
+        logger.lifecycle "wrote ${tarball}"
     }
 }
 
-// ---------- (2) CLI tarball ----------
+// ---------- (2) install.sh with DEFAULT_REPO baked in ----------
 
-tasks.register('packageMigrationAssistantCliTarball', Exec) {
-    description = 'Run assemble-bootstrap.sh to package the CLI tarball'
+tasks.register('renderInstallScript') {
+    description = 'Render install.sh with DEFAULT_REPO substituted'
     group = 'migrate-cli'
-    inputs.dir 'cli'
-    inputs.file 'assemble-bootstrap.sh'
-    inputs.files configurations.agentSkills
-    inputs.property 'cliVersion', cliVersion
+    def src = file('cli/install.sh')
+    def out = distDir.map { it.file('install.sh') }
+    inputs.file src
     inputs.property 'defaultRepo', defaultRepo
-    outputs.dir distDir
-
-    workingDir = projectDir
-    // We pass --output-dir into the Gradle build directory rather than
-    // ./dist/ so the legacy path is undisturbed for standalone use.
-    doFirst {
-        distDir.get().asFile.mkdirs()
+    outputs.file out
+    doLast {
+        def dst = out.get().asFile
+        dst.parentFile.mkdirs()
+        dst.text = src.text.replace('@DEFAULT_REPO@', defaultRepo.get())
+        dst.setExecutable(true)
+        logger.lifecycle "wrote ${dst}"
     }
-    commandLine 'bash', './assemble-bootstrap.sh',
-                '--cli-version',  cliVersion.get(),
-                '--default-repo', defaultRepo.get(),
-                '--output-dir',   distDir.get().asFile.absolutePath
-    environment 'AGENT_SKILLS_TAR',
-                configurations.agentSkills.singleFile
 }
 
 // ---------- aggregator + lifecycle ----------
 
 tasks.register('packageMigrationAssistantCli') {
-    description = 'Build both the CLI tarball and the curl-pipe shim'
+    description = 'Build the CLI tarball and the curl-pipe installer'
     group = 'migrate-cli'
-    dependsOn 'packageMigrationAssistantCliTarball', 'generateAwsBootstrapShim'
+    dependsOn 'packageMigrationAssistantCliTarball', 'renderInstallScript'
 }
 
 assemble.dependsOn 'packageMigrationAssistantCli'

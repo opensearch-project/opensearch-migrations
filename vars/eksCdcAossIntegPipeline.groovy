@@ -29,7 +29,6 @@ def call(Map config = [:]) {
             choice(name: 'SOURCE_CLUSTER_TYPE', choices: ['OPENSEARCH_MANAGED_SERVICE'], description: 'Source cluster type')
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
             booleanParam(name: 'BUILD', defaultValue: true, description: 'Build all artifacts from source (images, CFN, chart). When false, downloads published release artifacts.')
-            booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Use release bootstrap script')
             string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy')
         }
 
@@ -86,7 +85,7 @@ def call(Map config = [:]) {
             }
 
             stage('Build') {
-                when { expression { !params.USE_RELEASE_BOOTSTRAP && params.BUILD } }
+                when { expression { params.BUILD } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         sh './gradlew clean build -x test --no-daemon --stacktrace'
@@ -100,20 +99,15 @@ def call(Map config = [:]) {
                         script {
                             env.sourceVer = params.SOURCE_VERSION
 
-                            def bootstrap = resolveBootstrap(
-                                useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
-                                build: params.BUILD,
-                                skipTestImages: true,
-                                version: params.VERSION,
-                                useGeneralNodePool: true
-                            )
-
                             withMigrationsTestAccount(region: params.REGION, duration: 7200) { accountId ->
                                 bootstrapMA(
                                     stackName: env.STACK_NAME,
                                     stage: maStageName,
                                     region: params.REGION,
-                                    bootstrap: bootstrap,
+                                    build: params.BUILD,
+                                    skipTestImages: true,
+                                    version: params.VERSION,
+                                    useGeneralNodePool: true,
                                     eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                     kubectlContext: "migration-eks-${maStageName}"
                                 )

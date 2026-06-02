@@ -35,7 +35,7 @@ HELM_CHART_NAME='migration-assistant'
 #
 # This means a single EKS cluster runs ONE migration-assistant install
 # at a time (release=ma, ns=ma). Multiple stages → multiple CFN stacks
-# → multiple EKS clusters. That matches the aws-bootstrap.sh contract.
+# → multiple EKS clusters.
 HELM_RELEASE_NAME='ma'
 HELM_NAMESPACE='ma'
 
@@ -52,8 +52,7 @@ helm_kubeconfig_setup() {
   ui_step "Updating kubeconfig for EKS cluster"
 
   # Read all outputs once. Look up MIGRATIONS_EKS_CLUSTER_NAME
-  # (the canonical key in opensearch-migrations stacks) and tolerate the
-  # legacy EKSClusterName key as a fallback.
+  # (the canonical key) and tolerate EKSClusterName as a fallback.
   local outputs cluster_name registry_from_cfn
   outputs=$(cfn_outputs "$stack_name" "$region")
 
@@ -64,7 +63,7 @@ helm_kubeconfig_setup() {
   registry_from_cfn=$(_cfn_pick "$outputs" MIGRATIONS_ECR_REGISTRY ECRRegistry)
   [[ -n "$registry_from_cfn" ]] && state_set CRANE_REGISTRY "$registry_from_cfn"
 
-  # Match legacy aws-bootstrap.sh: always create the kubeconfig entry
+  # Always create the kubeconfig entry
   # (with --alias so multi-cluster hosts get a stable context name), and
   # only skip the *active context switch* when --skip-setting-k8s-context
   # is set. Default alias is the cluster name; --kubectl-context overrides.
@@ -93,7 +92,7 @@ helm_install_or_upgrade() {
   local ma_ver;     ma_ver=$(state_get MA_VERSION)
 
   # Kubeconfig may already be set up by manual_path (so build_images can
-  # run before helm). If not (legacy fast-path or test), do it now.
+  # run before helm). If not (test or fast-path), do it now.
   if [[ -z "${HELM[*]+x}" || ${#HELM[@]} -le 1 ]]; then
     helm_kubeconfig_setup
   fi
@@ -126,8 +125,7 @@ helm_install_or_upgrade() {
 
   # Extract the chart's bundled valuesEks.yaml (and base values.yaml). The
   # chart's default values.yaml targets LocalStack — running it on EKS
-  # without valuesEks.yaml gives wrong defaults. aws-bootstrap.sh does the
-  # same extraction.
+  # without valuesEks.yaml gives wrong defaults; we extract both.
   local chart_extract; chart_extract=$(_helm_extract_chart_values "$chart")
 
   # Prefer the registry the operator pushed mirrored images to (CRANE_REGISTRY);
@@ -202,8 +200,7 @@ helm_install_or_upgrade() {
   # deploy the custom Karpenter NodePool 'general-work-pool' (defaults
   # to true under valuesEks.yaml, which we always pass through -f).
   # `--use-general-node-pool` flips it OFF so workloads schedule on the
-  # EKS Auto Mode general-purpose pool — the legacy semantics, used by
-  # every CI pipeline.
+  # EKS Auto Mode general-purpose pool.
   #
   # `--disable-general-purpose-pool` is a different, rarer toggle: it
   # asks AWS to drop "general-purpose" from the EKS Auto Mode compute
@@ -214,8 +211,7 @@ helm_install_or_upgrade() {
     nodepool_args+=(--set "cluster.useCustomKarpenterNodePool=false")
   fi
 
-  # TLS flags. Built once here so the legacy --tls-mode + --pca-arn
-  # surface lands as deterministic --set arguments. See _helm_tls_flags.
+  # TLS flags from --tls-mode / --pca-arn. See _helm_tls_flags.
   local tls_args=()
   _helm_tls_flags tls_args || return 1
 
@@ -1122,8 +1118,7 @@ _helm_build_public_image_flags() {
   local ver="$1" out_name="$2"
   local pub='public.ecr.aws/opensearchproject'
   # The five images the chart ships, mapping internal name → public suffix.
-  # Source: aws-bootstrap.sh ${RELEASE_VERSION} block.
-  local pairs=(
+    local pairs=(
     "captureProxy|opensearch-migrations-traffic-capture-proxy"
     "trafficReplayer|opensearch-migrations-traffic-replayer"
     "reindexFromSnapshot|opensearch-migrations-reindex-from-snapshot"
@@ -1145,8 +1140,7 @@ _helm_build_public_image_flags() {
 # _helm_build_mirrored_image_flags <registry> <ma_version> <out_array_name>
 #
 # Same idea, but for the operator's private ECR registry that crane copied
-# into. The mirrored layout differs from the public layout — aws-bootstrap.sh
-# uses tags like "migrations_capture_proxy_<ver>" within a single repo.
+# into. Mirrored layout uses tags like "migrations_capture_proxy_<ver>" within a single repo.
 # Match that exactly.
 _helm_build_mirrored_image_flags() {
   local registry="$1" ver="$2" out_name="$3"
@@ -1172,7 +1166,7 @@ _helm_build_mirrored_image_flags() {
 # Populate <out_array_name> with the helm `--set` arguments derived from
 # state.env's TLS_MODE and PCA_ARN.
 #
-# Modes (matching the legacy aws-bootstrap.sh contract):
+# Modes:
 #   none, self-signed  → no extra flags (chart defaults handle these)
 #   pca-existing       → enables aws-privateca-issuer + sets awsPrivateCA.arn
 #                        and awsPrivateCA.region. Requires --pca-arn.
@@ -1214,9 +1208,8 @@ _helm_tls_flags() {
 # _helm_apply_disable_general_purpose_pool <cluster> <region>
 #
 # Post-install hook: ask EKS Auto Mode to drop "general-purpose" from
-# the cluster's compute config. The legacy aws-bootstrap.sh did this at
-# the end of the deploy too — running it earlier breaks the chart's
-# pre-install Job, which has no nodes to schedule on.
+# the cluster's compute config. Done after helm install so the
+# chart's pre-install Job has somewhere to schedule.
 #
 # We need the cluster's existing nodeRoleArn to feed back into
 # update-cluster-config; aws cli requires the whole compute-config blob.
