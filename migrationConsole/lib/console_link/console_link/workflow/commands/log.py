@@ -185,7 +185,8 @@ def get_resource_logs(namespace: str, resource_path: str) -> str:
     selectors = [
         f"{key}={value}"
         for key, value in sorted(labels.items())
-        if (key.startswith(prefix) or key in _RESOURCE_OUTPUT_LABELS) and key not in _LABELS_NOT_PROPAGATED_TO_PODS and value
+        if (key.startswith(prefix) or key in _RESOURCE_OUTPUT_LABELS) and
+        key not in _LABELS_NOT_PROPAGATED_TO_PODS and value
     ]
     if not selectors:
         return f"(No log labels for '{resource_path}')"
@@ -227,7 +228,8 @@ def _resource_label_selectors(ctx, namespace, resource_name, prefix):
     selectors = [
         f"{key}={value}"
         for key, value in sorted(labels.items())
-        if (key.startswith(prefix) or key in _RESOURCE_OUTPUT_LABELS) and key not in _LABELS_NOT_PROPAGATED_TO_PODS and value
+        if (key.startswith(prefix) or key in _RESOURCE_OUTPUT_LABELS) and
+        key not in _LABELS_NOT_PROPAGATED_TO_PODS and value
     ]
     if not selectors:
         click.echo(f"Migration resource '{resource_name}' has no output labels.", err=True)
