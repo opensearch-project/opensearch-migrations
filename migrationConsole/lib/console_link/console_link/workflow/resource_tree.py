@@ -358,7 +358,7 @@ def maybe_rewrite_wait_step(step: Dict[str, Any]) -> Dict[str, Any]:
         return step
     display_name = step.get('display_name', '')
     base_name = display_name.split('(')[0].strip() if '(' in display_name else display_name
-    if not base_name.startswith('waitFor'):
+    if not base_name.startswith('wait'):
         return step
     resource_name = get_node_input_parameter(step, 'resourceName')
     if resource_name and resource_name.strip():

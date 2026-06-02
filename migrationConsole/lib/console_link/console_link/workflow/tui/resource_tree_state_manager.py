@@ -54,17 +54,17 @@ class ResourceTreeStateManager:
         new_ids = [f'section:{s.name}' for s in new_sections]
 
         if self._has_structural_change(existing, new_ids):
-            expanded = self._save_expanded(root)
+            collapsed = self._save_collapsed(root)
             self._remove_children(root)
             for section in new_sections:
                 sid = f'section:{section.name}'
                 node = root.add(f"[bold]{section.name}[/]", data={'id': sid})
                 for group in section.groups:
                     self._add_group(node, group)
-                if sid in expanded:
-                    node.expand()
+                if sid in collapsed:
+                    node.collapse()
                 else:
-                    node.expand()  # sections default expanded
+                    node.expand()
         else:
             for section in new_sections:
                 sid = f'section:{section.name}'
@@ -78,7 +78,7 @@ class ResourceTreeStateManager:
         new_ids = [f'group:{g.display_name}' for g in new_groups]
 
         if self._has_structural_change(existing, new_ids):
-            expanded = self._save_expanded(section_node)
+            collapsed = self._save_collapsed(section_node)
             self._remove_children(section_node)
             for group in new_groups:
                 gid = f'group:{group.display_name}'
@@ -87,10 +87,10 @@ class ResourceTreeStateManager:
                     node.add("[dim](not configured)[/dim]", data=None)
                 else:
                     self._add_group_resources(node, group)
-                if gid in expanded:
-                    node.expand()
+                if gid in collapsed:
+                    node.collapse()
                 else:
-                    node.expand()  # groups default expanded
+                    node.expand()
         else:
             for group in new_groups:
                 gid = f'group:{group.display_name}'
@@ -112,11 +112,11 @@ class ResourceTreeStateManager:
         new_ids = [f'resource:{r.name}' for r in sorted_resources]
 
         if self._has_structural_change(existing, new_ids):
-            expanded = self._save_expanded(group_node)
+            collapsed = self._save_collapsed(group_node)
             self._remove_children(group_node)
             for resource in sorted_resources:
                 self._add_resource(group_node, resource)
-            self._restore_expanded_set(group_node, expanded)
+            self._restore_collapse_state(group_node, collapsed)
         else:
             for resource in sorted_resources:
                 rid = f'resource:{resource.name}'
@@ -130,7 +130,7 @@ class ResourceTreeStateManager:
 
     def _rebuild_resource_children(self, resource_node: TreeNode, resource: ResourceNode) -> None:
         """Rebuild spec details, deps, workflow progress, and child resources under a resource node."""
-        expanded = self._save_expanded_recursive(resource_node)
+        collapsed = self._save_collapsed_recursive(resource_node)
         self._remove_children(resource_node)
 
         details = format_spec_fields(resource)
@@ -142,7 +142,7 @@ class ResourceTreeStateManager:
         for child in resource.children:
             self._add_resource(resource_node, child)
 
-        self._restore_expanded_recursive(resource_node, expanded)
+        self._restore_collapse_state_recursive(resource_node, collapsed)
 
     def _add_group_resources(self, group_node: TreeNode, group: ResourceGroup) -> None:
         """Add sorted resources to a group node."""
@@ -176,11 +176,11 @@ class ResourceTreeStateManager:
         return list(existing.keys()) != new_ids
 
     @staticmethod
-    def _save_expanded(parent: TreeNode) -> set:
-        """Save expanded node IDs under a parent."""
+    def _save_collapsed(parent: TreeNode) -> set:
+        """Save collapsed node IDs under a parent (direct children only)."""
         result = set()
         for child in parent.children:
-            if child.data and isinstance(child.data, dict) and child.is_expanded:
+            if child.data and isinstance(child.data, dict) and not child.is_expanded:
                 nid = child.data.get('id')
                 if nid:
                     result.add(nid)
@@ -192,12 +192,12 @@ class ResourceTreeStateManager:
         for child in list(parent.children):
             child.remove()
 
-    def _restore_expanded_set(self, parent: TreeNode, expanded_ids: set) -> None:
-        """Restore expanded state for children, defaulting to expanded."""
+    def _restore_collapse_state(self, parent: TreeNode, collapsed_ids: set) -> None:
+        """Restore expanded state for children. Only collapse nodes that were previously collapsed."""
         for child in parent.children:
             if child.data and isinstance(child.data, dict):
                 nid = child.data.get('id')
-                if nid and nid not in expanded_ids and expanded_ids:
+                if nid and nid in collapsed_ids:
                     child.collapse()
                 else:
                     child.expand()
@@ -205,27 +205,27 @@ class ResourceTreeStateManager:
                 child.expand()
 
     @staticmethod
-    def _save_expanded_recursive(parent: TreeNode) -> set:
-        """Save expanded node IDs recursively under a parent."""
+    def _save_collapsed_recursive(parent: TreeNode) -> set:
+        """Save collapsed node IDs recursively under a parent."""
         result = set()
         stack = list(parent.children)
         while stack:
             child = stack.pop()
-            if child.data and isinstance(child.data, dict) and child.is_expanded:
+            if child.data and isinstance(child.data, dict) and not child.is_expanded:
                 nid = child.data.get('id')
                 if nid:
                     result.add(nid)
             stack.extend(child.children)
         return result
 
-    def _restore_expanded_recursive(self, parent: TreeNode, expanded_ids: set) -> None:
-        """Restore expanded state recursively, defaulting to expanded."""
+    def _restore_collapse_state_recursive(self, parent: TreeNode, collapsed_ids: set) -> None:
+        """Restore expanded state recursively. Only collapse nodes that were previously collapsed."""
         stack = list(parent.children)
         while stack:
             child = stack.pop()
             if child.data and isinstance(child.data, dict):
                 nid = child.data.get('id')
-                if nid and nid not in expanded_ids and expanded_ids:
+                if nid and nid in collapsed_ids:
                     child.collapse()
                 else:
                     child.expand()

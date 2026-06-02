@@ -133,12 +133,18 @@ class WorkflowTreeApp(App):
         from ..resource_tree import (
             build_resource_tree, extract_workflow_steps_by_resource, mark_not_configured_groups,
         )
-        from ..tree_utils import build_nested_workflow_tree, filter_tree_nodes
+        from ..tree_utils import (
+            build_nested_workflow_tree, filter_tree_nodes,
+            overlay_snapshot_migration_backfill_status,
+            overlay_data_snapshot_creation_status,
+        )
         from ..commands.status import LiveCheckProcessor, ConfigConverter
         sections = build_resource_tree(self._namespace)
         if workflow_data and workflow_data.get('status', {}).get('nodes'):
             tree_nodes = build_nested_workflow_tree(workflow_data)
             LiveCheckProcessor(ConfigConverter()).enrich_tree_with_live_checks(tree_nodes)
+            overlay_snapshot_migration_backfill_status(tree_nodes, self._namespace)
+            overlay_data_snapshot_creation_status(tree_nodes, self._namespace)
             filtered_tree = filter_tree_nodes(tree_nodes)
             steps = extract_workflow_steps_by_resource(filtered_tree)
             for section in sections:

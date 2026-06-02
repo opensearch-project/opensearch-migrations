@@ -519,7 +519,11 @@ def _run_resource_view(ctx, workflow_name, argo_server, namespace, insecure, tok
             extract_workflow_steps_by_resource, mark_not_configured_groups,
         )
         from ..models.utils import load_k8s_config
-        from ..tree_utils import build_nested_workflow_tree, filter_tree_nodes
+        from ..tree_utils import (
+            build_nested_workflow_tree, filter_tree_nodes,
+            overlay_snapshot_migration_backfill_status,
+            overlay_data_snapshot_creation_status,
+        )
         load_k8s_config()
         sections = build_resource_tree(namespace)
 
@@ -533,6 +537,8 @@ def _run_resource_view(ctx, workflow_name, argo_server, namespace, insecure, tok
                 tree_nodes = build_nested_workflow_tree(workflow_data)
                 if live_status:
                     LiveCheckProcessor(ConfigConverter()).enrich_tree_with_live_checks(tree_nodes)
+                overlay_snapshot_migration_backfill_status(tree_nodes, namespace)
+                overlay_data_snapshot_creation_status(tree_nodes, namespace)
                 filtered_tree = filter_tree_nodes(tree_nodes)
                 steps = extract_workflow_steps_by_resource(filtered_tree)
                 _assign_workflow_progress(sections, steps)
