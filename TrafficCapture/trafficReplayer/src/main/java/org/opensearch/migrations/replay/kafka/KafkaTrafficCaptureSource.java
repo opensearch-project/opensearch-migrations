@@ -77,9 +77,19 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 @Slf4j
 public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     public static final String MAX_POLL_INTERVAL_KEY = "max.poll.interval.ms";
-    // see
-    // https://stackoverflow.com/questions/39730126/difference-between-session-timeout-ms-and-max-poll-interval-ms-for-kafka-0-10
-    public static final String DEFAULT_POLL_INTERVAL_MS = "60000";
+    // Match the kafka-clients library default (5 minutes). This is the broker-enforced fence
+    // threshold — how long the consumer can go between poll() calls before the group coordinator
+    // reassigns its partitions. PR #3013 made round-trip reassignment handling correct, so the
+    // historical "fence aggressively" rationale (the previous 60s override) is no longer needed.
+    // The TOUCH frequency that keeps us inside this window is decoupled from the fence value and
+    // pinned in DEFAULT_KEEP_ALIVE_PERIOD below; raising the fence threshold does NOT slow down
+    // our heartbeat. Operators can still override via --kafkaPropertyFile.
+    public static final String DEFAULT_POLL_INTERVAL_MS = "300000";
+    // Touch period used to keep the consumer inside the max.poll.interval.ms window when the read
+    // loop is back-pressured. Pinned to 30s so behavior matches what shipped with the historical
+    // 60s default (60s / 2 = 30s). Decoupling this from max.poll.interval.ms preserves the
+    // tight heartbeat cadence while letting the fence threshold be more lenient.
+    static final Duration DEFAULT_KEEP_ALIVE_PERIOD = Duration.ofSeconds(30);
 
     final TrackingKafkaConsumer trackingKafkaConsumer;
     private final ExecutorService kafkaExecutor;
@@ -235,27 +245,14 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     ) throws IOException {
         var kafkaProps = buildKafkaProperties(brokers, groupId, authType, kafkaUserName, kafkaPassword, propertyFilePath);
         kafkaProps.putIfAbsent(MAX_POLL_INTERVAL_KEY, DEFAULT_POLL_INTERVAL_MS);
-        var pollPeriod = Duration.ofMillis(Long.valueOf((String) kafkaProps.get(MAX_POLL_INTERVAL_KEY)));
-        var keepAlivePeriod = getKeepAlivePeriodFromPollPeriod(pollPeriod);
         return new KafkaTrafficCaptureSource(
             globalContext,
             new KafkaConsumer<>(kafkaProps),
             topic,
-            keepAlivePeriod,
+            DEFAULT_KEEP_ALIVE_PERIOD,
             clock,
             behavioralPolicy
         );
-    }
-
-    /**
-     * We'll have to 'maintain' touches more frequently than the poll period, otherwise the
-     * consumer will fall out of the group, putting all the commits in-flight at risk.  Notice
-     * that this doesn't have a bearing on heartbeats, which themselves are maintained through
-     * Kafka Consumer poll() calls.  When those poll calls stop, so does the heartbeat, which
-     * is more sensitive, but managed via the 'session.timeout.ms' property.
-     */
-    private static Duration getKeepAlivePeriodFromPollPeriod(Duration pollPeriod) {
-        return pollPeriod.dividedBy(2);
     }
 
     public static Properties buildKafkaProperties(

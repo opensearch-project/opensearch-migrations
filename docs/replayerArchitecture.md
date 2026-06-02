@@ -432,7 +432,10 @@ called from `kafkaExecutor`.
 
 If records are in-flight but no new records are being read (backpressure is blocking the read
 loop), the consumer must still call `poll()` periodically to maintain its group membership
-(heartbeat). The `keepAliveInterval` is set to half of `max.poll.interval.ms`.
+(heartbeat). The `keepAliveInterval` is pinned to `DEFAULT_KEEP_ALIVE_PERIOD = 30s` in
+`KafkaTrafficCaptureSource`. It is intentionally decoupled from `max.poll.interval.ms` (the
+broker-enforced fence threshold, which inherits the kafka-clients library default of 5 minutes)
+so the touch cadence stays tight even when the fence threshold is lenient.
 
 `BlockingTrafficSource` tracks when the next touch is required via
 `TrackingKafkaConsumer.getNextRequiredTouch()`. If `kafkaRecordsLeftToCommitEventually > 0`, a
