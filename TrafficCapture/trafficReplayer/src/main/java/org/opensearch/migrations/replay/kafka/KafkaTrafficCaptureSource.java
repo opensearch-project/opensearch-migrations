@@ -98,6 +98,15 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
      * The first onNetworkConnectionClosed call for a given key decrements the counter.
      */
     final ConcurrentHashMap<String, Boolean> pendingTrafficSourceReaderInterruptedCloses = new ConcurrentHashMap<>();
+    /**
+     * Placeholder sessionNumber used at synthetic-close registration AND at the matching close-callback
+     * lookup. Both sites must use this exact value or the close-callback's
+     * pendingTrafficSourceReaderInterruptedCloses.remove will miss, leak the outstanding counter, and
+     * permanently block the empty-batch drain in readNextTrafficStreamSynchronously. Replace at both
+     * sites together when wiring the real Accumulation.startingSourceRequestIndex through to
+     * GenerationalSessionKey (Phase A4 in the architecture doc's Planned Work section).
+     */
+    public static final int PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER = 0;
     /** Consistent counter of registered-but-not-yet-closed synthetic closes. Uses AtomicInteger
      *  for volatile visibility — decrementAndGet() on the Netty thread is immediately visible
      *  to get() on kafkaExecutor, preventing a premature isEmpty() race. */
@@ -152,7 +161,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                     return channelContextManager.getGlobalContext()
                         .createTrafficStreamContextForKafkaSource(channelKeyCtx, "", 0);
                 }, ts, new PojoKafkaCommitOffsetData(trackingKafkaConsumer.getConsumerConnectionGeneration(), partition, -1));
-                var sessionKey = connKey.connectionId + ":" + 0 + ":" + trackingKafkaConsumer.getConsumerConnectionGeneration();
+                var sessionKey = connKey.connectionId + ":" + PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER
+                    + ":" + trackingKafkaConsumer.getConsumerConnectionGeneration();
                 if (pendingTrafficSourceReaderInterruptedCloses.putIfAbsent(sessionKey, Boolean.TRUE) == null) {
                     outstandingTrafficSourceReaderInterruptedCloseSessions.incrementAndGet();
                     batch.add(new TrafficSourceReaderInterruptedClose(key));
