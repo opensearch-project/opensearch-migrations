@@ -815,6 +815,34 @@ class TestWorkflowCLICommands:
     @patch('console_link.workflow.commands.log.load_k8s_config')
     @patch('console_link.workflow.commands.log.client')
     @patch('console_link.workflow.commands.log._run_history_mode')
+    def test_output_resource_excludes_cr_only_labels(self, mock_history, mock_client, _mock_k8s):
+        runner = CliRunner()
+        mock_custom = Mock()
+        mock_client.CustomObjectsApi.return_value = mock_custom
+        mock_custom.get_namespaced_custom_object.return_value = {
+            'metadata': {
+                'labels': {
+                    'migrations.opensearch.org/source': 'source',
+                    'migrations.opensearch.org/snapshot': 'backfill-snapshot',
+                    'migrations.opensearch.org/run-number': '1779987650969',
+                    'migrations.opensearch.org/workflow-name': 'migration-workflow',
+                }
+            }
+        }
+
+        result = runner.invoke(workflow_cli, ['log', 'resource', 'datasnapshot.source-backfill-snapshot'])
+
+        assert result.exit_code == 0
+        args, _ = mock_history.call_args
+        assert args[2] == (
+            'migrations.opensearch.org/snapshot=backfill-snapshot,'
+            'migrations.opensearch.org/source=source,'
+            'workflows.argoproj.io/workflow=migration-workflow'
+        )
+
+    @patch('console_link.workflow.commands.log.load_k8s_config')
+    @patch('console_link.workflow.commands.log.client')
+    @patch('console_link.workflow.commands.log._run_history_mode')
     def test_output_resource_keeps_workflow_selector_for_workflow_pods(
         self, mock_history, mock_client, _mock_k8s
     ):
