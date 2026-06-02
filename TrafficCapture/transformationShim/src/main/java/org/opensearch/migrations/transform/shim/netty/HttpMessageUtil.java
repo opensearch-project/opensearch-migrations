@@ -1,7 +1,10 @@
 package org.opensearch.migrations.transform.shim.netty;
 
 import java.net.URI;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -59,7 +62,15 @@ public final class HttpMessageUtil {
         var body = request.content().toString(StandardCharsets.UTF_8);
         if (!body.isEmpty()) {
             var payload = new LinkedHashMap<String, Object>();
-            payload.put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, parseJsonOrText(body));
+            String contentType = request.headers().get(HttpHeaderNames.CONTENT_TYPE);
+            if (contentType != null && contentType.startsWith("application/x-www-form-urlencoded")) {
+                payload.put(JsonKeysForHttpMessage.INLINED_FORM_ENCODED_BODY_DOCUMENT_KEY,
+                    parseFormEncodedBody(body));
+            } else if (contentType == null || contentType.startsWith("application/json")) {
+                payload.put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, parseJsonOrText(body));
+            } else {
+                payload.put(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY, body);
+            }
             map.put(JsonKeysForHttpMessage.PAYLOAD_KEY, payload);
         }
         return map;
@@ -173,8 +184,39 @@ public final class HttpMessageUtil {
                 throw new IllegalStateException("Failed to serialize inlinedJsonBody", e);
             }
         }
+        // Check for form-encoded body — serialize back to form-encoded string
+        var formBody = (Map<String, List<String>>) payload.get(
+            JsonKeysForHttpMessage.INLINED_FORM_ENCODED_BODY_DOCUMENT_KEY);
+        if (formBody != null) {
+            return serializeFormEncodedBody(formBody);
+        }
         // Fallback to inlinedTextBody (String)
         return (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY);
+    }
+
+    private static String serializeFormEncodedBody(Map<String, List<String>> formBody) {
+        var sb = new StringBuilder();
+        for (var entry : formBody.entrySet()) {
+            for (String value : entry.getValue()) {
+                if (!sb.isEmpty()) sb.append('&');
+                sb.append(URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8));
+                sb.append('=');
+                sb.append(URLEncoder.encode(value, StandardCharsets.UTF_8));
+            }
+        }
+        return sb.toString();
+    }
+
+    static Map<String, List<String>> parseFormEncodedBody(String body) {
+        var params = new LinkedHashMap<String, List<String>>();
+        if (body == null || body.isEmpty()) return params;
+        for (String pair : body.split("&")) {
+            int eq = pair.indexOf('=');
+            String key = eq >= 0 ? URLDecoder.decode(pair.substring(0, eq), StandardCharsets.UTF_8) : URLDecoder.decode(pair, StandardCharsets.UTF_8);
+            String value = eq >= 0 ? URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8) : "";
+            params.computeIfAbsent(key, k -> new ArrayList<>()).add(value);
+        }
+        return params;
     }
 
     /**

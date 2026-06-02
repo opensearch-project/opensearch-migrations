@@ -45,4 +45,29 @@ class RfsMigrateDocumentsTest {
             Arguments.of(1, 2, INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD + 0.001, "Should return existingLeaseExponent + 1 when shard prep time is greater than increase threshold for lease duration")
         );
     }
+
+    @ParameterizedTest
+    @MethodSource("emitDocTypeCases")
+    void testResolveEmitDocType(RfsMigrateDocuments.EmitDocTypeMode mode, Version version, String transformerConfig, boolean expected) {
+        Assertions.assertEquals(expected, RfsMigrateDocuments.resolveEmitDocType(mode, version, transformerConfig));
+    }
+
+    static Stream<Arguments> emitDocTypeCases() {
+        Version es5 = Version.fromString("ES 5.6.16");
+        Version es6 = Version.fromString("ES 6.8.23");
+        Version es7 = Version.fromString("ES 7.10.2");
+        Version os3 = Version.fromString("OS 3.1.0");
+        String someTransformer = "[{\"TypeMappingSanitizationTransformerProvider\":{}}]";
+
+        return Stream.of(
+            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.ON,  es7, null, true),
+            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.OFF, es5, someTransformer, false),
+            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, es5, someTransformer, true),
+            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, es6, someTransformer, true),
+            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, es7, someTransformer, false),
+            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, es5, null, false),
+            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, os3, someTransformer, false),
+            Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, null, someTransformer, false)
+        );
+    }
 }

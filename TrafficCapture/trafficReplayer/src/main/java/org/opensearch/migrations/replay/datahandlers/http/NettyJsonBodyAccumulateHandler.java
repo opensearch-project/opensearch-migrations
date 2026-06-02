@@ -1,12 +1,15 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Predicate;
 
@@ -129,7 +132,13 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
 
                     var leftoverBody = accumulatedBody.slice(jsonBodyByteLength,
                         accumulatedBody.readableBytes() - jsonBodyByteLength);
-                    if (jsonBodyByteLength == 0 &&
+                    if (jsonBodyByteLength == 0 && isFormEncodedContentType(capturedHttpJsonMessage))
+                    {
+                        var formString = leftoverBody.toString(StandardCharsets.UTF_8);
+                        capturedHttpJsonMessage.payload()
+                            .put(JsonKeysForHttpMessage.INLINED_FORM_ENCODED_BODY_DOCUMENT_KEY,
+                                parseFormEncodedBody(formString));
+                    } else if (jsonBodyByteLength == 0 &&
                         hasRequestContentTypeMatching(capturedHttpJsonMessage, v -> !v.startsWith("text/")))
                     {
                         context.onPayloadSetBinary();
@@ -185,5 +194,29 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
         decoder.onMalformedInput(CodingErrorAction.REPORT);
         decoder.onUnmappableCharacter(CodingErrorAction.REPORT);
         return decoder.decode(buffer);
+    }
+
+    private static boolean isFormEncodedContentType(HttpJsonMessageWithFaultingPayload message) {
+        if (message == null) return false;
+        var contentTypes = message.headers().insensitiveGet(HttpHeaderNames.CONTENT_TYPE.toString());
+        if (contentTypes == null) return false;
+        return contentTypes.stream()
+            .anyMatch(v -> v.startsWith("application/x-www-form-urlencoded"));
+    }
+
+    private static Map<String, List<String>> parseFormEncodedBody(String body) {
+        var params = new LinkedHashMap<String, List<String>>();
+        if (body == null || body.isEmpty()) return params;
+        for (String pair : body.split("&")) {
+            int eq = pair.indexOf('=');
+            String key = eq >= 0
+                ? URLDecoder.decode(pair.substring(0, eq), StandardCharsets.UTF_8)
+                : URLDecoder.decode(pair, StandardCharsets.UTF_8);
+            String value = eq >= 0
+                ? URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8)
+                : "";
+            params.computeIfAbsent(key, k -> new ArrayList<>()).add(value);
+        }
+        return params;
     }
 }

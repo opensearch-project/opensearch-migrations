@@ -127,6 +127,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "documentBackfillDocTransformerConfigBase64": "",
       "documentBackfillDocumentsPerBulkRequest": 2147483647,
       "documentBackfillDocumentsSizePerBulkRequest": 10485760,
+      "documentBackfillEmitDocType": "AUTO",
       "documentBackfillEnableSourcelessMigrations": false,
       "documentBackfillFileSourceVolumeMounts": [],
       "documentBackfillFileSourceVolumes": [],
@@ -138,6 +139,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "documentBackfillMaxShardSizeBytes": 85899345920,
       "documentBackfillOtelCollectorEndpoint": "http://otel-collector:4317",
       "documentBackfillPodReplicas": 1,
+      "documentBackfillPositionGapStopword": "a",
       "documentBackfillResources": {
         "limits": {
           "cpu": "3300m",
