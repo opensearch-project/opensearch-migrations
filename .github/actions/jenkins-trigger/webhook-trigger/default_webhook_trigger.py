@@ -7,13 +7,18 @@ import sys
 import time
 from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import urlencode
 
 import requests
-from requests import Response
+from requests import Response, Session
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
+
+# HTTP timeouts: (connect, read). Read timeout is generous because Jenkins endpoints
+# can be slow under load, but we want to fail rather than hang forever.
+DEFAULT_TIMEOUT = (10, 60)
 
 
 @dataclass
@@ -43,15 +48,18 @@ class JenkinsConfig:
         return bool(self.jenkins_user and self.jenkins_api_token)
 
     @property
-    def webhook_url(self) -> str:
+    def webhook_base_url(self) -> str:
         return f"{self.jenkins_url}/generic-webhook-trigger/invoke"
 
     @property
+    def webhook_url(self) -> str:
+        # The Jenkins Generic Webhook Trigger plugin authenticates via the `token`
+        # query parameter, not via Authorization headers.
+        return f"{self.webhook_base_url}?{urlencode({'token': self.pipeline_token})}"
+
+    @property
     def auth_headers(self) -> dict[str, str]:
-        return {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.pipeline_token}",
-        }
+        return {"Content-Type": "application/json"}
 
     @property
     def payload(self) -> dict[str, str]:
@@ -88,7 +96,7 @@ def _cancel_jenkins_build(signum: int, frame: object) -> None:
         try:
             stop_url = f"{_active_build_url}stop"
             auth = (_active_config.jenkins_user, _active_config.jenkins_api_token)
-            response = requests.post(stop_url, auth=auth)
+            response = requests.post(stop_url, auth=auth, timeout=DEFAULT_TIMEOUT)
             logging.info(f"Sent stop request to {stop_url}, response: {response.status_code}")
         except Exception as e:
             logging.error(f"Failed to cancel Jenkins build: {e}")
@@ -101,16 +109,36 @@ signal.signal(signal.SIGTERM, _cancel_jenkins_build)
 signal.signal(signal.SIGINT, _cancel_jenkins_build)
 
 
-def perform_request(url: str, payload: dict, headers: dict, retries: int = 3, backoff_factor: int = 1) -> Response:
+def _build_session(retries: int = 3, backoff_factor: int = 1) -> Session:
     retry_strategy = Retry(
         total=retries,
         backoff_factor=backoff_factor,
         status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=frozenset(["GET", "POST"]),
     )
     adapter = HTTPAdapter(max_retries=retry_strategy)
     session = requests.Session()
     session.mount("https://", adapter)
-    return session.post(url, json=payload, headers=headers)
+    session.mount("http://", adapter)
+    return session
+
+
+def perform_request(url: str, payload: dict, headers: dict, retries: int = 3, backoff_factor: int = 1) -> Response:
+    session = _build_session(retries=retries, backoff_factor=backoff_factor)
+    return session.post(url, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
+
+
+def _summarize_response(response: Optional[Response], max_chars: int = 500) -> str:
+    """Render a response for log output, preferring JSON, falling back to truncated text."""
+    if response is None:
+        return "<no response>"
+    try:
+        return f"status={response.status_code} json={response.json()}"
+    except ValueError:
+        body = (response.text or "").strip().replace("\n", " ")
+        if len(body) > max_chars:
+            body = body[:max_chars] + f"... (truncated, {len(response.text)} chars total)"
+        return f"status={response.status_code} body={body!r}"
 
 
 def _find_queue_url(trigger_response: dict, job_name: str = None) -> Optional[str]:
@@ -122,13 +150,14 @@ def _find_queue_url(trigger_response: dict, job_name: str = None) -> Optional[st
     return None
 
 
-def _poll_for_build_url(config: JenkinsConfig, queue_url: str) -> Optional[str]:
+def _poll_for_build_url(session: Session, config: JenkinsConfig, queue_url: str) -> Optional[str]:
     """Query the Jenkins queue API to get the build URL once the job starts."""
     full_queue_url = f"{config.jenkins_url}/{queue_url}api/json"
-    queue_response = requests.get(full_queue_url)
+    queue_response = session.get(full_queue_url, timeout=DEFAULT_TIMEOUT)
     if not queue_response.ok:
         raise RuntimeError(
             f"Unable to retrieve queue entry for request: {full_queue_url}. "
+            f"{_summarize_response(queue_response)}. "
             f"Does queue entry exist and worker have read permission for Jenkins jobs?"
         )
     return queue_response.json().get("executable", {}).get("url") or None
@@ -146,9 +175,10 @@ def wait_for_job_completion(config: JenkinsConfig, trigger_response: dict) -> Jo
     logging.info("Waiting for Jenkins to start workflow")
     time.sleep(15)
 
+    poll_session = _build_session()
     while total_wait_time <= config.timeout_seconds:
         logging.info("Using queue information to find build number in Jenkins if available")
-        workflow_url = _poll_for_build_url(config, queue_url)
+        workflow_url = _poll_for_build_url(poll_session, config, queue_url)
         logging.info(f"Jenkins workflow_url: {workflow_url}")
 
         if workflow_url:
@@ -162,13 +192,13 @@ def wait_for_job_completion(config: JenkinsConfig, trigger_response: dict) -> Jo
                 logging.info(f"Total time waiting: {total_wait_time}")
                 time.sleep(30)
 
-                workflow_response = requests.get(f"{workflow_url}api/json")
+                workflow_response = poll_session.get(f"{workflow_url}api/json", timeout=DEFAULT_TIMEOUT)
                 building = workflow_response.json().get("building", False)
                 logging.info(f"Workflow currently in progress: {building}")
                 if not building:
                     logging.info("Run completed, checking results now...")
-                    result = requests.get(f"{workflow_url}api/json").json().get("result")
-                    return JobResult(status=result, workflow_url=workflow_url)
+                    final = poll_session.get(f"{workflow_url}api/json", timeout=DEFAULT_TIMEOUT)
+                    return JobResult(status=final.json().get("result"), workflow_url=workflow_url)
 
             logging.warning(f"Workflow has exceeded its {config.timeout_seconds} second limit")
             return JobResult(status="TIMED_OUT", workflow_url=workflow_url)
@@ -219,17 +249,21 @@ def trigger_and_wait_for_job(config: JenkinsConfig) -> None:
             if not job_result.is_success:
                 sys.exit(1)
         else:
+            # Surface the Jenkins error body before re-raising — Generic Webhook Trigger
+            # often returns useful text like "Did not find any jobs with GenericTrigger
+            # configured!" that is invaluable for diagnosis.
+            logging.error(
+                f"Webhook trigger returned non-success: {_summarize_response(response)} "
+                f"for url={config.webhook_base_url}"
+            )
             response.raise_for_status()
 
     except requests.exceptions.RequestException:
-        response_body: object = "{}"
-        if response is not None:
-            try:
-                response_body = response.json()
-            except Exception as parse_exception:
-                logging.warning(f"Unable to parse trigger request response: {parse_exception}")
-        logging.error(f"Failed to trigger webhook for URL: {config.webhook_url} and payload: {config.payload} "
-                      f"with response body: {response_body}")
+        # Log the URL without the token so failures are diagnosable without leaking secrets.
+        logging.error(
+            f"Failed to trigger webhook for URL: {config.webhook_base_url} and payload: {config.payload} "
+            f"with response: {_summarize_response(response)}"
+        )
         logging.info("Action Result: FAILURE")
         raise
     except Exception:
