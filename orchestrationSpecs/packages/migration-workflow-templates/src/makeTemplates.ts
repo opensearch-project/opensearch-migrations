@@ -1,4 +1,4 @@
-import {renderWorkflowTemplate, toSafeYamlOutput} from "@opensearch-migrations/argo-workflow-builders";
+import {renderWorkflowTemplate, unwrapPlaceholdersAndStringify} from "@opensearch-migrations/argo-workflow-builders";
 import {AllWorkflowTemplates} from "./workflowTemplates/allWorkflowTemplates";
 import * as fs from "node:fs";
 import path from "node:path";
@@ -66,7 +66,7 @@ async function outputArgoWorkflowTemplate(workflowConfig: any, workflowName: str
     workflowConfig.metadata.namespace = targetNamespace;
 
     // const textFormattedResource = JSON.stringify(workflowConfig, null, 2);
-    const textFormattedResource = toSafeYamlOutput(workflowConfig);
+    const textFormattedResource = unwrapPlaceholdersAndStringify(workflowConfig);
     if (!outputDirectory) {
         console.log(textFormattedResource);
         return;
