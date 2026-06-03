@@ -397,17 +397,14 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             log.atError().setCause(e).setMessage("Terminating Kafka traffic stream due to exception").log();
             throw e;
         }
-        // Invariant: a single returned chunk holds either synth closes (drained at the top of
-        // this method) OR real records, never both. If a rebalance fires inline during
-        // kafkaConsumer.poll() above, TrackingKafkaConsumer drops the polled batch and seeks
-        // each still-assigned partition back to its pre-poll position so the records re-deliver
-        // on the next poll — by which time the synth closes will have flushed through this
-        // method's pre-poll drain. `assert cond : expr` only evaluates `expr` when the assertion
-        // fails, so this is free at runtime and pins the invariant against future changes.
-        assert records.isEmpty() || trafficSourceReaderInterruptedCloseQueue.isEmpty()
-            : "mixed chunk: " + records.size() + " records returned with "
-                + trafficSourceReaderInterruptedCloseQueue.size() + " synth-close batch(es) queued — "
-                + "TrackingKafkaConsumer should have dropped+sought the records on inline rebalance";
+        // Note: when a rebalance fires inline during kafkaConsumer.poll(),
+        // TrackingKafkaConsumer drops records from the touched partitions and resets only
+        // those partitions to their last-committed offset (or beginning if no commit).
+        // Records from UNTOUCHED partitions are kept and returned here, even though the
+        // synth-close queue may now be non-empty. Those kept records are for connections on
+        // partitions the rebalance never touched, so they don't share state with the
+        // synth-closed connections — their accumulators and channel sessions are independent.
+        // Synth closes will flow through the next call's pre-poll drain.
         return records;
     }
 

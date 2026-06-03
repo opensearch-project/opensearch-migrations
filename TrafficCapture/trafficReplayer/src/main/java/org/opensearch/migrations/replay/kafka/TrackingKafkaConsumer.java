@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -124,12 +125,16 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
      *  was stamped on those channels — required for onNetworkConnectionClosed to find and clear
      *  the pendingTrafficSourceReaderInterruptedCloses entries. */
     private java.util.function.Consumer<Collection<Integer>> onPartitionsTrulyLostCallback = ignored -> {};
-    /** Set by any rebalance callback that fires inline during {@code kafkaConsumer.poll()}.
-     *  Cleared and inspected by {@link #getNextBatchOfRecords} so it can drop the polled batch
-     *  and seek every still-assigned partition back to the pre-poll position. The flag is
-     *  scoped to one poll call: cleared right before the poll and read right after, so concurrent
-     *  rebalances on later polls don't pollute earlier results. */
-    private final AtomicBoolean rebalanceDuringPoll = new AtomicBoolean(false);
+    /** Partitions that were revoked OR newly assigned during the in-flight {@code poll()}.
+     *  The post-poll handler resets ONLY these partitions to their last-committed offset
+     *  (or beginning if no commit). Partitions that were assigned both before AND after the
+     *  rebalance — i.e., not touched at all — keep their post-poll position so we don't
+     *  re-replay records past their last commit. Cleared right before each poll. Concurrent
+     *  Set so the kafka thread can read it after poll() returns without races (callbacks
+     *  run on the same thread, so writes are already visible, but the Set's safety doesn't
+     *  hurt and matches the existing concurrent-collection idiom in this class). */
+    private final Set<TopicPartition> partitionsTouchedDuringPoll =
+        Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     public TrackingKafkaConsumer(
         @NonNull RootReplayerContext globalContext,
@@ -190,9 +195,11 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             log.atDebug().setMessage("{} revoked/lost no partitions.").addArgument(this).log();
             return;
         }
-        // If we're inside poll(), tell the read loop to drop whatever this poll returns and
-        // seek every still-assigned partition back to its pre-poll position.
-        rebalanceDuringPoll.set(true);
+        // If we're inside poll(), tag these partitions so the read loop can drop their
+        // stale-buffered records and reset ONLY them on the next poll. Untouched partitions
+        // keep their position so we don't re-replay records past the last commit on a
+        // partition that wasn't rebalanced (could be 1000s of records past commit).
+        partitionsTouchedDuringPoll.addAll(partitions);
         new KafkaConsumerContexts.AsyncListeningContext(globalContext).onPartitionsRevoked(partitions);
         var revokedPartitionNums = new ArrayList<Integer>(partitions.size());
         synchronized (commitDataLock) {
@@ -383,54 +390,80 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     ) {
         try {
             lastTouchTimeRef.set(clock.instant());
-            rebalanceDuringPoll.set(false);
+            partitionsTouchedDuringPoll.clear();
             ConsumerRecords<String, byte[]> records;
             try (var pollContext = context.createPollContext()) {
                 records = kafkaConsumer.poll(keepAliveInterval.dividedBy(POLL_TIMEOUT_KEEP_ALIVE_DIVISOR));
             }
-            if (rebalanceDuringPoll.getAndSet(false)) {
-                // A rebalance fired inline. Synthetic closes for the OLD generation are already
-                // queued on the source-layer side. The records returned here are either from a
-                // partition we just lost (no longer ours to replay) or stale buffer from before
-                // the rebalance for a partition still assigned. We can't trust them, AND we
-                // can't trust the post-rebalance fetch position the kafka client landed at
-                // because pre-rebalance buffered records have advanced it past records the
-                // broker would re-deliver under the new generation. Reset each still-assigned
-                // partition to its last committed offset (broker round-trip via committed())
-                // so the next poll re-fetches everything past the last commit. If a partition
-                // has no committed offset, fall through to auto.offset.reset by clearing the
-                // local position and letting the next poll's updateFetchPositions resolve it.
+            // Snapshot+clear so concurrent later rebalances don't muddy this round.
+            var touched = new ArrayList<>(partitionsTouchedDuringPoll);
+            partitionsTouchedDuringPoll.clear();
+            if (!touched.isEmpty()) {
+                // Some partitions were revoked/lost during this poll(). Their pre-rebalance
+                // buffered records, if any, already advanced their local fetch position past
+                // records the broker would re-deliver under the new generation. We CANNOT
+                // trust the post-poll position for those partitions.
+                //
+                // For every OTHER assigned partition (untouched by the rebalance), the polled
+                // records are valid AND the fetch position is still where we expect — leave
+                // them alone. This matters when one partition rebalanced while another has
+                // 1000s of uncommitted records in flight: we don't want to re-replay those.
                 var stillAssigned = kafkaConsumer.assignment();
-                var committedMap = stillAssigned.isEmpty()
-                    ? Collections.<TopicPartition, OffsetAndMetadata>emptyMap()
-                    : kafkaConsumer.committed(stillAssigned);
-                int seekedToCommit = 0;
-                int seekedToBeginning = 0;
-                var partitionsWithoutCommit = new ArrayList<TopicPartition>();
+                var toReset = new ArrayList<TopicPartition>();
+                var keptRecords = new HashMap<TopicPartition, java.util.List<ConsumerRecord<String, byte[]>>>();
                 for (var tp : stillAssigned) {
-                    var committed = committedMap.get(tp);
-                    if (committed != null) {
-                        kafkaConsumer.seek(tp, committed.offset());
-                        seekedToCommit++;
-                    } else {
-                        partitionsWithoutCommit.add(tp);
+                    if (touched.contains(tp)) {
+                        toReset.add(tp);
                     }
                 }
-                if (!partitionsWithoutCommit.isEmpty()) {
-                    // No committed offset for these — rewind to beginning so re-delivery covers
-                    // everything (auto.offset.reset=earliest semantic, applied explicitly).
-                    kafkaConsumer.seekToBeginning(partitionsWithoutCommit);
-                    seekedToBeginning = partitionsWithoutCommit.size();
+                // Keep records from partitions we did NOT reset.
+                int droppedCount = 0;
+                for (var rec : records) {
+                    var tp = new TopicPartition(rec.topic(), rec.partition());
+                    if (toReset.contains(tp)) {
+                        droppedCount++;
+                    } else if (stillAssigned.contains(tp)) {
+                        keptRecords.computeIfAbsent(tp, k -> new ArrayList<>()).add(rec);
+                    } else {
+                        // Partition no longer assigned (revoked outright, not round-tripped). Drop.
+                        droppedCount++;
+                    }
                 }
-                log.atInfo().setMessage("Rebalance during poll: dropped {} record(s); reset {} " +
-                        "partition(s) to last-committed and {} partition(s) to beginning")
-                    .addArgument(records::count)
+                // Reset the touched-and-still-assigned partitions to last committed (or beginning
+                // if no commit). committed() is a broker RPC but only on this rare path.
+                int seekedToCommit = 0;
+                int seekedToBeginning = 0;
+                if (!toReset.isEmpty()) {
+                    var committedMap = kafkaConsumer.committed(new java.util.HashSet<>(toReset));
+                    var partitionsWithoutCommit = new ArrayList<TopicPartition>();
+                    for (var tp : toReset) {
+                        var committed = committedMap.get(tp);
+                        if (committed != null) {
+                            kafkaConsumer.seek(tp, committed.offset());
+                            seekedToCommit++;
+                        } else {
+                            partitionsWithoutCommit.add(tp);
+                        }
+                    }
+                    if (!partitionsWithoutCommit.isEmpty()) {
+                        kafkaConsumer.seekToBeginning(partitionsWithoutCommit);
+                        seekedToBeginning = partitionsWithoutCommit.size();
+                    }
+                }
+                log.atInfo().setMessage("Rebalance during poll: dropped {} record(s) on {} touched " +
+                        "partition(s); kept {} record(s) from untouched partition(s); reset {} to " +
+                        "last-committed and {} to beginning")
+                    .addArgument(droppedCount)
+                    .addArgument(toReset::size)
+                    .addArgument(() -> keptRecords.values().stream().mapToInt(java.util.List::size).sum())
                     .addArgument(seekedToCommit)
                     .addArgument(seekedToBeginning)
                     .log();
                 pollsSinceLastHeartbeat.incrementAndGet();
-                emptyPollsSinceLastHeartbeat.incrementAndGet();
-                return new ConsumerRecords<>(Collections.emptyMap(), Collections.emptyMap());
+                if (keptRecords.isEmpty()) {
+                    emptyPollsSinceLastHeartbeat.incrementAndGet();
+                }
+                return new ConsumerRecords<>(keptRecords, Collections.emptyMap());
             }
             log.atLevel(records.isEmpty() ? Level.TRACE : Level.DEBUG)
                 .setMessage("Kafka consumer poll has fetched {} records.  Records in flight={}")
