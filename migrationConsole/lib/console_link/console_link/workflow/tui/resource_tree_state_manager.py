@@ -140,7 +140,11 @@ class ResourceTreeStateManager:
             resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
         live = format_live_status(resource)
         if live:
-            resource_node.add(f"[cyan]{live}[/cyan]", data=None)
+            summary_line, detail_lines = live
+            live_node = resource_node.add(f"[cyan]{summary_line}[/cyan]", data={'id': f'live:{resource.name}'})
+            for line in detail_lines:
+                live_node.add(f"[cyan]{line}[/cyan]", data=None)
+            live_node.collapse()
         self._add_workflow_progress(resource_node, resource)
         for child in resource.children:
             self._add_resource(resource_node, child)
@@ -283,7 +287,11 @@ class ResourceTreeStateManager:
             resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
         live = format_live_status(resource)
         if live:
-            resource_node.add(f"[cyan]{live}[/cyan]", data=None)
+            summary_line, detail_lines = live
+            live_node = resource_node.add(f"[cyan]{summary_line}[/cyan]", data={'id': f'live:{resource.name}'})
+            for line in detail_lines:
+                live_node.add(f"[cyan]{line}[/cyan]", data=None)
+            live_node.collapse()
 
         # Workflow subtree (nodes carry Argo dict data for interactions)
         self._add_workflow_progress(resource_node, resource)

@@ -548,7 +548,8 @@ def _run_resource_view(ctx, workflow_name, argo_server, namespace, insecure, tok
         except Exception:
             workflow_unavailable = True
 
-        display_resource_tree(sections, workflow_unavailable=workflow_unavailable)
+        display_resource_tree(sections, workflow_unavailable=workflow_unavailable,
+                              show_live_status=live_status)
     except Exception as e:
         click.echo(f"Error: {str(e)}", err=True)
         ctx.exit(ExitCode.FAILURE.value)

@@ -214,7 +214,8 @@ def _mark_not_configured_from_filtered(sections: List[ResourceSection], filtered
                 group.not_configured = True
 
 
-def display_resource_tree(sections: List[ResourceSection], workflow_unavailable: bool = False) -> None:
+def display_resource_tree(sections: List[ResourceSection], workflow_unavailable: bool = False,
+                          show_live_status: bool = True) -> None:
     """Render the resource tree using Rich."""
     console = Console()
     has_any = any(
@@ -231,14 +232,14 @@ def display_resource_tree(sections: List[ResourceSection], workflow_unavailable:
             continue
         section_tree = Tree(f"[bold]{section.name}[/bold]")
         for group in section.groups:
-            _render_group(section_tree, group)
+            _render_group(section_tree, group, show_live_status)
         console.print(section_tree)
 
     if workflow_unavailable:
         console.print("\n[dim](Workflow progress unavailable)[/dim]")
 
 
-def _render_group(parent_tree, group: ResourceGroup) -> None:
+def _render_group(parent_tree, group: ResourceGroup, show_live_status: bool = True) -> None:
     """Render a resource group as a subtree."""
     if not group.resources and not group.not_configured:
         return
@@ -253,14 +254,14 @@ def _render_group(parent_tree, group: ResourceGroup) -> None:
     )
     plural_order = {p: i for i, p in enumerate(group_plurals)}
     for resource in sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name)):
-        _render_resource(group_node, resource)
+        _render_resource(group_node, resource, show_live_status)
 
 
 # Phases shown in the resource label (settled states)
 DISPLAY_PHASES = {'Ready', 'Completed', 'Failed', 'Error'}
 
 
-def _render_resource(parent_node, resource: ResourceNode) -> None:
+def _render_resource(parent_node, resource: ResourceNode, show_live_status: bool = True) -> None:
     """Render a single resource node with its children."""
     symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
     if resource.phase in DISPLAY_PHASES:
@@ -268,12 +269,12 @@ def _render_resource(parent_node, resource: ResourceNode) -> None:
     else:
         label = f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold]"
     node = parent_node.add(label)
-    _add_resource_details(node, resource)
+    _add_resource_details(node, resource, show_live_status)
     for child in resource.children:
-        _render_resource(node, child)
+        _render_resource(node, child, show_live_status)
 
 
-def _add_resource_details(node, resource: ResourceNode) -> None:
+def _add_resource_details(node, resource: ResourceNode, show_live_status: bool = True) -> None:
     """Add spec/status detail lines under a resource node."""
     details = format_spec_fields(resource)
     if details:
@@ -281,9 +282,13 @@ def _add_resource_details(node, resource: ResourceNode) -> None:
     if resource.depends_on:
         deps = ", ".join(resource.depends_on)
         node.add(f"[dim]Depends on: {deps}[/dim]")
-    live = format_live_status(resource)
-    if live:
-        node.add(f"[cyan]{live}[/cyan]")
+    if show_live_status:
+        live = format_live_status(resource)
+        if live:
+            summary_line, detail_lines = live
+            status_node = node.add(f"[cyan]{summary_line}[/cyan]")
+            for line in detail_lines:
+                status_node.add(f"[cyan]{line}[/cyan]")
     if resource.workflow_progress:
         if has_notable_steps(resource.workflow_progress):
             _add_workflow_subtree(node, resource.workflow_progress)
@@ -411,39 +416,88 @@ def format_spec_fields(resource: ResourceNode) -> str:
     return ' | '.join(parts)
 
 
-def format_live_status(resource: ResourceNode) -> Optional[str]:
-    """Format live progress from CR status fields (backfill or snapshot creation)."""
+def format_live_status(resource: ResourceNode):
+    """Format live progress from CR status fields.
+
+    Returns (summary_line, detail_lines) or None if no status data.
+    """
     if resource.plural == 'snapshotmigrations':
         backfill = resource.status.get('documentBackfill')
         if isinstance(backfill, dict):
-            summary = backfill.get('summary') or {}
-            parts = []
-            pct = summary.get('percentageCompleted')
-            if pct is not None:
-                parts.append(f"{pct:.0f}%")
-            shards_total = summary.get('shardsTotal')
-            shards_migrated = summary.get('shardsMigrated')
-            if shards_total is not None:
-                parts.append(f"shards {shards_migrated or 0}/{shards_total}")
-            eta_ms = summary.get('etaMs')
-            if eta_ms:
-                secs = int(eta_ms / 1000)
-                m, s = divmod(secs, 60)
-                h, m = divmod(m, 60)
-                parts.append(f"ETA {h}h {m}m {s}s")
-            if parts:
-                return f"Backfill: {', '.join(parts)}"
+            return _format_backfill_status(backfill)
     elif resource.plural == 'datasnapshots':
         creation = resource.status.get('snapshotCreation')
         if isinstance(creation, dict):
-            summary = creation.get('summary') or {}
-            parts = []
-            shards_total = summary.get('shardsTotal')
-            shards_done = summary.get('shardsSuccessful')
-            if shards_total is not None:
-                parts.append(f"shards {shards_done or 0}/{shards_total}")
-            if parts:
-                return f"Snapshot: {', '.join(parts)}"
+            return _format_snapshot_creation_status(creation)
+    return None
+
+
+def _format_backfill_status(backfill: Dict[str, Any]):
+    summary = backfill.get('summary') or {}
+    parts = []
+    details = []
+    phase = backfill.get('phase')
+    if phase:
+        details.append(f"phase: {phase}")
+    pct = summary.get('percentageCompleted')
+    if pct is not None:
+        parts.append(f"{pct:.0f}%")
+    shards_total = summary.get('shardsTotal')
+    shards_migrated = summary.get('shardsMigrated')
+    if shards_total is not None:
+        parts.append(f"shards {shards_migrated or 0}/{shards_total}")
+        details.append(f"shards migrated: {shards_migrated or 0}/{shards_total}")
+    shards_in_progress = summary.get('shardsInProgress')
+    if shards_in_progress:
+        details.append(f"shards in progress: {shards_in_progress}")
+    shards_waiting = summary.get('shardsWaiting')
+    if shards_waiting:
+        details.append(f"shards waiting: {shards_waiting}")
+    eta_ms = summary.get('etaMs')
+    if eta_ms:
+        secs = int(eta_ms / 1000)
+        m, s = divmod(secs, 60)
+        h, m = divmod(m, 60)
+        parts.append(f"ETA {h}h {m}m {s}s")
+        details.append(f"ETA: {h}h {m}m {s}s")
+    started = summary.get('started')
+    if started:
+        details.append(f"started: {started}")
+    finished = summary.get('finished')
+    if finished:
+        details.append(f"finished: {finished}")
+    updated_at = backfill.get('updatedAt')
+    if updated_at:
+        details.append(f"updated at: {updated_at}")
+    if parts:
+        return f"Backfill status: {', '.join(parts)}", details
+    return None
+
+
+def _format_snapshot_creation_status(creation: Dict[str, Any]):
+    summary = creation.get('summary') or {}
+    parts = []
+    details = []
+    phase = creation.get('phase')
+    if phase:
+        details.append(f"phase: {phase}")
+    shards_total = summary.get('shardsTotal')
+    shards_done = summary.get('shardsSuccessful')
+    if shards_total is not None:
+        parts.append(f"shards {shards_done or 0}/{shards_total}")
+        details.append(f"shards: {shards_done or 0}/{shards_total}")
+    shards_failed = summary.get('shardsFailed')
+    if shards_failed:
+        details.append(f"shards failed: {shards_failed}")
+    data_processed = summary.get('dataProcessed')
+    if data_processed:
+        unit = summary.get('dataProcessedUnit', 'MiB')
+        details.append(f"data processed: {data_processed} {unit}")
+    updated_at = creation.get('updatedAt')
+    if updated_at:
+        details.append(f"updated at: {updated_at}")
+    if parts:
+        return f"Snapshot status: {', '.join(parts)}", details
     return None
 
 
