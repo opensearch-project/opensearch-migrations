@@ -3,6 +3,7 @@ package org.opensearch.migrations.trafficcapture.proxyserver;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLException;
 
+import java.nio.file.Files;
 import java.util.function.Supplier;
 
 import com.beust.jcommander.ParameterException;
@@ -35,6 +36,31 @@ public class FrontsideMtlsTest {
             true);
         SSLEngine engine = supplier.get();
         Assertions.assertTrue(engine.getNeedClientAuth());
+    }
+
+    @Test
+    public void testWithInlineTrustCertPemAndClientAuthRequiredReturnsEngineWithNeedClientAuth() throws Exception {
+        var trustCertPem = Files.readString(ssc.certificate().toPath());
+        Supplier<SSLEngine> supplier = CaptureProxy.loadSslEngineFromPem(
+            ssc.certificate().getAbsolutePath(),
+            ssc.privateKey().getAbsolutePath(),
+            null,
+            trustCertPem,
+            true);
+        SSLEngine engine = supplier.get();
+        Assertions.assertTrue(engine.getNeedClientAuth());
+    }
+
+    @Test
+    public void testWithBothTrustCertFileAndInlineTrustCertPemThrows() throws Exception {
+        var trustCertPem = Files.readString(ssc.certificate().toPath());
+        Assertions.assertThrows(ParameterException.class, () ->
+            CaptureProxy.loadSslEngineFromPem(
+                ssc.certificate().getAbsolutePath(),
+                ssc.privateKey().getAbsolutePath(),
+                ssc.certificate().getAbsolutePath(),
+                trustCertPem,
+                true));
     }
 
     @Test

@@ -56,3 +56,6 @@ deployment/k8s/aws/dist/
 deployment/k8s/aws/cli/dist/
 .scannerwork/
 .sisyphus/
+
+# Local-only Claude Code settings
+.claude/settings.local.json

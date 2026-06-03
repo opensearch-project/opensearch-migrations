@@ -8,6 +8,9 @@ Three subcommands:
 See PLAN_approve_semantics.md and PLAN_approve_implementation.md for design.
 """
 
+import base64
+import gzip
+import json
 import logging
 import os
 
@@ -103,7 +106,7 @@ def _waiting_gates_from_workflow(namespace, workflow_name):
         return []
     if not wf:
         return []
-    nodes = wf.get('status', {}).get('nodes', {})
+    nodes = _workflow_nodes(wf)
     results = []
     for node in nodes.values():
         if node.get('phase') != 'Running':
@@ -131,6 +134,28 @@ def _waiting_gates_from_workflow(namespace, workflow_name):
                         break
         results.append((gate_name, reason))
     return results
+
+
+def _workflow_nodes(workflow):
+    """Return expanded workflow nodes from either nodes or compressedNodes."""
+    status = workflow.get('status', {})
+    nodes = status.get('nodes')
+    if isinstance(nodes, dict):
+        return nodes
+
+    compressed = status.get('compressedNodes')
+    if not compressed:
+        return {}
+
+    try:
+        payload = gzip.decompress(base64.b64decode(compressed))
+        decoded = json.loads(payload.decode('utf-8'))
+    except Exception as e:
+        logger.debug("Could not decode compressedNodes for workflow %s: %s",
+                     workflow.get('metadata', {}).get('name', '<unknown>'), e)
+        return {}
+
+    return decoded if isinstance(decoded, dict) else {}
 
 
 def _list_all_gates(namespace, workflow_name=None):

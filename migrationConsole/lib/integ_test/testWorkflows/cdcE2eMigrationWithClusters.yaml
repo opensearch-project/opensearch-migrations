@@ -63,7 +63,7 @@ spec:
         value: "20"
       - name: observed-packet-timeout
         value: "30"
-      - name: transforms-sources
+      - name: replayer-config-overrides
         value: "{}"
       - name: pre-snapshot-proxy-submit
         value: "false"
@@ -164,8 +164,6 @@ spec:
                   value: "{{workflow.parameters.snapshot-and-migration-configs}}"
                 - name: replayer-config
                   value: "{{workflow.parameters.replayer-config}}"
-                - name: transforms-sources
-                  value: "{{workflow.parameters.transforms-sources}}"
                 - name: imageMigrationConsoleLocation
                   valueFrom:
                     configMapKeyRef:
@@ -254,6 +252,8 @@ spec:
                     configMapKeyRef:
                       name: "{{workflow.parameters.migration-image-configmap}}"
                       key: migrationConsolePullPolicy
+                - name: replayer-config-overrides
+                  value: "{{workflow.parameters.replayer-config-overrides}}"
                 - name: captureProxyServiceType
                   value: "{{workflow.parameters.capture-proxy-service-type}}"
 

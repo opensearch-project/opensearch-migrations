@@ -287,6 +287,10 @@ class SolrLuceneDocReaderTest {
                 return realReader.getLiveDocs();
             }
             @Override
+            public LuceneLeafReader newView() {
+                return this;
+            }
+            @Override
             public int maxDoc() { return realReader.maxDoc(); }
             @Override
             public String getContextString() { return realReader.getContextString(); }
