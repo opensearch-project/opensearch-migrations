@@ -670,7 +670,9 @@ def backfill_dlq_location_cmd(session):
     click.echo(cfg.location_uri)
 
 
-@dlq_group.command(name="count", help="Count failed document records in the current session's DLQ.")
+@dlq_group.command(name="count",
+                   help="Count distinct failed documents in the current session's DLQ "
+                        "(de-duplicated by index + document id, since the DLQ is at-least-once).")
 @click.option('--session', default=None, help='Override the session id (defaults to RFS_DLQ_SESSION_ID).')
 def backfill_dlq_count_cmd(session):
     try:

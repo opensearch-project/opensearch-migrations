@@ -75,9 +75,15 @@ public abstract class OpenSearchClient {
 
     // DLQ context — null when no DLQ is configured. The bootstrap in RfsMigrateDocuments
     // calls setDlqContext(...) to install an S3DlqSink when a bucket is provided.
-    private DlqSink dlqSink;
-    private String dlqSessionId = "unknown-session";
-    private String dlqWorkerId = "unknown-worker";
+    // volatile: emitDlqRecord runs on concurrent bulk-write threads (batchConcurrency defaults
+    // to 10) while setDlqContext/setDlqWorkItem are written from the pipeline thread, so these
+    // need safe publication across threads.
+    private volatile DlqSink dlqSink;
+    private volatile String dlqSessionId = "unknown-session";
+    private volatile String dlqWorkerId = "unknown-worker";
+    // Canonical work-item id (index + shard + checkpoint) for the work item currently being
+    // processed. Updated per work item via setDlqWorkItem; null until the first work item starts.
+    private volatile String dlqWorkItemId;
 
     protected OpenSearchClient(ConnectionContext connectionContext, Version version, CompressionMode compressionMode) {
         this(new RestClient(connectionContext), new FailedRequestsLogger(), version, compressionMode);
@@ -99,6 +105,18 @@ public abstract class OpenSearchClient {
         this.dlqSink = dlqSink;
         this.dlqSessionId = sessionId;
         this.dlqWorkerId = workerId;
+    }
+
+    /**
+     * Update the work-coordination work item id stamped on subsequent DLQ records. The target
+     * client is long-lived and processes many work items over its lifetime, so the bootstrap
+     * calls this at the start of each work item. The id is the canonical
+     * {@code IWorkCoordinator.WorkItemAndDuration.WorkItem#toString()} form
+     * ({@code base64url(index)__shard__startingDocId}), so a DLQ record round-trips back to the
+     * exact work item that produced it.
+     */
+    public void setDlqWorkItem(String workItemId) {
+        this.dlqWorkItemId = workItemId;
     }
 
     public DlqSink getDlqSink() {
@@ -466,6 +484,7 @@ public abstract class OpenSearchClient {
                 .operation(newMetadata)
                 .document(original.getDocument())
                 .includeDocument(original.isIncludeDocument())
+                .originalSource(original.getOriginalSource())
                 .build();
         }
         return original;
@@ -745,12 +764,19 @@ public abstract class OpenSearchClient {
                 ? failure.getDocumentId()
                 : extractDocumentId(op);
             JsonNode requestItem = op != null ? OBJECT_MAPPER.valueToTree(op) : null;
+            // Persist the original source-index document rather than the transformed one.
+            // The transformed body is what was actually sent, but the DLQ is meant to let
+            // operators inspect/replay the source document, so swap it in when available.
+            if (requestItem instanceof ObjectNode && op != null && op.getOriginalSource() != null) {
+                ((ObjectNode) requestItem).set("document", OBJECT_MAPPER.valueToTree(op.getOriginalSource()));
+            }
             JsonNode responseItem = failure != null && failure.getResponseItemJson() != null
                 ? OBJECT_MAPPER.readTree(failure.getResponseItemJson()) : null;
             String failureType = failure != null ? failure.getErrorType() : null;
             DlqRecord dlqRecord = DlqRecord.builder()
                 .sessionId(dlqSessionId)
                 .workerId(dlqWorkerId)
+                .workItemId(dlqWorkItemId)
                 .targetIndex(indexName)
                 .documentId(docId)
                 .failureType(failureType)

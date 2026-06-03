@@ -166,13 +166,13 @@ def _iter_objects(cfg: DlqConfig, client=None) -> Iterator[dict]:
             yield obj
 
 
-def list_records(cfg: DlqConfig, limit: Optional[int] = None) -> List[dict]:
-    """Stream NDJSON records from all session objects in stable order.
+def _read_all_records(cfg: DlqConfig, client=None) -> List[dict]:
+    """Read and JSON-parse every NDJSON record across all session objects (no sort/dedup/limit).
 
-    Stable order = (timestamp asc, documentId asc); records without a timestamp
-    sort to the end. ``limit`` caps the returned list — useful in CLI contexts.
+    Skips non-gzip objects and malformed lines with a warning so a single bad object can't
+    break inspection of the rest.
     """
-    client = _s3_client(cfg)
+    client = client or _s3_client(cfg)
     records: List[dict] = []
     for obj in _iter_objects(cfg, client=client):
         body = client.get_object(Bucket=cfg.bucket, Key=obj["Key"])["Body"].read()
@@ -189,6 +189,53 @@ def list_records(cfg: DlqConfig, limit: Optional[int] = None) -> List[dict]:
                 records.append(json.loads(line))
             except json.JSONDecodeError as e:
                 logger.warning("Skipping malformed DLQ record in %s: %s", obj["Key"], e)
+    return records
+
+
+def _dedup_key(record: dict):
+    """Stable identity of a failed document: ``(targetIndex, documentId)``.
+
+    This is invariant across re-emissions — a successor that reprocesses a partition writes the
+    same (targetIndex, documentId) regardless of which checkpoint it resumed from (so it is NOT
+    keyed on workItemId, which changes when the checkpoint advances). Returns ``None`` when
+    documentId is absent/empty (e.g. server-generated ids): such records can't be correlated, so
+    they are never collapsed.
+    """
+    doc_id = record.get("documentId")
+    if not doc_id:
+        return None
+    return (record.get("targetIndex"), doc_id)
+
+
+def dedupe_records(records: List[dict]) -> List[dict]:
+    """Collapse duplicate failures for the same document into a single record.
+
+    The DLQ is at-least-once: a worker crash or a failed flush makes a successor reprocess the
+    partition and re-emit the same terminal failures, so the same ``(targetIndex, documentId)``
+    can appear in multiple objects. We keep the latest record per document (by timestamp).
+    Records without a documentId can't be correlated and are all retained.
+    """
+    by_doc: dict = {}
+    without_id: List[dict] = []
+    for r in records:
+        key = _dedup_key(r)
+        if key is None:
+            without_id.append(r)
+            continue
+        existing = by_doc.get(key)
+        if existing is None or (r.get("timestamp") or "") >= (existing.get("timestamp") or ""):
+            by_doc[key] = r
+    return list(by_doc.values()) + without_id
+
+
+def list_records(cfg: DlqConfig, limit: Optional[int] = None) -> List[dict]:
+    """Stream de-duplicated NDJSON records from all session objects in stable order.
+
+    Records are de-duplicated by (targetIndex, documentId) — see ``dedupe_records`` — because the
+    DLQ is at-least-once. Stable order = (timestamp asc, documentId asc); records without a
+    timestamp sort to the end. ``limit`` caps the returned list — useful in CLI contexts.
+    """
+    records = dedupe_records(_read_all_records(cfg))
     records.sort(key=lambda r: (r.get("timestamp") or "~", r.get("documentId") or ""))
     if limit is not None:
         return records[:limit]
@@ -196,22 +243,14 @@ def list_records(cfg: DlqConfig, limit: Optional[int] = None) -> List[dict]:
 
 
 def count(cfg: DlqConfig) -> int:
-    """Count failed document records in this session's DLQ.
+    """Count distinct failed documents in this session's DLQ.
 
-    Counts NDJSON lines across all session objects. For very large DLQs we read
-    object bodies — workflows typically expect a small number of failures, so
-    this trade-off favors accuracy over a cheap object-count approximation.
+    De-duplicates by (targetIndex, documentId) so re-emitted failures (the DLQ is at-least-once)
+    are counted once rather than inflating the total. For very large DLQs we read object bodies —
+    workflows typically expect a small number of failures, so this favors accuracy over a cheap
+    object/line-count approximation.
     """
-    client = _s3_client(cfg)
-    total = 0
-    for obj in _iter_objects(cfg, client=client):
-        body = client.get_object(Bucket=cfg.bucket, Key=obj["Key"])["Body"].read()
-        try:
-            decoded = gzip.GzipFile(fileobj=io.BytesIO(body)).read().decode("utf-8")
-        except OSError:
-            continue
-        total += sum(1 for line in decoded.splitlines() if line.strip())
-    return total
+    return len(dedupe_records(_read_all_records(cfg)))
 
 
 def delete_session(cfg: DlqConfig) -> int:

@@ -1389,6 +1389,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "description": "S3 bucket for the DLQ. When omitted, falls back to the deployment-provisioned default bucket (MIGRATIONS_DEFAULT_S3_BUCKET). Set this to use a separate bucket for DLQ records."
                     },
+                    "dlqMaxBufferBytes": {
+                      "type": "number",
+                      "default": 67108864
+                    },
                     "transformsImage": {
                       "type": "string",
                       "default": ""
@@ -3137,6 +3141,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "dlqS3Bucket": {
                         "type": "string",
                         "description": "S3 bucket for the DLQ. When omitted, falls back to the deployment-provisioned default bucket (MIGRATIONS_DEFAULT_S3_BUCKET). Set this to use a separate bucket for DLQ records."
+                      },
+                      "dlqMaxBufferBytes": {
+                        "type": "number",
+                        "default": 67108864,
+                        "description": "Maximum uncompressed bytes buffered in memory per target index before the DLQ rotates to a new S3 object. Bounds heap use when a shard produces a very large number of terminal failures. Default 67108864 (64 MiB)."
                       }
                     },
                     "description": "Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."

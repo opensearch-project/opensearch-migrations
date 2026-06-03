@@ -913,6 +913,10 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
     dlqS3Bucket: z.string().optional()
         .describe("S3 bucket for the DLQ. When omitted, falls back to the deployment-provisioned " +
             "default bucket (MIGRATIONS_DEFAULT_S3_BUCKET). Set this to use a separate bucket for DLQ records."),
+    dlqMaxBufferBytes: z.number().default(67108864).optional()
+        .describe("Maximum uncompressed bytes buffered in memory per target index before the DLQ rotates " +
+            "to a new S3 object. Bounds heap use when a shard produces a very large number of terminal " +
+            "failures. Default 67108864 (64 MiB)."),
 }).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");
 
 export const USER_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(USER_RFS_WORKFLOW_OPTIONS);

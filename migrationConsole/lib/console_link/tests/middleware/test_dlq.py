@@ -312,6 +312,62 @@ class TestCount:
         assert dlq.count(_config()) == 1
 
 
+# ---------- deduplication (at-least-once → duplicates collapse) --------------
+
+class TestDeduplication:
+    def test_count_collapses_reemitted_duplicates(self, mocker):
+        # Same (targetIndex, documentId) emitted twice — e.g. original worker + successor
+        # re-emit after a crash. Three raw lines, but only two distinct documents.
+        obj1 = _gz(_ndjson([
+            {"targetIndex": "movies", "documentId": "d1", "timestamp": "2026-05-01T00:00:00Z"},
+        ]))
+        obj2 = _gz(_ndjson([
+            {"targetIndex": "movies", "documentId": "d1", "timestamp": "2026-05-02T00:00:00Z"},
+            {"targetIndex": "movies", "documentId": "d2", "timestamp": "2026-05-02T00:00:00Z"},
+        ]))
+        s3 = _make_s3_mock([("a.gz", obj1), ("b.gz", obj2)])
+        mocker.patch.object(dlq, "_s3_client", return_value=s3)
+
+        assert dlq.count(_config()) == 2
+
+    def test_list_keeps_latest_record_per_document(self, mocker):
+        obj = _gz(_ndjson([
+            {"targetIndex": "movies", "documentId": "d1", "failureType": "old",
+             "timestamp": "2026-05-01T00:00:00Z"},
+            {"targetIndex": "movies", "documentId": "d1", "failureType": "new",
+             "timestamp": "2026-05-02T00:00:00Z"},
+        ]))
+        s3 = _make_s3_mock([("a.gz", obj)])
+        mocker.patch.object(dlq, "_s3_client", return_value=s3)
+
+        result = dlq.list_records(_config())
+        assert len(result) == 1
+        assert result[0]["failureType"] == "new"   # latest timestamp wins
+
+    def test_same_doc_id_different_index_not_collapsed(self, mocker):
+        # documentId is only unique within an index, so the dedup key includes targetIndex.
+        obj = _gz(_ndjson([
+            {"targetIndex": "movies", "documentId": "d1", "timestamp": "t"},
+            {"targetIndex": "books", "documentId": "d1", "timestamp": "t"},
+        ]))
+        s3 = _make_s3_mock([("a.gz", obj)])
+        mocker.patch.object(dlq, "_s3_client", return_value=s3)
+
+        assert dlq.count(_config()) == 2
+
+    def test_records_without_document_id_are_not_collapsed(self, mocker):
+        # Null/missing/empty documentId can't be correlated across re-emissions → all retained.
+        obj = _gz(_ndjson([
+            {"targetIndex": "movies", "timestamp": "t1"},
+            {"targetIndex": "movies", "documentId": None, "timestamp": "t2"},
+            {"targetIndex": "movies", "documentId": "", "timestamp": "t3"},
+        ]))
+        s3 = _make_s3_mock([("a.gz", obj)])
+        mocker.patch.object(dlq, "_s3_client", return_value=s3)
+
+        assert dlq.count(_config()) == 3
+
+
 # ---------- delete_session --------------------------------------------------
 
 class TestDeleteSession:

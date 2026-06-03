@@ -5,6 +5,11 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -20,6 +25,7 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
@@ -70,7 +76,8 @@ class S3DlqSinkTest {
         sink.close();
 
         assertThat(captured, hasSize(1));
-        assertThat(captured.get(0).s3Uri(), startsWith("s3://my-bucket/rfs-dlq/session=sess-A/worker=worker-1/dlq-"));
+        assertThat(captured.get(0).s3Uri(),
+            startsWith("s3://my-bucket/rfs-dlq/session=sess-A/index=movies/worker=worker-1/dlq-"));
 
         var decoded = decode(captured.get(0).data());
         assertThat(decoded, containsString("\"documentId\":\"doc-1\""));
@@ -84,6 +91,196 @@ class S3DlqSinkTest {
         assertThat(parsed.path("requestItem").path("op").asText(), equalTo("index"));
         assertThat(parsed.path("responseItem").path("index").path("status").asInt(), equalTo(400));
         assertThat(sink.getLocation(), equalTo("s3://my-bucket/rfs-dlq/session=sess-A/"));
+    }
+
+    @Test
+    void singleFlushSplitsRecordsIntoOnePerTargetIndex() {
+        // Records for different indices buffered before one flush must land in separate
+        // S3 objects, each keyed by its own index= segment.
+        var captured = new ArrayList<CapturedUpload>();
+        var sink = S3DlqSink.builder()
+            .bucket("b").prefix("rfs-dlq/").sessionId("s").workerId("w").region("r")
+            .uploader((uri, data, region) -> captured.add(new CapturedUpload(uri, data)))
+            .build();
+
+        sink.write(buildRecordForIndex("movies", "m-1")).subscribe();
+        sink.write(buildRecordForIndex("books", "b-1")).subscribe();
+        sink.write(buildRecordForIndex("movies", "m-2")).subscribe();
+        sink.flush().block();
+
+        assertThat(captured, hasSize(2));
+        var uris = captured.stream().map(CapturedUpload::s3Uri).toList();
+        assertThat(uris, hasItem(containsString("/session=s/index=movies/worker=w/dlq-")));
+        assertThat(uris, hasItem(containsString("/session=s/index=books/worker=w/dlq-")));
+    }
+
+    @Test
+    void blankTargetIndexFallsBackToUnknownIndex() {
+        // Covers the isBlank() branch of sanitizeIndex (the null test short-circuits it).
+        var captured = new ArrayList<CapturedUpload>();
+        var sink = S3DlqSink.builder()
+            .bucket("b").prefix("rfs-dlq/").sessionId("s").workerId("w").region("r")
+            .uploader((uri, data, region) -> captured.add(new CapturedUpload(uri, data)))
+            .build();
+
+        sink.write(buildRecordForIndex("   ", "d-1")).subscribe();
+        sink.flush().block();
+
+        assertThat(captured, hasSize(1));
+        assertThat(captured.get(0).s3Uri(), containsString("/session=s/index=unknown-index/worker=w/dlq-"));
+    }
+
+    @Test
+    void flushUploadFailureMidLoopPropagatesAfterEarlierIndexUploaded() {
+        // Two indices are buffered; the first uploads fine, the second throws.
+        // Verifies the per-index flush loop surfaces the later failure as a Mono error
+        // rather than swallowing it after an earlier successful upload.
+        var captured = new ArrayList<CapturedUpload>();
+        var sink = S3DlqSink.builder()
+            .bucket("b").prefix("rfs-dlq/").sessionId("s").workerId("w").region("r")
+            .uploader((uri, data, region) -> {
+                if (uri.contains("index=books/")) {
+                    throw new RuntimeException("second upload failed");
+                }
+                captured.add(new CapturedUpload(uri, data));
+            })
+            .build();
+
+        // LinkedHashMap preserves insertion order, so "movies" uploads before "books".
+        sink.write(buildRecordForIndex("movies", "m-1")).subscribe();
+        sink.write(buildRecordForIndex("books", "b-1")).subscribe();
+
+        StepVerifier.create(sink.flush())
+            .expectErrorMatches(t -> t instanceof RuntimeException
+                && t.getMessage().contains("second upload failed"))
+            .verify();
+
+        // The first index's object was uploaded before the failure.
+        assertThat(captured, hasSize(1));
+        assertThat(captured.get(0).s3Uri(), containsString("index=movies/"));
+    }
+
+    @Test
+    void recordWithoutTargetIndexFallsBackToUnknownIndex() throws Exception {
+        var captured = new ArrayList<CapturedUpload>();
+        var sink = S3DlqSink.builder()
+            .bucket("b").prefix("rfs-dlq/").sessionId("s").workerId("w").region("r")
+            .uploader((uri, data, region) -> captured.add(new CapturedUpload(uri, data)))
+            .build();
+
+        var mapper = new ObjectMapper();
+        sink.write(DlqRecord.builder()
+            .sessionId("s").workerId("w").targetIndex(null).documentId("d-1")
+            .failureType("err").failureClass(FailureClass.RETRYABLE_EXHAUSTED)
+            .timestamp(Instant.parse("2026-05-14T12:00:00Z").toString())
+            .requestItem(mapper.createObjectNode())
+            .responseItem(mapper.createObjectNode())
+            .build()).subscribe();
+        sink.flush().block();
+
+        assertThat(captured, hasSize(1));
+        assertThat(captured.get(0).s3Uri(), containsString("/session=s/index=unknown-index/worker=w/dlq-"));
+    }
+
+    @Test
+    void rotatesMidShardWhenBufferExceedsThresholdAndFlushesRemainder() throws Exception {
+        var captured = new ArrayList<CapturedUpload>();
+        var recBytes = new ObjectMapper().writeValueAsBytes(buildRecordForIndex("idx", "d1")).length + 1;
+        // Threshold fits one record but is crossed by the second, forcing a mid-shard rotation.
+        var sink = S3DlqSink.builder()
+            .bucket("b").prefix("rfs-dlq/").sessionId("s").workerId("w").region("r")
+            .maxBufferBytes(recBytes + 1)
+            .uploader((uri, data, region) -> captured.add(new CapturedUpload(uri, data)))
+            .build();
+
+        sink.write(buildRecordForIndex("idx", "d1")).subscribe();
+        sink.write(buildRecordForIndex("idx", "d2")).subscribe();
+        // The second write crosses the cap and rotates — one object is uploaded before any flush.
+        assertThat(captured, hasSize(1));
+
+        sink.write(buildRecordForIndex("idx", "d3")).subscribe();
+        sink.flush().block();
+        // flush() uploads the remaining partial buffer (the third record).
+        assertThat(captured, hasSize(2));
+
+        assertThat(countLines(captured.get(0).data()), equalTo(2));
+        assertThat(countLines(captured.get(1).data()), equalTo(1));
+        // Distinct sequence numbers keep the two objects from colliding.
+        assertThat(captured.get(0).s3Uri(), not(equalTo(captured.get(1).s3Uri())));
+    }
+
+    @Test
+    void rotationUploadFailureBlocksGatingFlushThenClears() {
+        // A failed rotation upload must make the gating flush() fail too, so the work item
+        // is not marked complete and a successor reprocesses. The error is surfaced once.
+        var sink = S3DlqSink.builder()
+            .bucket("b").prefix("rfs-dlq/").sessionId("s").workerId("w").region("r")
+            .maxBufferBytes(1)   // rotate on every write
+            .uploader((uri, data, region) -> {
+                throw new RuntimeException("rotate upload failed");
+            })
+            .build();
+
+        StepVerifier.create(sink.write(buildRecord("d1")))
+            .expectErrorMatches(t -> t instanceof RuntimeException
+                && t.getMessage().contains("rotate upload failed"))
+            .verify();
+
+        // Gating flush re-surfaces the retained rotation error.
+        StepVerifier.create(sink.flush())
+            .expectErrorMatches(t -> t instanceof RuntimeException
+                && t.getMessage().contains("rotate upload failed"))
+            .verify();
+
+        // Once surfaced, it's cleared so a later shard reusing this sink isn't penalized.
+        StepVerifier.create(sink.flush()).verifyComplete();
+    }
+
+    @Test
+    void concurrentWritesAndFlushesDoNotCorruptOrLoseRecords() throws Exception {
+        // batchConcurrency defaults to 10, so write() runs concurrently with the per-batch
+        // flush(). Every record must survive (gzip streams uncorrupted) and the total line
+        // count across all uploaded objects must equal the number of writes — no loss, no dup.
+        var captured = new CopyOnWriteArrayList<CapturedUpload>();
+        var sink = S3DlqSink.builder()
+            .bucket("b").prefix("rfs-dlq/").sessionId("s").workerId("w").region("r")
+            .maxBufferBytes(2048)   // small cap so rotations also race with writes/flushes
+            .uploader((uri, data, region) -> captured.add(new CapturedUpload(uri, data)))
+            .build();
+
+        int threads = 8;
+        int perThread = 200;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        var start = new CountDownLatch(1);
+        var done = new CountDownLatch(threads);
+        for (int t = 0; t < threads; t++) {
+            final int tid = t;
+            pool.submit(() -> {
+                try {
+                    start.await();
+                    for (int i = 0; i < perThread; i++) {
+                        sink.write(buildRecordForIndex("idx", "d-" + tid + "-" + i)).block();
+                        if (i % 20 == 0) {
+                            sink.flush().block();   // flushes concurrent with other threads' writes
+                        }
+                    }
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+        start.countDown();
+        assertThat(done.await(60, TimeUnit.SECONDS), equalTo(true));
+        pool.shutdown();
+        sink.close();   // flush any remainder
+
+        int totalLines = 0;
+        for (var c : captured) {
+            totalLines += countLines(c.data());   // decode throws if any gzip object is corrupt
+        }
+        assertThat(totalLines, equalTo(threads * perThread));
     }
 
     @Test
@@ -258,9 +455,13 @@ class S3DlqSinkTest {
     }
 
     private static DlqRecord buildRecord(String docId) {
+        return buildRecordForIndex("idx", docId);
+    }
+
+    private static DlqRecord buildRecordForIndex(String index, String docId) {
         var mapper = new ObjectMapper();
         return DlqRecord.builder()
-            .sessionId("s").workerId("w").targetIndex("idx").documentId(docId)
+            .sessionId("s").workerId("w").targetIndex(index).documentId(docId)
             .failureType("err").failureClass(FailureClass.NON_RETRYABLE)
             .timestamp(Instant.parse("2026-05-14T12:00:00Z").toString())
             .requestItem(mapper.createObjectNode())
@@ -272,5 +473,10 @@ class S3DlqSinkTest {
         try (var gz = new GZIPInputStream(new ByteArrayInputStream(gzipped))) {
             return new String(gz.readAllBytes());
         }
+    }
+
+    private static int countLines(byte[] gzipped) throws IOException {
+        var stripped = decode(gzipped).strip();
+        return stripped.isEmpty() ? 0 : stripped.split("\n").length;
     }
 }

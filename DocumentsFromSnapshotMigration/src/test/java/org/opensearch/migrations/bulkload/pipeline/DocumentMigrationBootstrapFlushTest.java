@@ -85,4 +85,32 @@ class DocumentMigrationBootstrapFlushTest {
 
         assertThat(thrown.getMessage(), equalTo("DLQ flush failed for " + wi));
     }
+
+    // ---- flushDlqForBatch (per-batch flush that gates progress) -------------
+
+    @Test
+    void flushDlqForBatch_nullSinkIsANoOp() {
+        assertDoesNotThrow(() -> DocumentMigrationBootstrap.flushDlqForBatch(null));
+    }
+
+    @Test
+    void flushDlqForBatch_successReturnsNormally() {
+        var sink = mock(DlqSink.class);
+        when(sink.flush()).thenReturn(Mono.empty());
+        assertDoesNotThrow(() -> DocumentMigrationBootstrap.flushDlqForBatch(sink));
+    }
+
+    @Test
+    void flushDlqForBatch_failurePropagatesSoProgressIsNotCommitted() {
+        // The exception must propagate (not be swallowed): the pipeline onNext lets it reach
+        // the error consumer, so the progress cursor is NOT advanced for this batch and the
+        // work item is never marked complete — a successor reprocesses and re-emits.
+        var cause = new RuntimeException("S3 5xx");
+        var sink = mock(DlqSink.class);
+        when(sink.flush()).thenReturn(Mono.error(cause));
+
+        var thrown = assertThrows(RuntimeException.class,
+            () -> DocumentMigrationBootstrap.flushDlqForBatch(sink));
+        assertThat(thrown, is(cause));
+    }
 }

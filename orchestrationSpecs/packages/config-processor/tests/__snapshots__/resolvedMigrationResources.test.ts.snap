@@ -124,6 +124,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "documentBackfillCoordinatorRetryInitialDelayMs": 1000,
       "documentBackfillCoordinatorRetryMaxDelayMs": 64000,
       "documentBackfillCoordinatorRetryMaxRetries": 7,
+      "documentBackfillDlqMaxBufferBytes": 67108864,
       "documentBackfillDlqS3Prefix": "rfs-dlq/",
       "documentBackfillDocTransformerConfigBase64": "",
       "documentBackfillDocumentsPerBulkRequest": 2147483647,

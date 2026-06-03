@@ -138,13 +138,19 @@ public class DocumentMigrationBootstrap {
         }
     }
 
-    private CompletionStatus runPartitionMigration(
+    // Package-private for end-to-end testing of the per-batch DLQ flush gating (see
+    // DocumentMigrationBootstrapDlqE2ETest); the public entry point is migrateOneShard.
+    CompletionStatus runPartitionMigration(
         IWorkCoordinator.WorkItemAndDuration workItem,
         PipelineConfig pipelineConfig,
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
         var wi = workItem.getWorkItem();
         log.info("Pipeline acquired work item: {}", wi);
+
+        // Stamp DLQ records emitted while processing this shard with its canonical work-item id
+        // (index + shard + checkpoint) so each terminal failure traces back to the work item.
+        targetClient.setDlqWorkItem(wi.toString());
 
         if (workItemTimeProvider != null) {
             workItemTimeProvider.getLeaseAcquisitionTimeRef().set(Instant.now());
@@ -181,6 +187,12 @@ public class DocumentMigrationBootstrap {
                     batchCount.incrementAndGet();
                     totalDocsMigrated.addAndGet(cursor.docsInBatch());
                     totalBytesMigrated.addAndGet(cursor.bytesInBatch());
+                    // Persist this batch's terminal failures to S3 BEFORE advancing the progress
+                    // watermark, so the coordinator checkpoint never moves past a failure that
+                    // isn't durably in the DLQ (at-least-once for DLQ drops). A flush failure
+                    // throws here; the LambdaSubscriber routes it to the error consumer below, so
+                    // the work item is not completed and a successor reprocesses and re-emits.
+                    flushDlqForBatch(targetClient.getDlqSink());
                     cursorConsumer.accept(new WorkItemCursor(cursor.lastDocProcessed()));
                 },
                 error -> {
@@ -236,6 +248,20 @@ public class DocumentMigrationBootstrap {
         } finally {
             progressMonitor.close();
         }
+    }
+
+    /**
+     * Flush the DLQ buffer for a just-completed batch so its terminal failures are durable in S3
+     * before that batch's progress is committed to the work coordinator. Throwing (on flush
+     * failure or the 5-minute timeout) aborts the partition migration so the work item is not
+     * marked complete — a successor then reprocesses from the last durable cursor and re-emits,
+     * giving an at-least-once guarantee for DLQ entries. No-op when the DLQ is disabled.
+     */
+    static void flushDlqForBatch(DlqSink dlqSink) {
+        if (dlqSink == null) {
+            return;
+        }
+        dlqSink.flush().block(Duration.ofMinutes(5));
     }
 
     static void flushDlqOrThrow(DlqSink dlqSink, IWorkCoordinator.WorkItemAndDuration.WorkItem wi) {

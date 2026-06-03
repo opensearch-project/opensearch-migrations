@@ -344,6 +344,13 @@ public class RfsMigrateDocuments {
             description = "Identifier for this RFS run; used as the S3 prefix that isolates this run's " +
                 "DLQ records from prior runs. Defaults to the Argo workflow UID when available.")
         public String dlqSessionId = null;
+
+        @Parameter(required = false,
+            names = { "--dlq-max-buffer-bytes" },
+            description = "Maximum uncompressed bytes buffered in memory per target index before the DLQ " +
+                "rotates to a new S3 object. Bounds heap use when a shard produces a very large number of " +
+                "terminal failures. Default 67108864 (64 MiB).")
+        public long dlqMaxBufferBytes = S3DlqSink.DEFAULT_MAX_BUFFER_BYTES;
     }
 
     public static class ExperimentalArgs {
@@ -882,6 +889,7 @@ public class RfsMigrateDocuments {
             .workerId(workerId)
             .region(region)
             .uploader(S3DlqSink.s3ClientUploader(s3Client))
+            .maxBufferBytes(arguments.dlqArgs.dlqMaxBufferBytes)
             .build();
     }
 
@@ -973,7 +981,6 @@ public class RfsMigrateDocuments {
         }
         var workItemId = workItemAndDuration.getWorkItem().toString();
         log.atInfo().setMessage("Marking progress: " + workItemId + ", at doc " + progressCursor.get().getProgressCheckpointNum()).log();
-        var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, progressCursor.get());
 
         // Don't checkmark the work item as done until the DLQ stuff is written/flushed.
         // If the flush fails, refuse to mark complete so the lease naturally expires and a
@@ -982,6 +989,14 @@ public class RfsMigrateDocuments {
         if (!flushDlqBeforeComplete(dlqSink, workItemId)) {
             return;
         }
+
+        // The flush succeeded, so every document processed through the current cursor is now
+        // durable in the DLQ. That cursor is our DLQ watermark — checkpoint the successor to it
+        // so we never advance the work item past what we've durably persisted. (Under the
+        // current flush-before-complete gate the watermark equals the progress cursor; capturing
+        // it after the flush makes that invariant explicit.)
+        var dlqWatermark = progressCursor.get();
+        var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, dlqWatermark);
 
         coordinator.createSuccessorWorkItemsAndMarkComplete(
                 workItemId, successorWorkItem, 1, contextSupplier
@@ -1083,6 +1098,10 @@ public class RfsMigrateDocuments {
                         return;
                     }
 
+                    // The flush succeeded, so everything through progressCursor is durable in the
+                    // DLQ — that cursor is the DLQ watermark, and successorWorkItemIds (computed
+                    // from it above) checkpoints the successor to exactly that point, never past
+                    // what we've persisted.
                     coordinator.createSuccessorWorkItemsAndMarkComplete(
                             workItemId,
                             successorWorkItemIds,

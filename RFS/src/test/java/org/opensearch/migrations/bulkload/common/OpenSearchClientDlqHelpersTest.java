@@ -86,6 +86,7 @@ class OpenSearchClientDlqHelpersTest {
     void emitDlqRecord_passesIdSessionWorkerAndIndexThrough() {
         when(dlqSink.write(any())).thenReturn(Mono.empty());
         client.setDlqContext(dlqSink, "sess-A", "worker-1");
+        client.setDlqWorkItem("bXktaW5kZXg__0__1250");
         var op = indexOpWithId("doc-42");
         var failure = new BulkResponseParser.ItemFailure(0, "doc-42", "boom", "{\"raw\":\"json\"}");
 
@@ -96,6 +97,7 @@ class OpenSearchClientDlqHelpersTest {
         var r = rec.getValue();
         assertThat(r.getSessionId(), equalTo("sess-A"));
         assertThat(r.getWorkerId(), equalTo("worker-1"));
+        assertThat(r.getWorkItemId(), equalTo("bXktaW5kZXg__0__1250"));
         assertThat(r.getTargetIndex(), equalTo("movies"));
         assertThat(r.getDocumentId(), equalTo("doc-42"));
         assertThat(r.getFailureType(), equalTo("boom"));
@@ -103,6 +105,63 @@ class OpenSearchClientDlqHelpersTest {
         assertThat(r.getRequestItem(), notNullValue());
         assertThat(r.getResponseItem(), notNullValue());
         assertThat(r.getTimestamp(), notNullValue());
+    }
+
+    @Test
+    void emitDlqRecord_usesOriginalSourceForDocumentBody() {
+        // When the op carries an originalSource (the pre-transformation, source-index
+        // document), the DLQ record's requestItem must reflect that original body rather
+        // than the transformed document that was actually sent.
+        when(dlqSink.write(any())).thenReturn(Mono.empty());
+        client.setDlqContext(dlqSink, "s", "w");
+        var op = IndexOp.builder()
+            .operation(IndexOperationMeta.builder().id("doc-7").build())
+            .document(java.util.Map.of("field", "transformed"))
+            .originalSource(java.util.Map.of("field", "original"))
+            .build();
+        var failure = new BulkResponseParser.ItemFailure(0, "doc-7", "err", "{}");
+
+        client.emitDlqRecord("idx", op, failure, FailureClass.NON_RETRYABLE);
+
+        ArgumentCaptor<DlqRecord> rec = ArgumentCaptor.forClass(DlqRecord.class);
+        verify(dlqSink).write(rec.capture());
+        var requestItem = rec.getValue().getRequestItem();
+        assertThat(requestItem.get("document").get("field").asText(), equalTo("original"));
+    }
+
+    @Test
+    void emitDlqRecord_withoutOriginalSource_keepsSentDocumentBody() {
+        // No originalSource (e.g. transformer synthesized a new doc with no source
+        // counterpart): fall back to the document that was actually sent.
+        when(dlqSink.write(any())).thenReturn(Mono.empty());
+        client.setDlqContext(dlqSink, "s", "w");
+        var op = IndexOp.builder()
+            .operation(IndexOperationMeta.builder().id("doc-8").build())
+            .document(java.util.Map.of("field", "sent"))
+            .build();
+        var failure = new BulkResponseParser.ItemFailure(0, "doc-8", "err", "{}");
+
+        client.emitDlqRecord("idx", op, failure, FailureClass.NON_RETRYABLE);
+
+        ArgumentCaptor<DlqRecord> rec = ArgumentCaptor.forClass(DlqRecord.class);
+        verify(dlqSink).write(rec.capture());
+        var requestItem = rec.getValue().getRequestItem();
+        assertThat(requestItem.get("document").get("field").asText(), equalTo("sent"));
+    }
+
+    @Test
+    void emitDlqRecord_workItemIdNullUntilSet() {
+        // Before any work item is started (setDlqWorkItem not yet called), the record's
+        // workItemId is null rather than an empty/garbage string.
+        when(dlqSink.write(any())).thenReturn(Mono.empty());
+        client.setDlqContext(dlqSink, "s", "w");
+
+        client.emitDlqRecord("idx", indexOpWithId("d-1"),
+            new BulkResponseParser.ItemFailure(0, "d-1", "err", "{}"), FailureClass.NON_RETRYABLE);
+
+        ArgumentCaptor<DlqRecord> rec = ArgumentCaptor.forClass(DlqRecord.class);
+        verify(dlqSink).write(rec.capture());
+        assertThat(rec.getValue().getWorkItemId(), nullValue());
     }
 
     @Test
