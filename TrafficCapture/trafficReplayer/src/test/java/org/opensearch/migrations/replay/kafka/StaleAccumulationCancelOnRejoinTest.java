@@ -252,6 +252,14 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
      * {@link #CONN_ID} have been observed. Each individual chunk under option A is either
      * all-synth or all-real (never mixed); this helper collects the cross-chunk delivery order
      * so callers can verify ordering at the source-layer level.
+     *
+     * <p>In production the empty-batch park (gated by
+     * {@code outstandingTrafficSourceReaderInterruptedCloseSessions}) is drained by the
+     * channel-close callback wired through {@code TrafficReplayerTopLevel}. This unit test
+     * skips that wiring and the test session has no real {@code ConnectionReplaySession},
+     * so we simulate the close confirmation directly: as soon as a synth close is observed for
+     * {@code CONN_ID}, fire {@link KafkaTrafficCaptureSource#onNetworkConnectionClosed} so the
+     * counter drops back to zero and the next poll can fetch the broker's re-delivery.
      */
     private List<ITrafficStreamWithKey> drainUntilSyntheticAndRealForConn(
         KafkaTrafficCaptureSource source,
@@ -266,8 +274,18 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
                 accumulator.accept(ts);
                 observed.add(ts);
                 if (CONN_ID.equals(ts.getKey().getConnectionId())) {
-                    if (ts instanceof TrafficSourceReaderInterruptedClose) sawSynthetic = true;
-                    else sawReal = true;
+                    if (ts instanceof TrafficSourceReaderInterruptedClose) {
+                        sawSynthetic = true;
+                        // Simulate the channel-close callback that, in production, drains
+                        // outstandingTrafficSourceReaderInterruptedCloseSessions for the
+                        // PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER session at the synth-close generation.
+                        source.onNetworkConnectionClosed(
+                            CONN_ID,
+                            KafkaTrafficCaptureSource.PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER,
+                            ts.getKey().getSourceGeneration());
+                    } else {
+                        sawReal = true;
+                    }
                 }
             }
             if (sawSynthetic && sawReal) return observed;

@@ -225,8 +225,12 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             log.atInfo().setMessage("{} assigned no new partitions.").addArgument(this).log();
             return;
         }
-        // Whatever this poll returns is now stamped at the new generation — drop it.
-        rebalanceDuringPoll.set(true);
+        // NOTE: do NOT set rebalanceDuringPoll here. The flag exists to flag "we lost something
+        // during this poll, the records returned cannot be trusted" — that's the
+        // revoke/lost-only invariant. A pure assignment (initial subscription, or cooperative
+        // gain-only) doesn't introduce a generation mismatch, and dropping its records would
+        // waste a poll cycle. If revoke + assigned both fire in one poll (round-trip),
+        // cleanupRevokedPartitions has already set the flag.
         new KafkaConsumerContexts.AsyncListeningContext(globalContext).onPartitionsAssigned(newPartitions);
         synchronized (commitDataLock) {
             consumerConnectionGeneration.incrementAndGet();
