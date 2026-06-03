@@ -75,6 +75,9 @@ helm template ma ../deployment/k8s/charts/aggregates/migrationAssistantWithArgo 
     -f <(envsubst < ../deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesForLocalK8sWithEnvSubst.yaml) \
     | kubectl apply -n ma -f -
 ```
+- the local `fillLocalRegistry.sh` script adds the flags to the gradle run to include Solr 7 and excludes all custom elastic version builds to save time. Change the flags
+  in the file if you need those images. Note that without setting `includeSolr773TestImage` flag by default Solr 7 build is excluded due to long build times due to reliance
+  on apache archive mirror. This should be adjusted going forward. Exclusion by default also means it is currently not configured in pipeline tests.
 
 
 #### Port Forwarding

@@ -26,6 +26,7 @@ def publishedRepoByImageName = [
 ]
 
 def excludeSolr660TestImage = project.hasProperty('excludeSolr660TestImage') // pass -PexcludeSolr660TestImage to include
+// NOTE: the solr 7 image is not included by default for now due to current source, which is apache archive
 def includeSolr773TestImage = project.hasProperty('includeSolr773TestImage') // pass -PincludeSolr773TestImage to include
 def excludeESCustomTestImages = project.hasProperty('excludeESCustomTestImages') // pass -PexcludeESCustomTestImages to exclude custom ES test image builds
 
