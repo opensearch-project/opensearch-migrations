@@ -43,6 +43,7 @@ def call(Map config = [:]) {
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
             booleanParam(name: 'BUILD', defaultValue: true, description: 'Build all artifacts from source (images, CFN, chart). When false, downloads published release artifacts.')
             string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download.')
+            booleanParam(name: 'USE_RELEASE_CLI', defaultValue: false, description: 'Download the migration-assistant CLI from the GitHub release for VERSION instead of using the source-checkout copy. Tests the same install path operators use via curl-pipe install.')
         }
 
         options {
@@ -89,6 +90,7 @@ def call(Map config = [:]) {
     Target:                 ${params.TARGET_VERSION}
     Build:                  ${params.BUILD}
     Version:                ${params.VERSION}
+    Use Release CLI:        ${params.USE_RELEASE_CLI}
     ================================================================
 """
                 }
@@ -142,6 +144,7 @@ def call(Map config = [:]) {
                                             build: params.BUILD,
                                             skipTestImages: true,
                                             version: params.VERSION,
+                                            useReleaseCli: params.USE_RELEASE_CLI,
                                             useGeneralNodePool: true,
                                             eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                             kubectlContext: "migration-eks-${maStageName}",

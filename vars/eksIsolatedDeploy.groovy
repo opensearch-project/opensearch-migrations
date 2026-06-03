@@ -17,6 +17,8 @@ def call(Map config = [:]) {
             string(name: 'ISOLATED_VPC_ID', defaultValue: isolatedVpcId, description: 'VPC ID for isolated deployment')
             string(name: 'ISOLATED_SUBNET_IDS', defaultValue: isolatedSubnetIds, description: 'Comma-separated subnet IDs (isolated, no internet)')
             string(name: 'REGION', defaultValue: region, description: 'AWS region')
+            booleanParam(name: 'USE_RELEASE_CLI', defaultValue: false, description: 'Download the migration-assistant CLI from the latest GitHub release instead of using the source checkout copy')
+            string(name: 'VERSION', defaultValue: 'latest', description: 'Release version of migration-assistant CLI to install when USE_RELEASE_CLI=true (e.g. "3.2.1" or "latest")')
         }
 
         options {
@@ -36,9 +38,15 @@ def call(Map config = [:]) {
                 steps {
                     timeout(time: 90, unit: 'MINUTES') {
                         script {
+                            // Resolve the CLI binary once; reused across both
+                            // stages so we don't re-install on every step.
+                            env.MA_CLI_BIN = resolveCli(
+                                useReleaseCli: params.USE_RELEASE_CLI,
+                                version:       params.VERSION
+                            )
                             sh """
                                 export MIGRATE_HOME="\$(pwd)/migration-assistant-workspace"
-                                ./deployment/k8s/aws/cli/bin/migration-assistant \
+                                ${env.MA_CLI_BIN} \
                                   --non-interactive \
                                   --deploy-create-vpc-cfn \
                                   --build \
@@ -71,7 +79,7 @@ def call(Map config = [:]) {
                         script {
                             sh """
                                 export MIGRATE_HOME="\$(pwd)/migration-assistant-workspace"
-                                ./deployment/k8s/aws/cli/bin/migration-assistant \
+                                ${env.MA_CLI_BIN} \
                                   --non-interactive \
                                   --deploy-import-vpc-cfn \
                                   --build \

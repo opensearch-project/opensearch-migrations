@@ -27,6 +27,7 @@ def call(Map config = [:]) {
             string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '33', description: 'Max retries for workflow monitoring (~1/min). 33=~30min')
             booleanParam(name: 'BUILD', defaultValue: true, description: 'Build all artifacts from source (images, CFN, chart). When false, downloads published release artifacts.')
             string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download for images, chart, and CFN templates.')
+            booleanParam(name: 'USE_RELEASE_CLI', defaultValue: false, description: 'Download the migration-assistant CLI from the GitHub release for VERSION instead of using the source-checkout copy. Tests the same install path operators use via curl-pipe install.')
         }
 
         options {
@@ -75,6 +76,7 @@ def call(Map config = [:]) {
                             Workers:          ${params.RFS_WORKERS}
                             Build:                  ${params.BUILD}
                             Version:                ${params.VERSION}
+                            Use Release CLI:        ${params.USE_RELEASE_CLI}
                             ================================================================
                         """
                     }
@@ -87,8 +89,9 @@ def call(Map config = [:]) {
                 }
             }
 
-            // Skip source build when using release bootstrap or when not building
-            // any artifacts from source (images/chart).
+            // Skip source build when not building any artifacts from
+            // source (images/chart). USE_RELEASE_CLI is independent —
+            // it only governs which migration-assistant binary runs.
             stage('Build') {
                 when { expression { params.BUILD } }
                 steps {
@@ -110,6 +113,7 @@ def call(Map config = [:]) {
                                     build: params.BUILD,
                                     skipTestImages: true,
                                     version: params.VERSION,
+                                    useReleaseCli: params.USE_RELEASE_CLI,
                                     useGeneralNodePool: true,
                                     eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                     kubectlContext: "migration-eks-${maStageName}"

@@ -37,6 +37,7 @@ def call(Map config = [:]) {
             string(name: 'TEST_IDS', defaultValue: '0040', description: 'Test IDs to run (comma-separated)')
             booleanParam(name: 'BUILD', defaultValue: true, description: 'Build all artifacts from source (images, CFN, chart). When false, downloads published release artifacts.')
             string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download for images, chart, and CFN templates.')
+            booleanParam(name: 'USE_RELEASE_CLI', defaultValue: false, description: 'Download the migration-assistant CLI from the GitHub release for VERSION instead of using the source-checkout copy. Tests the same install path operators use via curl-pipe install.')
         }
 
         options {
@@ -83,6 +84,9 @@ def call(Map config = [:]) {
     Source:     ${params.SOURCE_VERSION}
     Target:     ${params.TARGET_VERSION}
     Test IDs:   ${params.TEST_IDS}
+    Build:      ${params.BUILD}
+    Version:    ${params.VERSION}
+    Use Release CLI: ${params.USE_RELEASE_CLI}
     ================================================================
 """
                 }
@@ -116,6 +120,7 @@ def call(Map config = [:]) {
                                     build: params.BUILD,
                                     skipTestImages: true,
                                     version: params.VERSION,
+                                    useReleaseCli: params.USE_RELEASE_CLI,
                                     useGeneralNodePool: true,
                                     eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                     kubectlContext: "migration-eks-build-${env.buildStageName}"
@@ -147,6 +152,7 @@ def call(Map config = [:]) {
                                     build: params.BUILD,
                                     skipTestImages: true,
                                     version: params.VERSION,
+                                    useReleaseCli: params.USE_RELEASE_CLI,
                                     useGeneralNodePool: true,
                                     eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                     kubectlContext: "migration-eks-${env.maStageName}",

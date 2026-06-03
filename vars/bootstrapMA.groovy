@@ -1,7 +1,15 @@
 /**
- * Run the migration-assistant CLI from the source checkout to deploy the
- * Migration Assistant CFN stack. State and the run log land under
+ * Run the migration-assistant CLI to deploy the Migration Assistant CFN
+ * stack. State and the run log land under
  * ./migration-assistant-workspace/<stage>/ in the Jenkins workspace.
+ *
+ * The CLI binary defaults to the source-checkout copy
+ * (./deployment/k8s/aws/cli/bin/migration-assistant). Pass
+ * useReleaseCli=true (typically wired to params.USE_RELEASE_CLI) to
+ * download install.sh from the GitHub release for `version` and run
+ * the released CLI instead — this is the path operators use via
+ * curl-pipe install. Replaces the old USE_RELEASE_BOOTSTRAP toggle
+ * (which downloaded aws-bootstrap.sh; that script no longer exists).
  *
  * Sets these env vars from CFN outputs after deploy:
  *   - env.MA_STACK_NAME
@@ -21,7 +29,8 @@
  *       build:                 params.BUILD,
  *       skipTestImages:        true,
  *       useGeneralNodePool:    true,
- *       version:               params.VERSION,  // ignored when build=true
+ *       version:               params.VERSION,         // ignored when build=true
+ *       useReleaseCli:         params.USE_RELEASE_CLI, // false → source checkout (default)
  *       // Optional — import VPC mode:
  *       vpcId:               "vpc-xxx",
  *       subnetIds:           "subnet-a,subnet-b",
@@ -82,6 +91,13 @@ def call(Map config = [:]) {
     def flagStr = flags.join(' ')
     def workspaceDir = "${env.WORKSPACE}/migration-assistant-workspace"
 
+    // Resolve which CLI binary to run: source-checkout (default) or the
+    // released CLI installed via install.sh. See vars/resolveCli.groovy.
+    def cliBin = resolveCli(
+        useReleaseCli: config.useReleaseCli ?: false,
+        version:       config.version ?: 'latest'
+    )
+
     // Run the CLI. Stream stdout+stderr live (each line tagged with the
     // wall-clock time so a hang is obvious in the Jenkins console). On
     // non-zero exit, dump the full migrate.log so the failure root cause
@@ -89,7 +105,7 @@ def call(Map config = [:]) {
     sh """
         set +e
         export MIGRATE_HOME="${workspaceDir}"
-        ./deployment/k8s/aws/cli/bin/migration-assistant \
+        ${cliBin} \
           --non-interactive \
           --verbose \
           --stack-name "${stackName}" \

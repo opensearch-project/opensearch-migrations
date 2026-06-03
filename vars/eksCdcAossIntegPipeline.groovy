@@ -3,7 +3,9 @@
  *
  * Combines CDC pipeline stages (ES source + capture proxy + replayer) with
  * AOSS deployment from eksAOSSIntegPipeline. Deploys:
- *   - EKS cluster + Migration Assistant (via aws-bootstrap.sh, create-vpc-cfn)
+ *   - EKS cluster + Migration Assistant (via the migration-assistant CLI,
+ *     create-vpc-cfn). USE_RELEASE_CLI=true switches between the
+ *     source-checkout CLI and the released one.
  *   - ES 7.10 source domain (via CDK, public access + SigV4)
  *   - AOSS search collection (via CDK, as replayer target in MA VPC)
  */
@@ -30,6 +32,7 @@ def call(Map config = [:]) {
             string(name: 'REGION', defaultValue: 'us-east-1', description: 'AWS region for deployment')
             booleanParam(name: 'BUILD', defaultValue: true, description: 'Build all artifacts from source (images, CFN, chart). When false, downloads published release artifacts.')
             string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy')
+            booleanParam(name: 'USE_RELEASE_CLI', defaultValue: false, description: 'Download the migration-assistant CLI from the GitHub release for VERSION instead of using the source-checkout copy. Tests the same install path operators use via curl-pipe install.')
         }
 
         options {
@@ -75,6 +78,9 @@ def call(Map config = [:]) {
     Test IDs:       ${params.TEST_IDS}
     Source:         ${params.SOURCE_VERSION}
     Target:         AOSS (search collection)
+    Build:          ${params.BUILD}
+    Version:        ${params.VERSION}
+    Use Release CLI: ${params.USE_RELEASE_CLI}
     ================================================================
 """
                 }
@@ -107,6 +113,7 @@ def call(Map config = [:]) {
                                     build: params.BUILD,
                                     skipTestImages: true,
                                     version: params.VERSION,
+                                    useReleaseCli: params.USE_RELEASE_CLI,
                                     useGeneralNodePool: true,
                                     eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                     kubectlContext: "migration-eks-${maStageName}"
