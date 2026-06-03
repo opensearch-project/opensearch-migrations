@@ -800,14 +800,14 @@ public class TrafficReplayer {
         }
         log.info("S3 tuple writing enabled — bucket={}, region={}, prefix={}",
             params.tupleS3Bucket, params.tupleS3Region, params.tupleS3Prefix);
-        var s3ClientBuilder = S3AsyncClient.crtBuilder()
+        var credentialsProvider = DefaultCredentialsProvider.builder().build();
+        var s3ClientBuilder = S3AsyncClient.builder()
             .region(Region.of(params.tupleS3Region))
-            .credentialsProvider(DefaultCredentialsProvider.builder().build())
-            .targetThroughputInGbps(2.0)
-            .minimumPartSizeInBytes(8L * 1024 * 1024);
+            .credentialsProvider(credentialsProvider);
         if (params.tupleS3Endpoint != null && !params.tupleS3Endpoint.isEmpty()) {
-            s3ClientBuilder.endpointOverride(URI.create(params.tupleS3Endpoint));
-            s3ClientBuilder.forcePathStyle(true);
+            s3ClientBuilder
+                .endpointOverride(URI.create(params.tupleS3Endpoint))
+                .forcePathStyle(true);
         }
         var s3Client = s3ClientBuilder.build();
         var replayerId = ProcessHelpers.getNodeInstanceName();

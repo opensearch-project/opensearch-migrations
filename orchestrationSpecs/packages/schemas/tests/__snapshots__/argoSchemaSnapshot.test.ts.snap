@@ -698,6 +698,78 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                               "type": "string",
                               "default": "360h",
                               "description": "How long before certificate expiry to trigger renewal (e.g. '360h' = 15 days)."
+                            },
+                            "clientAuth": {
+                              "type": "object",
+                              "properties": {
+                                "trustedClientCaFile": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "image": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                        },
+                                        "pullPolicy": {
+                                          "type": "string",
+                                          "enum": [
+                                            "Always",
+                                            "Never",
+                                            "IfNotPresent"
+                                          ],
+                                          "default": "IfNotPresent",
+                                          "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                          "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                        }
+                                      },
+                                      "required": [
+                                        "image",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "configMap": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                          "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                        }
+                                      },
+                                      "required": [
+                                        "configMap",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ],
+                                  "description": "PEM trusted CA certificate file used to verify client certificates accepted by the capture proxy."
+                                },
+                                "trustedClientCaPem": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy."
+                                },
+                                "required": {
+                                  "type": "boolean",
+                                  "default": true,
+                                  "description": "When true, clients must present a certificate signed by the configured trusted client CA. Defaults to true."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "description": "Optional mutual TLS client-authentication configuration for the capture proxy listener."
                             }
                           },
                           "required": [
@@ -720,6 +792,78 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "secretName": {
                               "type": "string",
                               "description": "Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/."
+                            },
+                            "clientAuth": {
+                              "type": "object",
+                              "properties": {
+                                "trustedClientCaFile": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "image": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                        },
+                                        "pullPolicy": {
+                                          "type": "string",
+                                          "enum": [
+                                            "Always",
+                                            "Never",
+                                            "IfNotPresent"
+                                          ],
+                                          "default": "IfNotPresent",
+                                          "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                          "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                        }
+                                      },
+                                      "required": [
+                                        "image",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "configMap": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                          "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                        }
+                                      },
+                                      "required": [
+                                        "configMap",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ],
+                                  "description": "PEM trusted CA certificate file used to verify client certificates accepted by the capture proxy."
+                                },
+                                "trustedClientCaPem": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "description": "Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy."
+                                },
+                                "required": {
+                                  "type": "boolean",
+                                  "default": true,
+                                  "description": "When true, clients must present a certificate signed by the configured trusted client CA. Defaults to true."
+                                }
+                              },
+                              "additionalProperties": false,
+                              "description": "Optional mutual TLS client-authentication configuration for the capture proxy listener."
                             }
                           },
                           "required": [
@@ -770,6 +914,121 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "suppressMethodAndPath": {
                       "type": "string",
                       "default": ""
+                    },
+                    "sslTrustCertFile": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "sslTrustCertPem": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "sslTrustCertPemEnvVar": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "requireClientAuth": {
+                      "type": "boolean"
+                    },
+                    "fileSourceVolumes": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configMap": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "configMap"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "image": {
+                                "type": "object",
+                                "properties": {
+                                  "reference": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "pullPolicy": {
+                                    "type": "string",
+                                    "enum": [
+                                      "Always",
+                                      "Never",
+                                      "IfNotPresent"
+                                    ],
+                                    "default": "IfNotPresent"
+                                  }
+                                },
+                                "required": [
+                                  "reference"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "image"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "default": []
+                    },
+                    "fileSourceVolumeMounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "mountPath": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "readOnly": {
+                            "type": "boolean",
+                            "enum": [
+                              true
+                            ],
+                            "default": true
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "mountPath"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "default": []
                     }
                   },
                   "required": [
@@ -1189,22 +1448,105 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "boolean",
                       "default": false
                     },
-                    "transformsImage": {
-                      "type": "string",
-                      "default": ""
+                    "fileSourceVolumes": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configMap": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "configMap"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "image": {
+                                "type": "object",
+                                "properties": {
+                                  "reference": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "pullPolicy": {
+                                    "type": "string",
+                                    "enum": [
+                                      "Always",
+                                      "Never",
+                                      "IfNotPresent"
+                                    ],
+                                    "default": "IfNotPresent"
+                                  }
+                                },
+                                "required": [
+                                  "reference"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "image"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "default": []
                     },
-                    "transformsImagePullPolicy": {
-                      "type": "string",
-                      "enum": [
-                        "Always",
-                        "Never",
-                        "IfNotPresent"
-                      ],
-                      "default": "IfNotPresent"
-                    },
-                    "transformsConfigMap": {
-                      "type": "string",
-                      "default": ""
+                    "fileSourceVolumeMounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "mountPath": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "readOnly": {
+                            "type": "boolean",
+                            "enum": [
+                              true
+                            ],
+                            "default": true
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "mountPath"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "default": []
                     }
                   }
                 },
@@ -1354,6 +1696,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "default": "AUTO"
                     },
+                    "emitDocType": {
+                      "type": "string",
+                      "enum": [
+                        "AUTO",
+                        "ON",
+                        "OFF"
+                      ],
+                      "default": "AUTO"
+                    },
                     "allowedDocExceptionTypes": {
                       "type": "array",
                       "items": {
@@ -1393,22 +1744,109 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 67108864
                     },
-                    "transformsImage": {
+                    "positionGapStopword": {
                       "type": "string",
-                      "default": ""
+                      "default": "a"
                     },
-                    "transformsImagePullPolicy": {
-                      "type": "string",
-                      "enum": [
-                        "Always",
-                        "Never",
-                        "IfNotPresent"
-                      ],
-                      "default": "IfNotPresent"
+                    "fileSourceVolumes": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configMap": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "configMap"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "image": {
+                                "type": "object",
+                                "properties": {
+                                  "reference": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "pullPolicy": {
+                                    "type": "string",
+                                    "enum": [
+                                      "Always",
+                                      "Never",
+                                      "IfNotPresent"
+                                    ],
+                                    "default": "IfNotPresent"
+                                  }
+                                },
+                                "required": [
+                                  "reference"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "image"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "default": []
                     },
-                    "transformsConfigMap": {
-                      "type": "string",
-                      "default": ""
+                    "fileSourceVolumeMounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "mountPath": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "readOnly": {
+                            "type": "boolean",
+                            "enum": [
+                              true
+                            ],
+                            "default": true
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "mountPath"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "default": []
                     }
                   }
                 },
@@ -1961,22 +2399,105 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "description": "String appended to the User-Agent header on all replayed requests to the target cluster. Useful for identifying replayed traffic in target cluster logs."
                     },
-                    "transformsImage": {
-                      "type": "string",
-                      "default": ""
+                    "fileSourceVolumes": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configMap": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "configMap"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "image": {
+                                "type": "object",
+                                "properties": {
+                                  "reference": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "pullPolicy": {
+                                    "type": "string",
+                                    "enum": [
+                                      "Always",
+                                      "Never",
+                                      "IfNotPresent"
+                                    ],
+                                    "default": "IfNotPresent"
+                                  }
+                                },
+                                "required": [
+                                  "reference"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "image"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "default": []
                     },
-                    "transformsImagePullPolicy": {
-                      "type": "string",
-                      "enum": [
-                        "Always",
-                        "Never",
-                        "IfNotPresent"
-                      ],
-                      "default": "IfNotPresent"
-                    },
-                    "transformsConfigMap": {
-                      "type": "string",
-                      "default": ""
+                    "fileSourceVolumeMounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "mountPath": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "readOnly": {
+                            "type": "boolean",
+                            "enum": [
+                              true
+                            ],
+                            "default": true
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "mountPath"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "default": []
                     }
                   }
                 },
@@ -2270,54 +2791,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
       },
       "default": {},
       "description": "Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'."
-    },
-    "transformsSources": {
-      "type": "object",
-      "additionalProperties": {
-        "anyOf": [
-          {
-            "type": "object",
-            "properties": {
-              "image": {
-                "type": "string",
-                "minLength": 1,
-                "description": "OCI image reference (preferably with digest) whose root contains transform files. The workflow mounts the image at /transforms/. Build with deployment/k8s/package-transforms.sh."
-              },
-              "pullPolicy": {
-                "type": "string",
-                "enum": [
-                  "Always",
-                  "Never",
-                  "IfNotPresent"
-                ],
-                "default": "IfNotPresent",
-                "description": "Kubernetes image pull policy for the transforms image. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
-              }
-            },
-            "required": [
-              "image"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "configMap": {
-                "type": "string",
-                "minLength": 1,
-                "description": "Name of a pre-existing Kubernetes ConfigMap. Each key becomes a file in /transforms/."
-              }
-            },
-            "required": [
-              "configMap"
-            ],
-            "additionalProperties": false
-          }
-        ],
-        "description": "Source for user-defined transform files. Exactly one of 'image' or 'configMap'."
-      },
-      "default": {},
-      "description": "Named transform sources. Define once, reference by key in transform-eligible tool options."
     },
     "sourceClusters": {
       "type": "object",
@@ -2719,16 +3192,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "default": false,
                         "description": "When true, skips the manual approval gate after the metadata migration step. The migration step applies the evaluated metadata changes to the target cluster."
                       },
-                      "transformsSource": {
-                        "type": "string",
-                        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                        "description": "Key into top-level transformsSources. Mounts /transforms/ into the metadata migration pod.",
-                        "checksumFor": [
-                          "snapshot",
-                          "replayer"
-                        ],
-                        "changeRestriction": "impossible"
-                      },
                       "componentTemplateAllowlist": {
                         "type": "array",
                         "items": {
@@ -2805,38 +3268,323 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "items": {
                           "type": "object",
                           "properties": {
-                            "language": {
-                              "type": "string",
-                              "enum": [
-                                "javascript",
-                                "python"
+                            "entryPoint": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "javascript": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "javascript"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "javascriptFile": {
+                                      "anyOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "image": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                            },
+                                            "pullPolicy": {
+                                              "type": "string",
+                                              "enum": [
+                                                "Always",
+                                                "Never",
+                                                "IfNotPresent"
+                                              ],
+                                              "default": "IfNotPresent",
+                                              "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                            },
+                                            "path": {
+                                              "type": "string",
+                                              "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                              "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                            }
+                                          },
+                                          "required": [
+                                            "image",
+                                            "path"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "configMap": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                            },
+                                            "path": {
+                                              "type": "string",
+                                              "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                              "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                            }
+                                          },
+                                          "required": [
+                                            "configMap",
+                                            "path"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      ],
+                                      "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                    }
+                                  },
+                                  "required": [
+                                    "javascriptFile"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "python": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "python"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "pythonFile": {
+                                      "anyOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "image": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                            },
+                                            "pullPolicy": {
+                                              "type": "string",
+                                              "enum": [
+                                                "Always",
+                                                "Never",
+                                                "IfNotPresent"
+                                              ],
+                                              "default": "IfNotPresent",
+                                              "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                            },
+                                            "path": {
+                                              "type": "string",
+                                              "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                              "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                            }
+                                          },
+                                          "required": [
+                                            "image",
+                                            "path"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "configMap": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                            },
+                                            "path": {
+                                              "type": "string",
+                                              "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                              "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                            }
+                                          },
+                                          "required": [
+                                            "configMap",
+                                            "path"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      ],
+                                      "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                    }
+                                  },
+                                  "required": [
+                                    "pythonFile"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "transformName": {
+                              "type": "string"
+                            },
+                            "context": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "valueDirectories": {
+                                      "type": "array",
+                                      "items": {
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "configMap": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              }
+                                            },
+                                            "required": [
+                                              "configMap"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "image": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              },
+                                              "pullPolicy": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "Always",
+                                                  "Never",
+                                                  "IfNotPresent"
+                                                ],
+                                                "default": "IfNotPresent"
+                                              },
+                                              "path": {
+                                                "type": "string",
+                                                "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                                "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                              }
+                                            },
+                                            "required": [
+                                              "image"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        ],
+                                        "description": "Directory whose immediate files become transform context values."
+                                      },
+                                      "default": []
+                                    },
+                                    "values": {
+                                      "type": "object",
+                                      "additionalProperties": {
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "value": {
+                                                "type": [
+                                                  "string",
+                                                  "number",
+                                                  "boolean",
+                                                  "object",
+                                                  "array",
+                                                  "null"
+                                                ]
+                                              }
+                                            },
+                                            "required": [
+                                              "value"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "fromFile": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "image": {
+                                                        "type": "string",
+                                                        "minLength": 1,
+                                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                      },
+                                                      "pullPolicy": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                          "Always",
+                                                          "Never",
+                                                          "IfNotPresent"
+                                                        ],
+                                                        "default": "IfNotPresent",
+                                                        "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                                      },
+                                                      "path": {
+                                                        "type": "string",
+                                                        "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                                        "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "image",
+                                                      "path"
+                                                    ],
+                                                    "additionalProperties": false
+                                                  },
+                                                  {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "configMap": {
+                                                        "type": "string",
+                                                        "minLength": 1,
+                                                        "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                                      },
+                                                      "path": {
+                                                        "type": "string",
+                                                        "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                                        "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "configMap",
+                                                      "path"
+                                                    ],
+                                                    "additionalProperties": false
+                                                  }
+                                                ],
+                                                "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                              }
+                                            },
+                                            "required": [
+                                              "fromFile"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        ]
+                                      },
+                                      "default": {}
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
                               ],
-                              "description": "Runtime for this transform script."
-                            },
-                            "file": {
-                              "type": "string",
-                              "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
-                              "description": "Script path relative to /transforms. Defaults by transform kind and language."
-                            },
-                            "bindingsObject": {
-                              "type": "object",
-                              "additionalProperties": {
-                                "type": [
-                                  "string",
-                                  "number",
-                                  "boolean",
-                                  "object",
-                                  "array",
-                                  "null"
-                                ]
-                              },
-                              "default": {},
-                              "description": "Optional JSON object passed to the transform at initialization."
+                              "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files."
                             }
                           },
-                          "required": [
-                            "language"
-                          ]
+                          "additionalProperties": false
                         },
                         "description": "Metadata transform pipeline. Generates the existing transformerConfig inline JSON option.",
                         "checksumFor": [
@@ -2949,15 +3697,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         ],
                         "description": "Kubernetes resource limits and requests for the RFS container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."
                       },
-                      "transformsSource": {
-                        "type": "string",
-                        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                        "description": "Key into top-level transformsSources. Mounts /transforms/ into the RFS pod.",
-                        "checksumFor": [
-                          "replayer"
-                        ],
-                        "changeRestriction": "impossible"
-                      },
                       "indexAllowlist": {
                         "type": "array",
                         "items": {
@@ -3009,38 +3748,323 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "items": {
                           "type": "object",
                           "properties": {
-                            "language": {
-                              "type": "string",
-                              "enum": [
-                                "javascript",
-                                "python"
+                            "entryPoint": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "javascript": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "javascript"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "javascriptFile": {
+                                      "anyOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "image": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                            },
+                                            "pullPolicy": {
+                                              "type": "string",
+                                              "enum": [
+                                                "Always",
+                                                "Never",
+                                                "IfNotPresent"
+                                              ],
+                                              "default": "IfNotPresent",
+                                              "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                            },
+                                            "path": {
+                                              "type": "string",
+                                              "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                              "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                            }
+                                          },
+                                          "required": [
+                                            "image",
+                                            "path"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "configMap": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                            },
+                                            "path": {
+                                              "type": "string",
+                                              "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                              "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                            }
+                                          },
+                                          "required": [
+                                            "configMap",
+                                            "path"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      ],
+                                      "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                    }
+                                  },
+                                  "required": [
+                                    "javascriptFile"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "python": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "python"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "pythonFile": {
+                                      "anyOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "image": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                            },
+                                            "pullPolicy": {
+                                              "type": "string",
+                                              "enum": [
+                                                "Always",
+                                                "Never",
+                                                "IfNotPresent"
+                                              ],
+                                              "default": "IfNotPresent",
+                                              "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                            },
+                                            "path": {
+                                              "type": "string",
+                                              "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                              "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                            }
+                                          },
+                                          "required": [
+                                            "image",
+                                            "path"
+                                          ],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "configMap": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                            },
+                                            "path": {
+                                              "type": "string",
+                                              "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                              "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                            }
+                                          },
+                                          "required": [
+                                            "configMap",
+                                            "path"
+                                          ],
+                                          "additionalProperties": false
+                                        }
+                                      ],
+                                      "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                    }
+                                  },
+                                  "required": [
+                                    "pythonFile"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "transformName": {
+                              "type": "string"
+                            },
+                            "context": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "valueDirectories": {
+                                      "type": "array",
+                                      "items": {
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "configMap": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              }
+                                            },
+                                            "required": [
+                                              "configMap"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "image": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              },
+                                              "pullPolicy": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "Always",
+                                                  "Never",
+                                                  "IfNotPresent"
+                                                ],
+                                                "default": "IfNotPresent"
+                                              },
+                                              "path": {
+                                                "type": "string",
+                                                "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                                "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                              }
+                                            },
+                                            "required": [
+                                              "image"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        ],
+                                        "description": "Directory whose immediate files become transform context values."
+                                      },
+                                      "default": []
+                                    },
+                                    "values": {
+                                      "type": "object",
+                                      "additionalProperties": {
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "value": {
+                                                "type": [
+                                                  "string",
+                                                  "number",
+                                                  "boolean",
+                                                  "object",
+                                                  "array",
+                                                  "null"
+                                                ]
+                                              }
+                                            },
+                                            "required": [
+                                              "value"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "fromFile": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "image": {
+                                                        "type": "string",
+                                                        "minLength": 1,
+                                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                      },
+                                                      "pullPolicy": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                          "Always",
+                                                          "Never",
+                                                          "IfNotPresent"
+                                                        ],
+                                                        "default": "IfNotPresent",
+                                                        "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                                      },
+                                                      "path": {
+                                                        "type": "string",
+                                                        "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                                        "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "image",
+                                                      "path"
+                                                    ],
+                                                    "additionalProperties": false
+                                                  },
+                                                  {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "configMap": {
+                                                        "type": "string",
+                                                        "minLength": 1,
+                                                        "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                                      },
+                                                      "path": {
+                                                        "type": "string",
+                                                        "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                                        "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "configMap",
+                                                      "path"
+                                                    ],
+                                                    "additionalProperties": false
+                                                  }
+                                                ],
+                                                "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                              }
+                                            },
+                                            "required": [
+                                              "fromFile"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        ]
+                                      },
+                                      "default": {}
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
                               ],
-                              "description": "Runtime for this transform script."
-                            },
-                            "file": {
-                              "type": "string",
-                              "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
-                              "description": "Script path relative to /transforms. Defaults by transform kind and language."
-                            },
-                            "bindingsObject": {
-                              "type": "object",
-                              "additionalProperties": {
-                                "type": [
-                                  "string",
-                                  "number",
-                                  "boolean",
-                                  "object",
-                                  "array",
-                                  "null"
-                                ]
-                              },
-                              "default": {},
-                              "description": "Optional JSON object passed to the transform at initialization."
+                              "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files."
                             }
                           },
-                          "required": [
-                            "language"
-                          ]
+                          "additionalProperties": false
                         },
                         "description": "Document transform pipeline. Generates the existing docTransformerConfig inline JSON option.",
                         "checksumFor": [
@@ -3091,6 +4115,20 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         ],
                         "default": "AUTO",
                         "description": "Controls document ID generation on the target. 'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. 'ALWAYS': always use server-generated IDs (discards source IDs). 'NEVER': always preserve source document IDs (may fail on serverless TIMESERIES/VECTOR collections)."
+                      },
+                      "emitDocType": {
+                        "type": "string",
+                        "enum": [
+                          "AUTO",
+                          "ON",
+                          "OFF"
+                        ],
+                        "default": "AUTO",
+                        "description": "Controls whether the ES _type field is propagated into bulk action-line metadata. 'AUTO' (default): emit _type only when the source is ES 6 or older AND a document transformer is configured (e.g. TypeMappingSanitizationTransformerProvider for multi-type indices). 'ON': always emit _type. 'OFF': never emit _type.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       },
                       "allowedDocExceptionTypes": {
                         "type": "array",
@@ -3146,6 +4184,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "number",
                         "default": 67108864,
                         "description": "Maximum uncompressed bytes buffered in memory per target index before the DLQ rotates to a new S3 object. Bounds heap use when a shard produces a very large number of terminal failures. Default 67108864 (64 MiB)."
+                      },
+                      "positionGapStopword": {
+                        "type": "string",
+                        "default": "a",
+                        "description": "Token used to fill skipped Lucene positions when reconstructing analyzed-text fields from postings. ES preserves position increments for stop-word-filtered tokens (e.g. 'i like the tree' with stopword 'the' indexes at positions 0,1,3 — position 2 is consumed by 'the' but the term itself is dropped). Without filler the reconstructor joins on spaces and OS re-tokenizes the document at consecutive positions [0,1,2], silently changing slop / proximity / phrase semantics on migrated documents. The reconstructor splices this token into the gap so OS — assumed to have the same token configured as a stopword — re-creates the original [0,1,3] postings while indexing. The token MUST be on the target's stopword list or it leaks into search results; 'a' is a safe default for the english / standard analyzers. Pass an empty string to opt out and fall back to the legacy multi-space behaviour. Default: 'a'.",
+                        "checksumFor": [
+                          "replayer"
+                        ],
+                        "changeRestriction": "impossible"
                       }
                     },
                     "description": "Configuration for backfilling documents from the snapshot to the target using Reindex From Snapshot. Omit to skip document backfill."
@@ -3414,6 +4461,78 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                             "type": "string",
                             "default": "360h",
                             "description": "How long before certificate expiry to trigger renewal (e.g. '360h' = 15 days)."
+                          },
+                          "clientAuth": {
+                            "type": "object",
+                            "properties": {
+                              "trustedClientCaFile": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "image": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                      },
+                                      "pullPolicy": {
+                                        "type": "string",
+                                        "enum": [
+                                          "Always",
+                                          "Never",
+                                          "IfNotPresent"
+                                        ],
+                                        "default": "IfNotPresent",
+                                        "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                      },
+                                      "path": {
+                                        "type": "string",
+                                        "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                        "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                      }
+                                    },
+                                    "required": [
+                                      "image",
+                                      "path"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "configMap": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                      },
+                                      "path": {
+                                        "type": "string",
+                                        "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                        "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                      }
+                                    },
+                                    "required": [
+                                      "configMap",
+                                      "path"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                ],
+                                "description": "PEM trusted CA certificate file used to verify client certificates accepted by the capture proxy."
+                              },
+                              "trustedClientCaPem": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy."
+                              },
+                              "required": {
+                                "type": "boolean",
+                                "default": true,
+                                "description": "When true, clients must present a certificate signed by the configured trusted client CA. Defaults to true."
+                              }
+                            },
+                            "additionalProperties": false,
+                            "description": "Optional mutual TLS client-authentication configuration for the capture proxy listener."
                           }
                         },
                         "required": [
@@ -3436,6 +4555,78 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                           "secretName": {
                             "type": "string",
                             "description": "Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/."
+                          },
+                          "clientAuth": {
+                            "type": "object",
+                            "properties": {
+                              "trustedClientCaFile": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "image": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                      },
+                                      "pullPolicy": {
+                                        "type": "string",
+                                        "enum": [
+                                          "Always",
+                                          "Never",
+                                          "IfNotPresent"
+                                        ],
+                                        "default": "IfNotPresent",
+                                        "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                      },
+                                      "path": {
+                                        "type": "string",
+                                        "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                        "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                      }
+                                    },
+                                    "required": [
+                                      "image",
+                                      "path"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "configMap": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                      },
+                                      "path": {
+                                        "type": "string",
+                                        "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                        "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                      }
+                                    },
+                                    "required": [
+                                      "configMap",
+                                      "path"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                ],
+                                "description": "PEM trusted CA certificate file used to verify client certificates accepted by the capture proxy."
+                              },
+                              "trustedClientCaPem": {
+                                "type": "string",
+                                "minLength": 1,
+                                "description": "Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy."
+                              },
+                              "required": {
+                                "type": "boolean",
+                                "default": true,
+                                "description": "When true, clients must present a certificate signed by the configured trusted client CA. Defaults to true."
+                              }
+                            },
+                            "additionalProperties": false,
+                            "description": "Optional mutual TLS client-authentication configuration for the capture proxy listener."
                           }
                         },
                         "required": [
@@ -3648,12 +4839,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     ],
                     "description": "Kubernetes resource limits and requests for the replayer container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                   },
-                  "transformsSource": {
-                    "type": "string",
-                    "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                    "description": "Key into top-level transformsSources. Mounts /transforms/ into the replayer pod.",
-                    "changeRestriction": "impossible"
-                  },
                   "kafkaTrafficEnableMSKAuth": {
                     "type": "boolean",
                     "default": false,
@@ -3738,38 +4923,323 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "items": {
                       "type": "object",
                       "properties": {
-                        "language": {
-                          "type": "string",
-                          "enum": [
-                            "javascript",
-                            "python"
+                        "entryPoint": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "javascript": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "javascript"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "javascriptFile": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "image": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                        },
+                                        "pullPolicy": {
+                                          "type": "string",
+                                          "enum": [
+                                            "Always",
+                                            "Never",
+                                            "IfNotPresent"
+                                          ],
+                                          "default": "IfNotPresent",
+                                          "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                          "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                        }
+                                      },
+                                      "required": [
+                                        "image",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "configMap": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                          "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                        }
+                                      },
+                                      "required": [
+                                        "configMap",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ],
+                                  "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                }
+                              },
+                              "required": [
+                                "javascriptFile"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "python": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "python"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "pythonFile": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "image": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                        },
+                                        "pullPolicy": {
+                                          "type": "string",
+                                          "enum": [
+                                            "Always",
+                                            "Never",
+                                            "IfNotPresent"
+                                          ],
+                                          "default": "IfNotPresent",
+                                          "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                          "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                        }
+                                      },
+                                      "required": [
+                                        "image",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "configMap": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                          "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                        }
+                                      },
+                                      "required": [
+                                        "configMap",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ],
+                                  "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                }
+                              },
+                              "required": [
+                                "pythonFile"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "transformName": {
+                          "type": "string"
+                        },
+                        "context": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "valueDirectories": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "configMap": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          }
+                                        },
+                                        "required": [
+                                          "configMap"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "image": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "pullPolicy": {
+                                            "type": "string",
+                                            "enum": [
+                                              "Always",
+                                              "Never",
+                                              "IfNotPresent"
+                                            ],
+                                            "default": "IfNotPresent"
+                                          },
+                                          "path": {
+                                            "type": "string",
+                                            "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                            "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                          }
+                                        },
+                                        "required": [
+                                          "image"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ],
+                                    "description": "Directory whose immediate files become transform context values."
+                                  },
+                                  "default": []
+                                },
+                                "values": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": [
+                                              "string",
+                                              "number",
+                                              "boolean",
+                                              "object",
+                                              "array",
+                                              "null"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "value"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "fromFile": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "image": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                  },
+                                                  "pullPolicy": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "Always",
+                                                      "Never",
+                                                      "IfNotPresent"
+                                                    ],
+                                                    "default": "IfNotPresent",
+                                                    "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                                  },
+                                                  "path": {
+                                                    "type": "string",
+                                                    "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                                    "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                                  }
+                                                },
+                                                "required": [
+                                                  "image",
+                                                  "path"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "configMap": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                                  },
+                                                  "path": {
+                                                    "type": "string",
+                                                    "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                                    "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                                  }
+                                                },
+                                                "required": [
+                                                  "configMap",
+                                                  "path"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ],
+                                            "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                          }
+                                        },
+                                        "required": [
+                                          "fromFile"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "default": {}
+                                }
+                              },
+                              "additionalProperties": false
+                            }
                           ],
-                          "description": "Runtime for this transform script."
-                        },
-                        "file": {
-                          "type": "string",
-                          "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
-                          "description": "Script path relative to /transforms. Defaults by transform kind and language."
-                        },
-                        "bindingsObject": {
-                          "type": "object",
-                          "additionalProperties": {
-                            "type": [
-                              "string",
-                              "number",
-                              "boolean",
-                              "object",
-                              "array",
-                              "null"
-                            ]
-                          },
-                          "default": {},
-                          "description": "Optional JSON object passed to the transform at initialization."
+                          "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files."
                         }
                       },
-                      "required": [
-                        "language"
-                      ]
+                      "additionalProperties": false
                     },
                     "description": "Request transform pipeline. Generates the existing transformerConfig inline JSON option.",
                     "changeRestriction": "gated"
@@ -3794,38 +5264,323 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "items": {
                       "type": "object",
                       "properties": {
-                        "language": {
-                          "type": "string",
-                          "enum": [
-                            "javascript",
-                            "python"
+                        "entryPoint": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "javascript": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "javascript"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "javascriptFile": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "image": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                        },
+                                        "pullPolicy": {
+                                          "type": "string",
+                                          "enum": [
+                                            "Always",
+                                            "Never",
+                                            "IfNotPresent"
+                                          ],
+                                          "default": "IfNotPresent",
+                                          "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                          "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                        }
+                                      },
+                                      "required": [
+                                        "image",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "configMap": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                          "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                        }
+                                      },
+                                      "required": [
+                                        "configMap",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ],
+                                  "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                }
+                              },
+                              "required": [
+                                "javascriptFile"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "python": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "python"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "pythonFile": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "image": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                        },
+                                        "pullPolicy": {
+                                          "type": "string",
+                                          "enum": [
+                                            "Always",
+                                            "Never",
+                                            "IfNotPresent"
+                                          ],
+                                          "default": "IfNotPresent",
+                                          "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                          "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                        }
+                                      },
+                                      "required": [
+                                        "image",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "configMap": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                        },
+                                        "path": {
+                                          "type": "string",
+                                          "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                          "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                        }
+                                      },
+                                      "required": [
+                                        "configMap",
+                                        "path"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  ],
+                                  "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                }
+                              },
+                              "required": [
+                                "pythonFile"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        },
+                        "transformName": {
+                          "type": "string"
+                        },
+                        "context": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "valueDirectories": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "configMap": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          }
+                                        },
+                                        "required": [
+                                          "configMap"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "image": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "pullPolicy": {
+                                            "type": "string",
+                                            "enum": [
+                                              "Always",
+                                              "Never",
+                                              "IfNotPresent"
+                                            ],
+                                            "default": "IfNotPresent"
+                                          },
+                                          "path": {
+                                            "type": "string",
+                                            "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                            "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                          }
+                                        },
+                                        "required": [
+                                          "image"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ],
+                                    "description": "Directory whose immediate files become transform context values."
+                                  },
+                                  "default": []
+                                },
+                                "values": {
+                                  "type": "object",
+                                  "additionalProperties": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "value": {
+                                            "type": [
+                                              "string",
+                                              "number",
+                                              "boolean",
+                                              "object",
+                                              "array",
+                                              "null"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "value"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "fromFile": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "image": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "description": "OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."
+                                                  },
+                                                  "pullPolicy": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                      "Always",
+                                                      "Never",
+                                                      "IfNotPresent"
+                                                    ],
+                                                    "default": "IfNotPresent",
+                                                    "description": "Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."
+                                                  },
+                                                  "path": {
+                                                    "type": "string",
+                                                    "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
+                                                    "description": "Path relative to the mounted image root. Absolute paths and '..' traversal are rejected."
+                                                  }
+                                                },
+                                                "required": [
+                                                  "image",
+                                                  "path"
+                                                ],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "configMap": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "description": "Name of a pre-existing Kubernetes ConfigMap."
+                                                  },
+                                                  "path": {
+                                                    "type": "string",
+                                                    "pattern": "^(?!\\\\.{1,2}$)(?!\\\\.\\\\.)[A-Za-z0-9._-]+$",
+                                                    "description": "ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs."
+                                                  }
+                                                },
+                                                "required": [
+                                                  "configMap",
+                                                  "path"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            ],
+                                            "description": "Reference to one file from a ConfigMap key or mountable OCI image."
+                                          }
+                                        },
+                                        "required": [
+                                          "fromFile"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "default": {}
+                                }
+                              },
+                              "additionalProperties": false
+                            }
                           ],
-                          "description": "Runtime for this transform script."
-                        },
-                        "file": {
-                          "type": "string",
-                          "pattern": "^(?!\\\\/)(?!.*(?:^|\\\\/)\\\\.\\\\.(?:\\\\/|$)).+$",
-                          "description": "Script path relative to /transforms. Defaults by transform kind and language."
-                        },
-                        "bindingsObject": {
-                          "type": "object",
-                          "additionalProperties": {
-                            "type": [
-                              "string",
-                              "number",
-                              "boolean",
-                              "object",
-                              "array",
-                              "null"
-                            ]
-                          },
-                          "default": {},
-                          "description": "Optional JSON object passed to the transform at initialization."
+                          "description": "Optional transform provider context. Values are either inline or loaded at runtime from mounted files."
                         }
                       },
-                      "required": [
-                        "language"
-                      ]
+                      "additionalProperties": false
                     },
                     "description": "Tuple transform pipeline. Generates the existing tupleTransformerConfig inline JSON option.",
                     "changeRestriction": "gated"

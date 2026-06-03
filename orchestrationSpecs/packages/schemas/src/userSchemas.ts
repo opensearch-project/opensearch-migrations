@@ -158,43 +158,87 @@ export const GENERIC_JSON_OBJECT = z.record(z.string(), z.any());
 export const K8S_NAMING_PATTERN = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
 export const K8S_IMAGE_PULL_POLICY = z.enum(["Always", "Never", "IfNotPresent"]);
 
-export const TRANSFORMS_IMAGE_SOURCE = z.object({
-    image: z.string().min(1)
-        .describe("OCI image reference (preferably with digest) whose root contains transform files. " +
-            "The workflow mounts the image at /transforms/. Build with deployment/k8s/package-transforms.sh."),
-    pullPolicy: K8S_IMAGE_PULL_POLICY.default("IfNotPresent").optional()
-        .describe("Kubernetes image pull policy for the transforms image. Use 'Always' for mutable tags like 'latest'; " +
-            "leave as 'IfNotPresent' for immutable tags or digests.")
-}).strict();
-
-export const TRANSFORMS_CONFIGMAP_SOURCE = z.object({
-    configMap: z.string().min(1)
-        .describe("Name of a pre-existing Kubernetes ConfigMap. Each key becomes a file in /transforms/.")
-}).strict();
-
-export const TRANSFORMS_SOURCE = z.union([
-    TRANSFORMS_IMAGE_SOURCE,
-    TRANSFORMS_CONFIGMAP_SOURCE
-]).describe("Source for user-defined transform files. Exactly one of 'image' or 'configMap'.");
-
-export const TRANSFORMS_SOURCES_MAP = z.record(
-    z.string().regex(K8S_NAMING_PATTERN),
-    TRANSFORMS_SOURCE
-).describe("Map of transform source names to their definitions.");
-
-export const TRANSFORM_LANGUAGE = z.enum(["javascript", "python"]);
-
-export const TRANSFORM_RELATIVE_FILE = z.string()
+export const FILE_RELATIVE_PATH = z.string()
     .regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/)
-    .describe("Script path relative to /transforms, e.g. 'request.js' or 'lib/request.py'.");
+    .describe("Path relative to the mounted image root. Absolute paths and '..' traversal are rejected.");
+
+export const CONFIGMAP_FILE_KEY = z.string()
+    .regex(/^(?!\.{1,2}$)(?!\.\.)[A-Za-z0-9._-]+$/)
+    .describe("ConfigMap key to expose as a mounted file. Nested paths are not supported for ConfigMap-backed file refs.");
+
+export const FILE_REF_FROM_IMAGE = z.object({
+    image: z.string().min(1)
+        .describe("OCI image reference (preferably with digest) whose mounted filesystem contains the requested file."),
+    pullPolicy: K8S_IMAGE_PULL_POLICY.default("IfNotPresent").optional()
+        .describe("Kubernetes image pull policy. Use 'Always' for mutable tags like 'latest'; leave as 'IfNotPresent' for immutable tags or digests."),
+    path: FILE_RELATIVE_PATH
+}).strict();
+
+export const FILE_REF_FROM_CONFIGMAP = z.object({
+    configMap: z.string().min(1)
+        .describe("Name of a pre-existing Kubernetes ConfigMap."),
+    path: CONFIGMAP_FILE_KEY
+}).strict();
+
+export const FILE_REF = z.union([
+    FILE_REF_FROM_IMAGE,
+    FILE_REF_FROM_CONFIGMAP
+]).describe("Reference to one file from a ConfigMap key or mountable OCI image.");
+
+export const INLINE_JSON_VALUE = z.any()
+    .refine(value => value !== undefined, {message: "value is required"});
+
+export const TRANSFORM_CONTEXT_VALUE_DIRECTORY = z.union([
+    z.object({
+        configMap: z.string().min(1)
+    }).strict(),
+    z.object({
+        image: z.string().min(1),
+        pullPolicy: K8S_IMAGE_PULL_POLICY.default("IfNotPresent").optional(),
+        path: FILE_RELATIVE_PATH.optional()
+    }).strict()
+]).describe("Directory whose immediate files become transform context values.");
+
+export const CONFIG_VALUE_FROM_FILE = z.object({
+    fromFile: FILE_REF
+}).strict();
+
+export const TRANSFORM_CONTEXT_VALUE = z.union([
+    z.object({value: INLINE_JSON_VALUE}).strict(),
+    CONFIG_VALUE_FROM_FILE
+]);
+
+export const TRANSFORM_CONTEXT = z.union([
+    z.string(),
+    z.object({
+        valueDirectories: z.array(TRANSFORM_CONTEXT_VALUE_DIRECTORY).default([]).optional(),
+        values: z.record(z.string(), TRANSFORM_CONTEXT_VALUE).default({}).optional()
+    }).strict()
+]).describe("Optional transform provider context. Values are either inline or loaded at runtime from mounted files.");
+
+export const SCRIPT_TRANSFORM_ENTRY_POINT = z.union([
+    z.object({javascript: z.string().min(1)}).strict(),
+    z.object({javascriptFile: FILE_REF}).strict(),
+    z.object({python: z.string().min(1)}).strict(),
+    z.object({pythonFile: FILE_REF}).strict()
+]);
 
 export const TRANSFORM_SPEC = z.object({
-    language: TRANSFORM_LANGUAGE
-        .describe("Runtime for this transform script."),
-    file: TRANSFORM_RELATIVE_FILE.optional()
-        .describe("Script path relative to /transforms. Defaults by transform kind and language."),
-    bindingsObject: GENERIC_JSON_OBJECT.default({}).optional()
-        .describe("Optional JSON object passed to the transform at initialization.")
+    entryPoint: SCRIPT_TRANSFORM_ENTRY_POINT.optional(),
+    transformName: z.string().optional(),
+    context: TRANSFORM_CONTEXT.optional()
+}).strict().superRefine((value, ctx) => {
+    const selectorCount = [
+        value.entryPoint !== undefined,
+        value.transformName !== undefined
+    ].filter(Boolean).length;
+
+    if (selectorCount !== 1) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Exactly one of entryPoint or transformName is required"
+        });
+    }
 });
 
 export const TRANSFORM_PIPELINE = z.preprocess(
@@ -225,21 +269,6 @@ function validatePipelineRawConfigConflict(
             code: z.ZodIssueCode.custom,
             message: `Cannot configure both '${pipelineKey}' and '${conflictingKey}'. Use either the transform pipeline or the raw transformer config source.`,
             path: [pipelineKey]
-        });
-    }
-}
-
-function validateTransformsSourceForPipelines(
-    ctx: z.RefinementCtx,
-    data: Record<string, unknown>,
-    pipelineKeys: string[]
-) {
-    const hasPipeline = pipelineKeys.some(key => hasTransformPipelineEntries(data[key]));
-    if (hasPipeline && !hasConfiguredString(data.transformsSource)) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "'transformsSource' is required when transform pipelines are configured.",
-            path: ["transformsSource"]
         });
     }
 }
@@ -432,6 +461,27 @@ export const CERT_MANAGER_ISSUER_REF = z.object({
         .describe("API group of the issuer. Use 'cert-manager.io' for standard issuers or 'awspca.cert-manager.io' for AWS Private CA issuers."),
 }).describe("Reference to a cert-manager issuer that will sign TLS certificates for the proxy.");
 
+export const PROXY_TLS_CLIENT_AUTH_CONFIG = z.object({
+    trustedClientCaFile: FILE_REF.optional()
+        .describe("PEM trusted CA certificate file used to verify client certificates accepted by the capture proxy."),
+    trustedClientCaPem: z.string().min(1).optional()
+        .describe("Inline PEM trusted CA certificate used to verify client certificates accepted by the capture proxy."),
+    required: z.boolean().default(true).optional()
+        .describe("When true, clients must present a certificate signed by the configured trusted client CA. Defaults to true.")
+}).strict().superRefine((value, ctx) => {
+    const trustSourceCount = [
+        value.trustedClientCaFile !== undefined,
+        value.trustedClientCaPem !== undefined
+    ].filter(Boolean).length;
+
+    if (trustSourceCount !== 1) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Exactly one of trustedClientCaFile or trustedClientCaPem is required"
+        });
+    }
+}).describe("Optional mutual TLS client-authentication configuration for the capture proxy listener.");
+
 export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
     z.object({
         mode: z.literal("certManager")
@@ -445,12 +495,14 @@ export const PROXY_TLS_CONFIG = z.discriminatedUnion("mode", [
             .describe("Requested certificate validity duration in Go duration format (e.g. '2160h' = 90 days)."),
         renewBefore: z.string().default("360h").optional()
             .describe("How long before certificate expiry to trigger renewal (e.g. '360h' = 15 days)."),
+        clientAuth: PROXY_TLS_CLIENT_AUTH_CONFIG.optional()
     }).describe("Provision a TLS certificate via cert-manager. A Certificate resource is created and the resulting secret is mounted into the proxy pod."),
     z.object({
         mode: z.literal("existingSecret")
             .describe("Use a pre-existing Kubernetes TLS secret."),
         secretName: z.string()
             .describe("Name of an existing Kubernetes TLS secret containing 'tls.crt' and 'tls.key' entries. The secret is mounted into the proxy pod at /etc/proxy-tls/."),
+        clientAuth: PROXY_TLS_CLIENT_AUTH_CONFIG.optional()
     }).describe("Use a pre-existing Kubernetes TLS secret for proxy HTTPS termination."),
     z.object({
         mode: z.literal("plaintext")
@@ -555,9 +607,6 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
 }).describe("Kubernetes deployment-level options for the traffic replayer.");
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
-    transformsSource: z.string().regex(K8S_NAMING_PATTERN).optional()
-        .describe("Key into top-level transformsSources. Mounts /transforms/ into the replayer pod.")
-        .changeRestriction('impossible'),
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
         .describe("Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
         .changeRestriction('impossible'),
@@ -647,7 +696,6 @@ export const USER_REPLAYER_OPTIONS = z.object({
     ...USER_REPLAYER_WORKFLOW_OPTIONS.shape,
     ...USER_REPLAYER_PROCESS_OPTIONS.shape,
 }).superRefine((data, ctx) => {
-    validateTransformsSourceForPipelines(ctx, data, ["requestTransforms", "tupleTransforms"]);
     validatePipelineRawConfigConflict(ctx, data, "requestTransforms", [
         "transformerConfig",
         "transformerConfigEncoded",
@@ -726,10 +774,6 @@ export const USER_METADATA_WORKFLOW_OPTIONS = z.object({
 }).describe("Workflow-level options for metadata migration, controlling JVM settings and approval gates.");
 
 export const USER_METADATA_PROCESS_OPTIONS = z.object({
-    transformsSource: z.string().regex(K8S_NAMING_PATTERN).optional()
-        .describe("Key into top-level transformsSources. Mounts /transforms/ into the metadata migration pod.")
-        .checksumFor('snapshot', 'replayer')
-        .changeRestriction('impossible'),
     componentTemplateAllowlist: z.array(z.string()).default([]).optional()
         .describe("List of component template names to include in the metadata migration. " +
             "Each entry is either an exact name or a regex pattern prefixed with 'regex:'. " +
@@ -786,7 +830,6 @@ export const USER_METADATA_OPTIONS = z.object({
     ...USER_METADATA_WORKFLOW_OPTIONS.shape,
     ...USER_METADATA_PROCESS_OPTIONS.shape,
 }).superRefine((data, ctx) => {
-    validateTransformsSourceForPipelines(ctx, data, ["metadataTransforms"]);
     validatePipelineRawConfigConflict(ctx, data, "metadataTransforms", [
         "transformerConfig",
         "transformerConfigBase64",
@@ -825,10 +868,6 @@ export const USER_RFS_WORKFLOW_OPTIONS = z.object({
 }).describe("Kubernetes deployment-level options for the Reindex From Snapshot (RFS) document backfill.");
 
 export const USER_RFS_PROCESS_OPTIONS = z.object({
-    transformsSource: z.string().regex(K8S_NAMING_PATTERN).optional()
-        .describe("Key into top-level transformsSources. Mounts /transforms/ into the RFS pod.")
-        .checksumFor('replayer')
-        .changeRestriction('impossible'),
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("Filters which indices are migrated by the document backfill (RFS) — evaluated client-side on the snapshot contents after the snapshot has been taken. " +
             "Each entry is either an exact index name or a regex pattern prefixed with 'regex:' (e.g. 'regex:logs-.*'). " +
@@ -880,6 +919,13 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +
             "'ALWAYS': always use server-generated IDs (discards source IDs). " +
             "'NEVER': always preserve source document IDs (may fail on serverless TIMESERIES/VECTOR collections)."),
+    emitDocType: z.enum(["AUTO", "ON", "OFF"]).default("AUTO").optional()
+        .describe("Controls whether the ES _type field is propagated into bulk action-line metadata. " +
+            "'AUTO' (default): emit _type only when the source is ES 6 or older AND a document transformer " +
+            "is configured (e.g. TypeMappingSanitizationTransformerProvider for multi-type indices). " +
+            "'ON': always emit _type. 'OFF': never emit _type.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
     allowedDocExceptionTypes: z.array(z.string()).default([]).optional()
         .describe("List of document-level exception types to treat as successful operations during bulk migration. " +
             "Documents that fail with these errors are not retried and not counted as failures — they are silently accepted. " +
@@ -917,6 +963,19 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
         .describe("Maximum uncompressed bytes buffered in memory per target index before the DLQ rotates " +
             "to a new S3 object. Bounds heap use when a shard produces a very large number of terminal " +
             "failures. Default 67108864 (64 MiB)."),
+    positionGapStopword: z.string().default("a").optional()
+        .describe("Token used to fill skipped Lucene positions when reconstructing analyzed-text fields from postings. " +
+            "ES preserves position increments for stop-word-filtered tokens (e.g. 'i like the tree' with stopword 'the' indexes " +
+            "at positions 0,1,3 — position 2 is consumed by 'the' but the term itself is dropped). Without filler the " +
+            "reconstructor joins on spaces and OS re-tokenizes the document at consecutive positions [0,1,2], silently " +
+            "changing slop / proximity / phrase semantics on migrated documents. The reconstructor splices this token " +
+            "into the gap so OS — assumed to have the same token configured as a stopword — re-creates the original " +
+            "[0,1,3] postings while indexing. The token MUST be on the target's stopword list or it leaks into search " +
+            "results; 'a' is a safe default for the english / standard analyzers. " +
+            "Pass an empty string to opt out and fall back to the legacy multi-space behaviour. " +
+            "Default: 'a'.")
+        .checksumFor('replayer')
+        .changeRestriction('impossible'),
 }).describe("Process-level options for the RFS document backfill command, controlling indexing behavior, concurrency, and transformations.");
 
 export const USER_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(USER_RFS_WORKFLOW_OPTIONS);
@@ -927,7 +986,6 @@ export const USER_RFS_OPTIONS = z.object({
     ...USER_RFS_PROCESS_OPTIONS.shape,
 })
     .superRefine((data, ctx) => {
-        validateTransformsSourceForPipelines(ctx, data, ["documentTransforms"]);
         validatePipelineRawConfigConflict(ctx, data, "documentTransforms", [
             "docTransformerConfig",
             "docTransformerConfigBase64",
@@ -1152,7 +1210,7 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     version: CLUSTER_VERSION_STRING,
     snapshotInfo: SNAPSHOT_INFO.optional()
         .describe("Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source.")
-}).describe("Connection and snapshot configuration for a source Elasticsearch or OpenSearch cluster.").superRefine((data, ctx) => {
+}).describe("Connection and snapshot configuration for a source cluster.").superRefine((data, ctx) => {
     const repos = data.snapshotInfo?.repos;
     const snapshots = data.snapshotInfo?.snapshots ?? {};
     for (const [snapName, snapConfig] of Object.entries(snapshots)) {
@@ -1269,8 +1327,6 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
         kafkaClusterConfiguration: KAFKA_CLUSTERS_MAP.default({}).optional()
             .describe("Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. " +
                 "Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'."),
-        transformsSources: TRANSFORMS_SOURCES_MAP.default({}).optional()
-            .describe("Named transform sources. Define once, reference by key in transform-eligible tool options."),
         sourceClusters: SOURCE_CLUSTERS_MAP
             .describe("Source Elasticsearch or OpenSearch clusters to migrate from."),
         targetClusters: TARGET_CLUSTERS_MAP
@@ -1282,17 +1338,6 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                 "All top-level items are independent, but replayers can declare dependencies on snapshot migrations to ensure data consistency.")
             .optional()
     }).describe("Top-level migration configuration defining source clusters, target clusters, snapshot migrations, and optional traffic capture/replay.").superRefine((data, ctx) => {
-        const transformSources = data.transformsSources ?? {};
-        const validateTransformSourceReference = (sourceName: string | undefined, path: (string | number)[]) => {
-            if (sourceName !== undefined && !(sourceName in transformSources)) {
-                ctx.addIssue({
-                    code: z.ZodIssueCode.custom,
-                    message: `Unknown transformsSource '${sourceName}'. Available: ${Object.keys(transformSources).join(', ') || '(none)'}`,
-                    path
-                });
-            }
-        };
-
         for (let i = 0; i < data.snapshotMigrationConfigs.length; i++) {
             const mc = data.snapshotMigrationConfigs[i];
 
@@ -1324,18 +1369,6 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                         });
                     }
                 }
-                for (const [snapName, migrations] of Object.entries(mc.perSnapshotConfig)) {
-                    migrations.forEach((migration, migrationIndex) => {
-                        validateTransformSourceReference(
-                            migration.metadataMigrationConfig?.transformsSource,
-                            ['snapshotMigrationConfigs', i, 'perSnapshotConfig', snapName, migrationIndex, 'metadataMigrationConfig', 'transformsSource']
-                        );
-                        validateTransformSourceReference(
-                            migration.documentBackfillConfig?.transformsSource,
-                            ['snapshotMigrationConfigs', i, 'perSnapshotConfig', snapName, migrationIndex, 'documentBackfillConfig', 'transformsSource']
-                        );
-                    });
-                }
             }
         }
 
@@ -1360,11 +1393,6 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
             }
 
             for (const [replayerName, rc] of Object.entries(data.traffic.replayers)) {
-                validateTransformSourceReference(
-                    rc.replayerConfig?.transformsSource,
-                    ['traffic', 'replayers', replayerName, 'replayerConfig', 'transformsSource']
-                );
-
                 if (!(rc.toTarget in data.targetClusters)) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,

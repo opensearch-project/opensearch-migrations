@@ -102,11 +102,7 @@ public class RfsMigrateDocuments {
     private static final double DECREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD = 0.025;
     private static final double INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD = 0.1;
 
-    public static final String DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG = "[" +
-            "  {" +
-            "    \"JsonTransformerForDocumentTypeRemovalProvider\":\"\"" +
-            "  }" +
-            "]";
+    public static final String DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG = null;
 
     public static class DurationConverter implements IStringConverter<Duration> {
         @Override
@@ -133,6 +129,12 @@ public class RfsMigrateDocuments {
         AUTO,   // Auto-detect serverless TIMESERIES/VECTOR collections and enable
         ALWAYS, // Always use server-generated IDs
         NEVER   // Always preserve source IDs
+    }
+
+    public enum EmitDocTypeMode {
+        AUTO, // Emit _type only when source is ES <= 6 and a doc transformer is configured
+        ON,   // Always emit _type into bulk action-line metadata
+        OFF   // Never emit _type
     }
 
     public static class Args {
@@ -287,6 +289,14 @@ public class RfsMigrateDocuments {
             description = "Optional. Maximum delay in milliseconds for any single coordinator completion retry. Default: 64000")
         public long coordinatorRetryMaxDelayMs = 64_000;
 
+        @Parameter(required = false,
+            names = { "--emit-doc-type" },
+            description = "Optional. Controls whether the ES _type field is propagated into bulk action-line metadata. " +
+                "AUTO (default): emit _type only when the source is ES 6 or older AND a document transformer is " +
+                "configured (e.g. TypeMappingSanitizationTransformerProvider for multi-type indices). " +
+                "ON: always emit _type. OFF: never emit _type.")
+        public EmitDocTypeMode emitDocType = EmitDocTypeMode.AUTO;
+
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
 
@@ -387,6 +397,22 @@ public class RfsMigrateDocuments {
             arity = 0
         )
         public boolean useRecoverySource = false;
+
+        @Parameter(required = false,
+            names = { "--position-gap-stopword", "--positionGapStopword" },
+            description = "Optional. Token used to fill skipped Lucene positions when reconstructing analyzed-text " +
+                "fields from postings. ES preserves position increments for stop-word-filtered tokens (e.g. " +
+                "\"i like the tree\" with stopword \"the\" indexes at positions 0,1,3 — position 2 is consumed " +
+                "by \"the\" but the term itself is dropped). Without this flag the reconstructor joins on spaces " +
+                "and OS re-tokenizes the document at consecutive positions [0,1,2], silently changing slop / " +
+                "proximity / phrase semantics. The reconstructor splices this token into the gap so OS — assumed " +
+                "to have the same token configured as a stopword — re-creates the original [0,1,3] postings while " +
+                "indexing. The token MUST be on the target's stopword list or it leaks into search results; " +
+                "'a' is a safe default for the english / standard analyzers. " +
+                "Pass an empty string to opt out and fall back to the legacy multi-space behaviour. " +
+                "Default: 'a'."
+        )
+        public String positionGapStopword = "a";
     }
 
 
@@ -545,6 +571,20 @@ public class RfsMigrateDocuments {
 
         validateArgs(arguments);
 
+        // Forward the position-gap stopword to the reconstruction layer via system property —
+        // LuceneLeafReader.joinWithOffsets reads it from RfsTunables.positionGapStopword().
+        // Done here (rather than threaded through DocumentMigrationBootstrap) to match the
+        // existing tunables pattern for rfs.reader.parallelism, keeping the streaming-postings
+        // hot path free of per-call config plumbing.
+        if (arguments.experimental.positionGapStopword != null
+                && !arguments.experimental.positionGapStopword.isBlank()) {
+            System.setProperty(
+                org.opensearch.migrations.bulkload.lucene.RfsTunables.POSITION_GAP_STOPWORD_PROP,
+                arguments.experimental.positionGapStopword);
+            log.atInfo().setMessage("Position-gap stopword filler enabled: '{}'")
+                .addArgument(arguments.experimental.positionGapStopword).log();
+        }
+
         if (arguments.cleanLocalDirs) {
             FileSystemUtils.deleteDirectories(arguments.s3LocalDir, arguments.luceneDir);
         }
@@ -588,19 +628,27 @@ public class RfsMigrateDocuments {
             }
         };
 
-        var docTransformerConfig = Optional.ofNullable(TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams))
-            .orElse(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
-        log.atInfo().setMessage("Doc Transformations config string: {}")
-                .addArgument(docTransformerConfig).log();
+        var docTransformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams);
+        if (docTransformerConfig != null) {
+            log.atInfo().setMessage("Doc Transformations config string: {}")
+                    .addArgument(docTransformerConfig).log();
+        } else {
+            log.atInfo().setMessage("No doc transformations configured; using raw-bytes fast path").log();
+        }
         var transformationLoader = new TransformationLoader();
-        Supplier<IJsonTransformer> docTransformerSupplier = () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
+        Supplier<IJsonTransformer> docTransformerSupplier = docTransformerConfig == null
+            ? null
+            : () -> transformationLoader.getTransformerFactoryLoader(docTransformerConfig);
+
+        boolean emitDocType = resolveEmitDocType(
+            arguments.emitDocType, arguments.sourceVersion, docTransformerConfig);
 
         MigrationSourceFactory sourceFactory;
         if (arguments.sourceVersion != null && arguments.sourceVersion.getFlavor() == Flavor.SOLR) {
             sourceFactory = buildSolrSourceFactory(arguments, targetClient, docTransformerSupplier, useServerGeneratedIds, context);
         } else {
             sourceFactory = buildElasticsearchSourceFactory(arguments, targetClient,
-                docTransformerSupplier, useServerGeneratedIds, context);
+                docTransformerSupplier, useServerGeneratedIds, emitDocType, context);
         }
 
         var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
@@ -696,6 +744,7 @@ public class RfsMigrateDocuments {
         OpenSearchClient targetClient,
         Supplier<IJsonTransformer> docTransformerSupplier,
         boolean useServerGeneratedIds,
+        boolean emitDocType,
         RootDocumentMigrationContext context
     ) {
         return (workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider) -> {
@@ -725,7 +774,8 @@ public class RfsMigrateDocuments {
 
             var sourceBuilder = LuceneSnapshotSource.builder(extractor, arguments.snapshotName, luceneDirPath)
                 .maxShardSizeBytes(arguments.maxShardSizeBytes)
-                .useRecoverySource(arguments.experimental.useRecoverySource);
+                .useRecoverySource(arguments.experimental.useRecoverySource)
+                .emitDocType(emitDocType);
             if (arguments.experimental.previousSnapshotName != null && arguments.experimental.experimentalDeltaMode != null) {
                 sourceBuilder.delta(arguments.experimental.previousSnapshotName,
                     arguments.experimental.experimentalDeltaMode,
@@ -910,6 +960,31 @@ public class RfsMigrateDocuments {
                 .setMessage("Pre-check of coordinator pending work failed; proceeding with normal flow").log();
             return false;
         }
+    }
+
+    /**
+     * Resolve {@link EmitDocTypeMode} to a boolean. AUTO enables _type emission only when the
+     * source is ES 6 or older AND a document transformer is configured — the combination that
+     * exercises type-mapping transformers (e.g. TypeMappingSanitizationTransformerProvider) on
+     * multi-type indices.
+     */
+    static boolean resolveEmitDocType(EmitDocTypeMode mode, Version sourceVersion, String docTransformerConfig) {
+        return switch (mode) {
+            case ON -> true;
+            case OFF -> false;
+            case AUTO -> {
+                boolean isLegacyEs = sourceVersion != null
+                    && sourceVersion.getFlavor() == Flavor.ELASTICSEARCH
+                    && sourceVersion.getMajor() <= 6;
+                boolean hasCustomTransformer = docTransformerConfig != null;
+                boolean enable = isLegacyEs && hasCustomTransformer;
+                if (enable) {
+                    log.atInfo().setMessage("Auto-enabling --emit-doc-type for {} with custom transformer")
+                        .addArgument(sourceVersion).log();
+                }
+                yield enable;
+            }
+        };
     }
 
     /**

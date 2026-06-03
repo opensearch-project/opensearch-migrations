@@ -42,6 +42,7 @@ def test_exec_background_cmd_preserves_single_quoted_arguments():
                 "pytest",
                 "--transform_image_basic=repo.example/image@sha256:abc123",
                 "--transform_image_sequence=repo.example/image with spaces@sha256:def456",
+                "--transform_image_context=repo.example/context-image@sha256:feedface",
             ],
             log_file="/tmp/test log.txt",
             exit_code_file="/tmp/test exit.txt",
@@ -58,5 +59,6 @@ def test_exec_background_cmd_preserves_single_quoted_arguments():
     script = shlex.split(script_arg)[0]
     assert "--transform_image_basic=repo.example/image@sha256:abc123" in shlex.split(script)
     assert "--transform_image_sequence=repo.example/image with spaces@sha256:def456" in shlex.split(script)
+    assert "--transform_image_context=repo.example/context-image@sha256:feedface" in shlex.split(script)
     assert "> '/tmp/test log.txt' 2>&1;" in script
     assert "echo $? > '/tmp/test exit.txt'" in script

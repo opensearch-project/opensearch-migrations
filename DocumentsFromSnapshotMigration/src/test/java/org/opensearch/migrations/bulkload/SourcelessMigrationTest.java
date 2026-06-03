@@ -443,6 +443,111 @@ public class SourcelessMigrationTest extends SourceTestBase {
     }
 
     /**
+     * ES 7.10 → OS: tests object-array reconstruction with _source.excludes and text fields.
+     * Verifies that position-gap splitting correctly reconstructs multi-valued text fields
+     * within object arrays, and that over-split coalescing works when the splitter produces
+     * more buckets than array elements.
+     */
+    @Test
+    @SneakyThrows
+    public void testSourcelessMigration_ES7_objectArrayWithTextFields() {
+        try (
+            var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
+            var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_19_4)
+        ) {
+            Startables.deepStart(sourceCluster, targetCluster).join();
+
+            var sourceOps = new ClusterOperations(sourceCluster);
+            var targetOps = new ClusterOperations(targetCluster);
+
+            // Object array with _source.excludes on text subfields
+            sourceOps.createIndex(INDEX_NAME, "{\n"
+                + "\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0},\n"
+                + "\"mappings\":{\"_source\":{\"excludes\":[\"files.content\"]},\n"
+                + "  \"properties\":{\n"
+                + "    \"title\":{\"type\":\"keyword\"},\n"
+                + "    \"files\":{\"properties\":{\n"
+                + "      \"name\":{\"type\":\"keyword\"},\n"
+                + "      \"size\":{\"type\":\"long\"},\n"
+                + "      \"content\":{\"type\":\"text\",\"analyzer\":\"standard\"}\n"
+                + "    }}\n"
+                + "}}}");
+
+            // Doc with 3-element object array — content is text (will have positions)
+            sourceOps.createDocument(INDEX_NAME, "1", "{\n"
+                + "\"title\":\"report\",\n"
+                + "\"files\":[\n"
+                + "  {\"name\":\"intro.txt\",\"size\":100,\"content\":\"hello world introduction\"},\n"
+                + "  {\"name\":\"body.txt\",\"size\":200,\"content\":\"main body of the document\"},\n"
+                + "  {\"name\":\"conclusion.txt\",\"size\":150,\"content\":\"final summary and conclusion\"}\n"
+                + "]}\n");
+
+            sourceOps.refresh();
+
+            var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+            var sourceClientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                .host(sourceCluster.getUrl()).insecure(true).build().toConnectionContext());
+            var snapshotCreator = new FileSystemSnapshotCreator(SNAPSHOT_NAME, SNAPSHOT_REPO,
+                sourceClientFactory.determineVersionAndCreate(),
+                SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, List.of(),
+                snapshotContext.createSnapshotCreateContext());
+            SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            var fileFinder = SnapshotReaderRegistry.getSnapshotFileFinder(
+                sourceCluster.getContainerVersion().getVersion(), true);
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath(), fileFinder);
+            targetOps.createIndex(INDEX_NAME, "{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}}");
+
+            var testCtx = DocumentMigrationTestContext.factory().noOtelTracking();
+            var runCounter = new AtomicInteger();
+            waitForRfsCompletion(() ->
+                migrateDocumentsSequentiallyWithSourceless(
+                    sourceRepo, SNAPSHOT_NAME, List.of(INDEX_NAME),
+                    targetCluster, runCounter, new Random(1), testCtx,
+                    sourceCluster.getContainerVersion().getVersion(),
+                    targetCluster.getContainerVersion().getVersion())
+            );
+
+            targetOps.refresh();
+            var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            var targetClient = new RestClient(ConnectionContextTestParams.builder()
+                .host(targetCluster.getUrl()).build().toConnectionContext());
+            var testDocCtx = testCtx.createUnboundRequestContext();
+
+            var doc1Response = targetClient.get(INDEX_NAME + "/_doc/1", testDocCtx);
+            var doc1Source = mapper.readTree(doc1Response.body).path("_source");
+            log.info("Reconstructed doc1: {}", doc1Source);
+
+            // Verify non-excluded fields preserved exactly
+            Assertions.assertEquals("report", doc1Source.path("title").asText());
+            var files = doc1Source.path("files");
+            Assertions.assertTrue(files.isArray(), "files must be an array: " + doc1Source);
+            Assertions.assertEquals(3, files.size(), "3 file elements: " + doc1Source);
+
+            // names and sizes come from doc_values (keyword/long) — exact
+            Assertions.assertEquals("intro.txt", files.get(0).path("name").asText());
+            Assertions.assertEquals("body.txt", files.get(1).path("name").asText());
+            Assertions.assertEquals("conclusion.txt", files.get(2).path("name").asText());
+            Assertions.assertEquals(100L, files.get(0).path("size").asLong());
+            Assertions.assertEquals(200L, files.get(1).path("size").asLong());
+            Assertions.assertEquals(150L, files.get(2).path("size").asLong());
+
+            // content is excluded from _source, reconstructed from analyzed text (lossy)
+            // The exact tokens depend on the standard analyzer, but each element should
+            // have some non-empty content reconstructed from the inverted index
+            for (int i = 0; i < 3; i++) {
+                String content = files.get(i).path("content").asText("");
+                Assertions.assertFalse(content.isEmpty(),
+                    "files[" + i + "].content should be reconstructed (lossy): " + doc1Source);
+                log.info("files[{}].content = '{}'", i, content);
+            }
+
+            log.info("ES7 object-array sourceless migration test PASSED");
+        }
+    }
+
+    /**
      * Runs migration sequentially with sourceless migrations enabled.
      */
     public static int migrateDocumentsSequentiallyWithSourceless(

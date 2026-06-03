@@ -1,0 +1,6 @@
+POST /test HTTP/1.1
+Host: foo.example
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 49
+
+username=hello+world&limit=10&sort=name&sort=date
