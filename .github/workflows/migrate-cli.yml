@@ -92,21 +92,33 @@ jobs:
       - name: bats (verbose, fail-fast on the first failing file)
         working-directory: deployment/k8s/aws/cli
         run: |
-          # --print-output-on-failure: dumps each failed test's stdout/stderr
-          # --show-output-of-passing-tests: surfaces the _diag dumps we emit
-          #   from test_resume_flow.bats on assertion failures
-          # tee + post-check: bats exits 0 on a "Executed N instead of M
-          # tests" warning, but any gap means a test silently died (e.g.
-          # via die/exit before reporting TAP). Treat that as a hard
-          # failure so it never escapes CI undetected again.
-          set -o pipefail
-          bats --print-output-on-failure --show-output-of-passing-tests test/ \
-            | tee /tmp/bats.tap
-          if grep -q '^# bats warning: Executed' /tmp/bats.tap; then
-            echo "::error::bats reported a test-count gap — at least one test died before emitting TAP output." >&2
-            grep '^# bats warning' /tmp/bats.tap >&2
-            exit 1
-          fi
+          # The wrapper handles --print-output-on-failure +
+          # post-mortem when bats reports a test-count gap (silent
+          # not-run from a `[[ … ]] && fn` rc-leak in a sourced lib,
+          # OR a test calling a deleted function). It exits 2 on
+          # mismatch with a framed diagnostic block and a step-by-
+          # step "find the culprit" guide pointing at per-file count
+          # checks and a single-test ERR-trap recipe.
+          ./test/run-bats.sh
+      - name: Per-file test-count audit (only on failure)
+        if: failure()
+        working-directory: deployment/k8s/aws/cli
+        run: |
+          # When the bats step above fails with a count mismatch,
+          # this step pinpoints the offending .bats file. Each file
+          # is run individually and its declared count (--count) is
+          # compared to the number of TAP `ok|not ok` lines actually
+          # emitted. Any file with declared > actual = silent skip.
+          echo "Per-file declared-vs-actual test count:"
+          for f in test/*.bats; do
+            declared=$(bats --count "$f" 2>/dev/null || echo "?")
+            actual=$(bats --tap "$f" 2>&1 | grep -cE '^(ok|not ok) ' || true)
+            if [[ "$declared" != "$actual" ]]; then
+              echo "  ::error::$f declared=$declared actual=$actual (silent skip)"
+            else
+              echo "  $f declared=$declared actual=$actual"
+            fi
+          done
 
   smoke:
     runs-on: ubuntu-22.04

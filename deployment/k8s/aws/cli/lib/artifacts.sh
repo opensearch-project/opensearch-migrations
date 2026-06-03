@@ -106,12 +106,16 @@ artifacts_reset_cache() {
 
 # Internal helpers
 #
-# _http_head: probe whether <url> is reachable. Suppress curl's stderr (the
-# "(56) The requested URL returned error: 404" line) — a 404 here is not an
-# error, it's a normal "asset doesn't exist; try fallback" branch, and the
-# user shouldn't see it in the terminal.
+# _http_head: probe whether <url> is reachable. Follows redirects so the
+# final-target HTTP code is what we test (GitHub release assets always
+# 302 to release-assets.githubusercontent.com → an Azure-signed blob URL
+# whose 200/4xx is the real answer; without -L curl stopped at the 302,
+# which `-f` doesn't treat as failure but the subsequent download might).
+# Suppress curl's stderr (the "(56) The requested URL returned error:
+# 404" line) — a 404 here is not an error, it's a normal "asset doesn't
+# exist; try fallback" branch.
 _http_head() {
-  curl -fsSI --max-time 10 -o /dev/null "$1" 2>/dev/null
+  curl -fsSIL --max-time 10 -o /dev/null "$1" 2>/dev/null
 }
 
 _sha256_of_string() {

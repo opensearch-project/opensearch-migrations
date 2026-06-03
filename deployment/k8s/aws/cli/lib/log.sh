@@ -118,7 +118,15 @@ log_announce_exit() {
       local n="${MIGRATE_FAIL_LOG_TAIL_LINES:-100}"
       printf '\n%s== migrate.log: last %s ERROR/WARN lines ==%s\n' \
         "$__UI_C_DIM" "$err_n" "$__UI_C_RESET" >&2
-      grep -E ' (ERROR|WARN|stream\[(crane|helm|kubectl-wait|installer|diag-)' "$LOG_FILE" \
+      # ERE: match level "ERROR" / "WARN" anywhere on a log line, OR a
+      # STREAM[<bucket>] entry from one of the chatty subprocess buckets.
+      # The regex needs balanced parens: outer group is the
+      # ERROR|WARN|STREAM[…] alternation, inner group is the bucket list
+      # inside the brackets. The previous version was missing the inner
+      # group's closing paren, producing "grep: Unmatched ( or \(" on
+      # every failed run — the operator-facing error dump turned into
+      # noise when they most needed it.
+      grep -E '(ERROR|WARN|STREAM\[(crane|helm|kubectl-wait|installer|diag-[a-z-]+)\])' "$LOG_FILE" \
         | tail -n "$err_n" >&2 || true
       printf '\n%s== migrate.log: last %s lines (full tail) ==%s\n' \
         "$__UI_C_DIM" "$n" "$__UI_C_RESET" >&2

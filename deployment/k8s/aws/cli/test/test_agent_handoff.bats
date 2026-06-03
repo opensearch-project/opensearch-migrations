@@ -98,13 +98,21 @@ teardown() {
   [ -d "$STAGE_DIR/.kiro/agents" ]      || [ -d "$STAGE_DIR/.kiro/steering" ]
 }
 
-# ---------- AWS MCP registration ----------
+# ---------- MCP registration ----------
+#
+# These tests cover mcp_install_from_manifest (the manifest-driven
+# replacement for the old _agent_install_aws_mcp + per-agent helpers
+# trio). The contract: each agent writes its MCP config to a
+# project-scope path under $STAGE_DIR with the manifest's substituted
+# args.
 
-@test "_agent_install_aws_mcp skips when MIGRATE_SKIP_MCP=1" {
-  MIGRATE_SKIP_MCP=1 _agent_install_aws_mcp claude
+@test "mcp_install_from_manifest skips everything when MIGRATE_SKIP_MCP=1" {
+  mkstub uvx ''
+  MIGRATE_SKIP_MCP=1 mcp_install_from_manifest claude
   # Should not have written a config anywhere.
-  [ ! -f "$HOME/.codex/config.toml" ]
+  [ ! -f "$STAGE_DIR/.codex/config.toml" ]
   [ ! -f "$STAGE_DIR/.kiro/settings/mcp.json" ]
+  [ ! -f "$STAGE_DIR/.mcp.json" ]
 }
 
 @test "_agent_ensure_uvx returns 0 when uvx already on PATH" {
@@ -112,49 +120,62 @@ teardown() {
   _agent_ensure_uvx
 }
 
-@test "_agent_install_aws_mcp codex appends [mcp_servers.aws-mcp] block" {
+@test "mcp_install_from_manifest codex writes [mcp_servers.aws-mcp] to project config.toml" {
   mkstub uvx ''
   state_set AWS_REGION "us-west-2"
-  _agent_install_aws_mcp codex
-  [ -f "$HOME/.codex/config.toml" ]
-  grep -q '^\[mcp_servers\.aws-mcp\]' "$HOME/.codex/config.toml"
-  grep -q 'AWS_REGION=us-west-2' "$HOME/.codex/config.toml"
-  grep -q 'aws-mcp.us-east-1.api.aws/mcp' "$HOME/.codex/config.toml"
+  state_save
+  mcp_install_from_manifest codex
+  [ -f "$STAGE_DIR/.codex/config.toml" ]
+  grep -q '^\[mcp_servers\.aws-mcp\]' "$STAGE_DIR/.codex/config.toml"
+  grep -q 'AWS_REGION=us-west-2' "$STAGE_DIR/.codex/config.toml"
+  grep -q 'aws-mcp.us-east-1.api.aws/mcp' "$STAGE_DIR/.codex/config.toml"
 }
 
-@test "_agent_install_aws_mcp codex is idempotent (no duplicate block)" {
+@test "mcp_install_from_manifest codex is idempotent (no duplicate block)" {
   mkstub uvx ''
   state_set AWS_REGION "us-east-1"
-  _agent_install_aws_mcp codex
-  _agent_install_aws_mcp codex
+  state_save
+  mcp_install_from_manifest codex
+  mcp_install_from_manifest codex
   local count
-  count=$(grep -c '^\[mcp_servers\.aws-mcp\]' "$HOME/.codex/config.toml")
+  count=$(grep -c '^\[mcp_servers\.aws-mcp\]' "$STAGE_DIR/.codex/config.toml")
   [ "$count" -eq 1 ]
 }
 
-@test "_agent_install_aws_mcp kiro writes settings/mcp.json" {
+@test "mcp_install_from_manifest kiro writes settings/mcp.json" {
   mkstub uvx ''
   state_set AWS_REGION "eu-west-1"
-  mkdir -p "$STAGE_DIR/.kiro"
-  _agent_install_aws_mcp kiro
+  state_save
+  mcp_install_from_manifest kiro
   [ -f "$STAGE_DIR/.kiro/settings/mcp.json" ]
   grep -q '"aws-mcp"' "$STAGE_DIR/.kiro/settings/mcp.json"
   grep -q 'AWS_REGION=eu-west-1' "$STAGE_DIR/.kiro/settings/mcp.json"
 }
 
-@test "_agent_install_aws_mcp kiro is idempotent (file rewrite skipped)" {
+@test "mcp_install_from_manifest kiro is idempotent (file rewrite skipped)" {
   mkstub uvx ''
   state_set AWS_REGION "us-east-1"
-  mkdir -p "$STAGE_DIR/.kiro"
-  _agent_install_aws_mcp kiro
+  state_save
+  mcp_install_from_manifest kiro
   local hash1
   hash1=$(md5 -q "$STAGE_DIR/.kiro/settings/mcp.json" 2>/dev/null \
           || md5sum "$STAGE_DIR/.kiro/settings/mcp.json" | cut -d' ' -f1)
-  _agent_install_aws_mcp kiro
+  mcp_install_from_manifest kiro
   local hash2
   hash2=$(md5 -q "$STAGE_DIR/.kiro/settings/mcp.json" 2>/dev/null \
           || md5sum "$STAGE_DIR/.kiro/settings/mcp.json" | cut -d' ' -f1)
   [ "$hash1" = "$hash2" ]
+}
+
+@test "mcp_install_from_manifest claude writes project-scope .mcp.json" {
+  mkstub uvx ''
+  state_set AWS_REGION "ap-southeast-1"
+  state_save
+  mcp_install_from_manifest claude
+  # claude project scope = $STAGE_DIR/.mcp.json (NOT user-scope)
+  [ -f "$STAGE_DIR/.mcp.json" ]
+  jq -e '.mcpServers["aws-mcp"].command == "uvx"' "$STAGE_DIR/.mcp.json"
+  grep -q 'AWS_REGION=ap-southeast-1' "$STAGE_DIR/.mcp.json"
 }
 
 # ---------- install-hint surfacing ----------

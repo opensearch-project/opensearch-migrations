@@ -32,7 +32,11 @@ lint-bash32:
 
 test:
 	@command -v bats >/dev/null 2>&1 || { echo "install bats-core: brew install bats-core"; exit 127; }
-	bats test/
+	# Use the wrapper so silent test-count mismatches (caused by `[[…]]
+	# && fn` rc-leaks under bats's set -e + errtrace) surface as a hard
+	# failure with diagnostics, instead of being buried in a single-line
+	# warning that returns exit 0 in some bats versions.
+	./test/run-bats.sh
 
 $(TARBALL): | $(DIST_DIR)
 	@[ -n "$(LICENSE_SRC)" ] || { echo "could not locate LICENSE (looked at ../../../../LICENSE and ./LICENSE)"; exit 1; }

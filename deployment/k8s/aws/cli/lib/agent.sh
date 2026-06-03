@@ -226,11 +226,17 @@ agent_setup() {
   # change required. This is the manifest's `skills.discovery: auto`
   # contract, implemented in shell so it works whether or not manifest.sh
   # has been initialized (test path).
+  #
+  # NOTE: bash's `for d in dir/*/` yields paths with a TRAILING slash.
+  # `cp -R src/ dst/` on BSD/macOS copies src's CONTENTS into dst, while
+  # `cp -R src dst/` copies src AS dst/src — that's what we want here
+  # (we want $STAGE_DIR/skills/<name>/ subdirs to materialize). Strip
+  # the trailing slash explicitly before cp.
   mkdir -p "$STAGE_DIR/skills"
   local skill_dir
   for skill_dir in "$skills_src"/*/; do
     [[ -f "${skill_dir}SKILL.md" ]] || continue
-    cp -R "$skill_dir" "$STAGE_DIR/skills/"
+    cp -R "${skill_dir%/}" "$STAGE_DIR/skills/"
   done
 
   local dest_dir
@@ -243,7 +249,9 @@ agent_setup() {
       cp -f "$skills_src/Startup.md" "$dest_dir/opensearch-migration/Startup.md"
       for skill_dir in "$skills_src"/*/; do
         [[ -f "${skill_dir}SKILL.md" ]] || continue
-        cp -R "$skill_dir" "$dest_dir/"
+        # See cp-trailing-slash note above — strip the slash so the
+        # subdir copies as a subdir, not as its contents.
+        cp -R "${skill_dir%/}" "$dest_dir/"
       done
       _agent_write_claude_settings
       ;;
@@ -364,7 +372,15 @@ mcp_install_from_manifest() {
   # Claude only: merge permissions from the manifest into the
   # project-scope settings.json. (The CLI's own bash/aws/kubectl
   # allowlist is contributed by _agent_write_claude_settings.)
-  [[ "$agent" == "claude" ]] && _agent_write_claude_settings
+  #
+  # Use an if/fi rather than `[[ ]] && fn` because the latter, when
+  # the test fails (agent != claude), returns rc=1 — which under
+  # `set -e + errtrace` (which bats enables per test) aborts the
+  # enclosing function with a non-zero exit. The if-form has no
+  # such rc leak.
+  if [[ "$agent" == "claude" ]]; then
+    _agent_write_claude_settings
+  fi
 }
 
 # _mcp_norm_envvar <name>
