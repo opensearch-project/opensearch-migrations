@@ -125,14 +125,21 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
      *  was stamped on those channels — required for onNetworkConnectionClosed to find and clear
      *  the pendingTrafficSourceReaderInterruptedCloses entries. */
     private java.util.function.Consumer<Collection<Integer>> onPartitionsTrulyLostCallback = ignored -> {};
-    /** Partitions that were revoked OR newly assigned during the in-flight {@code poll()}.
-     *  The post-poll handler resets ONLY these partitions to their last-committed offset
-     *  (or beginning if no commit). Partitions that were assigned both before AND after the
-     *  rebalance — i.e., not touched at all — keep their post-poll position so we don't
-     *  re-replay records past their last commit. Cleared right before each poll. Concurrent
-     *  Set so the kafka thread can read it after poll() returns without races (callbacks
-     *  run on the same thread, so writes are already visible, but the Set's safety doesn't
-     *  hurt and matches the existing concurrent-collection idiom in this class). */
+    /** Partitions revoked or lost (via {@link #cleanupRevokedPartitions}) during the in-flight
+     *  {@code poll()}. The post-poll handler resets ONLY these partitions to their last-committed
+     *  offset (or beginning if no commit), AND only if they're still in our assignment after the
+     *  rebalance — i.e., the round-trip case. Partitions that round-trip (revoked + reassigned in
+     *  the same poll, e.g. when this consumer fails to heartbeat in time and gets fenced but then
+     *  rejoins as the only group member) ARE in this set: the revoke side put them in, the
+     *  assign side didn't remove them, and the post-poll handler will treat them as touched and
+     *  reset them. Partitions that we keep continuously across the poll without ever being
+     *  revoked aren't here, so we keep their polled records and post-poll position — important
+     *  when one partition rebalances while another has thousands of uncommitted records in
+     *  flight; we don't want to re-replay those. Pure new assignments aren't here either,
+     *  because we have no pre-rebalance buffer to drop for them. Cleared right before each
+     *  poll. Concurrent Set since rebalance callbacks run on the same poll() thread but write-
+     *  visibility through ConcurrentHashMap is the existing concurrent-collection idiom in
+     *  this class. */
     private final Set<TopicPartition> partitionsTouchedDuringPoll =
         Collections.newSetFromMap(new ConcurrentHashMap<>());
 
