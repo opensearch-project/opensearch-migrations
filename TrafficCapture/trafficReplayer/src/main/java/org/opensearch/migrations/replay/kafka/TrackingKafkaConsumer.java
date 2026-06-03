@@ -459,11 +459,13 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         // touch. Partitions newly assigned mid-poll are also iterated here but get skipped
         // by the prePollPositions lookup below.
         for (var tp : kafkaConsumer.assignment()) {
+            // Skip partitions newly assigned mid-poll (no pre-poll entry — leave them alone)
+            // and partitions with no records this poll (position didn't move, no rewind needed).
             var pre = prePollPositions.get(tp);
-            if (pre == null) continue; // newly assigned mid-poll; leave alone
             var minRet = minReturned.get(tp);
-            if (minRet == null) continue; // no records returned this poll; position didn't move
-            kafkaConsumer.seek(tp, Math.min(pre, minRet));
+            if (pre != null && minRet != null) {
+                kafkaConsumer.seek(tp, Math.min(pre, minRet));
+            }
         }
         log.atInfo().setMessage("Rebalance during poll: dropped {} record(s); rewound {} partition(s)")
             .addArgument(polled::count)
