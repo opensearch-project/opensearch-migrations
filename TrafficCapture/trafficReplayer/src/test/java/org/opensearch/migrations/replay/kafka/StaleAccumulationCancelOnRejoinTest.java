@@ -175,22 +175,30 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
             //   1. onPartitionsRevoked fires the truly-lost callback immediately, while the
             //      generation is still OLD (gen=1) — so synthetic-close session keys match
             //      session.generation on the channels opened during gen=1.
-            //   2. The synthetic close is enqueued in trafficSourceReaderInterruptedCloseQueue
-            //      while the same poll() also returns the re-delivered gen=2 record.
-            //   3. readNextTrafficStreamSynchronously drains the queue after the poll and
-            //      PREPENDS the synthetic close before the gen=2 record.
+            //   2. The synthetic close lands in trafficSourceReaderInterruptedCloseQueue.
+            //      TrackingKafkaConsumer detects the inline rebalance, drops the polled
+            //      records, and seeks the partition back to its pre-poll position so the
+            //      records re-deliver on a later poll.
+            //   3. The next chunk returned by readNextTrafficStreamSynchronously contains ONLY
+            //      the synth close (chunks never mix synth + real).
+            //   4. A subsequent chunk delivers the re-delivered gen=2 record.
             mc.schedulePollTask(() -> {
                 mc.rebalance(Collections.emptyList());          // onPartitionsRevoked → fires truly-lost(0) at gen=1
                 mc.rebalance(Collections.singletonList(tp));    // onPartitionsAssigned → bumps to gen=2
-                addReadEomRecord(mc, 1L);                       // re-delivered record at offset 1
+                // Records for this poll are intentionally NOT added here. TrackingKafkaConsumer
+                // will detect the inline rebalance and seek the partition back to its pre-poll
+                // position (which is what would make the broker re-deliver records past the
+                // last commit on the next poll in production). MockConsumer drops records on
+                // poll and doesn't re-deliver on seek, so we simulate the broker's re-delivery
+                // by scheduling the offset-1 record on a subsequent poll task below.
             });
+            // Simulate the broker re-delivering the uncommitted record after seek-back.
+            mc.schedulePollTask(() -> addReadEomRecord(mc, 1L));
 
-            // Drain a single source.readNextTrafficStreamChunk() and capture the order of
-            // ITrafficStreamWithKey types the accumulator received. The synthetic close must
-            // appear before the real (re-delivered) record.
-            var deliveryOrder = drainAndCaptureOrder(source, accumulator);
+            // Drain chunks until we observe both the synth close and the re-delivered record.
+            var deliveryOrder = drainUntilSyntheticAndRealForConn(source, accumulator);
 
-            // ---- Source-layer ordering ----
+            // Each chunk is either all-synth or all-real — verify and locate the indices.
             int firstSyntheticIdx = -1;
             int firstRealIdx = -1;
             for (int i = 0; i < deliveryOrder.size(); i++) {
@@ -206,10 +214,10 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
                 "source layer must inject a TrafficSourceReaderInterruptedClose for the round-tripped "
                     + "partition; nothing synthetic was delivered. Order=" + deliveryOrder);
             Assertions.assertTrue(firstRealIdx >= 0,
-                "the re-delivered gen=2 record must still be returned (not dropped). Order=" + deliveryOrder);
+                "the re-delivered gen=2 record must arrive on a later chunk after seek-back. Order=" + deliveryOrder);
             Assertions.assertTrue(firstSyntheticIdx < firstRealIdx,
-                "synthetic close MUST be processed before the new-generation record so the in-flight "
-                    + "accumulation is closed cleanly. syntheticIdx=" + firstSyntheticIdx
+                "synthetic close MUST be delivered (and processed) before the new-generation record. "
+                    + "syntheticIdx=" + firstSyntheticIdx
                     + " realIdx=" + firstRealIdx + " order=" + deliveryOrder);
 
             // ---- End-to-end close semantics ----
@@ -239,25 +247,33 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
     }
 
     /**
-     * Drains one chunk from the source, feeds each record into the accumulator (mirroring
-     * {@code TrafficReplayerCore.pullCaptureFromSourceToAccumulator}), and returns the items in
-     * the exact order they were delivered. Loops past empty batches caused by the
-     * synthetic-close-pending guard until at least one item is delivered.
+     * Drains chunks from the source (mirroring {@code pullCaptureFromSourceToAccumulator}) and
+     * accumulates everything across chunks until BOTH a synthetic close AND a real record for
+     * {@link #CONN_ID} have been observed. Each individual chunk under option A is either
+     * all-synth or all-real (never mixed); this helper collects the cross-chunk delivery order
+     * so callers can verify ordering at the source-layer level.
      */
-    private List<ITrafficStreamWithKey> drainAndCaptureOrder(
+    private List<ITrafficStreamWithKey> drainUntilSyntheticAndRealForConn(
         KafkaTrafficCaptureSource source,
         CapturedTrafficToHttpTransactionAccumulator accumulator
     ) throws Exception {
-        for (int attempt = 0; attempt < 16; attempt++) {
+        var observed = new ArrayList<ITrafficStreamWithKey>();
+        boolean sawSynthetic = false;
+        boolean sawReal = false;
+        for (int attempt = 0; attempt < 32; attempt++) {
             var batch = source.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
-            if (!batch.isEmpty()) {
-                for (ITrafficStreamWithKey ts : batch) {
-                    accumulator.accept(ts);
+            for (ITrafficStreamWithKey ts : batch) {
+                accumulator.accept(ts);
+                observed.add(ts);
+                if (CONN_ID.equals(ts.getKey().getConnectionId())) {
+                    if (ts instanceof TrafficSourceReaderInterruptedClose) sawSynthetic = true;
+                    else sawReal = true;
                 }
-                return batch;
             }
+            if (sawSynthetic && sawReal) return observed;
         }
-        throw new AssertionError("drainAndCaptureOrder: source returned no records after 16 polls");
+        throw new AssertionError("did not see both synthetic close and re-delivered record for "
+            + CONN_ID + " after 32 polls. Observed=" + observed);
     }
 
     /** Mimics one iteration of {@code TrafficReplayerCore.pullCaptureFromSourceToAccumulator}. */

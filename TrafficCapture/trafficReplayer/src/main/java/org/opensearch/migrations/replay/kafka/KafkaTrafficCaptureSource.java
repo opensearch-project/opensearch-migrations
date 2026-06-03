@@ -397,25 +397,18 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             log.atError().setCause(e).setMessage("Terminating Kafka traffic stream due to exception").log();
             throw e;
         }
-        // A rebalance can fire inline during kafkaConsumer.poll() above. onPartitionsRevoked
-        // enqueues synthetic closes at the OLD generation for any active connections on the
-        // revoked partitions, and a follow-up onPartitionsAssigned in the same poll bumps the
-        // generation, so any records returned from this poll already carry the NEW generation.
-        // Prepend any closes enqueued during the poll so the accumulator sees them before the
-        // new-generation records that follow.
-        var prepended = new ArrayList<ITrafficStreamWithKey>();
-        for (var batch = trafficSourceReaderInterruptedCloseQueue.poll();
-             batch != null;
-             batch = trafficSourceReaderInterruptedCloseQueue.poll()) {
-            prepended.addAll(batch);
-        }
-        if (prepended.isEmpty()) {
-            return records;
-        }
-        log.atInfo().setMessage("Rebalance during poll: prepending {} synthetic close(s) to {} record(s)")
-            .addArgument(prepended::size).addArgument(records::size).log();
-        prepended.addAll(records);
-        return Collections.unmodifiableList(prepended);
+        // Invariant: a single returned chunk holds either synth closes (drained at the top of
+        // this method) OR real records, never both. If a rebalance fires inline during
+        // kafkaConsumer.poll() above, TrackingKafkaConsumer drops the polled batch and seeks
+        // each still-assigned partition back to its pre-poll position so the records re-deliver
+        // on the next poll — by which time the synth closes will have flushed through this
+        // method's pre-poll drain. `assert cond : expr` only evaluates `expr` when the assertion
+        // fails, so this is free at runtime and pins the invariant against future changes.
+        assert records.isEmpty() || trafficSourceReaderInterruptedCloseQueue.isEmpty()
+            : "mixed chunk: " + records.size() + " records returned with "
+                + trafficSourceReaderInterruptedCloseQueue.size() + " synth-close batch(es) queued — "
+                + "TrackingKafkaConsumer should have dropped+sought the records on inline rebalance";
+        return records;
     }
 
     @Override

@@ -186,7 +186,7 @@ flowchart TD
     TKC -->|ITrafficStreamWithKey| KCS
     KCS -->|add connId on first record| PAC
     KCS -.->|"tag stream with quiescentUntil [NEW]\nif: no open obs + not in active set"| BTS
-    KCS -->|"1. pre-poll drain trafficSourceReaderInterruptedCloseQueue\n2. return empty if OSC > 0\n3. else poll Kafka\n4. post-poll: prepend any closes\n   enqueued during poll() to records"| BTS
+    KCS -->|"1. pre-poll: drain one synth-close batch and return it\n2. return empty if OSC > 0\n3. else poll Kafka\n   (TrackingKafkaConsumer drops + seeks back\n   on inline rebalance — chunk is empty)\n4. assert: chunk is all-synth OR all-real, never mixed"| BTS
     BTS --> ACC
 
     TKC -->|"onPartitionsRevoked\nfire trulyLost callback NOW (OLD generation)"| SQ
@@ -490,12 +490,14 @@ partitions at this point, so commits are valid.
 4. Invokes `onPartitionsTrulyLostCallback` with the revoked partition numbers — fired **outside**
    `commitDataLock` and at the **current (OLD) generation**. The source layer enqueues synthetic
    `TrafficSourceReaderInterruptedClose` events whose session keys reference that OLD generation,
-   matching the `session.generation` stamped on channels when they were opened. Any subsequent
-   `onPartitionsAssigned` will bump the generation; records returned from the same `poll()`
-   that triggered this revocation are stamped with the NEW generation, and the source layer's
-   post-poll prepend (see [`readNextTrafficStreamSynchronously`](#kafkatrafficcapturesource))
-   ensures the OLD-generation synthetic closes are delivered to the accumulator before any
-   NEW-generation re-deliveries.
+   matching the `session.generation` stamped on channels when they were opened.
+5. Sets `rebalanceDuringPoll = true` so that if the rebalance fires inline during
+   `kafkaConsumer.poll()`, `TrackingKafkaConsumer.safePollWithSwallowedRuntimeExceptions` will
+   **drop the polled records and `seek()` every still-assigned partition back to the position
+   captured before the poll**. Those records re-deliver on a later poll — by which time the
+   synth-close batches will have flushed through the source's pre-poll drain and through the
+   accumulator. This keeps the contract that any single chunk returned by
+   `readNextTrafficStreamSynchronously` is either all synth-closes or all records, never mixed.
 
 After this returns, any in-flight records from the revoked partitions will hit the generation
 check in `commitKafkaKey()` and return `IGNORED`.
@@ -556,7 +558,7 @@ flowchart TD
     end
 
     subgraph mainThread["main thread"]
-        SYNTH["readNextTrafficStreamChunk\n1. pre-poll: drain queue\n2. if OSC>0: park+empty\n3. else poll Kafka\n4. post-poll: prepend any closes\n   enqueued during poll() to records"]
+        SYNTH["readNextTrafficStreamChunk\n1. pre-poll: drain one synth-close batch\n2. if OSC>0: park+empty\n3. else poll Kafka\n   (TrackingKafkaConsumer drops + seeks back\n   on inline rebalance — chunk is empty)\n4. assert: all-synth OR all-real, never mixed"]
         ACC2[Accumulator.accept\nTrafficSourceReaderInterruptedClose\n→ onConnectionClose TRAFFIC_SOURCE_READER_INTERRUPTED]
         CANCEL["ConnectionReplaySession\nscheduleSequencer.cancelAllWork()\n→ completes all signalWorkCompletedFutures\n→ cascades through sorter chain\n→ channel.close()"]
     end
@@ -660,20 +662,22 @@ still planned):
   flow that snapshots `ClientConnectionPool` cache entries with `computeIfPresent`, threads the
   real `Accumulation.startingSourceRequestIndex` as `sessionNumber`, and skips registration
   when the session is already gone is still planned.
-- `readNextTrafficStreamSynchronously` runs four phases per call: (1) **pre-poll**, drain one
+- `readNextTrafficStreamSynchronously` runs three phases per call: (1) **pre-poll**, drain one
   queued synthetic-close batch and return it immediately if present; (2) if
   `outstandingTrafficSourceReaderInterruptedCloseSessions > 0`, park briefly and return an
-  empty batch (do not poll Kafka); (3) call `getNextBatchOfRecords` to poll Kafka; (4)
-  **post-poll**, drain *all* synthetic-close batches enqueued *during* the poll and **prepend**
-  them to the freshly polled records before returning. Phase 4 is required because a rebalance
-  can fire inline during `kafkaConsumer.poll()` — when it does, `onPartitionsRevoked` enqueues
-  the OLD-generation synthetic closes and the follow-up `onPartitionsAssigned` bumps the
-  generation, so any records returned from the same poll already carry the **new** generation.
-  Without the prepend, new-generation records would reach the accumulator ahead of the
-  old-generation synthetic closes and trip the accumulator's defensive backstop. The
-  accumulator cache entry is cleared synchronously on the main thread when the synthetic
-  close is processed — before any new data can arrive for that connection, even within the
-  same returned chunk.
+  empty batch (do not poll Kafka); (3) call `getNextBatchOfRecords` to poll Kafka. A returned
+  chunk is therefore either *all* synth closes or *all* real records, never mixed — pinned by
+  an `assert` at the bottom of the method.
+- The "never mixed" invariant is enforced by `TrackingKafkaConsumer.safePollWithSwallowedRuntimeExceptions`
+  itself rather than by post-poll bookkeeping in the source. Before each `kafkaConsumer.poll()`,
+  the consumer snapshots `position(tp)` for every assigned partition (a local call — no broker
+  RPC) and clears a `rebalanceDuringPoll` flag. If any rebalance callback fires inline during
+  the poll, it sets the flag. When `poll()` returns: if the flag is set, the consumer
+  `seek()`s every still-assigned partition back to its pre-poll position (also local) and
+  drops the polled `ConsumerRecords` by returning an empty batch. The seek-back guarantees the
+  records re-deliver on a later `poll()` call — by which time the source's pre-poll drain has
+  flushed the OLD-generation synth closes through the accumulator. This sidesteps the entire
+  class of "old synth + new records arrive in the same chunk" ordering problems.
 - `TrafficSourceReaderInterruptedClose` is handled in `accept()` by:
   1. Calling `fireAccumulationsCallbacksAndClose(TRAFFIC_SOURCE_READER_INTERRUPTED)` on the
      existing `Accumulation` — this completes `finishedAccumulatingResponseFuture` for any
