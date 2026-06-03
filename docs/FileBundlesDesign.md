@@ -8,7 +8,6 @@ The user should be able to declare file-bearing inputs directly where those inpu
 
 - transform entry-point files
 - transform context files
-- Solr source-cluster configuration
 - capture proxy mTLS client trust roots
 - future component-specific configuration files
 
@@ -20,19 +19,17 @@ Builder-owned config-processor extensions, such as injecting a default Solr repl
 
 - Let users provide read-only files from ConfigMaps or mountable OCI images.
 - Let any compute component mount multiple file sources.
-- Keep file-source syntax generic enough for transforms, source-cluster config, mTLS roots, and later file-backed settings.
-- Add generic source-cluster configuration files that Solr can use first without making the workflow know Solr file semantics.
+- Keep file-source syntax generic enough for transforms, mTLS roots, and later file-backed settings.
 - Make transform specs support either a script entry point or an existing transformer provider name.
 - Let transform context be a plain string, explicit values, file-backed values, or directory-loaded values.
 - Keep transformer providers focused on logical config objects, not Kubernetes mounts, env var scanning, or file parsing.
-- Push generic file-source volume arrays through the Argo schema so workflow templates do not need transform- or Solr-specific mount logic.
+- Push generic file-source volume arrays through the Argo schema so workflow templates do not need component-specific mount logic.
 
 ## Non-Goals
 
 - This does not replace Kubernetes Secrets for private keys or credentials.
 - This does not materialize inline user strings into mounted files. Inline strings should use explicit value/script fields; fields that require file paths should use ConfigMaps, OCI images, or workflow-produced resources.
 - This does not require the config processor to read user-provided ConfigMaps or OCI images. Those files are read by runtime components after Kubernetes mounts them.
-- This does not define Solr-specific file semantics in the workflow schema. Solr docs and Solr-aware components define which named files they understand.
 - This does not define builder-owned config-processor extension hooks. Those are trusted application code and stay out of the user-facing file-source model.
 
 ## Core Model
@@ -180,7 +177,7 @@ Avoid accepting bare scalars or objects inside `context.values` in v1. Requiring
 The schema has three distinct concepts:
 
 - Script source, such as `entryPoint.javascript` or `entryPoint.javascriptFile`.
-- Runtime file paths derived from file-bearing fields, such as `clusterConfiguration.files.<name>` and `clientAuth.trustedClientCaFile`.
+- Runtime file paths derived from file-bearing fields, such as `clientAuth.trustedClientCaFile`.
 - Context values, which become provider config values or script `bindingsObject` values.
 
 The config processor can embed inline values directly into generated JSON, but it cannot inline files from ConfigMaps or images because it cannot read them while transforming the user config. File refs become component-level volume arrays plus resolved runtime paths. File-backed context values become resolver instructions that Java reads after the files are mounted.
@@ -192,7 +189,6 @@ Non-context file and script fields translate directly:
 - `entryPoint.python` selects `JsonPythonTransformerProvider` and sets `initializationScript`.
 - `entryPoint.pythonFile` selects `JsonPythonTransformerProvider` and sets `initializationScriptFile` to the resolved path.
 - `transformName` selects the named provider used by `TransformationLoader`.
-- `clusterConfiguration.files.<name>` is a named source-cluster file declaration; a later projection can turn it into a resolved path plus mounts for each consuming component.
 - `clientAuth.trustedClientCaFile` becomes `sslTrustCertFile` with the resolved path.
 
 Context translation has three stages:
@@ -336,7 +332,6 @@ The same context attached to a script entry point uses `bindingsObjectDirs`, `bi
 
 The config processor collects file refs from:
 
-- source-cluster configuration files
 - transform entry points
 - transform context value directories and file-backed context values
 - capture proxy mTLS trust roots
@@ -351,19 +346,9 @@ ConfigMap: { type: "configMap", name }
 Image:     { type: "image", reference, pullPolicy }
 ```
 
-For example, if one replayer uses the same ConfigMap for source-cluster configuration and a transform context file:
+For example, if one replayer uses the same ConfigMap for multiple transform context files:
 
 ```yaml
-sourceClusters:
-  prod-solr:
-    version: "SOLR 8.11.4"
-    endpoint: "https://solr.example.com:8983"
-    clusterConfiguration:
-      files:
-        clusterConfig:
-          configMap: prod-solr-config
-          path: solrconfig.xml
-
 traffic:
   replayers:
     replay:
@@ -380,22 +365,22 @@ traffic:
                     distribution: elasticsearch
                 regexMappings:
                   fromFile:
-                    configMap: prod-solr-config
+                    configMap: type-mappings-settings
                     path: regexMappings.json
                 defaults:
                   fromFile:
-                    configMap: prod-solr-config
+                    configMap: type-mappings-settings
                     path: defaults.json
 ```
 
 the replayer pod should get one mount root:
 
 ```text
-/file-sources/configmap-prod-solr-config/solrconfig.xml
-/file-sources/configmap-prod-solr-config/defaults.json
+/file-sources/configmap-type-mappings-settings/regexMappings.json
+/file-sources/configmap-type-mappings-settings/defaults.json
 ```
 
-The repeated ConfigMap reference is intentional. This design does not automatically wire `sourceClusters.<source>.clusterConfiguration.files.clusterConfig` into transform context. If a transform provider needs source-cluster config, the user config or a later config-processor extension must place that value into the transform's `context`.
+The repeated ConfigMap reference is intentional. The config processor dedupes the volume mount while preserving distinct resolved file paths for each file-backed context value.
 
 The same transform context could also be implemented with `valueDirectories` if the mounted directory's file names match the provider's expected context keys, such as `regexMappings` and `featureFlags`. In that case the resolver would load each immediate file as one context value, using provider-owned type metadata for those keys.
 
@@ -524,81 +509,8 @@ For example:
 - Inline JavaScript uses `entryPoint.javascript`.
 - Inline transform settings use `context.values.<name>.value`.
 - Inline mTLS trust roots can be a proxy TLS field because the proxy owns TLS initialization.
-- Inline source-cluster configuration can be a source-cluster value because later config-processor work can decide how to pass that logical value to transform providers.
 
 This avoids a generic Argo resource factory for arbitrary strings. If a later component truly needs a path, the config processor extension for that component can materialize a managed ConfigMap or require the user to provide a file source.
-
-## Source-Cluster Configuration Files
-
-The current `CLUSTER_VERSION_STRING` already accepts `SOLR 6`, `SOLR 7`, `SOLR 8`, and `SOLR 9` version strings. Keep that support and add a generic configuration section to `SOURCE_CLUSTER_CONFIG`:
-
-```typescript
-const SOURCE_CLUSTER_INLINE_VALUE = z.object({
-    value: INLINE_JSON_VALUE
-}).strict();
-
-const SOURCE_CLUSTER_CONFIGURATION = z.object({
-    files: z.record(z.string().min(1), FILE_REF).default({}).optional(),
-    values: z.record(z.string().min(1), SOURCE_CLUSTER_INLINE_VALUE).default({}).optional()
-}).strict();
-
-export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
-    version: CLUSTER_VERSION_STRING,
-    clusterConfiguration: SOURCE_CLUSTER_CONFIGURATION.optional(),
-    snapshotInfo: SNAPSHOT_INFO.optional()
-});
-```
-
-Validation rules:
-
-- The mount and workflow layers do not interpret file names.
-- Solr documentation and Solr-aware components define which keys inside `clusterConfiguration.files` and `clusterConfiguration.values` they understand.
-- Initial validation can allow `clusterConfiguration` only for `SOLR ...` sources because that is the first concrete consumer. The schema shape itself should stay generic so other source engines can reuse it later.
-- Components that receive this source config must also receive the corresponding `fileSourceVolumes` and `fileSourceVolumeMounts` for file-backed entries.
-- Relative path validation rejects absolute paths and `..` traversal.
-
-The user-facing source-cluster block is the source of truth. It carries both the file source and the relative path for every file-backed entry:
-
-```yaml
-sourceClusters:
-  prod-solr:
-    version: "SOLR 8.11.4"
-    endpoint: "https://solr.example.com:8983"
-    clusterConfiguration:
-      files:
-        clusterConfig:
-          configMap: prod-solr-config
-          path: solrconfig.xml
-        defaults:
-          image: "123456789012.dkr.ecr.us-east-1.amazonaws.com/source-config@sha256:abc123"
-          pullPolicy: IfNotPresent
-          path: solr/defaults.json
-      values:
-        clusterConfigText:
-          value: |
-            <config>...</config>
-```
-
-File entry rules:
-
-- Each key under `clusterConfiguration.files` is a logical source-cluster config name.
-- Each file entry includes exactly one file source, such as `configMap` or `image`.
-- `path` is always relative to that file source.
-- For a ConfigMap source, `path` names one ConfigMap key. In v1 this is a single key/file name, not a nested path.
-- For an image source, `path` names the file inside the mounted image filesystem.
-- Inline entries use `clusterConfiguration.values`, not `clusterConfiguration.files`.
-
-A later projection step turns these declarations into component-specific resolved paths plus `fileSourceVolumes` and `fileSourceVolumeMounts`. For example, a consumer that needs `prod-solr.clusterConfiguration.files.clusterConfig` would receive both a resolved path under its local mount root and generated Kubernetes volume entries that identify `prod-solr-config` as the backing ConfigMap. That projected shape is not the source-cluster schema; it is derived from this block.
-
-The same pattern applies to image-backed source config: the source-cluster block carries the image reference, optional pull policy, and relative path. The projection chooses the component-local mount root and constructs the resolved path. Inline `clusterConfiguration.values` do not create mounts.
-
-For Solr, the first documented source-cluster keys can be `clusterConfig` and `defaults` if those are the source-cluster documentation contracts we settle on. The workflow does not need to know that `clusterConfig` is a Solr config file or that `defaults` has Solr request-handler meaning. It only preserves named file declarations and named inline values under the source cluster.
-
-Transform provider config keys are separate from source-cluster documentation keys. For example, `TypeMappingSanitizationTransformerProvider` consumes provider keys such as `regexMappings`, `staticMappings`, `featureFlags`, and `sourceProperties`; those names do not define or constrain source-cluster keys such as `clusterConfig` or `defaults`.
-
-This design does not automatically copy `clusterConfiguration.values` into transform context. A follow-up config-processor extension can do that explicitly. If a provider accepts source config as text or JSON, the extension can inject it as `context.values.<name>.value`. If a provider requires a path, that extension can materialize a managed ConfigMap and inject `context.values.<name>.fromFile`.
-
-Snapshot-based metadata and RFS can continue reading schema/configset material from Solr backup data when it is present. If a future runtime component needs another Solr file, that should be a Solr documentation/provider concern: add another named entry under `clusterConfiguration.files`, not a new workflow field.
 
 ## Transformer Runtime
 
@@ -756,14 +668,6 @@ sourceClusters:
   prod-solr:
     version: "SOLR 8.11.4"
     endpoint: "https://solr.example.com:8983"
-    clusterConfiguration:
-      files:
-        clusterConfig:
-          configMap: prod-solr-config
-          path: solrconfig.xml
-        defaults:
-          configMap: prod-solr-config
-          path: defaults.json
 
 targetClusters:
   prod-os:
@@ -819,13 +723,13 @@ traffic:
                 path: request.js
             context:
               values:
-                sourceDefaults:
+                featureFlags:
                   fromFile:
-                    configMap: prod-solr-config
-                    path: defaults.json
+                    configMap: type-mappings-settings
+                    path: featureFlags.json
 ```
 
-This example intentionally repeats `prod-solr-config`. The config processor dedupes that source in the replayer and still preserves distinct resolved paths for `solrconfig.xml` and `defaults.json`.
+This example intentionally repeats `type-mappings-settings`. The config processor dedupes that source in the replayer and still preserves distinct resolved paths for `regexMappings.json` and `featureFlags.json`.
 
 ## Implementation Status
 
@@ -839,15 +743,12 @@ Completed in the first implementation pass:
 6. Added transformed Argo fields `fileSourceVolumes` and `fileSourceVolumeMounts` to MetadataMigration, RFS, Replayer, and Capture Proxy configs.
 7. Added those fields to each component's workflow-option key list so they are omitted from Java process parameter JSON.
 8. Added Argo TS array-concat/rendering support for appending `fileSourceVolumes` to static `volumes` and `fileSourceVolumeMounts` to static `volumeMounts`.
-9. Added generic `clusterConfiguration.files` and `clusterConfiguration.values` to source clusters, restricted to `SOLR ...` source versions.
-10. Added Java runtime support for provider config files, binding files, directories, and provider-owned value materialization.
-11. Added `TypeMappingSanitizationTransformerProvider` metadata so file-backed `regexMappings`, `staticMappings`, `featureFlags`, and `sourceProperties` are materialized as JSON without user-provided type hints.
-12. Added capture proxy `clientAuth.trustedClientCaFile` schema and workflow translation for file-backed roots.
-13. Added capture proxy `clientAuth.trustedClientCaPem` schema, workflow env-var projection, and runtime PEM loading.
-14. Added workflow-template support for dynamically appended file-source volumes and mounts.
-15. Updated samples and docs from mountable transforms to direct file-source declarations.
-
-The source-cluster projection and config-processor extension work is tracked in `ConfigProcessorExtensionsDesign.md`; it is not part of the FileBundles implementation pass.
+9. Added Java runtime support for provider config files, binding files, directories, and provider-owned value materialization.
+10. Added `TypeMappingSanitizationTransformerProvider` metadata so file-backed `regexMappings`, `staticMappings`, `featureFlags`, and `sourceProperties` are materialized as JSON without user-provided type hints.
+11. Added capture proxy `clientAuth.trustedClientCaFile` schema and workflow translation for file-backed roots.
+12. Added capture proxy `clientAuth.trustedClientCaPem` schema, workflow env-var projection, and runtime PEM loading.
+13. Added workflow-template support for dynamically appended file-source volumes and mounts.
+14. Updated samples and docs from mountable transforms to direct file-source declarations.
 
 ## Remaining Work
 
@@ -867,7 +768,6 @@ Covered in the first implementation pass:
 - Schema rejects absolute paths and `..` path traversal.
 - Schema rejects ConfigMap file refs whose `path` contains `/` or reserved dot paths; ConfigMap file refs address one key.
 - Schema rejects transform specs with both `entryPoint` and `transformName`, or neither.
-- Schema accepts Solr source versions and rejects `clusterConfiguration` for non-Solr source versions.
 - Transform translation maps inline JavaScript to `initializationScript`.
 - Transform translation maps `javascriptFile` to `initializationScriptFile`.
 - Transform translation maps inline Python and `pythonFile` to `JsonPythonTransformerProvider` with the same `initializationScript` / `initializationScriptFile` keys.
@@ -878,7 +778,6 @@ Covered in the first implementation pass:
 - Component process JSON omits `fileSourceVolumes` and `fileSourceVolumeMounts`; they are workflow-only fields.
 - Capture proxy mTLS lowering verifies `clientAuth.trustedClientCaFile` from a ConfigMap sets `sslTrustCertFile` and `requireClientAuth`.
 - Capture proxy mTLS lowering verifies `clientAuth.trustedClientCaPem` sets `sslTrustCertPem`, wires the dedicated env var, and does not create mounts.
-- Source-cluster config fixtures verify `clusterConfiguration.files` and `clusterConfiguration.values` are accepted for Solr sources.
 - Workflow template snapshots cover dynamic file-source volume and mount projection in MetadataMigration, RFS, Replayer, and Capture Proxy templates.
 - Argo builder unit coverage verifies `ContainerBuilder` can carry dynamic volume arrays, and parity coverage was added for `sprig.concat`.
 - Java transformer runtime tests verify named provider file-backed config is resolved before provider creation.
@@ -912,6 +811,6 @@ If the same image is reused, users can repeat the direct image reference or use 
 
 **Environment variables**: Do not add a generic env-var value source for file bundles or transform context in v1. The current workflows already model the needed env vars directly: credentials from Secrets, runtime JVM/logging/localstack settings, and config-processor invocation settings. New env vars should be added as explicit component fields when a runtime actually needs them.
 
-**Inline file materialization**: Generic `FILE_REF.contents` remains out of scope. Inline content should stay value/script-only through fields such as `entryPoint.javascript`, `context.values.<name>.value`, and `clusterConfiguration.values`. If a runtime truly needs a path, use a ConfigMap, OCI image, workflow-produced resource, or builder-owned config-processor extension.
+**Inline file materialization**: Generic `FILE_REF.contents` remains out of scope. Inline content should stay value/script-only through fields such as `entryPoint.javascript` and `context.values.<name>.value`. If a runtime truly needs a path, use a ConfigMap, OCI image, workflow-produced resource, or builder-owned config-processor extension.
 
 **Image pull policy**: Image file sources should accept `pullPolicy` and default to `IfNotPresent`. Pull policy remains part of the canonical image source identity because it changes the Kubernetes volume spec. Two otherwise identical image references with different pull policies should therefore produce distinct component mounts.

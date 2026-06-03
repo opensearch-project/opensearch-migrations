@@ -2,14 +2,6 @@ sourceClusters:
   prod-solr:
     version: "SOLR 8.11.4"
     endpoint: "https://solr.example.com:8983"
-    clusterConfiguration:
-      files:
-        clusterConfig:
-          configMap: solr-config
-          path: solrconfig.xml
-        defaults:
-          configMap: solr-config
-          path: defaults.json
 
 targetClusters:
   prod-os:
