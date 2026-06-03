@@ -1106,15 +1106,6 @@ export const SOURCE_CLUSTER_REPOS_RECORD =
     z.record(z.string(), S3_REPO_CONFIG)
     .describe("Map of snapshot repository names to their S3 configurations. Keys are the repository names as registered in the source cluster.");
 
-export const SOURCE_CLUSTER_INLINE_VALUE = z.object({
-    value: INLINE_JSON_VALUE
-}).strict();
-
-export const SOURCE_CLUSTER_CONFIGURATION = z.object({
-    files: z.record(z.string().min(1), FILE_REF).default({}).optional(),
-    values: z.record(z.string().min(1), SOURCE_CLUSTER_INLINE_VALUE).default({}).optional()
-}).strict().describe("Generic source-cluster configuration files and inline values. The workflow preserves keys but does not interpret engine-specific semantics.");
-
 export const CAPTURE_CONFIG = z.object({
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
         .describe("Label of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration."),
@@ -1206,18 +1197,9 @@ const AWS_MANAGED_ENDPOINT_PATTERN = /(?:\.es\.amazonaws\.com|\.aos\.[a-z0-9-]+\
 
 export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
     version: CLUSTER_VERSION_STRING,
-    clusterConfiguration: SOURCE_CLUSTER_CONFIGURATION.optional(),
     snapshotInfo: SNAPSHOT_INFO.optional()
         .describe("Snapshot repository and snapshot configurations for this source cluster. Required if any snapshot-based migrations reference this source.")
 }).describe("Connection and snapshot configuration for a source cluster.").superRefine((data, ctx) => {
-    if (data.clusterConfiguration !== undefined && !data.version.startsWith("SOLR ")) {
-        ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            message: "'clusterConfiguration' is currently supported only for SOLR source clusters.",
-            path: ["clusterConfiguration"]
-        });
-    }
-
     const repos = data.snapshotInfo?.repos;
     const snapshots = data.snapshotInfo?.snapshots ?? {};
     for (const [snapName, snapConfig] of Object.entries(snapshots)) {
