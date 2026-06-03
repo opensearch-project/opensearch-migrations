@@ -287,10 +287,16 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             RequestResponsePacketPair.ReconstructionStatus status,
             List<ITrafficStreamKey> trafficStreamKeysBeingHeld
         ) {
-            commitTrafficStreams(
-                status != RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY,
-                trafficStreamKeysBeingHeld
-            );
+            // Both CLOSED_PREMATURELY and TRAFFIC_SOURCE_READER_INTERRUPTED suppress the commit.
+            // CLOSED_PREMATURELY: the source ran out of data mid-transaction, so committing
+            //   would mark a partial replay as completed.
+            // TRAFFIC_SOURCE_READER_INTERRUPTED: the partition was reassigned and the broker
+            //   will re-deliver the records past the last commit on the next assignment;
+            //   committing here would advance past records we want re-delivered.
+            boolean shouldCommit =
+                status != RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY
+                && status != RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED;
+            commitTrafficStreams(shouldCommit, trafficStreamKeysBeingHeld);
         }
 
         @SneakyThrows
