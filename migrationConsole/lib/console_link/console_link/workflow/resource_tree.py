@@ -429,6 +429,10 @@ def format_live_status(resource: ResourceNode):
         creation = resource.status.get('snapshotCreation')
         if isinstance(creation, dict):
             return _format_snapshot_creation_status(creation)
+    elif resource.plural == 'captureproxies':
+        endpoint = (resource.status.get('loadBalancerEndpoint') or '').strip()
+        if endpoint:
+            return f"endpoint: {endpoint}", []
     return None
 
 
