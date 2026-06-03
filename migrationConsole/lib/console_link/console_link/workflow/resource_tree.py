@@ -47,9 +47,13 @@ PHASE_SYMBOLS = {
 SPEC_DISPLAY_FIELDS = {
     'kafkaclusters': ['version', 'auth.type', 'nodePool.replicas'],
     'capturedtraffics': ['topicName', 'partitions', 'replicas'],
-    'captureproxies': ['podReplicas', 'listenPort', 'internetFacing'],
+    'captureproxies': ['podReplicas', 'listenPort', 'internetFacing', 'serviceType'],
     'datasnapshots': ['snapshotPrefix', 'indexAllowlist'],
-    'snapshotmigrations': ['documentBackfillPodReplicas', 'sourceVersion'],
+    'snapshotmigrations': [
+        'documentBackfillPodReplicas', 'sourceVersion',
+        'documentBackfillIndexAllowlist', 'metadataMigrationIndexAllowlist',
+        'metadataMigrationMultiTypeBehavior',
+    ],
     'trafficreplays': ['podReplicas', 'speedupFactor', 'removeAuthHeader'],
 }
 
@@ -276,9 +280,8 @@ def _render_resource(parent_node, resource: ResourceNode, show_live_status: bool
 
 def _add_resource_details(node, resource: ResourceNode, show_live_status: bool = True) -> None:
     """Add spec/status detail lines under a resource node."""
-    details = format_spec_fields(resource)
-    if details:
-        node.add(f"[dim]{details}[/dim]")
+    for spec_line in format_spec_fields(resource):
+        node.add(f"[dim]{spec_line}[/dim]")
     if resource.depends_on:
         deps = ", ".join(resource.depends_on)
         node.add(f"[dim]Depends on: {deps}[/dim]")
@@ -400,8 +403,8 @@ def _node_phase(node: Dict[str, Any]) -> str:
     return node.get('phase', 'Unknown')
 
 
-def format_spec_fields(resource: ResourceNode) -> str:
-    """Extract key spec fields for display."""
+def format_spec_fields(resource: ResourceNode) -> List[str]:
+    """Extract key spec fields for display. Returns list of 'field: value' strings."""
     fields = SPEC_DISPLAY_FIELDS.get(resource.plural, [])
     parts = []
     for field_path in fields:
@@ -413,7 +416,7 @@ def format_spec_fields(resource: ResourceNode) -> str:
                 if len(resource.spec.get(field_path, [])) > 3:
                     value += '...'
             parts.append(f"{label}: {value}")
-    return ' | '.join(parts)
+    return parts
 
 
 def format_live_status(resource: ResourceNode):

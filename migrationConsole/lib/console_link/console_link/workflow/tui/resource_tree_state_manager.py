@@ -133,9 +133,8 @@ class ResourceTreeStateManager:
         collapsed = self._save_collapsed_recursive(resource_node)
         self._remove_children(resource_node)
 
-        details = format_spec_fields(resource)
-        if details:
-            resource_node.add(f"[dim]{details}[/dim]", data=None)
+        for field in format_spec_fields(resource):
+            resource_node.add(f"[dim]{field}[/dim]", data=None)
         if resource.depends_on:
             resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
         live = format_live_status(resource)
@@ -280,9 +279,8 @@ class ResourceTreeStateManager:
         })
 
         # Spec details
-        details = format_spec_fields(resource)
-        if details:
-            resource_node.add(f"[dim]{details}[/dim]", data=None)
+        for field in format_spec_fields(resource):
+            resource_node.add(f"[dim]{field}[/dim]", data=None)
         if resource.depends_on:
             resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
         live = format_live_status(resource)
