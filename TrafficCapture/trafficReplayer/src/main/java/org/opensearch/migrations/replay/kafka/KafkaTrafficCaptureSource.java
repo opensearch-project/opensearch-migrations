@@ -345,9 +345,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             java.util.concurrent.locks.LockSupport.parkNanos(5_000_000); // yield for up to 5 ms
             return Collections.emptyList();
         }
-        List<ITrafficStreamWithKey> records;
         try {
-            records = trackingKafkaConsumer.getNextBatchOfRecords(context, (offsetData, kafkaRecord) -> {
+            return trackingKafkaConsumer.getNextBatchOfRecords(context, (offsetData, kafkaRecord) -> {
                 try {
                     TrafficStream ts = TrafficStream.parseFrom(kafkaRecord.value());
                     var trafficStreamsSoFar = trafficStreamsRead.incrementAndGet();
@@ -397,15 +396,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             log.atError().setCause(e).setMessage("Terminating Kafka traffic stream due to exception").log();
             throw e;
         }
-        // Note: when a rebalance fires inline during kafkaConsumer.poll(),
-        // TrackingKafkaConsumer drops records from the touched partitions and resets only
-        // those partitions to their last-committed offset (or beginning if no commit).
-        // Records from UNTOUCHED partitions are kept and returned here, even though the
-        // synth-close queue may now be non-empty. Those kept records are for connections on
-        // partitions the rebalance never touched, so they don't share state with the
-        // synth-closed connections — their accumulators and channel sessions are independent.
-        // Synth closes will flow through the next call's pre-poll drain.
-        return records;
     }
 
     @Override

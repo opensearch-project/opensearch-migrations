@@ -186,7 +186,7 @@ flowchart TD
     TKC -->|ITrafficStreamWithKey| KCS
     KCS -->|add connId on first record| PAC
     KCS -.->|"tag stream with quiescentUntil [NEW]\nif: no open obs + not in active set"| BTS
-    KCS -->|"1. pre-poll: drain one synth-close batch and return it\n2. return empty if OSC > 0\n3. else poll Kafka\n   (TrackingKafkaConsumer drops + seeks back\n   on inline rebalance — chunk is empty)\n4. assert: chunk is all-synth OR all-real, never mixed"| BTS
+    KCS -->|"1. pre-poll: drain one synth-close batch and return it\n2. return empty if OSC > 0\n3. else poll Kafka\n   (on inline rebalance, TrackingKafkaConsumer drops\n   the entire batch and rewinds every assigned\n   partition to min(prePollPosition, lowestReturnedOffset);\n   chunk is empty)\n4. invariant: a chunk holds either dropped+seeked-back\n   records or live ones, never both"| BTS
     BTS --> ACC
 
     TKC -->|"onPartitionsRevoked\nfire trulyLost callback NOW (OLD generation)"| SQ
@@ -474,49 +474,83 @@ Both callbacks run on `kafkaExecutor` (inside a `poll()` call).
 
 The state model is intentionally minimal: revocation cleans up immediately and assignment
 just assigns. There is no deferred set, no truly-lost diff against `newPartitions`, no
-ordering invariant tying the generation bump to a drain step. Every partition that gets
-revoked has its fetch position reset to the last committed offset on the next assignment
-regardless of whether it comes back, so we don't try to distinguish "round-trip" from "lost".
+ordering invariant tying the generation bump to a drain step.
 
-### `onPartitionsRevoked(partitions)`
+### `onPartitionsRevoked` / `onPartitionsLost` (shared helper)
 
-Called before partitions are released to the group coordinator. The consumer still owns the
-partitions at this point, so commits are valid.
+Both callbacks delegate to a single private helper, `cleanupRevokedPartitions(parts, attemptCommit)`.
+`onPartitionsRevoked` passes `attemptCommit=true`; `onPartitionsLost` passes `false` because
+commits are impossible after a fence/timeout.
 
-1. Calls `safeCommit()` — last chance to flush pending commits for the revoked partitions.
-2. Removes from `partitionToOffsetLifecycleTrackerMap`, `nextSetOfCommitsMap`,
-   `nextSetOfKeysContextsBeingCommitted` for each revoked partition.
-3. Recalculates `kafkaRecordsLeftToCommitEventually` from remaining partitions.
-4. Invokes `onPartitionsTrulyLostCallback` with the revoked partition numbers — fired **outside**
-   `commitDataLock` and at the **current (OLD) generation**. The source layer enqueues synthetic
-   `TrafficSourceReaderInterruptedClose` events whose session keys reference that OLD generation,
-   matching the `session.generation` stamped on channels when they were opened.
-5. Sets `rebalanceDuringPoll = true` so that if the rebalance fires inline during
-   `kafkaConsumer.poll()`, `TrackingKafkaConsumer.safePollWithSwallowedRuntimeExceptions` will
-   **drop the polled records and `seek()` every still-assigned partition back to the position
-   captured before the poll**. Those records re-deliver on a later poll — by which time the
-   synth-close batches will have flushed through the source's pre-poll drain and through the
-   accumulator. This keeps the contract that any single chunk returned by
-   `readNextTrafficStreamSynchronously` is either all synth-closes or all records, never mixed.
+1. Sets `rebalanceDuringPoll = true` (an `AtomicBoolean`) **before** taking `commitDataLock`,
+   so the post-poll inline-rebalance recovery still fires even if the commit attempt below
+   throws.
+2. Inside `commitDataLock`:
+   - If `attemptCommit`, calls `safeCommit()` — last chance to flush pending commits while we
+     still own the partitions. Skipped on the lost path (a fenced consumer can't commit).
+   - Removes each partition from `partitionToOffsetLifecycleTrackerMap`, `nextSetOfCommitsMap`,
+     and `nextSetOfKeysContextsBeingCommitted`.
+   - Recalculates `kafkaRecordsLeftToCommitEventually` from the remaining partitions and
+     refreshes `kafkaRecordsReadyToCommit`.
+   - Emits a single warn log distinguishing `revoked` vs `lost (no commit attempted)`.
+3. **Outside** `commitDataLock`, invokes `onPartitionsTrulyLostCallback` with the partition
+   numbers at the **OLD generation** (before any subsequent `onPartitionsAssigned` bumps
+   `consumerConnectionGeneration`). The source layer uses this to enqueue synthetic
+   `TrafficSourceReaderInterruptedClose` events whose session keys carry the OLD generation,
+   matching the `session.generation` stamped on channels opened during that gen. Running
+   outside the lock lets the callback freely touch the source's concurrent collections.
 
 After this returns, any in-flight records from the revoked partitions will hit the generation
 check in `commitKafkaKey()` and return `IGNORED`.
 
+#### Inline-rebalance recovery (post-poll)
+
+If the rebalance fires inline during `kafkaConsumer.poll()`, the recovery happens after
+`poll()` returns, in `safePollWithSwallowedRuntimeExceptions`:
+
+- Before each `poll()`, snapshot `kafkaConsumer.position(tp)` for every assigned partition
+  (a local call — no broker RPC) and clear `rebalanceDuringPoll`.
+- After `poll()`: if `rebalanceDuringPoll` is set, drop the entire returned batch and seek
+  every CURRENTLY-assigned partition (skipping any not in the pre-poll snapshot — newly
+  assigned mid-poll) to `min(prePollPosition, lowestOffsetReturnedForThisPartition)`. The
+  iteration uses the current assignment because `position()` and `seek()` throw for any
+  partition we no longer own.
+
+`min(pre-poll, min-returned)` works uniformly:
+
+- **Touched partition** (broker reset to the last committed offset): the lowest offset
+  returned for that partition equals the broker's reset value, which is ≤ pre-poll. `min`
+  picks it; records past the last commit re-deliver under the new generation.
+- **Untouched partition**: the lowest returned offset equals pre-poll (its position never
+  rewound). `min` picks pre-poll; only the polled-and-dropped records re-deliver — not
+  thousands of records past the last commit on a partition the rebalance never touched.
+- **Partition with no records this poll**: not in the min-returned map → skipped (its
+  position didn't move, no rewind needed).
+- **Newly assigned mid-poll**: not in the pre-poll snapshot → skipped (left wherever the
+  rebalance set it).
+- **Revoked outright**: not in the current assignment → not iterated.
+
+Note: post-poll `position(tp)` is *not* a usable "current" reference here — it has already
+advanced past records this poll returned, hiding the broker's reset value for touched
+partitions. The lowest returned offset is the un-advanced reference frame.
+
 ### `onPartitionsAssigned(newPartitions)`
 
 1. Increments `consumerConnectionGeneration` (under `commitDataLock`).
-2. Creates a new `OffsetLifecycleTracker` for each newly assigned partition, stamped with the
-   new generation.
+2. For each newly assigned partition, uses `computeIfAbsent` to install a fresh
+   `OffsetLifecycleTracker` stamped with the new generation. The `computeIfAbsent` guard
+   avoids re-stamping a tracker for a partition that's already tracked.
 
 There is intentionally nothing else to do here — cleanup of the previous generation already
-happened in `onPartitionsRevoked` (or `onPartitionsLost`).
+happened in `cleanupRevokedPartitions`. In particular, this handler does **not** touch
+`rebalanceDuringPoll`: a pure assignment (initial subscribe or cooperative gain-only)
+introduces no generation mismatch and no buffer to drop. The same-consumer round-trip case is
+already covered because `cleanupRevokedPartitions` set the flag before assign was invoked.
 
 ### `onPartitionsLost(partitions)` (Kafka 2.4+ override)
 
 Called instead of `onPartitionsRevoked` when partitions are lost due to a consumer timeout or
-group fence. The cleanup path is the **same** as `onPartitionsRevoked` — drop per-partition
-state under `commitDataLock` and fire `onPartitionsTrulyLostCallback` for active connections —
-just with `safeCommit()` skipped (commits are impossible after a fence). The "lost"-vs-"revoked"
+group fence. Delegates to `cleanupRevokedPartitions` with `attemptCommit=false`. The "lost"-vs-"revoked"
 distinction is preserved in the warn log so operators can still tell a fence apart from a
 graceful revocation.
 
@@ -558,7 +592,7 @@ flowchart TD
     end
 
     subgraph mainThread["main thread"]
-        SYNTH["readNextTrafficStreamChunk\n1. pre-poll: drain one synth-close batch\n2. if OSC>0: park+empty\n3. else poll Kafka\n   (TrackingKafkaConsumer drops + seeks back\n   on inline rebalance — chunk is empty)\n4. assert: all-synth OR all-real, never mixed"]
+        SYNTH["readNextTrafficStreamChunk\n1. pre-poll: drain one synth-close batch\n2. if OSC>0: park+empty\n3. else poll Kafka\n   (on inline rebalance, drop entire batch and\n   rewind every assigned partition to\n   min(prePollPosition, lowestReturnedOffset))\n4. invariant: a chunk never holds both\n   dropped-and-rewound records and live records"]
         ACC2[Accumulator.accept\nTrafficSourceReaderInterruptedClose\n→ onConnectionClose TRAFFIC_SOURCE_READER_INTERRUPTED]
         CANCEL["ConnectionReplaySession\nscheduleSequencer.cancelAllWork()\n→ completes all signalWorkCompletedFutures\n→ cascades through sorter chain\n→ channel.close()"]
     end
@@ -665,19 +699,26 @@ still planned):
 - `readNextTrafficStreamSynchronously` runs three phases per call: (1) **pre-poll**, drain one
   queued synthetic-close batch and return it immediately if present; (2) if
   `outstandingTrafficSourceReaderInterruptedCloseSessions > 0`, park briefly and return an
-  empty batch (do not poll Kafka); (3) call `getNextBatchOfRecords` to poll Kafka. A returned
-  chunk is therefore either *all* synth closes or *all* real records, never mixed — pinned by
-  an `assert` at the bottom of the method.
-- The "never mixed" invariant is enforced by `TrackingKafkaConsumer.safePollWithSwallowedRuntimeExceptions`
-  itself rather than by post-poll bookkeeping in the source. Before each `kafkaConsumer.poll()`,
-  the consumer snapshots `position(tp)` for every assigned partition (a local call — no broker
-  RPC) and clears a `rebalanceDuringPoll` flag. If any rebalance callback fires inline during
-  the poll, it sets the flag. When `poll()` returns: if the flag is set, the consumer
-  `seek()`s every still-assigned partition back to its pre-poll position (also local) and
-  drops the polled `ConsumerRecords` by returning an empty batch. The seek-back guarantees the
-  records re-deliver on a later `poll()` call — by which time the source's pre-poll drain has
-  flushed the OLD-generation synth closes through the accumulator. This sidesteps the entire
-  class of "old synth + new records arrive in the same chunk" ordering problems.
+  empty batch (do not poll Kafka); (3) call `getNextBatchOfRecords` to poll Kafka.
+
+  **Invariant**: a chunk returned from this method never contains a mix of records that the
+  inline-rebalance recovery dropped+rewound and live records. The recovery path returns an
+  empty `ConsumerRecords` after rewinding, so the caller sees either nothing (followed by
+  re-delivery on a later poll) or a fully live batch — never a half-baked mix.
+
+- The invariant is enforced by `TrackingKafkaConsumer.safePollWithSwallowedRuntimeExceptions`,
+  not by post-poll bookkeeping in the source. Before each `kafkaConsumer.poll()`, the consumer
+  clears `rebalanceDuringPoll` (an `AtomicBoolean`) and snapshots `kafkaConsumer.position(tp)`
+  for every assigned partition (both local — no broker RPC). If any rebalance callback fires
+  inline during `poll()`, the shared `cleanupRevokedPartitions` helper sets the flag. When
+  `poll()` returns: if the flag is set, the consumer drops the entire returned batch and seeks
+  every CURRENTLY-assigned partition (skipping any not in the pre-poll snapshot — newly
+  assigned mid-poll) to `min(prePollPosition, lowestOffsetReturnedForThisPartition)`. The
+  seek target works uniformly: for partitions the rebalance touched, the broker reset to the
+  last committed offset and the lowest returned offset equals that reset; for untouched
+  partitions, the lowest returned offset equals pre-poll. Empty batch returned. Records
+  re-deliver on a later `poll()` — by which time the source's pre-poll drain has flushed the
+  OLD-generation synth closes through the accumulator.
 - `TrafficSourceReaderInterruptedClose` is handled in `accept()` by:
   1. Calling `fireAccumulationsCallbacksAndClose(TRAFFIC_SOURCE_READER_INTERRUPTED)` on the
      existing `Accumulation` — this completes `finishedAccumulatingResponseFuture` for any
