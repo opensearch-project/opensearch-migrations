@@ -383,14 +383,6 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     ) {
         try {
             lastTouchTimeRef.set(clock.instant());
-            // Snapshot the current fetch position for every assigned partition BEFORE poll(). If
-            // a rebalance fires inline during this poll(), we'll drop the polled batch and seek
-            // each still-assigned partition back to where we were so the records re-deliver on
-            // the next poll. position() is a local call (no broker round trip).
-            var prePollPositions = new HashMap<TopicPartition, Long>();
-            for (var tp : kafkaConsumer.assignment()) {
-                prePollPositions.put(tp, kafkaConsumer.position(tp));
-            }
             rebalanceDuringPoll.set(false);
             ConsumerRecords<String, byte[]> records;
             try (var pollContext = context.createPollContext()) {
@@ -400,21 +392,31 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 // A rebalance fired inline. Synthetic closes for the OLD generation are already
                 // queued on the source-layer side. The records returned here either belong to a
                 // partition we just lost (no longer ours to replay) or to a partition we still
-                // hold but at the NEW generation (re-delivery from the broker's reset of fetch
-                // position). Either way, drop them and seek each still-assigned partition back
-                // to its pre-poll position so the records re-deliver cleanly on the next poll —
-                // by then the source layer has flushed the synth closes through the accumulator.
-                int dropped = records.count();
+                // hold but at the NEW generation. Either way, drop them and seek each still-
+                // assigned partition back to the MINIMUM offset of the records returned for that
+                // partition — those are exactly the records we want to re-deliver on the next
+                // poll, after the source layer has flushed the synth closes. We use the minimum
+                // returned offset (rather than a pre-poll position snapshot) because the broker
+                // can reset the fetch position during the rebalance — e.g. a fence on a
+                // partition with no committed offset resets to AUTO_OFFSET_RESET (earliest),
+                // which can be LOWER than what we read pre-poll. The minimum returned offset is
+                // always the correct reference frame regardless of what the broker did.
+                var minOffsetPerPartition = new HashMap<TopicPartition, Long>();
+                for (var rec : records) {
+                    var tp = new TopicPartition(rec.topic(), rec.partition());
+                    minOffsetPerPartition.merge(tp, rec.offset(), Math::min);
+                }
                 var stillAssigned = kafkaConsumer.assignment();
-                for (var tp : stillAssigned) {
-                    var pre = prePollPositions.get(tp);
-                    if (pre != null) {
-                        kafkaConsumer.seek(tp, pre);
+                int sought = 0;
+                for (var entry : minOffsetPerPartition.entrySet()) {
+                    if (stillAssigned.contains(entry.getKey())) {
+                        kafkaConsumer.seek(entry.getKey(), entry.getValue());
+                        sought++;
                     }
                 }
                 log.atInfo().setMessage("Rebalance during poll: dropped {} record(s); seek-back applied " +
-                        "to {} still-assigned partition(s)")
-                    .addArgument(dropped).addArgument(stillAssigned::size).log();
+                        "to {} still-assigned partition(s) at the min-returned offset")
+                    .addArgument(records::count).addArgument(sought).log();
                 pollsSinceLastHeartbeat.incrementAndGet();
                 emptyPollsSinceLastHeartbeat.incrementAndGet();
                 return new ConsumerRecords<>(Collections.emptyMap(), Collections.emptyMap());

@@ -284,8 +284,20 @@ public class StaleAccumulationCancelOnRejoinKafkaTest extends InstrumentationTes
                 accumulator.accept(ts);
                 observed.add(ts);
                 if (targetConnId.equals(ts.getKey().getConnectionId())) {
-                    if (ts instanceof TrafficSourceReaderInterruptedClose) sawSynthetic = true;
-                    else sawReal = true;
+                    if (ts instanceof TrafficSourceReaderInterruptedClose) {
+                        sawSynthetic = true;
+                        // Simulate the channel-close callback: in production the wired
+                        // ConnectionReplaySession.onClose calls source.onNetworkConnectionClosed,
+                        // which decrements outstandingTrafficSourceReaderInterruptedCloseSessions
+                        // so subsequent polls can resume real Kafka traffic. This test doesn't
+                        // wire a real session pool, so we fire the callback explicitly.
+                        source.onNetworkConnectionClosed(
+                            targetConnId,
+                            KafkaTrafficCaptureSource.PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER,
+                            ts.getKey().getSourceGeneration());
+                    } else {
+                        sawReal = true;
+                    }
                 }
             }
             if (sawSynthetic && sawReal) return observed;
