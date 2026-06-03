@@ -431,15 +431,23 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     }
 
     public void putSnapshotData(final String directory) {
+        putSnapshotData(directory, CLUSTER_SNAPSHOT_DIR);
+    }
+
+    public void putSnapshotData(final String directory, final String containerPath) {
         try {
-            this.copyFileToContainer(MountableFile.forHostPath(directory), CLUSTER_SNAPSHOT_DIR);
             var user = this.containerVersion.user;
             executeAndLog(ExecConfig.builder()
-                .command(new String[] {"sh", "-c", "chown -R " + user + ":" + user + " " + CLUSTER_SNAPSHOT_DIR})
+                .command(new String[] {"sh", "-c", "mkdir -p " + containerPath})
+                .user("root")
+                .build());
+            this.copyFileToContainer(MountableFile.forHostPath(directory), containerPath);
+            executeAndLog(ExecConfig.builder()
+                .command(new String[] {"sh", "-c", "chown -R " + user + ":" + user + " " + containerPath})
                 .user("root")
                 .build());
             executeAndLog(ExecConfig.builder()
-                .command(new String[] {"sh", "-c", "chmod -R 777 " + CLUSTER_SNAPSHOT_DIR})
+                .command(new String[] {"sh", "-c", "chmod -R 777 " + containerPath})
                 .user("root")
                 .build());
         } catch (final Exception e) {

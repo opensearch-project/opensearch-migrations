@@ -1,6 +1,7 @@
 package org.opensearch.migrations;
 
 import java.util.List;
+import java.util.function.BiFunction;
 import java.util.function.BiPredicate;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -109,6 +110,18 @@ public class MetadataTransformationRegistry {
                 .name("Solr field type conversion")
                 .descriptionLine("Convert Solr field types to OpenSearch equivalents")
                 .build())
+            .build(),
+        // Pre-emptively strip / rename analyzer, tokenizer, char_filter and token-filter
+        // references that we know the target cluster will reject. Driven by the
+        // AnalysisCompatibility table; the config is computed per (source, target) pair.
+        TransformerConfigs.builder()
+            .filename("js/analysis-component-removal.js")
+            .contextProvider(AnalysisCompatibility::buildContextJsonOrNull)
+            .isRelevantForVersions(AnalysisCompatibility::hasRulesFor)
+            .transformerInfo(Transformers.TransformerInfo.builder()
+                .name("Analysis component compatibility")
+                .descriptionLine("Strip or rename removed/renamed analyzer/tokenizer/filter names")
+                .build())
             .build()
     );
 
@@ -124,8 +137,32 @@ public class MetadataTransformationRegistry {
     private static class TransformerConfigs {
         @NonNull private Transformers.TransformerInfo transformerInfo;
         @NonNull private String filename;
+        /** Static JSON context. */
         private String context;
+        /** Dynamic context computed from (source, target). May return null to skip the transform. */
+        private BiFunction<Version, Version, String> contextProvider;
         @NonNull private BiPredicate<Version, Version> isRelevantForVersions;
+
+        /**
+         * Resolves the context. Returns the static context if no provider is set;
+         * if a provider is set and returns null, the transform should be skipped.
+         */
+        ContextResolution resolveContext(Version sourceVersion, Version targetVersion) {
+            if (contextProvider != null) {
+                String dynamic = contextProvider.apply(sourceVersion, targetVersion);
+                return dynamic == null ? ContextResolution.none() : ContextResolution.of(dynamic);
+            }
+            return ContextResolution.of(context); // static context (may itself be null = empty bindings)
+        }
+    }
+
+    /** Wrapper to differentiate "skip this transform" from "null context = empty bindings". */
+    private static final class ContextResolution {
+        final boolean shouldSkip;
+        final String context;
+        private ContextResolution(boolean shouldSkip, String context) { this.shouldSkip = shouldSkip; this.context = context; }
+        static ContextResolution none() { return new ContextResolution(true, null); }
+        static ContextResolution of(String context) { return new ContextResolution(false, context); }
     }
 
     public static Transformers getCustomTransformationByClusterVersions(Version sourceVersion, Version targetVersion) {
@@ -135,17 +172,26 @@ public class MetadataTransformationRegistry {
                 config.isRelevantForVersions.test(sourceVersion, targetVersion))
             .toList();
         transformersBuilder.transformerInfos(bakedInTransformers.stream().map(TransformerConfigs::getTransformerInfo).collect(Collectors.toList()));
-        var config = getAggregateJSTransformer(bakedInTransformers);
+        var config = getAggregateJSTransformer(bakedInTransformers, sourceVersion, targetVersion);
         logTransformerConfig("Default breaking changes transform config", config);
         transformersBuilder.transformer(configToTransformer(config));
         return transformersBuilder.build();
     }
 
-    private static String getAggregateJSTransformer(List<TransformerConfigs> transformerConfigs) {
-        return transformerConfigs.isEmpty() ? NOOP_TRANSFORMATION_CONFIG :
-            transformerConfigs.stream()
-                .map(config -> getJSTransform(config.getFilename(), config.getContext()))
-                .collect(Collectors.joining(",", "[", "]"));
+    private static String getAggregateJSTransformer(
+            List<TransformerConfigs> transformerConfigs,
+            Version sourceVersion,
+            Version targetVersion) {
+        if (transformerConfigs.isEmpty()) return NOOP_TRANSFORMATION_CONFIG;
+        var rendered = transformerConfigs.stream()
+            .map(c -> {
+                var resolution = c.resolveContext(sourceVersion, targetVersion);
+                return resolution.shouldSkip ? null : getJSTransform(c.getFilename(), resolution.context);
+            })
+            .filter(java.util.Objects::nonNull)
+            .collect(Collectors.toList());
+        if (rendered.isEmpty()) return NOOP_TRANSFORMATION_CONFIG;
+        return rendered.stream().collect(Collectors.joining(",", "[", "]"));
     }
 
     private static String getJSTransform(String filename, String context) {

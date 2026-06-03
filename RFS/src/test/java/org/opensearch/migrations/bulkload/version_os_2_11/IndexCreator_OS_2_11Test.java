@@ -164,6 +164,61 @@ class IndexCreator_OS_2_11Test {
         assertThat("properties should be preserved", finalIndexBody, containsString("field1"));
     }
 
+    @Test
+    void testCreate_withRetryToRemoveRemovedTokenFilters() throws Exception {
+        // Setup: server complains that the legacy "standard" token filter was removed (ES 7+ / OpenSearch).
+        var invalidResponse = mock(InvalidResponse.class);
+        when(invalidResponse.getRemovedTokenFilters()).thenReturn(Set.of("standard"));
+
+        var client = mock(OpenSearchClient.class);
+        when(client.createIndex(any(), any(), any()))
+            .thenThrow(invalidResponse)
+            .thenReturn(INDEX_CREATE_SUCCESS);
+
+        var rawJson = "{\r\n" +
+            "  \"aliases\": {},\r\n" +
+            "  \"mappings\": {},\r\n" +
+            "  \"settings\": {\r\n" +
+            "    \"analysis\": {\r\n" +
+            "      \"analyzer\": {\r\n" +
+            "        \"custom_tokenized_string\": {\r\n" +
+            "          \"type\": \"custom\",\r\n" +
+            "          \"tokenizer\": \"standard\",\r\n" +
+            "          \"filter\": [\"standard\", \"lowercase\", \"asciifolding\"]\r\n" +
+            "        }\r\n" +
+            "      }\r\n" +
+            "    }\r\n" +
+            "  }\r\n" +
+            "}";
+
+        // Action
+        var result = create(client, rawJson, "indexName");
+
+        // Assertions
+        assertThat(result.wasSuccessful(), equalTo(true));
+
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
+
+        var finalBody = requestBodyCapture.getValue();
+        var filters = finalBody.get("settings")
+            .get("analysis")
+            .get("analyzer")
+            .get("custom_tokenized_string")
+            .get("filter");
+        assertThat("filter array should still exist", filters.isArray(), equalTo(true));
+        assertThat("filter array size after removal", filters.size(), equalTo(2));
+        var remaining = new java.util.ArrayList<String>();
+        filters.forEach(n -> remaining.add(n.asText()));
+        assertThat("filter array should no longer contain 'standard'",
+            remaining, not(org.hamcrest.Matchers.hasItem("standard")));
+        assertThat("other filters preserved", remaining, org.hamcrest.Matchers.hasItems("lowercase", "asciifolding"));
+        assertThat("tokenizer 'standard' is unrelated and should be preserved",
+            finalBody.get("settings").get("analysis").get("analyzer")
+                .get("custom_tokenized_string").get("tokenizer").asText(),
+            equalTo("standard"));
+    }
+
     @SneakyThrows
     private CreationResult create(OpenSearchClient client, String rawJson, String indexName) {
         var node = (ObjectNode) OBJECT_MAPPER.readTree(rawJson);
