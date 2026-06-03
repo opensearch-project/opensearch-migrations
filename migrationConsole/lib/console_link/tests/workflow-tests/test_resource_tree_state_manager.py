@@ -89,7 +89,7 @@ class TestRebuild:
         mgr.rebuild(make_sections({'Capture': [resource]}))
         resource_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}proxy-1')
         labels = [str(c.label) for c in resource_node.children]
-        assert any('podReplicas: 3' in l for l in labels)
+        assert any('podReplicas: 3' in ln for ln in labels)
 
     def test_rebuild_shows_live_status(self, tree_and_manager):
         tree, mgr = tree_and_manager
@@ -99,7 +99,7 @@ class TestRebuild:
         mgr.rebuild(make_sections({'Backfill': [resource]}))
         resource_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}bf-1')
         labels = [str(c.label) for c in resource_node.children]
-        assert any('Backfill status:' in l for l in labels)
+        assert any('Backfill status:' in ln for ln in labels)
 
 
 # --- Incremental Update ---

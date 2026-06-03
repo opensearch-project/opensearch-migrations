@@ -1,8 +1,8 @@
 """Tests for resource_tree.py — resource-centric tree building and formatting."""
 
-import pytest
+
 from console_link.workflow.resource_tree import (
-    ResourceNode, ResourceGroup, ResourceSection,
+    ResourceNode,
     _build_tree_from_raw, _nest_topics_under_kafka,
     format_spec_fields, format_live_status, maybe_rewrite_wait_step,
     has_notable_steps, collect_notable_steps, find_last_succeeded,
@@ -116,9 +116,9 @@ class TestFormatSpecFields:
             'snapshotPrefix': 'backfill', 'indexAllowlist': [],
         })
         lines = format_spec_fields(resource)
-        assert any('snapshotPrefix: backfill' in l for l in lines)
+        assert any('snapshotPrefix: backfill' in ln for ln in lines)
         # Empty list should be skipped
-        assert not any('indexAllowlist' in l for l in lines)
+        assert not any('indexAllowlist' in ln for ln in lines)
 
     def test_nested_field_path(self):
         resource = make_resource('kafkaclusters', spec={
@@ -134,7 +134,7 @@ class TestFormatSpecFields:
             'indexAllowlist': ['idx1', 'idx2', 'idx3', 'idx4'],
         })
         lines = format_spec_fields(resource)
-        allowlist_line = [l for l in lines if 'indexAllowlist' in l][0]
+        allowlist_line = [ln for ln in lines if 'indexAllowlist' in ln][0]
         assert 'idx1, idx2, idx3...' in allowlist_line
 
     def test_unknown_plural_returns_empty(self):
