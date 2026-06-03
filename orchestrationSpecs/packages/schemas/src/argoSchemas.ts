@@ -89,10 +89,31 @@ function makeOptionalDefaultedFieldsRequired<T extends z.ZodTypeAny>(schema: T):
     return schema;
 }
 
-const TRANSFORMS_RESOLVED_FIELDS = {
-    transformsImage: z.string().default("").optional(),
-    transformsImagePullPolicy: z.enum(["Always", "Never", "IfNotPresent"]).default("IfNotPresent"),
-    transformsConfigMap: z.string().default("").optional(),
+export const ARGO_FILE_SOURCE_VOLUME = z.union([
+    z.object({
+        name: z.string().min(1),
+        configMap: z.object({
+            name: z.string().min(1)
+        }).strict()
+    }).strict(),
+    z.object({
+        name: z.string().min(1),
+        image: z.object({
+            reference: z.string().min(1),
+            pullPolicy: z.enum(["Always", "Never", "IfNotPresent"]).default("IfNotPresent").optional()
+        }).strict()
+    }).strict(),
+]);
+
+export const ARGO_FILE_SOURCE_VOLUME_MOUNT = z.object({
+    name: z.string().min(1),
+    mountPath: z.string().min(1),
+    readOnly: z.literal(true).default(true).optional()
+}).strict();
+
+const FILE_SOURCE_RESOLVED_FIELDS = {
+    fileSourceVolumes: z.array(ARGO_FILE_SOURCE_VOLUME).default([]).optional(),
+    fileSourceVolumeMounts: z.array(ARGO_FILE_SOURCE_VOLUME_MOUNT).default([]).optional(),
 } as const;
 
 export const NAMED_KAFKA_CLUSTER_CONFIG = z.object({
@@ -142,16 +163,14 @@ export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
     USER_METADATA_OPTIONS.omit({
         skipEvaluateApproval: true,
         skipMigrateApproval: true,
-        transformsSource: true,
         metadataTransforms: true,
-    }).extend(TRANSFORMS_RESOLVED_FIELDS)
+    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
 export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_METADATA_OPTIONS.pick({
     jvmArgs: true,
     loggingConfigurationOverrideConfigMap: true,
-    transformsImage: true,
-    transformsImagePullPolicy: true,
-    transformsConfigMap: true,
+    fileSourceVolumes: true,
+    fileSourceVolumeMounts: true,
 }));
 
 export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
@@ -165,9 +184,8 @@ export const ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_CREATE_
 export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
     USER_RFS_OPTIONS.in.omit({
         skipApproval: true,
-        transformsSource: true,
         documentTransforms: true,
-    }).extend(TRANSFORMS_RESOLVED_FIELDS)
+    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
 export const ARGO_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_RFS_OPTIONS.pick({
     podReplicas: true,
@@ -175,13 +193,17 @@ export const ARGO_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_RFS_OPTIONS.pick({
     loggingConfigurationOverrideConfigMap: true,
     useTargetClusterForWorkCoordination: true,
     resources: true,
-    transformsImage: true,
-    transformsImagePullPolicy: true,
-    transformsConfigMap: true,
+    fileSourceVolumes: true,
+    fileSourceVolumeMounts: true,
 }));
 
 export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_PROXY_OPTIONS
+    USER_PROXY_OPTIONS.extend({
+        sslTrustCertFile: z.string().min(1).optional(),
+        sslTrustCertPem: z.string().min(1).optional(),
+        sslTrustCertPemEnvVar: z.string().min(1).optional(),
+        requireClientAuth: z.boolean().optional(),
+    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
 export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick({
     loggingConfigurationOverrideConfigMap: true,
@@ -190,14 +212,16 @@ export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pic
     podReplicas: true,
     resources: true,
     tls: true,
+    sslTrustCertPem: true,
+    fileSourceVolumes: true,
+    fileSourceVolumeMounts: true,
 }));
 
 export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
     USER_REPLAYER_OPTIONS.omit({
-        transformsSource: true,
         requestTransforms: true,
         tupleTransforms: true,
-    }).extend(TRANSFORMS_RESOLVED_FIELDS)
+    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
 export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_REPLAYER_OPTIONS.pick({
     jvmArgs: true,
@@ -205,9 +229,8 @@ export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_REPLAYER_OPTIO
     podReplicas: true,
     useLocalStack: true,
     resources: true,
-    transformsImage: true,
-    transformsImagePullPolicy: true,
-    transformsConfigMap: true,
+    fileSourceVolumes: true,
+    fileSourceVolumeMounts: true,
 }));
 
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({

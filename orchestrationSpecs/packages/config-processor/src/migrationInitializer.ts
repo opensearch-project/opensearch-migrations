@@ -496,11 +496,13 @@ export class MigrationInitializer {
                 resolvedConfig: resolvedMigrationResources,
             },
         }];
-        const specsByResource = new Map<string, Record<string, unknown>>(
+        const resourcesByKey = new Map(
             resolvedMigrationResources.resources
-                .map(resource => [`${resource.kind}:${resource.name}`, resource.parameters])
+                .map(resource => [`${resource.kind}:${resource.name}`, resource])
         );
-        const specFor = (kind: string, name: string) => specsByResource.get(`${kind}:${name}`) ?? {};
+        const resourceFor = (kind: string, name: string) => resourcesByKey.get(`${kind}:${name}`);
+        const specFor = (kind: string, name: string) => resourceFor(kind, name)?.parameters ?? {};
+        const annotationsFor = (kind: string, name: string) => resourceFor(kind, name)?.annotations;
 
         // KafkaCluster resources from workflow-managed Kafka clusters
         for (const kafkaCluster of (workflows.kafkaClusters ?? []) as KafkaClusterConfig[]) {
@@ -562,7 +564,10 @@ export class MigrationInitializer {
                         ...baseResourceLabels,
                         ...(proxySource && { [MigrationInitializer.GATE_LABEL_SOURCE]: proxySource }),
                         [MigrationInitializer.OUTPUT_LABEL_TASK]: 'captureProxy',
-                    }
+                    },
+                    ...(annotationsFor('CaptureProxy', proxy.name) ?
+                        { annotations: annotationsFor('CaptureProxy', proxy.name) } :
+                        {}),
                 },
                 spec: specFor('CaptureProxy', proxy.name),
                 status: { phase: 'Created', configChecksum: '' }

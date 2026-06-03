@@ -1,6 +1,6 @@
 function main(context) {
-  const fieldName = context.get("fieldName") || "mountable_sequence_document_first";
-  const fieldValue = context.get("fieldValue") || "first-document-transform";
+  const fieldName = String(context.get("fieldName") || "mountable_sequence_document_first").trim();
+  const fieldValue = String(context.get("fieldValue") || "first-document-transform").trim();
 
   return (documents) => {
     for (const doc of documents) {

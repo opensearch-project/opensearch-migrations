@@ -26,8 +26,6 @@ spec:
         value: "20"
       - name: observed-packet-timeout
         value: "30"
-      - name: transforms-sources
-        value: "{}"
       - name: replayer-config-overrides
         value: "{}"
       - name: pre-snapshot-proxy-submit
@@ -41,8 +39,6 @@ spec:
         parameters:
           - name: source-configs
           - name: target-config
-          - name: transforms-sources
-            default: "{}"
           - name: replayer-config-overrides
             default: "{}"
           - name: tupleS3Region
@@ -90,8 +86,6 @@ spec:
                   value: "{{inputs.parameters.source-configs}}"
                 - name: target-config
                   value: "{{inputs.parameters.target-config}}"
-                - name: transforms-sources
-                  value: "{{inputs.parameters.transforms-sources}}"
                 - name: imageMigrationConsoleLocation
                   value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
                 - name: imageMigrationConsolePullPolicy
