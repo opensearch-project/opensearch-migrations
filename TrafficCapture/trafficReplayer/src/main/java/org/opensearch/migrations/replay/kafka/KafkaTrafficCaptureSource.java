@@ -397,14 +397,12 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
             log.atError().setCause(e).setMessage("Terminating Kafka traffic stream due to exception").log();
             throw e;
         }
-        // A rebalance can fire inline during kafkaConsumer.poll() above. When it does,
-        // onPartitionsRevoked / onPartitionsAssigned enqueue synthetic closes for the in-flight
-        // connections and bump the consumer generation, so any records returned from the same
-        // poll carry the NEW generation. If we returned those records without delivering the
-        // synthetic closes first, the accumulator would see new-generation records against
-        // old-generation accumulations and trip its defensive backstop. Drain every synthetic
-        // close batch enqueued during the poll and prepend them so the accumulator processes
-        // them in order before any new-generation records.
+        // A rebalance can fire inline during kafkaConsumer.poll() above. onPartitionsRevoked
+        // enqueues synthetic closes at the OLD generation for any active connections on the
+        // revoked partitions, and a follow-up onPartitionsAssigned in the same poll bumps the
+        // generation, so any records returned from this poll already carry the NEW generation.
+        // Prepend any closes enqueued during the poll so the accumulator sees them before the
+        // new-generation records that follow.
         var prepended = new ArrayList<ITrafficStreamWithKey>();
         for (var batch = trafficSourceReaderInterruptedCloseQueue.poll();
              batch != null;

@@ -49,7 +49,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p>Pre-fix mechanism:
  * <ol>
- *   <li>{@code onPartitionsRevoked([0])} added partition 0 to {@code pendingCleanupPartitions}.
+ *   <li>{@code onPartitionsRevoked([0])} deferred cleanup until {@code onPartitionsAssigned}.
  *   <li>{@code onPartitionsAssigned([0])} bumped the consumer generation, then the
  *       {@code trulyLost} filter excluded partition 0 (it came back) — <em>no synthetic close
  *       was enqueued.</em>
@@ -60,10 +60,10 @@ import org.junit.jupiter.api.Test;
  *
  * <p>Post-fix:
  * <ul>
- *   <li>{@code TrackingKafkaConsumer.onPartitionsAssigned} treats every round-tripped partition
- *       as truly lost (the fetch position is reset regardless of whether it came back), and
- *       dispatches the truly-lost callback BEFORE the generation bump so synthetic close session
- *       keys carry the OLD generation that matches {@code session.generation}.
+ *   <li>{@code TrackingKafkaConsumer.onPartitionsRevoked} fires the truly-lost callback for
+ *       every revoked partition immediately, while {@code consumerConnectionGeneration} is still
+ *       the OLD generation — so the synthetic close session keys match {@code session.generation}
+ *       on the channels.
  *   <li>{@code KafkaTrafficCaptureSource.readNextTrafficStreamSynchronously} drains any
  *       synthetic closes enqueued during {@code poll()} and prepends them to the returned batch
  *       so they are processed before any new-generation records.
@@ -172,17 +172,16 @@ public class StaleAccumulationCancelOnRejoinTest extends InstrumentationTest {
             // sequence that single-partition single-consumer deployments hit on every fence/rejoin.
             //
             // Source-layer guarantees being exercised:
-            //   1. onPartitionsAssigned dispatches the truly-lost callback BEFORE the generation
-            //      bump, so synthetic-close session keys carry the OLD generation.
-            //   2. The trulyLost filter no longer excludes round-trip partitions — partition 0
-            //      IS treated as truly lost despite being reassigned back.
-            //   3. The synthetic close is enqueued in trafficSourceReaderInterruptedCloseQueue
+            //   1. onPartitionsRevoked fires the truly-lost callback immediately, while the
+            //      generation is still OLD (gen=1) — so synthetic-close session keys match
+            //      session.generation on the channels opened during gen=1.
+            //   2. The synthetic close is enqueued in trafficSourceReaderInterruptedCloseQueue
             //      while the same poll() also returns the re-delivered gen=2 record.
-            //   4. readNextTrafficStreamSynchronously drains the queue after the poll and
+            //   3. readNextTrafficStreamSynchronously drains the queue after the poll and
             //      PREPENDS the synthetic close before the gen=2 record.
             mc.schedulePollTask(() -> {
-                mc.rebalance(Collections.emptyList());          // onPartitionsRevoked → pendingCleanup={0}
-                mc.rebalance(Collections.singletonList(tp));    // onPartitionsAssigned: dispatch lost(0), then gen=2
+                mc.rebalance(Collections.emptyList());          // onPartitionsRevoked → fires truly-lost(0) at gen=1
+                mc.rebalance(Collections.singletonList(tp));    // onPartitionsAssigned → bumps to gen=2
                 addReadEomRecord(mc, 1L);                       // re-delivered record at offset 1
             });
 

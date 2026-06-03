@@ -189,9 +189,9 @@ flowchart TD
     KCS -->|"1. pre-poll drain trafficSourceReaderInterruptedCloseQueue\n2. return empty if OSC > 0\n3. else poll Kafka\n4. post-poll: prepend any closes\n   enqueued during poll() to records"| BTS
     BTS --> ACC
 
-    TKC -->|onPartitionsRevoked\nrecord pendingCleanupPartitions| TKC
-    TKC -->|"onPartitionsAssigned\n1. drain ALL pending as trulyLost\n2. THEN bump generation"| SQ
-    TKC -.->|onPartitionsLost override\nskip commit go direct| SQ
+    TKC -->|"onPartitionsRevoked\nfire trulyLost callback NOW (OLD generation)"| SQ
+    TKC -->|"onPartitionsAssigned\nbump generation, create OffsetLifecycleTracker"| TKC
+    TKC -.->|"onPartitionsLost\nsame as Revoked but skip safeCommit"| SQ
     SQ -.->|increment OSC per connection| OSC
 
     SQ -.->|TrafficSourceReaderInterruptedClose\nbefore real records| ACC
@@ -472,6 +472,12 @@ indefinitely.
 
 Both callbacks run on `kafkaExecutor` (inside a `poll()` call).
 
+The state model is intentionally minimal: revocation cleans up immediately and assignment
+just assigns. There is no deferred set, no truly-lost diff against `newPartitions`, no
+ordering invariant tying the generation bump to a drain step. Every partition that gets
+revoked has its fetch position reset to the last committed offset on the next assignment
+regardless of whether it comes back, so we don't try to distinguish "round-trip" from "lost".
+
 ### `onPartitionsRevoked(partitions)`
 
 Called before partitions are released to the group coordinator. The consumer still owns the
@@ -481,50 +487,45 @@ partitions at this point, so commits are valid.
 2. Removes from `partitionToOffsetLifecycleTrackerMap`, `nextSetOfCommitsMap`,
    `nextSetOfKeysContextsBeingCommitted` for each revoked partition.
 3. Recalculates `kafkaRecordsLeftToCommitEventually` from remaining partitions.
-4. Records the revoked partition numbers in a `pendingCleanupPartitions` set so the next
-   `onPartitionsAssigned` (or `onPartitionsLost`) can convert them to synthetic closes.
+4. Invokes `onPartitionsTrulyLostCallback` with the revoked partition numbers — fired **outside**
+   `commitDataLock` and at the **current (OLD) generation**. The source layer enqueues synthetic
+   `TrafficSourceReaderInterruptedClose` events whose session keys reference that OLD generation,
+   matching the `session.generation` stamped on channels when they were opened. Any subsequent
+   `onPartitionsAssigned` will bump the generation; records returned from the same `poll()`
+   that triggered this revocation are stamped with the NEW generation, and the source layer's
+   post-poll prepend (see [`readNextTrafficStreamSynchronously`](#kafkatrafficcapturesource))
+   ensures the OLD-generation synthetic closes are delivered to the accumulator before any
+   NEW-generation re-deliveries.
 
 After this returns, any in-flight records from the revoked partitions will hit the generation
 check in `commitKafkaKey()` and return `IGNORED`.
 
 ### `onPartitionsAssigned(newPartitions)`
 
-1. Drains `pendingCleanupPartitions` and treats **all** of them as truly lost — including any
-   that were just reassigned back to this consumer. Every partition that round-tripped through
-   revocation has had its fetch position reset to the last committed offset by the broker, so
-   any in-flight accumulations are about to receive re-delivered records under a new generation.
-   The drained set is passed to `onPartitionsTrulyLostCallback`, which enqueues synthetic
-   `TrafficSourceReaderInterruptedClose` events for all active connections on those partitions.
-   This step runs **before** the generation bump (invariant) so the synthetic-close session keys
-   carry the **old** generation, matching the `session.generation` stamped on channels when they
-   were opened. If the generation were bumped first, the synthetic closes would carry the new
-   generation and `onNetworkConnectionClosed` (called with the old `session.generation`) would
-   never find them, leaking `outstandingTrafficSourceReaderInterruptedCloseSessions` and
-   permanently blocking real records.
-2. Increments `consumerConnectionGeneration` (under `commitDataLock`) — this invalidates all
-   in-flight commit data from the previous assignment.
-3. Creates a new `OffsetLifecycleTracker` for each newly assigned partition, stamped with the
+1. Increments `consumerConnectionGeneration` (under `commitDataLock`).
+2. Creates a new `OffsetLifecycleTracker` for each newly assigned partition, stamped with the
    new generation.
+
+There is intentionally nothing else to do here — cleanup of the previous generation already
+happened in `onPartitionsRevoked` (or `onPartitionsLost`).
 
 ### `onPartitionsLost(partitions)` (Kafka 2.4+ override)
 
 Called instead of `onPartitionsRevoked` when partitions are lost due to a consumer timeout or
-group fence. Commits are impossible after a fence. The override skips `safeCommit()`, removes
-per-partition state under `commitDataLock`, and immediately invokes `onPartitionsTrulyLostCallback`
-with all lost partition numbers — bypassing `pendingCleanupPartitions` entirely, since no
-deferred handoff to `onPartitionsAssigned` is needed when commits cannot succeed.
+group fence. The cleanup path is the **same** as `onPartitionsRevoked` — drop per-partition
+state under `commitDataLock` and fire `onPartitionsTrulyLostCallback` for active connections —
+just with `safeCommit()` skipped (commits are impossible after a fence). The "lost"-vs-"revoked"
+distinction is preserved in the warn log so operators can still tell a fence apart from a
+graceful revocation.
 
 ### Rebalance Protocol Note
 
 The default `RangeAssignor` uses **eager rebalancing**: all partitions are revoked from all
-consumers simultaneously before redistribution. `CooperativeStickyAssignor` (now configured by
+consumers simultaneously before redistribution. `CooperativeStickyAssignor` (configured by
 default in `KafkaTrafficCaptureSource`) uses **incremental rebalancing**: only partitions that
-need to move are revoked. Under cooperative rebalancing, `onPartitionsRevoked` only fires for
-partitions actually moving to another consumer. The replayer still drains *all* pending
-partitions as truly lost in `onPartitionsAssigned` because the broker resets the fetch position
-on every reassignment of the same partition, so a same-consumer round-trip still re-delivers
-records under a new generation; cooperative rebalancing reduces the *frequency* of these
-events, not their semantics.
+need to move are revoked. Cooperative rebalancing reduces the *frequency* of these events but
+not their semantics — every revocation, including the same-consumer round-trip case, runs the
+same cleanup path described above.
 
 ---
 
@@ -549,9 +550,9 @@ resources on the target cluster and can cause connection exhaustion under high p
 ```mermaid
 flowchart TD
     subgraph kafkaExecutor["kafkaExecutor thread"]
-        REV[onPartitionsRevoked\nsafeCommit + record pendingCleanup]
-        ASN["onPartitionsAssigned\n1. drain ALL pending as trulyLost\n2. increment generation\n3. create new OffsetLifecycleTrackers"]
-        LOST[onPartitionsLost\nskip commit\nenqueue closes immediately]
+        REV["onPartitionsRevoked\nsafeCommit + drop tracker maps\n+ fire trulyLost(parts) at OLD gen"]
+        ASN["onPartitionsAssigned\nincrement generation\n+ create new OffsetLifecycleTrackers"]
+        LOST["onPartitionsLost\nsame as Revoked, skip safeCommit"]
     end
 
     subgraph mainThread["main thread"]
@@ -560,9 +561,8 @@ flowchart TD
         CANCEL["ConnectionReplaySession\nscheduleSequencer.cancelAllWork()\n→ completes all signalWorkCompletedFutures\n→ cascades through sorter chain\n→ channel.close()"]
     end
 
-    REV -->|pendingCleanupPartitions| ASN
-    ASN -->|"trulyLost = ALL drained pending\n(fired BEFORE generation bump)"| SYNTH
-    LOST -->|immediately| SYNTH
+    REV -->|trulyLost partitions at OLD gen| SYNTH
+    LOST -->|trulyLost partitions at OLD gen| SYNTH
     SYNTH -->|TrafficSourceReaderInterruptedClose| ACC2
     ACC2 -->|"replayEngine.cancelConnection()\n(bypasses sorter+time-shift)"| CANCEL
     CANCEL -->|"ClientConnectionPool.cancelConnection()\nsession.cancelled=true\nscheduleSequencer.cancelAllWork()\nchannel.close()"| Target[(Target Cluster)]
@@ -571,9 +571,10 @@ flowchart TD
 ### Generation-Based Stale State Fix (implemented)
 
 `ITrafficStreamKey.getSourceGeneration()` (default 0 for non-Kafka sources) returns the
-`consumerConnectionGeneration` at the time the record was consumed. This is incremented on each
-`onPartitionsAssigned`, *after* the truly-lost callback drains `pendingCleanupPartitions` (see
-the ordering invariant in `onPartitionsAssigned` above).
+`consumerConnectionGeneration` at the time the record was consumed. This is incremented in
+`onPartitionsAssigned`. Synthetic closes are always enqueued in the prior `onPartitionsRevoked`
+(or `onPartitionsLost`) call, while the generation is still the OLD value — so the close keys
+match the channel `session.generation` set when those connections were opened.
 
 - `ChannelContextManager.retainOrCreateContext()`: if the incoming key's generation exceeds the
   stored entry's generation, force-closes the old OTel span and creates a fresh one.
@@ -642,15 +643,13 @@ empty-batch drain.
 Traffic-source-reader-interrupted close injection and drain (source-layer round-trip handling
 landed; coordinator-side `ClientConnectionPool` snapshot and `GenerationalSessionKey` work
 still planned):
-- When a partition is truly lost, the source layer (`KafkaTrafficCaptureSource` via the
+- When a partition is revoked or lost, the source layer (`KafkaTrafficCaptureSource` via the
   `onPartitionsTrulyLostCallback` wired to `TrackingKafkaConsumer`) builds a synthetic-close
-  batch from `partitionToActiveConnections` for the lost partition. This is triggered from two
-  paths: `onPartitionsAssigned` (drains `pendingCleanupPartitions` and treats every entry as
-  truly lost — any round-trip through revoke→assign resets the fetch position to the last
-  committed offset, so re-delivery is guaranteed regardless of whether the partition was
-  reassigned to us), and `onPartitionsLost` (commits are impossible after a fence/timeout, so
-  all lost partitions are immediately truly lost — no deferred handoff through
-  `pendingCleanupPartitions`). For each active connection the source registers an entry in
+  batch from `partitionToActiveConnections` for that partition. This is triggered from two
+  paths: `onPartitionsRevoked` (every revocation, regardless of whether the partition is
+  later reassigned to us — the broker resets fetch position to the last committed offset on
+  every reassignment, so re-delivery is guaranteed) and `onPartitionsLost` (same cleanup,
+  just no commit attempt). For each active connection the source registers an entry in
   `pendingTrafficSourceReaderInterruptedCloses` (today a
   `ConcurrentHashMap<String, Boolean>` keyed by `connectionId + ":" + sessionNumber + ":" +
   generation`, with `sessionNumber` currently set to the named constant
@@ -667,13 +666,14 @@ still planned):
   empty batch (do not poll Kafka); (3) call `getNextBatchOfRecords` to poll Kafka; (4)
   **post-poll**, drain *all* synthetic-close batches enqueued *during* the poll and **prepend**
   them to the freshly polled records before returning. Phase 4 is required because a rebalance
-  can fire inline during `kafkaConsumer.poll()` — when it does, `onPartitionsRevoked` and
-  `onPartitionsAssigned` enqueue synthetic closes and bump the consumer generation, so any
-  records returned from the same poll already carry the **new** generation. Without the
-  prepend, new-generation records would reach the accumulator ahead of the old-generation
-  synthetic closes and trip the accumulator's defensive backstop. The accumulator cache entry
-  is cleared synchronously on the main thread when the synthetic close is processed — before
-  any new data can arrive for that connection, even within the same returned chunk.
+  can fire inline during `kafkaConsumer.poll()` — when it does, `onPartitionsRevoked` enqueues
+  the OLD-generation synthetic closes and the follow-up `onPartitionsAssigned` bumps the
+  generation, so any records returned from the same poll already carry the **new** generation.
+  Without the prepend, new-generation records would reach the accumulator ahead of the
+  old-generation synthetic closes and trip the accumulator's defensive backstop. The
+  accumulator cache entry is cleared synchronously on the main thread when the synthetic
+  close is processed — before any new data can arrive for that connection, even within the
+  same returned chunk.
 - `TrafficSourceReaderInterruptedClose` is handled in `accept()` by:
   1. Calling `fireAccumulationsCallbacksAndClose(TRAFFIC_SOURCE_READER_INTERRUPTED)` on the
      existing `Accumulation` — this completes `finishedAccumulatingResponseFuture` for any
@@ -740,19 +740,17 @@ start time. No buffering in the source; backpressure is unaffected.
 
 **4. `onPartitionsLost` override** *(implemented)*
 
-Overridden in `TrackingKafkaConsumer`: skips `safeCommit()` (commits fail when fenced), removes
-per-partition state under `commitDataLock`, and immediately invokes
-`onPartitionsTrulyLostCallback` with all lost partition numbers — bypassing
-`pendingCleanupPartitions` since there is no deferred handoff when commits cannot succeed.
+Overridden in `TrackingKafkaConsumer` to share the same cleanup path as `onPartitionsRevoked`
+(drop per-partition state under `commitDataLock`, fire `onPartitionsTrulyLostCallback`),
+differing only in skipping `safeCommit()` since commits fail when the consumer is fenced.
 
 **5. Cooperative rebalancing** *(implemented)*
 
-`KafkaTrafficCaptureSource` now configures `CooperativeStickyAssignor` by default, eliminating
-the stop-the-world rebalance penalty: `onPartitionsRevoked` only fires for partitions actually
-moving to another consumer. The replayer still drains all of `pendingCleanupPartitions` as
-truly lost in `onPartitionsAssigned` because the broker resets the fetch position on every
-reassignment of the same partition, so a same-consumer round-trip still re-delivers records
-under a new generation.
+`KafkaTrafficCaptureSource` configures `CooperativeStickyAssignor` by default, eliminating the
+stop-the-world rebalance penalty: `onPartitionsRevoked` only fires for partitions actually
+moving to another consumer. Cleanup runs the same way for every revocation — same-consumer
+round-trip or not — because the broker resets the fetch position on every reassignment, so
+re-delivered records are guaranteed to arrive at the new generation.
 
 ---
 

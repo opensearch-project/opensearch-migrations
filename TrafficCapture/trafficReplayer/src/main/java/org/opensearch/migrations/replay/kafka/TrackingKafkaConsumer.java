@@ -11,7 +11,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.PriorityQueue;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -119,9 +118,11 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     private final AtomicInteger commitsSinceLastHeartbeat = new AtomicInteger();
     private static final org.slf4j.Logger heartbeatLogger =
         org.slf4j.LoggerFactory.getLogger("KafkaHeartbeat");
-    /** Partitions revoked but not yet confirmed lost — cleared in onPartitionsAssigned. */
-    private final Set<Integer> pendingCleanupPartitions = Collections.newSetFromMap(new ConcurrentHashMap<>());
-    /** Called with truly lost partition numbers after onPartitionsAssigned confirms they didn't come back. */
+    /** Called with revoked partition numbers so the source layer can synthesize interrupted-close
+     *  events for any active connections on them. Always invoked at the OLD generation (before
+     *  any subsequent onPartitionsAssigned bumps it), which matches the session.generation that
+     *  was stamped on those channels — required for onNetworkConnectionClosed to find and clear
+     *  the pendingTrafficSourceReaderInterruptedCloses entries. */
     private java.util.function.Consumer<Collection<Integer>> onPartitionsTrulyLostCallback = ignored -> {};
 
     public TrackingKafkaConsumer(
@@ -157,92 +158,64 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
 
     @Override
     public void onPartitionsLost(Collection<TopicPartition> partitions) {
-        if (partitions.isEmpty()) {
-            return;
-        }
-        // Partitions lost due to timeout/fence — commits are impossible, skip safeCommit
-        new KafkaConsumerContexts.AsyncListeningContext(globalContext).onPartitionsRevoked(partitions);
-        var lostPartitionNums = new ArrayList<Integer>();
-        synchronized (commitDataLock) {
-            partitions.forEach(p -> {
-                var tp = new TopicPartition(topic, p.partition());
-                nextSetOfCommitsMap.remove(tp);
-                nextSetOfKeysContextsBeingCommitted.remove(tp);
-                partitionToOffsetLifecycleTrackerMap.remove(p.partition());
-                lostPartitionNums.add(p.partition());
-            });
-            kafkaRecordsLeftToCommitEventually.set(
-                partitionToOffsetLifecycleTrackerMap.values().stream().mapToInt(OffsetLifecycleTracker::size).sum()
-            );
-            kafkaRecordsReadyToCommit.set(!nextSetOfCommitsMap.values().isEmpty());
-            log.atWarn().setMessage("{} partitions lost (no commit attempted) for {}")
-                .addArgument(this)
-                .addArgument(() -> partitions.stream().map(String::valueOf).collect(Collectors.joining(",")))
-                .log();
-        }
-        // All lost partitions are immediately truly lost — no deferred diff needed
-        if (!lostPartitionNums.isEmpty()) {
-            onPartitionsTrulyLostCallback.accept(lostPartitionNums);
-        }
+        // Fence/timeout: commits are impossible. Same cleanup as a revocation, just no commit attempt.
+        cleanupRevokedPartitions(partitions, /*attemptCommit=*/ false);
     }
 
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+        cleanupRevokedPartitions(partitions, /*attemptCommit=*/ true);
+    }
+
+    /**
+     * Tear down per-partition state and synthesize interrupted-close events for any active
+     * connections, NOW, while consumerConnectionGeneration is still the generation those
+     * connections were opened on. Any subsequent onPartitionsAssigned will bump the generation;
+     * records returned from the same poll() that triggered this revocation are stamped with the
+     * NEW generation, and the source layer's post-poll prepend (see
+     * KafkaTrafficCaptureSource.readNextTrafficStreamSynchronously) ensures the synthetic
+     * closes are delivered to the accumulator before any new-generation re-deliveries.
+     *
+     * <p>The truly-lost callback is invoked OUTSIDE commitDataLock so it can freely touch the
+     * source's concurrent collections without ordering concerns.
+     */
+    private void cleanupRevokedPartitions(Collection<TopicPartition> partitions, boolean attemptCommit) {
         if (partitions.isEmpty()) {
-            log.atDebug().setMessage("{} revoked no partitions.").addArgument(this).log();
+            log.atDebug().setMessage("{} revoked/lost no partitions.").addArgument(this).log();
             return;
         }
-
         new KafkaConsumerContexts.AsyncListeningContext(globalContext).onPartitionsRevoked(partitions);
+        var revokedPartitionNums = new ArrayList<Integer>(partitions.size());
         synchronized (commitDataLock) {
-            safeCommit(globalContext::createCommitContext);
+            if (attemptCommit) {
+                safeCommit(globalContext::createCommitContext);
+            }
             partitions.forEach(p -> {
                 var tp = new TopicPartition(topic, p.partition());
                 nextSetOfCommitsMap.remove(tp);
                 nextSetOfKeysContextsBeingCommitted.remove(tp);
                 partitionToOffsetLifecycleTrackerMap.remove(p.partition());
+                revokedPartitionNums.add(p.partition());
             });
             kafkaRecordsLeftToCommitEventually.set(
                 partitionToOffsetLifecycleTrackerMap.values().stream().mapToInt(OffsetLifecycleTracker::size).sum()
             );
             kafkaRecordsReadyToCommit.set(!nextSetOfCommitsMap.values().isEmpty());
-            log.atWarn().setMessage("{} partitions revoked for {}")
+            log.atWarn().setMessage(attemptCommit ? "{} partitions revoked for {}"
+                                                  : "{} partitions lost (no commit attempted) for {}")
                 .addArgument(this)
                 .addArgument(() -> partitions.stream().map(String::valueOf).collect(Collectors.joining(",")))
                 .log();
         }
-        // Record for deferred cleanup — onPartitionsAssigned will determine which are truly lost
-        partitions.forEach(p -> pendingCleanupPartitions.add(p.partition()));
+        onPartitionsTrulyLostCallback.accept(revokedPartitionNums);
     }
 
     @Override
     public void onPartitionsAssigned(Collection<TopicPartition> newPartitions) {
-        // Drain pendingCleanupPartitions FIRST so synthetic closes carry the OLD generation,
-        // matching the session.generation set when channels were opened on that generation.
-        // If we bumped the generation first, the synthetic-close session keys would carry the
-        // NEW generation and onNetworkConnectionClosed (called with session.generation = OLD)
-        // would never find them, leaking outstandingTrafficSourceReaderInterruptedCloseSessions
-        // and permanently blocking real records.
-        //
-        // Every partition that round-tripped through pendingCleanupPartitions has had its
-        // fetch position reset to the last committed offset by the broker, so any in-flight
-        // accumulations are about to receive re-delivered records under a new generation.
-        // Treat ALL pending partitions as truly lost — including those reassigned back to us —
-        // so each in-flight connection gets a proper interrupted-close before the new records
-        // arrive.
-        if (!pendingCleanupPartitions.isEmpty()) {
-            var trulyLost = new ArrayList<>(pendingCleanupPartitions);
-            pendingCleanupPartitions.clear();
-            log.atInfo().setMessage("Treating {} pending partition(s) as truly lost (any round-trip " +
-                    "still resets fetch position to last committed offset): {}")
-                .addArgument(trulyLost::size).addArgument(trulyLost).log();
-            onPartitionsTrulyLostCallback.accept(trulyLost);
-        }
         if (newPartitions.isEmpty()) {
             log.atInfo().setMessage("{} assigned no new partitions.").addArgument(this).log();
             return;
         }
-
         new KafkaConsumerContexts.AsyncListeningContext(globalContext).onPartitionsAssigned(newPartitions);
         synchronized (commitDataLock) {
             consumerConnectionGeneration.incrementAndGet();
