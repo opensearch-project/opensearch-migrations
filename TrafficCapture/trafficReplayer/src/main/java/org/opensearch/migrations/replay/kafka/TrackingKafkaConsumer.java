@@ -390,33 +390,44 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             }
             if (rebalanceDuringPoll.getAndSet(false)) {
                 // A rebalance fired inline. Synthetic closes for the OLD generation are already
-                // queued on the source-layer side. The records returned here either belong to a
-                // partition we just lost (no longer ours to replay) or to a partition we still
-                // hold but at the NEW generation. Either way, drop them and seek each still-
-                // assigned partition back to the MINIMUM offset of the records returned for that
-                // partition — those are exactly the records we want to re-deliver on the next
-                // poll, after the source layer has flushed the synth closes. We use the minimum
-                // returned offset (rather than a pre-poll position snapshot) because the broker
-                // can reset the fetch position during the rebalance — e.g. a fence on a
-                // partition with no committed offset resets to AUTO_OFFSET_RESET (earliest),
-                // which can be LOWER than what we read pre-poll. The minimum returned offset is
-                // always the correct reference frame regardless of what the broker did.
-                var minOffsetPerPartition = new HashMap<TopicPartition, Long>();
-                for (var rec : records) {
-                    var tp = new TopicPartition(rec.topic(), rec.partition());
-                    minOffsetPerPartition.merge(tp, rec.offset(), Math::min);
-                }
+                // queued on the source-layer side. The records returned here are either from a
+                // partition we just lost (no longer ours to replay) or stale buffer from before
+                // the rebalance for a partition still assigned. We can't trust them, AND we
+                // can't trust the post-rebalance fetch position the kafka client landed at
+                // because pre-rebalance buffered records have advanced it past records the
+                // broker would re-deliver under the new generation. Reset each still-assigned
+                // partition to its last committed offset (broker round-trip via committed())
+                // so the next poll re-fetches everything past the last commit. If a partition
+                // has no committed offset, fall through to auto.offset.reset by clearing the
+                // local position and letting the next poll's updateFetchPositions resolve it.
                 var stillAssigned = kafkaConsumer.assignment();
-                int sought = 0;
-                for (var entry : minOffsetPerPartition.entrySet()) {
-                    if (stillAssigned.contains(entry.getKey())) {
-                        kafkaConsumer.seek(entry.getKey(), entry.getValue());
-                        sought++;
+                var committedMap = stillAssigned.isEmpty()
+                    ? Collections.<TopicPartition, OffsetAndMetadata>emptyMap()
+                    : kafkaConsumer.committed(stillAssigned);
+                int seekedToCommit = 0;
+                int seekedToBeginning = 0;
+                var partitionsWithoutCommit = new ArrayList<TopicPartition>();
+                for (var tp : stillAssigned) {
+                    var committed = committedMap.get(tp);
+                    if (committed != null) {
+                        kafkaConsumer.seek(tp, committed.offset());
+                        seekedToCommit++;
+                    } else {
+                        partitionsWithoutCommit.add(tp);
                     }
                 }
-                log.atInfo().setMessage("Rebalance during poll: dropped {} record(s); seek-back applied " +
-                        "to {} still-assigned partition(s) at the min-returned offset")
-                    .addArgument(records::count).addArgument(sought).log();
+                if (!partitionsWithoutCommit.isEmpty()) {
+                    // No committed offset for these — rewind to beginning so re-delivery covers
+                    // everything (auto.offset.reset=earliest semantic, applied explicitly).
+                    kafkaConsumer.seekToBeginning(partitionsWithoutCommit);
+                    seekedToBeginning = partitionsWithoutCommit.size();
+                }
+                log.atInfo().setMessage("Rebalance during poll: dropped {} record(s); reset {} " +
+                        "partition(s) to last-committed and {} partition(s) to beginning")
+                    .addArgument(records::count)
+                    .addArgument(seekedToCommit)
+                    .addArgument(seekedToBeginning)
+                    .log();
                 pollsSinceLastHeartbeat.incrementAndGet();
                 emptyPollsSinceLastHeartbeat.incrementAndGet();
                 return new ConsumerRecords<>(Collections.emptyMap(), Collections.emptyMap());
