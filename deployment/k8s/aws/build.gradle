@@ -31,8 +31,11 @@ configurations {
 dependencies {
     // Pull in agent-skills.tar.gz from the agent-skills module's
     // declared producer artifact. A change to any skill file
-    // (Startup.md, the SOP, aoss-nextgen, kiro config) triggers a
-    // rebuild of the CLI tarball — no copy-by-hand drift.
+    // (Startup.md, manifest.json, any skills/<name>/SKILL.md, the kiro
+    // config) triggers a rebuild of the CLI tarball — no copy-by-hand
+    // drift. Partner packs add new skills the same way: drop a
+    // skills/<your-skill>/SKILL.md into the producer, and the
+    // consumer's tarball picks it up.
     agentSkills project(path: ':agent-skills', configuration: 'agentSkills')
 }
 
@@ -108,7 +111,7 @@ tasks.register('packageMigrationAssistantCliTarball') {
 
             // Drop the agent-skills tree under skills/ inside the tarball.
             // The producer module emits its tarball with paths
-            //   skills/Startup.md, skills/migrating-to-opensearch/…, skills/kiro/…
+            //   skills/Startup.md, skills/manifest.json, skills/<name>/…, skills/kiro/…
             // so untar-into-root matches the layout the CLI's agent.sh expects.
             def skillsTarFile = agentSkillsTar.singleFile
             project.copy {

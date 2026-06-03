@@ -61,9 +61,9 @@ teardown() {
 @test "manifest_skills auto-discovers SKILL.md dirs" {
   manifest_init
   out=$(manifest_skills)
-  # The four shipped skills.
-  [[ "$out" == *"aoss-nextgen"* ]]
-  [[ "$out" == *"migrating-to-opensearch"* ]]
+  # The two upstream skills. Partner packs add more via the
+  # `migration-assistant pack` flow; the discovery contract is "any
+  # subdir of skills/ with a SKILL.md" — see lib/manifest.sh:manifest_skills.
   [[ "$out" == *"migration-assistant-cli-reference"* ]]
   [[ "$out" == *"migration-assistant-operator"* ]]
 }

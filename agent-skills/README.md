@@ -18,16 +18,19 @@ config. It now serves all three agents:
 agent-skills/
 ├── build.gradle
 ├── README.md
-├── skills/                      # agent-agnostic
-│   ├── Startup.md               # the agent-handoff briefing the CLI
-│   │                            # exec's first
-│   ├── migrating-to-opensearch/ # the assessment SOP
+├── skills/                            # agent-agnostic
+│   ├── Startup.md                     # the agent-handoff briefing the CLI
+│   │                                  # exec's first
+│   ├── manifest.json                  # bundle TOC + extension contract
+│   ├── migration-assistant-operator/  # operator runbook
 │   │   ├── SKILL.md
-│   │   ├── references/          # ~18 per-topic deep-dives
-│   │   └── assets/              # report templates
-│   └── aoss-nextgen/            # AOSS NextGen target operator skill
+│   │   ├── deployment.md
+│   │   ├── workflow.md
+│   │   ├── product.md
+│   │   └── migration-prompt.md
+│   └── migration-assistant-cli-reference/
 │       └── SKILL.md
-└── kiro/                        # Kiro-specific
+└── kiro/                              # Kiro-specific
     ├── agents/opensearch-migration.json
     ├── prompts/start.md
     ├── settings/hooks.json
@@ -37,6 +40,32 @@ agent-skills/
         ├── product.md
         └── workflow.md
 ```
+
+## Extensible skill framework
+
+Skills are auto-discovered: every subdirectory of `skills/` that contains
+a `SKILL.md` is bundled by the CLI's `agent_setup` step and installed
+into the operator's session at handoff time.
+
+To add a partner-distribution skill, drop `skills/<your-skill>/SKILL.md`
+into the tree and rebuild — no code change required.
+
+For one-off custom builds without forking the repo, use the
+`migration-assistant pack` subcommand against a release tarball:
+
+```bash
+migration-assistant pack \
+  --input migration-assistant-cli-3.2.1.tar.gz \
+  --add-skill ./your-runbook \
+  --add-mcp ./your-mcp.json \
+  --branding ./your-branding.json \
+  --pack-name your-org --pack-version 1.0.0 \
+  --output your-migrate-3.2.1+your-1.0.0.tar.gz
+```
+
+The bundle contract (manifest.json schema, MCP shape, branding fields)
+is documented in `skills/manifest.json` and enforced by the CLI's
+`lib/manifest.sh` parser.
 
 ## Gradle tasks
 

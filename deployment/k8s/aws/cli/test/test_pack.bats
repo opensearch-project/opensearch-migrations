@@ -27,7 +27,7 @@ setup() {
   cp "$PROJECT_ROOT/../../../../agent-skills/skills/manifest.json" "$TARBALL_DIR/skills/manifest.json"
   : >"$TARBALL_DIR/skills/Startup.md"
   local s
-  for s in aoss-nextgen migrating-to-opensearch migration-assistant-cli-reference migration-assistant-operator; do
+  for s in migration-assistant-cli-reference migration-assistant-operator; do
     cp -R "$PROJECT_ROOT/../../../../agent-skills/skills/$s" "$TARBALL_DIR/skills/"
   done
 

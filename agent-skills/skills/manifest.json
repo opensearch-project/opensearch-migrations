@@ -29,7 +29,7 @@
         "available":   true
       }
     ],
-    "agentFreshPrompt": "Greet the operator. Briefly (3-5 sentences max) introduce what you can help with — assess a migration, deploy + operate Migration Assistant, run a Solr/ES/OpenSearch migration end-to-end. Suggest 3-4 example asks (e.g. \"I have a Solr cluster on EC2, help me move to OpenSearch Serverless\", \"Continue a deploy that was Ctrl-C'd\", \"Run a migration assessment for my ES 7.10 cluster\"). DO NOT run any tools yet — no Read of state.env, no Bash, no kubectl. Wait for the operator to tell you what they want. The CLAUDE.md / AGENTS.md in this directory has been auto-loaded; you already know the rules. Be concise and friendly."
+    "agentFreshPrompt": "Greet the operator. Briefly (3-5 sentences max) introduce what you can help with — deploy + operate Migration Assistant, run a Solr/ES/OpenSearch migration end-to-end. Suggest 3-4 example asks (e.g. \"Deploy a fresh Migration Assistant in us-east-1\", \"Continue a deploy that was Ctrl-C'd\", \"Move data from my Solr cluster to OpenSearch Serverless\"). DO NOT run any tools yet — no Read of state.env, no Bash, no kubectl. Wait for the operator to tell you what they want. The CLAUDE.md / AGENTS.md in this directory has been auto-loaded; you already know the rules. Be concise and friendly."
   },
   "skills": {
     "discovery": "auto"

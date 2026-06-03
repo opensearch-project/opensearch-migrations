@@ -7,10 +7,10 @@ before doing anything else.
 
 ## On the very first turn
 
-Greet the operator. Briefly introduce what you can help with — assess
-a migration, deploy + operate Migration Assistant, drive a Solr / ES /
-OpenSearch migration end-to-end. Offer 3-4 example asks. Then **stop
-and wait** for the operator to tell you what they want.
+Greet the operator. Briefly introduce what you can help with — deploy
++ operate Migration Assistant, drive a Solr / ES / OpenSearch
+migration end-to-end. Offer 3-4 example asks. Then **stop and wait**
+for the operator to tell you what they want.
 
 Do **NOT** run any tools on the first turn:
 - No `Read` of state.env
@@ -150,9 +150,10 @@ at their shell. The CLI's job is done; yours is not.
    authenticate** (which credential store / env var / SSM path). Never
    store credentials in this directory. Pointers only.
 
-5. **Pick the right skill(s) for the user's goal.** Three are
-   shipped under `skills/`. Read each as you need it; do not read them
-   all up front.
+5. **Pick the right skill(s) for the user's goal.** Read each as you
+   need it; do not read them all up front.
+
+   The upstream bundle ships these skills under `skills/`:
 
    - **`skills/migration-assistant-operator/`** — operator runbook for
      driving an already-deployed Migration Assistant. Read `SKILL.md`,
@@ -160,21 +161,39 @@ at their shell. The CLI's job is done; yours is not.
      shows the deploy is done (`last_step=ready` / `agent_handoff`)
      AND the user wants to MOVE DATA.
 
-   - **`skills/migrating-to-opensearch/`** — structured migration
-     **ASSESSMENT**: source family detection, persona-aware intake,
-     version compatibility, target shape (managed vs Serverless),
-     ranked migration-path scoring across six tool families
-     (Migration Assistant for Amazon OpenSearch Service, snapshot/
-     restore, OpenSearch Ingestion, reindex from remote,
-     Logstash/EMR/Spark, in-place blue/green), sizing, 0-100
-     readiness score. `references/` has per-topic deep-dives;
-     `assets/` has report templates. Read `SKILL.md` first.
+   - **`skills/migration-assistant-cli-reference/`** — reference for
+     the `migration-assistant` CLI itself (lib/cfn.sh, lib/helm.sh,
+     lib/crane.sh, lib/agent.sh). Read this when you need to know
+     what the CLI did or will do at a given step before guessing.
 
-   - **`skills/aoss-nextgen/`** — OpenSearch Serverless NextGen
-     target-side reference. Pair with the assessment SOP whenever
-     the target is Serverless. Covers NextGen vs Classic signals,
-     the SDK/CLI pre-flight, vector mapping, the 401-during-warmup
-     window, and cleanup ordering.
+   ### Partner / pack skills
+
+   The bundle is **extensible**. Custom builds (created via
+   `migration-assistant pack`) may ship additional partner-specific
+   skills under `skills/`. Walk `skills/*/SKILL.md` at the start of a
+   migration to see what's actually available — don't assume the
+   shipped skill set matches the upstream list above.
+
+   To check which skills are loaded in this session:
+
+   ```bash
+   for d in skills/*/; do
+     [[ -f "$d/SKILL.md" ]] && printf '%s\n' "${d%/}"
+   done
+   ```
+
+   The bundle's `manifest.json` (at the bundle root, sibling of
+   `bin/` + `lib/` + `skills/`) lists the build identity and any
+   applied packs:
+
+   ```bash
+   jq '{build, skills: [.mcpServers | keys][0]}' manifest.json
+   jq '.build.packs' manifest.json   # what custom packs were applied
+   ```
+
+   When a `build.packs[]` entry is present, the bundle is a custom
+   build — flag this to the operator so they understand the skill
+   set is curated by their organization, not upstream.
 
    **HARD RULE**: do NOT assert source/target support boundaries
    (what Migration Assistant supports, what targets are compatible,
@@ -182,25 +201,16 @@ at their shell. The CLI's job is done; yours is not.
    Those drift per release. Migration Assistant supports
    **Solr, Elasticsearch, and OpenSearch sources**, and supports
    **OpenSearch Service domains AND OpenSearch Serverless targets** —
-   but the authoritative compatibility matrix lives in the
-   assessment SOP's `references/` directory and the AWS docs (see
-   step 6). If you'd say "X is not supported", load the assessment
-   SOP and verify first.
-
-   **Default behavior on uncertainty**: load
-   `skills/migrating-to-opensearch/SKILL.md` first. Its scoring
-   rubric routes you to the right tool — including back at the
-   operator skill when Migration Assistant is the answer. That's
-   strictly safer than committing to an operator path the
-   migration shape can't actually take.
+   but the authoritative compatibility matrix lives in the AWS docs
+   (see step 6). If you'd say "X is not supported", retrieve from
+   the AWS MCP first.
 
 6. **Use the AWS MCP server for version-specific facts.** The CLI
    tries to register `aws-mcp` with your client at handoff time. If
    `aws___read_documentation` is available as a tool, prefer it over
    web fetch for AWS-doc lookups (instance types, plugin support,
-   X-Pack parity rows, k-NN engines, sizing limits). The SOP has a
-   hard pre-condition: do NOT assert version-specific claims from
-   training memory; retrieve them.
+   X-Pack parity rows, k-NN engines, sizing limits). Do NOT assert
+   version-specific claims from training memory; retrieve them.
 
 7. **Plan the migration.** Write a step-by-step plan to `plan/<n>.md`
    (next ordinal under `plan/`). Each plan goes in its own file; do
@@ -244,9 +254,9 @@ at their shell. The CLI's job is done; yours is not.
   hand the keyboard back: the operator can run
   `kubectl exec -n ma -it migration-console-0 -- /bin/bash` and continue
   in the console's native CLI. Read
-  `skills/migration-assistant-operator/ (read SKILL.md first, then workflow.md)` for
-  the full surface (`workflow` is the modern declarative path;
-  `console` is the per-stage legacy path).
+  `skills/migration-assistant-operator/` (read `SKILL.md` first, then
+  `workflow.md`) for the full surface — `workflow` is the modern
+  declarative path; `console` is the per-stage legacy path.
 
 ## Final note
 

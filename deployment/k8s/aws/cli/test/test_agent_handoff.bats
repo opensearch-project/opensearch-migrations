@@ -69,11 +69,13 @@ teardown() {
 
 # ---------- agent_setup: skill files land in the right places ----------
 
-@test "agent_setup claude drops Startup.md and SOP into .claude/skills/" {
+@test "agent_setup claude drops Startup.md and the operator skill into .claude/skills/" {
   agent_setup claude
   [ -f "$STAGE_DIR/.claude/skills/opensearch-migration/Startup.md" ]
   [ -f "$STAGE_DIR/Startup.md" ]
-  [ -d "$STAGE_DIR/skills/migrating-to-opensearch" ]
+  # The operator skill is in the upstream bundle; auto-discovery picks
+  # it up regardless of partner packs.
+  [ -d "$STAGE_DIR/skills/migration-assistant-operator" ]
 }
 
 @test "agent_setup codex drops AGENTS.md at stage root and Startup.md in .codex/" {

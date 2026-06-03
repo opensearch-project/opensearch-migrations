@@ -188,8 +188,9 @@ _agent_print_install_hints_for_missing() {
 }
 
 # agent_setup <agent> — write Startup.md, drop the bundled skill tree
-# (the migrating-to-opensearch SOP), wire up agent-specific config, and
-# register the AWS MCP server. Source skill is $LIB_DIR/../skills/.
+# (every skills/<name>/SKILL.md auto-discovered, partner packs included),
+# wire up agent-specific config, and register MCP servers from manifest.
+# Source skill is $LIB_DIR/../skills/.
 agent_setup() {
   local agent="$1"
   # Skill source resolution. In a release tarball, skills live next to
@@ -659,7 +660,7 @@ agent_exec() {
   # first impression), otherwise the upstream default below.
   local fresh_prompt; fresh_prompt=$(manifest_brand agentFreshPrompt)
   if [[ -z "$fresh_prompt" ]]; then
-    fresh_prompt='Greet the operator. Briefly (3-5 sentences max) introduce what you can help with — assess a migration, deploy + operate Migration Assistant, run a Solr/ES/OpenSearch migration end-to-end. Suggest 3-4 example asks (e.g. "I have a Solr cluster on EC2, help me move to OpenSearch Serverless", "Continue a deploy that was Ctrl-C'\''d", "Run a migration assessment for my ES 7.10 cluster"). DO NOT run any tools yet — no Read of state.env, no Bash, no kubectl. Wait for the operator to tell you what they want. The CLAUDE.md / AGENTS.md in this directory has been auto-loaded; you already know the rules. Be concise and friendly.'
+    fresh_prompt='Greet the operator. Briefly (3-5 sentences max) introduce what you can help with — deploy + operate Migration Assistant, run a Solr/ES/OpenSearch migration end-to-end. Suggest 3-4 example asks (e.g. "Deploy a fresh Migration Assistant in us-east-1", "Continue a deploy that was Ctrl-C'\''d", "Move data from my Solr cluster to OpenSearch Serverless"). DO NOT run any tools yet — no Read of state.env, no Bash, no kubectl. Wait for the operator to tell you what they want. The CLAUDE.md / AGENTS.md in this directory has been auto-loaded; you already know the rules. Be concise and friendly.'
   fi
   ui_dim "  exec $bin (resume=$resuming)"
   case "$agent" in

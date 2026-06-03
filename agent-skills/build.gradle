@@ -7,11 +7,12 @@ plugins {
 //
 // Two parallel deliverables:
 //
-//   1. Agent-agnostic skill bundle (skills/) — Startup.md + the
-//      migrating-to-opensearch SOP + the aoss-nextgen target skill.
+//   1. Agent-agnostic skill bundle (skills/) — Startup.md +
+//      manifest.json + the operator runbook + the CLI reference.
 //      Consumed by the migration-assistant CLI (deployment/k8s/aws/cli)
-//      via task `agentSkillsTar`. Any future agent that wants to load
-//      the same content reads from this output.
+//      via task `agentSkillsTar`. Skill discovery is by-convention:
+//      every skills/<name>/ subdir with a SKILL.md is bundled. Partner
+//      packs add their own skill dirs the same way.
 //
 //   2. Kiro-specific bundle (kiro/) — Kiro CLI config (agents/, prompts/,
 //      settings/, steering/). Built into a runnable `.kiro/` tree by
