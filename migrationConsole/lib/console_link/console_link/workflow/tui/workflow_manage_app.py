@@ -21,6 +21,7 @@ from .log_manager import LogManager
 from .manage_injections import ArgoWorkflowInterface, PodScraperInterface, WaiterInterface
 from .pod_name_manager import PodNameManager
 from .tree_state_manager import TreeStateManager
+from .resource_tree_state_manager import RESOURCE_ID_PREFIX
 from ..commands.artifact_store import ArtifactStoreError
 from ..commands.crd_utils import resource_display_name
 from ..commands.show import read_managed_output
@@ -303,8 +304,8 @@ class WorkflowTreeApp(App):
             stack.extend(reversed(current.children))
         # Fallback for resource nodes: search raw workflow data for patch-output steps
         # (they may be filtered out of the tree by collect_notable_steps)
-        if not refs and selected_data.get('id', '').startswith('resource:'):
-            resource_name = selected_data.get('id', '').removeprefix('resource:')
+        if not refs and selected_data.get('id', '').startswith(RESOURCE_ID_PREFIX):
+            resource_name = selected_data.get('id', '').removeprefix(RESOURCE_ID_PREFIX)
             refs = self._find_output_refs_in_workflow_data(resource_name)
         logger.info("Collected %s managed output ref(s)", len(refs))
         return refs
@@ -501,7 +502,7 @@ class WorkflowTreeApp(App):
         node_id = node.get('id') or ''
         ntype = node.get('type')
 
-        if node_id.startswith('resource:'):
+        if node_id.startswith(RESOURCE_ID_PREFIX):
             self.bind("l", "view_resource_logs", description="View Logs")
             if self._collect_managed_output_refs():
                 self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)

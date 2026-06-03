@@ -15,6 +15,9 @@ from console_link.workflow.tree_utils import get_step_rich_label, get_step_statu
 from console_link.workflow.commands.crd_utils import DISPLAY_NAMES
 
 
+RESOURCE_ID_PREFIX = 'resource:'
+
+
 class ResourceTreeStateManager:
     """Builds and updates a resource-centric Textual Tree from CRs + Argo workflow data."""
 
@@ -78,26 +81,29 @@ class ResourceTreeStateManager:
         new_ids = [f'group:{g.display_name}' for g in new_groups]
 
         if self._has_structural_change(existing, new_ids):
-            collapsed = self._save_collapsed(section_node)
-            self._remove_children(section_node)
-            for group in new_groups:
-                gid = f'group:{group.display_name}'
-                node = section_node.add(f"[bold]{group.display_name}[/]", data={'id': gid})
-                if group.not_configured:
-                    node.add("[dim](not configured)[/dim]", data=None)
-                else:
-                    self._add_group_resources(node, group)
-                if gid in collapsed:
-                    node.collapse()
-                else:
-                    node.expand()
+            self._rebuild_groups(section_node, new_groups)
         else:
             for group in new_groups:
                 gid = f'group:{group.display_name}'
                 group_node = existing[gid]
-                if group.not_configured:
-                    continue
-                self._update_resources(group_node, group)
+                if not group.not_configured:
+                    self._update_resources(group_node, group)
+
+    def _rebuild_groups(self, section_node: TreeNode, groups: List[ResourceGroup]) -> None:
+        """Rebuild all groups under a section (structural change detected)."""
+        collapsed = self._save_collapsed(section_node)
+        self._remove_children(section_node)
+        for group in groups:
+            gid = f'group:{group.display_name}'
+            node = section_node.add(f"[bold]{group.display_name}[/]", data={'id': gid})
+            if group.not_configured:
+                node.add("[dim](not configured)[/dim]", data=None)
+            else:
+                self._add_group_resources(node, group)
+            if gid in collapsed:
+                node.collapse()
+            else:
+                node.expand()
 
     def _update_resources(self, group_node: TreeNode, group: ResourceGroup) -> None:
         """Diff resources within a group."""
@@ -109,7 +115,7 @@ class ResourceTreeStateManager:
         sorted_resources = sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name))
 
         existing = self._existing_by_id(group_node)
-        new_ids = [f'resource:{r.name}' for r in sorted_resources]
+        new_ids = [f'{RESOURCE_ID_PREFIX}{r.name}' for r in sorted_resources]
 
         if self._has_structural_change(existing, new_ids):
             collapsed = self._save_collapsed(group_node)
@@ -119,7 +125,7 @@ class ResourceTreeStateManager:
             self._restore_collapse_state(group_node, collapsed)
         else:
             for resource in sorted_resources:
-                rid = f'resource:{resource.name}'
+                rid = f'{RESOURCE_ID_PREFIX}{resource.name}'
                 resource_node = existing[rid]
                 # Update label if phase changed
                 old_phase = resource_node.data.get('phase')
@@ -135,7 +141,7 @@ class ResourceTreeStateManager:
 
         for field in format_spec_fields(resource):
             resource_node.add(f"[dim]{field}[/dim]", data=None)
-        if resource.depends_on:
+        if resource.depends_on and resource.phase not in ('Ready', 'Completed'):
             resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
         live = format_live_status(resource)
         if live:
@@ -273,7 +279,7 @@ class ResourceTreeStateManager:
         label = self._resource_label(resource)
         resource_path = f"{DISPLAY_NAMES.get(resource.plural, resource.plural)}.{resource.name}"
         resource_node = parent.add(label, data={
-            'id': f'resource:{resource.name}',
+            'id': f'{RESOURCE_ID_PREFIX}{resource.name}',
             'resource_path': resource_path,
             'phase': resource.phase,
         })
@@ -281,7 +287,7 @@ class ResourceTreeStateManager:
         # Spec details
         for field in format_spec_fields(resource):
             resource_node.add(f"[dim]{field}[/dim]", data=None)
-        if resource.depends_on:
+        if resource.depends_on and resource.phase not in ('Ready', 'Completed'):
             resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
         live = format_live_status(resource)
         if live:
@@ -325,10 +331,15 @@ class ResourceTreeStateManager:
         node = parent.add(label, data=step)
         if step.get('type') == 'Pod' and self._on_new_pod:
             self._on_new_pod(step['id'])
+        self._add_live_check_lines(node, step)
+        for child in sorted(collect_notable_steps(step.get('children', [])), key=step_timestamp):
+            self._add_workflow_step(node, child)
+
+    @staticmethod
+    def _add_live_check_lines(node: TreeNode, step: Dict) -> None:
+        """Add live check result lines under a workflow step node."""
         live_check = step.get('live_check')
         if live_check and live_check.get('success') and 'value' in live_check:
             for line in live_check['value'].replace('\\n', '\n').strip().split('\n'):
                 if line.strip():
                     node.add(f"[cyan]{line.strip()}[/cyan]", data=None)
-        for child in sorted(collect_notable_steps(step.get('children', [])), key=step_timestamp):
-            self._add_workflow_step(node, child)

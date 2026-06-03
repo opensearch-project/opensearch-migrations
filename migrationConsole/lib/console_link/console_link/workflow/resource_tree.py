@@ -282,7 +282,7 @@ def _add_resource_details(node, resource: ResourceNode, show_live_status: bool =
     """Add spec/status detail lines under a resource node."""
     for spec_line in format_spec_fields(resource):
         node.add(f"[dim]{spec_line}[/dim]")
-    if resource.depends_on:
+    if resource.depends_on and resource.phase not in ('Ready', 'Completed'):
         deps = ", ".join(resource.depends_on)
         node.add(f"[dim]Depends on: {deps}[/dim]")
     if show_live_status:
@@ -497,7 +497,7 @@ def _format_snapshot_creation_status(creation: Dict[str, Any]):
     if shards_failed:
         details.append(f"shards failed: {shards_failed}")
     data_processed = summary.get('dataProcessed')
-    if data_processed:
+    if data_processed and phase != 'Completed':
         unit = summary.get('dataProcessedUnit', 'MiB')
         details.append(f"data processed: {data_processed} {unit}")
     updated_at = creation.get('updatedAt')
