@@ -451,10 +451,13 @@ jobs:
     - name: Run SonarQube Scanner
       run: |
         set -euo pipefail
-        SCANNER_VERSION="6.2.1.4610"
+        SCANNER_VERSION="8.1.0.6389"
         SCANNER_ZIP="sonar-scanner-cli-${SCANNER_VERSION}-linux-x64.zip"
-        SCANNER_URL="https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/${SCANNER_ZIP}"
-        SCANNER_SHA256="0b8a3049f0bd5de7abc1582c78c233960d3d4ed7cc983a1d1635e8552f8bb439"
+        # Maven Central mirrors the SonarSource scanner releases and has been
+        # reliable from GitHub-hosted runners; binaries.sonarsource.com has
+        # started returning 403 from some egress IPs.
+        SCANNER_URL="https://repo1.maven.org/maven2/org/sonarsource/scanner/cli/sonar-scanner-cli/${SCANNER_VERSION}/${SCANNER_ZIP}"
+        SCANNER_SHA256="bb8f709f9cb73352f8d1260a3b3c506c0f41146754bc630762c126d795499d0b"
 
         # Retry on transient failures (CDN flakes, partial downloads).
         # --fail makes curl exit non-zero on HTTP errors so we don't silently feed an
