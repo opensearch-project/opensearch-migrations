@@ -74,7 +74,7 @@ describe("builtinMutators", () => {
         const cases = expandCases(spec, reg);
         expect(cases).toHaveLength(1);
         expect(cases[0].caseName).toBe(
-            "snapshotmigration-source-target-snap1-migration-0-subject-impossible-change-snapshotMigration-maxConnections",
+            "snapshotmigration-source-target-snap1-migration-0-subject-impossible-change-snapshotMigration-maxConnections-leave-blocked",
         );
         expect(cases[0].response).toBe("leave-blocked");
     });
@@ -169,7 +169,7 @@ describe("builtinMutators", () => {
         expect(cases).toHaveLength(1);
         expect(cases[0]).toMatchObject({
             caseName:
-                "snapshotmigration-source-target-snap1-migration-0-subject-gated-change-snapshotMigration-maxConnections-gated-in-progress-bad-target-auth",
+                "snapshotmigration-source-target-snap1-migration-0-subject-gated-change-snapshotMigration-maxConnections-gated-leave-blocked-in-progress-bad-target-auth",
             subjectStateAtMutation: "in-progress",
             poisonPillName: "bad-target-auth",
         });

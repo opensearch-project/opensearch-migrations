@@ -11,6 +11,15 @@ matrix:
     - changeClass: impossible
       patterns: [subject-impossible-change]
       response: leave-blocked
+    - changeClass: impossible
+      patterns: [subject-impossible-change]
+      response: approve-only
+    - changeClass: impossible
+      patterns: [subject-impossible-change]
+      response: reset-only
+    - changeClass: impossible
+      patterns: [subject-impossible-change]
+      response: reset-then-approve
 
 lifecycle:
   setup: [create-basic-auth-secrets]

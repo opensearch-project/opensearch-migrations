@@ -150,7 +150,9 @@ describe("snapshotMigrationMaxConnectionsMutator", () => {
 
     it("has the expected metadata", () => {
         expect(mutator.name).toBe("snapshotMigration-maxConnections");
+        expect(mutator.fieldChangeClass).toBe("gated");
         expect(mutator.changeClass).toBe("impossible");
+        expect(mutator.effectiveChangeReason).toBe("completed-subject-lock-on-complete");
         expect(mutator.dependencyPattern).toBe("subject-impossible-change");
         expect(mutator.subject).toBe("snapshotmigration:source-target-snap1-migration-0");
         expect(mutator.expectedRerunComponents).toEqual([
@@ -226,6 +228,7 @@ describe("snapshotMigrationMaxConnectionsGatedMutator", () => {
     it("uses declared gated metadata for in-progress state-control cases", () => {
         const mutator = snapshotMigrationMaxConnectionsGatedMutator();
         expect(mutator.name).toBe("snapshotMigration-maxConnections-gated");
+        expect(mutator.fieldChangeClass).toBe("gated");
         expect(mutator.changeClass).toBe("gated");
         expect(mutator.dependencyPattern).toBe("subject-gated-change");
         expect(mutator.changedPaths).toEqual([

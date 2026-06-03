@@ -52,6 +52,20 @@ function registryWithSafeMutator(): MutatorRegistry {
     return reg;
 }
 
+function registryWithGatedMutator(): MutatorRegistry {
+    const reg = new MutatorRegistry();
+    reg.register({
+        name: "proxy-gated-toggle",
+        changeClass: "gated",
+        dependencyPattern: "subject-gated-change",
+        subject: "captureproxy:capture-proxy" as ComponentId,
+        changedPaths: ["traffic.proxies.capture-proxy.proxyConfig.enabled"],
+        approvalPattern: "captureproxy.capture-proxy",
+        apply: (c) => structuredClone(c),
+    });
+    return reg;
+}
+
 describe("expandCases", () => {
     it("expands default selector to one case per matching mutator", () => {
         const cases = expandCases(fakeSpec(), registryWithSafeMutator());
@@ -125,6 +139,33 @@ describe("expandCases", () => {
         const cases = expandCases(spec, reg);
         expect(cases).toHaveLength(2);
         expect(cases.map((c) => c.mutator.name).sort()).toEqual(["m1", "m2"]);
+    });
+
+    it("includes response names so gated/impossible variants do not collide", () => {
+        const spec = fakeSpec({
+            matrix: {
+                subject: "captureproxy:capture-proxy",
+                select: [
+                    {
+                        changeClass: "gated",
+                        patterns: ["subject-gated-change"],
+                        response: "leave-blocked",
+                    },
+                    {
+                        changeClass: "gated",
+                        patterns: ["subject-gated-change"],
+                        response: "approve",
+                    },
+                ],
+            },
+        });
+
+        const cases = expandCases(spec, registryWithGatedMutator());
+
+        expect(cases.map((c) => c.caseName)).toEqual([
+            "captureproxy-capture-proxy-subject-gated-change-proxy-gated-toggle-leave-blocked",
+            "captureproxy-capture-proxy-subject-gated-change-proxy-gated-toggle-approve",
+        ]);
     });
 
     it("expands a poison-pill selector to an in-progress case", () => {

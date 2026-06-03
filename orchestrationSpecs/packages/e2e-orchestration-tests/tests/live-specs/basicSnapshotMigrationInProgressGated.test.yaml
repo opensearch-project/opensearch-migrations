@@ -12,6 +12,10 @@ matrix:
       patterns: [subject-gated-change]
       response: leave-blocked
       poisonPill: snapshotmigration-bad-target-auth
+    - changeClass: gated
+      patterns: [subject-gated-change]
+      response: approve
+      poisonPill: snapshotmigration-bad-target-auth
 
 lifecycle:
   setup: [create-basic-auth-secrets]

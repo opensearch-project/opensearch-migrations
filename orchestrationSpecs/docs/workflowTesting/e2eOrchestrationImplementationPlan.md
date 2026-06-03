@@ -109,17 +109,17 @@ Current branch status:
 - `[x]` `create-basic-auth-secrets` setup actor reads basic-auth secret names from the baseline config and creates workflow-managed credentials from per-secret env vars declared in the scenario spec before configure/submit.
 - `[x]` Generic phase-completion no longer treats `Pending` as terminal for topology components.
 - `[x]` A live noop spec exists at `packages/e2e-orchestration-tests/tests/live-specs/fullMigrationNoop.test.yaml`.
-- `[x]` Snapshots include an ordered event history for setup, configure, submit, approve, wait, observe, cleanup, and teardown.
+- `[x]` Snapshots include an ordered event history for setup, configure, submit, approve, reset, wait, observe, and teardown.
 - `[x]` Workflow CLI failures include stderr/stdout diagnostics in error snapshots.
-- `[x]` Each submitted run deletes and waits for the default `migration-workflow` before and after submit; failure to confirm baseline cleanup stops the noop run before it can collide.
+- `[x]` The runner no longer directly deletes `migration-workflow` between submissions; repeated submissions rely on the normal `workflow submit` replacement behavior a user would exercise.
 - `[ ]` Optional generated workflow-name override is deferred until the workflow CLI and test framework can prove that path without diverging from normal user behavior.
-- `[x]` Noop and safe pass/fail assertions are wired into runner snapshots; gated and impossible case-plan assertions are wired in unit tests, with live validation still pending.
+- `[x]` Noop, safe, gated leave-blocked, impossible leave-blocked, and poison-pill in-progress assertions are wired into runner snapshots and have at least one live-cluster validation path.
 - `[x]` Blocking checkpoint wait failures (`workflow-timeout`, `workflow-failed`, `phase-timeout`) now stop the case before the next plan step while preserving the failed run in the snapshot.
 - `[x]` Inner Argo workflow waits use a lightweight JSONPath status projection so large Argo workflow status payloads do not look like missing workflows or consume the full phase timeout.
 - `[x]` Mutation-gate checkpoints now use categorized workflow approval commands: structural gates use `workflow approve step`, gated changes use `workflow approve change`, and impossible retry gates use `workflow approve retry`.
 - `[x]` Approval-gate waits stop early with an actionable diagnostic when Argo already has failed nodes and the expected gate is still not available, instead of consuming the full phase timeout.
 - `[x]` State-controlled cases can submit a poison-baseline run, observe `subject-held`, then submit the restore plus the real mutation.
-- `[~]` Poison-pill support is unit-tested for config-value and basic-auth strategies; live DataSnapshot/SnapshotMigration poison-pill validation is still pending.
+- `[x]` Poison-pill support is unit-tested and live-validated for config-value and basic-auth strategies.
 
 Get a real cluster-backed test running as early as possible, even if it covers only one safe/noop path and uses hardcoded scenario data. This is intentionally a vertical slice from the design document's "How A Test Case Runs" section, not the full framework.
 
@@ -238,7 +238,7 @@ Inputs:
 - `ObservedSnapshot`
 - `ComponentTopology`
 - `subject`
-- `changeClass`
+- effective change class (`safe`, `gated`, or `impossible`)
 - `checkpoint`
 
 Behavior:
@@ -272,7 +272,7 @@ Current branch status:
 - `[x]` Matrix expansion and mutator registry scaffolding exist.
 - `[x]` CLI runs expanded cases by default.
 - `[x]` Noop-only mode is explicit opt-in via `--noop-only`.
-- `[x]` Case-plan steps can now include multiple checkpoints and response actions before workflow cleanup.
+- `[x]` Case-plan steps can now include multiple checkpoints and response actions within the same submitted workflow.
 - `[~]` Live CRD checksum/fingerprint extraction reads `status.configChecksum` with an annotation fallback; Argo cross-checking is still pending.
 - `[~]` Argo workflow/node execution status is captured on each checkpoint, and missing Argo evidence is diagnostic-only; node execution is not yet correlated into per-component behavior.
 - `[x]` Configure events record a SHA-256 and byte length for the submitted config so snapshots can prove the runner sent different baseline vs mutated YAML.
@@ -326,7 +326,7 @@ Exit criteria:
 
 - `[x]` CLI expands and runs all selected safe cases by default.
 - `[x]` `--noop-only` or equivalent preserves the current noop harness as an opt-in developer mode.
-- `[~]` One safe proxy or replay spec runs end-to-end locally with the corrected materiality oracle; warm/pre-existing full-flow runs reached snapshot writing with zero oracle violations, but cold full-flow validation is currently blocked by SUT/live workflow progress.
+- `[x]` One safe proxy spec runs end-to-end on a clean local cluster with the corrected materiality oracle and zero oracle violations.
 - `[x]` Snapshot is written per expanded case.
 - `[x]` `assertLogic` is the pass/fail oracle, not a direct snapshot comparison.
 - `[~]` CRD checksum/fingerprint is captured when available; Argo node execution evidence is captured and missing-Argo cases are diagnostic-only, but node execution is not yet correlated to components.
@@ -340,6 +340,11 @@ Latest live validation note:
 - 2026-05-20 clean-cluster rerun used `kind-ma-workflow-e2e-default` with image tag `workflow-tests-20260520-default` and `basicSnapshotNoop.test.yaml --noop-only`. Baseline completed in 4m44s, noop-pre completed in 39.857s, both Argo workflows reported `Succeeded`, DataSnapshot and SnapshotMigration reached `Completed`, and the case passed with zero diagnostics and zero violations. Snapshot output: `/tmp/e2e-orchestration-snapshots-ma-workflow-e2e-default-basic-noop-20260520/datasnapshot-source-snap1-noop.json`.
 - 2026-05-20 safe-flow run used `kind-ma-workflow-safe` and `fullMigrationProxySafe.test.yaml`. The four-run safe sequence completed and the summary snapshot passed with zero diagnostics and zero violations. Snapshot output: `/tmp/e2e-orchestration-snapshots-ma-workflow-safe-full-proxy-safe-20260520/captureproxy-capture-proxy-subject-change-proxy-numThreads.json`.
 - 2026-05-20 impossible-flow run used `kind-ma-workflow-impossible` with image tag `workflow-tests-20260520-impossible` and `basicSnapshotImpossible.test.yaml`. Baseline completed in 278.425s and noop-pre completed in 37.688s. The mutated run submitted `documentBackfillConfig.maxConnections: 5`; `upsertsnapshotmigrationresource` failed with the expected VAP immutable-field denial against the completed `SnapshotMigration`, but `workflow approve retry --list` still reported `No gates available` while Argo stayed `Running` at `3/4`. Treat this as the current SUT/workflow retry-gate blocker before impossible `leave-blocked` can pass live. Evidence was saved to `/tmp/e2e-orchestration-evidence-ma-workflow-impossible-20260520/`.
+- 2026-05-21 clean-cluster serial validation used `kind-e2e-tests-1` and image tag `latest-workflow-tests`. The following focused specs passed with zero violations: `basicSnapshotNoop.test.yaml --noop-only`, `basicSnapshotDataSnapshotInProgress.test.yaml`, `basicSnapshotMigrationInProgressGated.test.yaml` with `response: leave-blocked`, `basicSnapshotImpossible.test.yaml` with `response: leave-blocked`, and `fullMigrationProxySafe.test.yaml`. Snapshot outputs: `/tmp/e2e-orchestration-e2e-tests-1-basic-noop-fresh-20260521154952`, `/tmp/e2e-orchestration-e2e-tests-1-datasnapshot-inprogress-20260521183713`, `/tmp/e2e-orchestration-e2e-tests-1-snapshotmigration-gated-20260521184734`, `/tmp/e2e-orchestration-e2e-tests-1-basic-impossible-20260521185245`, and `/tmp/e2e-orchestration-e2e-tests-1-full-proxy-safe-20260521185908`.
+- 2026-05-21/22 clean-cluster validation used recreated `kind-e2e-tests-2` and image tag `latest-workflow-tests`. `basicSnapshotMigrationInProgressGated.test.yaml --case snapshotmigration-source-target-snap1-migration-0-subject-gated-change-snapshotMigration-maxConnections-gated-approve-in-progress-snapshotmigration-bad-target-auth` passed, proving the gated `approve` response through `before-approval`, `after-approval`, and `noop-post`. Snapshot output: `/tmp/e2e-orchestration-e2e-tests-2-gated-approve-20260521235626/`.
+- Terminal SnapshotMigration response cases are order-sensitive when run against a reused cluster. A prior gated approve run left the completed `SnapshotMigration` with `documentBackfillConfig.maxConnections: 5`; a later impossible baseline using the original config was denied by the lock-on-complete admission policy. For live validation, run impossible response cases from a fresh cluster or run the baseline-changing `reset-then-approve` case last.
+- 2026-05-22 impossible response validation on `kind-e2e-tests-2` proved `approve-only` and `reset-only` against the completed SnapshotMigration case. Snapshot outputs: `/tmp/e2e-orchestration-e2e-tests-2-impossible-approve-only-20260522001949/` and `/tmp/e2e-orchestration-e2e-tests-2-impossible-reset-only-20260522002643/`.
+- 2026-05-22 `reset-then-approve` remains blocked by current SUT/workflow semantics. The impossible mutation is rejected by admission policy before a retry gate becomes actionable; after `workflow reset`, the same Argo workflow does not retry the failed upsert, so approval cannot advance that workflow. Live nodes showed failed `upsertsnapshotmigrationresource` nodes with lock-on-complete/admission-policy messages while the workflow stayed `Running` at `3/4`; the run was stopped before timeout and did not write a snapshot.
 
 ### 7. Matrix Expander And Mutator Registry `[~]`
 
@@ -355,7 +360,8 @@ Current branch status:
 - `[x]` Gated/impossible response expansion exists at the matrix level; the live runner now has case-plan wiring for gated approve/leave-blocked and impossible leave-blocked/approve-only/reset-only/reset-then-approve.
 - `[x]` Matrix expansion now carries `subjectStateAtMutation`. Existing selectors expand to `completed`; selectors with a `poisonPill` expand to `in-progress`; selectors can request both states explicitly.
 - `[x]` Expanded in-progress case names include the poison pill to make completed vs in-progress coverage distinct on disk.
-- `[x]` Built-in mutators now include a DataSnapshot safe `maxSnapshotRateMbPerNode` change and a SnapshotMigration gated `maxConnections` change for in-progress state-control specs.
+- `[x]` Built-in mutators now include a DataSnapshot safe `maxSnapshotRateMbPerNode` change and SnapshotMigration `maxConnections` coverage. `maxConnections` is recorded as a gated field-level change; completed-subject impossible cases report the effective class as impossible because lock-on-complete seals the resource.
+- `[x]` Expanded gated/impossible case names include the response so multiple response variants from one spec do not overwrite each other.
 
 Expand cases with straightforward nested-loop code; it does not need a complex topology resolver.
 
@@ -384,7 +390,9 @@ Each mutator should declare:
 
 - `subjectKind` or `componentKind`.
 - `componentNamePattern`.
-- `changeClass`.
+- `fieldChangeClass` when it differs from the case behavior.
+- effective `changeClass` used for selector matching and assertion dispatch.
+- `effectiveChangeReason` when lifecycle state changes the raw field behavior, for example completed-subject lock-on-complete.
 - `dependencyPattern`.
 - `changedPaths`, using user-config paths.
 
@@ -394,7 +402,7 @@ Exit criteria:
 - `[x]` A spec with poison-pill state control expands in-progress cases and rejects unknown or wrong-subject poison pills.
 - `[x]` Mutated configs validate against `OVERALL_MIGRATION_CONFIG`.
 - `[x]` The CLI runner executes all expanded safe cases by default.
-- `[ ]` Optional exact-case selection exists only as a developer convenience, not as required behavior.
+- `[x]` Optional exact-case selection exists via `--case <expanded-case-name>` for focused live validation.
 
 ### 7a. Poison-Pill State Control And Coverage Overview `[~]`
 
@@ -404,9 +412,9 @@ Current branch status:
 - `[x]` `config-value` poison pills can write a poison value and restore value into the submitted workflow config.
 - `[x]` `basic-auth-credentials` poison pills use `workflow configure credentials create/update --stdin` through the same workflow-managed credential path as setup.
 - `[x]` In-progress case execution submits `poison-baseline`, waits for the subject to be observable but not completed, then submits `mutated` with the restore value and the real mutator applied.
-- `[x]` Each case snapshot records coverage metadata, and CLI runs write `coverage-summary.json` plus `coverage-summary.md`.
+- `[x]` Each case snapshot records coverage metadata, including field-level versus effective change class, and CLI runs write `coverage-summary.json` plus `coverage-summary.md`.
 - `[x]` Added checked-in live specs for DataSnapshot bad snapshot-repository endpoint and SnapshotMigration bad target-auth state control.
-- `[ ]` Validate both poison-pill strategies against a clean cluster and confirm the restore step resumes progress.
+- `[x]` Validate both poison-pill strategies against a clean cluster and confirm the restore step resumes progress.
 - `[ ]` Decide whether narrower long-term poison pills, such as target-index write blocks, should replace broad auth/source/repo blockers in stable suites.
 
 Implementation rule:
@@ -417,7 +425,7 @@ Exit criteria:
 
 - A DataSnapshot case can hold `datasnapshot:source-snap1` in-progress, mutate a selected field, apply the restore step, and report the observed subject phase before mutation.
 - A SnapshotMigration case can hold `snapshotmigration:source-target-snap1-migration-0` in-progress, mutate a selected field, apply the restore step, and report the observed subject phase before mutation.
-- `coverage-summary.md` is enough to see which subject/state/change-class combinations ran without opening the detail snapshots.
+- `coverage-summary.md` is enough to see which subject/state/field-class/effective-class combinations ran without opening the detail snapshots.
 
 ### 8. Transition Tree Generator `[ ]`
 
@@ -455,7 +463,7 @@ Exit criteria:
 
 - Generator output is deterministic across two runs.
 - Unit tests cover explicit `gated`, explicit `impossible`, and default `safe`.
-- A mutator whose declared `changeClass` disagrees with generated tree data fails at expansion time.
+- A mutator whose `fieldChangeClass` disagrees with generated tree data fails at expansion time. A different effective `changeClass` is allowed only when the case records an `effectiveChangeReason`, such as completed-subject lock-on-complete.
 
 ### 9. Phase Completion Predicate `[~]`
 
@@ -488,22 +496,22 @@ Current branch status:
 - `[x]` Pure `before-approval` and `after-approval` assertions exist.
 - `[x]` The case-plan executor can keep one workflow submission alive across checkpoint -> approve action -> checkpoint.
 - `[x]` Expanded non-safe cases dispatch to their own case-plan builders instead of the safe runner.
-- `[~]` Gated mutator metadata is supported through `mutator.approvalPattern`; no built-in gated mutator is registered yet.
+- `[x]` Gated mutator metadata is supported through `mutator.approvalPattern`, and a built-in SnapshotMigration gated mutator is registered.
 - `[x]` Live gated execution is wired into `runExpandedCase` and unit-tested for the approve response.
 - `[x]` The runner waits for `workflow approve change --list` before the `before-approval` checkpoint and sends `workflow approve change <pattern>` for the approve response.
 
-Implement `response: approve` and `response: leave-blocked` after safe flow is stable.
+Implement `response: approve` and `response: leave-blocked` after safe flow is stable. `leave-blocked` has passed live; `approve` still needs live validation.
 
-Use `ApprovalGate` CRD observation:
+Use workflow approval commands for actionable gates:
 
 - Identify mutation-triggered gates separately from structural gates.
-- Snapshot gate name and status phase.
-- Patch `status.phase = Approved` for approval responses.
+- Snapshot gate category and actionable command output.
+- Send approval through `workflow approve change <pattern>` instead of directly patching `ApprovalGate` resources.
 
 Exit criteria:
 
 - `[x]` `before-approval` and `after-approval` checkpoints are populated by the case-plan executor in unit tests.
-- `[ ]` `before-approval` and `after-approval` checkpoints are validated against real CRD observations.
+- `[x]` `before-approval` and `after-approval` checkpoints are validated against real CRD observations for the built-in SnapshotMigration gated mutator.
 - `leave-blocked` ends after verifying the gate is still pending/paused and writes a complete snapshot.
 - Gate-time validations use split observer/checker fixtures.
 
@@ -515,9 +523,11 @@ Current branch status:
 - `[x]` The case-plan executor can run reset actions between checkpoints.
 - `[x]` Expanded non-safe cases dispatch to their own case-plan builders instead of the safe runner.
 - `[x]` One impossible mutator and reset/approval metadata are defined for `SnapshotMigration/source-target-snap1-migration-0`.
-- `[x]` Live impossible execution is wired into `runExpandedCase` and unit-tested for `leave-blocked`; response operations for `approve-only`, `reset-only`, and `reset-then-approve` are also encoded in the case plan.
-- `[~]` Live impossible execution reached baseline and noop-pre on a clean cluster, then hit a SUT/workflow retry-gate blocker before `leave-blocked` could pass.
-- `[x]` The runner waits for `workflow approve retry --list` and annotates the subject observation with `gatePending`/`gateType` when the retry gate becomes actionable.
+- `[x]` Live impossible execution is wired into `runExpandedCase`; response operations for `leave-blocked`, `approve-only`, `reset-only`, and `reset-then-approve` are encoded in the case plan.
+- `[x]` Live impossible `leave-blocked`, `approve-only`, and `reset-only` executions have passed on clean-cluster paths.
+- `[x]` The runner can treat either an actionable retry approval command or a ValidatingAdmissionPolicy rejection as the expected blocked signal for the terminal completed-subject case.
+- `[x]` The runner treats `after-reset` as a non-terminal workflow checkpoint and synthesizes a missing reset subject as `Deleted` for the assertion contract.
+- `[x]` The runner waits for `workflow approve retry --list` and annotates the subject observation with `approvalGateActionable`/`approvalGateCategory` when the retry gate becomes actionable.
 - `[x]` Approval-gate waits now produce a blocking `approval-gate-workflow-error` diagnostic if Argo has failed nodes but the expected retry gate never becomes available.
 
 Implement only after reset behavior is understood per component kind.
@@ -539,8 +549,9 @@ For `approve-only` and `reset-only`, verify non-advancement by comparing a befor
 
 Exit criteria:
 
-- `[~]` All four response plans can be constructed by the runner; real-cluster validation is blocked by the retry-gate availability issue captured in the latest live validation note.
-- The AND condition is proven: approval alone does not advance, reset alone does not advance, reset plus approval does advance.
+- `[~]` All four response plans can be constructed by the runner; `leave-blocked`, `approve-only`, and `reset-only` have passed real-cluster validation.
+- `[ ]` `reset-then-approve` live validation is blocked until the SUT/workflow can retry the failed upsert after reset or expose a different supported command sequence for "reset plus approval".
+- The partial AND condition is proven: approval alone does not advance, and reset alone does not advance. Reset plus approval is not yet proven live because the current workflow does not retry after the admission-policy rejection.
 
 ### 12. Multi-Case Execution `[~]`
 

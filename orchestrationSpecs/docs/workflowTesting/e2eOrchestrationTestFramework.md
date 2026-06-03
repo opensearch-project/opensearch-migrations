@@ -76,8 +76,8 @@ Fixtures are TypeScript functions registered in the fixture registry. The framew
 
 | Kind | Shape | Purpose |
 |------|-------|---------|
-| **Mutator** | `config → config` | Transforms the baseline config to produce the variant under test. Tagged with `changeClass` and `dependencyPattern` so spec selectors can match them by those attributes without naming them explicitly. |
-| **Actor** | `context → ()` | Side effects: gate approval, resource deletion. Also used for lifecycle setup and teardown. |
+| **Mutator** | `config → config` | Transforms the baseline config to produce the variant under test. Tagged with an effective `changeClass` and `dependencyPattern` so spec selectors can match them by behavior without naming them explicitly. Mutators may also record a separate field-level class when lifecycle state changes the effective behavior. |
+| **Actor** | `context → ()` | Lifecycle side effects such as credential setup or fixture cleanup. Also used for lifecycle setup and teardown. |
 | **Observer** | `context → observation` | Reads state from the cluster and returns a structured result. |
 | **Checker** | `(observations, readCtx) → verdict` | Judges observations. Pure function, no cluster access. |
 | **Provider** | `() → state` | Produces initial state with no cluster context needed: seed data, generated configs. |
@@ -621,12 +621,26 @@ The `reset-then-approve` snapshot records the full recovery:
 
 ### What Changes: The Mutator
 
-Each mutator is registered with two required tags:
+Each mutator is registered with two required matching tags:
 
-- **`changeClass`** — what the migration framework does when it sees this config change: `safe` (apply in place), `gated` (pause for approval), `impossible` (block, must delete and recreate).
+- **`changeClass`** — the effective behavior this test case is selecting: `safe` (apply in place), `gated` (pause for approval), `impossible` (block, must reset/recreate before progressing).
 - **`dependencyPattern`** — where the change lands relative to the subject component: `subject-change`, `immediate-dependent-change`, `transitive-dependent-change`.
 
 A spec selector matches all mutators in the registry where both tags match. `{ changeClass: safe, patterns: [subject-change] }` finds every registered mutator tagged `safe` + `subject-change` for a proxy component — currently just `proxy-numThreads`, but any new mutator added with those tags would be picked up automatically in future runs.
+
+The selected `changeClass` is not always the raw schema field rule. Some fields have a field-level class that changes meaning once the subject reaches a terminal lifecycle state. For example, `SnapshotMigration.documentBackfillConfig.maxConnections` is a gated field while the `SnapshotMigration` is in progress, but a completed `SnapshotMigration` is sealed by lock-on-complete. A completed-subject case should report:
+
+```json
+{
+  "fieldChangeClass": "gated",
+  "effectiveChangeClass": "impossible",
+  "effectiveChangeReason": "completed-subject-lock-on-complete",
+  "subjectStateAtMutation": "completed",
+  "observedSubjectPhaseBeforeMutation": "Completed"
+}
+```
+
+This distinction keeps the double-entry check intact: generated transition-tree data can validate the field-level rule, while the scenario's subject state explains the effective behavior the test is exercising.
 
 ### What The Test Does: The Response
 
@@ -691,7 +705,13 @@ type FixtureName = string & { readonly brand: unique symbol };
 interface Mutator {
   kind: 'mutator';
   name: FixtureName;
-  tags: { changeClass: z.infer<typeof ChangeClass>; dependencyPattern: z.infer<typeof DependencyPattern>; componentPattern?: string };
+  tags: {
+    changeClass: z.infer<typeof ChangeClass>;          // effective class selected by the scenario
+    fieldChangeClass?: z.infer<typeof ChangeClass>;    // schema-level class before lifecycle state is applied
+    effectiveChangeReason?: string;
+    dependencyPattern: z.infer<typeof DependencyPattern>;
+    componentPattern?: string;
+  };
   apply(config: WorkflowConfig): WorkflowConfig;
 }
 
@@ -984,7 +1004,7 @@ Any behavioral difference between them is a bug.
 ## Constraints
 
 - One test case runs at a time.
-- The live runner submits through the default `migration-workflow` path while cases run one at a time, so automated validation exercises the same workflow CLI path users run manually. Generated workflow-name override is a later isolation feature, not part of the current baseline.
+- The live runner submits through the default `migration-workflow` path while cases run one at a time, so automated validation exercises the same workflow CLI path users run manually. The runner does not directly delete Argo workflow resources between submissions; replacement is left to the normal `workflow submit` behavior. Generated workflow-name override is a later isolation feature, not part of the current baseline.
 - Teardown is mandatory before a test case is marked complete.
 - Mutators are validated against `WorkflowConfigSchema` at expansion time — invalid configs are rejected before any cluster is touched.
 

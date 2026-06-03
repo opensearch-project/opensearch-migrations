@@ -15,7 +15,16 @@ import { ChangeClass, ComponentId, DependencyPattern } from "../types";
 
 export interface Mutator {
     name: string;
+    /**
+     * Field-level change class before lifecycle state is considered.
+     * For example, SnapshotMigration maxConnections is gated while the
+     * resource is still running, but becomes effectively impossible once
+     * lock-on-complete seals a Completed resource.
+     */
+    fieldChangeClass?: ChangeClass;
     changeClass: ChangeClass;
+    /** Human-readable reason when changeClass differs from fieldChangeClass. */
+    effectiveChangeReason?: string;
     dependencyPattern: DependencyPattern;
     /** The component this mutation targets. */
     subject: ComponentId;
@@ -125,22 +134,24 @@ export function proxyNumThreadsMutator(): Mutator {
 }
 
 /**
- * snapshotMigrationMaxConnectionsMutator — minimal impossible mutator
- * for the reliable basic snapshot workflow.
+ * snapshotMigrationMaxConnectionsMutator — completed-subject
+ * lock-on-complete mutator for the reliable basic snapshot workflow.
  *
  * Mutates
  * `snapshotMigrationConfigs[0].perSnapshotConfig.snap1[0].documentBackfillConfig.maxConnections`.
- * The field is operationally simple, but SnapshotMigration is a
- * terminal resource; once it reaches `Completed`, lock-on-complete
- * semantics make any spec change impossible without reset. Unlike
- * DataSnapshot, SnapshotMigration is already wrapped by the workflow's
- * ApprovalGate retry loop, so it is the right first live impossible
- * target for this test framework.
+ * The field-level rule is gated. When the SnapshotMigration has already
+ * reached `Completed`, lock-on-complete seals the resource and makes
+ * the effective change impossible without reset. Unlike DataSnapshot,
+ * SnapshotMigration is already wrapped by the workflow's ApprovalGate
+ * retry loop, so it is the right first live completed-subject target
+ * for this test framework.
  */
 export function snapshotMigrationMaxConnectionsMutator(): Mutator {
     return snapshotMigrationMaxConnectionsBaseMutator({
         name: "snapshotMigration-maxConnections",
+        fieldChangeClass: "gated",
         changeClass: "impossible",
+        effectiveChangeReason: "completed-subject-lock-on-complete",
         dependencyPattern: "subject-impossible-change",
     });
 }
@@ -154,6 +165,7 @@ export function snapshotMigrationMaxConnectionsMutator(): Mutator {
 export function snapshotMigrationMaxConnectionsGatedMutator(): Mutator {
     return snapshotMigrationMaxConnectionsBaseMutator({
         name: "snapshotMigration-maxConnections-gated",
+        fieldChangeClass: "gated",
         changeClass: "gated",
         dependencyPattern: "subject-gated-change",
     });
@@ -161,12 +173,16 @@ export function snapshotMigrationMaxConnectionsGatedMutator(): Mutator {
 
 function snapshotMigrationMaxConnectionsBaseMutator(opts: {
     name: string;
+    fieldChangeClass?: ChangeClass;
     changeClass: ChangeClass;
+    effectiveChangeReason?: string;
     dependencyPattern: DependencyPattern;
 }): Mutator {
     return {
         name: opts.name,
+        fieldChangeClass: opts.fieldChangeClass,
         changeClass: opts.changeClass,
+        effectiveChangeReason: opts.effectiveChangeReason,
         dependencyPattern: opts.dependencyPattern,
         subject: "snapshotmigration:source-target-snap1-migration-0" as ComponentId,
         expectedRerunComponents: [

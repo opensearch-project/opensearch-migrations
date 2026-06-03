@@ -76,12 +76,16 @@ export function expandCases(
                     if (subjectStateAtMutation === "in-progress") {
                         validatePoisonPillSelection(spec, sel, subject);
                     }
+                    const responseSuffix =
+                        sel.response === undefined
+                            ? ""
+                            : `-${sanitizeCaseNameToken(sel.response)}`;
                     const stateSuffix =
                         subjectStateAtMutation === "completed"
                             ? ""
                             : `-${subjectStateAtMutation}-${sanitizeCaseNameToken(sel.poisonPill!)}`;
                     const caseName =
-                        `${mutator.subject.replace(/:/g, "-")}-${pattern}-${mutator.name}${stateSuffix}`;
+                        `${mutator.subject.replace(/:/g, "-")}-${pattern}-${mutator.name}${responseSuffix}${stateSuffix}`;
                     cases.push({
                         caseName,
                         subject,

@@ -144,28 +144,12 @@ describe("runNoopCase — basic flow", () => {
         }
     });
 
-    it("deletes the default workflow resource before and after each run", async () => {
+    it("does not directly delete the default workflow resource between submissions", async () => {
         const { deps, k8sCalls, tmpDir } = makeRunnerTestDeps();
         try {
             await runNoopCase(deps);
             const deletes = k8sCalls.filter((c) => c.args[0] === "delete");
-            expect(deletes.map((c) => c.args.slice(0, 3))).toEqual([
-                ["delete", "workflows.argoproj.io", "migration-workflow"],
-                ["delete", "workflows.argoproj.io", "migration-workflow"],
-                ["delete", "workflows.argoproj.io", "migration-workflow"],
-                ["delete", "workflows.argoproj.io", "migration-workflow"],
-            ]);
-            for (const call of deletes) {
-                expect(call.args).toEqual(
-                    expect.arrayContaining([
-                        "-n",
-                        "ma",
-                        "--ignore-not-found",
-                        "--wait=true",
-                        "--timeout=60s",
-                    ]),
-                );
-            }
+            expect(deletes).toEqual([]);
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }
@@ -444,7 +428,9 @@ describe("runNoopCase — basic flow", () => {
         }
     });
 
-    it("treats admission-policy rejection as the blocked signal for retry-gated impossible changes", async () => {
+    it.each(["on-blocked", "after-approve-without-reset"] as const)(
+        "treats admission-policy rejection as the blocked signal for retry-gated impossible changes at %s",
+        async (checkpoint) => {
         const { deps, tmpDir, baselinePath } = makeRunnerTestDeps();
         let now = 0;
         deps.clock = {
@@ -505,7 +491,7 @@ describe("runNoopCase — basic flow", () => {
                         operations: [
                             {
                                 kind: "checkpoint",
-                                checkpoint: "on-blocked",
+                                checkpoint,
                                 subject: COMPONENTS[0],
                                 approvalGate: {
                                     category: "retry",
@@ -803,7 +789,7 @@ describe("runNoopCase — error paths", () => {
         }
     });
 
-    it("still deletes workflow resources when a post-submit command fails", async () => {
+    it("leaves workflow resources in place when a post-submit command fails", async () => {
         const { deps, k8sCalls, tmpDir } = makeRunnerTestDeps();
         (deps.workflowCli as unknown as { approveStep: () => never }).approveStep =
             () => {
@@ -820,30 +806,21 @@ describe("runNoopCase — error paths", () => {
             const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
             expect(snapshot.outcome).toBe("error");
             const deletes = k8sCalls.filter((c) => c.args[0] === "delete");
-            expect(deletes.map((c) => c.args.slice(0, 3))).toEqual([
-                ["delete", "workflows.argoproj.io", "migration-workflow"],
-                ["delete", "workflows.argoproj.io", "migration-workflow"],
-            ]);
+            expect(deletes).toEqual([]);
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }
     });
 
-    it("stops before noop-pre if baseline workflow cleanup fails", async () => {
+    it("does not let kubectl workflow deletion behavior affect case progress", async () => {
         const { deps, calls, tmpDir } = makeRunnerTestDeps();
-        let innerWorkflowDeletes = 0;
         const k8sClient = new K8sClient({
             namespace: "ma",
             runner: (args) => {
-                const deletingInnerWorkflow =
-                    args[0] === "delete" && args[2] === "migration-workflow";
-                if (deletingInnerWorkflow) innerWorkflowDeletes += 1;
-                const failPostSubmitInnerDelete =
-                    deletingInnerWorkflow && innerWorkflowDeletes > 1;
                 return {
                     stdout: "",
-                    stderr: failPostSubmitInnerDelete ? "delete timed out" : "",
-                    exitCode: failPostSubmitInnerDelete ? 1 : 0,
+                    stderr: args[0] === "delete" ? "delete should not be called" : "",
+                    exitCode: args[0] === "delete" ? 1 : 0,
                 };
             },
         });
@@ -852,10 +829,9 @@ describe("runNoopCase — error paths", () => {
         try {
             const outPath = await runNoopCase(deps);
             const snapshot: CaseSnapshot = readDetailSnapshot(outPath);
-            expect(snapshot.outcome).toBe("error");
-            expect(snapshot.diagnostics.join("\n")).toMatch(/workflow cleanup failed for baseline/);
-            expect(calls.filter((c) => c.args[0] === "submit")).toHaveLength(1);
-            expect(snapshot.runs["noop-pre"]).toBeUndefined();
+            expect(snapshot.outcome).toBe("passed");
+            expect(calls.filter((c) => c.args[0] === "submit")).toHaveLength(2);
+            expect(snapshot.runs["noop-pre"]).toBeDefined();
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }
@@ -1034,12 +1010,7 @@ describe("runWorkflowCasePlan — multi-checkpoint run steps", () => {
             ]);
 
             const deletes = k8sCalls.filter((c) => c.args[0] === "delete");
-            expect(deletes.map((c) => c.args.slice(0, 3))).toEqual([
-                ["delete", "workflows.argoproj.io", "migration-workflow"],
-                ["delete", "workflows.argoproj.io", "migration-workflow"],
-                ["delete", "workflows.argoproj.io", "migration-workflow"],
-                ["delete", "workflows.argoproj.io", "migration-workflow"],
-            ]);
+            expect(deletes).toEqual([]);
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }

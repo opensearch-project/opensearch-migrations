@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { runSafeCase, runExpandedCases, runStateControlledCase, LiveRunnerDeps } from "../src/e2e-run";
+import { runSafeCase, runExpandedCases, runStateControlledCase, runImpossibleCase, LiveRunnerDeps } from "../src/e2e-run";
 import { buildTopology } from "../src/componentTopology";
 import { WorkflowCli } from "../src/workflowCli";
 import { K8sClient } from "../src/k8sClient";
@@ -507,6 +507,53 @@ describe("runExpandedCases", () => {
         }
     });
 
+    it("can run one exact expanded case from a larger matrix", async () => {
+        const { deps, tmpDir } = makeRunnerTestDeps();
+        try {
+            const { MutatorRegistry } = await import("../src/fixtures/mutators");
+
+            const secondMutator: Mutator = {
+                ...safeMutator(),
+                name: "proxy-otherKnob",
+                changedPaths: ["traffic.proxies.capture-proxy.proxyConfig.otherKnob"],
+            };
+
+            const registry = new MutatorRegistry();
+            registry.register(safeMutator());
+            registry.register(secondMutator);
+
+            const paths = await runExpandedCases(deps, registry, {
+                caseName:
+                    "captureproxy-capture-proxy-subject-change-proxy-otherKnob",
+            });
+
+            expect(paths).toHaveLength(1);
+            const snap = readDetailSnapshot(paths[0]);
+            expect(snap.case).toBe(
+                "captureproxy-capture-proxy-subject-change-proxy-otherKnob",
+            );
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it("lists expanded case names when exact case selection misses", async () => {
+        const { deps, tmpDir } = makeRunnerTestDeps();
+        try {
+            const { MutatorRegistry } = await import("../src/fixtures/mutators");
+            const registry = new MutatorRegistry();
+            registry.register(safeMutator());
+
+            await expect(runExpandedCases(deps, registry, {
+                caseName: "does-not-exist",
+            })).rejects.toThrow(
+                /Available cases:\n  captureproxy-capture-proxy-subject-change-proxy-numThreads/,
+            );
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
     it("runs a gated approve case through before-approval and after-approval checkpoints", async () => {
         const { deps, calls, tmpDir } = makeRunnerTestDeps({
             observationFactory: (n) => {
@@ -642,6 +689,73 @@ describe("runExpandedCases", () => {
                 "submit",
                 "approve",
             ]);
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    });
+
+    it("uses change approval after reset in reset-then-approve impossible cases", async () => {
+        const { deps, calls, tmpDir } = makeRunnerTestDeps({
+            observationFactory: (n) => {
+                const components: Record<ComponentId, ObservedComponent> = {};
+                for (const c of ALL) {
+                    if (c === SNAPMIG && n >= 7 && n < 9) {
+                        continue;
+                    }
+                    components[c] = {
+                        componentId: c,
+                        phase: n >= 5 && n < 7 && c === SNAPMIG ? "Blocked" : "Ready",
+                        configChecksum: n >= 9 && c === SNAPMIG
+                            ? `mutated-cs-${c}`
+                            : `baseline-cs-${c}`,
+                        uid: n >= 9 && c === SNAPMIG ? `mutated-uid-${c}` : `uid-${c}`,
+                    };
+                }
+                return components;
+            },
+        });
+
+        const impossibleMutator: Mutator = {
+            ...safeMutator(),
+            name: "snapshotMigration-maxConnections",
+            changeClass: "impossible",
+            dependencyPattern: "subject-impossible-change",
+            subject: SNAPMIG,
+            expectedRerunComponents: [SNAPMIG],
+            changedPaths: [
+                "snapshotMigrationConfigs.0.perSnapshotConfig.snap1.0.documentBackfillConfig.maxConnections",
+            ],
+            approvalPattern: "snapshotmigration.source-target-snap1-migration-0",
+            reset: {
+                path: "source-target-snap1-migration-0",
+                cascade: true,
+            },
+        };
+
+        try {
+            const outPath = await runImpossibleCase(deps, {
+                caseName:
+                    "snapshotmigration-source-target-snap1-migration-0-subject-impossible-change-snapshotMigration-maxConnections-reset-then-approve",
+                subject: SNAPMIG,
+                mutator: impossibleMutator,
+                expectedRerunComponents: [SNAPMIG],
+                changedPaths: impossibleMutator.changedPaths,
+                response: "reset-then-approve",
+                subjectStateAtMutation: "completed",
+            });
+            const snap = readDetailSnapshot(outPath);
+
+            expect(snap.outcome).toBe("passed");
+            expect(snap.runs["mutated"].checkpoints.map((cp) => cp.checkpoint)).toEqual([
+                "on-blocked",
+                "after-reset",
+                "after-approve",
+            ]);
+            expect(calls.filter((c) => c.args[0] === "approve").map((c) => c.args))
+                .toEqual([
+                    ["approve", "retry", "--list", "--namespace", "ma"],
+                    ["approve", "change", "snapshotmigration.source-target-snap1-migration-0", "--namespace", "ma"],
+                ]);
         } finally {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }

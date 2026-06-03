@@ -5,7 +5,7 @@
  * A case plan is an ordered list of workflow submissions. Each step
  * supplies the config to submit and the checkpoint assertion to run
  * after the workflow settles. The executor owns common lifecycle
- * concerns: setup actors, workflow cleanup, submit/approve/wait,
+ * concerns: setup actors, submit/approve/wait,
  * behavior derivation, violation surfacing, teardown actors, and
  * snapshot writing.
  */
@@ -142,12 +142,6 @@ export interface LiveRunnerDeps {
      * phaseCompletionTimeoutSeconds budget still applies.
      */
     innerWorkflowMissingGraceSeconds?: number;
-    /**
-     * Optional pause after deleting the fixed-name Argo workflow and
-     * before submitting the next run. Live clusters can otherwise race
-     * the Argo controller when the same workflow name is reused quickly.
-     */
-    workflowCleanupSettleMs?: number;
     /** Optional live progress sink for CLI runs. Unit tests leave this unset. */
     progress?: (message: string) => void;
 }
@@ -478,7 +472,7 @@ export async function runImpossibleCase(deps: LiveRunnerDeps, expandedCase: Expa
                 {
                     kind: "approve",
                     pattern: approvalPattern!,
-                    category: "retry",
+                    category: "change",
                 },
                 {
                     kind: "checkpoint",
@@ -705,7 +699,7 @@ function mutationOperationsForStateControlledCase(
             {
                 kind: "approve",
                 pattern: approvalPattern!,
-                category: "retry",
+                category: "change",
             },
             {
                 kind: "checkpoint",
@@ -740,10 +734,14 @@ function coverageForExpandedCase(
         (expandedCase.poisonPillName
             ? resolvePoisonPill(deps.spec, expandedCase.poisonPillName, expandedCase.subject)
             : undefined);
+    const fieldChangeClass = expandedCase.mutator.fieldChangeClass ?? expandedCase.mutator.changeClass;
     return {
         subject: expandedCase.subject,
         subjectStateAtMutation: expandedCase.subjectStateAtMutation,
+        fieldChangeClass,
         declaredChangeClass: expandedCase.mutator.changeClass,
+        effectiveChangeClass: expandedCase.mutator.changeClass,
+        effectiveChangeReason: expandedCase.mutator.effectiveChangeReason,
         dependencyPattern: expandedCase.mutator.dependencyPattern,
         response: expandedCase.response,
         mutatorName: expandedCase.mutator.name,
@@ -1040,196 +1038,100 @@ async function runSubmittedWorkflow(args: {
         pendingStateControlRestores,
     } = args;
     const checkpoints: RunCheckpoint[] = [];
-    let attemptedSubmit = false;
-    let primaryError: unknown;
-    let cleanupFailed = false;
-
-    try {
-        progress(deps, `[${workflowName}] cleanup-before-submit`);
-        const preSubmitCleanupOk = cleanupWorkflowResources({
+    if (stateControl) {
+        progress(
             deps,
+            `[${workflowName}] ${stateControl.mode} poison pill ${stateControl.poisonPillName}`,
+        );
+        const pill = runStateControlOperation({
+            deps,
+            stateControl,
             runName,
-            workflowName,
-            deleteSubmittedWorkflow: false,
-            diagnostics,
             events,
             clock,
         });
-        if (!preSubmitCleanupOk) {
-            throw new Error(`pre-submit workflow cleanup failed for ${runName}`);
+        if (stateControl.mode === "poison") {
+            pendingStateControlRestores.set(pill.name, pill);
+        } else {
+            pendingStateControlRestores.delete(pill.name);
         }
-        const cleanupSettleMs = deps.workflowCleanupSettleMs ?? 0;
-        if (cleanupSettleMs > 0) {
-            progress(
-                deps,
-                `[${workflowName}] settle after workflow cleanup for ${cleanupSettleMs}ms`,
-            );
-            events.push(event(clock, runName, "settle-after-workflow-cleanup", "ok", {
-                message:
-                    `waiting ${cleanupSettleMs}ms after deleting ${INNER_MIGRATION_WORKFLOW_NAME} ` +
-                    "before reusing the fixed workflow name",
-            }));
-            await clock.sleep(cleanupSettleMs);
-        }
-        if (stateControl) {
-            progress(
-                deps,
-                `[${workflowName}] ${stateControl.mode} poison pill ${stateControl.poisonPillName}`,
-            );
-            const pill = runStateControlOperation({
-                deps,
-                stateControl,
-                runName,
-                events,
-                clock,
-            });
-            if (stateControl.mode === "poison") {
-                pendingStateControlRestores.set(pill.name, pill);
-            } else {
-                pendingStateControlRestores.delete(pill.name);
-            }
-        }
-        progress(deps, `[${workflowName}] configure`);
-        workflowEvent(
-            events,
-            clock,
-            runName,
-            "configure",
-            "workflow configure edit --stdin",
-            () => deps.workflowCli.configureEditStdin(configYaml),
-            {
-                configSha256: sha256(configYaml),
-                configBytes: Buffer.byteLength(configYaml, "utf8"),
-            },
-        );
-        attemptedSubmit = true;
-        progress(deps, `[${workflowName}] submit`);
-        workflowEvent(
-            events,
-            clock,
-            runName,
-            "submit",
-            `workflow submit --namespace ${deps.namespace}`,
-            () => deps.workflowCli.submit({ wait: false }),
-        );
-        for (const gate of deps.spec.approvalGates) {
-            progress(deps, `[${workflowName}] approve structural gate ${gate.approvePattern}`);
-            workflowEvent(
-                events,
-                clock,
-                runName,
-                "approve",
-                workflowApproveCommand("step", gate.approvePattern, deps.namespace),
-                () => deps.workflowCli.approveStep(gate.approvePattern),
-            );
-        }
-        for (const operation of operations) {
-            if (operation.kind === "checkpoint") {
-                progress(deps, `[${workflowName}] checkpoint ${operation.checkpoint}`);
-                await waitAndCheckpoint(
-                    deps,
-                    checkpoints,
-                    workflowName,
-                    operation.checkpoint,
-                    operation.subject,
-                    operation.waitMode,
-                    operation.expectedRerunComponents,
-                    operation.changedPaths,
-                    operation.approvalGate,
-                    priorComponents,
-                    diagnostics,
-                    events,
-                    clock,
-                );
-                continue;
-            }
-            if (operation.kind === "approve") {
-                progress(deps, `[${workflowName}] approve ${operation.pattern}`);
-                workflowEvent(
-                    events,
-                    clock,
-                    runName,
-                    operation.action ?? "approve-response",
-                    workflowApproveCommand(operation.category ?? "step", operation.pattern, deps.namespace),
-                    () => approveWorkflowGate(deps.workflowCli, operation),
-                );
-                continue;
-            }
-            progress(deps, `[${workflowName}] reset`);
-            workflowEvent(
-                events,
-                clock,
-                runName,
-                operation.action ?? "reset-response",
-                workflowResetCommand(operation.reset, deps.namespace),
-                () => deps.workflowCli.reset(operation.reset),
-            );
-        }
-    } catch (e) {
-        primaryError = e;
-    } finally {
-        progress(deps, `[${workflowName}] cleanup-after-submit`);
-        cleanupFailed = !cleanupWorkflowResources({
-            deps,
-            runName,
-            workflowName,
-            deleteSubmittedWorkflow: attemptedSubmit,
-            diagnostics,
-            events,
-            clock,
-        });
     }
-
-    if (primaryError) throw primaryError;
-    if (cleanupFailed) {
-        throw new Error(`workflow cleanup failed for ${runName}`);
-    }
-    return { name: runName, checkpoints };
-}
-
-function cleanupWorkflowResources(args: {
-    deps: LiveRunnerDeps;
-    runName: string;
-    workflowName: string;
-    deleteSubmittedWorkflow: boolean;
-    diagnostics: string[];
-    events: CaseEvent[];
-    clock: typeof realClock;
-}): boolean {
-    const {
-        deps,
-        runName,
-        workflowName,
-        deleteSubmittedWorkflow,
-        diagnostics,
+    progress(deps, `[${workflowName}] configure`);
+    workflowEvent(
         events,
         clock,
-    } = args;
-    const targets = Array.from(new Set([
-        ...(deleteSubmittedWorkflow ? [workflowName] : []),
-        INNER_MIGRATION_WORKFLOW_NAME,
-    ]));
-    let ok = true;
-
-    for (const name of targets) {
-        try {
-            deps.k8sClient.deleteResourceAndWait(ARGO_WORKFLOW_RESOURCE, name);
-            events.push(event(clock, runName, "delete-workflow", "ok", {
-                command: `kubectl delete ${ARGO_WORKFLOW_RESOURCE} ${name} -n ${deps.namespace} --ignore-not-found --wait=true --timeout=60s`,
-            }));
-        } catch (e) {
-            ok = false;
-            const err = e as Partial<Error> & { stderr?: string };
-            const diagnostic = `cleanup failed for ${ARGO_WORKFLOW_RESOURCE}/${name}: ${err.message ?? String(e)}`;
-            diagnostics.push(diagnostic);
-            events.push(event(clock, runName, "delete-workflow", "error", {
-                command: `kubectl delete ${ARGO_WORKFLOW_RESOURCE} ${name} -n ${deps.namespace} --ignore-not-found --wait=true --timeout=60s`,
-                message: err.message,
-                stderr: err.stderr || undefined,
-            }));
-        }
+        runName,
+        "configure",
+        "workflow configure edit --stdin",
+        () => deps.workflowCli.configureEditStdin(configYaml),
+        {
+            configSha256: sha256(configYaml),
+            configBytes: Buffer.byteLength(configYaml, "utf8"),
+        },
+    );
+    progress(deps, `[${workflowName}] submit`);
+    workflowEvent(
+        events,
+        clock,
+        runName,
+        "submit",
+        `workflow submit --namespace ${deps.namespace}`,
+        () => deps.workflowCli.submit({ wait: false }),
+    );
+    for (const gate of deps.spec.approvalGates) {
+        progress(deps, `[${workflowName}] approve structural gate ${gate.approvePattern}`);
+        workflowEvent(
+            events,
+            clock,
+            runName,
+            "approve",
+            workflowApproveCommand("step", gate.approvePattern, deps.namespace),
+            () => deps.workflowCli.approveStep(gate.approvePattern),
+        );
     }
-    return ok;
+    for (const operation of operations) {
+        if (operation.kind === "checkpoint") {
+            progress(deps, `[${workflowName}] checkpoint ${operation.checkpoint}`);
+            await waitAndCheckpoint(
+                deps,
+                checkpoints,
+                workflowName,
+                operation.checkpoint,
+                operation.subject,
+                operation.waitMode,
+                operation.expectedRerunComponents,
+                operation.changedPaths,
+                operation.approvalGate,
+                priorComponents,
+                diagnostics,
+                events,
+                clock,
+            );
+            continue;
+        }
+        if (operation.kind === "approve") {
+            progress(deps, `[${workflowName}] approve ${operation.pattern}`);
+            workflowEvent(
+                events,
+                clock,
+                runName,
+                operation.action ?? "approve-response",
+                workflowApproveCommand(operation.category ?? "step", operation.pattern, deps.namespace),
+                () => approveWorkflowGate(deps.workflowCli, operation),
+            );
+            continue;
+        }
+        progress(deps, `[${workflowName}] reset`);
+        workflowEvent(
+            events,
+            clock,
+            runName,
+            operation.action ?? "reset-response",
+            workflowResetCommand(operation.reset, deps.namespace),
+            () => deps.workflowCli.reset(operation.reset),
+        );
+    }
+    return { name: runName, checkpoints };
 }
 
 function formatFatalDiagnostics(e: unknown): string[] {
@@ -1254,7 +1156,8 @@ function isExpectedAdmissionPolicyBlock(
     message: string,
 ): boolean {
     return (
-        checkpoint === "on-blocked" &&
+        (checkpoint === "on-blocked" ||
+            checkpoint === "after-approve-without-reset") &&
         category === "retry" &&
         /ValidatingAdmissionPolicy|is invalid/i.test(message) &&
         /snapshotmigration|upsertsnapshotmigrationresource/i.test(message)
@@ -1580,7 +1483,7 @@ async function waitAndCheckpoint(
             : deps.spec.phaseCompletionTimeoutSeconds,
         readObservations: async () => {
             const o = await deps.readObservations();
-            return Object.values(o.components).map((c) => ({
+            const observations = Object.values(o.components).map((c) => ({
                 componentId: c.componentId,
                 // If the workflow CLI says the subject's gate is
                 // actionable, the checkpoint has been reached even
@@ -1595,6 +1498,14 @@ async function waitAndCheckpoint(
                         ? "Blocked"
                         : c.phase,
             }));
+            if (
+                checkpoint === "after-reset" &&
+                subject &&
+                !o.components[subject]
+            ) {
+                observations.push({ componentId: subject, phase: "Deleted" });
+            }
+            return observations;
         },
         clock,
     });
@@ -1602,6 +1513,12 @@ async function waitAndCheckpoint(
     // Re-read final state after wait so the snapshot has the settled
     // phases.
     const finalObs = await deps.readObservations();
+    if (checkpoint === "after-reset" && subject && !finalObs.components[subject]) {
+        finalObs.components[subject] = {
+            componentId: subject,
+            phase: "Deleted",
+        };
+    }
     if ((approvalGateActionable || admissionPolicyBlocked) && subject) {
         const subjectObs = finalObs.components[subject];
         if (subjectObs) {
@@ -1969,6 +1886,12 @@ export interface RunFromSpecOptions {
      */
     noopOnly?: boolean;
     /**
+     * Optional exact expanded-case name to run. This is a developer
+     * convenience for live validation; it intentionally selects after
+     * matrix expansion so the same spec remains the source of truth.
+     */
+    caseName?: string;
+    /**
      * Optional per-invocation override for the spec's phase completion
      * timeout. This is useful for live smoke runs where the environment
      * may be unhealthy and the caller wants a quick diagnostic snapshot
@@ -2066,9 +1989,12 @@ export async function runFromSpec(opts: RunFromSpecOptions): Promise<string[]> {
         mutatorRegistry,
         validateMutatedConfig: true,
         waitForInnerWorkflowCompletion: true,
-        workflowCleanupSettleMs: 5000,
         progress: opts.progress,
     };
+
+    if (opts.noopOnly && opts.caseName) {
+        throw new Error("--case cannot be combined with --noop-only");
+    }
 
     // Noop-only mode is useful for bring-up and for debugging
     // phase-completion issues before touching mutation flow.
@@ -2076,7 +2002,14 @@ export async function runFromSpec(opts: RunFromSpecOptions): Promise<string[]> {
         return [await runNoopCase(sharedDeps)];
     }
 
-    return runExpandedCases(sharedDeps, mutatorRegistry);
+    return runExpandedCases(sharedDeps, mutatorRegistry, {
+        caseName: opts.caseName,
+    });
+}
+
+export interface RunExpandedCasesOptions {
+    /** Optional exact expanded-case name to run. */
+    caseName?: string;
 }
 
 /**
@@ -2089,13 +2022,30 @@ export async function runFromSpec(opts: RunFromSpecOptions): Promise<string[]> {
 export async function runExpandedCases(
     deps: LiveRunnerDeps,
     mutatorRegistry: MutatorRegistry,
+    opts: RunExpandedCasesOptions = {},
 ): Promise<string[]> {
-    const cases = expandCases(deps.spec, mutatorRegistry);
+    const cases = selectExpandedCases(
+        expandCases(deps.spec, mutatorRegistry),
+        opts.caseName,
+    );
     const out: string[] = [];
     for (const expanded of cases) {
         out.push(await runExpandedCase(deps, expanded));
     }
     return out;
+}
+
+function selectExpandedCases(
+    cases: ExpandedTestCase[],
+    caseName: string | undefined,
+): ExpandedTestCase[] {
+    if (!caseName) return cases;
+    const selected = cases.filter((c) => c.caseName === caseName);
+    if (selected.length > 0) return selected;
+    const available = cases.map((c) => c.caseName).sort().join("\n  ");
+    throw new Error(
+        `case '${caseName}' did not match any expanded case. Available cases:\n  ${available}`,
+    );
 }
 
 export async function runExpandedCase(
@@ -2188,7 +2138,7 @@ async function main(): Promise<void> {
     const args = process.argv.slice(2);
     if (args.length < 1) {
         console.error(
-            "Usage: e2e-run <spec-path> [--namespace ma] [--output-dir ./snapshots] [--local] [--noop-only] [--phase-timeout-seconds 600]",
+            "Usage: e2e-run <spec-path> [--namespace ma] [--output-dir ./snapshots] [--local] [--noop-only] [--case <expanded-case-name>] [--phase-timeout-seconds 600]",
         );
         process.exit(2);
     }
@@ -2197,6 +2147,7 @@ async function main(): Promise<void> {
     const outputDir = takeFlag(args, "--output-dir") ?? path.resolve("snapshots");
     const cliMode = args.includes("--local") ? "local" : "kubectl-exec";
     const noopOnly = args.includes("--noop-only");
+    const caseName = takeFlag(args, "--case");
 
     try {
         const phaseCompletionTimeoutSeconds = parsePositiveIntFlag(
@@ -2209,6 +2160,7 @@ async function main(): Promise<void> {
             outputDir,
             cliMode,
             noopOnly,
+            caseName,
             phaseCompletionTimeoutSeconds,
             progress: (message) => console.error(message),
         });
@@ -2519,6 +2471,7 @@ function shouldWaitForInnerWorkflow(checkpoint: Checkpoint): boolean {
         "before-approval",
         "on-blocked",
         "after-approve-without-reset",
+        "after-reset",
     ]).has(checkpoint);
 }
 

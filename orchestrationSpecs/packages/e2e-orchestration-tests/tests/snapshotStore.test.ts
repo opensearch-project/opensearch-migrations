@@ -145,7 +145,7 @@ describe("writeCaseSnapshot", () => {
                 {
                     at: "2025-01-01T00:00:04.500Z",
                     phase: "baseline",
-                    action: "delete-workflow",
+                    action: "submit",
                     result: "ok",
                 },
             ],

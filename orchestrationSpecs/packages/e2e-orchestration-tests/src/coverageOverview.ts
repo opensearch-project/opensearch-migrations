@@ -17,7 +17,10 @@ export interface CoverageCaseSummary {
     subject?: string;
     subjectStateAtMutation?: string;
     observedSubjectPhaseBeforeMutation?: string;
+    fieldChangeClass?: string;
     declaredChangeClass?: string;
+    effectiveChangeClass?: string;
+    effectiveChangeReason?: string;
     dependencyPattern?: string;
     response?: string;
     mutatorName?: string;
@@ -35,7 +38,10 @@ export interface CoverageGroupSummary {
     key: string;
     subject?: string;
     subjectStateAtMutation?: string;
+    fieldChangeClass?: string;
     declaredChangeClass?: string;
+    effectiveChangeClass?: string;
+    effectiveChangeReason?: string;
     dependencyPattern?: string;
     response?: string;
     poisonPill?: string;
@@ -66,7 +72,7 @@ export function buildCoverageOverview(
         const key = [
             c.subject ?? "(unknown-subject)",
             c.subjectStateAtMutation ?? "(unknown-state)",
-            c.declaredChangeClass ?? "(unknown-class)",
+            c.effectiveChangeClass ?? c.declaredChangeClass ?? "(unknown-class)",
             c.dependencyPattern ?? "(unknown-pattern)",
             c.response ?? "(no-response)",
             c.poisonPill ?? "(no-poison)",
@@ -75,7 +81,10 @@ export function buildCoverageOverview(
             key,
             subject: c.subject,
             subjectStateAtMutation: c.subjectStateAtMutation,
+            fieldChangeClass: c.fieldChangeClass,
             declaredChangeClass: c.declaredChangeClass,
+            effectiveChangeClass: c.effectiveChangeClass,
+            effectiveChangeReason: c.effectiveChangeReason,
             dependencyPattern: c.dependencyPattern,
             response: c.response,
             poisonPill: c.poisonPill,
@@ -131,7 +140,10 @@ function readCoverageCaseSummary(reportPath: string): CoverageCaseSummary {
         subject: coverage?.subject,
         subjectStateAtMutation: coverage?.subjectStateAtMutation,
         observedSubjectPhaseBeforeMutation: coverage?.observedSubjectPhaseBeforeMutation,
+        fieldChangeClass: coverage?.fieldChangeClass,
         declaredChangeClass: coverage?.declaredChangeClass,
+        effectiveChangeClass: coverage?.effectiveChangeClass,
+        effectiveChangeReason: coverage?.effectiveChangeReason,
         dependencyPattern: coverage?.dependencyPattern,
         response: coverage?.response ?? undefined,
         mutatorName: coverage?.mutatorName,
@@ -162,15 +174,17 @@ function renderCoverageMarkdown(overview: CoverageOverview): string {
         "",
         "## Groups",
         "",
-        "| Subject | State | Class | Pattern | Response | Poison pill | Cases | Outcomes | Violations | Diagnostics |",
-        "|---|---|---|---|---|---|---:|---|---:|---:|",
+        "| Subject | State | Field class | Effective class | Reason | Pattern | Response | Poison pill | Cases | Outcomes | Violations | Diagnostics |",
+        "|---|---|---|---|---|---|---|---|---:|---|---:|---:|",
     ];
 
     for (const g of overview.groups) {
         lines.push([
             cell(g.subject),
             cell(g.subjectStateAtMutation),
-            cell(g.declaredChangeClass),
+            cell(g.fieldChangeClass),
+            cell(g.effectiveChangeClass ?? g.declaredChangeClass),
+            cell(g.effectiveChangeReason),
             cell(g.dependencyPattern),
             cell(g.response),
             cell(g.poisonPill),
@@ -185,14 +199,16 @@ function renderCoverageMarkdown(overview: CoverageOverview): string {
         "",
         "## Cases",
         "",
-        "| Case | Outcome | Subject Phase Before Mutation | Poison | Violations | Diagnostics |",
-        "|---|---|---|---|---:|---:|",
+        "| Case | Outcome | Subject Phase Before Mutation | Effective Class | Reason | Poison | Violations | Diagnostics |",
+        "|---|---|---|---|---|---|---:|---:|",
     );
     for (const c of overview.cases) {
         lines.push([
             cell(c.case),
             cell(c.outcome),
             cell(c.observedSubjectPhaseBeforeMutation),
+            cell(c.effectiveChangeClass ?? c.declaredChangeClass),
+            cell(c.effectiveChangeReason),
             cell(c.poisonPill),
             String(c.violationCount),
             String(c.diagnosticCount),
