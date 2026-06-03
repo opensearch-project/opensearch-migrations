@@ -390,7 +390,14 @@ _mcp_norm_envvar() {
   local s="$1"
   # tr is one fork; doing this in pure bash via case-loop is bash 4+
   # (${var^^}) so we accept the fork.
-  printf '%s' "$s" | tr '[:lower:]/-.' '[:upper:]___'
+  #
+  # The non-alpha set is '/-.' — note `-` MUST be at the end of the
+  # set so GNU tr (Linux) doesn't interpret '/-.' as a range from '/'
+  # (0x2F) to '.' (0x2E), which IS reverse-collating and dies with
+  # "tr: range-endpoints of '/-.' are in reverse collating sequence
+  # order". macOS BSD tr is more lenient and accepts the buggy form,
+  # which is why this passed locally but blew up on Ubuntu CI.
+  printf '%s' "$s" | tr '[:lower:]/.-' '[:upper:]___'
 }
 
 # _mcp_register_for_agent <agent> <mcp_name>

@@ -21,6 +21,13 @@ setup() {
   # at the repo root.
   PROJECT_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
   export LIB_DIR="$PROJECT_ROOT/lib"
+
+  # Default: skip MCP registration so agent_setup tests don't have to
+  # care about uvx being on PATH. The CI runner installs uv globally
+  # but setup_isolated_home above repoints HOME to a tempdir where
+  # the install isn't visible. Tests that DO want to exercise MCP
+  # writers stub uvx and unset this in their own body.
+  export MIGRATE_SKIP_MCP=1
 }
 
 teardown() {
@@ -120,7 +127,13 @@ teardown() {
   _agent_ensure_uvx
 }
 
+# Each MCP-write test below unsets MIGRATE_SKIP_MCP (set by the file's
+# default setup so the agent_setup tests can run without uvx) and stubs
+# uvx so the registration code finds it on PATH. Linux CI has no uvx
+# inside the bats-isolated $HOME — the tests must bring their own.
+
 @test "mcp_install_from_manifest codex writes [mcp_servers.aws-mcp] to project config.toml" {
+  unset MIGRATE_SKIP_MCP
   mkstub uvx ''
   state_set AWS_REGION "us-west-2"
   state_save
@@ -132,6 +145,7 @@ teardown() {
 }
 
 @test "mcp_install_from_manifest codex is idempotent (no duplicate block)" {
+  unset MIGRATE_SKIP_MCP
   mkstub uvx ''
   state_set AWS_REGION "us-east-1"
   state_save
@@ -143,6 +157,7 @@ teardown() {
 }
 
 @test "mcp_install_from_manifest kiro writes settings/mcp.json" {
+  unset MIGRATE_SKIP_MCP
   mkstub uvx ''
   state_set AWS_REGION "eu-west-1"
   state_save
@@ -153,6 +168,7 @@ teardown() {
 }
 
 @test "mcp_install_from_manifest kiro is idempotent (file rewrite skipped)" {
+  unset MIGRATE_SKIP_MCP
   mkstub uvx ''
   state_set AWS_REGION "us-east-1"
   state_save
@@ -168,6 +184,7 @@ teardown() {
 }
 
 @test "mcp_install_from_manifest claude writes project-scope .mcp.json" {
+  unset MIGRATE_SKIP_MCP
   mkstub uvx ''
   state_set AWS_REGION "ap-southeast-1"
   state_save

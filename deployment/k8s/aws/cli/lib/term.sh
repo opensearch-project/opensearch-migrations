@@ -314,13 +314,30 @@ term_set_title() {
 
 # ---------- spinner glyph (no animator loop) -------------------------------
 
-# term_spinner_frame <tick> [<glyph_set>]
 # Echo one glyph from the braille spinner sequence. The animator loop
 # stays in ui.sh; this is the per-frame glyph picker so it can be tested
 # independently and shared with timeline.sh / dashboard.sh.
-__TERM_SPINNER='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+#
+# Spinner glyphs as a bash ARRAY rather than a single string. Array
+# indexing is locale-independent (each element is its own string),
+# whereas ${var:offset:1} on a multi-byte string yields one BYTE in C
+# locale and one CODEPOINT in UTF-8 locale — cycle math broke on the
+# Ubuntu CI runner where the default locale is POSIX/C.
+__TERM_SPINNER_GLYPHS=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+
+# term_spinner_frame <tick> [<glyph> ...]
+# When extra args are passed they form an inline glyph set, otherwise
+# the default braille spinner is used.
 term_spinner_frame() {
-  local tick="$1" set="${2:-$__TERM_SPINNER}"
-  local idx=$(( tick % ${#set} ))
-  printf '%s' "${set:$idx:1}"
+  local tick="$1"; shift
+  local glyphs=()
+  if (( $# > 0 )); then
+    glyphs=("$@")
+  else
+    glyphs=("${__TERM_SPINNER_GLYPHS[@]}")
+  fi
+  local n=${#glyphs[@]}
+  (( n == 0 )) && return 0
+  local idx=$(( tick % n ))
+  printf '%s' "${glyphs[$idx]}"
 }
