@@ -123,9 +123,59 @@ def _build_session(retries: int = 3, backoff_factor: int = 1) -> Session:
     return session
 
 
-def perform_request(url: str, payload: dict, headers: dict, retries: int = 3, backoff_factor: int = 1) -> Response:
-    session = _build_session(retries=retries, backoff_factor=backoff_factor)
-    return session.post(url, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
+# Status codes treated as transient when triggering the webhook. 403 and 404 are
+# observed Generic Webhook Trigger plugin flakes: under burst load the plugin's
+# token/job index briefly fails to match and returns 403 ("Did not find any jobs
+# with GenericTrigger configured!") with no useful body, then the next call
+# succeeds. urllib3's Retry would short-circuit on 403/404, so we wrap the trigger
+# request in an application-level retry instead.
+WEBHOOK_TRANSIENT_STATUSES = frozenset({403, 404, 408, 425, 429, 500, 502, 503, 504})
+
+
+def perform_request(
+    url: str,
+    payload: dict,
+    headers: dict,
+    retries: int = 5,
+    backoff_factor: float = 2.0,
+) -> Response:
+    """Trigger the webhook, retrying on connection errors and transient HTTP statuses.
+
+    The standard urllib3 Retry handles 5xx/429 transparently. We additionally
+    retry on 403/404 here, with explicit logs so the retry is visible in CI
+    output. After exhausting retries, the last response is returned so the
+    caller can surface it via response.raise_for_status().
+    """
+    session = _build_session(retries=2, backoff_factor=1)
+    last_response: Optional[Response] = None
+    for attempt in range(1, retries + 1):
+        try:
+            response = session.post(url, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
+        except requests.exceptions.RequestException as exc:
+            if attempt == retries:
+                raise
+            sleep_seconds = backoff_factor * (2 ** (attempt - 1))
+            logging.warning(
+                f"Webhook POST attempt {attempt}/{retries} raised {type(exc).__name__}: {exc}. "
+                f"Retrying in {sleep_seconds:.1f}s..."
+            )
+            time.sleep(sleep_seconds)
+            continue
+
+        last_response = response
+        if response.ok or response.status_code not in WEBHOOK_TRANSIENT_STATUSES:
+            return response
+        if attempt == retries:
+            return response
+        sleep_seconds = backoff_factor * (2 ** (attempt - 1))
+        logging.warning(
+            f"Webhook POST attempt {attempt}/{retries} returned "
+            f"{_summarize_response(response)}. Retrying in {sleep_seconds:.1f}s..."
+        )
+        time.sleep(sleep_seconds)
+
+    assert last_response is not None  # loop exits via return on the final attempt
+    return last_response
 
 
 def _summarize_response(response: Optional[Response], max_chars: int = 500) -> str:

@@ -35,11 +35,12 @@ def _make_response(status_code, json_value=None, text=None):
     return resp
 
 
+@patch('default_webhook_trigger.time.sleep')
 class DefaultWebhookTriggerTest(unittest.TestCase):
 
     @patch('requests.Session.post')
     @patch('requests.Session.get')
-    def test_successful_webhook_trigger(self, mock_session_get, mock_session_post):
+    def test_successful_webhook_trigger(self, mock_session_get, mock_session_post, _mock_sleep):
         mock_session_post.return_value = _make_response(200, {"jobs": {
             JENKINS_JOB_NAME: {"triggered": True, "url": JENKINS_QUEUE_URL}
         }})
@@ -65,7 +66,7 @@ class DefaultWebhookTriggerTest(unittest.TestCase):
 
     @patch('requests.Session.post')
     @patch('requests.Session.get')
-    def test_min_successful_webhook_trigger(self, mock_session_get, mock_session_post):
+    def test_min_successful_webhook_trigger(self, mock_session_get, mock_session_post, _mock_sleep):
         mock_session_post.return_value = _make_response(200, {"jobs": {
             JENKINS_JOB_NAME: {"triggered": True, "url": JENKINS_QUEUE_URL}
         }})
@@ -87,7 +88,7 @@ class DefaultWebhookTriggerTest(unittest.TestCase):
 
     @patch('requests.Session.post')
     @patch('requests.Session.get')
-    def test_single_job_param_successful_webhook_trigger(self, mock_session_get, mock_session_post):
+    def test_single_job_param_successful_webhook_trigger(self, mock_session_get, mock_session_post, _mock_sleep):
         mock_session_post.return_value = _make_response(200, {"jobs": {
             JENKINS_JOB_NAME: {"triggered": True, "url": JENKINS_QUEUE_URL}
         }})
@@ -110,7 +111,7 @@ class DefaultWebhookTriggerTest(unittest.TestCase):
 
     @patch('requests.Session.post')
     @patch('requests.Session.get')
-    def test_empty_job_param_successful_webhook_trigger(self, mock_session_get, mock_session_post):
+    def test_empty_job_param_successful_webhook_trigger(self, mock_session_get, mock_session_post, _mock_sleep):
         mock_session_post.return_value = _make_response(200, {"jobs": {
             JENKINS_JOB_NAME: {"triggered": True, "url": JENKINS_QUEUE_URL}
         }})
@@ -190,8 +191,9 @@ class WebhookUrlAuthTest(unittest.TestCase):
 class TriggerErrorReportingTest(unittest.TestCase):
     """Failed trigger requests must surface the Jenkins response body and not leak the token."""
 
+    @patch('default_webhook_trigger.time.sleep')
     @patch('requests.Session.post')
-    def test_403_response_logs_body_and_status(self, mock_session_post):
+    def test_403_response_logs_body_and_status(self, mock_session_post, _mock_sleep):
         mock_session_post.return_value = _make_response(
             403,
             text="Did not find any jobs with GenericTrigger configured!\nA token was supplied.\n",
@@ -202,7 +204,7 @@ class TriggerErrorReportingTest(unittest.TestCase):
                         '--jenkins_url', JENKINS_URL,
                         '--job_name', JENKINS_JOB_NAME]
         with unittest.mock.patch('sys.argv', command_args), \
-                self.assertLogs(level=logging.ERROR) as captured, \
+                self.assertLogs(level=logging.WARNING) as captured, \
                 self.assertRaises(requests.exceptions.HTTPError):
             default_webhook_trigger.main()
 
@@ -210,8 +212,9 @@ class TriggerErrorReportingTest(unittest.TestCase):
         self.assertIn("status=403", joined)
         self.assertIn("Did not find any jobs", joined)
 
+    @patch('default_webhook_trigger.time.sleep')
     @patch('requests.Session.post')
-    def test_failed_request_does_not_leak_token_in_url_log(self, mock_session_post):
+    def test_failed_request_does_not_leak_token_in_url_log(self, mock_session_post, _mock_sleep):
         mock_session_post.return_value = _make_response(403, text="forbidden")
 
         command_args = ['default_webhook_trigger',
@@ -219,7 +222,7 @@ class TriggerErrorReportingTest(unittest.TestCase):
                         '--jenkins_url', JENKINS_URL,
                         '--job_name', JENKINS_JOB_NAME]
         with unittest.mock.patch('sys.argv', command_args), \
-                self.assertLogs(level=logging.ERROR) as captured, \
+                self.assertLogs(level=logging.WARNING) as captured, \
                 self.assertRaises(requests.exceptions.HTTPError):
             default_webhook_trigger.main()
 
@@ -227,9 +230,11 @@ class TriggerErrorReportingTest(unittest.TestCase):
         self.assertNotIn(JENKINS_WEBHOOK_TOKEN, joined)
         self.assertIn("/generic-webhook-trigger/invoke", joined)
 
+    @patch('default_webhook_trigger.time.sleep')
     @patch('requests.Session.post')
-    def test_html_response_does_not_mask_status(self, mock_session_post):
+    def test_html_response_does_not_mask_status(self, mock_session_post, _mock_sleep):
         # Earlier behavior buried the real 401 under "Expecting value: line 1 column 1".
+        # 401 is not in WEBHOOK_TRANSIENT_STATUSES, so it fails fast (no retry).
         mock_session_post.return_value = _make_response(
             401,
             text="<html><body>401 Unauthorized</body></html>",
@@ -248,6 +253,103 @@ class TriggerErrorReportingTest(unittest.TestCase):
         self.assertIn("status=401", joined)
         # The old "Unable to parse trigger request response: Expecting value..." warning is gone.
         self.assertNotIn("Expecting value", joined)
+
+
+class WebhookRetryTest(unittest.TestCase):
+    """Transient 403 from the Generic Webhook Trigger plugin must be retried, not failed."""
+
+    @patch('default_webhook_trigger.time.sleep')
+    @patch('requests.Session.get')
+    @patch('requests.Session.post')
+    def test_403_then_success_recovers(self, mock_session_post, mock_session_get, _mock_sleep):
+        # First call: transient 403 (the Jenkins plugin flake).
+        # Second call: 200 with a triggered job — the action should NOT fail.
+        mock_session_post.side_effect = [
+            _make_response(403, text="Did not find any jobs with GenericTrigger configured!"),
+            _make_response(200, {"jobs": {
+                JENKINS_JOB_NAME: {"triggered": True, "url": JENKINS_QUEUE_URL}
+            }}),
+        ]
+        mock_session_get.side_effect = [
+            _make_response(200, {"executable": {"url": JENKINS_WORKFLOW_URL}}),
+            _make_response(200, {"building": False}),
+            _make_response(200, {"result": "SUCCESS"}),
+        ]
+
+        command_args = ['default_webhook_trigger',
+                        '--pipeline_token', JENKINS_WEBHOOK_TOKEN,
+                        '--jenkins_url', JENKINS_URL,
+                        '--job_name', JENKINS_JOB_NAME]
+        with unittest.mock.patch('sys.argv', command_args), \
+                self.assertLogs(level=logging.WARNING) as captured:
+            default_webhook_trigger.main()
+
+        self.assertEqual(mock_session_post.call_count, 2)
+        joined = "\n".join(captured.output)
+        # The first failed attempt should be visible in logs so the operator
+        # knows we retried, with attempt N/M context.
+        self.assertIn("attempt 1/", joined)
+        self.assertIn("status=403", joined)
+
+    @patch('default_webhook_trigger.time.sleep')
+    @patch('requests.Session.post')
+    def test_persistent_403_eventually_fails(self, mock_session_post, _mock_sleep):
+        # If 403 never goes away, the action should still fail (with the real error).
+        mock_session_post.return_value = _make_response(
+            403, text="Did not find any jobs with GenericTrigger configured!"
+        )
+
+        command_args = ['default_webhook_trigger',
+                        '--pipeline_token', JENKINS_WEBHOOK_TOKEN,
+                        '--jenkins_url', JENKINS_URL,
+                        '--job_name', JENKINS_JOB_NAME]
+        with unittest.mock.patch('sys.argv', command_args), \
+                self.assertLogs(level=logging.WARNING), \
+                self.assertRaises(requests.exceptions.HTTPError):
+            default_webhook_trigger.main()
+
+        # Default retry count is 5 — every attempt should hit the server.
+        self.assertEqual(mock_session_post.call_count, 5)
+
+    @patch('default_webhook_trigger.time.sleep')
+    @patch('requests.Session.post')
+    def test_401_does_not_retry(self, mock_session_post, _mock_sleep):
+        # 401 is real auth failure, not a plugin flake — should fail fast.
+        mock_session_post.return_value = _make_response(401, text="Unauthorized")
+
+        command_args = ['default_webhook_trigger',
+                        '--pipeline_token', JENKINS_WEBHOOK_TOKEN,
+                        '--jenkins_url', JENKINS_URL,
+                        '--job_name', JENKINS_JOB_NAME]
+        with unittest.mock.patch('sys.argv', command_args), \
+                self.assertLogs(level=logging.ERROR), \
+                self.assertRaises(requests.exceptions.HTTPError):
+            default_webhook_trigger.main()
+
+        # Single attempt, no retry.
+        self.assertEqual(mock_session_post.call_count, 1)
+
+    @patch('default_webhook_trigger.time.sleep')
+    @patch('requests.Session.post')
+    def test_connection_error_retries(self, mock_session_post, _mock_sleep):
+        # Network blip on attempt 1, success on attempt 2.
+        mock_session_post.side_effect = [
+            requests.exceptions.ConnectionError("Connection reset by peer"),
+            _make_response(200, {"jobs": {}}),
+        ]
+
+        config = JenkinsConfig(
+            jenkins_url=JENKINS_URL,
+            pipeline_token=JENKINS_WEBHOOK_TOKEN,
+            job_name=JENKINS_JOB_NAME,
+            job_params={},
+            job_timeout_minutes=10,
+        )
+        result = default_webhook_trigger.perform_request(
+            config.webhook_url, config.payload, config.auth_headers
+        )
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(mock_session_post.call_count, 2)
 
 
 class SummarizeResponseTest(unittest.TestCase):
