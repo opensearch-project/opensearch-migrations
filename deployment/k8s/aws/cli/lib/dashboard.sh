@@ -108,10 +108,14 @@ dash_clear() {
 dash_render() {
   local ns="$1" started="$2" header_override="${3:-}"
 
-  # SSH-disconnect / detached-tty guard. If we lost the tty mid-deploy,
-  # fall through silently rather than emitting ANSI to a closed fd until
-  # the kernel reaps us.
-  is_tty_alive || return 0
+  # NOTE: we previously gated the whole render on `is_tty_alive` ([[ -t 1 ]])
+  # to short-circuit on ssh disconnect. That check is wrong for two reasons:
+  #   1. The dashboard writes to stderr (fd 2), not stdout (fd 1).
+  #   2. `[[ -t … ]]` is also false for pipes/files (bats captures, CI
+  #      logs), where we DO want to render.
+  # SSH-disconnect / orphan-watcher protection is handled at the watcher
+  # level (helm_watch_pods + helm_watch_installer_logs poll parent_pid
+  # via `kill -0` and self-exit). dash_render itself just renders.
 
   # Pull state via indirect expansion. ${!name} reads the variable named
   # by $name — bash 3.2-safe, no eval, no quote-injection hazard.
