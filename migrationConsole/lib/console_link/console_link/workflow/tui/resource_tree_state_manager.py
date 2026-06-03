@@ -201,8 +201,8 @@ class ResourceTreeStateManager:
     @staticmethod
     def _remove_children(parent: TreeNode) -> None:
         """Remove all children from a node."""
-        for child in list(parent.children):
-            child.remove()
+        while parent.children:
+            parent.children[-1].remove()
 
     def _restore_collapse_state(self, parent: TreeNode, collapsed_ids: set) -> None:
         """Restore expanded state for children. Only collapse nodes that were previously collapsed."""

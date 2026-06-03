@@ -148,16 +148,21 @@ class WorkflowTreeApp(App):
             overlay_data_snapshot_creation_status(tree_nodes, self._namespace)
             filtered_tree = filter_tree_nodes(tree_nodes)
             steps = extract_workflow_steps_by_resource(filtered_tree)
-            for section in sections:
-                for group in section.groups:
-                    for resource in group.resources:
-                        if resource.name in steps:
-                            resource.workflow_progress = steps[resource.name]
-                        for child in resource.children:
-                            if child.name in steps:
-                                child.workflow_progress = steps[child.name]
+            self._assign_workflow_progress(sections, steps)
             mark_not_configured_groups(sections, filtered_tree)
         return sections
+
+    @staticmethod
+    def _assign_workflow_progress(sections, steps):
+        """Attach workflow step subtrees to matching resource nodes."""
+        for section in sections:
+            for group in section.groups:
+                for resource in group.resources:
+                    if resource.name in steps:
+                        resource.workflow_progress = steps[resource.name]
+                    for child in resource.children:
+                        if child.name in steps:
+                            child.workflow_progress = steps[child.name]
 
     def _handle_resource_data(self, sections, workflow_data: Dict, force_reload: bool = False) -> None:
         """Handle pre-built resource sections on the main thread."""
