@@ -64,6 +64,7 @@ class TestRunner:
                  registry_prefix: str = "", values_file: str = None, skip_install: bool = False,
                  speedup_factor: int = 20, observed_packet_timeout: int = 30,
                  transform_image_basic: str = "", transform_image_sequence: str = "",
+                 transform_image_context: str = "",
                  capture_proxy_service_type: str = "LoadBalancer") -> None:
         self.k8s_service = k8s_service
         self.unique_id = unique_id
@@ -77,6 +78,7 @@ class TestRunner:
         self.observed_packet_timeout = observed_packet_timeout
         self.transform_image_basic = transform_image_basic
         self.transform_image_sequence = transform_image_sequence
+        self.transform_image_context = transform_image_context
         self.capture_proxy_service_type = capture_proxy_service_type
 
     def _print_test_stats(self, report: TestReport) -> None:
@@ -161,7 +163,8 @@ class TestRunner:
         self._print_summary_table(reports=reports)
 
     def run_tests(self, source_version: str, target_version: str, keep_workflows: bool = False,
-                  reuse_clusters: bool = False, test_reports_dir: str = None) -> TestReport:
+                  reuse_clusters: bool = False, skip_workflow_reset: bool = False,
+                  test_reports_dir: str = None) -> TestReport:
         """Runs pytest tests via background exec + poll to survive WebSocket drops."""
         logger.info(f"Executing migration test cases with pytest and test ID filters: {self.test_ids}")
         command_list = [
@@ -180,6 +183,8 @@ class TestRunner:
             command_list.append(f"--test_ids={','.join(self.test_ids)}")
         if keep_workflows:
             command_list.append("--keep_workflows")
+        if skip_workflow_reset:
+            command_list.append("--skip_workflow_reset")
         if reuse_clusters:
             command_list.append("--reuse_clusters")
         if self.registry_prefix:
@@ -188,6 +193,8 @@ class TestRunner:
             command_list.append(f"--transform_image_basic={self.transform_image_basic}")
         if self.transform_image_sequence:
             command_list.append(f"--transform_image_sequence={self.transform_image_sequence}")
+        if self.transform_image_context:
+            command_list.append(f"--transform_image_context={self.transform_image_context}")
         command_list.append(f"--capture_proxy_service_type={self.capture_proxy_service_type}")
         command_list.append(f"--speedup_factor={self.speedup_factor}")
         command_list.append(f"--observed_packet_timeout={self.observed_packet_timeout}")
@@ -411,6 +418,7 @@ class TestRunner:
                                              target_version=target_version,
                                              keep_workflows=keep_workflows,
                                              reuse_clusters=reuse_clusters,
+                                             skip_workflow_reset=skip_delete,
                                              test_reports_dir=test_reports_dir)
                 test_reports.append(test_report)
 
@@ -621,6 +629,12 @@ def parse_args() -> argparse.Namespace:
         help="Digest-pinned transform image containing the sequence transform fixture bank."
     )
     parser.add_argument(
+        "--transform-image-context",
+        type=str,
+        default="",
+        help="Digest-pinned transform image containing the context-only transform fixture bank."
+    )
+    parser.add_argument(
         "--capture-proxy-service-type",
         choices=("LoadBalancer", "ClusterIP"),
         default="LoadBalancer",
@@ -669,6 +683,7 @@ def main() -> None:
                              observed_packet_timeout=args.observed_packet_timeout,
                              transform_image_basic=args.transform_image_basic,
                              transform_image_sequence=args.transform_image_sequence,
+                             transform_image_context=args.transform_image_context,
                              capture_proxy_service_type=args.capture_proxy_service_type)
 
     if args.delete_only:

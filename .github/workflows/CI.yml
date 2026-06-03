@@ -450,9 +450,33 @@ jobs:
         echo "SONAR_TOKEN=$SONAR_TOKEN" >> $GITHUB_ENV
     - name: Run SonarQube Scanner
       run: |
-        curl -sLo sonar-scanner-cli.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-6.2.1.4610-linux-x64.zip
-        unzip -q sonar-scanner-cli.zip -d $HOME
-        export PATH="$HOME/sonar-scanner-6.2.1.4610-linux-x64/bin:$PATH"
+        set -euo pipefail
+        SCANNER_VERSION="8.1.0.6389"
+        SCANNER_ZIP="sonar-scanner-cli-${SCANNER_VERSION}-linux-x64.zip"
+        # Maven Central mirrors the SonarSource scanner releases and has been
+        # reliable from GitHub-hosted runners; binaries.sonarsource.com has
+        # started returning 403 from some egress IPs.
+        SCANNER_URL="https://repo1.maven.org/maven2/org/sonarsource/scanner/cli/sonar-scanner-cli/${SCANNER_VERSION}/${SCANNER_ZIP}"
+        SCANNER_SHA256="bb8f709f9cb73352f8d1260a3b3c506c0f41146754bc630762c126d795499d0b"
+
+        # Retry on transient failures (CDN flakes, partial downloads).
+        # --fail makes curl exit non-zero on HTTP errors so we don't silently feed an
+        # error page into unzip, --retry-all-errors covers the body-cut-off case where
+        # curl saw 200 OK headers but the connection died mid-stream.
+        curl --fail --location --silent --show-error \
+             --retry 5 --retry-delay 5 --retry-all-errors \
+             --max-time 120 \
+             -o sonar-scanner-cli.zip "$SCANNER_URL"
+
+        # Verify checksum to catch any corruption that curl could not detect.
+        echo "${SCANNER_SHA256}  sonar-scanner-cli.zip" | sha256sum -c -
+
+        # Test zip integrity before extracting so a bad download fails loudly here
+        # instead of leaking partial files into $HOME.
+        unzip -tq sonar-scanner-cli.zip
+        unzip -q sonar-scanner-cli.zip -d "$HOME"
+
+        export PATH="$HOME/sonar-scanner-${SCANNER_VERSION}-linux-x64/bin:$PATH"
         sonar-scanner \
           -Dsonar.projectKey=local_project \
           -Dsonar.host.url=http://localhost:9000 \

@@ -1,5 +1,6 @@
 import { renderWorkflowTemplate, expr, typeToken } from "../../../src/index.js";
-import { makeTestWorkflow } from "../infra/testWorkflowHelper.js";import { submitProbe, submitRenderedWorkflow } from "../infra/probeHelper.js";
+import { makeTestWorkflow } from "../infra/testWorkflowHelper.js";
+import { submitProbe, submitRenderedWorkflow } from "../infra/probeHelper.js";
 import { ParitySpec, BuilderVariant, reportContractResult, reportParityResult } from "../infra/parityHelper.js";
 
 describe("Array Operations - array indexing with literal index", () => {
@@ -187,6 +188,59 @@ describe("Array Operations - array with mixed types", () => {
       expect(result.phase).toBe("Succeeded");
       const parsed = JSON.parse(result.globalOutputs.result);
       expect(parsed).toEqual([1, "two", true]);
+      reportParityResult(spec, builderVariant, result);
+    });
+  });
+});
+
+describe("Array Operations - concatenate arrays", () => {
+  const spec: ParitySpec = {
+    category: "Array Operations",
+    name: "concatenate arrays",
+    inputs: {
+      left: '[{"name":"base"}]',
+      right: '[{"name":"extra"}]',
+    },
+    argoExpression: "toJson(sprig.concat(fromJSON(inputs.parameters.left), fromJSON(inputs.parameters.right)))",
+    expectedResult: '[{"name":"base"},{"name":"extra"}]',
+  };
+
+  describe("ArgoYaml", () => {
+    test("raw expression produces expected result", async () => {
+      const result = await submitProbe({
+        inputs: spec.inputs,
+        expression: spec.argoExpression,
+      });
+      expect(result.phase).toBe("Succeeded");
+      expect(JSON.parse(result.globalOutputs.result)).toEqual(JSON.parse(spec.expectedResult));
+      reportContractResult(spec, result);
+    });
+  });
+
+  describe("Builder - concatArrays", () => {
+    const builderVariant: BuilderVariant = {
+      name: "concatArrays",
+      code: "expr.serialize(expr.concatArrays(expr.deserializeRecord(ctx.inputs.left), expr.deserializeRecord(ctx.inputs.right)))",
+    };
+
+    test("builder API produces same result", async () => {
+      const wf = makeTestWorkflow(t => t
+          .addRequiredInput("left", typeToken<{name: string}[]>())
+          .addRequiredInput("right", typeToken<{name: string}[]>())
+          .addSteps(s => s.addStepGroup(c => c))
+          .addExpressionOutput("result", (ctx) =>
+            expr.serialize(expr.concatArrays(
+              expr.deserializeRecord(ctx.inputs.left),
+              expr.deserializeRecord(ctx.inputs.right),
+            ))
+          )
+        )
+        ;
+
+      const rendered = renderWorkflowTemplate(wf);
+      const result = await submitRenderedWorkflow(rendered, spec.inputs);
+      expect(result.phase).toBe("Succeeded");
+      expect(JSON.parse(result.globalOutputs.result)).toEqual(JSON.parse(spec.expectedResult));
       reportParityResult(spec, builderVariant, result);
     });
   });

@@ -13,6 +13,8 @@ import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {
     ARGO_PROXY_WORKFLOW_OPTION_KEYS,
+    ARGO_FILE_SOURCE_VOLUME,
+    ARGO_FILE_SOURCE_VOLUME_MOUNT,
     DEFAULT_RESOURCES,
     DENORMALIZED_PROXY_CONFIG,
     PROXY_TLS_CONFIG,
@@ -29,10 +31,12 @@ import {
 } from "./commonUtils/resourceRetryStrategy";
 import {CONTAINER_NAMES} from "../containerNames";
 import {ResourceManagement} from "./resourceManagement";
+import {setupFileSourcesForContainer} from "./commonUtils/containerFragments";
 
 const KAFKA_AUTH_CONFIG_MOUNT_PATH = "/config/kafka-auth";
 const KAFKA_AUTH_CONFIG_FILE_PATH = `${KAFKA_AUTH_CONFIG_MOUNT_PATH}/client.properties`;
 const KAFKA_CA_MOUNT_PATH = "/config/kafka-ca";
+const CAPTURE_PROXY_SSL_TRUST_CERT_PEM_ENV_VAR = "CAPTURE_PROXY_SSL_TRUST_CERT_PEM";
 
 function makeOwnerReferences(
     ownerName: BaseExpression<string>,
@@ -173,6 +177,9 @@ function makeProxyDeploymentManifest(args: {
     kafkaSecretName: BaseExpression<string>,
     kafkaCaSecretName: BaseExpression<string>,
     tlsSecretName?: BaseExpression<string>,
+    sslTrustCertPem: BaseExpression<string>,
+    fileSourceVolumes: BaseExpression<any[]>,
+    fileSourceVolumeMounts: BaseExpression<any[]>,
     ownerUid: BaseExpression<string>,
     workflowName: BaseExpression<string>,
     sourceK8sLabel: BaseExpression<string>,
@@ -203,15 +210,15 @@ function makeProxyDeploymentManifest(args: {
                 name: "CAPTURE_PROXY_KAFKA_PASSWORD",
                 valueFrom: {
                     secretKeyRef: {
-                        name: makeStringTypeProxy(expr.ternary(
-                            isScramAuth,
-                            args.kafkaSecretName,
-                            expr.literal("empty")
-                        )),
+                        name: makeStringTypeProxy(args.kafkaSecretName),
                         key: "password",
                         optional: makeDirectTypeProxy(expr.not(isScramAuth))
                     }
                 }
+            },
+            {
+                name: CAPTURE_PROXY_SSL_TRUST_CERT_PEM_ENV_VAR,
+                value: makeStringTypeProxy(args.sslTrustCertPem)
             }
         ],
         volumeMounts: [
@@ -231,9 +238,7 @@ function makeProxyDeploymentManifest(args: {
         container.volumeMounts.push({name: "tls-certs", mountPath: "/etc/proxy-tls", readOnly: true});
     }
 
-    const podSpec: Record<string, any> = {
-        containers: [container],
-        volumes: [
+    const volumes = [
             {
                 name: "kafka-auth-config",
                 configMap: {name: args.kafkaAuthConfigMapName}
@@ -241,19 +246,19 @@ function makeProxyDeploymentManifest(args: {
             {
                 name: "kafka-ca",
                 secret: {
-                    secretName: makeStringTypeProxy(expr.ternary(
-                        isScramAuth,
-                        args.kafkaCaSecretName,
-                        expr.literal("empty")
-                    )),
+                    secretName: makeStringTypeProxy(args.kafkaCaSecretName),
                     optional: makeDirectTypeProxy(expr.not(isScramAuth))
                 }
             }
-        ]
-    };
+        ];
     if (args.tlsSecretName) {
-        podSpec.volumes.push({name: "tls-certs", secret: {secretName: args.tlsSecretName}});
+        volumes.push({name: "tls-certs", secret: {secretName: makeStringTypeProxy(args.tlsSecretName)}} as any);
     }
+    const podConfig = setupFileSourcesForContainer(
+        args.fileSourceVolumes,
+        args.fileSourceVolumeMounts,
+        {container: container as any, volumes: volumes as any}
+    );
 
     return {
         apiVersion: "apps/v1",
@@ -281,7 +286,10 @@ function makeProxyDeploymentManifest(args: {
                     "migrations.opensearch.org/source": makeStringTypeProxy(args.sourceK8sLabel),
                     "migrations.opensearch.org/task": makeStringTypeProxy(args.taskK8sLabel),
                 }},
-                spec: podSpec
+                spec: {
+                    containers: [podConfig.container],
+                    volumes: podConfig.volumes
+                }
             }
         }
     };
@@ -368,6 +376,9 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
+        .addRequiredInput("sslTrustCertPem", typeToken<string>())
+        .addRequiredInput("fileSourceVolumes", typeToken<z.infer<typeof ARGO_FILE_SOURCE_VOLUME>[]>())
+        .addRequiredInput("fileSourceVolumeMounts", typeToken<z.infer<typeof ARGO_FILE_SOURCE_VOLUME_MOUNT>[]>())
         .addRequiredInput("ownerUid", typeToken<string>())
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
         .addOptionalInput("taskK8sLabel", c => "captureProxy")
@@ -391,6 +402,9 @@ export const SetupCapture = WorkflowBuilder.create({
                     kafkaAuthType: b.inputs.kafkaAuthType,
                     kafkaSecretName: b.inputs.kafkaSecretName,
                     kafkaCaSecretName: b.inputs.kafkaCaSecretName,
+                    sslTrustCertPem: b.inputs.sslTrustCertPem,
+                    fileSourceVolumes: expr.deserializeRecord(b.inputs.fileSourceVolumes),
+                    fileSourceVolumeMounts: expr.deserializeRecord(b.inputs.fileSourceVolumeMounts),
                     ownerUid: b.inputs.ownerUid,
                     workflowName: expr.getWorkflowValue("name"),
                     sourceK8sLabel: b.inputs.sourceK8sLabel,
@@ -411,6 +425,9 @@ export const SetupCapture = WorkflowBuilder.create({
         .addRequiredInput("listenPort", typeToken<number>())
         .addRequiredInput("podReplicas", typeToken<number>())
         .addRequiredInput("resources", typeToken<ResourceRequirementsType>())
+        .addRequiredInput("sslTrustCertPem", typeToken<string>())
+        .addRequiredInput("fileSourceVolumes", typeToken<z.infer<typeof ARGO_FILE_SOURCE_VOLUME>[]>())
+        .addRequiredInput("fileSourceVolumeMounts", typeToken<z.infer<typeof ARGO_FILE_SOURCE_VOLUME_MOUNT>[]>())
         .addRequiredInput("tlsSecretName", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
         .addRequiredInput("sourceK8sLabel", typeToken<string>())
@@ -435,6 +452,9 @@ export const SetupCapture = WorkflowBuilder.create({
                     kafkaSecretName: b.inputs.kafkaSecretName,
                     kafkaCaSecretName: b.inputs.kafkaCaSecretName,
                     tlsSecretName: b.inputs.tlsSecretName,
+                    sslTrustCertPem: b.inputs.sslTrustCertPem,
+                    fileSourceVolumes: expr.deserializeRecord(b.inputs.fileSourceVolumes),
+                    fileSourceVolumeMounts: expr.deserializeRecord(b.inputs.fileSourceVolumeMounts),
                     ownerUid: b.inputs.ownerUid,
                     workflowName: expr.getWorkflowValue("name"),
                     sourceK8sLabel: b.inputs.sourceK8sLabel,
@@ -631,9 +651,20 @@ export const SetupCapture = WorkflowBuilder.create({
                                 podReplicas: b.inputs.podReplicas,
                                 kafkaAuthConfigMapName,
                                 kafkaAuthType: effectiveKafkaAuthType,
-                                kafkaSecretName: expr.getLoose(kafkaConfig, "secretName"),
-                                kafkaCaSecretName: expr.getLoose(kafkaConfig, "caSecretName"),
+                                kafkaSecretName: expr.ternary(
+                                    shouldUseScramAuth,
+                                    expr.getLoose(kafkaConfig, "secretName"),
+                                    expr.literal("empty")
+                                ),
+                                kafkaCaSecretName: expr.ternary(
+                                    shouldUseScramAuth,
+                                    expr.getLoose(kafkaConfig, "caSecretName"),
+                                    expr.literal("empty")
+                                ),
                                 resources: expr.serialize(expr.get(proxyOpts, "resources")),
+                                sslTrustCertPem: expr.dig(proxyOpts, ["sslTrustCertPem"], ""),
+                                fileSourceVolumes: expr.serialize(expr.dig(proxyOpts, ["fileSourceVolumes"], [])),
+                                fileSourceVolumeMounts: expr.serialize(expr.dig(proxyOpts, ["fileSourceVolumeMounts"], [])),
                                 ownerUid: b.inputs.ownerUid,
                                 jsonConfig: expr.asString(expr.serialize(
                                     makeProxyParamsDict(
@@ -654,10 +685,21 @@ export const SetupCapture = WorkflowBuilder.create({
                                 podReplicas: b.inputs.podReplicas,
                                 kafkaAuthConfigMapName,
                                 kafkaAuthType: effectiveKafkaAuthType,
-                                kafkaSecretName: expr.getLoose(kafkaConfig, "secretName"),
-                                kafkaCaSecretName: expr.getLoose(kafkaConfig, "caSecretName"),
+                                kafkaSecretName: expr.ternary(
+                                    shouldUseScramAuth,
+                                    expr.getLoose(kafkaConfig, "secretName"),
+                                    expr.literal("empty")
+                                ),
+                                kafkaCaSecretName: expr.ternary(
+                                    shouldUseScramAuth,
+                                    expr.getLoose(kafkaConfig, "caSecretName"),
+                                    expr.literal("empty")
+                                ),
                                 resources: expr.serialize(expr.get(proxyOpts, "resources")),
                                 tlsSecretName: tlsSecretName,
+                                sslTrustCertPem: expr.dig(proxyOpts, ["sslTrustCertPem"], ""),
+                                fileSourceVolumes: expr.serialize(expr.dig(proxyOpts, ["fileSourceVolumes"], [])),
+                                fileSourceVolumeMounts: expr.serialize(expr.dig(proxyOpts, ["fileSourceVolumeMounts"], [])),
                                 ownerUid: b.inputs.ownerUid,
                                 jsonConfig: expr.asString(expr.serialize(
                                     expr.mergeDicts(
