@@ -524,13 +524,13 @@ class TestWorkflowCLICommands:
         nodes = {
             'approval-node': {
                 'id': 'approval-node',
-                'displayName': 'waitForApproval',
+                'displayName': 'waitForUserApproval',
                 'phase': 'Running',
                 'type': 'Pod',
                 'boundaryID': 'approve-boundary',
                 'templateRef': {
                     'name': 'resource-management',
-                    'template': 'waitforapproval',
+                    'template': 'waitforuserapproval',
                 },
                 'inputs': {
                     'parameters': [

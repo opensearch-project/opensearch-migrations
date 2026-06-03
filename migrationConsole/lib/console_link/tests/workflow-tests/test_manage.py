@@ -63,7 +63,7 @@ def mock_workflow_with_pod_and_suspend():
                                  "inputs": {"parameters": [{"name": "resourceName", "value": "migration-0"}]}},
                 "node-2": {"id": "node-2", "displayName": "suspend-1", "type": "Resource", "phase": PHASE_RUNNING,
                            "children": [],
-                           "templateRef": {"name": "resource-management", "template": "waitforapproval"},
+                           "templateRef": {"name": "resource-management", "template": "waitforuserapproval"},
                            "inputs": {"parameters": [{"name": "resourceName", "value": "my-gate"}]}}
             }
         }
