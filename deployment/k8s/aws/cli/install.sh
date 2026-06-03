@@ -97,13 +97,19 @@ resolve_version() {
 }
 
 # fetch_into <install_dir> — populate <install_dir> with bin/ lib/ skills/
-# from a local tree (INSTALL_FROM_LOCAL) or the released tarball.
+# from a local tree (INSTALL_FROM_LOCAL) or the released tarball. Also
+# copies a tarball-root manifest.json (alongside skills/manifest.json)
+# when present so install.sh can read branding.binaryName below.
 fetch_into() {
   local install_dir="$1" version="$2"
   if [[ -n "$INSTALL_FROM_LOCAL" ]]; then
     cp -R "$INSTALL_FROM_LOCAL/bin"    "$install_dir/"
     cp -R "$INSTALL_FROM_LOCAL/lib"    "$install_dir/"
     cp -R "$INSTALL_FROM_LOCAL/skills" "$install_dir/"
+    # Optional: a tarball-root manifest.json. Released tarballs put one
+    # there; the source checkout has it under skills/ only.
+    [[ -f "$INSTALL_FROM_LOCAL/manifest.json" ]] \
+      && cp "$INSTALL_FROM_LOCAL/manifest.json" "$install_dir/"
   else
     local tarball="migration-assistant-cli-${version}.tar.gz"
     local url="https://github.com/${REPO}/releases/download/${version}/${tarball}"
@@ -114,6 +120,40 @@ fetch_into() {
     rm -rf "$tmp"
   fi
   chmod +x "$install_dir/bin/migration-assistant"
+}
+
+# read_binary_name <install_dir> — echoes branding.binaryName from
+# manifest.json, defaulting to "migration-assistant" when absent.
+# install.sh runs before lib/manifest.sh is sourced, so we read the JSON
+# directly. We use jq when available, else a regex fallback (the field
+# is a simple string).
+read_binary_name() {
+  local install_dir="$1"
+  local manifest=""
+  if [[ -f "$install_dir/manifest.json" ]]; then
+    manifest="$install_dir/manifest.json"
+  elif [[ -f "$install_dir/skills/manifest.json" ]]; then
+    manifest="$install_dir/skills/manifest.json"
+  fi
+  if [[ -z "$manifest" ]]; then
+    printf '%s' "migration-assistant"
+    return
+  fi
+  if command -v jq >/dev/null 2>&1; then
+    local v
+    v=$(jq -r '.branding.binaryName // "migration-assistant"' "$manifest" 2>/dev/null)
+    [[ -z "$v" || "$v" == "null" ]] && v="migration-assistant"
+    printf '%s' "$v"
+  else
+    # Coarse fallback. The field is a top-level string; sed extracts
+    # the first match.
+    local v
+    v=$(grep -oE '"binaryName"[[:space:]]*:[[:space:]]*"[^"]+"' "$manifest" \
+        | head -1 \
+        | sed -E 's/.*"([^"]+)"$/\1/')
+    [[ -z "$v" ]] && v="migration-assistant"
+    printf '%s' "$v"
+  fi
 }
 
 resolve_install_version() {
@@ -138,10 +178,17 @@ install_path_mode() {
   mkdir -p "$prefix" "$bin_dir"
 
   fetch_into "$prefix" "$version"
-  ln -sfn "$prefix/bin/migration-assistant" "$bin_dir/migration-assistant"
 
-  printf '%s migration-assistant %s installed\n\n' "$(c_green '✔')" "$version"
-  printf '  Binary: %s/migration-assistant\n\n' "$(_pretty "$bin_dir")"
+  # The CLI binary inside the install tree is always called
+  # migration-assistant (Jenkins/CI contract). The user-facing PATH
+  # symlink uses branding.binaryName from manifest.json, defaulting to
+  # the same name. Packs that brand-rename (e.g. "myorg-migrate") flow
+  # through naturally.
+  local bin_name; bin_name=$(read_binary_name "$prefix")
+  ln -sfn "$prefix/bin/migration-assistant" "$bin_dir/$bin_name"
+
+  printf '%s %s %s installed\n\n' "$(c_green '✔')" "$bin_name" "$version"
+  printf '  Binary: %s/%s\n\n' "$(_pretty "$bin_dir")" "$bin_name"
 
   if ! printf '%s' "$PATH" | tr ':' '\n' | grep -qxF "$bin_dir"; then
     printf '%s %s is not on your PATH. Add it to your shell rc:\n' \
@@ -151,7 +198,7 @@ install_path_mode() {
   fi
 
   printf '%s\n' "$(c_bold 'Next: cd into the directory you want to use as your migration project, then run:')"
-  printf '    %s\n\n' "$(c_bold 'migration-assistant')"
+  printf '    %s\n\n' "$(c_bold "$bin_name")"
   printf '  That directory becomes the project — state, logs, and plan land in\n'
   printf '  %s there (one removable folder). Use %s for a named project.\n' \
     "$(c_dim './migration-assistant-workspace/')" "$(c_dim '--stage <name>')"
@@ -177,14 +224,19 @@ install_workspace_mode() {
   mkdir -p "$install_dir" "$bin_dir"
 
   fetch_into "$install_dir" "$version"
-  ln -sfn "$install_dir/bin/migration-assistant" "$bin_dir/migration-assistant"
+
+  # See install_path_mode for the binaryName rationale. The activate
+  # script doesn't need to know the binary name — it just prepends
+  # $bin_dir to PATH.
+  local bin_name; bin_name=$(read_binary_name "$install_dir")
+  ln -sfn "$install_dir/bin/migration-assistant" "$bin_dir/$bin_name"
 
   # activate: `source ./migration-assistant-workspace/activate` wires
   # MIGRATE_HOME + PATH for an existing shell.
   cat >"$workspace/activate" <<EOF
 # Source this file: \`source $(_pretty "$workspace")/activate\`
 # Sets MIGRATE_HOME so per-stage state lands in this workspace, and
-# prepends bin/ to PATH so \`migration-assistant\` resolves here.
+# prepends bin/ to PATH so \`$bin_name\` resolves here.
 export MIGRATE_HOME="$workspace"
 case ":\$PATH:" in
   *":$bin_dir:"*) ;;
@@ -195,7 +247,7 @@ EOF
   printf '%s Migration Assistant workspace ready\n\n' "$(c_green '✔')"
   printf '  Version:    %s\n' "$version"
   printf '  Workspace:  %s\n' "$(_pretty "$workspace")"
-  printf '  Binary:     %s/migration-assistant\n\n' "$(_pretty "$bin_dir")"
+  printf '  Binary:     %s/%s\n\n' "$(_pretty "$bin_dir")" "$bin_name"
   printf '  In a new shell: %ssource %s/activate%s to wire PATH + MIGRATE_HOME\n' \
     "$(c_dim '')" "$(_pretty "$workspace")" "$(c_dim '')"
   printf '  State for each stage lives at %s/<stage>/\n\n' "$(_pretty "$workspace")"
@@ -211,14 +263,17 @@ EOF
   fi
   if { exec 3<>/dev/tty; } 2>/dev/null; then
     exec 3>&- 3<&-
-    printf '\n%s Launching %s now…\n\n' "$(c_dim '↳')" "$(c_bold 'migration-assistant')"
+    printf '\n%s Launching %s now…\n\n' "$(c_dim '↳')" "$(c_bold "$bin_name")"
     export MIGRATE_HOME="$workspace"
-    exec "$bin_dir/migration-assistant" "$@" </dev/tty
+    # Always exec the underlying migration-assistant binary regardless
+    # of the symlinked $bin_name — the script reads its own name from
+    # BASH_SOURCE only for path resolution, not for branding.
+    exec "$bin_dir/$bin_name" "$@" </dev/tty
   else
     printf '\n%s no interactive terminal detected — not auto-launching.\n' "$(c_yellow '!')"
     printf '  Run it yourself from a real terminal:\n'
-    printf '    %ssource %s/activate && migration-assistant%s\n' \
-      "$(c_bold '')" "$(_pretty "$workspace")" "$(c_bold '')"
+    printf '    %ssource %s/activate && %s%s\n' \
+      "$(c_bold '')" "$(_pretty "$workspace")" "$bin_name" "$(c_bold '')"
   fi
 }
 

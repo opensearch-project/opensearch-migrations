@@ -20,6 +20,10 @@
 [[ -n "${__MIGRATE_AGENT_LOADED:-}" ]] && return 0
 __MIGRATE_AGENT_LOADED=1
 
+# Defensive source: agent_setup uses manifest_have / manifest_mcp_*.
+# shellcheck source=lib/manifest.sh
+source "${LIB_DIR:-$(dirname "${BASH_SOURCE[0]}")}/manifest.sh"
+
 # Each entry is "<canonical-name>:<binary1>[ <binary2>…]". The canonical
 # name is what we display + persist in state. The binary list is the
 # names we'll search for on PATH (kiro ships its installed binary as
@@ -215,12 +219,17 @@ agent_setup() {
   cp -f "$skills_src/Startup.md" "$STAGE_DIR/AGENTS.md"
   cp -f "$skills_src/Startup.md" "$STAGE_DIR/Startup.md"
 
+  # Skill discovery: every subdir of $skills_src that contains a SKILL.md
+  # is auto-installed. Replaces the previous hard-coded list of 4 skills
+  # — drop a new <skill>/SKILL.md into the bundle and it ships, no code
+  # change required. This is the manifest's `skills.discovery: auto`
+  # contract, implemented in shell so it works whether or not manifest.sh
+  # has been initialized (test path).
   mkdir -p "$STAGE_DIR/skills"
-  local skill
-  for skill in migration-assistant-operator migration-assistant-cli-reference migrating-to-opensearch aoss-nextgen; do
-    if [[ -d "$skills_src/$skill" ]]; then
-      cp -R "$skills_src/$skill" "$STAGE_DIR/skills/"
-    fi
+  local skill_dir
+  for skill_dir in "$skills_src"/*/; do
+    [[ -f "${skill_dir}SKILL.md" ]] || continue
+    cp -R "$skill_dir" "$STAGE_DIR/skills/"
   done
 
   local dest_dir
@@ -231,10 +240,9 @@ agent_setup() {
       dest_dir="$STAGE_DIR/.claude/skills"
       mkdir -p "$dest_dir/opensearch-migration"
       cp -f "$skills_src/Startup.md" "$dest_dir/opensearch-migration/Startup.md"
-      for skill in migration-assistant-operator migration-assistant-cli-reference migrating-to-opensearch aoss-nextgen; do
-        if [[ -d "$skills_src/$skill" ]]; then
-          cp -R "$skills_src/$skill" "$dest_dir/"
-        fi
+      for skill_dir in "$skills_src"/*/; do
+        [[ -f "${skill_dir}SKILL.md" ]] || continue
+        cp -R "$skill_dir" "$dest_dir/"
       done
       _agent_write_claude_settings
       ;;
@@ -291,36 +299,214 @@ agent_setup() {
       ;;
   esac
 
-  _agent_install_aws_mcp "$agent"
+  mcp_install_from_manifest "$agent"
 
   log_info "agent_setup: agent=$agent skill_dir=$dest_dir"
 }
 
-# _agent_install_aws_mcp <agent> — register the AWS MCP server (SigV4-
-# protected, signs as the operator's IAM identity) with the agent's
-# config so aws___read_documentation, aws___search_documentation,
-# aws___call_aws, etc. are available in the handoff session.
+# mcp_install_from_manifest <agent>
 #
-# Backed by uvx mcp-proxy-for-aws@latest pointing at
-# https://aws-mcp.us-east-1.api.aws/mcp with AWS_REGION metadata
-# matching the deploy region.
+# Generic MCP installer driven by manifest.json's mcpServers. Replaces
+# the previous _agent_install_aws_mcp + three per-agent helpers. Adding
+# a new MCP is a one-line edit to manifest.json — no shell change, no
+# fork of the CLI.
 #
+# Per-agent project-scope writes (avoids the stale-user-scope-cache bug
+# where claude mcp add-json --scope user thought aws-mcp was registered
+# but the binary couldn't reach it):
+#   claude → $STAGE_DIR/.mcp.json     (claude reads project-scope MCPs)
+#   codex  → $STAGE_DIR/.codex/config.toml  (CODEX_HOME=$STAGE_DIR/.codex)
+#   kiro   → $STAGE_DIR/.kiro/settings/mcp.json
+#
+# Bypass:
+#   MIGRATE_SKIP_MCP=1                  → skip every MCP
+#   MIGRATE_SKIP_MCP_<NAME_NORMED>=1    → skip a specific MCP by name
+#                                          (NAME_NORMED is uppercase + - → _)
+mcp_install_from_manifest() {
+  local agent="$1"
+  if [[ "${MIGRATE_SKIP_MCP:-0}" -eq 1 ]]; then
+    ui_dim "  MIGRATE_SKIP_MCP=1 → skipping all MCP registration"
+    return 0
+  fi
+  if ! manifest_have; then
+    log_warn "mcp: no manifest loaded; skipping MCP registration"
+    return 0
+  fi
+
+  # Resolve required binaries up front. One uvx prompt covers N MCPs
+  # that all need uvx.
+  local req
+  while IFS= read -r req; do
+    [[ -z "$req" ]] && continue
+    case "$req" in
+      uvx) _agent_ensure_uvx || die "MCP registration requires uvx; rerun with MIGRATE_SKIP_MCP=1 to opt out" ;;
+      *)
+        if ! optional_cmd "$req"; then
+          die "MCP registration requires '$req' on PATH; install it or rerun with MIGRATE_SKIP_MCP=1"
+        fi
+        ;;
+    esac
+  done < <(printf '%s' "$__MANIFEST_RAW" | jq -r '[.mcpServers[].requires[]?] | unique[]')
+
+  # Iterate each MCP that targets this agent.
+  local mcp skip_var
+  while IFS= read -r mcp; do
+    [[ -z "$mcp" ]] && continue
+    skip_var="MIGRATE_SKIP_MCP_$(_mcp_norm_envvar "$mcp")"
+    if [[ "${!skip_var:-0}" == "1" ]]; then
+      ui_dim "  $skip_var=1 → skipping $mcp for $agent"
+      continue
+    fi
+    _mcp_register_for_agent "$agent" "$mcp"
+  done < <(manifest_mcp_names "$agent")
+
+  # Claude only: merge permissions from the manifest into the
+  # project-scope settings.json. (The CLI's own bash/aws/kubectl
+  # allowlist is contributed by _agent_write_claude_settings.)
+  [[ "$agent" == "claude" ]] && _agent_write_claude_settings
+}
+
+# _mcp_norm_envvar <name>
+# Normalize an MCP name into an uppercase env-var-safe suffix.
+# aws-mcp → AWS_MCP, my.org/secrets → MY_ORG_SECRETS.
+_mcp_norm_envvar() {
+  local s="$1"
+  # tr is one fork; doing this in pure bash via case-loop is bash 4+
+  # (${var^^}) so we accept the fork.
+  printf '%s' "$s" | tr '[:lower:]/-.' '[:upper:]___'
+}
+
+# _mcp_register_for_agent <agent> <mcp_name>
+# Dispatch to the per-agent project-scope writer.
+_mcp_register_for_agent() {
+  local agent="$1" name="$2"
+  case "$agent" in
+    claude) _mcp_write_claude "$name" ;;
+    codex)  _mcp_write_codex  "$name" ;;
+    kiro)   _mcp_write_kiro   "$name" ;;
+    *)      log_warn "mcp: no project-scope writer for agent=$agent; skipping $name" ;;
+  esac
+}
+
+# _mcp_write_claude <name>
+# Project-scope: $STAGE_DIR/.mcp.json. Claude Code auto-loads project
+# MCPs on first session (with a one-time trust prompt per stage), which
+# is the right safety prompt for an operator running a custom build.
+_mcp_write_claude() {
+  local name="$1"
+  local cfg="$STAGE_DIR/.mcp.json"
+  if [[ -f "$cfg" ]] && jq -e --arg n "$name" '.mcpServers[$n] // empty' "$cfg" >/dev/null 2>&1; then
+    ui_dim "  claude: $name already in $(_mcp_pretty "$cfg")"
+    return 0
+  fi
+  ui_step "Registering $name with claude ($cfg)"
+
+  # Build the entry as a jq fragment.
+  local cmd; cmd=$(manifest_mcp_command "$name")
+  local args_array; args_array=$(_mcp_args_jq_array "$name")
+  local entry
+  entry=$(jq -nc --arg cmd "$cmd" --argjson args "$args_array" \
+    '{command: $cmd, args: $args}')
+
+  local tmp; tmp=$(mktemp "$STAGE_DIR/.mcp.json.tmp.XXXXXX")
+  if [[ -f "$cfg" ]]; then
+    jq --arg n "$name" --argjson e "$entry" '.mcpServers[$n] = $e' "$cfg" >"$tmp"
+  else
+    jq -nc --arg n "$name" --argjson e "$entry" '{mcpServers: {($n): $e}}' >"$tmp"
+  fi
+  mv -f "$tmp" "$cfg"
+  ui_ok "$name registered with claude"
+}
+
+# _mcp_write_codex <name>
+# Project-scope: $STAGE_DIR/.codex/config.toml. Set CODEX_HOME at
+# exec time so codex resolves its config from this stage rather than
+# the user-global ~/.codex.
+_mcp_write_codex() {
+  local name="$1"
+  local cfg_dir="$STAGE_DIR/.codex"
+  local cfg="$cfg_dir/config.toml"
+  mkdir -p "$cfg_dir"
+  touch "$cfg"
+  if grep -qE "^\\[mcp_servers\\.${name}\\]" "$cfg" 2>/dev/null; then
+    ui_dim "  codex: $name already in $cfg"
+    return 0
+  fi
+  ui_step "Registering $name with codex ($cfg)"
+
+  local cmd; cmd=$(manifest_mcp_command "$name")
+  local args_array; args_array=$(_mcp_args_jq_array "$name")
+  # Convert JSON args array → TOML array literal.
+  local args_toml
+  args_toml=$(printf '%s' "$args_array" | jq -r '
+    map("\"" + (. | gsub("\\\\"; "\\\\") | gsub("\""; "\\\"")) + "\"")
+    | "[" + join(", ") + "]"
+  ')
+  {
+    printf '\n[mcp_servers.%s]\n' "$name"
+    printf 'command = "%s"\n' "$cmd"
+    printf 'args = %s\n' "$args_toml"
+  } >>"$cfg"
+  ui_ok "$name registered with codex"
+}
+
+# _mcp_write_kiro <name>
+# Project-scope: $STAGE_DIR/.kiro/settings/mcp.json. Already project-
+# scoped pre-refactor; this rewrite generalizes to any name.
+_mcp_write_kiro() {
+  local name="$1"
+  local cfg="$STAGE_DIR/.kiro/settings/mcp.json"
+  mkdir -p "$(dirname "$cfg")"
+  if [[ -f "$cfg" ]] && jq -e --arg n "$name" '.mcpServers[$n] // empty' "$cfg" >/dev/null 2>&1; then
+    ui_dim "  kiro: $name already in $cfg"
+    return 0
+  fi
+  ui_step "Registering $name with kiro ($cfg)"
+
+  local cmd; cmd=$(manifest_mcp_command "$name")
+  local args_array; args_array=$(_mcp_args_jq_array "$name")
+  local entry
+  entry=$(jq -nc --arg cmd "$cmd" --argjson args "$args_array" \
+    '{command: $cmd, args: $args}')
+
+  local tmp; tmp=$(mktemp "$STAGE_DIR/.kiro/settings/mcp.json.tmp.XXXXXX")
+  if [[ -f "$cfg" ]]; then
+    jq --arg n "$name" --argjson e "$entry" '.mcpServers[$n] = $e' "$cfg" >"$tmp"
+  else
+    jq -nc --arg n "$name" --argjson e "$entry" '{mcpServers: {($n): $e}}' >"$tmp"
+  fi
+  mv -f "$tmp" "$cfg"
+  ui_ok "$name registered with kiro"
+}
+
+# _mcp_args_jq_array <name>
+# Echo the substituted args list as a JSON array, suitable for `--argjson`
+# injection in jq. Reads from manifest_mcp_args (one substituted arg per
+# line) and folds into a JSON array.
+_mcp_args_jq_array() {
+  local name="$1"
+  manifest_mcp_args "$name" | jq -R . | jq -sc .
+}
+
+# _mcp_pretty <path>
+# Echo a path relative to $HOME for log messages.
+# shellcheck disable=SC2088 # the literal `~/` below is display text, not shell expansion
+_mcp_pretty() {
+  local p="$1"
+  case "$p" in
+    "$HOME"/*) printf '~/%s' "${p#"$HOME"/}" ;;
+    *)         printf '%s' "$p" ;;
+  esac
+}
+
 # _agent_write_claude_settings — drop a project-scope .claude/settings.json
-# at $STAGE_DIR with pre-approved permissions so the operator doesn't
-# answer the trust dialog over and over for safe read-only commands.
+# at $STAGE_DIR with pre-approved permissions. The MCP-tool permissions
+# come from each MCP's permissionsAllow in manifest.json (so packs that
+# add new MCPs get their tools auto-allowed). The bash/aws/kubectl
+# read-only allowlist comes from this file — it's CLI-specific, not
+# MCP-specific, so it doesn't belong in the manifest.
 #
-# What's allowed:
-#   * the aws-mcp tools (read-only AWS doc + region/quota lookups)
-#   * read-only AWS CLI verbs (sts get-caller-identity, eks list*,
-#     cloudformation describe* / list*)
-#   * read-only kubectl verbs (get / describe / logs / wait)
-#   * read-only filesystem on the migration runtime tree
-#
-# Anything that mutates AWS / k8s / source / target is NOT pre-approved
-# — those will still hit the trust dialog so the operator can confirm.
-#
-# Skipped when MIGRATE_NO_CLAUDE_SETTINGS=1 (operator wants vanilla
-# claude defaults).
+# Skipped when MIGRATE_NO_CLAUDE_SETTINGS=1.
 _agent_write_claude_settings() {
   if [[ "${MIGRATE_NO_CLAUDE_SETTINGS:-0}" -eq 1 ]]; then
     return 0
@@ -335,86 +521,55 @@ _agent_write_claude_settings() {
     return 0
   fi
 
-  cat >"$settings" <<'JSON'
-{
-  "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "permissions": {
-    "allow": [
-      "mcp__aws-mcp__aws___read_documentation",
-      "mcp__aws-mcp__aws___search_documentation",
-      "mcp__aws-mcp__aws___get_regional_availability",
-      "mcp__aws-mcp__aws___list_service_quotas",
-      "Bash(aws sts get-caller-identity:*)",
-      "Bash(aws eks list-clusters:*)",
-      "Bash(aws eks describe-cluster:*)",
-      "Bash(aws cloudformation list-stacks:*)",
-      "Bash(aws cloudformation describe-stacks:*)",
-      "Bash(aws cloudformation describe-stack-events:*)",
-      "Bash(aws cloudformation describe-stack-resources:*)",
-      "Bash(aws ecr describe-repositories:*)",
-      "Bash(aws ecr list-images:*)",
-      "Bash(aws s3 ls:*)",
-      "Bash(aws iam get-role:*)",
-      "Bash(aws iam list-attached-role-policies:*)",
-      "Bash(kubectl get:*)",
-      "Bash(kubectl describe:*)",
-      "Bash(kubectl logs:*)",
-      "Bash(kubectl wait:*)",
-      "Bash(kubectl version:*)",
-      "Bash(kubectl config current-context:*)",
-      "Bash(kubectl config get-contexts:*)",
-      "Bash(helm status:*)",
-      "Bash(helm list:*)",
-      "Bash(helm history:*)",
-      "Bash(helm get values:*)",
-      "Bash(cat:*)",
-      "Bash(ls:*)",
-      "Bash(jq:*)",
-      "Bash(grep:*)",
-      "Bash(rg:*)",
-      "Bash(find:*)",
-      "Bash(head:*)",
-      "Bash(tail:*)",
-      "Bash(wc:*)",
-      "Read(*)",
-      "Glob(*)",
-      "Grep(*)",
-      "Write(*)",
-      "Edit(*)",
-      "MultiEdit(*)",
-      "NotebookEdit(*)",
-      "Bash(mkdir:*)",
-      "Bash(touch:*)",
-      "Bash(cp:*)",
-      "Bash(mv:*)"
-    ]
-  }
-}
-JSON
-  log_info "claude: wrote pre-approved permissions to $settings"
-}
+  # The CLI's read-only operator allowlist (NOT MCP-specific).
+  local cli_perms_json
+  cli_perms_json=$(jq -nc '[
+    "Bash(aws sts get-caller-identity:*)",
+    "Bash(aws eks list-clusters:*)",
+    "Bash(aws eks describe-cluster:*)",
+    "Bash(aws cloudformation list-stacks:*)",
+    "Bash(aws cloudformation describe-stacks:*)",
+    "Bash(aws cloudformation describe-stack-events:*)",
+    "Bash(aws cloudformation describe-stack-resources:*)",
+    "Bash(aws ecr describe-repositories:*)",
+    "Bash(aws ecr list-images:*)",
+    "Bash(aws s3 ls:*)",
+    "Bash(aws iam get-role:*)",
+    "Bash(aws iam list-attached-role-policies:*)",
+    "Bash(kubectl get:*)",
+    "Bash(kubectl describe:*)",
+    "Bash(kubectl logs:*)",
+    "Bash(kubectl wait:*)",
+    "Bash(kubectl version:*)",
+    "Bash(kubectl config current-context:*)",
+    "Bash(kubectl config get-contexts:*)",
+    "Bash(helm status:*)",
+    "Bash(helm list:*)",
+    "Bash(helm history:*)",
+    "Bash(helm get values:*)",
+    "Bash(cat:*)", "Bash(ls:*)", "Bash(jq:*)", "Bash(grep:*)", "Bash(rg:*)",
+    "Bash(find:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)",
+    "Read(*)", "Glob(*)", "Grep(*)",
+    "Write(*)", "Edit(*)", "MultiEdit(*)", "NotebookEdit(*)",
+    "Bash(mkdir:*)", "Bash(touch:*)", "Bash(cp:*)", "Bash(mv:*)"
+  ]')
 
-# Per-agent registration paths:
-#   claude → `claude mcp add-json aws-mcp --scope user '<json>'`
-#   codex  → write [mcp_servers.aws-mcp] block to ~/.codex/config.toml
-#   kiro   → write to $STAGE_DIR/.kiro/settings/mcp.json
-#
-# Idempotent: each path checks for an existing entry first.
-# Bypass: MIGRATE_SKIP_MCP=1.
-_agent_install_aws_mcp() {
-  local agent="$1"
-  if [[ "${MIGRATE_SKIP_MCP:-0}" -eq 1 ]]; then
-    ui_dim "  MIGRATE_SKIP_MCP=1 → skipping aws-mcp registration"
-    return 0
+  # Manifest-driven MCP tool perms. May be empty (no MCPs declared
+  # any).
+  local mcp_perms_json='[]'
+  if manifest_have; then
+    mcp_perms_json=$(printf '%s' "$__MANIFEST_RAW" \
+      | jq '[.mcpServers[].permissionsAllow[]?] | unique')
   fi
-  _agent_ensure_uvx || die "aws-mcp registration requires uvx; rerun with MIGRATE_SKIP_MCP=1 to opt out"
-  local region; region=$(state_get AWS_REGION us-east-1)
 
-  case "$agent" in
-    claude) _agent_mcp_claude "$region" ;;
-    codex)  _agent_mcp_codex  "$region" ;;
-    kiro)   _agent_mcp_kiro   "$region" ;;
-  esac
+  # Merge + emit.
+  jq -n --argjson mcp "$mcp_perms_json" --argjson cli "$cli_perms_json" '
+    {
+      "$schema": "https://json.schemastore.org/claude-code-settings.json",
+      permissions: { allow: ($mcp + $cli | unique) }
+    }
+  ' >"$settings"
+  log_info "claude: wrote pre-approved permissions to $settings ($(jq '.permissions.allow|length' "$settings") entries)"
 }
 
 # _agent_ensure_uvx — uvx is required for AWS MCP registration. If it's
@@ -454,63 +609,11 @@ _agent_ensure_uvx() {
   return 0
 }
 
-_agent_mcp_claude() {
-  local region="$1"
-  if ! command -v claude >/dev/null 2>&1; then return 0; fi
-  if claude mcp list 2>/dev/null | grep -q '^aws-mcp\b'; then
-    ui_dim "  claude: aws-mcp already registered"
-    return 0
-  fi
-  ui_step "Registering aws-mcp with claude"
-  local cfg
-  cfg=$(printf '{"command":"uvx","args":["mcp-proxy-for-aws@latest","https://aws-mcp.us-east-1.api.aws/mcp","--metadata","AWS_REGION=%s"]}' "$region")
-  if claude mcp add-json aws-mcp --scope user "$cfg" >>"$LOG_FILE" 2>&1; then
-    ui_ok "aws-mcp registered with claude (AWS_REGION=$region)"
-  else
-    ui_warn "claude mcp add-json failed; see $LOG_FILE"
-  fi
-}
-
-_agent_mcp_codex() {
-  local region="$1"
-  local cfg="$HOME/.codex/config.toml"
-  mkdir -p "$(dirname "$cfg")"
-  touch "$cfg"
-  if grep -q '^\[mcp_servers\.aws-mcp\]' "$cfg" 2>/dev/null; then
-    ui_dim "  codex: aws-mcp already in $cfg"
-    return 0
-  fi
-  ui_step "Registering aws-mcp with codex (~/.codex/config.toml)"
-  cat >>"$cfg" <<EOF
-
-[mcp_servers.aws-mcp]
-command = "uvx"
-args = ["mcp-proxy-for-aws@latest", "https://aws-mcp.us-east-1.api.aws/mcp", "--metadata", "AWS_REGION=$region"]
-EOF
-  ui_ok "aws-mcp registered with codex (AWS_REGION=$region)"
-}
-
-_agent_mcp_kiro() {
-  local region="$1"
-  local cfg="$STAGE_DIR/.kiro/settings/mcp.json"
-  mkdir -p "$(dirname "$cfg")"
-  if [[ -f "$cfg" ]] && grep -q '"aws-mcp"' "$cfg" 2>/dev/null; then
-    ui_dim "  kiro: aws-mcp already in $cfg"
-    return 0
-  fi
-  ui_step "Registering aws-mcp with kiro ($cfg)"
-  cat >"$cfg" <<EOF
-{
-  "mcpServers": {
-    "aws-mcp": {
-      "command": "uvx",
-      "args": ["mcp-proxy-for-aws@latest", "https://aws-mcp.us-east-1.api.aws/mcp", "--metadata", "AWS_REGION=$region"]
-    }
-  }
-}
-EOF
-  ui_ok "aws-mcp registered with kiro (AWS_REGION=$region)"
-}
+# Old _agent_mcp_claude / _agent_mcp_codex / _agent_mcp_kiro have been
+# replaced by mcp_install_from_manifest + _mcp_write_{claude,codex,kiro}.
+# The new path is project-scope (avoids the stale-user-cache class of
+# claude bug) and manifest-driven (a pack adds an MCP via JSON edit, no
+# fork required).
 
 # agent_exec <agent> — replace this process with the agent. Never returns.
 #
@@ -551,7 +654,13 @@ agent_exec() {
     resuming=1
   fi
 
-  local fresh_prompt='Greet the operator. Briefly (3-5 sentences max) introduce what you can help with — assess a migration, deploy + operate Migration Assistant, run a Solr/ES/OpenSearch migration end-to-end. Suggest 3-4 example asks (e.g. "I have a Solr cluster on EC2, help me move to OpenSearch Serverless", "Continue a deploy that was Ctrl-C'\''d", "Run a migration assessment for my ES 7.10 cluster"). DO NOT run any tools yet — no Read of state.env, no Bash, no kubectl. Wait for the operator to tell you what they want. The CLAUDE.md / AGENTS.md in this directory has been auto-loaded; you already know the rules. Be concise and friendly.'
+  # Agent fresh-handoff prompt: comes from manifest.branding.agentFreshPrompt
+  # if the bundle declares one (so packs can fully customize the agent's
+  # first impression), otherwise the upstream default below.
+  local fresh_prompt; fresh_prompt=$(manifest_brand agentFreshPrompt)
+  if [[ -z "$fresh_prompt" ]]; then
+    fresh_prompt='Greet the operator. Briefly (3-5 sentences max) introduce what you can help with — assess a migration, deploy + operate Migration Assistant, run a Solr/ES/OpenSearch migration end-to-end. Suggest 3-4 example asks (e.g. "I have a Solr cluster on EC2, help me move to OpenSearch Serverless", "Continue a deploy that was Ctrl-C'\''d", "Run a migration assessment for my ES 7.10 cluster"). DO NOT run any tools yet — no Read of state.env, no Bash, no kubectl. Wait for the operator to tell you what they want. The CLAUDE.md / AGENTS.md in this directory has been auto-loaded; you already know the rules. Be concise and friendly.'
+  fi
   ui_dim "  exec $bin (resume=$resuming)"
   case "$agent" in
     claude)
@@ -559,6 +668,11 @@ agent_exec() {
       else exec "$bin" "$fresh_prompt"
       fi ;;
     codex)
+      # Set CODEX_HOME to the per-stage project-scope config dir so codex
+      # picks up the MCP servers we wrote there. Without this, codex
+      # reads ~/.codex/config.toml globally and sees only the user's
+      # personal MCPs (or none).
+      export CODEX_HOME="$STAGE_DIR/.codex"
       if (( resuming )); then exec "$bin" resume --last
       else exec "$bin" "$fresh_prompt"
       fi ;;

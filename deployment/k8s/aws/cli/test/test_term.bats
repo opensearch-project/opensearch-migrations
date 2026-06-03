@@ -119,6 +119,12 @@ capture_stderr() {
   if ! command -v stty >/dev/null 2>&1; then
     skip "stty not on PATH"
   fi
+  # bats runs without a controlling tty, so `stty size` may fail. The
+  # contract is "_term_winch updates LINES/COLUMNS when stty succeeds AND
+  # leaves them alone when it fails". Skip when bats has no tty.
+  if ! stty size </dev/tty >/dev/null 2>&1; then
+    skip "no controlling tty (bats default)"
+  fi
   __TERM_LINES=0
   __TERM_COLUMNS=0
   _term_winch

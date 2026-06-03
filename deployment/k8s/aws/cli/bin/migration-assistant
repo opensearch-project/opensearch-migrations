@@ -44,6 +44,10 @@ source "$LIB_DIR/ui.sh"
 source "$LIB_DIR/log.sh"
 # shellcheck source=lib/state.sh
 source "$LIB_DIR/state.sh"
+# manifest.sh after state.sh (state_get is used for ${VAR} substitution),
+# before resume.sh / agent.sh (which consume branding + mcpServers).
+# shellcheck source=lib/manifest.sh
+source "$LIB_DIR/manifest.sh"
 # shellcheck source=lib/discover.sh
 source "$LIB_DIR/discover.sh"
 # shellcheck source=lib/install_tools.sh
@@ -72,6 +76,8 @@ source "$LIB_DIR/agent.sh"
 source "$LIB_DIR/cleanup.sh"
 # shellcheck source=lib/diag.sh
 source "$LIB_DIR/diag.sh"
+# shellcheck source=lib/pack.sh
+source "$LIB_DIR/pack.sh"
 # shellcheck source=lib/resume.sh
 source "$LIB_DIR/resume.sh"
 
@@ -82,7 +88,15 @@ case "${1:-resume}" in
   diag)                  cmd_diag     "${@:2}" ;;
   clear)                 cmd_clear    "${@:2}" ;;
   cleanup)               cmd_cleanup  "${@:2}" ;;
-  version|--version|-V)  printf '%s\n' "$CLI_VERSION" ;;
+  pack)                  cmd_pack     "${@:2}" ;;
+  version|--version|-V)
+    # Branded version: manifest's versionString if set, else cli version
+    # plus +pack-ver suffix per applied pack.
+    manifest_init
+    _v=$(manifest_brand versionString)
+    [[ -z "$_v" ]] && _v="$CLI_VERSION$(manifest_pack_summary)"
+    printf '%s\n' "$_v"
+    ;;
   help|--help|-h)        cmd_help ;;
   -y|--*)
     # Any flag-led invocation behaves like `resume <flags>` so

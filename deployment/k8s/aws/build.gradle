@@ -128,6 +128,31 @@ tasks.register('packageMigrationAssistantCliTarball') {
                 rename '.*', 'LICENSE'
             }
 
+            // ---- bundle manifest.json ----
+            // The agent-skills tarball already extracted skills/manifest.json
+            // into the bundle's skills/ directory above. Promote it to the
+            // tarball ROOT (sibling of bin/ + lib/) so manifest.sh's primary
+            // resolution path finds it instantly without descending. ALSO
+            // bake the build version into build.version so `migration-assistant
+            // version` and the banner report the assembled version rather
+            // than "0.0.0-dev".
+            def manifestJsonInner = new File(root, 'skills/manifest.json')
+            def manifestJsonRoot  = new File(root, 'manifest.json')
+            if (manifestJsonInner.exists()) {
+                def text = manifestJsonInner.text
+                // Substitute "version": "0.0.0-dev" → "version": "<ver>".
+                // Naive string replace — manifest.json is generated, the
+                // exact placeholder is constant.
+                text = text.replace(
+                    '"version": "0.0.0-dev"',
+                    "\"version\": \"${ver}\""
+                )
+                manifestJsonRoot.text = text
+                // Keep the inner copy in sync so resolution path #2 also
+                // sees the built version.
+                manifestJsonInner.text = text
+            }
+
             // Tar it. Gradle's Tar task is more portable than shelling out
             // to BSD/GNU tar — it always emits POSIX-clean entries.
             project.exec {

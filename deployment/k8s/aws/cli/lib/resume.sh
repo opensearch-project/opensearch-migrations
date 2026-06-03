@@ -38,8 +38,29 @@ cmd_resume() {
   done
 
   log_init
-  ui_banner "OpenSearch Migration Assistant"
-  ui_dim "  cli=$CLI_VERSION  stage=$STAGE  workdir=$STAGE_DIR"
+
+  # Banner uses branding.appName from manifest.json when set, otherwise
+  # falls back to the upstream string. Same for the optional tagline +
+  # version line. manifest_init is idempotent and cheap.
+  manifest_init
+  local app_name; app_name=$(manifest_brand appName)
+  [[ -z "$app_name" ]] && app_name="OpenSearch Migration Assistant"
+  ui_banner "$app_name"
+  local tagline; tagline=$(manifest_brand tagline)
+  [[ -n "$tagline" ]] && ui_dim "  $tagline"
+
+  local version_str; version_str=$(manifest_brand versionString)
+  if [[ -z "$version_str" ]]; then
+    version_str="$CLI_VERSION$(manifest_pack_summary)"
+  fi
+  ui_dim "  cli=$version_str  stage=$STAGE  workdir=$STAGE_DIR"
+
+  # First-run welcome (only when state is fresh — no last_step set).
+  if [[ -z "$(state_resumable_step)" ]]; then
+    local welcome; welcome=$(manifest_brand welcomeMessage)
+    [[ -n "$welcome" ]] && ui_info "$welcome"
+  fi
+
   log_announce
   on_exit_register log_announce_exit
   upgrade_notice_for_cli
@@ -219,31 +240,88 @@ cmd_resume() {
   esac
 }
 
-# _select_mode <current> → echoes "Manual" or "Agent" on stdout.
+# _select_mode <current> → echoes the selected mode id on stdout.
 #
 # Caller does mode=$(_select_mode "$mode"); see ui.sh header for the rule
 # (UI=stderr, return value=stdout). The chrome helpers below are stderr-safe.
+#
+# Mode list comes from branding.modes[] in manifest.json. The manifest's
+# upstream-default copy lists Manual first (default), Agent second; a
+# pack can reorder, relabel, change the default, or hide a mode by
+# setting available:false.
 _select_mode() {
   local current="${1:-Manual}"
-  local default
-  if [[ "$current" == "Agent" ]]; then default=2; else default=1; fi
+
+  manifest_init
+
+  # Build parallel arrays of visible modes from the manifest.
+  local ids=() labels=() descs=() default_idx=1
+  if manifest_have; then
+    local i=1 id label desc is_default
+    while IFS='|' read -r id label desc is_default; do
+      [[ -z "$id" ]] && continue
+      ids+=("$id"); labels+=("$label"); descs+=("$desc")
+      # Pick the default: prior MODE state wins; otherwise the manifest's
+      # default:true entry; otherwise position 1.
+      if [[ -n "$current" && "$id" == "$current" ]]; then
+        default_idx=$i
+      elif [[ -z "$current" && "$is_default" == "1" ]]; then
+        default_idx=$i
+      fi
+      i=$((i + 1))
+    done < <(manifest_modes)
+  fi
+
+  # Fallback (no manifest): Manual then Agent, today's strings.
+  if (( ${#ids[@]} == 0 )); then
+    ids=(Manual Agent)
+    labels=(Manual AI)
+    descs=(
+      "you in control. CLI deploys the chart, then drops you into migration-console-0 to run the migration commands yourself."
+      "an LLM coding agent (claude/codex/q/kiro) drives the migration. CLI deploys the chart, then hands control to the agent with a pre-loaded skill set (preview — refine your invocation as needed)."
+    )
+    [[ "$current" == "Agent" ]] && default_idx=2
+  fi
+
   ui_step "How do you want to drive this migration?"
-  printf '  %s[1] Manual%s — you in control. CLI deploys the chart, then\n' \
-    "$__UI_C_BOLD" "$__UI_C_RESET" >&2
-  printf '             drops you into migration-console-0 to run the\n' >&2
-  printf '             migration commands yourself.\n' >&2
-  printf '  %s[2] AI%s     — an LLM coding agent (claude/codex/q/kiro) drives\n' \
-    "$__UI_C_BOLD" "$__UI_C_RESET" >&2
-  printf '             the migration. CLI deploys the chart, then hands\n' >&2
-  printf '             control to the agent with a pre-loaded skill set\n' >&2
-  printf '             (preview — refine your invocation as needed).\n' >&2
+  local i
+  for ((i = 0; i < ${#ids[@]}; i++)); do
+    printf '  %s[%d] %s%s — %s\n' \
+      "$__UI_C_BOLD" "$((i + 1))" "${labels[$i]}" "$__UI_C_RESET" \
+      "${descs[$i]}" >&2
+  done
+
   local pick
-  ui_prompt "Select" "$default" pick
+  ui_prompt "Select" "$default_idx" pick
+
+  # Numeric pick → look up by index. Name pick → match against id or
+  # label (case-insensitive on the first letter to keep the legacy
+  # `manual` / `MANUAL` / `m` shapes working).
   case "$pick" in
-    1|Manual|manual) printf 'Manual\n' ;;
-    2|AI|ai|Agent|agent) printf 'Agent\n' ;;
-    *)               die "invalid selection: $pick" ;;
+    [0-9]*)
+      if (( pick >= 1 && pick <= ${#ids[@]} )); then
+        printf '%s\n' "${ids[$((pick - 1))]}"
+        return 0
+      fi
+      ;;
   esac
+  for ((i = 0; i < ${#ids[@]}; i++)); do
+    if [[ "$pick" == "${ids[$i]}" || "$pick" == "${labels[$i]}" ]]; then
+      printf '%s\n' "${ids[$i]}"
+      return 0
+    fi
+    # Lowercase first-letter match (legacy "m" / "a" shortcuts)
+    local id_lower="${ids[$i]:0:1}"
+    id_lower=$(printf '%s' "$id_lower" | tr '[:upper:]' '[:lower:]')
+    local pick_lower="${pick:0:1}"
+    pick_lower=$(printf '%s' "$pick_lower" | tr '[:upper:]' '[:lower:]')
+    if [[ "$pick_lower" == "$id_lower" ]]; then
+      printf '%s\n' "${ids[$i]}"
+      return 0
+    fi
+  done
+
+  die "invalid selection: $pick"
 }
 
 # manual_path — full deploy + console exec.
@@ -336,9 +414,11 @@ _manual_can_skip_to_console() {
 
 # cmd_help — short help text.
 cmd_help() {
+  manifest_init
+  local header; header=$(manifest_brand helpHeader)
+  [[ -z "$header" ]] && header="migration-assistant — OpenSearch Migration Assistant CLI"
+  printf '%s\n\n' "$header"
   cat <<'EOF'
-migration-assistant — OpenSearch Migration Assistant CLI
-
 Usage:
   migration-assistant [flags]                    Deploy / resume (default)
   migration-assistant resume   [flags]           Same as default
@@ -431,5 +511,9 @@ Examples:
     --skip-setting-k8s-context --build --skip-test-images \
     --use-general-node-pool --stage ma --region us-east-1
 EOF
-  printf '\nVersion: %s\n' "$CLI_VERSION"
+  local version_str; version_str=$(manifest_brand versionString)
+  if [[ -z "$version_str" ]]; then
+    version_str="$CLI_VERSION$(manifest_pack_summary)"
+  fi
+  printf '\nVersion: %s\n' "$version_str"
 }
