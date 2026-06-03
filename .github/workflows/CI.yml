@@ -450,9 +450,30 @@ jobs:
         echo "SONAR_TOKEN=$SONAR_TOKEN" >> $GITHUB_ENV
     - name: Run SonarQube Scanner
       run: |
-        curl -sLo sonar-scanner-cli.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-6.2.1.4610-linux-x64.zip
-        unzip -q sonar-scanner-cli.zip -d $HOME
-        export PATH="$HOME/sonar-scanner-6.2.1.4610-linux-x64/bin:$PATH"
+        set -euo pipefail
+        SCANNER_VERSION="6.2.1.4610"
+        SCANNER_ZIP="sonar-scanner-cli-${SCANNER_VERSION}-linux-x64.zip"
+        SCANNER_URL="https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/${SCANNER_ZIP}"
+        SCANNER_SHA256="0b8a3049f0bd5de7abc1582c78c233960d3d4ed7cc983a1d1635e8552f8bb439"
+
+        # Retry on transient failures (CDN flakes, partial downloads).
+        # --fail makes curl exit non-zero on HTTP errors so we don't silently feed an
+        # error page into unzip, --retry-all-errors covers the body-cut-off case where
+        # curl saw 200 OK headers but the connection died mid-stream.
+        curl --fail --location --silent --show-error \
+             --retry 5 --retry-delay 5 --retry-all-errors \
+             --max-time 120 \
+             -o sonar-scanner-cli.zip "$SCANNER_URL"
+
+        # Verify checksum to catch any corruption that curl could not detect.
+        echo "${SCANNER_SHA256}  sonar-scanner-cli.zip" | sha256sum -c -
+
+        # Test zip integrity before extracting so a bad download fails loudly here
+        # instead of leaking partial files into $HOME.
+        unzip -tq sonar-scanner-cli.zip
+        unzip -q sonar-scanner-cli.zip -d "$HOME"
+
+        export PATH="$HOME/sonar-scanner-${SCANNER_VERSION}-linux-x64/bin:$PATH"
         sonar-scanner \
           -Dsonar.projectKey=local_project \
           -Dsonar.host.url=http://localhost:9000 \
