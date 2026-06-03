@@ -60,7 +60,7 @@ run_split() {
 
 @test "log_stream tees stdout into the log file" {
   run_split log_stream "test" sh -c 'printf "hello world\n"'
-  [ -z "$STDOUT" ]                          # no chrome on stdout
+  [ -z "$STDOUT" ]                          # no UI text on stdout
   [[ "$STDERR" == *"hello world"* ]]        # streamed live to operator
   grep -q 'STREAM\[test\] hello world' "$LOG_FILE"
 }

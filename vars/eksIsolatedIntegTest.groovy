@@ -36,8 +36,8 @@ def call(Map config = [:]) {
             choice(name: 'TARGET_VERSION', choices: ['OS_2.19', 'OS_1.3', 'OS_3.1'], description: 'Target cluster version')
             string(name: 'TEST_IDS', defaultValue: '0040', description: 'Test IDs to run (comma-separated)')
             booleanParam(name: 'BUILD', defaultValue: true, description: 'Build all artifacts from source (images, CFN, chart). When false, downloads published release artifacts.')
+            booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
             string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download for images, chart, and CFN templates.')
-            booleanParam(name: 'USE_RELEASE_CLI', defaultValue: false, description: 'Download the migration-assistant CLI from the GitHub release for VERSION instead of using the source-checkout copy. Tests the same install path operators use via curl-pipe install.')
         }
 
         options {
@@ -84,9 +84,6 @@ def call(Map config = [:]) {
     Source:     ${params.SOURCE_VERSION}
     Target:     ${params.TARGET_VERSION}
     Test IDs:   ${params.TEST_IDS}
-    Build:      ${params.BUILD}
-    Version:    ${params.VERSION}
-    Use Release CLI: ${params.USE_RELEASE_CLI}
     ================================================================
 """
                 }
@@ -99,7 +96,7 @@ def call(Map config = [:]) {
             }
 
             stage('Build') {
-                when { expression { params.BUILD } }
+                when { expression { !params.USE_RELEASE_BOOTSTRAP && params.BUILD } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         sh './gradlew clean build -x test --no-daemon --stacktrace'
@@ -112,16 +109,18 @@ def call(Map config = [:]) {
                     timeout(time: 90, unit: 'MINUTES') {
                         withMigrationsTestAccount(region: params.REGION, duration: 5400) { accountId ->
                             script {
+                                def bootstrap = resolveBootstrap(
+                                    useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
+                                    build: params.BUILD,
+                                    skipTestImages: true,
+                                    version: params.VERSION
+                                )
 
                                 bootstrapMA(
                                     stackName: buildStackName,
                                     stage: env.buildStageName,
                                     region: params.REGION,
-                                    build: params.BUILD,
-                                    skipTestImages: true,
-                                    version: params.VERSION,
-                                    useReleaseCli: params.USE_RELEASE_CLI,
-                                    useGeneralNodePool: true,
+                                    bootstrap: bootstrap,
                                     eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                     kubectlContext: "migration-eks-build-${env.buildStageName}"
                                 )
@@ -144,21 +143,31 @@ def call(Map config = [:]) {
                                 isolatedVpcId = vpc.vpcId
                                 env.isolatedVpcId = vpc.vpcId
 
+                                // Tag subnets so AWS Load Balancer Controller can discover them for internal NLBs.
+                                // CDK's Tags.of() is a no-op on imported subnets, so we tag them here at the source.
+                                sh """
+                                    aws ec2 create-tags --region ${params.REGION} \
+                                      --resources ${vpc.subnetIds.replace(',', ' ')} \
+                                      --tags Key=kubernetes.io/role/internal-elb,Value=1
+                                """
+
                                 // Deploy EKS + MA into isolated subnets
+                                def bootstrap = resolveBootstrap(
+                                    useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
+                                    build: params.BUILD,
+                                    skipTestImages: true,
+                                    version: params.VERSION
+                                )
                                 bootstrapMA(
                                     stackName: isolatedStackName,
                                     stage: env.maStageName,
                                     region: params.REGION,
-                                    build: params.BUILD,
-                                    skipTestImages: true,
-                                    version: params.VERSION,
-                                    useReleaseCli: params.USE_RELEASE_CLI,
-                                    useGeneralNodePool: true,
+                                    bootstrap: bootstrap,
                                     eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                     kubectlContext: "migration-eks-${env.maStageName}",
                                     vpcId: vpc.vpcId,
                                     subnetIds: vpc.subnetIds,
-                                    createVpcEndpoints: 's3,ecr,ecrDocker,cloudwatchLogs,efs,sts,eksAuth',
+                                    createVpcEndpoints: true,
                                     maImagesSource: env.BUILD_ECR
                                 )
 

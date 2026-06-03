@@ -1,5 +1,23 @@
 # migrate-cli
 
+> ⚠️ **PREVIEW — opt-in only.** The production deploy path remains
+> `aws-bootstrap.sh` (curl-pipe from the GitHub release). This CLI is
+> being baked through CI for a few releases before being promoted. You
+> can opt in two ways:
+>
+> 1. **Locally**: install via the curl-pipe below and run
+>    `migration-assistant`. State is per-project; nothing leaks into
+>    your global env.
+> 2. **Through Jenkins**: leave `USE_RELEASE_BOOTSTRAP=false` (the
+>    default for source-checkout pipeline runs). Jenkins runs this CLI
+>    as the deploy backend, which is how the team gathers stability
+>    coverage. Setting `USE_RELEASE_BOOTSTRAP=true` falls back to the
+>    released `aws-bootstrap.sh` for that run.
+>
+> Production releases ship BOTH `aws-bootstrap.sh` (the stable production
+> artifact) AND `install.sh` + `migration-assistant-cli-<ver>.tar.gz`
+> (the preview CLI artifact) so operators can choose.
+
 A bash-native CLI for the OpenSearch Migration Assistant. Replaces the
 14k-line Go TUI proposed in
 [opensearch-project/opensearch-migrations#3008](https://github.com/opensearch-project/opensearch-migrations/pull/3008)

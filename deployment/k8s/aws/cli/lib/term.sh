@@ -119,7 +119,7 @@ _term_reset() {
 }
 
 # term_interactive — returns 0 iff term_init detected a real TTY.
-# Use to gate any visual chrome that's not handled internally by term.sh.
+# Use to gate any visual output that's not handled internally by term.sh.
 term_interactive() {
   (( __TERM_INTERACTIVE == 1 ))
 }

@@ -90,22 +90,47 @@ _diag() {
   fi
 }
 
-@test "Mode=2 (AI) progresses past mode-select" {
-  run bash -c "printf '2\n' | timeout 8 '$CLI_BIN' resume 2>&1"
+@test "Mode=2 (AI) progresses past mode-select WHEN MIGRATE_ENABLE_AGENT=1" {
+  # Agent mode is preview-gated. With MIGRATE_ENABLE_AGENT=1 the picker
+  # surfaces it as option 2; without, only Manual is shown and "2" is
+  # an invalid selection.
+  run bash -c "MIGRATE_ENABLE_AGENT=1 printf '2\n' | env MIGRATE_ENABLE_AGENT=1 timeout 8 '$CLI_BIN' resume 2>&1"
   if [[ "$output" == *"unknown mode"* ]]; then
-    _diag "Mode=AI: 'unknown mode' bug regression"
+    _diag "Mode=AI (gate on): 'unknown mode' bug regression"
     return 1
   fi
   if [[ "$output" != *"OpenSearch Migration Assistant"* ]]; then
-    _diag "Mode=AI: banner missing"
+    _diag "Mode=AI (gate on): banner missing"
     return 1
   fi
 }
 
-@test "--mode Agent is accepted (no gate)" {
-  run bash -c "timeout 6 '$CLI_BIN' resume --mode Agent 2>&1"
+@test "Mode picker hides AI option when MIGRATE_ENABLE_AGENT is unset" {
+  # Default behavior — gate off. The picker should only list Manual;
+  # the prompt should NOT mention "AI" or "agent".
+  run bash -c "printf 'q\n' | timeout 8 '$CLI_BIN' resume 2>&1 || true"
+  if [[ "$output" == *"[2] AI"* ]] || [[ "$output" == *"AI flow"* ]]; then
+    _diag "Mode picker leaked Agent option without MIGRATE_ENABLE_AGENT=1"
+    return 1
+  fi
+}
+
+@test "--mode Agent is rejected by default (preview gate)" {
+  run bash -c "timeout 6 '$CLI_BIN' resume --mode Agent 2>&1 || true"
+  if [[ "$output" != *"MIGRATE_ENABLE_AGENT"* ]]; then
+    _diag "--mode Agent should die with the MIGRATE_ENABLE_AGENT hint"
+    return 1
+  fi
+}
+
+@test "--mode Agent is accepted with MIGRATE_ENABLE_AGENT=1" {
+  run bash -c "MIGRATE_ENABLE_AGENT=1 timeout 6 '$CLI_BIN' resume --mode Agent 2>&1"
   if [[ "$output" == *"unknown mode"* ]]; then
-    _diag "--mode Agent: 'unknown mode' bug regression"
+    _diag "--mode Agent (gate on): 'unknown mode' regression"
+    return 1
+  fi
+  if [[ "$output" == *"MIGRATE_ENABLE_AGENT"* ]]; then
+    _diag "--mode Agent (gate on): unexpected gate-error message"
     return 1
   fi
 }

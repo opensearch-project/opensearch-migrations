@@ -1,17 +1,11 @@
 /**
- * Run the migration-assistant CLI to deploy the Migration Assistant CFN
- * stack. State and the run log land under
- * ./migration-assistant-workspace/<stage>/ in the Jenkins workspace.
+ * Deploy the Migration Assistant CFN stack and capture exports.
  *
- * The CLI binary defaults to the source-checkout copy
- * (./deployment/k8s/aws/cli/bin/migration-assistant). Pass
- * useReleaseCli=true (typically wired to params.USE_RELEASE_CLI) to
- * download install.sh from the GitHub release for `version` and run
- * the released CLI instead — this is the path operators use via
- * curl-pipe install. Replaces the old USE_RELEASE_BOOTSTRAP toggle
- * (which downloaded aws-bootstrap.sh; that script no longer exists).
+ * Supports two VPC modes:
+ *   - Create VPC (default): --deploy-create-vpc-cfn
+ *   - Import VPC: --deploy-import-vpc-cfn (requires vpcId, subnetIds)
  *
- * Sets these env vars from CFN outputs after deploy:
+ * Sets these env vars:
  *   - env.MA_STACK_NAME
  *   - env.registryEndpoint
  *   - env.eksClusterName
@@ -21,124 +15,66 @@
  *
  * Usage:
  *   bootstrapMA(
- *       stackName:             "...",
- *       stage:                 maStageName,
- *       region:                params.REGION,
+ *       stackName: "...",
+ *       stage: maStageName,
+ *       region: params.REGION,
+ *       bootstrap: bootstrap,           // from resolveBootstrap()
  *       eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
- *       kubectlContext:        "my-custom-context",
- *       build:                 params.BUILD,
- *       skipTestImages:        true,
- *       useGeneralNodePool:    true,
- *       version:               params.VERSION,         // ignored when build=true
- *       useReleaseCli:         params.USE_RELEASE_CLI, // false → source checkout (default)
+ *       kubectlContext: "my-custom-context",
  *       // Optional — import VPC mode:
- *       vpcId:               "vpc-xxx",
- *       subnetIds:           "subnet-a,subnet-b",
- *       createVpcEndpoints:  "s3,ecr,ecrDocker",
- *       // Optional:
- *       maImagesSource: "ecr-registry-url",
- *       tlsMode:        "self-signed",
- *       pcaArn:         "arn:aws:acm-pca:..."
+ *       vpcId: "vpc-xxx",
+ *       subnetIds: "subnet-a,subnet-b",
+ *       createVpcEndpoints: true,
+ *       // Optional — mirror images from another ECR:
+ *       maImagesSource: "ecr-registry-url"
  *   )
  */
 def call(Map config = [:]) {
     def stackName = config.stackName
     def stage = config.stage
     def region = config.region
+    def bootstrap = config.bootstrap
     def eksAccessPrincipalArn = config.eksAccessPrincipalArn
     def kubectlContext = config.kubectlContext
 
     if (!stackName) { error("bootstrapMA: 'stackName' is required") }
     if (!stage) { error("bootstrapMA: 'stage' is required") }
     if (!region) { error("bootstrapMA: 'region' is required") }
+    if (!bootstrap) { error("bootstrapMA: 'bootstrap' is required") }
     if (!eksAccessPrincipalArn) { error("bootstrapMA: 'eksAccessPrincipalArn' is required") }
     if (!kubectlContext) { error("bootstrapMA: 'kubectlContext' is required") }
 
     env.MA_STACK_NAME = stackName
     env.eksKubeContext = kubectlContext
 
-    def flags = []
+    def tlsMode = config.tlsMode
+    def tlsFlag = tlsMode ? "--tls-mode ${tlsMode}" : ''
 
-    // VPC mode.
-    if (config.vpcId) {
-        flags << '--deploy-import-vpc-cfn'
-        flags << "--vpc-id ${config.vpcId}"
-        flags << "--subnet-ids ${config.subnetIds}"
-        if (config.createVpcEndpoints) {
-            flags << "--create-vpc-endpoints ${config.createVpcEndpoints}"
-        }
-    } else {
-        flags << '--deploy-create-vpc-cfn'
-    }
+    // Determine VPC mode
+    def vpcId = config.vpcId
+    def subnetIds = config.subnetIds
+    def deployFlag = vpcId ? '--deploy-import-vpc-cfn' : '--deploy-create-vpc-cfn'
+    def vpcFlags = vpcId ? "--vpc-id ${vpcId} --subnet-ids ${subnetIds}" : ''
+    def endpointFlag = config.createVpcEndpoints ? '--create-vpc-endpoints' : ''
+    def imageSourceFlag = config.maImagesSource ? "--ma-images-source ${config.maImagesSource}" : ''
 
-    // Build-from-source vs released artifacts.
-    if (config.build) {
-        flags << '--build'
-        if (config.skipTestImages) flags << '--skip-test-images'
-        // base-dir defaults to the repo root the CLI was invoked out of;
-        // pwd is that root in the Jenkins workspace.
-    } else if (config.version && config.version != 'latest') {
-        flags << "--version ${config.version}"
-    }
-
-    if (config.useGeneralNodePool)        flags << '--use-general-node-pool'
-    if (config.disableGeneralPurposePool) flags << '--disable-general-purpose-pool'
-
-    if (config.tlsMode)        flags << "--tls-mode ${config.tlsMode}"
-    if (config.pcaArn)         flags << "--pca-arn ${config.pcaArn}"
-    if (config.maImagesSource) flags << "--ma-images-source ${config.maImagesSource}"
-
-    def flagStr = flags.join(' ')
-    def workspaceDir = "${env.WORKSPACE}/migration-assistant-workspace"
-
-    // Resolve which CLI binary to run: source-checkout (default) or the
-    // released CLI installed via install.sh. See vars/resolveCli.groovy.
-    def cliBin = resolveCli(
-        useReleaseCli: config.useReleaseCli ?: false,
-        version:       config.version ?: 'latest'
-    )
-
-    // Run the CLI. Stream stdout+stderr live (each line tagged with the
-    // wall-clock time so a hang is obvious in the Jenkins console). On
-    // non-zero exit, dump the full migrate.log so the failure root cause
-    // is in the same console output without a Jenkins archive round trip.
     sh """
-        set +e
-        export MIGRATE_HOME="${workspaceDir}"
-        ${cliBin} \
-          --non-interactive \
-          --verbose \
+        ${bootstrap.script} \
+          ${deployFlag} \
           --stack-name "${stackName}" \
           --stage "${stage}" \
           --eks-access-principal-arn "${eksAccessPrincipalArn}" \
-          ${flagStr} \
+          ${bootstrap.flags} \
+          ${tlsFlag} \
+          ${vpcFlags} \
+          ${endpointFlag} \
+          ${imageSourceFlag} \
           --skip-console-exec \
           --skip-setting-k8s-context \
           --kubectl-context "${kubectlContext}" \
           --region ${region} \
-          2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }
-        rc=\${PIPESTATUS[0]}
-        set -e
-        if [ \$rc -ne 0 ]; then
-          echo "=== migration-assistant FAILED (rc=\$rc) — full migrate.log ==="
-          cat "${workspaceDir}/${stage}/log/migrate.log" 2>&1 || \
-            echo "(migrate.log not found at ${workspaceDir}/${stage}/log/migrate.log)"
-          echo "=== end migrate.log ==="
-        fi
-        exit \$rc
+          2>&1 | { set +x; while IFS= read -r line; do printf '%s | %s\\n' "\$(date '+%H:%M:%S')" "\$line"; done; }; exit \${PIPESTATUS[0]}
     """
-
-    // Copy the full migrate.log into the workspace and archive it. Runs
-    // both on success and failure so the log is always captureable.
-    sh """
-        mkdir -p migrate-cli-logs/${stage}
-        cp -R "${workspaceDir}/${stage}/log/." migrate-cli-logs/${stage}/ 2>/dev/null || true
-    """
-    archiveArtifacts(
-        artifacts: "migrate-cli-logs/**",
-        allowEmptyArchive: true,
-        fingerprint: false
-    )
 
     def exportsMap = parseCfnExports(stackName: stackName, region: region)
     env.registryEndpoint = exportsMap['MIGRATIONS_ECR_REGISTRY']

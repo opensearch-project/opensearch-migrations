@@ -11,14 +11,14 @@
 #   * Prompts read from /dev/tty when stdin is not a TTY (curl-piped
 #     installer scenario), so install.sh can still ask questions.
 #
-# *** CRITICAL: ALL UI CHROME GOES TO STDERR. ***
+# *** CRITICAL: ALL UI OUTPUT GOES TO STDERR. ***
 #
 # Functions like ui_info / ui_ok / ui_step / ui_dim / ui_banner / ui_table
 # write only to stderr. Stdout is reserved for *return values* — the chosen
 # mode, the resolved version, the PID of a spinner, etc.
 #
 # Why: callers like `mode=$(_select_mode)` or `pid=$(ui_spinner_start …)`
-# capture stdout. If chrome leaks to stdout, the captured value gets
+# capture stdout. If UI text leaks to stdout, the captured value gets
 # polluted ("\n▶ Choose driver\nManual" instead of "Manual") and the next
 # `case` falls through. This rule eliminates that whole class of bug.
 #
@@ -48,8 +48,8 @@ __UI_C_CYAN="$__TERM_C_CYAN"
 __UI_C_DIM="$__TERM_C_DIM"
 __UI_C_BOLD="$__TERM_C_BOLD"
 
-# Every chrome helper writes to stderr — see file header for the rule.
-# Embed clickable hyperlinks in any chrome message via $(term_link URL LABEL).
+# Every UI helper writes to stderr — see file header for the rule.
+# Embed clickable hyperlinks in any UI message via $(term_link URL LABEL).
 # OSC 8 is rendered by iTerm2, kitty, Wezterm, vscode, recent gnome-terminal;
 # older terminals see plain text and don't break.
 ui_info()    { printf '%s%s%s %s\n' "$__UI_C_CYAN"   "ℹ"  "$__UI_C_RESET" "$*" >&2; }
@@ -82,7 +82,7 @@ ui_banner() {
 #     printed to stdout for capture via $(…).
 #
 # An empty input → default value. A read error → default value. The function
-# never returns the prompt text, the default hint, or any chrome on stdout.
+# never returns the prompt text, the default hint, or any UI text on stdout.
 ui_prompt() {
   local prompt="$1" default="$2" __ui_varname="${3:-}"
   # Locals are prefixed with __ui_ to avoid name-collision with the

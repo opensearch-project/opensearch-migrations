@@ -26,8 +26,8 @@ def call(Map config = [:]) {
             string(name: 'SNAPSHOT_NAME', defaultValue: 'os1x-aoss-osb-data', description: 'Name of the snapshot')
             string(name: 'MONITOR_RETRY_LIMIT', defaultValue: '33', description: 'Max retries for workflow monitoring (~1/min). 33=~30min')
             booleanParam(name: 'BUILD', defaultValue: true, description: 'Build all artifacts from source (images, CFN, chart). When false, downloads published release artifacts.')
+            booleanParam(name: 'USE_RELEASE_BOOTSTRAP', defaultValue: false, description: 'Download aws-bootstrap.sh from the latest GitHub release instead of using the source checkout version')
             string(name: 'VERSION', defaultValue: 'latest', description: 'Release version to deploy (e.g. "2.8.2" or "latest"). Determines which release artifacts to download for images, chart, and CFN templates.')
-            booleanParam(name: 'USE_RELEASE_CLI', defaultValue: false, description: 'Download the migration-assistant CLI from the GitHub release for VERSION instead of using the source-checkout copy. Tests the same install path operators use via curl-pipe install.')
         }
 
         options {
@@ -75,8 +75,8 @@ def call(Map config = [:]) {
                             Source:           ${params.SOURCE_VERSION}
                             Workers:          ${params.RFS_WORKERS}
                             Build:                  ${params.BUILD}
+                            Use Release Bootstrap:  ${params.USE_RELEASE_BOOTSTRAP}
                             Version:                ${params.VERSION}
-                            Use Release CLI:        ${params.USE_RELEASE_CLI}
                             ================================================================
                         """
                     }
@@ -89,11 +89,10 @@ def call(Map config = [:]) {
                 }
             }
 
-            // Skip source build when not building any artifacts from
-            // source (images/chart). USE_RELEASE_CLI is independent —
-            // it only governs which migration-assistant binary runs.
+            // Skip source build when using release bootstrap or when not building
+            // any artifacts from source (images/chart).
             stage('Build') {
-                when { expression { params.BUILD } }
+                when { expression { !params.USE_RELEASE_BOOTSTRAP && params.BUILD } }
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
                         sh './gradlew clean build -x test --no-daemon --stacktrace'
@@ -106,15 +105,18 @@ def call(Map config = [:]) {
                     timeout(time: 90, unit: 'MINUTES') {
                         script {
                             withMigrationsTestAccount(region: params.REGION, duration: 7200) { accountId ->
+                                def bootstrap = resolveBootstrap(
+                                    useReleaseBootstrap: params.USE_RELEASE_BOOTSTRAP,
+                                    build: params.BUILD,
+                                    skipTestImages: true,
+                                    version: params.VERSION,
+                                    useGeneralNodePool: true
+                                )
                                 bootstrapMA(
                                     stackName: env.STACK_NAME,
                                     stage: maStageName,
                                     region: params.REGION,
-                                    build: params.BUILD,
-                                    skipTestImages: true,
-                                    version: params.VERSION,
-                                    useReleaseCli: params.USE_RELEASE_CLI,
-                                    useGeneralNodePool: true,
+                                    bootstrap: bootstrap,
                                     eksAccessPrincipalArn: "arn:aws:iam::${accountId}:role/JenkinsDeploymentRole",
                                     kubectlContext: "migration-eks-${maStageName}"
                                 )

@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # test_stdout_discipline.bats — enforce the rule:
 #
-#     UI chrome (banners, prompts, info/ok/warn/err/step/dim/table) goes to
+#     UI output (banners, prompts, info/ok/warn/err/step/dim/table) goes to
 #     STDERR. Stdout is reserved for return values that callers capture
 #     with $(…).
 #
@@ -15,7 +15,7 @@
 #   1. Run each ui_* helper and assert: stdout empty, stderr non-empty.
 #   2. Run each value-returning function (_select_mode, ui_select,
 #      ui_spinner_start, state_get, arch_os, _sha256_of_string, etc.)
-#      with all chrome stubbed in, and assert stdout == single clean
+#      with all UI text stubbed in, and assert stdout == single clean
 #      return value with no embedded escape codes or banner glyphs.
 
 setup() {
@@ -41,7 +41,7 @@ run_split() {
   return $rc
 }
 
-# ---------- ui chrome must NEVER write to stdout ----------
+# ---------- ui helpers must NEVER write to stdout ----------
 
 @test "ui_info writes to stderr only" {
   run_split ui_info "hello world"
@@ -93,7 +93,7 @@ run_split() {
 
 # ---------- value-returning functions return a single clean line ----------
 
-@test "state_get returns only the value (no chrome on stdout)" {
+@test "state_get returns only the value (no UI text on stdout)" {
   state_load
   state_set FOO bar
   state_save
@@ -108,7 +108,7 @@ run_split() {
   [ "$STDOUT" = "xyz" ]
 }
 
-@test "arch_os returns os/arch with no chrome" {
+@test "arch_os returns os/arch with no UI text" {
   run_split arch_os
   [[ "$STDOUT" =~ ^(linux|darwin|windows)/(amd64|arm64)$ ]]
 }
@@ -127,10 +127,12 @@ run_split() {
   run_split _select_mode Manual
   [ "$STDOUT" = "Manual" ]
 
+  # Agent option only surfaces when MIGRATE_ENABLE_AGENT=1 (preview gate).
+  # Enable for the second half of this test so picking "2" → Agent works.
   ui_prompt() { printf -v "${3:-_DUMP}" '%s' '2'; }
   export -f ui_prompt
 
-  run_split _select_mode Manual
+  MIGRATE_ENABLE_AGENT=1 run_split _select_mode Manual
   [ "$STDOUT" = "Agent" ]
 }
 
@@ -237,8 +239,12 @@ run_split() {
   result=$(printf '1\n' | _select_mode "" 2>/dev/null)
   [ "$result" = "Manual" ]
 
+  # Agent option is preview-gated; need MIGRATE_ENABLE_AGENT=1 for "2" to
+  # mean Agent. Without it, picking "2" is invalid (only Manual visible).
+  export MIGRATE_ENABLE_AGENT=1
   result=$(printf '2\n' | _select_mode "" 2>/dev/null)
   [ "$result" = "Agent" ]
+  unset MIGRATE_ENABLE_AGENT
 
   # Empty input → default of 1 → Manual.
   result=$(printf '\n' | _select_mode "" 2>/dev/null)

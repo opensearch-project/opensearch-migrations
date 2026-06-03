@@ -261,7 +261,7 @@ _cfn_print_event() {
     *IN_PROGRESS)        color="$__UI_C_DIM" ;;
     *)                   color="$__UI_C_RESET" ;;
   esac
-  # UI chrome → stderr (per ui.sh discipline rule).
+  # UI output → stderr (per ui.sh discipline rule).
   # Plain copy → log file so the operator's `tail -f` shows it too.
   local plain
   if [[ -n "$reason" && "$reason" != "None" ]]; then

@@ -54,6 +54,14 @@ cmd_resume() {
     version_str="$CLI_VERSION$(manifest_pack_summary)"
   fi
   ui_dim "  cli=$version_str  stage=$STAGE  workdir=$STAGE_DIR"
+  # Preview flag — this CLI is opt-in while it bakes through a few
+  # releases. Production deploys still use aws-bootstrap.sh. Suppress
+  # only when the operator explicitly opts in via MIGRATE_PREVIEW_ACK=1
+  # so the message doesn't nag every CI run that has knowingly chosen
+  # the preview path.
+  if [[ "${MIGRATE_PREVIEW_ACK:-0}" != "1" ]]; then
+    ui_dim "  preview — production deploys still use aws-bootstrap.sh; export MIGRATE_PREVIEW_ACK=1 to silence"
+  fi
 
   # First-run welcome (only when state is fresh — no last_step set).
   if [[ -z "$(state_resumable_step)" ]]; then
@@ -213,7 +221,15 @@ cmd_resume() {
   # Mode selection. Picker fires on first run (no MODE in state) or
   # when --switch forces it; the choice persists for every subsequent
   # invocation. --mode <name> bypasses the picker entirely.
+  #
+  # Agent mode is preview-only and gated behind MIGRATE_ENABLE_AGENT=1.
+  # Reject `--mode Agent` (or a stale state.MODE=Agent) when the gate
+  # isn't on so operators can't end up in the AI flow accidentally.
   local mode; mode=$(state_get MODE "")
+  if [[ "$force_mode" == "Agent" || ( -z "$force_mode" && "$mode" == "Agent" ) ]] \
+     && [[ "${MIGRATE_ENABLE_AGENT:-0}" != "1" ]]; then
+    die "Agent mode is a preview feature gated behind MIGRATE_ENABLE_AGENT=1. Set the env var if you want to evaluate it; otherwise use --mode Manual."
+  fi
   if [[ -n "$force_mode" ]]; then
     mode="$force_mode"
     state_set MODE "$mode"
@@ -243,12 +259,19 @@ cmd_resume() {
 # _select_mode <current> → echoes the selected mode id on stdout.
 #
 # Caller does mode=$(_select_mode "$mode"); see ui.sh header for the rule
-# (UI=stderr, return value=stdout). The chrome helpers below are stderr-safe.
+# (UI=stderr, return value=stdout). The UI helpers below are stderr-safe.
 #
 # Mode list comes from branding.modes[] in manifest.json. The manifest's
 # upstream-default copy lists Manual first (default), Agent second; a
 # pack can reorder, relabel, change the default, or hide a mode by
 # setting available:false.
+#
+# Agent mode is a PREVIEW feature behind an env-var gate:
+#     MIGRATE_ENABLE_AGENT=1
+# Without it the picker hides the Agent entry entirely and the legacy
+# `--mode Agent` flag errors out at parse time. This keeps operators
+# from selecting an unfinished UX by default while preserving the
+# extension surface for partner builds that pre-vet AI use.
 _select_mode() {
   local current="${1:-Manual}"
 
@@ -260,6 +283,10 @@ _select_mode() {
     local i=1 id label desc is_default
     while IFS='|' read -r id label desc is_default; do
       [[ -z "$id" ]] && continue
+      # Agent mode is gated; skip when not enabled.
+      if [[ "$id" == "Agent" ]] && [[ "${MIGRATE_ENABLE_AGENT:-0}" != "1" ]]; then
+        continue
+      fi
       ids+=("$id"); labels+=("$label"); descs+=("$desc")
       # Pick the default: prior MODE state wins; otherwise the manifest's
       # default:true entry; otherwise position 1.
@@ -272,15 +299,17 @@ _select_mode() {
     done < <(manifest_modes)
   fi
 
-  # Fallback (no manifest): Manual then Agent, today's strings.
+  # Fallback (no manifest): Manual always; Agent only when gated on.
   if (( ${#ids[@]} == 0 )); then
-    ids=(Manual Agent)
-    labels=(Manual AI)
-    descs=(
-      "you in control. CLI deploys the chart, then drops you into migration-console-0 to run the migration commands yourself."
-      "an LLM coding agent (claude/codex/q/kiro) drives the migration. CLI deploys the chart, then hands control to the agent with a pre-loaded skill set (preview — refine your invocation as needed)."
-    )
-    [[ "$current" == "Agent" ]] && default_idx=2
+    ids=(Manual)
+    labels=(Manual)
+    descs=("you in control. CLI deploys the chart, then drops you into migration-console-0 to run the migration commands yourself.")
+    if [[ "${MIGRATE_ENABLE_AGENT:-0}" == "1" ]]; then
+      ids+=(Agent)
+      labels+=(AI)
+      descs+=("an LLM coding agent (claude/codex/q/kiro) drives the migration. CLI deploys the chart, then hands control to the agent with a pre-loaded skill set (preview — refine your invocation as needed).")
+      [[ "$current" == "Agent" ]] && default_idx=2
+    fi
   fi
 
   ui_step "How do you want to drive this migration?"
@@ -444,6 +473,16 @@ Common flags:
   --verbose, -v           Mirror logs to stderr live.
   --reset-cache           Wipe artifact cache before run.
   --switch                Re-prompt the deploy wizard.
+  --mode Manual|Agent     Bypass the mode picker. Agent mode is a
+                          PREVIEW and requires MIGRATE_ENABLE_AGENT=1.
+
+Env vars:
+  MIGRATE_HOME            State root (default: ./migration-assistant-workspace)
+  MIGRATE_NONINTERACTIVE  Accept all prompt defaults (=1 implies --non-interactive)
+  MIGRATE_ENABLE_AGENT    Set to 1 to surface AI/Agent mode in the picker
+                          and accept --mode Agent. Off by default.
+  MIGRATE_SKIP_MCP        Skip every MCP registration during agent setup
+  MIGRATE_VERBOSE         Mirror logs to stderr live (=1 implies --verbose)
 
 CFN / EKS flags:
   --stack-name NAME                 Override CFN stack name.

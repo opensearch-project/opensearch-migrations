@@ -4,7 +4,7 @@
 # manifest.json lives at the tarball root next to bin/ + lib/ + skills/.
 # It declares:
 #   * build.name / version / packs[] — bundle identity + pack provenance
-#   * branding.* — operator-visible chrome (appName, modes, prompts)
+#   * branding.* — operator-visible UI strings (appName, modes, prompts)
 #   * skills.discovery — "auto" (walk skills/*/SKILL.md) is the only
 #                        legal value today
 #   * mcpServers — name → command/args/scope/agents/requires/permissionsAllow
