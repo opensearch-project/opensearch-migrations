@@ -12,37 +12,44 @@ export function buildNode(name, schema, pathArr, requiredSet = new Set()) {
   }
 }
 
-export function buildChildren(schema, parentPath) {
-  const children = []
+function propertyChildren(schema, parentPath) {
+  if (!schema.properties) return []
   const required = new Set(schema.required || [])
+  return Object.entries(schema.properties)
+    .map(([k, v]) => buildNode(k, v, [...parentPath, k], required))
+    .filter(Boolean)
+}
 
-  if (schema.properties) {
-    for (const [k, v] of Object.entries(schema.properties)) {
-      const node = buildNode(k, v, [...parentPath, k], required)
-      if (node) children.push(node)
-    }
-  }
+function additionalPropertyChildren(schema, parentPath) {
+  if (!isObjectSchema(schema.additionalProperties)) return []
+  const node = buildNode('[value]', schema.additionalProperties, [...parentPath, '[value]'])
+  return node ? [node] : []
+}
 
-  if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
-    const node = buildNode('[value]', schema.additionalProperties, [...parentPath, '[value]'])
-    if (node) children.push(node)
-  }
-
-  const unionKey = schema.oneOf ? 'oneOf' : schema.anyOf ? 'anyOf' : null
-  if (unionKey) {
-    schema[unionKey].forEach((branch, i) => {
+function unionChildren(schema, parentPath) {
+  const unionKey = unionKeyOf(schema)
+  if (!unionKey) return []
+  return schema[unionKey]
+    .map((branch, i) => {
       const label = branch.title || `${unionKey}[${i}]`
-      const node = buildNode(label, branch, [...parentPath, label])
-      if (node) children.push(node)
+      return buildNode(label, branch, [...parentPath, label])
     })
-  }
+    .filter(Boolean)
+}
 
-  if (schema.type === 'array' && schema.items) {
-    const node = buildNode('items', schema.items, [...parentPath, 'items'])
-    if (node) children.push(node)
-  }
+function itemChildren(schema, parentPath) {
+  if (schema.type !== 'array' || !schema.items) return []
+  const node = buildNode('items', schema.items, [...parentPath, 'items'])
+  return node ? [node] : []
+}
 
-  return children
+export function buildChildren(schema, parentPath) {
+  return [
+    ...propertyChildren(schema, parentPath),
+    ...additionalPropertyChildren(schema, parentPath),
+    ...unionChildren(schema, parentPath),
+    ...itemChildren(schema, parentPath),
+  ]
 }
 
 export function nodeMatchesSearch(node, term) {
@@ -57,6 +64,19 @@ export function getTypeLabel(schema) {
   if (schema.allOf) return 'allOf'
   if (Array.isArray(schema.type)) return schema.type.join(' | ')
   return schema.type || 'any'
+}
+
+// Returns the union keyword used by a schema ('oneOf' / 'anyOf'), or null.
+export function unionKeyOf(schema) {
+  if (schema.oneOf) return 'oneOf'
+  if (schema.anyOf) return 'anyOf'
+  return null
+}
+
+// True when a value is a schema object (as opposed to a boolean like
+// `additionalProperties: true`).
+export function isObjectSchema(s) {
+  return !!s && typeof s === 'object'
 }
 
 export function typeBadgeClass(t) {
@@ -90,63 +110,73 @@ export function variantDesc(branch) {
 // it, which is accurate — all those fields are affected.
 //
 // `differ` is a jsondiffpatch instance, injected for testability.
-export function computeSchemaDiff(oldSchema, newSchema, differ) {
-  function flatten(schema) {
-    const map = {}
-    const visited = new WeakSet()
 
-    function walk(node, pathParts) {
-      if (!node || typeof node !== 'object' || visited.has(node)) return
-      visited.add(node)
+// Builds the path → scalar snapshot recorded for a single schema node.
+function snapshotOf(schema, required) {
+  const snap = { type: getTypeLabel(schema), required }
+  if (schema.default !== undefined) snap.default = JSON.stringify(schema.default)
+  return snap
+}
 
-      const req = new Set(node.required || [])
-
-      if (node.properties) {
-        for (const [k, v] of Object.entries(node.properties)) {
-          const path = [...pathParts, k]
-          const snap = { type: getTypeLabel(v), required: req.has(k) }
-          if (v.default !== undefined) snap.default = JSON.stringify(v.default)
-          map[path.join('/')] = snap
-          walk(v, path)
-        }
-      }
-
-      if (node.additionalProperties && typeof node.additionalProperties === 'object') {
-        const path = [...pathParts, '[value]']
-        const v = node.additionalProperties
-        const snap = { type: getTypeLabel(v), required: false }
-        if (v.default !== undefined) snap.default = JSON.stringify(v.default)
-        map[path.join('/')] = snap
-        walk(v, path)
-      }
-
-      const unionKey = node.oneOf ? 'oneOf' : node.anyOf ? 'anyOf' : null
-      if (unionKey) {
-        node[unionKey].forEach((branch, i) => {
-          const label = branch.title || `${unionKey}[${i}]`
-          const path = [...pathParts, label]
-          const snap = { type: getTypeLabel(branch), required: false }
-          if (branch.default !== undefined) snap.default = JSON.stringify(branch.default)
-          map[path.join('/')] = snap
-          walk(branch, path)
-        })
-      }
-
-      if (node.type === 'array' && node.items) {
-        const path = [...pathParts, 'items']
-        const v = node.items
-        const snap = { type: getTypeLabel(v), required: false }
-        if (v.default !== undefined) snap.default = JSON.stringify(v.default)
-        map[path.join('/')] = snap
-        walk(v, path)
-      }
+// Yields [label, childSchema, isRequired] for every child the tree walks into,
+// covering properties, the additionalProperties value, union branches, and array
+// items — mirroring buildChildren so diff paths match the rendered tree.
+function* schemaChildren(node) {
+  if (node.properties) {
+    const req = new Set(node.required || [])
+    for (const [k, v] of Object.entries(node.properties)) yield [k, v, req.has(k)]
+  }
+  if (isObjectSchema(node.additionalProperties)) {
+    yield ['[value]', node.additionalProperties, false]
+  }
+  const unionKey = unionKeyOf(node)
+  if (unionKey) {
+    for (const [i, branch] of node[unionKey].entries()) {
+      yield [branch.title || `${unionKey}[${i}]`, branch, false]
     }
+  }
+  if (node.type === 'array' && node.items) {
+    yield ['items', node.items, false]
+  }
+}
 
-    walk(schema, [])
-    return map
+// Flattens a resolved schema tree into a map of path → scalar snapshot.
+function flattenSchema(schema) {
+  const map = {}
+  const visited = new WeakSet()
+
+  function walk(node, pathParts) {
+    if (!isObjectSchema(node) || visited.has(node)) return
+    visited.add(node)
+    for (const [label, child, required] of schemaChildren(node)) {
+      const path = [...pathParts, label]
+      map[path.join('/')] = snapshotOf(child, required)
+      walk(child, path)
+    }
   }
 
-  const delta = differ.diff(flatten(oldSchema), flatten(newSchema))
+  walk(schema, [])
+  return map
+}
+
+// Interprets a jsondiffpatch default-value delta ([added] / [old,0,0] / [old,new]).
+function defaultChange(d) {
+  if (d.default.length === 1) return { kind: 'default', from: undefined, to: d.default[0] }
+  if (d.default.length === 3) return { kind: 'default', from: d.default[0], to: undefined }
+  return { kind: 'default', from: d.default[0], to: d.default[1] }
+}
+
+// Collects the scalar field changes (type / default / required) from a delta object.
+function scalarChanges(d) {
+  const changes = []
+  if (d.type) changes.push({ kind: 'type', from: d.type[0], to: d.type[1] })
+  if (d.default) changes.push(defaultChange(d))
+  if (d.required) changes.push({ kind: 'required', from: d.required[0], to: d.required[1] })
+  return changes
+}
+
+export function computeSchemaDiff(oldSchema, newSchema, differ) {
+  const delta = differ.diff(flattenSchema(oldSchema), flattenSchema(newSchema))
   const added = [], removed = [], modified = []
   if (!delta) return { added, removed, modified }
 
@@ -155,14 +185,7 @@ export function computeSchemaDiff(oldSchema, newSchema, differ) {
       if (d.length === 1) added.push(path)
       else if (d.length === 3 && d[1] === 0 && d[2] === 0) removed.push(path)
     } else if (d && typeof d === 'object' && !d._t) {
-      const changes = []
-      if (d.type) changes.push({ kind: 'type', from: d.type[0], to: d.type[1] })
-      if (d.default) {
-        if (d.default.length === 1)      changes.push({ kind: 'default', from: undefined,    to: d.default[0] })
-        else if (d.default.length === 3) changes.push({ kind: 'default', from: d.default[0], to: undefined })
-        else                             changes.push({ kind: 'default', from: d.default[0], to: d.default[1] })
-      }
-      if (d.required) changes.push({ kind: 'required', from: d.required[0], to: d.required[1] })
+      const changes = scalarChanges(d)
       if (changes.length) modified.push({ path, changes })
     }
   }

@@ -3,7 +3,7 @@ import { create as createDiffer } from 'https://esm.sh/jsondiffpatch@0.6.0'
 import {
   buildNode, nodeMatchesSearch,
   getTypeLabel, typeBadgeClass, variantTitle, variantDesc,
-  isExpert, stripExpert, computeSchemaDiff, isComposite,
+  isExpert, stripExpert, computeSchemaDiff, isComposite, unionKeyOf,
 } from './schema-utils.js'
 
 const differ = createDiffer()
@@ -96,7 +96,9 @@ function buildTreeNodeEl(node, depth, term) {
   const row = el('div', `tree-item${isSelected ? ' selected' : ''}`)
   row.style.paddingLeft = `${12 + depth * 14}px`
 
-  const toggle = el('span', 'tree-toggle', hasChildren ? (isExpanded ? '▾' : '▸') : '')
+  let toggleGlyph = ''
+  if (hasChildren) toggleGlyph = isExpanded ? '▾' : '▸'
+  const toggle = el('span', 'tree-toggle', toggleGlyph)
   const nameEl = el('span', 'tree-name', node.name)
   row.appendChild(toggle)
   row.appendChild(nameEl)
@@ -290,36 +292,44 @@ function renderCard(node) {
   main.appendChild(buildCardEl(node))
 }
 
-function buildCardEl(node) {
-  if (!node) return buildWelcomePanel()
+// Renders the list of "value — description" rows shared by union-variant and
+// map-value sections.
+function buildUnionList(branches, unionKey) {
+  const list = el('div', 'union-list')
+  branches.forEach((branch, i) => {
+    const row = el('div', 'union-row')
+    row.appendChild(el('span', 'union-value', `"${variantTitle(branch, i, unionKey)}"`))
+    row.appendChild(el('span', 'union-desc', branch.description || variantDesc(branch)))
+    list.appendChild(row)
+  })
+  return list
+}
 
+function buildSection(title, body) {
+  const section = el('div', 'section')
+  section.appendChild(el('div', 'section-title', title))
+  section.appendChild(body)
+  return section
+}
+
+// Card header: breadcrumb, title with optional Expert badge, description, meta row.
+function buildCardHeader(card, node, t) {
   const { name, schema, required, pathArr } = node
   const parentPath = pathArr.slice(0, -1)
-  const t = getTypeLabel(schema)
-  const unionKey = schema.oneOf ? 'oneOf' : schema.anyOf ? 'anyOf' : null
-  const branches = unionKey ? schema[unionKey] : []
 
-  const card = el('div', 'field-card')
-
-  // Breadcrumb
   if (parentPath.length > 0) {
     card.appendChild(el('div', 'breadcrumb', parentPath.join(' › ')))
   }
 
-  // Title + expert badge
   const titleRow = el('div', 'field-title-row')
   titleRow.appendChild(el('span', 'field-title', name))
-  if (isExpert(schema.description)) {
-    titleRow.appendChild(badge('Expert', 'badge-expert'))
-  }
+  if (isExpert(schema.description)) titleRow.appendChild(badge('Expert', 'badge-expert'))
   card.appendChild(titleRow)
 
-  // Description (strip [Expert] prefix if present)
   if (schema.description) {
     card.appendChild(el('p', 'field-desc', stripExpert(schema.description)))
   }
 
-  // Meta row
   const meta = el('div', 'meta-row')
   meta.appendChild(metaItem('Data type', badge(t, typeBadgeClass(t))))
   meta.appendChild(metaItem('Requirement',
@@ -328,23 +338,10 @@ function buildCardEl(node) {
     meta.appendChild(metaItem('Default', badge(JSON.stringify(schema.default), 'badge-default')))
   }
   card.appendChild(meta)
+}
 
-  // Union variants
-  if (unionKey && branches.length > 0) {
-    const section = el('div', 'section')
-    section.appendChild(el('div', 'section-title', 'Allowed enums / structures'))
-    const list = el('div', 'union-list')
-    branches.forEach((branch, i) => {
-      const row = el('div', 'union-row')
-      row.appendChild(el('span', 'union-value', `"${variantTitle(branch, i, unionKey)}"`))
-      row.appendChild(el('span', 'union-desc', branch.description || variantDesc(branch)))
-      list.appendChild(row)
-    })
-    section.appendChild(list)
-    card.appendChild(section)
-  }
-
-  // Properties — grouped by variant for union types, flat otherwise
+// "Properties" section: grouped by variant for union types, flat otherwise.
+function buildPropertiesSection(schema, pathArr, unionKey, branches) {
   const branchesWithProps = branches.filter(b => b.properties)
   if (unionKey && branchesWithProps.length > 0) {
     const section = el('div', 'section')
@@ -357,32 +354,43 @@ function buildCardEl(node) {
       block.appendChild(buildPropsTable(branch, [...pathArr, variantTitle(branch, i, unionKey)]))
       section.appendChild(block)
     })
-    card.appendChild(section)
-  } else if (!unionKey && schema.properties) {
-    const section = el('div', 'section')
-    section.appendChild(el('div', 'section-title', 'Properties'))
-    section.appendChild(buildPropsTable(schema, pathArr))
-    card.appendChild(section)
+    return section
+  }
+  if (!unionKey && schema.properties) {
+    return buildSection('Properties', buildPropsTable(schema, pathArr))
+  }
+  return null
+}
+
+// "Map value schema" section: union branches of an additionalProperties value type.
+function buildMapValueSection(schema) {
+  const ap = schema.additionalProperties
+  if (schema.properties || !ap || typeof ap !== 'object') return null
+  const apUnionKey = unionKeyOf(ap)
+  if (!apUnionKey) return null
+  return buildSection('Map value schema — allowed structures', buildUnionList(ap[apUnionKey], apUnionKey))
+}
+
+function buildCardEl(node) {
+  if (!node) return buildWelcomePanel()
+
+  const { schema, pathArr } = node
+  const t = getTypeLabel(schema)
+  const unionKey = unionKeyOf(schema)
+  const branches = unionKey ? schema[unionKey] : []
+
+  const card = el('div', 'field-card')
+  buildCardHeader(card, node, t)
+
+  if (unionKey && branches.length > 0) {
+    card.appendChild(buildSection('Allowed enums / structures', buildUnionList(branches, unionKey)))
   }
 
-  // Map value schema — show union branches if the value type has them
-  if (!schema.properties && schema.additionalProperties && typeof schema.additionalProperties === 'object') {
-    const ap = schema.additionalProperties
-    const apUnionKey = ap.oneOf ? 'oneOf' : ap.anyOf ? 'anyOf' : null
-    if (apUnionKey) {
-      const section = el('div', 'section')
-      section.appendChild(el('div', 'section-title', 'Map value schema — allowed structures'))
-      const list = el('div', 'union-list')
-      ap[apUnionKey].forEach((branch, i) => {
-        const row = el('div', 'union-row')
-        row.appendChild(el('span', 'union-value', `"${variantTitle(branch, i, apUnionKey)}"`))
-        row.appendChild(el('span', 'union-desc', branch.description || variantDesc(branch)))
-        list.appendChild(row)
-      })
-      section.appendChild(list)
-      card.appendChild(section)
-    }
-  }
+  const propsSection = buildPropertiesSection(schema, pathArr, unionKey, branches)
+  if (propsSection) card.appendChild(propsSection)
+
+  const mapValueSection = buildMapValueSection(schema)
+  if (mapValueSection) card.appendChild(mapValueSection)
 
   return card
 }
@@ -527,7 +535,7 @@ async function recomputeDiff(compareVersion) {
     const raw = await fetch(`./schemas/${compareVersion}.json`).then(r => r.json())
     const resolved = await $RefParser.dereference(raw)
     currentDiff = { fromVersion: compareVersion, diff: computeSchemaDiff(resolved, currentResolved, differ) }
-  } catch (_) {
+  } catch {
     currentDiff = null
   }
   clearStatus()
@@ -562,7 +570,7 @@ async function loadSchema(version) {
   try {
     schema = await $RefParser.dereference(rawSchema)
     clearStatus()
-  } catch (e) {
+  } catch {
     setStatus('Warning: $ref resolution failed — some fields may be incomplete.', 'warn')
   }
   currentResolved = schema
@@ -573,7 +581,7 @@ async function loadSchema(version) {
     try {
       const prevResolved = await $RefParser.dereference(prevRaw)
       currentDiff = { fromVersion: prevVersion, diff: computeSchemaDiff(prevResolved, schema, differ) }
-    } catch (_) { /* silently skip on resolution error */ }
+    } catch { /* silently skip on resolution error */ }
   }
 
   rebuildFromSchema(schema)
@@ -620,4 +628,4 @@ async function init() {
   await loadSchema(latest)
 }
 
-init()
+await init()
