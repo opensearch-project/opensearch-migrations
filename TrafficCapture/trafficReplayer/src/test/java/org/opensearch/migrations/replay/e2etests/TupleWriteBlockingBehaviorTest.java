@@ -11,10 +11,12 @@ import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
 import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TimeShifter;
+import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.sink.TupleSink;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficCaptureSource;
@@ -89,6 +91,29 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                 heldFutures.clear();
             }
         }
+    }
+
+    static class FailingTupleSink implements TupleSink {
+        final CountDownLatch allAccepted;
+
+        FailingTupleSink(int expectedCount) {
+            this.allAccepted = new CountDownLatch(expectedCount);
+        }
+
+        @Override
+        public void accept(Map<String, Object> tupleMap, CompletableFuture<Void> future) {
+            allAccepted.countDown();
+            future.completeExceptionally(new RuntimeException("tuple write failed"));
+        }
+
+        @Override
+        public void flush() {}
+
+        @Override
+        public void periodicFlush() {}
+
+        @Override
+        public void close() {}
     }
 
     private TrafficStream buildTrafficStreamWithRequests(int numRequests) {
@@ -282,6 +307,65 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
                     + " within " + deadline + " (still at " + ctx.nextReadCursor.get() + ")");
             }
             Thread.sleep(20);
+        }
+    }
+
+    @Test
+    public void tupleWriteFailureStopsReplayWithoutCommittingOffset() throws Throwable {
+        var random = new Random(1);
+        var failingSink = new FailingTupleSink(NUM_REQUESTS);
+
+        try (var httpServer = SimpleNettyHttpServer.makeServer(
+                false, Duration.ofMinutes(10),
+                response -> TestHttpServerContext.makeResponse(random, response))) {
+
+            var trafficStream = buildTrafficStreamWithRequests(NUM_REQUESTS);
+            var sourceContext = new ArrayCursorTrafficSourceContext(List.of(trafficStream));
+            var trafficSource = new ArrayCursorTrafficCaptureSource(rootContext, sourceContext);
+
+            var serverUri = httpServer.localhostEndpoint();
+            try (var tr = new RootReplayerConstructorExtensions(
+                    rootContext, serverUri,
+                    new StaticAuthTransformerFactory("TEST"),
+                    new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(serverUri.getHost()),
+                    RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
+                    10 * 1024);
+                 var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2));
+                 var tupleWriter = new ThreadLocalTupleWriter(i -> failingSink)) {
+
+                var replayFailure = new AtomicReference<Throwable>();
+                var replayThread = new Thread(() -> {
+                    try {
+                        tr.setupRunAndWaitForReplayWithShutdownChecks(
+                            Duration.ofSeconds(70), Duration.ofSeconds(30),
+                            blockingTrafficSource, new TimeShifter(10 * 1000),
+                            tupleWriter, Duration.ofSeconds(5));
+                    } catch (Throwable t) {
+                        replayFailure.set(t);
+                        log.atError().setCause(t).setMessage("Replay thread exception").log();
+                    }
+                });
+                replayThread.start();
+
+                Assertions.assertTrue(
+                    failingSink.allAccepted.await(30, TimeUnit.SECONDS),
+                    "Timed out waiting for failing sink to accept all tuples"
+                );
+
+                replayThread.join(30_000);
+                Assertions.assertFalse(replayThread.isAlive(), "Replay thread should have finished");
+                Assertions.assertEquals(0, sourceContext.nextReadCursor.get(),
+                    "Offsets should not be committed after tuple write failure");
+                Assertions.assertInstanceOf(TrafficReplayer.TerminationException.class, replayFailure.get());
+                var termination = (TrafficReplayer.TerminationException) replayFailure.get();
+                Assertions.assertInstanceOf(Error.class, termination.originalCause);
+                Assertions.assertTrue(
+                    termination.originalCause.getMessage().contains("Fatal tuple write failure"),
+                    "Fatal shutdown should explain that tuple output was not durably written"
+                );
+
+                tr.shutdown(null).get();
+            }
         }
     }
 }

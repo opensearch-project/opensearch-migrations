@@ -1,5 +1,9 @@
 """Integration tests for workflow CLI commands."""
 
+import base64
+import gzip
+import json
+
 from click.testing import CliRunner
 from unittest.mock import Mock, patch
 from kubernetes.client.rest import ApiException
@@ -507,6 +511,50 @@ class TestWorkflowCLICommands:
 
         assert [(gate.name, gate.status) for gate in gates] == [
             ('future-step', 'pending')
+        ]
+
+    @patch('console_link.workflow.commands.approve.get_workflow')
+    @patch('console_link.workflow.commands.approve._list_all_gates')
+    def test_gather_gates_reads_waiting_step_from_compressed_nodes(
+        self, mock_list_gates, mock_get_workflow
+    ):
+        from console_link.workflow.commands.approve import _gather_gates
+
+        gate_name = 'migratemetadata.source-target-migration-snapshot-migration-0'
+        nodes = {
+            'approval-node': {
+                'id': 'approval-node',
+                'displayName': 'waitForApproval',
+                'phase': 'Running',
+                'type': 'Pod',
+                'boundaryID': 'approve-boundary',
+                'templateRef': {
+                    'name': 'resource-management',
+                    'template': 'waitforapproval',
+                },
+                'inputs': {
+                    'parameters': [
+                        {'name': 'resourceName', 'value': gate_name},
+                    ]
+                },
+            }
+        }
+        mock_get_workflow.return_value = {
+            'metadata': {'name': 'migration-workflow'},
+            'status': {
+                'compressedNodes': base64.b64encode(
+                    gzip.compress(json.dumps(nodes).encode('utf-8'))
+                ).decode('utf-8')
+            }
+        }
+        mock_list_gates.return_value = [
+            (gate_name, 'Pending', {}),
+        ]
+
+        gates = _gather_gates('ma', 'migration-workflow', 'step', pre_approve=True)
+
+        assert [(gate.name, gate.status) for gate in gates] == [
+            (gate_name, 'waiting')
         ]
 
     @patch('console_link.workflow.commands.approve._waiting_gates_from_workflow')
