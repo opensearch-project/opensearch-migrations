@@ -48,3 +48,9 @@ ignore:
   - "**/orchestrationSpecs/**"
   - "**/Dockerfile*"
   - "**/*.sh"
+  # Per-Lucene-version PostingsEnum -> PostingsCursor adapters: trivial 1-line
+  # delegation methods that can only be exercised through the shadowed Lucene
+  # test classpath (which the repo's unit-test framework does not set up).
+  # Covered transitively by the SearchSnapshotExtractor integration tests in
+  # the gradle-tests matrix.
+  - "**/lucene/version_*/LuceneStreamingAdapters.java"

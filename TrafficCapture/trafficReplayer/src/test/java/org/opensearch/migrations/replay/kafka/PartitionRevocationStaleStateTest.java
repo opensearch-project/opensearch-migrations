@@ -88,7 +88,10 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
     /**
      * When a traffic stream arrives for a connection that already has an accumulation
      * from a lower generation, the old accumulation must be discarded via
-     * onTrafficStreamsExpired(CLOSED_PREMATURELY) and a fresh one created.
+     * onTrafficStreamsExpired(TRAFFIC_SOURCE_READER_INTERRUPTED) and a fresh one created.
+     * The interrupted-close status routes through replayEngine.cancelConnection so the
+     * channel session is marked cancelled and won't self-heal when the re-delivered
+     * Kafka records (post-rebalance fetch-position reset) create a fresh accumulation.
      */
     @Test
     void accumulator_staleAccumulationDiscardedOnGenerationBump() {
@@ -147,9 +150,10 @@ public class PartitionRevocationStaleStateTest extends InstrumentationTest {
         Assertions.assertEquals(1, expiredStatuses.size(),
             "onTrafficStreamsExpired must be called exactly once for the stale accumulation");
         Assertions.assertEquals(
-            RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY,
+            RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED,
             expiredStatuses.get(0),
-            "Stale accumulation must be expired with CLOSED_PREMATURELY");
+            "Stale accumulation must be expired with TRAFFIC_SOURCE_READER_INTERRUPTED so the " +
+                "channel session is cancelled and won't self-heal");
     }
 
     /**

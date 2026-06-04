@@ -4,11 +4,11 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-awscli = ">=1.45.6"
+awscli = ">=1.45.19"
 awscurl = ">=0.42"
 opensearch-benchmark = ">=2.3.0"
 pandas = "*"
-requests = ">=2.32.3"
+requests = ">=2.34.2"
 tqdm = ">=4.66.4"
 urllib3 = ">=2.7.0"
 

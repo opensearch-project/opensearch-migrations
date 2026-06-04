@@ -1,6 +1,6 @@
 function main(context) {
-  const headerName = context.get("headerName");
-  const headerValue = context.get("headerValue");
+  const headerName = String(context.get("headerName")).trim();
+  const headerValue = String(context.get("headerValue")).trim();
 
   return (tuple) => {
     const targetRequest = tuple.get("targetRequest");

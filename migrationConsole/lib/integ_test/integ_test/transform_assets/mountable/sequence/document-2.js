@@ -1,7 +1,7 @@
 function main(context) {
-  const sourceFieldName = context.get("sourceFieldName") || "mountable_sequence_document_first";
-  const fieldName = context.get("fieldName") || "mountable_sequence_document_second";
-  const valuePrefix = context.get("valuePrefix") || "second-transform-after-";
+  const sourceFieldName = String(context.get("sourceFieldName") || "mountable_sequence_document_first").trim();
+  const fieldName = String(context.get("fieldName") || "mountable_sequence_document_second").trim();
+  const valuePrefix = String(context.get("valuePrefix") || "second-transform-after-").trim();
 
   return (documents) => {
     for (const doc of documents) {

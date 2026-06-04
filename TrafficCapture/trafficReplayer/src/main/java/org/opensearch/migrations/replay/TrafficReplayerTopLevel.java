@@ -22,6 +22,7 @@ import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.BulkItemErrorClassifier;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
+import org.opensearch.migrations.replay.kafka.KafkaTrafficCaptureSource;
 import org.opensearch.migrations.replay.sink.ThreadLocalTupleWriter;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
@@ -227,13 +228,14 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         );
         var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
         this.currentReplayEngine.set(replayEngine);
-        // Wire session close callback so KafkaTrafficCaptureSource can track synthetic close drain
+        // Wire session close callback so KafkaTrafficCaptureSource can track synthetic close drain.
+        // The sessionNumber MUST match what KafkaTrafficCaptureSource registers in
+        // pendingTrafficSourceReaderInterruptedCloses; full GenerationalSessionKey wiring is Phase A4
+        // and will replace the constant at both call sites simultaneously.
         clientConnectionPool.setGlobalOnSessionClose(session ->
             trafficSource.onNetworkConnectionClosed(
                 session.getChannelKeyContext().getConnectionId(),
-                // sessionNumber is the key used in the pool — derive from the session's context
-                // For now use 0 as a placeholder; full GenerationalSessionKey wiring is Phase A4
-                0,
+                KafkaTrafficCaptureSource.PENDING_CLOSE_SESSION_NUMBER_PLACEHOLDER,
                 session.generation
             )
         );

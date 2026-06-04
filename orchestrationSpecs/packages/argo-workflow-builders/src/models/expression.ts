@@ -508,6 +508,44 @@ function fn<
     return new FunctionExpression<R, any, CIn, COut, typeof args>(name, args);
 }
 
+export type ExpressionTemplateValue<T extends PlainObject> =
+    | BaseExpression<T, any>
+    | (
+        T extends readonly (infer U)[]
+            ? readonly ExpressionTemplateValue<Extract<U, PlainObject>>[]
+            : T extends Record<string, PlainObject | undefined>
+                ? { [K in keyof T]?: ExpressionTemplateValue<Extract<T[K], PlainObject>> }
+                : T
+    );
+
+// Literal static values like `{"foo": 1}` don't work within expressions.
+// They first need to be converted into something like `sprig.dig("foo", 1...)`
+// This function makes that conversion recursively so that we can mix them together..
+function templateValueToExpression(
+    value: unknown
+): BaseExpression<any, "complicatedExpression"> {
+    if (isExpression(value)) {
+        return widenComplexity(value);
+    }
+
+    if (Array.isArray(value)) {
+        return new ArrayMakeExpression(
+            value.map(v => templateValueToExpression(v)) as BaseExpression<any, any>[]
+        ) as unknown as BaseExpression<any, "complicatedExpression">;
+    }
+
+    if (value !== null && typeof value === "object") {
+        const entries = Object.fromEntries(
+            Object.entries(value as Record<string, unknown>)
+                .filter(([, v]) => v !== undefined)
+                .map(([k, v]) => [k, templateValueToExpression(v)])
+        ) as Record<string, BaseExpression<PlainObject, any>>;
+        return new DictMakeExpression(entries) as unknown as BaseExpression<any, "complicatedExpression">;
+    }
+
+    return widenComplexity(toExpression(value as NonRecordLiteral)) as BaseExpression<any, "complicatedExpression">;
+}
+
 function _segmentsToPath(segs: readonly unknown[]): string {
     return segs.map(s => typeof s === "number" ? `[${s}]` : String(s)).join(".");
 }
@@ -581,6 +619,13 @@ class ExprBuilder {
 
     isEmpty(data: AllowLiteralOrExpression<any, any>): BaseExpression<boolean, "complicatedExpression"> {
         return this.equals(0, expr.length(expr.asString(data)));
+    }
+
+    defaultTo<T extends PlainObject>(
+        defaultValue: AllowLiteralOrExpression<T, any>,
+        value: AllowLiteralOrExpression<T, any>
+    ): BaseExpression<T, "complicatedExpression"> {
+        return fn<T, any>("sprig.default", toExpression(defaultValue), toExpression(value));
     }
 
     empty<T extends PlainObject>(): BaseExpression<T> {
@@ -950,6 +995,16 @@ class ExprBuilder {
 
     last<T extends PlainObject>(arr: BaseExpression<T[]>) {
         return fn<T, ExpressionType, "complicatedExpression">("last", arr);
+    }
+
+    concatArrays<T extends any[]>(
+        ...arrays: BaseExpression<T, any>[]
+    ): BaseExpression<T, "complicatedExpression"> {
+        return fn<T, ExpressionType, "complicatedExpression">("sprig.concat", ...arrays);
+    }
+
+    templateValue(value: unknown): BaseExpression<any, "complicatedExpression"> {
+        return templateValueToExpression(value);
     }
 
     // Parameter functions

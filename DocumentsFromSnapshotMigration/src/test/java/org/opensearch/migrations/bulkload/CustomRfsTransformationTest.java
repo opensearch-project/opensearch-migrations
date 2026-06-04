@@ -46,6 +46,8 @@ public class CustomRfsTransformationTest extends SourceTestBase {
         String[] transformationArgs = {
             "--doc-transformer-config",
             nameTransformation,
+            "--emit-doc-type",
+            "ON",
         };
         int totalSourceShards = 1;
         Consumer<ClusterOperations> loadDataIntoSource = cluster -> {
