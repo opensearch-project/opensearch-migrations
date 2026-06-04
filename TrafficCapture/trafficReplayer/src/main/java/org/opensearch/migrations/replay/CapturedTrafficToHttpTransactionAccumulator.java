@@ -668,6 +668,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         Accumulation accumulation,
         RequestResponsePacketPair.ReconstructionStatus status
     ) {
+        boolean expirationCommitted = false;
         try {
             switch (accumulation.state) {
                 case ACCUMULATING_READS:
@@ -691,6 +692,7 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                             accumulation.trafficChannelKey.getTrafficStreamsContext(),
                             Collections.unmodifiableList(accumulation.getRrPair().trafficStreamKeysBeingHeld)
                         );
+                        expirationCommitted = true;
                     }
                     return;
                 case ACCUMULATING_WRITES:
@@ -710,6 +712,20 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                     accumulation.getLastTimestamp(),
                     getTrafficStreamsHeldByAccum(accumulation)
                 );
+            } else if (!expirationCommitted) {
+                // Held traffic stream keys must be committed even when no HTTP request was
+                // signaled. OffsetLifecycleTracker keeps any uncommitted entry at the head of
+                // its priority queue and every subsequent commit becomes BLOCKED_BY_OTHER_COMMITS,
+                // freezing the consumer-group offset indefinitely (observed in CDC E2E runs as
+                // 30m+ TIME-LAG).
+                var heldStreams = getTrafficStreamsHeldByAccum(accumulation);
+                if (!heldStreams.isEmpty()) {
+                    listener.onTrafficStreamsExpired(
+                        status,
+                        accumulation.trafficChannelKey.getTrafficStreamsContext(),
+                        Collections.unmodifiableList(heldStreams)
+                    );
+                }
             }
         }
     }
