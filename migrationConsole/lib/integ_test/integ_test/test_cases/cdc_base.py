@@ -542,11 +542,77 @@ def log_kafka_consumer_group_state(label: str, group_name: Optional[str] = None,
     _emit_describe_snapshot(label, group_name, timeout_seconds)
 
 
+def log_topic_records(label: str, topic: Optional[str] = None,
+                      timeout_seconds: int = 60) -> None:
+    """Pure snapshot: run `console kafka describe-topic-records` and log the
+    per-partition record counts (LOG-END-OFFSETs). Useful as a [pre-gen] /
+    [post-gen] checkpoint around generate-data — before any consumer group
+    exists, this is the only signal that the capture proxy is offloading
+    records to the topic at all.
+
+    Infrastructure-level failures are logged, never raised.
+    """
+    cmd = ["console", "kafka", "describe-topic-records"]
+    if topic is not None:
+        cmd.append(topic)
+    logger.info("[%s] Running: %s", label, " ".join(cmd))
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        logger.warning("[%s] '%s' timed out after %ds; continuing.",
+                       label, " ".join(cmd), timeout_seconds)
+        return
+    except FileNotFoundError:
+        logger.warning("[%s] 'console' CLI not found on PATH; skipping topic-records.", label)
+        return
+    stdout = (result.stdout or "").rstrip()
+    if result.returncode != 0:
+        logger.warning("[%s] describe-topic-records exited with %d. stdout:\n%s\nstderr:\n%s",
+                       label, result.returncode, stdout, (result.stderr or "").rstrip())
+        return
+    logger.info("[%s] describe-topic-records output:\n%s", label, stdout)
+
+
+def _dump_topic_on_drain_failure(label: str, topic: Optional[str],
+                                 timeout_seconds: int) -> None:
+    """On a drain stall, dump the full reconstructed traffic (and raw records)
+    still sitting in the topic, so the failing CI run captures exactly what the
+    replayer never finished committing.
+
+    Launches a one-shot `console kafka dump-topic-records` (replayer image,
+    `--mode dump-both`, no consumer group — does not perturb the stuck
+    replayer's offsets). Best-effort: any failure is logged, never raised, so
+    it can't mask the ReplayLagDrainTimeout.
+    """
+    cmd = ["console", "kafka", "dump-topic-records"]
+    if topic is not None:
+        cmd.append(topic)
+    cmd += ["--mode", "dump-both", "--pod-timeout", str(timeout_seconds)]
+    logger.info("[%s] Drain failed — dumping topic for diagnostics: %s", label, " ".join(cmd))
+    try:
+        # Allow headroom over the pod timeout for image pull + pod teardown.
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                timeout=timeout_seconds + 180)
+    except subprocess.TimeoutExpired:
+        logger.warning("[%s] dump-topic-records timed out; continuing to raise drain failure.", label)
+        return
+    except FileNotFoundError:
+        logger.warning("[%s] 'console' CLI not found on PATH; skipping topic dump.", label)
+        return
+    stdout = (result.stdout or "").rstrip()
+    stderr = (result.stderr or "").rstrip()
+    logger.info("[%s] dump-topic-records output:\n%s", label, stdout)
+    if stderr:
+        logger.info("[%s] dump-topic-records stderr:\n%s", label, stderr)
+
+
 def assert_replay_drained(label: str = "replay-end",
                           group_name: Optional[str] = None,
                           max_lag: int = 1,
-                          timeout_seconds: int = 600,
-                          describe_timeout_seconds: int = 120) -> None:
+                          timeout_seconds: int = 120,
+                          describe_timeout_seconds: int = 120,
+                          dump_topic: Optional[str] = "capture-proxy",
+                          dump_timeout_seconds: int = 300) -> None:
     """Wait for the replayer consumer-group to drain to max per-partition
     LAG <=`max_lag`, log the describe snapshot, and raise on timeout.
 
@@ -562,12 +628,19 @@ def assert_replay_drained(label: str = "replay-end",
     target. Set higher only if you've consciously decided the test
     tolerates more drift.
 
-    `timeout_seconds=600` (10min) covers production-shaped runs where
-    drain takes minutes after `check_doc_counts_match` returns. Override
-    if your test is bounded smaller.
+    `timeout_seconds=120` (2min): by [replay-end] every response has already
+    landed on the target (verify_clusters passed), so a healthy run drains
+    within seconds; if it hasn't caught up in 2 minutes the offset commit is
+    genuinely stalled and waiting longer just delays the failure.
+
+    On a drain stall, before raising we dump the still-uncommitted topic
+    contents (`dump_topic`, full reconstructed HTTP via `dump-both`) so the
+    failing run captures exactly what the replayer left behind. Set
+    `dump_topic=None` to skip the dump. The dump reads with no consumer group
+    and does not perturb the stalled replayer.
 
     Raises `ReplayLagDrainTimeout` (an AssertionError) on drain stall.
-    Infrastructure-level describe failures are logged but never raised.
+    Infrastructure-level describe/dump failures are logged but never raised.
     """
     drain_succeeded, last_lag = _wait_for_consumer_group_caught_up(
         group_name, label,
@@ -576,11 +649,15 @@ def assert_replay_drained(label: str = "replay-end",
     )
     _emit_describe_snapshot(label, group_name, describe_timeout_seconds)
     if not drain_succeeded:
+        # Native record counts + full reconstructed dump of what's stuck.
+        log_topic_records(label, topic=dump_topic)
+        if dump_topic is not None:
+            _dump_topic_on_drain_failure(label, dump_topic, dump_timeout_seconds)
         raise ReplayLagDrainTimeout(
             f"[{label}] Replayer consumer-group did not drain to LAG<={max_lag} "
             f"within {timeout_seconds}s "
             f"(last observed max LAG={last_lag if last_lag is not None else '<unparsed>'}). "
-            f"See the snapshot logged above for per-partition state."
+            f"See the snapshot and topic dump logged above for per-partition state."
         )
 
 
