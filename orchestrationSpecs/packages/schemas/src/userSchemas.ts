@@ -406,6 +406,31 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
                         ],
                     },
                 },
+                // Spread brokers one-per-node so a single node disruption
+                // (Karpenter consolidation during the RFS scale-up/down churn,
+                // a spot reclaim, a drain) can only ever take ONE broker. With
+                // RF=3/minISR=2 the cluster then survives it as a rolling event
+                // instead of losing quorum. whenUnsatisfiable=ScheduleAnyway
+                // keeps this soft for the same reason the anti-affinity above
+                // is preferred-not-required: on a <3-node dev cluster the
+                // brokers must still schedule (and reschedule during rotation)
+                // rather than wedge Pending. maxSkew=1 means the scheduler only
+                // doubles up on a node once every other node already has one.
+                topologySpreadConstraints: [
+                    {
+                        maxSkew: 1,
+                        topologyKey: "kubernetes.io/hostname",
+                        whenUnsatisfiable: "ScheduleAnyway",
+                        labelSelector: {
+                            matchExpressions: [
+                                {
+                                    key: "strimzi.io/name",
+                                    operator: "Exists",
+                                },
+                            ],
+                        },
+                    },
+                ],
             },
         },
     },

@@ -258,6 +258,45 @@ def _dump_service_diagnostics(namespace: str, service_name: str) -> None:
             logger.warning("$ %s failed: %s", " ".join(cmd), e)
 
 
+def _dump_kafka_disruption_diagnostics(namespace: str = "ma") -> None:
+    """Best-effort dump of Kafka broker placement + disruption-budget state.
+
+    Surfaces the deployment-level conditions behind a replayer drain stall:
+      * broker pod -> node placement (`-o wide`): are all brokers co-located on
+        one node that Karpenter could consolidate, taking the cluster down at
+        once instead of one broker at a time?
+      * the Strimzi-managed PodDisruptionBudget: is `ALLOWED DISRUPTIONS` 0
+        (budget at floor) or is it actually permitting only single-broker moves?
+      * nodes (`-o wide`) and recent non-Normal events: node rotation /
+        consolidation / eviction activity in the window.
+
+    All failures are swallowed — this runs on an already-failing path and must
+    never mask the ReplayLagDrainTimeout.
+    """
+    cmds = (
+        # Broker pods and which node each landed on.
+        ["kubectl", "get", "pods", "-n", namespace,
+         "-l", "strimzi.io/broker-role=true", "-o", "wide"],
+        # Disruption budget state (ALLOWED DISRUPTIONS column is the tell).
+        ["kubectl", "get", "pdb", "-n", namespace, "-o", "wide"],
+        ["kubectl", "describe", "pdb", "-n", namespace],
+        # Node inventory — how many nodes exist for brokers to spread across.
+        ["kubectl", "get", "nodes", "-o", "wide"],
+        # Disruption / eviction / scheduling activity.
+        ["kubectl", "get", "events", "-n", namespace,
+         "--sort-by=.lastTimestamp", "--field-selector=type!=Normal"],
+    )
+    for cmd in cmds:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.stdout.strip():
+                logger.warning("$ %s\n%s", " ".join(cmd), result.stdout.rstrip())
+            if result.stderr.strip():
+                logger.warning("$ %s stderr\n%s", " ".join(cmd), result.stderr.rstrip())
+        except Exception as e:  # noqa: BLE001 — diagnostic must not raise
+            logger.warning("$ %s failed: %s", " ".join(cmd), e)
+
+
 def wait_for_replayer_consuming(
     namespace: str,
     timeout_seconds: int = 120,
@@ -649,6 +688,10 @@ def assert_replay_drained(label: str = "replay-end",
     )
     _emit_describe_snapshot(label, group_name, describe_timeout_seconds)
     if not drain_succeeded:
+        # Deployment-level context first: broker placement + PDB + node/eviction
+        # state explain whether a Kafka disruption (e.g. all brokers co-located
+        # on a consolidated node) perturbed the consumer group.
+        _dump_kafka_disruption_diagnostics()
         # Native record counts + full reconstructed dump of what's stuck.
         log_topic_records(label, topic=dump_topic)
         if dump_topic is not None:
