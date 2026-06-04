@@ -27,7 +27,7 @@ public class LuceneReader {
         100, Integer.MAX_VALUE, "lucene-io", 60, true
     );
 
-    /** Concurrency for flatMapSequential within a segment — matches the scheduler thread count. */
+    /** Per-segment read concurrency for the bounded-elastic flatMap. */
     private static final int SEGMENT_READ_CONCURRENCY = 100;
 
     private LuceneReader() {}
@@ -143,10 +143,7 @@ public class LuceneReader {
         // Start at
         int startDocIdInSegment = (docStartingId <= segmentDocBase) ? 0 : docStartingId - segmentDocBase;
 
-        // Per-segment spill prevents cross-segment memory accumulation (3GB shard can OOM otherwise)
-        final Path spillRoot = SourcelessSpillConfig.newSegmentSpillRoot(indexDirectoryPath);
-        final SegmentTermIndex termIndex = new SegmentTermIndex(
-                spillRoot, SourcelessSpillConfig.sortBufferBytes());
+        final SegmentTermIndex termIndex = new SegmentTermIndex();
 
         // For any errors, we want to log the segment reader debug info so we can see which segment is causing the issue.
         // This allows us to pass the supplier to getDocument without having to recompute the debug info
@@ -164,6 +161,15 @@ public class LuceneReader {
 
         var idxStream = (liveDocs != null) ? liveDocs.stream().filter(idx -> idx >= startDocIdInSegment) :
             IntStream.range(startDocIdInSegment, segmentReader.maxDoc());
+        // When sourceless reconstruction is active (mappingContext != null), the per-segment
+        // SegmentTermIndex holds forward-only streaming cursors that require monotonically
+        // non-decreasing docIds. flatMapSequential preserves output ORDER but subscribes
+        // inner publishers concurrently — concurrent advance from out-of-order docIds throws
+        // IllegalStateException, which getDocument's catch (RuntimeException) swallows by
+        // returning null, silently dropping documents. Serialize the inner pipeline when
+        // sourceless to honor the cursor's monotonic-docId contract. For stored-source
+        // (non-sourceless) reads the cursor is unused, so we keep the parallel fast path.
+        int innerConcurrency = (mappingContext != null) ? 1 : SEGMENT_READ_CONCURRENCY;
         return Flux.fromStream(idxStream.boxed())
             .flatMapSequential(docIdx -> Mono.defer(() -> {
                     try {
@@ -178,10 +184,9 @@ public class LuceneReader {
                         return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx
                             + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
-                }).subscribeOn(LUCENE_IO_SCHEDULER), SEGMENT_READ_CONCURRENCY, 1)
+                }).subscribeOn(LUCENE_IO_SCHEDULER), innerConcurrency, 1)
             .doFinally(sig -> termIndex.close());
     }
-
 
     /**
      * Iterate live documents in a segment with bounded concurrency, applying a custom

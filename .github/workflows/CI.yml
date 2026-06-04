@@ -25,7 +25,7 @@ jobs:
     outputs:
       docker_cache_key: ${{ steps.generate_docker_cache_key.outputs.key }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Generate Docker Cache Key
         id: generate_docker_cache_key
         run: |
@@ -43,7 +43,7 @@ jobs:
           - spotlessCheck
           - publishToMavenLocal
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: ./.github/actions/setup-env
         with:
           gradle-cache-enabled: true
@@ -55,7 +55,7 @@ jobs:
   gradle-build-macos:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: ./.github/actions/setup-env
         with:
           gradle-cache-enabled: false
@@ -67,7 +67,7 @@ jobs:
   python-lint:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: ./.github/actions/setup-env
       - name: Install dependencies
         run: |
@@ -95,7 +95,7 @@ jobs:
       run:
         working-directory: ${{ env.WORKING_DIR }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: ./.github/actions/setup-env
 
       # Set up Kind cluster for workflow integration tests (only for console_link project)
@@ -151,7 +151,7 @@ jobs:
         run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT//\//-}" >> $GITHUB_ENV
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354
         with:
           fail_ci_if_error: true
           flags: python
@@ -186,7 +186,7 @@ jobs:
       matrix:
         index: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: ./.github/actions/setup-env
         with:
           gradle-cache-enabled: true
@@ -241,7 +241,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354
         with:
           fail_ci_if_error: true
           flags: gradle
@@ -274,7 +274,7 @@ jobs:
       run:
         working-directory: ${{ matrix.npm-project }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: ./.github/actions/setup-env
       - name: Install NPM dependencies
         run: npm ci
@@ -285,7 +285,7 @@ jobs:
         run: npm run test:integ:crds
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354
         with:
           fail_ci_if_error: true
           flags: node
@@ -297,7 +297,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Set up kind cluster
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
@@ -317,7 +317,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: lychee Link Checker
         id: lychee
         uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2
@@ -352,7 +352,7 @@ jobs:
     # hidden behind an unrelated flake8 / pytest failure.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: '3.11'
@@ -398,12 +398,12 @@ jobs:
         - language: javascript-typescript
         - language: python
     steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-    - uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+    - uses: github/codeql-action/init@87557b9c84dde89fdd9b10e88954ac2f4248e463 # v4
       with:
         languages: ${{ matrix.language }}
         build-mode: none
-    - uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4
+    - uses: github/codeql-action/analyze@87557b9c84dde89fdd9b10e88954ac2f4248e463 # v4
       with:
         category: "/language:${{matrix.language}}"
 
@@ -423,7 +423,7 @@ jobs:
         env:
           SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
     steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
     - uses: ./.github/actions/setup-env
       with:
         gradle-cache-enabled: true
@@ -450,9 +450,33 @@ jobs:
         echo "SONAR_TOKEN=$SONAR_TOKEN" >> $GITHUB_ENV
     - name: Run SonarQube Scanner
       run: |
-        curl -sLo sonar-scanner-cli.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-6.2.1.4610-linux-x64.zip
-        unzip -q sonar-scanner-cli.zip -d $HOME
-        export PATH="$HOME/sonar-scanner-6.2.1.4610-linux-x64/bin:$PATH"
+        set -euo pipefail
+        SCANNER_VERSION="8.1.0.6389"
+        SCANNER_ZIP="sonar-scanner-cli-${SCANNER_VERSION}-linux-x64.zip"
+        # Maven Central mirrors the SonarSource scanner releases and has been
+        # reliable from GitHub-hosted runners; binaries.sonarsource.com has
+        # started returning 403 from some egress IPs.
+        SCANNER_URL="https://repo1.maven.org/maven2/org/sonarsource/scanner/cli/sonar-scanner-cli/${SCANNER_VERSION}/${SCANNER_ZIP}"
+        SCANNER_SHA256="bb8f709f9cb73352f8d1260a3b3c506c0f41146754bc630762c126d795499d0b"
+
+        # Retry on transient failures (CDN flakes, partial downloads).
+        # --fail makes curl exit non-zero on HTTP errors so we don't silently feed an
+        # error page into unzip, --retry-all-errors covers the body-cut-off case where
+        # curl saw 200 OK headers but the connection died mid-stream.
+        curl --fail --location --silent --show-error \
+             --retry 5 --retry-delay 5 --retry-all-errors \
+             --max-time 120 \
+             -o sonar-scanner-cli.zip "$SCANNER_URL"
+
+        # Verify checksum to catch any corruption that curl could not detect.
+        echo "${SCANNER_SHA256}  sonar-scanner-cli.zip" | sha256sum -c -
+
+        # Test zip integrity before extracting so a bad download fails loudly here
+        # instead of leaking partial files into $HOME.
+        unzip -tq sonar-scanner-cli.zip
+        unzip -q sonar-scanner-cli.zip -d "$HOME"
+
+        export PATH="$HOME/sonar-scanner-${SCANNER_VERSION}-linux-x64/bin:$PATH"
         sonar-scanner \
           -Dsonar.projectKey=local_project \
           -Dsonar.host.url=http://localhost:9000 \

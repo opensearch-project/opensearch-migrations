@@ -240,8 +240,10 @@ def call(Map config = [:]) {
 
                                 env.TRANSFORM_IMAGE_BASIC = buildTransformImage('basic')
                                 env.TRANSFORM_IMAGE_SEQUENCE = buildTransformImage('sequence')
+                                env.TRANSFORM_IMAGE_CONTEXT = buildTransformImage('context')
                                 echo "Transform image (basic): ${env.TRANSFORM_IMAGE_BASIC}"
                                 echo "Transform image (sequence): ${env.TRANSFORM_IMAGE_SEQUENCE}"
+                                echo "Transform image (context): ${env.TRANSFORM_IMAGE_CONTEXT}"
                             }
                         }
                     }
@@ -255,7 +257,7 @@ def call(Map config = [:]) {
                             script {
                                 sh "pipenv install --deploy"
                                 withMigrationsTestAccount(region: params.REGION, duration: 14400) { accountId ->
-                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}'"
+                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}' --transform-image-context='${env.TRANSFORM_IMAGE_CONTEXT}'"
                                 }
                             }
                         }

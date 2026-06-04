@@ -256,22 +256,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var tsk = trafficStreamAndKey.getKey();
         // Synthetic close from partition reassignment
         if (trafficStreamAndKey instanceof TrafficSourceReaderInterruptedClose) {
-            var partitionId = tsk.getNodeId();
-            var connectionId = tsk.getConnectionId();
-
             var existingAccum = liveStreams.getIfPresent(tsk);
             if (existingAccum != null) {
-                // fireAccumulationsCallbacksAndClose with TRAFFIC_SOURCE_READER_INTERRUPTED status:
-                // - completes finishedAccumulatingResponseFuture for any in-flight request
-                //   (ACCUMULATING_WRITES state), allowing the OnlineRadixSorter to drain
-                // - fires onConnectionClose(TRAFFIC_SOURCE_READER_INTERRUPTED) in its finally block,
-                //   which calls replayEngine.closeConnection() to schedule the channel close after
-                //   any in-flight requests complete
-                fireAccumulationsCallbacksAndClose(
-                    existingAccum,
-                    RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED
-                );
-                liveStreams.remove(partitionId, connectionId);
+                closeAsTrafficSourceReaderInterruptedAndRemove(existingAccum, tsk);
             } else {
                 // No accumulation — fire onConnectionClose directly so replayEngine.closeConnection
                 // is called and the session drains
@@ -299,26 +286,24 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         var partitionId = yetToBeSequencedTrafficStream.getNodeId();
         var connectionId = yetToBeSequencedTrafficStream.getConnectionId();
 
-        // If the incoming key has a higher generation than the stored accumulation, the partition
-        // was revoked and reassigned without a TrafficSourceReaderInterruptedClose being processed
-        // for this connection. This should not happen in normal operation — the interrupted-close
-        // path should have cleaned up the accumulation before new-generation data arrives.
-        // Log an error and discard the stale accumulation defensively.
+        // Defensive backstop: a higher generation means the partition was revoked and reassigned.
+        // The source layer (KafkaTrafficCaptureSource + TrackingKafkaConsumer) is responsible for
+        // injecting a TrafficSourceReaderInterruptedClose ahead of any new-generation records, so
+        // this branch should not fire in normal operation. If it does, log loudly and still close
+        // through the same interrupted-close path the synth-close branch uses, so the channel
+        // session is cancelled (preventing self-healing reconnects) before the re-delivered
+        // records create a fresh one.
         var existingAccum = liveStreams.getIfPresent(tsk);
         if (existingAccum != null && existingAccum.sourceGeneration < tsk.getSourceGeneration()) {
             log.atError().setMessage("Stale accumulation found for {}:{} (stored gen={}, incoming gen={}) — " +
-                    "TrafficSourceReaderInterruptedClose was not processed for this connection. " +
-                    "This indicates a gap in interrupted-close coverage.")
+                    "TrafficSourceReaderInterruptedClose was not delivered for this connection before " +
+                    "the new-generation record arrived. This indicates a gap in source-layer interrupted-close coverage.")
                 .addArgument(partitionId)
                 .addArgument(connectionId)
                 .addArgument(existingAccum.sourceGeneration)
                 .addArgument(tsk::getSourceGeneration)
                 .log();
-            fireAccumulationsCallbacksAndClose(
-                existingAccum,
-                RequestResponsePacketPair.ReconstructionStatus.CLOSED_PREMATURELY
-            );
-            liveStreams.remove(partitionId, connectionId);
+            closeAsTrafficSourceReaderInterruptedAndRemove(existingAccum, tsk);
         }
 
         var accum = liveStreams.getOrCreateWithoutExpiration(tsk, k -> createInitialAccumulation(trafficStreamAndKey));
@@ -713,6 +698,27 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             );
         });
         liveStreams.clear();
+    }
+
+    /**
+     * Single entry point for closing an accumulation in response to source-layer partition
+     * reassignment. Always uses {@code TRAFFIC_SOURCE_READER_INTERRUPTED} (never
+     * {@code CLOSED_PREMATURELY}) so the close routes through {@code replayEngine.cancelConnection}
+     * — bypassing the sorter and time-shifting, completing in-flight response futures, and
+     * setting {@code ConnectionReplaySession.cancelled = true} so the cached Netty channel
+     * cannot be reused by a re-delivered request stream stamped with the new generation.
+     * Used by both the synth-close branch (primary path) and the stale-generation defensive
+     * backstop, so the two cannot drift in close semantics.
+     */
+    private void closeAsTrafficSourceReaderInterruptedAndRemove(
+        Accumulation existingAccum,
+        ITrafficStreamKey tsk
+    ) {
+        fireAccumulationsCallbacksAndClose(
+            existingAccum,
+            RequestResponsePacketPair.ReconstructionStatus.TRAFFIC_SOURCE_READER_INTERRUPTED
+        );
+        liveStreams.remove(tsk.getNodeId(), tsk.getConnectionId());
     }
 
     private void fireAccumulationsCallbacksAndClose(

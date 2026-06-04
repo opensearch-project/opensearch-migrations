@@ -1,5 +1,9 @@
 """Integration tests for workflow CLI commands."""
 
+import base64
+import gzip
+import json
+
 from click.testing import CliRunner
 from unittest.mock import Mock, patch
 from kubernetes.client.rest import ApiException
@@ -509,6 +513,50 @@ class TestWorkflowCLICommands:
             ('future-step', 'pending')
         ]
 
+    @patch('console_link.workflow.commands.approve.get_workflow')
+    @patch('console_link.workflow.commands.approve._list_all_gates')
+    def test_gather_gates_reads_waiting_step_from_compressed_nodes(
+        self, mock_list_gates, mock_get_workflow
+    ):
+        from console_link.workflow.commands.approve import _gather_gates
+
+        gate_name = 'migratemetadata.source-target-migration-snapshot-migration-0'
+        nodes = {
+            'approval-node': {
+                'id': 'approval-node',
+                'displayName': 'waitForApproval',
+                'phase': 'Running',
+                'type': 'Pod',
+                'boundaryID': 'approve-boundary',
+                'templateRef': {
+                    'name': 'resource-management',
+                    'template': 'waitforapproval',
+                },
+                'inputs': {
+                    'parameters': [
+                        {'name': 'resourceName', 'value': gate_name},
+                    ]
+                },
+            }
+        }
+        mock_get_workflow.return_value = {
+            'metadata': {'name': 'migration-workflow'},
+            'status': {
+                'compressedNodes': base64.b64encode(
+                    gzip.compress(json.dumps(nodes).encode('utf-8'))
+                ).decode('utf-8')
+            }
+        }
+        mock_list_gates.return_value = [
+            (gate_name, 'Pending', {}),
+        ]
+
+        gates = _gather_gates('ma', 'migration-workflow', 'step', pre_approve=True)
+
+        assert [(gate.name, gate.status) for gate in gates] == [
+            (gate_name, 'waiting')
+        ]
+
     @patch('console_link.workflow.commands.approve._waiting_gates_from_workflow')
     @patch('console_link.workflow.commands.approve._list_all_gates')
     def test_gather_gates_can_include_completed(
@@ -810,6 +858,34 @@ class TestWorkflowCLICommands:
             'migrations.opensearch.org/source=source1,'
             'migrations.opensearch.org/target=target1,'
             'strimzi.io/cluster=default'
+        )
+
+    @patch('console_link.workflow.commands.log.load_k8s_config')
+    @patch('console_link.workflow.commands.log.client')
+    @patch('console_link.workflow.commands.log._run_history_mode')
+    def test_output_resource_excludes_cr_only_labels(self, mock_history, mock_client, _mock_k8s):
+        runner = CliRunner()
+        mock_custom = Mock()
+        mock_client.CustomObjectsApi.return_value = mock_custom
+        mock_custom.get_namespaced_custom_object.return_value = {
+            'metadata': {
+                'labels': {
+                    'migrations.opensearch.org/source': 'source',
+                    'migrations.opensearch.org/snapshot': 'backfill-snapshot',
+                    'migrations.opensearch.org/run-number': '1779987650969',
+                    'migrations.opensearch.org/workflow-name': 'migration-workflow',
+                }
+            }
+        }
+
+        result = runner.invoke(workflow_cli, ['log', 'resource', 'datasnapshot.source-backfill-snapshot'])
+
+        assert result.exit_code == 0
+        args, _ = mock_history.call_args
+        assert args[2] == (
+            'migrations.opensearch.org/snapshot=backfill-snapshot,'
+            'migrations.opensearch.org/source=source,'
+            'workflows.argoproj.io/workflow=migration-workflow'
         )
 
     @patch('console_link.workflow.commands.log.load_k8s_config')

@@ -3,7 +3,9 @@ import {
     collectProjectedFields,
     ProjectedField,
 } from "@opensearch-migrations/schemas";
+import {createHash} from "crypto";
 import {z} from "zod";
+import {FILE_SOURCE_RUNTIME_FIELDS, fileSourceRefsForTrace} from "./fileSourceUtils";
 
 type WorkflowConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 type KafkaClusterConfig = NonNullable<WorkflowConfig["kafkaClusters"]>[number];
@@ -23,6 +25,7 @@ export interface ResolvedMigrationResource {
     kind: string;
     name: string;
     parameters: Record<string, unknown>;
+    annotations?: Record<string, string>;
     parameterPolicies?: ResolvedParameterPolicy[];
 }
 
@@ -125,6 +128,69 @@ function prefixFields(prefix: string, value: Record<string, unknown> | undefined
     );
 }
 
+const CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS = [
+    // Workflow/deployment bridge fields. The CaptureProxy CRD does not own these
+    // until the resource controller grows file-source-aware mTLS support.
+    ...FILE_SOURCE_RUNTIME_FIELDS,
+    "sslTrustCertFile",
+    "sslTrustCertPem",
+    "sslTrustCertPemEnvVar",
+    "requireClientAuth",
+] as const;
+
+const WORKFLOW_ONLY_FIELDS_ANNOTATION = "migrations.opensearch.org/workflow-only-fields";
+const WORKFLOW_ONLY_HASH_ANNOTATION = "migrations.opensearch.org/workflow-only-hash";
+const FILE_SOURCE_REFS_ANNOTATION = "migrations.opensearch.org/file-source-refs";
+
+function omitFields(source: Record<string, unknown>, fields: readonly string[]): Record<string, unknown> {
+    const result = {...source};
+    for (const field of fields) {
+        delete result[field];
+    }
+    return result;
+}
+
+function isNonEmptyTraceValue(value: unknown): boolean {
+    if (value === undefined) {
+        return false;
+    }
+    if (Array.isArray(value)) {
+        return value.length > 0;
+    }
+    return true;
+}
+
+function pickFields(source: Record<string, unknown>, fields: readonly string[]): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const field of fields) {
+        if (field in source && isNonEmptyTraceValue(source[field])) {
+            result[field] = source[field];
+        }
+    }
+    return result;
+}
+
+function traceHash(value: unknown) {
+    return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+
+function workflowOnlyTraceAnnotations(omittedFields: Record<string, unknown>) {
+    const fields = Object.keys(omittedFields);
+    if (fields.length === 0) {
+        return undefined;
+    }
+
+    const annotations: Record<string, string> = {
+        [WORKFLOW_ONLY_FIELDS_ANNOTATION]: fields.join(","),
+        [WORKFLOW_ONLY_HASH_ANNOTATION]: traceHash(omittedFields),
+    };
+    const fileSourceRefs = fileSourceRefsForTrace(omittedFields);
+    if (fileSourceRefs.length > 0) {
+        annotations[FILE_SOURCE_REFS_ANNOTATION] = JSON.stringify(fileSourceRefs);
+    }
+    return annotations;
+}
+
 function resourcePolicies(kind: string, parameters: Record<string, unknown>): ResolvedParameterPolicy[] {
     return collectProjectedFields()
         .filter(field => field.resourceKind === kind && hasPath(parameters, field.specPath))
@@ -143,6 +209,7 @@ function resource(
     name: string,
     parameters: Record<string, unknown>,
     options: ResolvedMigrationResourcesOptions = {},
+    annotations?: Record<string, string>,
 ): ResolvedMigrationResource {
     const normalizedParameters = removeUndefined(parameters) as Record<string, unknown>;
     return {
@@ -150,6 +217,7 @@ function resource(
         kind,
         name,
         parameters: normalizedParameters,
+        ...(annotations === undefined ? {} : {annotations}),
         ...(options.includeParameterPolicies
             ? {parameterPolicies: resourcePolicies(kind, normalizedParameters)}
             : {}),
@@ -184,9 +252,17 @@ function capturedTrafficParameters(proxy: ProxyConfig): Record<string, unknown> 
 
 function captureProxyParameters(proxy: ProxyConfig): Record<string, unknown> {
     return {
-        ...proxy.proxyConfig,
+        ...omitFields(proxy.proxyConfig as Record<string, unknown>, CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS),
         dependsOn: [`${proxy.name}-topic`],
     };
+}
+
+function captureProxyAnnotations(proxy: ProxyConfig) {
+    const omittedFields = pickFields(
+        proxy.proxyConfig as Record<string, unknown>,
+        CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS
+    );
+    return workflowOnlyTraceAnnotations(omittedFields);
 }
 
 function dataSnapshotParameters(item: SnapshotItemConfig): Record<string, unknown> {
@@ -233,7 +309,13 @@ export function buildResolvedMigrationResourceList(
 
     for (const proxy of workflowConfig.proxies ?? []) {
         resources.push(resource("CapturedTraffic", `${proxy.name}-topic`, capturedTrafficParameters(proxy), options));
-        resources.push(resource("CaptureProxy", proxy.name, captureProxyParameters(proxy), options));
+        resources.push(resource(
+            "CaptureProxy",
+            proxy.name,
+            captureProxyParameters(proxy),
+            options,
+            captureProxyAnnotations(proxy)
+        ));
     }
 
     for (const snapshot of workflowConfig.snapshots ?? []) {
