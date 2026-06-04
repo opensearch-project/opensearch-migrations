@@ -64,7 +64,7 @@ class S3TupleSinkTest {
     }
 
     @Test
-    void periodicFlushUploadsPendingTupleOnceMaxAgeReached() throws Exception {
+    void selfScheduledFlushUploadsPendingTupleOnceMaxAgeReached() throws Exception {
         var s3Client = mock(S3AsyncClient.class);
         var upload = new CompletableFuture<PutObjectResponse>();
         var putCallCount = new AtomicInteger();
@@ -75,20 +75,13 @@ class S3TupleSinkTest {
                 return upload;
             });
 
-        // Short max-age so the age-gated periodic flush fires on the second tick.
+        // Short max-age: the sink's own scheduled worker should rotate the trailing batch
+        // WITHOUT any further accept() calls or external flush — this is the stall fix.
         try (var sink = makeSink(s3Client, 100, Duration.ofMillis(50))) {
             var future = new CompletableFuture<Void>();
             sink.accept(makeTuple("conn1.0"), future);
-            assertFalse(future.isDone(), "Tuple future should wait until the batch is uploaded");
 
-            // Drive the age-based flush until the file reaches its max age and rotates.
-            var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            while (putCallCount.get() == 0 && System.nanoTime() < deadline) {
-                sink.periodicFlush();
-                Thread.sleep(20);
-            }
-            assertEquals(1, putCallCount.get(),
-                "Periodic flush should upload the pending tuple batch once max age is reached");
+            waitForPutCalls(putCallCount, 1);
             assertFalse(future.isDone(), "Tuple future should still wait for the upload result");
 
             upload.complete(PutObjectResponse.builder().build());
@@ -97,16 +90,16 @@ class S3TupleSinkTest {
     }
 
     @Test
-    void periodicFlushDoesNotUploadBeforeMaxAge() {
+    void doesNotUploadBeforeMaxAgeWhileQuiet() throws Exception {
         var s3Client = mock(S3AsyncClient.class);
 
-        // Long max-age: a quiet sink should NOT upload tiny objects on every scheduler tick.
+        // Long max-age: a quiet sink must NOT upload a tiny object on its scheduled ticks.
         try (var sink = makeSink(s3Client, 100, Duration.ofMinutes(10))) {
             var future = new CompletableFuture<Void>();
             sink.accept(makeTuple("conn1.0"), future);
 
-            sink.periodicFlush();
-            sink.periodicFlush();
+            // Give the scheduled worker several opportunities to (incorrectly) flush.
+            Thread.sleep(200);
 
             verify(s3Client, never()).putObject(any(PutObjectRequest.class), any(AsyncRequestBody.class));
             assertFalse(future.isDone(), "Tuple future stays pending until size/count/age rotation");
