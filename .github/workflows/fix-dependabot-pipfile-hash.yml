@@ -4,7 +4,15 @@ name: Fix Dependabot Pipfile.lock hash
 # Dependabot generates Pipfile.lock hashes using plette's native method,
 # but our CI uses pipenv 2026.5.0 which computes hashes using PEP 503
 # canonicalized package names. This workflow detects the mismatch and
-# pushes a fixup commit so CI passes.
+# fixes it.
+#
+# The original strategy was to push the fix back to the dependabot PR
+# branch directly. That was blocked when an opensearch-project org
+# ruleset began enforcing PR-only updates on dependabot/** refs:
+#   "Cannot update this protected ref"
+# So now we open a replacement PR from a non-protected branch and
+# comment on the dependabot PR so reviewers can close it in favor of
+# the corrected one.
 
 on:
   pull_request_target:
@@ -14,6 +22,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   fix-pipfile-hash:
@@ -25,6 +34,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
@@ -71,7 +81,6 @@ jobs:
               current_hash = lock_data["_meta"]["hash"]["sha256"]
 
               if current_hash != correct_hash:
-                  # Surgical replacement to preserve file formatting
                   text = lockfile.read_text()
                   text = text.replace(current_hash, correct_hash, 1)
                   lockfile.write_text(text)
@@ -83,13 +92,16 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"fixed={'true' if fixed else 'false'}\n")
 
-      - name: Commit and push hash fix
+      - name: Try direct push to dependabot branch
+        id: direct-push
         if: steps.fix-hashes.outputs.fixed == 'true'
+        continue-on-error: true
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -u '*.lock'
-          git commit -m "Fix Pipfile.lock _meta.hash for pipenv compatibility
+          git commit -s -m "Fix Pipfile.lock _meta.hash for pipenv compatibility
 
           Dependabot generates hashes using plette's native method, but CI
           uses pipenv 2026.5.0 which applies PEP 503 name canonicalization
@@ -97,3 +109,89 @@ jobs:
 
           Signed-off-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
           git push
+
+      - name: Open replacement PR when direct push is blocked
+        if: |
+          steps.fix-hashes.outputs.fixed == 'true' &&
+          steps.direct-push.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEP_BRANCH: ${{ github.event.pull_request.head.ref }}
+          DEP_PR: ${{ github.event.pull_request.number }}
+          DEP_TITLE: ${{ github.event.pull_request.title }}
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+
+          # The commit from "Try direct push" was created locally even though
+          # the push was rejected — reuse it on a non-protected branch.
+          FIX_BRANCH="bot/pipfile-hash-fix/${DEP_BRANCH#dependabot/}"
+
+          git push --force origin "HEAD:refs/heads/${FIX_BRANCH}"
+
+          BODY=$(cat <<EOF
+          Replaces #${DEP_PR}.
+
+          The Pipfile.lock hash Dependabot generated for that PR mismatches
+          what pipenv 2026.5.0 produces (PEP 503 name canonicalization is
+          applied before hashing). Direct push to \`${DEP_BRANCH}\` is
+          blocked by an org-level ruleset, so this workflow opened a
+          replacement PR carrying the same dependency bump with the
+          corrected \`_meta.hash\` so CI can pass.
+
+          Once this PR is merged, the original Dependabot PR can be closed.
+          EOF
+          )
+
+          # Reuse an existing replacement PR if one is already open for this
+          # dependabot branch — Dependabot will trigger this workflow on
+          # every synchronize, and we don't want a fresh PR each time.
+          EXISTING=$(gh pr list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --head "${FIX_BRANCH}" \
+            --state open \
+            --json number \
+            --jq '.[0].number // empty')
+
+          if [ -n "${EXISTING}" ]; then
+            echo "Updating existing replacement PR #${EXISTING}"
+            gh pr edit "${EXISTING}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --body "${BODY}"
+            REPLACEMENT_URL=$(gh pr view "${EXISTING}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --json url --jq .url)
+          else
+            echo "Opening new replacement PR for ${DEP_BRANCH}"
+            REPLACEMENT_URL=$(gh pr create \
+              --repo "${GITHUB_REPOSITORY}" \
+              --base "${BASE_BRANCH}" \
+              --head "${FIX_BRANCH}" \
+              --title "${DEP_TITLE} (Pipfile.lock hash fixed)" \
+              --body "${BODY}")
+          fi
+
+          # Leave a single sticky comment on the original Dependabot PR
+          # pointing at the replacement, idempotent across synchronize events.
+          MARKER="<!-- pipfile-hash-fix-replacement-pr -->"
+          COMMENT_BODY="${MARKER}
+          Pipfile.lock \`_meta.hash\` doesn't match pipenv 2026.5.0 output
+          and direct push to \`${DEP_BRANCH}\` is blocked by ruleset.
+          A replacement PR with the corrected hash has been opened:
+          ${REPLACEMENT_URL}"
+
+          EXISTING_COMMENT=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/issues/${DEP_PR}/comments" \
+            --paginate \
+            --jq ".[] | select(.body | startswith(\"${MARKER}\")) | .id" \
+            | head -n1)
+
+          if [ -n "${EXISTING_COMMENT}" ]; then
+            gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING_COMMENT}" \
+              -f body="${COMMENT_BODY}" >/dev/null
+          else
+            gh pr comment "${DEP_PR}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --body "${COMMENT_BODY}"
+          fi
