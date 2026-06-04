@@ -10,6 +10,8 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.GZIPOutputStream;
 
+import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.extern.slf4j.Slf4j;
@@ -49,7 +51,7 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 public class S3DlqSink implements DlqSink {
     private static final DateTimeFormatter TIMESTAMP_FORMAT =
         DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC);
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = ObjectMapperFactory.createDefaultMapper();
 
     @FunctionalInterface
     public interface S3Uploader {
