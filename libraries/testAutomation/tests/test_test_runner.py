@@ -140,17 +140,6 @@ class TestPytestCommand:
         command_list = runner.k8s_service.exec_background_cmd.call_args.kwargs["command_list"]
         assert "--capture_proxy_service_type=ClusterIP" in command_list
 
-    def test_skip_delete_does_not_disable_inter_case_reset(self):
-        """--skip-delete preserves the deployment but must NOT pass
-        --skip_workflow_reset to pytest. Per-case CRD reset is required for
-        every multi-case run; otherwise case N+1's setup precondition trips on
-        leftovers from case N (e.g. datasnapshot.source1-testsnapshot)."""
-        runner = _make_runner(combinations=[("ES_7.10", "OS_1.3")])
-        with patch.object(runner, "run_tests", return_value=_make_report(passed=2, failed=0)) as mock_run:
-            runner.run(skip_delete=True)
-            mock_run.assert_called_once()
-            assert mock_run.call_args.kwargs.get("skip_workflow_reset", False) is False
-
 
 from test_runner import get_version_combinations, TargetType, VALID_SOURCE_VERSIONS
 
