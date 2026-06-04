@@ -81,6 +81,25 @@ public class ThreadLocalTupleWriter implements AutoCloseable {
         return future;
     }
 
+    /**
+     * Age-based flush across every registered sink. Driven from the replayer's shared
+     * scheduler thread (NOT a sink's owning event loop), so each sink's periodicFlush()
+     * must guard the buffer state it shares with accept(). Without this, a sink that
+     * stops receiving tuples never re-evaluates its max-age rotation, leaving the last
+     * batch's futures pending forever — which keeps the replayer's Kafka offset pinned
+     * (commit is gated on durable tuple output). Per-sink errors are swallowed so one
+     * bad sink can't stop the others (or the scheduler).
+     */
+    public void periodicFlush() {
+        sinks.forEach(sink -> {
+            try {
+                sink.periodicFlush();
+            } catch (Exception e) {
+                log.atError().setCause(e).setMessage("Error during periodic TupleSink flush").log();
+            }
+        });
+    }
+
     @Override
     public void close() {
         sinks.forEach(sink -> {

@@ -122,52 +122,72 @@ public class S3TupleSink implements TupleSink {
         openNewStream();
     }
 
+    // accept() runs on the owning Netty event loop, but periodicFlush() is now driven from
+    // the replayer's shared scheduler thread (so the age-based rotation fires when traffic
+    // goes quiet — otherwise the trailing buffer's tuple futures never complete and the
+    // replayer's Kafka offset never advances). That cross-thread flush means the methods
+    // mutating the buffer (gzipOut / pendingFutures / currentFile) can no longer assume
+    // single-threaded access, so they synchronize on this lock. The lock is only ever held
+    // for local buffer bookkeeping + kicking off the async upload — never across the S3 call.
+    private final Object bufferLock = new Object();
+
     @Override
     public void accept(Map<String, Object> tupleMap, CompletableFuture<Void> future) {
-        try {
-            byte[] json = mapper.writeValueAsBytes(tupleMap);
-            gzipOut.write(json);
-            gzipOut.write('\n');
-            uncompressedBytes += json.length + 1;
-            tupleCount++;
-            pendingFutures.add(future);
-        } catch (IOException e) {
-            future.completeExceptionally(e);
-            return;
-        }
-        if (shouldRotate()) {
-            rotate(true);
+        synchronized (bufferLock) {
+            try {
+                byte[] json = mapper.writeValueAsBytes(tupleMap);
+                gzipOut.write(json);
+                gzipOut.write('\n');
+                uncompressedBytes += json.length + 1;
+                tupleCount++;
+                pendingFutures.add(future);
+            } catch (IOException e) {
+                future.completeExceptionally(e);
+                return;
+            }
+            if (shouldRotate()) {
+                rotate(true);
+            }
         }
     }
 
     @Override
     public void flush() {
-        if (pendingFutures.isEmpty()) {
-            return;
+        synchronized (bufferLock) {
+            if (pendingFutures.isEmpty()) {
+                return;
+            }
+            rotate(true);
         }
-        rotate(true);
     }
 
     @Override
     public void periodicFlush() {
-        if (!pendingFutures.isEmpty()) {
-            rotate(true);
+        synchronized (bufferLock) {
+            // Age-driven safety flush: only rotate if there are buffered tuples AND the file
+            // has reached its max age. Without the age gate this would upload a tiny object on
+            // every scheduler tick under steady traffic; shouldRotate() already covers size/count.
+            if (!pendingFutures.isEmpty() && hasReachedMaxAge()) {
+                rotate(true);
+            }
         }
     }
 
     @Override
     public void close() {
         closeRequested.set(true);
-        if (gzipOut == null) {
-            shutdownRetryExecutorIfDone();
-            return;
-        }
-        if (!pendingFutures.isEmpty()) {
-            rotate(false);
-        } else {
-            closeCurrentStream();
-            deleteFile(currentFile);
-            clearCurrentStream();
+        synchronized (bufferLock) {
+            if (gzipOut == null) {
+                shutdownRetryExecutorIfDone();
+                return;
+            }
+            if (!pendingFutures.isEmpty()) {
+                rotate(false);
+            } else {
+                closeCurrentStream();
+                deleteFile(currentFile);
+                clearCurrentStream();
+            }
         }
         shutdownRetryExecutorIfDone();
     }
@@ -175,7 +195,11 @@ public class S3TupleSink implements TupleSink {
     private boolean shouldRotate() {
         return uncompressedBytes >= rotateAfterBytes
             || (rotateAfterTuples > 0 && tupleCount >= rotateAfterTuples)
-            || Duration.between(fileOpenedAt, Instant.now()).compareTo(rotateAfterAge) >= 0;
+            || hasReachedMaxAge();
+    }
+
+    private boolean hasReachedMaxAge() {
+        return Duration.between(fileOpenedAt, Instant.now()).compareTo(rotateAfterAge) >= 0;
     }
 
     private void rotate(boolean openNextStream) {

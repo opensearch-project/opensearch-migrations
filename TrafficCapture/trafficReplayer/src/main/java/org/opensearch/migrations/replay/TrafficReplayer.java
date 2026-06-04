@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
@@ -706,6 +707,10 @@ public class TrafficReplayer {
             );
             ActiveContextMonitor finalActiveContextMonitor = activeContextMonitor;
             var finalBlockingTrafficSource = blockingTrafficSource;
+            // Holder so the scheduler tick can drive the tuple writer's age-based flush. The
+            // writer is created a few lines below (after the shutdown hook), so it's wired in
+            // via this reference once available.
+            var tupleWriterRef = new AtomicReference<ThreadLocalTupleWriter>();
             scheduledExecutorService.scheduleAtFixedRate(() -> {
                 activeContextLogger.atInfo().setMessage("Total requests outstanding at {}: {}")
                     .addArgument(Instant::now)
@@ -722,6 +727,15 @@ public class TrafficReplayer {
                 if (engine != null) {
                     engine.logHeartbeat();
                 }
+                // Drive the age-based S3 tuple flush. accept() only re-checks file age when a
+                // new tuple arrives, so without this a sink that goes quiet never rotates its
+                // last batch — leaving those tuple futures pending and the Kafka offset pinned
+                // (commit is gated on durable tuple output). Guarded inside the sink for the
+                // cross-thread access; never raises (errors are swallowed in periodicFlush).
+                var tupleWriterForFlush = tupleWriterRef.get();
+                if (tupleWriterForFlush != null) {
+                    tupleWriterForFlush.periodicFlush();
+                }
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
@@ -729,6 +743,7 @@ public class TrafficReplayer {
                 params,
                 () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig)
             );
+            tupleWriterRef.set(tupleWriter);
             if (tupleWriter != null) {
                 tr.setupRunAndWaitForReplayWithShutdownChecks(
                     Duration.ofSeconds(params.observedPacketConnectionTimeout),

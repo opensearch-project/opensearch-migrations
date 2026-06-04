@@ -64,7 +64,7 @@ class S3TupleSinkTest {
     }
 
     @Test
-    void periodicFlushUploadsPendingTuple() throws Exception {
+    void periodicFlushUploadsPendingTupleOnceMaxAgeReached() throws Exception {
         var s3Client = mock(S3AsyncClient.class);
         var upload = new CompletableFuture<PutObjectResponse>();
         var putCallCount = new AtomicInteger();
@@ -75,17 +75,41 @@ class S3TupleSinkTest {
                 return upload;
             });
 
-        try (var sink = makeSink(s3Client, 100)) {
+        // Short max-age so the age-gated periodic flush fires on the second tick.
+        try (var sink = makeSink(s3Client, 100, Duration.ofMillis(50))) {
             var future = new CompletableFuture<Void>();
             sink.accept(makeTuple("conn1.0"), future);
             assertFalse(future.isDone(), "Tuple future should wait until the batch is uploaded");
 
-            sink.periodicFlush();
-            assertEquals(1, putCallCount.get(), "Periodic flush should upload the pending tuple batch");
+            // Drive the age-based flush until the file reaches its max age and rotates.
+            var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (putCallCount.get() == 0 && System.nanoTime() < deadline) {
+                sink.periodicFlush();
+                Thread.sleep(20);
+            }
+            assertEquals(1, putCallCount.get(),
+                "Periodic flush should upload the pending tuple batch once max age is reached");
             assertFalse(future.isDone(), "Tuple future should still wait for the upload result");
 
             upload.complete(PutObjectResponse.builder().build());
             future.get(1, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void periodicFlushDoesNotUploadBeforeMaxAge() {
+        var s3Client = mock(S3AsyncClient.class);
+
+        // Long max-age: a quiet sink should NOT upload tiny objects on every scheduler tick.
+        try (var sink = makeSink(s3Client, 100, Duration.ofMinutes(10))) {
+            var future = new CompletableFuture<Void>();
+            sink.accept(makeTuple("conn1.0"), future);
+
+            sink.periodicFlush();
+            sink.periodicFlush();
+
+            verify(s3Client, never()).putObject(any(PutObjectRequest.class), any(AsyncRequestBody.class));
+            assertFalse(future.isDone(), "Tuple future stays pending until size/count/age rotation");
         }
     }
 
@@ -158,6 +182,10 @@ class S3TupleSinkTest {
     }
 
     private S3TupleSink makeSink(S3AsyncClient s3Client, int rotateAfterTuples) {
+        return makeSink(s3Client, rotateAfterTuples, Duration.ofMinutes(10));
+    }
+
+    private S3TupleSink makeSink(S3AsyncClient s3Client, int rotateAfterTuples, Duration rotateAfterAge) {
         return new S3TupleSink(
             s3Client,
             "bucket",
@@ -165,7 +193,7 @@ class S3TupleSinkTest {
             "replayer-1",
             0,
             1024 * 1024,
-            Duration.ofMinutes(10),
+            rotateAfterAge,
             rotateAfterTuples,
             Duration.ofMillis(10)
         );
