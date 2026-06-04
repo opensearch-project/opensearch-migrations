@@ -175,16 +175,9 @@ public class S3TupleSink implements TupleSink {
         }, null);
     }
 
-    @Override
-    public void periodicFlush() {
-        // Retained for the TupleSink contract / external callers, but the sink now drives its
-        // own age flush from the worker thread (see periodicFlushOnWorker). Marshal so external
-        // callers remain safe.
-        runOnWorker(this::periodicFlushOnWorker, null);
-    }
-
-    /** Age-driven safety flush; runs on the worker thread. Only rotates buffered tuples once the
-     * file has reached its max age (size/count rotation is handled inline in accept()). */
+    /** Age-driven safety flush; runs on the worker thread (self-scheduled in the constructor).
+     * Only rotates buffered tuples once the file has reached its max age (size/count rotation is
+     * handled inline in accept()). */
     private void periodicFlushOnWorker() {
         if (!pendingFutures.isEmpty() && hasReachedMaxAge()) {
             rotate(true);
