@@ -96,10 +96,9 @@ describe("CaptureProxy CR builder conformance with the generated CRD", () => {
         const emittable = argoProxyOptionKeys().filter(k => !omitted.has(k));
         const leaked = emittable.filter(k => !allowed.has(k));
 
-        expect({leaked, omitted: [...omitted].sort()}).toEqual({
-            leaked: [],
-            omitted: [...omitted].sort(),
-        });
+        // On failure, `leaked` names the offending fields; the omit list that was
+        // applied is available via the sibling test below.
+        expect(leaked).toEqual([]);
     });
 
     it("strips the resolved mTLS bridge fields that the customer config triggers", () => {

@@ -19,8 +19,7 @@ import {
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
 import {
-    ARGO_PROXY_RESOLVED_ONLY_KEYS,
-    ARGO_PROXY_WORKFLOW_OPTION_KEYS,
+    ARGO_PROXY_CR_OMITTED_KEYS,
     ARGO_REPLAYER_OPTIONS,
     ARGO_REPLAYER_WORKFLOW_OPTION_KEYS,
     DEFAULT_RESOURCES,
@@ -278,8 +277,9 @@ function makeCaptureProxyManifest(
         },
         spec: makeDirectTypeProxy(expr.mergeDicts(
             workflowSpecFields,
-            // Also strip resolved-only bridge fields not defined by the CaptureProxy CRD.
-            expr.omit(proxyOpts, ...ARGO_PROXY_WORKFLOW_OPTION_KEYS, ...ARGO_PROXY_RESOLVED_ONLY_KEYS)
+            // Strip workflow-option fields (re-added above as spec fields) and the
+            // resolved-only bridge fields not defined by the CaptureProxy CRD.
+            expr.omit(proxyOpts, ...ARGO_PROXY_CR_OMITTED_KEYS)
         )),
     };
 }

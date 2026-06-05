@@ -228,6 +228,15 @@ export const ARGO_PROXY_RESOLVED_ONLY_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick(
     fileSourceVolumeMounts: true,
 }));
 
+// All keys stripped from the CaptureProxy custom resource: workflow-option fields
+// (re-added explicitly as spec fields by makeCaptureProxyManifest) plus the
+// resolved-only bridge fields above. Deduped because the two sets legitimately
+// overlap (e.g. sslTrustCertPem, fileSource*), so the rendered sprig.omit lists
+// each key once.
+export const ARGO_PROXY_CR_OMITTED_KEYS = [
+    ...new Set([...ARGO_PROXY_WORKFLOW_OPTION_KEYS, ...ARGO_PROXY_RESOLVED_ONLY_KEYS]),
+];
+
 export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
     USER_REPLAYER_OPTIONS.omit({
         requestTransforms: true,
