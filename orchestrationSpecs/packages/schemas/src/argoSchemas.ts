@@ -9,6 +9,8 @@ import {
     KAFKA_CLUSTERS_MAP,
     NORMALIZED_COMPLETE_SNAPSHOT_CONFIG,
     NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG,
+    GCS_REPO_CONFIG,
+    REPO_CONFIG,
     S3_REPO_CONFIG,
     SNAPSHOT_MIGRATION_FILTER,
     SOURCE_CLUSTER_CONFIG,
@@ -155,10 +157,36 @@ export const DENORMALIZED_S3_REPO_CONFIG =
         repoName: z.string(),
     }));
 
+export const DENORMALIZED_GCS_REPO_CONFIG =
+    makeOptionalDefaultedFieldsRequired(GCS_REPO_CONFIG.safeExtend({
+        repoName: z.string(),
+    }));
+
+// Discriminated union of denormalized repo configs. Mirrors REPO_CONFIG at the
+// argoSchemas layer (post-`makeOptionalDefaultedFieldsRequired` transformation
+// + `repoName`/`useLocalStack` enrichment performed by the config transformer).
+//
+// NOTE (multi-cloud stage 1): The union type is *defined and exported* here, but the
+// downstream Argo WorkflowTemplate schemas (COMPLETE_SNAPSHOT_CONFIG, DYNAMIC_SNAPSHOT_CONFIG,
+// SNAPSHOT_REPO_CONFIG, PER_SOURCE_CREATE_SNAPSHOTS_CONFIG) intentionally continue to use
+// DENORMALIZED_S3_REPO_CONFIG. The dispatcher pattern that selects the S3 or GCS WT family
+// based on `repoConfig.type` is introduced in stage 2 and at that point these schemas
+// will switch to DENORMALIZED_REPO_CONFIG.
+export const DENORMALIZED_REPO_CONFIG = z.discriminatedUnion("type", [
+    DENORMALIZED_S3_REPO_CONFIG,
+    DENORMALIZED_GCS_REPO_CONFIG,
+]);
+
 export const COMPLETE_SNAPSHOT_CONFIG =
     makeOptionalDefaultedFieldsRequired(NORMALIZED_COMPLETE_SNAPSHOT_CONFIG.safeExtend({
         label: z.string(),
         repoConfig: DENORMALIZED_S3_REPO_CONFIG  // Replace string reference with actual config
+    }));
+
+export const COMPLETE_SNAPSHOT_CONFIG_GCS =
+    makeOptionalDefaultedFieldsRequired(NORMALIZED_COMPLETE_SNAPSHOT_CONFIG.safeExtend({
+        label: z.string(),
+        repoConfig: DENORMALIZED_GCS_REPO_CONFIG
     }));
 
 export const DYNAMIC_SNAPSHOT_CONFIG =
@@ -166,6 +194,14 @@ export const DYNAMIC_SNAPSHOT_CONFIG =
         .omit({repoName: true})
         .safeExtend({
             repoConfig: DENORMALIZED_S3_REPO_CONFIG,  // Replace string reference with actual config
+            label: z.string()
+    }));
+
+export const DYNAMIC_SNAPSHOT_CONFIG_GCS =
+    makeOptionalDefaultedFieldsRequired(NORMALIZED_DYNAMIC_SNAPSHOT_CONFIG
+        .omit({repoName: true})
+        .safeExtend({
+            repoConfig: DENORMALIZED_GCS_REPO_CONFIG,
             label: z.string()
     }));
 
@@ -287,7 +323,14 @@ export const SNAPSHOT_NAME_RESOLUTION = z.union([
 
 export const SNAPSHOT_REPO_CONFIG = z.object({
     label: z.string(),
+    // Stage 1: WT-facing schema stays S3-only; stage 2 introduces the GCS WT family
+    // and flips this to DENORMALIZED_REPO_CONFIG.
     repoConfig: DENORMALIZED_S3_REPO_CONFIG
+});
+
+export const SNAPSHOT_REPO_CONFIG_GCS = z.object({
+    label: z.string(),
+    repoConfig: DENORMALIZED_GCS_REPO_CONFIG
 });
 
 export const SNAPSHOT_MIGRATION_CONFIG = z.object({
@@ -308,6 +351,25 @@ export const SNAPSHOT_MIGRATION_CONFIG = z.object({
     configChecksum: z.string(),
     checksumForReplayer: z.string(),
     workloadIdentityChecksum: z.string(),
+    resourceUid: z.string(),
+});
+
+export const SNAPSHOT_MIGRATION_CONFIG_GCS = z.object({
+    label: z.string(),
+    migrationLabel: z.string(),
+    snapshotNameResolution: SNAPSHOT_NAME_RESOLUTION,
+    snapshotConfigChecksum: z.string(),
+    metadataMigrationConfig: ARGO_METADATA_OPTIONS.optional(),
+    documentBackfillConfig: ARGO_RFS_OPTIONS.optional(),
+    sourceVersion: z.string(),
+    sourceLabel: z.string(),
+    targetConfig: NAMED_TARGET_CLUSTER_CONFIG,
+    snapshotConfig: SNAPSHOT_REPO_CONFIG_GCS,
+    sourceEndpoint: z.string().optional(),
+    sourceAllowInsecure: z.boolean().optional(),
+    sourceAuth: z.any().optional(),
+    configChecksum: z.string(),
+    checksumForReplayer: z.string(),
     resourceUid: z.string(),
 });
 
@@ -339,6 +401,8 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
     label: z.string(),
     snapshotPrefix: z.string(),
     config: ARGO_CREATE_SNAPSHOT_OPTIONS,
+    // Stage 1: WT-facing schema stays S3-only; stage 2 flips to DENORMALIZED_REPO_CONFIG
+    // alongside the GCS WT family.
     repo: DENORMALIZED_S3_REPO_CONFIG,
     semaphoreConfigMapName: z.string(),
     semaphoreKey: z.string(),
@@ -350,6 +414,20 @@ export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG = z.object({
     resourceUid: z.string(),
 });
 
+export const PER_SOURCE_CREATE_SNAPSHOTS_CONFIG_GCS = z.object({
+    label: z.string(),
+    snapshotPrefix: z.string(),
+    config: ARGO_CREATE_SNAPSHOT_OPTIONS,
+    repo: DENORMALIZED_GCS_REPO_CONFIG,
+    semaphoreConfigMapName: z.string(),
+    semaphoreKey: z.string(),
+    dependsOnProxySetups: z.array(z.object({
+        name: z.string(),
+        configChecksum: z.string(),
+    })),
+    configChecksum: z.string(),
+});
+
 export const ENRICHED_SNAPSHOT_MIGRATION_FILTER = SNAPSHOT_MIGRATION_FILTER.extend({
     migrationLabel: z.string(),
     configChecksum: z.string(),
@@ -357,6 +435,13 @@ export const ENRICHED_SNAPSHOT_MIGRATION_FILTER = SNAPSHOT_MIGRATION_FILTER.exte
 
 export const DENORMALIZED_CREATE_SNAPSHOTS_CONFIG = z.object({
     createSnapshotConfig: z.array(PER_SOURCE_CREATE_SNAPSHOTS_CONFIG).min(1),
+    sourceConfig: NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO
+});
+
+// Stage 4 multi-cloud: parallel GCS snapshot creation list. Dispatched via
+// a parallel `createSnapshot` step using CreateSnapshotGcs in fullMigration.ts.
+export const DENORMALIZED_CREATE_SNAPSHOTS_CONFIG_GCS = z.object({
+    createSnapshotConfig: z.array(PER_SOURCE_CREATE_SNAPSHOTS_CONFIG_GCS).min(1),
     sourceConfig: NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO
 });
 
@@ -410,7 +495,12 @@ export const ARGO_MIGRATION_CONFIG = z.object({
     proxies: z.array(DENORMALIZED_PROXY_CONFIG).default([]),
     s3TrafficLoaders: z.array(DENORMALIZED_S3_TRAFFIC_LOADER_CONFIG).default([]),
     snapshots: z.array(DENORMALIZED_CREATE_SNAPSHOTS_CONFIG).default([]),
+    // Stage 4 multi-cloud: parallel GCS snapshot creation list.
+    snapshotsGcs: z.array(DENORMALIZED_CREATE_SNAPSHOTS_CONFIG_GCS).default([]),
     snapshotMigrations: z.array(SNAPSHOT_MIGRATION_CONFIG).default([]),
+    // Stage 2 multi-cloud: parallel GCS snapshot migration list. Dispatched via
+    // a parallel `runSingleSnapshotMigrationGcs` step in fullMigration.ts.
+    snapshotMigrationsGcs: z.array(SNAPSHOT_MIGRATION_CONFIG_GCS).default([]),
     trafficReplays: z.array(DENORMALIZED_REPLAY_CONFIG).default([]),
 });
 
@@ -436,6 +526,9 @@ function makePreEnrichMigrationConfigSchema() {
         snapshots: z.array(preEnrichCreateSnapshotsConfig).default([]),
         snapshotMigrations: z.array(
             makeResourceUidOptional(SNAPSHOT_MIGRATION_CONFIG)
+        ).default([]),
+        snapshotMigrationsGcs: z.array(
+            makeResourceUidOptional(SNAPSHOT_MIGRATION_CONFIG_GCS)
         ).default([]),
         trafficReplays: z.array(
             makeResourceUidOptional(DENORMALIZED_REPLAY_CONFIG)

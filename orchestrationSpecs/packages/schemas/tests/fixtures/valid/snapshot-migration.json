@@ -6,6 +6,7 @@
       "snapshotInfo": {
         "repos": {
           "my-repo": {
+            "type": "s3",
             "awsRegion": "us-east-1",
             "s3RepoPathUri": "s3://my-bucket/snapshots"
           }
