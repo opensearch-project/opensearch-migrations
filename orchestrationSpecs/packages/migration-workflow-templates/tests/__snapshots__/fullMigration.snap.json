@@ -2110,6 +2110,10 @@
               "name": "targetConfig"
             },
             {
+              "name": "sourceConfig",
+              "value": ""
+            },
+            {
               "name": "snapshotConfig"
             },
             {
@@ -2205,6 +2209,10 @@
                   {
                     "name": "sourceEndpoint",
                     "value": "{{inputs.parameters.sourceEndpoint}}"
+                  },
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}"
                   },
                   {
                     "name": "snapshotConfig",
@@ -2586,6 +2594,10 @@
                   {
                     "name": "sourceEndpoint",
                     "value": "{{=sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
+                  },
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{=toJSON(sprig.dict(\"label\", fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceLabel'], \"version\", fromJSON(inputs.parameters.snapshotMigrationConfig)['sourceVersion'], \"endpoint\", sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig)), \"allowInsecure\", sprig.dig('sourceAllowInsecure', false, fromJSON(inputs.parameters.snapshotMigrationConfig)), \"authConfig\", sprig.dig('sourceAuth', sprig.dict(), fromJSON(inputs.parameters.snapshotMigrationConfig))))}}"
                   }
                 ]
               },
