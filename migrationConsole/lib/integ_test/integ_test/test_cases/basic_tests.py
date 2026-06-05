@@ -110,9 +110,11 @@ class Test0003ApprovalGateIntegration(MATestBase):
         self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=timeout_seconds)
 
     def _wait_and_approve_gates(self, timeout_seconds: int):
-        """Poll `workflow approve step --all` until approval succeeds."""
+        """Keep approving gates until none remain (workflow moves past all approval points)."""
         deadline = time.time() + timeout_seconds
         interval = 10
+        approved_any = False
+        consecutive_failures = 0
         while time.time() < deadline:
             result = subprocess.run(
                 ["workflow", "approve", "step", "--all"],
@@ -120,9 +122,17 @@ class Test0003ApprovalGateIntegration(MATestBase):
             )
             if result.returncode == 0:
                 logger.info("Approval gates approved: %s", result.stdout.strip())
-                return
-            logger.debug("Approve not ready yet (rc=%d): %s", result.returncode, result.stderr.strip())
+                approved_any = True
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+                if approved_any and consecutive_failures >= 3:
+                    # Already approved at least one gate and no new ones appeared — done
+                    return
+                logger.debug("Approve not ready yet (rc=%d): %s", result.returncode, result.stderr.strip())
             time.sleep(interval)
+        if approved_any:
+            return
         raise TimeoutError(f"No approval gates became available within {timeout_seconds}s")
 
     def verify_clusters(self):
