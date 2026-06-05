@@ -364,7 +364,18 @@ export class MigrationInitializer {
     static readonly CRD_API_VERSION = `${MigrationInitializer.CRD_GROUP}/v1alpha1`;
 
     private makeCrdName(...labels: string[]): string {
-        return labels.join('-');
+        // CRD metadata.name must be a valid RFC 1123 subdomain:
+        //   lowercase alphanumeric, '-' or '.', start/end alphanumeric.
+        // User-provided labels (e.g. externallyManagedSnapshotName like
+        // "global_state_snapshot") may contain underscores or uppercase.
+        // Normalize: lowercase, replace any disallowed char with '-',
+        // collapse runs, strip leading/trailing '-'.
+        return labels
+            .join('-')
+            .toLowerCase()
+            .replace(/[^a-z0-9.-]+/g, '-')
+            .replace(/-+/g, '-')
+            .replace(/^[-.]+|[-.]+$/g, '');
     }
 
     private sanitizeResourceName(value: string): string {
@@ -892,11 +903,14 @@ export class MigrationInitializer {
             "trap 'rm -f \"$tmp_file\"' EXIT",
             "",
             "jq --argjson uids \"$uid_map_json\" '",
+            "  def crdname(s): s | ascii_downcase | gsub(\"[^a-z0-9.-]+\"; \"-\") | gsub(\"-+\"; \"-\") | sub(\"^[-.]+\"; \"\") | sub(\"[-.]+$\"; \"\");",
             "  .kafkaClusters |= ((. // []) | map(. + {resourceUid: $uids.kafkaClusters[.name]}))",
             "  | .proxies |= ((. // []) | map(. + {resourceUid: $uids.proxies[.name]} | .kafkaConfig += {clusterResourceUid: $uids.kafkaClusters[.kafkaConfig.label]}))",
             "  | .snapshots |= ((. // []) | map(. as $snapshot | .createSnapshotConfig |= ((. // []) | map(. + {resourceUid: $uids.dataSnapshots[($snapshot.sourceConfig.label + \"-\" + .label)]}))))",
             "  | .s3TrafficLoaders |= ((. // []) | map(. + {resourceUid: $uids.s3TrafficLoaders[.name]} | .kafkaConfig += {clusterResourceUid: $uids.kafkaClusters[.kafkaConfig.label]}))",
             "  | .snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + \"-\" + .targetConfig.label + \"-\" + .label + \"-\" + .migrationLabel)]}))",
+            "  | (if has(\"snapshotsGcs\") then .snapshotsGcs |= ((. // []) | map(. + {resourceUid: \"imported\"})) else . end)",
+            "  | (if has(\"snapshotMigrationsGcs\") then .snapshotMigrationsGcs |= ((. // []) | map(. + {resourceUid: \"imported\"})) else . end)",
             "  | .trafficReplays |= ((. // []) | map(. + {resourceUid: $uids.trafficReplays[.name]}))",
             "' \"$CONFIG_PATH\" > \"$tmp_file\"",
             "",

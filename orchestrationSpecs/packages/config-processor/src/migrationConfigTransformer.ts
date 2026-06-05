@@ -2,9 +2,12 @@ import {
     ARGO_METADATA_OPTIONS,
     ARGO_REPLAYER_OPTIONS,
     ARGO_RFS_OPTIONS,
+    DENORMALIZED_REPO_CONFIG,
     DENORMALIZED_S3_REPO_CONFIG,
+    DENORMALIZED_GCS_REPO_CONFIG,
     DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
     OVERALL_MIGRATION_CONFIG,
+    REPO_CONFIG,
     S3_REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     ARGO_MIGRATION_CONFIG_PRE_ENRICH, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
@@ -51,10 +54,15 @@ async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string
 }
 
 async function rewriteRepoEndpointIfLocalStack(
-    snapshotRepo: z.infer<typeof S3_REPO_CONFIG>,
+    snapshotRepo: z.infer<typeof REPO_CONFIG>,
     repoName: string
-): Promise<z.infer<typeof DENORMALIZED_S3_REPO_CONFIG>>
+): Promise<z.infer<typeof DENORMALIZED_REPO_CONFIG>>
 {
+    if (snapshotRepo.type === "gcs") {
+        // GCS repos have no LocalStack-equivalent. Pass through with repoName enrichment.
+        return { ...snapshotRepo, repoName };
+    }
+    // type === "s3"
     const useLocalStack = /^localstacks?:\/\//i.test(snapshotRepo.endpoint ?? "");
     if (snapshotRepo.endpoint && useLocalStack) {
         snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint);
@@ -481,21 +489,9 @@ function normalizeTrafficConfig(traffic: InputConfig["traffic"]): InputConfig["t
         normalizedProxies[key] = normalized;
     }
 
-    const normalizedS3Sources: NonNullable<InputConfig["traffic"]>["s3Sources"] = {};
-    for (const [key, s3] of Object.entries(traffic.s3Sources ?? {})) {
-        // Same sentinel-placeholder strip as proxies — empty-string kafkaTopic
-        // means "default to the source name", and the unified schema rejects
-        // empty strings for that field.
-        const normalized = s3.kafkaTopic === ""
-            ? (({kafkaTopic, ...rest}) => rest)(s3)
-            : s3;
-        normalizedS3Sources[key] = normalized;
-    }
-
     return {
         ...traffic,
         proxies: normalizedProxies,
-        s3Sources: normalizedS3Sources,
     };
 }
 
@@ -514,10 +510,7 @@ export function normalizeUserConfig(userConfig: InputConfig): NormalizedUserConf
 }
 
 /** Resolve kafkaClusterConfiguration, auto-injecting autoCreate entries only when no explicit kafka config was provided. */
-function resolveKafkaClusters(userConfig: {
-    kafkaClusterConfiguration?: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>,
-    traffic?: { proxies?: Record<string, { kafka?: string }>, s3Sources?: Record<string, { kafka?: string }> }
-}) {
+function resolveKafkaClusters(userConfig: { kafkaClusterConfiguration?: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>>, traffic?: { proxies?: Record<string, { kafka?: string }> } }) {
     const explicit = userConfig.kafkaClusterConfiguration ?? {};
     if (Object.keys(explicit).length > 0) {
         return explicit;
@@ -525,12 +518,6 @@ function resolveKafkaClusters(userConfig: {
     const clusters: Record<string, z.infer<typeof KAFKA_CLUSTER_CONFIG>> = {};
     for (const proxy of Object.values(userConfig.traffic?.proxies || {})) {
         const key = proxy.kafka ?? "default";
-        if (!(key in clusters)) {
-            clusters[key] = DEFAULT_AUTO_CREATE_CONFIG;
-        }
-    }
-    for (const s3 of Object.values(userConfig.traffic?.s3Sources || {})) {
-        const key = s3.kafka ?? "default";
         if (!(key in clusters)) {
             clusters[key] = DEFAULT_AUTO_CREATE_CONFIG;
         }
@@ -637,9 +624,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     private async transformSync(userConfig: NormalizedUserConfig): Promise<OutputConfig> {
         const kafkaClusters = this.buildKafkaClusters(userConfig);
         const proxies = this.buildProxies(userConfig);
-        const s3TrafficLoaders = this.buildS3TrafficLoaders(userConfig);
-        const snapshots = this.buildSnapshots(userConfig);
-        const snapshotMigrations = await this.buildSnapshotMigrations(userConfig);
+        const { results: snapshots, resultsGcs: snapshotsGcs } = this.buildSnapshots(userConfig);
+        const { results: snapshotMigrations, resultsGcs: snapshotMigrationsGcs } = await this.buildSnapshotMigrations(userConfig);
         const trafficReplays = this.buildTrafficReplays(userConfig);
 
         // Compute config checksums with dependency chaining
@@ -660,23 +646,6 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const proxyChecksums = new Map(proxiesWithChecksums.map(p => [p.name, p.configChecksum]));
         const proxyChecksumForSnapshot = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForSnapshot]));
         const proxyChecksumForReplayer = new Map(proxiesWithChecksums.map(p => [p.name, p.checksumForReplayer]));
-
-        const s3LoadersWithChecksums = s3TrafficLoaders.map(s => {
-            const kafkaCs = kafkaChecksums.get(s.kafkaConfig.label) ?? '';
-            // Replayer & topic checksums are derived from the loader's identity:
-            // s3Uri + topic + kafka cluster. Editing the URI would force a reset
-            // of the CapturedTraffic resource (VAP-protected); the resulting
-            // checksum change is what flags the replayer to re-evaluate.
-            const checksum = cs(s.s3Uri, s.kafkaConfig.kafkaTopic, kafkaCs);
-            return {
-                ...s,
-                kafkaConfig: { ...s.kafkaConfig, configChecksum: kafkaCs },
-                topicConfigChecksum: cs(s.kafkaConfig.kafkaTopic, s.kafkaConfig.topicSpecOverrides, kafkaCs),
-                checksumForReplayer: checksum,
-                configChecksum: checksum,
-            };
-        });
-        const s3LoaderChecksumForReplayer = new Map(s3LoadersWithChecksums.map(s => [s.name, s.checksumForReplayer]));
 
         const snapshotsWithChecksums = snapshots.map(s => ({
             ...s,
@@ -699,8 +668,28 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 };
             }),
         }));
+        // Parallel GCS snapshot list — checksum computation mirrors S3 path.
+        const snapshotsGcsWithChecksums = snapshotsGcs.map(s => ({
+            ...s,
+            createSnapshotConfig: s.createSnapshotConfig.map((item: z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>) => {
+                const enrichedDeps = (item.dependsOnProxySetups ?? []).map((dep: {name: string}) => ({
+                    ...dep,
+                    configChecksum: proxyChecksumForSnapshot.get(dep.name) ?? '',
+                }));
+                return {
+                    ...item,
+                    dependsOnProxySetups: enrichedDeps,
+                    configChecksum: cs(item.config, item.repo, ...enrichedDeps.map(d => d.configChecksum)),
+                };
+            }),
+        }));
         const snapshotChecksums = new Map<string, string>();
         for (const s of snapshotsWithChecksums) {
+            for (const item of s.createSnapshotConfig) {
+                snapshotChecksums.set([s.sourceConfig.label, item.label].join('-'), item.configChecksum!);
+            }
+        }
+        for (const s of snapshotsGcsWithChecksums) {
             for (const item of s.createSnapshotConfig) {
                 snapshotChecksums.set([s.sourceConfig.label, item.label].join('-'), item.configChecksum!);
             }
@@ -752,45 +741,59 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             };
         });
 
-        const replaysWithChecksums = trafficReplays.map(r => {
-            // Resolve the upstream checksum from either the proxy or the s3 loader.
-            // (One and only one will exist; super-refine guarantees no name collisions.)
-            const fromCapturedTrafficChecksum =
-                proxyChecksumForReplayer.get(r.fromCapturedTraffic) ??
-                s3LoaderChecksumForReplayer.get(r.fromCapturedTraffic) ??
-                '';
-            return ({
-                ...r,
-                dependsOn: [
-                    r.fromCapturedTraffic,
-                    ...((r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
-                        migrationsWithChecksums
-                            .filter(m =>
-                                m.sourceLabel === dep.source &&
-                                m.targetConfig.label === r.toTarget.label &&
-                                m.label === dep.snapshot
-                            )
-                            .map(m => [m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel].join('-'))
-                    ))
-                ],
-                kafkaConfig: { ...r.kafkaConfig, configChecksum: kafkaChecksums.get(r.kafkaConfig.label) ?? '' },
-                fromCapturedTrafficConfigChecksum: fromCapturedTrafficChecksum,
-                configChecksum: cs(r.replayerConfig, r.toTarget, fromCapturedTrafficChecksum),
-                dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
-                    migrationsWithChecksums
+        // Parallel GCS migration list — checksum computation mirrors S3 path.
+        const migrationsGcsWithChecksums = snapshotMigrationsGcs.map(m => {
+            const replayerMaterialPart = m.documentBackfillConfig
+                ? csDep(RFS_SCHEMA, m.documentBackfillConfig as Record<string, unknown>, 'replayer')
+                : '';
+            return {
+                ...m,
+                snapshotConfigChecksum: snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '',
+                configChecksum: cs(
+                    m.metadataMigrationConfig ?? {},
+                    m.documentBackfillConfig ?? {},
+                    m.targetConfig,
+                    snapshotChecksums.get([m.sourceLabel, m.label].join('-'))
+                ),
+                checksumForReplayer: cs(m.targetConfig, replayerMaterialPart),
+            };
+        });
+
+        // Combined view used for traffic-replay dependency resolution so a replayer
+        // can depend on either S3 or GCS snapshot migrations transparently.
+        const allMigrationsWithChecksums = [...migrationsWithChecksums, ...migrationsGcsWithChecksums];
+
+        const replaysWithChecksums = trafficReplays.map(r => ({
+            ...r,
+            dependsOn: [
+                r.fromProxy,
+                ...((r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
+                    allMigrationsWithChecksums
                         .filter(m =>
                             m.sourceLabel === dep.source &&
                             m.targetConfig.label === r.toTarget.label &&
                             m.label === dep.snapshot
                         )
-                        .map(m => ({
-                            ...dep,
-                            migrationLabel: m.migrationLabel,
-                            configChecksum: m.checksumForReplayer,
-                        }))
-                ),
-            });
-        });
+                        .map(m => [m.sourceLabel, m.targetConfig.label, m.label, m.migrationLabel].join('-'))
+                ))
+            ],
+            kafkaConfig: { ...r.kafkaConfig, configChecksum: kafkaChecksums.get(r.kafkaConfig.label) ?? '' },
+            fromProxyConfigChecksum: proxyChecksumForReplayer.get(r.fromProxy) ?? '',
+            configChecksum: cs(r.replayerConfig, r.toTarget, proxyChecksumForReplayer.get(r.fromProxy)),
+            dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
+                allMigrationsWithChecksums
+                    .filter(m =>
+                        m.sourceLabel === dep.source &&
+                        m.targetConfig.label === r.toTarget.label &&
+                        m.label === dep.snapshot
+                    )
+                    .map(m => ({
+                        ...dep,
+                        migrationLabel: m.migrationLabel,
+                        configChecksum: m.checksumForReplayer,
+                    }))
+            ),
+        }));
 
         const kafkasWithChecksums = kafkaClusters.map(k => ({
             ...k,
@@ -800,9 +803,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         const output = {
             ...(kafkasWithChecksums.length > 0 ? { kafkaClusters: kafkasWithChecksums } : {}),
             ...(proxiesWithChecksums.length > 0 ? { proxies: proxiesWithChecksums } : {}),
-            ...(s3LoadersWithChecksums.length > 0 ? { s3TrafficLoaders: s3LoadersWithChecksums } : {}),
             ...(snapshotsWithChecksums.length > 0 ? { snapshots: snapshotsWithChecksums } : {}),
+            ...(snapshotsGcsWithChecksums.length > 0 ? { snapshotsGcs: snapshotsGcsWithChecksums } : {}),
             ...(migrationsWithChecksums.length > 0 ? { snapshotMigrations: migrationsWithChecksums } : {}),
+            ...(migrationsGcsWithChecksums.length > 0 ? { snapshotMigrationsGcs: migrationsGcsWithChecksums } : {}),
             ...(replaysWithChecksums.length > 0 ? { trafficReplays: replaysWithChecksums } : {})
         };
 
@@ -814,20 +818,15 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         }
     }
 
-    /** Collect auto-created kafka clusters with their aggregated topics from proxies and s3Sources. */
+    /** Collect auto-created kafka clusters with their aggregated topics from proxies. */
     private buildKafkaClusters(userConfig: NormalizedUserConfig) {
         const kafkaClusters = resolveKafkaClusters(userConfig);
-        // Aggregate topics per kafka cluster from proxies AND s3Sources
+        // Aggregate topics per kafka cluster from proxies
         const topicsByCluster = new Map<string, Set<string>>();
         for (const [proxyName, proxy] of Object.entries(userConfig.traffic?.proxies || {})) {
             const clusterKey = proxy.kafka ?? "default";
             if (!topicsByCluster.has(clusterKey)) topicsByCluster.set(clusterKey, new Set());
             topicsByCluster.get(clusterKey)!.add(proxy.kafkaTopic || proxyName);
-        }
-        for (const [s3Name, s3] of Object.entries(userConfig.traffic?.s3Sources || {})) {
-            const clusterKey = s3.kafka ?? "default";
-            if (!topicsByCluster.has(clusterKey)) topicsByCluster.set(clusterKey, new Set());
-            topicsByCluster.get(clusterKey)!.add(s3.kafkaTopic || s3Name);
         }
 
         return Object.entries(kafkaClusters)
@@ -885,7 +884,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         };
     }
 
-    /** Build snapshot creation configs grouped by source cluster. */
+    /** Build snapshot creation configs grouped by source cluster.
+     * Returns two parallel arrays split by repo type:
+     *   - results:    S3 → snapshots
+     *   - resultsGcs: GCS → snapshotsGcs (dispatched in fullMigration.ts via CreateSnapshotGcs)
+     */
     private buildSnapshots(userConfig: NormalizedUserConfig) {
         // Build a map of source → proxy names for dependsOnProxySetups
         const proxyNamesBySource = new Map<string, string[]>();
@@ -896,9 +899,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         }
 
         const results: any[] = [];
+        const resultsGcs: any[] = [];
         for (const [sourceName, sourceCluster] of Object.entries(userConfig.sourceClusters)) {
             const snapshotInfo = sourceCluster.snapshotInfo;
             const createConfigs: any[] = [];
+            const createConfigsGcs: any[] = [];
 
             for (const [snapshotName, snapshotDef] of Object.entries(snapshotInfo?.snapshots || {})) {
                 if (!isGenerateSnapshot(snapshotDef.config)) continue;
@@ -917,7 +922,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     snapshotName,
                     snapshotInfo?.serializeSnapshotCreation
                 );
-                createConfigs.push({
+                const entry = {
                     label: snapshotName,
                     snapshotPrefix: snapshotDef.config.createSnapshotConfig.snapshotPrefix || snapshotName,
                     config: {
@@ -929,28 +934,46 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                         name,
                         configChecksum: ''
                     }))}
-                });
+                };
+                if (repoConfig.type === "gcs") {
+                    createConfigsGcs.push(entry);
+                } else {
+                    createConfigs.push(entry);
+                }
             }
 
+            const { snapshotInfo: _si, ...restOfSource } = sourceCluster;
+            const proxy = this.getSourceAttachedProxy(userConfig, sourceName);
+            const sourceConfig = {
+                ...restOfSource,
+                label: sourceName,
+                ...(proxy ? {proxy} : {})
+            };
             if (createConfigs.length > 0) {
-                const { snapshotInfo: _si, ...restOfSource } = sourceCluster;
-                const proxy = this.getSourceAttachedProxy(userConfig, sourceName);
                 results.push({
                     createSnapshotConfig: createConfigs,
-                    sourceConfig: {
-                        ...restOfSource,
-                        label: sourceName,
-                        ...(proxy ? {proxy} : {})
-                    }
+                    sourceConfig
+                });
+            }
+            if (createConfigsGcs.length > 0) {
+                resultsGcs.push({
+                    createSnapshotConfig: createConfigsGcs,
+                    sourceConfig
                 });
             }
         }
-        return results;
+        return { results, resultsGcs };
     }
 
-    /** Build snapshot migration configs from snapshotMigrationConfigs + perSnapshotConfig. */
+    /**
+     * Build snapshot migration configs from snapshotMigrationConfigs + perSnapshotConfig.
+     * Returns two parallel arrays split by repo type:
+     *   - results: S3 (or externally-managed without an explicit repo) → snapshotMigrations
+     *   - resultsGcs: GCS → snapshotMigrationsGcs (parallel WT family dispatched in fullMigration.ts)
+     */
     private async buildSnapshotMigrations(userConfig: NormalizedUserConfig) {
         const results: any[] = [];
+        const resultsGcs: any[] = [];
 
         for (const mc of userConfig.snapshotMigrationConfigs) {
             const { fromSource, toTarget, perSnapshotConfig } = mc;
@@ -1002,7 +1025,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     const documentBackfillConfig = prepareDocumentBackfillConfig(
                         migration.documentBackfillConfig
                     );
-                    results.push({
+                    const migrationEntry = {
                         label: snapshotName,
                         migrationLabel: migration.label,
                         snapshotNameResolution,
@@ -1024,28 +1047,29 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                                 }
                             } : {})
                         }
-                    });
+                    };
+                    // Route to GCS-specific list when the repo is GCS; otherwise S3.
+                    // Externally-managed snapshots without a repoConfig stay on the S3 path for back-compat.
+                    if (repoConfig?.type === "gcs") {
+                        resultsGcs.push(migrationEntry);
+                    } else {
+                        results.push(migrationEntry);
+                    }
                 }
             }
         }
-        return results;
+        return { results, resultsGcs };
     }
 
-    /** Build traffic replay configs by resolving captured-traffic source → kafka chain.
-     * The source can be either a live capture proxy or a one-time S3 load — both
-     * appear identical to the replayer (kafka cluster + topic). */
+    /** Build traffic replay configs by resolving proxy → kafka chain. */
     private buildTrafficReplays(userConfig: NormalizedUserConfig) {
         const kafkaClusters = resolveKafkaClusters(userConfig);
-        const proxies = userConfig.traffic?.proxies ?? {};
-        const s3Sources = userConfig.traffic?.s3Sources ?? {};
+        const proxies = userConfig.traffic?.proxies;
 
         return Object.entries(userConfig.traffic?.replayers || {}).map(([name, replayer]) => {
-            const sourceName = replayer.fromCapturedTraffic;
-            const proxy = proxies[sourceName];
-            const s3Source = s3Sources[sourceName];
-
-            if (!proxy && !s3Source) {
-                throw new Error(`Replayer references unknown captured-traffic source '${sourceName}'`);
+            const proxy = proxies?.[replayer.fromProxy];
+            if (!proxy) {
+                throw new Error(`Replayer references unknown proxy '${replayer.fromProxy}'`);
             }
 
             const targetCluster = userConfig.targetClusters[replayer.toTarget];
@@ -1053,45 +1077,20 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 throw new Error(`Replayer references unknown target cluster '${replayer.toTarget}'`);
             }
 
-            // proxy and s3Source share the same shape for what the replayer cares about:
-            // a kafka cluster reference, a topic name, and a sourceLabel.
-            const kafkaCluster = (proxy?.kafka ?? s3Source?.kafka) ?? "default";
-            const topicOverride = proxy?.kafkaTopic ?? s3Source?.kafkaTopic ?? "";
-            const topic = topicOverride || sourceName;
-            const sourceLabel = proxy?.source ?? s3Source!.sourceLabel;
-
+            const topic = proxy.kafkaTopic || replayer.fromProxy;
             const replayerConfig = prepareReplayerConfig(
                 replayer.replayerConfig
             );
 
             return {
-                name: [sourceName, replayer.toTarget, name].join('-'),
-                sourceLabel,
-                fromCapturedTraffic: sourceName,
-                kafkaClusterName: kafkaCluster,
-                kafkaConfig: buildKafkaClientConfig(kafkaCluster, kafkaClusters, topic),
+                name: [replayer.fromProxy, replayer.toTarget, name].join('-'),
+                sourceLabel: proxy.source,
+                fromProxy: replayer.fromProxy,
+                kafkaClusterName: proxy.kafka ?? "default",
+                kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
                 toTarget: { ...targetCluster, label: replayer.toTarget },
                 replayerConfig,
                 ...(replayer.dependsOnSnapshotMigrations ? { dependsOnSnapshotMigrations: replayer.dependsOnSnapshotMigrations } : {}),
-            };
-        });
-    }
-
-    /** Build one denormalized loader entry per traffic.s3Sources item. */
-    private buildS3TrafficLoaders(userConfig: NormalizedUserConfig) {
-        const kafkaClusters = resolveKafkaClusters(userConfig);
-        const s3Sources = userConfig.traffic?.s3Sources ?? {};
-        return Object.entries(s3Sources).map(([name, s3]) => {
-            const kafkaCluster = s3.kafka ?? "default";
-            const topic = s3.kafkaTopic || name;
-            return {
-                name,
-                sourceLabel: s3.sourceLabel,
-                s3Uri: s3.s3Uri,
-                awsRegion: s3.awsRegion,
-                ...(s3.endpoint ? { endpoint: s3.endpoint } : {}),
-                kafkaClusterName: kafkaCluster,
-                kafkaConfig: buildKafkaClientConfig(kafkaCluster, kafkaClusters, topic),
             };
         });
     }
