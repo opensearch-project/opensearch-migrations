@@ -766,9 +766,6 @@ public class TrafficReplayer {
             }
             log.info("Done processing TrafficStreams");
         } finally {
-            if (tupleWriter != null) {
-                tupleWriter.close();
-            }
             scheduledExecutorService.shutdown();
             if (activeContextMonitor != null) {
                 var acmLevel = globalContextTracker.getActiveScopesByAge().findAny().isPresent()

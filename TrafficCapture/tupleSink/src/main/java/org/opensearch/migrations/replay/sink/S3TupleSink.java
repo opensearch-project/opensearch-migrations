@@ -139,10 +139,6 @@ public class S3TupleSink implements TupleSink {
 
     @Override
     public void accept(Map<String, Object> tupleMap, CompletableFuture<Void> future) {
-        if (closeRequested.get()) {
-            future.completeExceptionally(new IllegalStateException("S3TupleSink is closed"));
-            return;
-        }
         // Serialize the tuple on the calling (event-loop) thread so a serialization failure can
         // be reported synchronously and the tupleMap isn't retained across threads. The actual
         // buffer write is marshalled onto the worker thread.
@@ -154,10 +150,6 @@ public class S3TupleSink implements TupleSink {
             return;
         }
         runOnWorker(() -> {
-            if (gzipOut == null) {
-                future.completeExceptionally(new IllegalStateException("S3TupleSink is closed"));
-                return;
-            }
             try {
                 gzipOut.write(json);
                 gzipOut.write('\n');
