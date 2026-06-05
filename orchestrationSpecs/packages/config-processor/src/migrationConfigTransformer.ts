@@ -2,9 +2,12 @@ import {
     ARGO_METADATA_OPTIONS,
     ARGO_REPLAYER_OPTIONS,
     ARGO_RFS_OPTIONS,
+    DENORMALIZED_REPO_CONFIG,
     DENORMALIZED_S3_REPO_CONFIG,
+    DENORMALIZED_GCS_REPO_CONFIG,
     DEFAULT_KAFKA_TOPIC_SPEC_OVERRIDES,
     OVERALL_MIGRATION_CONFIG,
+    REPO_CONFIG,
     S3_REPO_CONFIG,
     SOURCE_CLUSTER_REPOS_RECORD, USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG,
     ARGO_MIGRATION_CONFIG_PRE_ENRICH, KAFKA_CLUSTER_CONFIG, KAFKA_CLUSTER_CREATION_CONFIG, CAPTURE_CONFIG,
@@ -51,10 +54,15 @@ async function rewriteLocalStackEndpointToIp(s3Endpoint: string): Promise<string
 }
 
 async function rewriteRepoEndpointIfLocalStack(
-    snapshotRepo: z.infer<typeof S3_REPO_CONFIG>,
+    snapshotRepo: z.infer<typeof REPO_CONFIG>,
     repoName: string
-): Promise<z.infer<typeof DENORMALIZED_S3_REPO_CONFIG>>
+): Promise<z.infer<typeof DENORMALIZED_REPO_CONFIG>>
 {
+    if (snapshotRepo.type === "gcs") {
+        // GCS repos have no LocalStack-equivalent. Pass through with repoName enrichment.
+        return { ...snapshotRepo, repoName };
+    }
+    // type === "s3"
     const useLocalStack = /^localstacks?:\/\//i.test(snapshotRepo.endpoint ?? "");
     if (snapshotRepo.endpoint && useLocalStack) {
         snapshotRepo.endpoint = await rewriteLocalStackEndpointToIp(snapshotRepo.endpoint);
@@ -616,8 +624,8 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
     private async transformSync(userConfig: NormalizedUserConfig): Promise<OutputConfig> {
         const kafkaClusters = this.buildKafkaClusters(userConfig);
         const proxies = this.buildProxies(userConfig);
-        const snapshots = this.buildSnapshots(userConfig);
-        const snapshotMigrations = await this.buildSnapshotMigrations(userConfig);
+        const { results: snapshots, resultsGcs: snapshotsGcs } = this.buildSnapshots(userConfig);
+        const { results: snapshotMigrations, resultsGcs: snapshotMigrationsGcs } = await this.buildSnapshotMigrations(userConfig);
         const trafficReplays = this.buildTrafficReplays(userConfig);
 
         // Compute config checksums with dependency chaining
@@ -660,8 +668,28 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 };
             }),
         }));
+        // Parallel GCS snapshot list — checksum computation mirrors S3 path.
+        const snapshotsGcsWithChecksums = snapshotsGcs.map(s => ({
+            ...s,
+            createSnapshotConfig: s.createSnapshotConfig.map((item: z.infer<typeof PER_SOURCE_CREATE_SNAPSHOTS_CONFIG>) => {
+                const enrichedDeps = (item.dependsOnProxySetups ?? []).map((dep: {name: string}) => ({
+                    ...dep,
+                    configChecksum: proxyChecksumForSnapshot.get(dep.name) ?? '',
+                }));
+                return {
+                    ...item,
+                    dependsOnProxySetups: enrichedDeps,
+                    configChecksum: cs(item.config, item.repo, ...enrichedDeps.map(d => d.configChecksum)),
+                };
+            }),
+        }));
         const snapshotChecksums = new Map<string, string>();
         for (const s of snapshotsWithChecksums) {
+            for (const item of s.createSnapshotConfig) {
+                snapshotChecksums.set([s.sourceConfig.label, item.label].join('-'), item.configChecksum!);
+            }
+        }
+        for (const s of snapshotsGcsWithChecksums) {
             for (const item of s.createSnapshotConfig) {
                 snapshotChecksums.set([s.sourceConfig.label, item.label].join('-'), item.configChecksum!);
             }
@@ -713,12 +741,34 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             };
         });
 
+        // Parallel GCS migration list — checksum computation mirrors S3 path.
+        const migrationsGcsWithChecksums = snapshotMigrationsGcs.map(m => {
+            const replayerMaterialPart = m.documentBackfillConfig
+                ? csDep(RFS_SCHEMA, m.documentBackfillConfig as Record<string, unknown>, 'replayer')
+                : '';
+            return {
+                ...m,
+                snapshotConfigChecksum: snapshotChecksums.get([m.sourceLabel, m.label].join('-')) ?? '',
+                configChecksum: cs(
+                    m.metadataMigrationConfig ?? {},
+                    m.documentBackfillConfig ?? {},
+                    m.targetConfig,
+                    snapshotChecksums.get([m.sourceLabel, m.label].join('-'))
+                ),
+                checksumForReplayer: cs(m.targetConfig, replayerMaterialPart),
+            };
+        });
+
+        // Combined view used for traffic-replay dependency resolution so a replayer
+        // can depend on either S3 or GCS snapshot migrations transparently.
+        const allMigrationsWithChecksums = [...migrationsWithChecksums, ...migrationsGcsWithChecksums];
+
         const replaysWithChecksums = trafficReplays.map(r => ({
             ...r,
             dependsOn: [
                 r.fromProxy,
                 ...((r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
-                    migrationsWithChecksums
+                    allMigrationsWithChecksums
                         .filter(m =>
                             m.sourceLabel === dep.source &&
                             m.targetConfig.label === r.toTarget.label &&
@@ -731,7 +781,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             fromProxyConfigChecksum: proxyChecksumForReplayer.get(r.fromProxy) ?? '',
             configChecksum: cs(r.replayerConfig, r.toTarget, proxyChecksumForReplayer.get(r.fromProxy)),
             dependsOnSnapshotMigrations: (r.dependsOnSnapshotMigrations ?? []).flatMap(dep =>
-                migrationsWithChecksums
+                allMigrationsWithChecksums
                     .filter(m =>
                         m.sourceLabel === dep.source &&
                         m.targetConfig.label === r.toTarget.label &&
@@ -754,7 +804,9 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             ...(kafkasWithChecksums.length > 0 ? { kafkaClusters: kafkasWithChecksums } : {}),
             ...(proxiesWithChecksums.length > 0 ? { proxies: proxiesWithChecksums } : {}),
             ...(snapshotsWithChecksums.length > 0 ? { snapshots: snapshotsWithChecksums } : {}),
+            ...(snapshotsGcsWithChecksums.length > 0 ? { snapshotsGcs: snapshotsGcsWithChecksums } : {}),
             ...(migrationsWithChecksums.length > 0 ? { snapshotMigrations: migrationsWithChecksums } : {}),
+            ...(migrationsGcsWithChecksums.length > 0 ? { snapshotMigrationsGcs: migrationsGcsWithChecksums } : {}),
             ...(replaysWithChecksums.length > 0 ? { trafficReplays: replaysWithChecksums } : {})
         };
 
@@ -832,7 +884,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         };
     }
 
-    /** Build snapshot creation configs grouped by source cluster. */
+    /** Build snapshot creation configs grouped by source cluster.
+     * Returns two parallel arrays split by repo type:
+     *   - results:    S3 → snapshots
+     *   - resultsGcs: GCS → snapshotsGcs (dispatched in fullMigration.ts via CreateSnapshotGcs)
+     */
     private buildSnapshots(userConfig: NormalizedUserConfig) {
         // Build a map of source → proxy names for dependsOnProxySetups
         const proxyNamesBySource = new Map<string, string[]>();
@@ -843,9 +899,11 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
         }
 
         const results: any[] = [];
+        const resultsGcs: any[] = [];
         for (const [sourceName, sourceCluster] of Object.entries(userConfig.sourceClusters)) {
             const snapshotInfo = sourceCluster.snapshotInfo;
             const createConfigs: any[] = [];
+            const createConfigsGcs: any[] = [];
 
             for (const [snapshotName, snapshotDef] of Object.entries(snapshotInfo?.snapshots || {})) {
                 if (!isGenerateSnapshot(snapshotDef.config)) continue;
@@ -864,7 +922,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     snapshotName,
                     snapshotInfo?.serializeSnapshotCreation
                 );
-                createConfigs.push({
+                const entry = {
                     label: snapshotName,
                     snapshotPrefix: snapshotDef.config.createSnapshotConfig.snapshotPrefix || snapshotName,
                     config: {
@@ -876,28 +934,46 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                         name,
                         configChecksum: ''
                     }))}
-                });
+                };
+                if (repoConfig.type === "gcs") {
+                    createConfigsGcs.push(entry);
+                } else {
+                    createConfigs.push(entry);
+                }
             }
 
+            const { snapshotInfo: _si, ...restOfSource } = sourceCluster;
+            const proxy = this.getSourceAttachedProxy(userConfig, sourceName);
+            const sourceConfig = {
+                ...restOfSource,
+                label: sourceName,
+                ...(proxy ? {proxy} : {})
+            };
             if (createConfigs.length > 0) {
-                const { snapshotInfo: _si, ...restOfSource } = sourceCluster;
-                const proxy = this.getSourceAttachedProxy(userConfig, sourceName);
                 results.push({
                     createSnapshotConfig: createConfigs,
-                    sourceConfig: {
-                        ...restOfSource,
-                        label: sourceName,
-                        ...(proxy ? {proxy} : {})
-                    }
+                    sourceConfig
+                });
+            }
+            if (createConfigsGcs.length > 0) {
+                resultsGcs.push({
+                    createSnapshotConfig: createConfigsGcs,
+                    sourceConfig
                 });
             }
         }
-        return results;
+        return { results, resultsGcs };
     }
 
-    /** Build snapshot migration configs from snapshotMigrationConfigs + perSnapshotConfig. */
+    /**
+     * Build snapshot migration configs from snapshotMigrationConfigs + perSnapshotConfig.
+     * Returns two parallel arrays split by repo type:
+     *   - results: S3 (or externally-managed without an explicit repo) → snapshotMigrations
+     *   - resultsGcs: GCS → snapshotMigrationsGcs (parallel WT family dispatched in fullMigration.ts)
+     */
     private async buildSnapshotMigrations(userConfig: NormalizedUserConfig) {
         const results: any[] = [];
+        const resultsGcs: any[] = [];
 
         for (const mc of userConfig.snapshotMigrationConfigs) {
             const { fromSource, toTarget, perSnapshotConfig } = mc;
@@ -949,7 +1025,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                     const documentBackfillConfig = prepareDocumentBackfillConfig(
                         migration.documentBackfillConfig
                     );
-                    results.push({
+                    const migrationEntry = {
                         label: snapshotName,
                         migrationLabel: migration.label,
                         snapshotNameResolution,
@@ -971,11 +1047,18 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                                 }
                             } : {})
                         }
-                    });
+                    };
+                    // Route to GCS-specific list when the repo is GCS; otherwise S3.
+                    // Externally-managed snapshots without a repoConfig stay on the S3 path for back-compat.
+                    if (repoConfig?.type === "gcs") {
+                        resultsGcs.push(migrationEntry);
+                    } else {
+                        results.push(migrationEntry);
+                    }
                 }
             }
         }
-        return results;
+        return { results, resultsGcs };
     }
 
     /** Build traffic replay configs by resolving proxy → kafka chain. */
