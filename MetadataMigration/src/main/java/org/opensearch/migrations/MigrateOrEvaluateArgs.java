@@ -49,6 +49,14 @@ public class MigrateOrEvaluateArgs {
                     "For use when the default AWS ones won't work for a particular context."))
     public String s3Endpoint = null;
 
+    @Parameter(names = {
+        "--gcs-repo-uri" }, description = "The GCS URI of the snapshot repo, like: gs://my-bucket/dir1/dir2")
+    public String gcsRepoUri;
+
+    @Parameter(names = {
+        "--gcs-local-dir" }, description = "The absolute path to the directory on local disk to download GCS files to")
+    public String gcsLocalDir;
+
     @ParametersDelegate
     public ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();
 

@@ -11,6 +11,8 @@ import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
+import org.opensearch.migrations.bulkload.common.GcsRepo;
+import org.opensearch.migrations.bulkload.common.GcsUri;
 import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
@@ -32,16 +34,19 @@ public class ClusterReaderExtractor {
     private final MigrateOrEvaluateArgs arguments;
 
     public ClusterReader extractClusterReader() {
-        if (arguments.fileSystemRepoPath == null && arguments.s3RepoUri == null && arguments.sourceArgs.host == null) {
+        if (arguments.fileSystemRepoPath == null && arguments.s3RepoUri == null && arguments.gcsRepoUri == null && arguments.sourceArgs.host == null) {
             throw new ParameterException("No details on the source cluster found, please supply a connection details or a snapshot");
         }
         if ((arguments.s3RepoUri != null) && (arguments.s3Region == null || arguments.s3LocalDirPath == null)) {
             throw new ParameterException("If an s3 repo is being used, s3-region and s3-local-dir-path must be set");
         }
+        if ((arguments.gcsRepoUri != null) && (arguments.gcsLocalDir == null)) {
+            throw new ParameterException("If a GCS repo is being used, gcs-local-dir must be set");
+        }
 
         // Solr backup: prefer snapshot over remote when snapshot args are provided
         if (arguments.sourceVersion != null && arguments.sourceVersion.getFlavor() == Flavor.SOLR
-                && (arguments.fileSystemRepoPath != null || arguments.s3RepoUri != null)) {
+                && (arguments.fileSystemRepoPath != null || arguments.s3RepoUri != null || arguments.gcsRepoUri != null)) {
             return getSolrSnapshotReader();
         }
 
@@ -64,6 +69,12 @@ public class ClusterReaderExtractor {
         SourceRepo repo = null;
         if (arguments.fileSystemRepoPath != null) {
             repo = new FileSystemRepo(Path.of(arguments.fileSystemRepoPath), fileFinder);
+        } else if (arguments.gcsRepoUri != null) {
+            repo = GcsRepo.create(
+                Path.of(arguments.gcsLocalDir),
+                new GcsUri(arguments.gcsRepoUri),
+                fileFinder
+            );
         } else if (arguments.s3LocalDirPath != null) {
             repo = S3Repo.create(
                 Path.of(arguments.s3LocalDirPath),
