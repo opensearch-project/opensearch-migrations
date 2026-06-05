@@ -512,7 +512,8 @@ def _wait_for_consumer_group_caught_up(group_name: Optional[str], label: str,
     pass `max_allowed_lag=1` so a fully-replayed run isn't reported as still
     behind.
     """
-    deadline = time.monotonic() + timeout_seconds
+    start = time.monotonic()
+    deadline = start + timeout_seconds
     attempt = 0
     last_observed: Optional[int] = None
     display_name = group_name if group_name is not None else "<workflow-resolved>"
@@ -520,8 +521,17 @@ def _wait_for_consumer_group_caught_up(group_name: Optional[str], label: str,
         attempt += 1
         observed = _consumer_group_max_lag(group_name)
         last_observed = observed
+        elapsed = int(time.monotonic() - start)
+        # Log the LAG trajectory every poll so a slow/recovering drain (e.g. a
+        # replayer pod evicted mid-run, cold-restarting, then re-draining its
+        # backlog) is visible as it happens instead of only at success/timeout.
+        logger.info("[%s] Consumer group '%s' max LAG=%s (target <=%d) "
+                    "[probe %d, elapsed=%ds/%ds]",
+                    label, display_name,
+                    "<unparsed>" if observed is None else observed,
+                    max_allowed_lag, attempt, elapsed, timeout_seconds)
         if observed is not None and observed <= max_allowed_lag:
-            logger.info("[%s] Consumer group '%s' max LAG=%d (<=%d) after %d probe(s)",
+            logger.info("[%s] Consumer group '%s' drained to LAG=%d (<=%d) after %d probe(s)",
                         label, display_name, observed, max_allowed_lag, attempt)
             return True, observed
         time.sleep(interval_seconds)
@@ -648,7 +658,7 @@ def _dump_topic_on_drain_failure(label: str, topic: Optional[str],
 def assert_replay_drained(label: str = "replay-end",
                           group_name: Optional[str] = None,
                           max_lag: int = 1,
-                          timeout_seconds: int = 120,
+                          timeout_seconds: int = 300,
                           describe_timeout_seconds: int = 120,
                           dump_topic: Optional[str] = "capture-proxy",
                           dump_timeout_seconds: int = 300) -> None:
@@ -667,10 +677,17 @@ def assert_replay_drained(label: str = "replay-end",
     target. Set higher only if you've consciously decided the test
     tolerates more drift.
 
-    `timeout_seconds=120` (2min): by [replay-end] every response has already
-    landed on the target (verify_clusters passed), so a healthy run drains
-    within seconds; if it hasn't caught up in 2 minutes the offset commit is
-    genuinely stalled and waiting longer just delays the failure.
+    `timeout_seconds=300` (5min): by [replay-end] every response has already
+    landed on the target (verify_clusters passed), so an undisturbed run drains
+    within seconds. The window is sized to outlast a single mid-drain pod
+    disruption: a Karpenter "Underutilized" consolidation can evict the replayer
+    pod, after which the replacement cold-starts on a fresh node (node provision
+    + image pull + JVM boot), re-joins the group under a new consumer-id, and
+    re-drains the backlog — observed end-to-end at ~2m40s in EKS CI. 5 minutes
+    leaves headroom for that recovery while still bounding a genuinely-stalled
+    offset commit (the in-order OffsetLifecycleTracker bug this assertion
+    guards). The LAG is logged every poll (see `_wait_for_consumer_group_caught_up`)
+    so the drain/recovery trajectory is visible in CI as it happens.
 
     On a drain stall, before raising we dump the still-uncommitted topic
     contents (`dump_topic`, full reconstructed HTTP via `dump-both`) so the
