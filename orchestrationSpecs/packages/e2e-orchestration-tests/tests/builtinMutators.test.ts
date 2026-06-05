@@ -9,6 +9,7 @@ import { ScenarioSpec } from "../src/types";
 describe("builtinMutators", () => {
     it("exposes proxy-numThreads in BUILTIN_MUTATOR_NAMES", () => {
         expect(BUILTIN_MUTATOR_NAMES).toContain("proxy-numThreads");
+        expect(BUILTIN_MUTATOR_NAMES).toContain("proxy-clientAuth");
         expect(BUILTIN_MUTATOR_NAMES).toContain("dataSnapshot-maxSnapshotRate");
         expect(BUILTIN_MUTATOR_NAMES).toContain("snapshotMigration-maxConnections-gated");
         expect(BUILTIN_MUTATOR_NAMES).toContain("snapshotMigration-maxConnections");
@@ -50,6 +51,33 @@ describe("builtinMutators", () => {
         expect(cases[0].caseName).toBe(
             "captureproxy-capture-proxy-subject-change-proxy-numThreads",
         );
+    });
+
+    it("enables gated matrix expansion for capture-proxy clientAuth (mTLS)", () => {
+        const reg = new MutatorRegistry();
+        for (const m of builtinMutators()) reg.register(m);
+
+        const spec: ScenarioSpec = {
+            baseConfig: "./anything.yaml",
+            phaseCompletionTimeoutSeconds: 600,
+            matrix: {
+                subject: "captureproxy:capture-proxy",
+                select: [{
+                    changeClass: "gated",
+                    patterns: ["subject-gated-change"],
+                    response: "approve",
+                }],
+            },
+            lifecycle: { setup: [], teardown: [] },
+            approvalGates: [],
+            fixtures: {},
+        };
+        const cases = expandCases(spec, reg);
+        expect(cases).toHaveLength(1);
+        expect(cases[0].caseName).toBe(
+            "captureproxy-capture-proxy-subject-gated-change-proxy-clientAuth-approve",
+        );
+        expect(cases[0].response).toBe("approve");
     });
 
     it("enables matrix expansion for the basic snapshot-migration impossible spec", () => {

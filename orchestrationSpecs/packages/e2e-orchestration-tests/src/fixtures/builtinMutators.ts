@@ -10,6 +10,7 @@
 import { Mutator } from "./mutators";
 import {
     dataSnapshotMaxSnapshotRateMutator,
+    proxyClientAuthMutator,
     proxyNumThreadsMutator,
     snapshotMigrationMaxConnectionsGatedMutator,
     snapshotMigrationMaxConnectionsMutator,
@@ -22,6 +23,7 @@ import {
 export function builtinMutators(): Mutator[] {
     return [
         proxyNumThreadsMutator(),
+        proxyClientAuthMutator(),
         dataSnapshotMaxSnapshotRateMutator(),
         snapshotMigrationMaxConnectionsGatedMutator(),
         snapshotMigrationMaxConnectionsMutator(),
@@ -34,6 +36,7 @@ export function builtinMutators(): Mutator[] {
  */
 export const BUILTIN_MUTATOR_NAMES: readonly string[] = [
     "proxy-numThreads",
+    "proxy-clientAuth",
     "dataSnapshot-maxSnapshotRate",
     "snapshotMigration-maxConnections-gated",
     "snapshotMigration-maxConnections",
