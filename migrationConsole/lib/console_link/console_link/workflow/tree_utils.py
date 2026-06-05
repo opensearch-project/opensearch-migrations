@@ -18,6 +18,8 @@ APPROVAL_GATE_PLURAL = 'approvalgates'
 SNAPSHOT_MIGRATION_PLURAL = 'snapshotmigrations'
 DATA_SNAPSHOT_PLURAL = 'datasnapshots'
 
+APPROVAL_TEMPLATE_NAME = 'waitforuserapproval'
+
 
 @dataclass
 class ArtifactRef:
@@ -50,10 +52,10 @@ def is_approval_node(node: Dict[str, Any]) -> bool:
     if node.get('is_approval'):
         return True
     tref = node.get('templateRef') or node.get('template_ref')
-    if tref and tref.get('template') == 'waitforuserapproval':
+    if tref and tref.get('template') == APPROVAL_TEMPLATE_NAME:
         return True
     tname = node.get('templateName') or node.get('template_name')
-    return tname == 'waitforuserapproval'
+    return tname == APPROVAL_TEMPLATE_NAME
 
 
 def get_node_input_parameter(node: Dict[str, Any], param_name: str) -> Optional[str]:

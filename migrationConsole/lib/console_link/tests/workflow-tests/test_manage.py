@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from unittest.mock import MagicMock, patch
 
+from console_link.workflow.tree_utils import APPROVAL_TEMPLATE_NAME
 from console_link.workflow.tui.workflow_manage_app import (
     WorkflowTreeApp,
     copy_to_clipboard, PHASE_SUCCEEDED, PHASE_RUNNING
@@ -63,7 +64,7 @@ def mock_workflow_with_pod_and_suspend():
                                  "inputs": {"parameters": [{"name": "resourceName", "value": "migration-0"}]}},
                 "node-2": {"id": "node-2", "displayName": "suspend-1", "type": "Resource", "phase": PHASE_RUNNING,
                            "children": [],
-                           "templateRef": {"name": "resource-management", "template": "waitforuserapproval"},
+                           "templateRef": {"name": "resource-management", "template": APPROVAL_TEMPLATE_NAME},
                            "inputs": {"parameters": [{"name": "resourceName", "value": "my-gate"}]}}
             }
         }
