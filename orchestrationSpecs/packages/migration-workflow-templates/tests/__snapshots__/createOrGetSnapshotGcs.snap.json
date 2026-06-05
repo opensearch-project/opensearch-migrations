@@ -2,7 +2,7 @@
   "apiVersion": "argoproj.io/v1alpha1",
   "kind": "WorkflowTemplate",
   "metadata": {
-    "name": "create-or-get-snapshot"
+    "name": "create-or-get-snapshot-gcs"
   },
   "spec": {
     "serviceAccountName": "argo-workflow-executor",
@@ -24,14 +24,6 @@
         {
           "name": "approvalConfigMapName",
           "value": "approval-config"
-        },
-        {
-          "name": "migrationRunNumber",
-          "value": "0"
-        },
-        {
-          "name": "workflowScriptsRoot",
-          "value": "/root/workflows/.workflowScripts"
         }
       ]
     },
@@ -103,12 +95,6 @@
               "name": "configChecksum"
             },
             {
-              "name": "dataSnapshotName"
-            },
-            {
-              "name": "dataSnapshotUid"
-            },
-            {
               "name": "imageMigrationConsoleLocation"
             },
             {
@@ -147,7 +133,7 @@
             {
               "templateRef": {
                 "template": "snapshotworkflow",
-                "name": "create-snapshot"
+                "name": "create-snapshot-gcs"
               },
               "when": "{{steps.getSnapshotName.outputs.parameters.autoCreate}}",
               "arguments": {
@@ -175,14 +161,6 @@
                   {
                     "name": "configChecksum",
                     "value": "{{inputs.parameters.configChecksum}}"
-                  },
-                  {
-                    "name": "dataSnapshotName",
-                    "value": "{{inputs.parameters.dataSnapshotName}}"
-                  },
-                  {
-                    "name": "dataSnapshotUid",
-                    "value": "{{inputs.parameters.dataSnapshotUid}}"
                   },
                   {
                     "name": "imageMigrationConsoleLocation",

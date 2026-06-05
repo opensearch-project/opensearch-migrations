@@ -1,20 +1,15 @@
 import {z} from "zod";
 import {
-    COMPLETE_SNAPSHOT_CONFIG,
+    COMPLETE_SNAPSHOT_CONFIG_GCS,
     DEFAULT_RESOURCES,
     ARGO_METADATA_OPTIONS,
     ARGO_METADATA_WORKFLOW_OPTION_KEYS,
-    NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
     NAMED_TARGET_CLUSTER_CONFIG,
-    S3_REPO_CONFIG,
-    GCS_REPO_CONFIG
 } from "@opensearch-migrations/schemas";
 import {
-    BaseExpression, configMapKey,
-    ContainerBuilder,
-    defineParam,
+    BaseExpression,
     defineRequiredParam,
-    expr, FunctionExpression, InputParamDef, InputParameterSource, InputParamsToExpressions,
+    expr, FunctionExpression, InputParameterSource, InputParamsToExpressions,
     INTERNAL,
     selectInputsForRegister,
     Serialized,
@@ -26,32 +21,16 @@ import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
-import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
+import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {
     getApprovalMap,
     getSourceTargetPathAndSnapshotAndMigrationIndex
 } from "./commonUtils/configContextPathConstructors";
 import {ResourceManagement} from "./resourceManagement";
+import {makeGcsRepoParamDict} from "./metadataMigration";
 
 const METADATA_OUTPUT_PATH = "/tmp/outputs/metadata-output.log";
-const METADATA_TEST_CREDS_VOLUME_NAME = "test-creds";
-const METADATA_STATIC_VOLUMES = [
-    {
-        name: METADATA_TEST_CREDS_VOLUME_NAME,
-        configMap: {
-            name: "localstack-test-creds",
-            optional: true
-        }
-    }
-] as const;
-const METADATA_STATIC_VOLUME_MOUNTS = [
-    {
-        name: METADATA_TEST_CREDS_VOLUME_NAME,
-        mountPath: "/config/credentials",
-        readOnly: true
-    }
-] as const;
 
 function makeMetadataOutputS3Key(
     crdName: BaseExpression<string>,
@@ -79,8 +58,8 @@ function makeMetadataOutputS3Key(
 }
 
 const COMMON_METADATA_PARAMETERS = {
-    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>({
-        description: "Snapshot storage details (region, endpoint, etc)"
+    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG_GCS>>({
+        description: "Snapshot storage details (gcs bucket/path, region, endpoint)"
     }),
     sourceLabel: defineRequiredParam<string>(),
     sourceVersion: defineRequiredParam<string>(),
@@ -93,63 +72,35 @@ const COMMON_METADATA_PARAMETERS = {
     ...makeRequiredImageParametersForKeys(["MigrationConsole"])
 };
 
-export function makeRepoParamDict(
-    repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>,
-    includes3LocalDir: boolean) {
-    return expr.mergeDicts(
-        expr.mergeDicts(
-            expr.ternary(
-                expr.isEmpty(expr.dig(repoConfig, ["endpoint"], (""))),
-                expr.makeDict({}),
-                expr.makeDict({"s3Endpoint": expr.getLoose(repoConfig, "endpoint")})),
-            expr.ternary(
-                expr.isEmpty(expr.dig(repoConfig, ["s3RoleArn"], (""))),
-                expr.makeDict({}),
-                expr.makeDict({"s3RoleArn": expr.getLoose(repoConfig, "s3RoleArn")}))
-        ),
-        expr.makeDict({
-            "s3RepoUri": expr.get(repoConfig, "s3RepoPathUri"),
-            "s3Region": expr.get(repoConfig, "awsRegion"),
-            ...(includes3LocalDir ? {"s3LocalDir": expr.literal("/tmp")} : {})
-        })
-    );
-}
-
-export function makeGcsCreateSnapshotRepoParamDict(
-    repoConfig: BaseExpression<z.infer<typeof GCS_REPO_CONFIG>>) {
-    return expr.makeDict({
-        "gcsRepoUri": expr.get(repoConfig, "gcsRepoPathUri")
-    });
-}
-
-export function makeGcsRepoParamDict(
-    repoConfig: BaseExpression<z.infer<typeof GCS_REPO_CONFIG>>) {
-    return expr.makeDict({
-        "gcsRepoUri": expr.get(repoConfig, "gcsRepoPathUri"),
-        "gcsLocalDir": expr.literal("/tmp")
-    });
-}
-
 function makeSnapshotParamsDict(
     sourceVersion: BaseExpression<string>,
-    snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>
+    snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG_GCS>>>
 ) {
     return expr.mergeDicts(
         expr.makeDict({
             "snapshotName": expr.get(expr.deserializeRecord(snapshotConfig), "snapshotName"),
             "sourceVersion": sourceVersion
         }),
-        makeRepoParamDict(
-            expr.omit(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"), "s3RoleArn"),
-            true)
+        makeGcsRepoParamDict(expr.get(expr.deserializeRecord(snapshotConfig), "repoConfig"))
     );
+}
+
+function makeSourceHostParamsDict(
+    sourceVersion: BaseExpression<string>,
+    sourceEndpoint: BaseExpression<string>
+) {
+    return expr.makeDict({
+        "sourceHost": sourceEndpoint,
+        "sourceVersion": sourceVersion
+    });
 }
 
 function makeParamsDict(
     sourceVersion: BaseExpression<string>,
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
-    snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
-    options: BaseExpression<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>
+    snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG_GCS>>>,
+    options: BaseExpression<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>,
+    sourceEndpoint?: BaseExpression<string>
 ) {
     const targetAndOptions = expr.mergeDicts(
         makeTargetParamDict(targetConfig),
@@ -160,16 +111,18 @@ function makeParamsDict(
 
     const base = expr.mergeDicts(
         expr.mergeDicts(targetAndOptions, snapshotParams),
-        expr.makeDict({
-            "outputFile": expr.literal(METADATA_OUTPUT_PATH),
-            // The EKS workflow re-runs the metadata phase as part of SnapshotMigration
-            // reconciliation, alongside the document backfill phase that owns the same
-            // target indexes. Forcing --allow-existing-indexes makes the metadata phase
-            // idempotent so a re-applied SnapshotMigration doesn't abort on indexes the
-            // prior run created.
-            "allowExistingIndexes": expr.literal(true)
-        })
+        expr.makeDict({"outputFile": expr.literal(METADATA_OUTPUT_PATH)})
     );
+
+    if (sourceEndpoint) {
+        return expr.mergeDicts(base,
+            expr.ternary(
+                expr.isEmpty(sourceEndpoint),
+                expr.makeDict({}),
+                makeSourceHostParamsDict(sourceVersion, sourceEndpoint)
+            )
+        );
+    }
 
     return base;
 }
@@ -193,119 +146,74 @@ function makeApprovalCheck<
     ]);
 }
 
-const runMetadataInputs = {
-    commandMode: defineRequiredParam<"evaluate" | "migrate">(),
-    sourceVersion: defineRequiredParam<string>(),
-    targetConfig: defineRequiredParam<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>(),
-    snapshotConfig: defineRequiredParam<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>(),
-    metadataMigrationConfig: defineRequiredParam<z.infer<typeof ARGO_METADATA_OPTIONS>>(),
-    sourceEndpoint: defineParam<string>({expression: expr.literal("")}),
-    sourceConfig: defineParam<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>({
-        expression: expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>()
-    }),
-    ...makeRequiredImageParametersForKeys(["MigrationConsole"]),
-    sourceK8sLabel: defineRequiredParam<string>(),
-    targetK8sLabel: defineRequiredParam<string>(),
-    snapshotK8sLabel: defineRequiredParam<string>(),
-    fromSnapshotMigrationK8sLabel: defineRequiredParam<string>(),
-    crdName: defineRequiredParam<string>(),
-    crdUid: defineRequiredParam<string>(),
-    resourceCreationTimestamp: defineRequiredParam<string>(),
-    workflowCreationTimestamp: defineParam<string>({expression: expr.getWorkflowValue("creationTimestamp")}),
-    workflowUid: defineParam<string>({expression: expr.getWorkflowValue("uid")})
-};
-
-const metadataMigrationBaseBuilder = WorkflowBuilder.create({
-    k8sResourceName: "metadata-migration",
+export const MetadataMigrationGcs = WorkflowBuilder.create({
+    k8sResourceName: "metadata-migration-gcs",
     serviceAccountName: "argo-workflow-executor"
 })
 
-    .addParams(CommonWorkflowParameters);
+    .addParams(CommonWorkflowParameters)
 
-function makeMetadataTaskK8sLabel(commandMode: BaseExpression<"evaluate" | "migrate">) {
-    return expr.ternary(
-        expr.equals(commandMode, expr.literal("evaluate")),
-        expr.literal("metadataEvaluate"),
-        expr.literal("metadataMigrate")
-    );
-}
 
-type RunMetadataTemplateInputDefs = typeof runMetadataInputs & {
-    taskK8sLabel: InputParamDef<string, false>;
-};
-
-function makeMetadataPodSpecPatch(inputs: InputParamsToExpressions<RunMetadataTemplateInputDefs, InputParameterSource>) {
-    const metadataConfig = expr.deserializeRecord(inputs.metadataMigrationConfig);
-    return expr.asString(expr.serialize(expr.makeDict({
-        volumes: expr.concatArrays(
-            expr.templateValue(METADATA_STATIC_VOLUMES),
-            expr.dig(metadataConfig, ["fileSourceVolumes"], [])
-        ),
-        containers: expr.toArray(expr.makeDict({
-            name: "main",
-            volumeMounts: expr.concatArrays(
-                expr.templateValue(METADATA_STATIC_VOLUME_MOUNTS),
-                expr.dig(metadataConfig, ["fileSourceVolumeMounts"], [])
-            ),
-        }))
-    })));
-}
-
-function buildMetadataContainer<
-    B extends ContainerBuilder<any, RunMetadataTemplateInputDefs, {}, {}, {}, any>
->(
-    builder: B
-) {
-    const {inputs} = builder;
-    return builder
-        .addImageInfo(inputs.imageMigrationConsoleLocation, inputs.imageMigrationConsolePullPolicy)
-        .addPodSpecPatch(({inputs}) => makeMetadataPodSpecPatch(inputs))
-        .addEnvVar("AWS_SHARED_CREDENTIALS_FILE",
-            expr.ternary(
-                expr.dig(expr.deserializeRecord(inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
-                expr.literal("/config/credentials/configuration"),
-                expr.literal(""))
-        )
-        .addEnvVar("JDK_JAVA_OPTIONS",
-            expr.dig(expr.deserializeRecord(inputs.metadataMigrationConfig), ["jvmArgs"], "")
-        )
-        .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(inputs.targetConfig)))
-        .addEnvVarsFromRecord(getSourceHttpAuthCreds(getHttpAuthSecretName(inputs.sourceConfig)))
-        .addResources(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI)
-        .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
-        .addArgs([
-            inputs.commandMode,
-            expr.literal("---INLINE-JSON"),
-            expr.asString(expr.serialize(
-                makeParamsDict(inputs.sourceVersion, inputs.targetConfig, inputs.snapshotConfig, inputs.metadataMigrationConfig)
-            ))
-        ])
-        .addArtifactOutput("metadataOutput", METADATA_OUTPUT_PATH, {
-            s3Key: makeMetadataOutputS3Key(
-                inputs.crdName,
-                inputs.crdUid,
-                inputs.resourceCreationTimestamp,
-                inputs.taskK8sLabel,
-                inputs.workflowCreationTimestamp,
-                inputs.workflowUid
-            )
-        })
-        .addPodMetadata(({inputs}) => ({
-            labels: {
-                'migrations.opensearch.org/source': inputs.sourceK8sLabel,
-                'migrations.opensearch.org/target': inputs.targetK8sLabel,
-                'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
-                'migrations.opensearch.org/from-snapshot-migration': inputs.fromSnapshotMigrationK8sLabel,
-                'migrations.opensearch.org/task': inputs.taskK8sLabel
-            }
-        }));
-}
-
-export const MetadataMigration = metadataMigrationBaseBuilder
     .addTemplate("runMetadata", t => t
-        .addInputsFromRecord(runMetadataInputs)
-        .addOptionalInput("taskK8sLabel", c => makeMetadataTaskK8sLabel(c.inputParameters.commandMode))
-        .addContainer(b => buildMetadataContainer(b))
+        .addRequiredInput("commandMode", typeToken<"evaluate" | "migrate">())
+        .addRequiredInput("sourceVersion", typeToken<string>())
+        .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG_GCS>>())
+        .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof ARGO_METADATA_OPTIONS>>())
+        .addOptionalInput("sourceEndpoint", c => expr.literal(""))
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addRequiredInput("sourceK8sLabel", typeToken<string>())
+        .addRequiredInput("targetK8sLabel", typeToken<string>())
+        .addRequiredInput("snapshotK8sLabel", typeToken<string>())
+        .addRequiredInput("fromSnapshotMigrationK8sLabel", typeToken<string>())
+        .addRequiredInput("crdName", typeToken<string>())
+        .addRequiredInput("crdUid", typeToken<string>())
+        .addRequiredInput("resourceCreationTimestamp", typeToken<string>())
+        .addOptionalInput("workflowCreationTimestamp", c => expr.getWorkflowValue("creationTimestamp"))
+        .addOptionalInput("workflowUid", c => expr.getWorkflowValue("uid"))
+        .addOptionalInput("taskK8sLabel", c => expr.ternary(
+            expr.equals(c.inputParameters.commandMode, expr.literal("evaluate")),
+            expr.literal("metadataEvaluate"),
+            expr.literal("metadataMigrate")
+        ))
+
+        .addContainer(b => b
+            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
+            .addEnvVar("JDK_JAVA_OPTIONS",
+                expr.dig(expr.deserializeRecord(b.inputs.metadataMigrationConfig), ["jvmArgs"], "")
+            )
+            .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(b.inputs.targetConfig)))
+            .addResources(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI)
+            .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
+            .addArgs([
+                b.inputs.commandMode,
+                expr.literal("---INLINE-JSON"),
+                expr.asString(expr.serialize(
+                    makeParamsDict(b.inputs.sourceVersion, b.inputs.targetConfig, b.inputs.snapshotConfig, b.inputs.metadataMigrationConfig,
+                        b.inputs.sourceEndpoint
+                    )
+                ))
+            ])
+            .addArtifactOutput("metadataOutput", METADATA_OUTPUT_PATH, {
+                s3Key: makeMetadataOutputS3Key(
+                    b.inputs.crdName,
+                    b.inputs.crdUid,
+                    b.inputs.resourceCreationTimestamp,
+                    b.inputs.taskK8sLabel,
+                    b.inputs.workflowCreationTimestamp,
+                    b.inputs.workflowUid
+                )
+            })
+            .addPodMetadata(({inputs}) => ({
+                labels: {
+                    'migrations.opensearch.org/source': inputs.sourceK8sLabel,
+                    'migrations.opensearch.org/target': inputs.targetK8sLabel,
+                    'migrations.opensearch.org/snapshot': inputs.snapshotK8sLabel,
+                    'migrations.opensearch.org/from-snapshot-migration': inputs.fromSnapshotMigrationK8sLabel,
+                    'migrations.opensearch.org/task': inputs.taskK8sLabel
+                }
+            }))
+        )
         .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )
 
@@ -313,14 +221,14 @@ export const MetadataMigration = metadataMigrationBaseBuilder
     .addTemplate("approveEvaluate", t => t
         .addRequiredInput("name", typeToken<string>())
         .addSteps(b => b
-            .addStep("waitForUserApproval", ResourceManagement, "waitForUserApproval", c =>
+            .addStep("waitForApproval", ResourceManagement, "waitForApproval", c =>
                 c.register({resourceName: b.inputs.name}))
         )
     )
     .addTemplate("approveMigrate", t => t
         .addRequiredInput("name", typeToken<string>())
         .addSteps(b => b
-            .addStep("waitForUserApproval", ResourceManagement, "waitForUserApproval", c =>
+            .addStep("waitForApproval", ResourceManagement, "waitForApproval", c =>
                 c.register({resourceName: b.inputs.name}))
         )
     )
@@ -329,8 +237,6 @@ export const MetadataMigration = metadataMigrationBaseBuilder
     .addTemplate("migrateMetaData", t => t
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof ARGO_METADATA_OPTIONS>>())
         .addOptionalInput("sourceEndpoint", c => expr.literal(""))
-        .addOptionalInput("sourceConfig", c =>
-            expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addInputsFromRecord(COMMON_METADATA_PARAMETERS)
         .addInputsFromRecord(
             getApprovalMap(t.inputs.workflowParameters.approvalConfigMapName, typeToken<{}>()))
@@ -354,7 +260,6 @@ export const MetadataMigration = metadataMigrationBaseBuilder
             .addStep("evaluateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    sourceConfig: b.inputs.sourceConfig,
                     commandMode: "evaluate",
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
@@ -392,7 +297,6 @@ export const MetadataMigration = metadataMigrationBaseBuilder
             .addStep("migrateMetadata", INTERNAL, "runMetadata", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    sourceConfig: b.inputs.sourceConfig,
                     commandMode: "migrate",
                     sourceK8sLabel: b.inputs.sourceLabel,
                     targetK8sLabel: expr.jsonPathStrict(b.inputs.targetConfig, "label"),
