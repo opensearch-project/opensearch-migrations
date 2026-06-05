@@ -199,8 +199,7 @@ export const ARGO_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_RFS_OPTIONS.pick({
 
 // Fields config lowering adds on top of the user-facing proxy schema, named as a
 // single shape so ARGO_PROXY_OPTIONS and ARGO_PROXY_RESOLVED_ONLY_KEYS share one
-// source of truth. The declarative mTLS config rides in the CR under
-// spec.tls.clientAuth; these are its flattened projection for the Java process.
+// source of truth.
 const PROXY_RESOLVED_FIELDS = {
     sslTrustCertFile: z.string().min(1).optional()
         .describe("Resolved mount path of tls.clientAuth.trustedClientCaFile, passed to the proxy process. Stripped from the CaptureProxy CR."),

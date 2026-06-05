@@ -277,8 +277,6 @@ function makeCaptureProxyManifest(
         },
         spec: makeDirectTypeProxy(expr.mergeDicts(
             workflowSpecFields,
-            // Strip workflow-option fields (re-added above as spec fields) and the
-            // resolved-only bridge fields (the flat projection of spec.tls.clientAuth).
             expr.omit(proxyOpts, ...ARGO_PROXY_CR_OMITTED_KEYS)
         )),
     };
