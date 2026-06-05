@@ -1,0 +1,58 @@
+steps:
+  # Build Java tools
+  - name: 'amazoncorretto:21'
+    entrypoint: './gradlew'
+    args:
+      - ':CreateSnapshot:installDist'
+      - ':MetadataMigration:installDist'
+      - ':DocumentsFromSnapshotMigration:installDist'
+      - ':DocumentsFromSnapshotMigration:copyDockerRuntimeJars'
+      - ':DocumentsFromSnapshotMigration:syncVersionFile_reindexFromSnapshot'
+      - '--no-daemon'
+
+  # Build config processor and workflow templates
+  - name: 'node:22'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        cd orchestrationSpecs
+        npm ci
+        echo "=== Building config processor ==="
+        cd packages/config-processor
+        npm run check-and-bundle -- /workspace/migrationConsole/build/dockerContext/nodeStaging/configProcessor
+        echo "=== Building workflow templates ==="
+        cd ../migration-workflow-templates
+        mkdir -p /workspace/migrationConsole/build/dockerContext/nodeStaging/workflowTemplates
+        npm run make-templates -- --outputDirectory /workspace/migrationConsole/build/dockerContext/nodeStaging/workflowTemplates
+        echo "=== Workflow templates built ==="
+        ls /workspace/migrationConsole/build/dockerContext/nodeStaging/workflowTemplates/
+
+  # Build reindex-from-snapshot image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--no-cache'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/migrations/reindex-from-snapshot:latest'
+      - 'DocumentsFromSnapshotMigration/docker'
+
+  # Build the migration console overlay image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--no-cache'
+      - '-f'
+      - 'Dockerfile.gcs-overlay'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/migrations/migration-console:latest'
+      - '.'
+
+images:
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/migrations/migration-console:latest'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/migrations/reindex-from-snapshot:latest'
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+  diskSizeGb: 100
