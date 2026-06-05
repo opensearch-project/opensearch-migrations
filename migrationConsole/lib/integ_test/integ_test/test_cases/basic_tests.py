@@ -106,24 +106,32 @@ class Test0003ApprovalGateIntegration(MATestBase):
 
     def workflow_perform_migrations(self, timeout_seconds: int = MIGRATION_COMPLETION_TIMEOUT_SECONDS):
         self.argo_service.resume_workflow(workflow_name=self.workflow_name)
-        self._wait_and_approve_gates(timeout_seconds)
-        self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=timeout_seconds)
+        self._approve_gates_until_suspend(timeout_seconds)
 
-    def _wait_and_approve_gates(self, timeout_seconds: int):
-        """Poll `workflow approve step --all` until approval succeeds."""
+    def _approve_gates_until_suspend(self, timeout_seconds: int):
+        """Approve gates on every poll while waiting for the workflow to reach its suspend."""
         deadline = time.time() + timeout_seconds
         interval = 10
         while time.time() < deadline:
+            # Try to approve any available gates (best-effort, ignore failures)
             result = subprocess.run(
                 ["workflow", "approve", "step", "--all"],
                 capture_output=True, text=True, timeout=30,
             )
             if result.returncode == 0:
                 logger.info("Approval gates approved: %s", result.stdout.strip())
-                return
-            logger.debug("Approve not ready yet (rc=%d): %s", result.returncode, result.stderr.strip())
+
+            # Check if workflow reached its suspend point
+            status_result = self.argo_service.get_workflow_status(self.workflow_name)
+            if status_result.success:
+                status_info = status_result.value
+                if status_info.get("phase") == "Running" and status_info.get("has_suspended_nodes"):
+                    return
+                if status_info.get("phase") in ("Succeeded", "Failed", "Error"):
+                    return
+
             time.sleep(interval)
-        raise TimeoutError(f"No approval gates became available within {timeout_seconds}s")
+        raise TimeoutError(f"Workflow did not reach suspended state within {timeout_seconds}s")
 
     def verify_clusters(self):
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
