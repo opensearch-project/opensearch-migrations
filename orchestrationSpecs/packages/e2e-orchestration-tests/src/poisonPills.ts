@@ -112,6 +112,9 @@ function setPathValue(root: unknown, path: string, value: unknown): void {
     if (!isRecord(cursor)) {
         throw new Error(`cannot set '${path}': parent '${parts.slice(0, -1).join(".")}' is not an object`);
     }
+    if (leaf === "__proto__" || leaf === "constructor" || leaf === "prototype") {
+        throw new Error(`cannot set '${path}': key '${leaf}' is not allowed`);
+    }
     cursor[leaf] = value;
 }
 

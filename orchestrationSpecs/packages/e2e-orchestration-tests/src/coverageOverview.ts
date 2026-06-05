@@ -219,5 +219,5 @@ function renderCoverageMarkdown(overview: CoverageOverview): string {
 }
 
 function cell(value: string | undefined): string {
-    return (value ?? "").replace(/\|/g, "\\|");
+    return (value ?? "").replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 }
