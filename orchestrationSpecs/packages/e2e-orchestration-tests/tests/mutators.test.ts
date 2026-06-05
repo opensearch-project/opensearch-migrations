@@ -3,6 +3,7 @@ import {
     dataSnapshotMaxSnapshotRateMutator,
     Mutator,
     MutatorRegistry,
+    proxyClientAuthMutator,
     proxyNumThreadsMutator,
     snapshotMigrationMaxConnectionsGatedMutator,
     snapshotMigrationMaxConnectionsMutator,
@@ -281,5 +282,64 @@ describe("dataSnapshotMaxSnapshotRateMutator", () => {
             result.sourceClusters.source.snapshotInfo.snapshots.snap1.config
                 .createSnapshotConfig.maxSnapshotRateMbPerNode,
         ).toBe(1);
+    });
+});
+
+describe("proxyClientAuthMutator", () => {
+    const mutator = proxyClientAuthMutator();
+
+    it("has the expected gated metadata", () => {
+        expect(mutator.name).toBe("proxy-clientAuth");
+        expect(mutator.changeClass).toBe("gated");
+        expect(mutator.dependencyPattern).toBe("subject-gated-change");
+        expect(mutator.subject).toBe("captureproxy:capture-proxy");
+        expect(mutator.approvalPattern).toBe("captureproxy.capture-proxy");
+        expect(mutator.expectedRerunComponents).toEqual([
+            "captureproxy:capture-proxy",
+        ]);
+        expect(mutator.changedPaths).toEqual([
+            "traffic.proxies.capture-proxy.proxyConfig.tls.clientAuth",
+        ]);
+    });
+
+    it("apply() sets clientAuth without mutating the input", () => {
+        const input = {
+            traffic: {
+                proxies: {
+                    "capture-proxy": {
+                        proxyConfig: { listenPort: 9201 },
+                    },
+                },
+            },
+        };
+        const result = mutator.apply(input) as any;
+        // Input unchanged.
+        expect((input.traffic.proxies["capture-proxy"].proxyConfig as any).tls).toBeUndefined();
+        // Result has clientAuth in the gated tls subtree.
+        const tls = result.traffic.proxies["capture-proxy"].proxyConfig.tls;
+        expect(tls.clientAuth.required).toBe(true);
+        expect(typeof tls.clientAuth.trustedClientCaPem).toBe("string");
+        // Unrelated fields preserved.
+        expect(result.traffic.proxies["capture-proxy"].proxyConfig.listenPort).toBe(9201);
+    });
+
+    it("apply() toggles required when mTLS is already enabled", () => {
+        const input = {
+            traffic: {
+                proxies: {
+                    "capture-proxy": {
+                        proxyConfig: {
+                            tls: {
+                                mode: "existingSecret",
+                                secretName: "proxy-tls",
+                                clientAuth: { required: true, trustedClientCaPem: "x" },
+                            },
+                        },
+                    },
+                },
+            },
+        };
+        const result = mutator.apply(input) as any;
+        expect(result.traffic.proxies["capture-proxy"].proxyConfig.tls.clientAuth.required).toBe(false);
     });
 });

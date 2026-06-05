@@ -283,3 +283,62 @@ export function dataSnapshotMaxSnapshotRateMutator(): Mutator {
         },
     };
 }
+
+/**
+ * proxyClientAuthMutator — gated mutator for `captureproxy:capture-proxy`
+ * that exercises capture-proxy mutual-TLS (clientAuth).
+ *
+ * Sets `proxyConfig.tls.clientAuth` with an inline trusted client CA PEM
+ * (the form that regressed in #3069 / fixed in #3071). clientAuth lives in
+ * the gated `tls` subtree of USER_PROXY_OPTIONS, so changing it is a gated
+ * change: the workflow must surface the proxy retry/approval gate before
+ * proceeding. This case also guards the underlying apply path — before the
+ * fix, the resolved mTLS fields leaked into the CaptureProxy CR and the
+ * upsert step failed outright, which this spec would catch as a non-terminal
+ * failure rather than a gate.
+ *
+ * The mutation toggles `clientAuth.required` so a re-submission produces a
+ * detectable diff in the gated subtree.
+ */
+export function proxyClientAuthMutator(): Mutator {
+    const CLIENT_CA_PEM = [
+        "-----BEGIN CERTIFICATE-----",
+        "MIIBkTCB+wIJAJ2e2e2e2e2eMA0GCSqGSIb3DQEBCwUAMA0xCzAJBgNVBAYTAlVT",
+        "-----END CERTIFICATE-----",
+    ].join("\n");
+    return {
+        name: "proxy-clientAuth",
+        fieldChangeClass: "gated",
+        changeClass: "gated",
+        dependencyPattern: "subject-gated-change",
+        subject: "captureproxy:capture-proxy" as ComponentId,
+        expectedRerunComponents: ["captureproxy:capture-proxy" as ComponentId],
+        changedPaths: ["traffic.proxies.capture-proxy.proxyConfig.tls.clientAuth"],
+        approvalPattern: "captureproxy.capture-proxy",
+        apply(config: unknown): unknown {
+            const cloned = structuredClone(config);
+            const root = cloned as Record<string, unknown>;
+            const traffic = root["traffic"] as Record<string, unknown> | undefined;
+            if (!traffic) throw new Error("proxy-clientAuth mutator: missing 'traffic' key");
+            const proxies = traffic["proxies"] as Record<string, unknown> | undefined;
+            if (!proxies) throw new Error("proxy-clientAuth mutator: missing 'traffic.proxies' key");
+            const proxy = proxies["capture-proxy"] as Record<string, unknown> | undefined;
+            if (!proxy) throw new Error("proxy-clientAuth mutator: missing 'traffic.proxies.capture-proxy' key");
+            const proxyConfig = proxy["proxyConfig"] as Record<string, unknown> | undefined;
+            if (!proxyConfig) throw new Error("proxy-clientAuth mutator: missing 'traffic.proxies.capture-proxy.proxyConfig' key");
+            const existingTls = proxyConfig["tls"] as Record<string, unknown> | undefined;
+            const existingClientAuth = existingTls?.["clientAuth"] as Record<string, unknown> | undefined;
+            // Toggle `required` so a resubmission of an already-mTLS proxy is a real diff.
+            const required = existingClientAuth?.["required"] === true ? false : true;
+            proxyConfig["tls"] = {
+                mode: "existingSecret",
+                secretName: "proxy-tls",
+                clientAuth: {
+                    required,
+                    trustedClientCaPem: CLIENT_CA_PEM,
+                },
+            };
+            return cloned;
+        },
+    };
+}
