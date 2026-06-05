@@ -126,32 +126,43 @@ class TrackingKafkaConsumerTest extends InstrumentationTest {
     }
 
     // -------------------------------------------------------------------------
-    // Phase C: onPartitionsAssigned empty assignment flushes pending cleanup
+    // onPartitionsRevoked fires the truly-lost callback at the OLD generation
     // -------------------------------------------------------------------------
 
     /**
-     * Test #10: Simulate revoke then assign-empty (no new partitions).
-     * Assert truly-lost cleanup still runs (all pending partitions treated as truly lost).
-     * Before fix: onPartitionsAssigned returned early when newPartitions was empty.
+     * Revocation must fire the truly-lost callback NOW, before any subsequent
+     * onPartitionsAssigned bumps the generation. The session keys built from this
+     * callback must reference the OLD generation so that channel sessions opened on
+     * that generation can be matched and closed.
      */
     @Test
-    void onPartitionsAssigned_emptyAssignment_flushesPendingCleanup() {
+    void onPartitionsRevoked_firesTrulyLostCallbackAtOldGeneration() {
         var mc = buildMockConsumer();
         var consumer = buildConsumer(mc);
         var tp = new TopicPartition(TOPIC, 0);
 
         consumer.onPartitionsAssigned(List.of(tp));
+        int generationAtAssign = consumer.getConsumerConnectionGeneration();
 
+        var observedGenerations = new ArrayList<Integer>();
         var trulyLostPartitions = new ArrayList<Integer>();
-        consumer.setOnPartitionsTrulyLostCallback(trulyLostPartitions::addAll);
+        consumer.setOnPartitionsTrulyLostCallback(parts -> {
+            observedGenerations.add(consumer.getConsumerConnectionGeneration());
+            trulyLostPartitions.addAll(parts);
+        });
 
-        // Revoke partition 0 — records it in pendingCleanupPartitions
         consumer.onPartitionsRevoked(List.of(tp));
 
-        // Assign empty — all pending must be flushed as truly lost
-        consumer.onPartitionsAssigned(Collections.emptyList());
-
         Assertions.assertEquals(List.of(0), trulyLostPartitions,
-            "Empty assignment must flush all pending cleanup partitions as truly lost");
+            "onPartitionsRevoked must fire truly-lost callback for the revoked partition immediately");
+        Assertions.assertEquals(List.of(generationAtAssign), observedGenerations,
+            "callback must fire at the OLD generation (before any subsequent onPartitionsAssigned bump)");
+
+        // A subsequent onPartitionsAssigned bumps the generation; the callback must NOT fire again.
+        consumer.onPartitionsAssigned(List.of(tp));
+        Assertions.assertEquals(List.of(0), trulyLostPartitions,
+            "truly-lost callback must not fire a second time on subsequent assignment");
+        Assertions.assertTrue(consumer.getConsumerConnectionGeneration() > generationAtAssign,
+            "subsequent onPartitionsAssigned must bump the generation");
     }
 }

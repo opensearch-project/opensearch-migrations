@@ -23,6 +23,7 @@ require_command() {
 }
 
 require_command docker
+require_command jq
 require_command kind
 require_command kubectl
 
@@ -55,7 +56,7 @@ if [[ "$(docker inspect -f '{{json .NetworkSettings.Networks.kind}}' "${KIND_REG
   docker network connect kind "${KIND_REGISTRY_NAME}"
 fi
 
-REGISTRY_DIR="/etc/containerd/certs.d/localhost:${KIND_REGISTRY_PORT}"
+REGISTRY_DIR="/etc/containerd/certs.d/${LOCAL_REGISTRY}"
 for node in $(kind get nodes --name "${KIND_CLUSTER_NAME}"); do
   if ! docker exec "${node}" grep -q 'config_path = "/etc/containerd/certs.d"' /etc/containerd/config.toml; then
     echo "Kind node ${node} is missing containerd registry config_path support." >&2
@@ -70,14 +71,20 @@ EOF
 done
 
 WORK_DIR="$(mktemp -d)"
+CREATED_TEST_NAMESPACE=false
 cleanup() {
-  kubectl --context "${KIND_CONTEXT}" delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
+  kubectl --context "${KIND_CONTEXT}" -n "${TEST_NAMESPACE}" delete pod "${POD_NAME}" --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
+  if [[ "${CREATED_TEST_NAMESPACE}" == "true" ]]; then
+    kubectl --context "${KIND_CONTEXT}" delete namespace "${TEST_NAMESPACE}" --ignore-not-found=true --wait=false >/dev/null 2>&1 || true
+  fi
   rm -rf "${WORK_DIR}"
 }
 trap cleanup EXIT
 
 TRANSFORMS_DIR="${WORK_DIR}/transforms"
-mkdir -p "${TRANSFORMS_DIR}/helpers"
+mkdir -p \
+  "${TRANSFORMS_DIR}/context/document" \
+  "${TRANSFORMS_DIR}/helpers"
 cat > "${TRANSFORMS_DIR}/document.js" <<'EOF'
 function main(context) {
   return (document) => {
@@ -97,6 +104,9 @@ function main(context) {
 }
 (() => main)();
 EOF
+cat > "${TRANSFORMS_DIR}/context/document/fieldName" <<'EOF'
+packaged_context_document_seen
+EOF
 cat > "${TRANSFORMS_DIR}/helpers/helper.py" <<'EOF'
 VALUE = "mountable_transform_seen"
 EOF
@@ -110,7 +120,11 @@ if [[ -z "${PINNED_REF}" ]]; then
   exit 1
 fi
 
-kubectl --context "${KIND_CONTEXT}" create namespace "${TEST_NAMESPACE}" >/dev/null
+if ! kubectl --context "${KIND_CONTEXT}" get namespace "${TEST_NAMESPACE}" >/dev/null 2>&1; then
+  kubectl --context "${KIND_CONTEXT}" create namespace "${TEST_NAMESPACE}" >/dev/null
+  CREATED_TEST_NAMESPACE=true
+fi
+kubectl --context "${KIND_CONTEXT}" -n "${TEST_NAMESPACE}" delete pod "${POD_NAME}" --ignore-not-found=true --wait=true >/dev/null
 
 cat <<EOF | kubectl --context "${KIND_CONTEXT}" -n "${TEST_NAMESPACE}" apply -f -
 apiVersion: v1
@@ -129,10 +143,12 @@ spec:
           set -eu
           test -f /transforms/document.js
           test -f /transforms/request.js
+          test -f /transforms/context/document/fieldName
           test -f /transforms/helpers/helper.py
           grep -q mountable_transform_seen /transforms/document.js
           grep -q x-mountable-transform /transforms/request.js
-          find /transforms -maxdepth 2 -type f | sort
+          test "\$(cat /transforms/context/document/fieldName)" = "packaged_context_document_seen"
+          find /transforms -maxdepth 3 -type f | sort
       volumeMounts:
         - name: user-transforms
           mountPath: /transforms

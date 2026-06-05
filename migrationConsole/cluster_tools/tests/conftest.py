@@ -25,17 +25,26 @@ def wait_for_opensearch(url, max_retries=30, retry_interval=2):
     raise TimeoutError(f"OpenSearch at {url} did not become ready within {max_retries * retry_interval} seconds")
 
 
-def create_opensearch_container():
-    """Create and start an OpenSearch container."""
-    container = OpenSearchContainer("opensearchproject/opensearch:2.19.1")
-    container.with_env("discovery.type", "single-node")
-    container.with_env("OPENSEARCH_JAVA_OPTS", "-Xms2g -Xmx2g")
-    container.start()
-
-    url = f"http://{container.get_container_host_ip()}:{container.get_exposed_port(9200)}"
-    wait_for_opensearch(url)
-
-    return container, url
+def create_opensearch_container(max_attempts=3):
+    """Create and start an OpenSearch container, retrying on startup failure."""
+    for attempt in range(max_attempts):
+        container = OpenSearchContainer("opensearchproject/opensearch:2.19.1")
+        container.with_env("discovery.type", "single-node")
+        container.with_env("OPENSEARCH_JAVA_OPTS", "-Xms512m -Xmx512m")
+        try:
+            container.start()
+            url = f"http://{container.get_container_host_ip()}:{container.get_exposed_port(9200)}"
+            wait_for_opensearch(url)
+            return container, url
+        except Exception:
+            try:
+                container.stop()
+            except Exception:
+                pass
+            if attempt == max_attempts - 1:
+                raise
+            time.sleep(5)
+    raise RuntimeError("Failed to start OpenSearch container")
 
 
 def create_environment_config(clusters):

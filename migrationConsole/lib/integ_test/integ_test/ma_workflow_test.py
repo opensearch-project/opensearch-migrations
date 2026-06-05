@@ -54,7 +54,13 @@ def _fail_if_migration_resources_exist(namespace: str = "ma"):
 
 
 @pytest.fixture(autouse=True)
-def setup_and_teardown(request, keep_workflows, dump_all_workflow_output_artifacts, test_case: MATestBase):
+def setup_and_teardown(
+    request,
+    keep_workflows,
+    skip_workflow_reset,
+    dump_all_workflow_output_artifacts,
+    test_case: MATestBase,
+):
     #-----Setup-----
     logger.info("Performing setup...")
     _fail_if_migration_resources_exist()
@@ -69,11 +75,12 @@ def setup_and_teardown(request, keep_workflows, dump_all_workflow_output_artifac
         if status_result.value.get("phase", "") not in ("Succeeded", "Failed", "Error", "Stopped", "Terminated"):
             test_case.argo_service.stop_workflow(workflow_name=test_case.workflow_name)
             test_case.argo_service.wait_for_ending_phase(workflow_name=test_case.workflow_name)
-        test_case.argo_service.print_workflow_status(workflow_name=test_case.workflow_name)
-        test_case.argo_service.print_migration_resource_status()
-        # Print workflow details and save diagnostics if test failed
+        # On success the full workflow-status JSON and migration-resource YAML are just noise.
+        # Only dump them (along with the heavier details/diagnostics) when the test failed.
         if request.node.rep_call and request.node.rep_call.failed:
             logger.info(f"Test failed - printing workflow details for {test_case.workflow_name}")
+            test_case.argo_service.print_workflow_status(workflow_name=test_case.workflow_name)
+            test_case.argo_service.print_migration_resource_status()
             test_case.argo_service.print_workflow_details(workflow_name=test_case.workflow_name)
             test_case.argo_service.print_namespace_diagnostics(
                 workflow_name=test_case.workflow_name,
@@ -86,8 +93,9 @@ def setup_and_teardown(request, keep_workflows, dump_all_workflow_output_artifac
             )
         if not keep_workflows:
             test_case.argo_service.delete_workflow(workflow_name=test_case.workflow_name)
-    # Reset all migration CRDs before test-specific cleanup
-    _run_workflow_reset()
+    # Reset all migration CRDs before test-specific cleanup unless the outer runner is preserving the run.
+    if not skip_workflow_reset:
+        _run_workflow_reset()
     test_case.cleanup()
 
 

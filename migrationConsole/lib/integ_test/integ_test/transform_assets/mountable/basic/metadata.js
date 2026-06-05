@@ -96,8 +96,8 @@ function addMetadataFieldMapping(mappings, fieldName, fieldType) {
 }
 
 function main(context) {
-  const fieldName = getValue(context, "fieldName") || "mountable_basic_metadata_transform";
-  const fieldType = getValue(context, "fieldType") || "keyword";
+  const fieldName = String(getValue(context, "fieldName") || "mountable_basic_metadata_transform").trim();
+  const fieldType = String(getValue(context, "fieldType") || "keyword").trim();
 
   return (metadata) => {
     const body = getValue(metadata, "body");
