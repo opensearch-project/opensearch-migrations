@@ -212,7 +212,10 @@ export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pic
     podReplicas: true,
     resources: true,
     tls: true,
+    sslTrustCertFile: true,
     sslTrustCertPem: true,
+    sslTrustCertPemEnvVar: true,
+    requireClientAuth: true,
     fileSourceVolumes: true,
     fileSourceVolumeMounts: true,
 }));
