@@ -1,0 +1,31 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+}
+
+dependencies {
+    implementation project(':RfsCommon')
+    implementation project(':RfsHttp')
+    implementation project(':RfsPipeline')
+    implementation project(':SearchSnapshotExtractor')
+
+    implementation libs.jackson.databind
+    implementation libs.jackson.core
+    implementation libs.jackson.dataformat.smile
+    implementation libs.slf4j.api
+    implementation libs.gcp.storage
+
+    testImplementation testFixtures(project(':RFS'))
+    testImplementation testFixtures(project(':coreUtilities'))
+    testImplementation testFixtures(project(':testHelperFixtures'))
+
+    testImplementation libs.hamcrest
+    testImplementation libs.mockito.core
+    testImplementation libs.mockito.junit.jupiter
+    testImplementation libs.junit.jupiter.api
+    testImplementation libs.junit.jupiter.params
+    testImplementation libs.log4j.core
+    testImplementation libs.log4j.slf4j2.impl
+
+    testRuntimeOnly libs.junit.jupiter.engine
+}
