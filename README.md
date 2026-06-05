@@ -18,6 +18,7 @@
   - [Getting Started](#getting-started)
     - [Local Deployment](#local-deployment)
     - [AWS Deployment](#aws-deployment)
+    - [GCP Deployment](#gcp-deployment)
   - [Continuous Integration and Deployment](#continuous-integration-and-deployment)
   - [Contributing](#contributing)
   - [Security](#security)
@@ -48,6 +49,7 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 
 - **Flexible Deployment Options**:
   - **[AWS Deployment](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/)**: Fully automated deployment to AWS.
+  - **[GCP Deployment](deployment/terraform/gcp/README.md)**: Terraform module that provisions a GKE cluster, GCS snapshot bucket, and the Workload Identity bindings required by the migration workflows, deployed via the [GKE Helm overlay](deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesGke.yaml).
   - **[Local Docker Deployment](./TrafficCapture/dockerSolution/README.md)**: Run the solution locally in a container for testing and development.
   - Contribute to add more deployment options.
 
@@ -137,6 +139,42 @@ User guide documentation is available in the [OpenSearch Migration Assistant doc
 ### AWS Deployment
 
 To deploy the solution on AWS, follow the steps outlined in [Migration Assistant for Amazon OpenSearch Service](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/), specifically [deploying the solution](https://docs.aws.amazon.com/solutions/latest/migration-assistant-for-amazon-opensearch-service/deploy-the-solution.html).
+
+### GCP Deployment
+
+To deploy the solution on Google Cloud:
+
+1. **Provision infrastructure** with the GCP Terraform module
+   ([`deployment/terraform/gcp`](deployment/terraform/gcp/README.md)), which
+   creates a GKE cluster, a GCS snapshot bucket, a node service account with
+   `roles/storage.admin`, and the Workload Identity bindings used by the
+   migration console and Argo workflow executor:
+
+   ```bash
+   terraform -chdir=deployment/terraform/gcp apply \
+     -var="project=<your-gcp-project>"
+   gcloud container clusters get-credentials migration-cluster \
+     --region us-central1 --project <your-gcp-project>
+   ```
+
+2. **Install the Helm chart** with the GKE overlay
+   ([`valuesGke.yaml`](deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesGke.yaml)),
+   which wires the migration components to GCS-backed snapshots via
+   Workload Identity instead of AWS-style IRSA:
+
+   ```bash
+   helm install --create-namespace -n ma ma \
+     deployment/k8s/charts/aggregates/migrationAssistantWithArgo \
+     --values deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesGke.yaml \
+     --set gcp.project=<your-gcp-project>
+   ```
+
+GCS snapshot repositories are configured per-workflow at submission time
+(via the `gcs` snapshot type), in the same way S3 repositories are configured
+for EKS deployments. See the [GCP Terraform README](deployment/terraform/gcp/README.md)
+for variables, `maxShardSizeBytes` sizing guidance, and a Bring-Your-Own-Snapshot
+walkthrough, and the [Kubernetes deployment README](deployment/k8s/README.md)
+for additional GKE notes.
 
 
 ## Continuous Integration and Deployment
