@@ -478,6 +478,7 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: b.inputs.resourceName,
                     snapshotItemConfig: snapshotItemConfigAsS3,
                     sourceLabel: expr.get(expr.deserializeRecord(b.inputs.sourceConfig), "label"),
+                    configChecksum: b.inputs.configChecksum,
                 }),
             )
             .addStep("readSnapshotPhase", ResourceManagement, "readResourcePhase", c =>
@@ -486,7 +487,7 @@ export const FullMigration = WorkflowBuilder.create({
                     resourceName: b.inputs.resourceName,
                 })
             )
-            .addStep("waitForProxyDeps", ResourceManagement, "waitForCaptureProxy", c =>
+            .addStep("waitIndefinitelyForProxyDeps", ResourceManagement, "waitIndefinitelyForCaptureProxy", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
                         resourceName: expr.get(c.item, "name"),
@@ -501,13 +502,13 @@ export const FullMigration = WorkflowBuilder.create({
                             expr.equals(c.readSnapshotPhase.outputs.configChecksum, b.inputs.configChecksum)
                         )),
                         expr.not(expr.and(
-                            expr.equals(c.readSnapshotPhase.outputs.phase, "Running"),
+                            expr.equals(c.readSnapshotPhase.outputs.phase, "Pending"),
                             expr.equals(c.readSnapshotPhase.outputs.configChecksum, b.inputs.configChecksum)
                         ))
                     )}),
                 }
             )
-            .addStep("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c =>
+            .addStep("waitIndefinitelyForSnapshot", ResourceManagement, "waitIndefinitelyForDataSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.resourceName,
@@ -515,7 +516,7 @@ export const FullMigration = WorkflowBuilder.create({
                     checksumField: expr.literal("checksumForSnapshotMigration"),
                 }),
                 {when: c => ({templateExp: expr.and(
-                    expr.equals(c.readSnapshotPhase.outputs.phase, "Running"),
+                    expr.equals(c.readSnapshotPhase.outputs.phase, "Pending"),
                     expr.equals(c.readSnapshotPhase.outputs.configChecksum, b.inputs.configChecksum)
                 )})}
             )
@@ -771,7 +772,9 @@ export const FullMigration = WorkflowBuilder.create({
                         resourceUid: c.steps.reconcileSnapshotMigrationResource.outputs.resourceUid,
                         resourceCreationTimestamp: c.steps.reconcileSnapshotMigrationResource.outputs.resourceCreationTimestamp,
                         groupName_view: expr.get(snapshotMigrationConfig, "migrationLabel"),
-                        sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], "")
+                        sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], ""),
+                        checksumForReplayer: expr.dig(snapshotMigrationConfig, ["checksumForReplayer"], ""),
+                        workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum")
                     });
                 }, {
                     when: c => ({templateExp: checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum)}),
@@ -864,12 +867,13 @@ export const FullMigration = WorkflowBuilder.create({
                     return c.register({
                         snapshotMigrationConfig: snapshotMigrationConfigAsS3,
                         resourceName: b.inputs.resourceName,
+                        configChecksum: b.inputs.configChecksum,
                         retryGateName: expr.concat(expr.literal("snapshotmigration."), b.inputs.resourceName, expr.literal(".vapretry")),
                         retryGroupName_view: expr.concat(expr.literal("SnapshotMigration: "), b.inputs.resourceName),
                     });
                 },
             )
-            .addStep("waitForSnapshot", ResourceManagement, "waitForDataSnapshot", c => {
+            .addStep("waitIndefinitelyForSnapshot", ResourceManagement, "waitIndefinitelyForDataSnapshot", c => {
                 const config = expr.deserializeRecord(snapshotMigrationConfigAsS3);
                 const snapshotNameRes = expr.get(config, "snapshotNameResolution");
                 return c.register({
@@ -955,8 +959,6 @@ export const FullMigration = WorkflowBuilder.create({
                         resourceUid: c.steps.reconcileSnapshotMigrationResource.outputs.resourceUid,
                         resourceCreationTimestamp: c.steps.reconcileSnapshotMigrationResource.outputs.resourceCreationTimestamp,
                         groupName_view: expr.get(snapshotMigrationConfig, "migrationLabel"),
-                        workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum"),
-                        checksumForReplayer: expr.dig(snapshotMigrationConfig, ["checksumForReplayer"], ""),
                         sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], "")
                     });
                 }, {
