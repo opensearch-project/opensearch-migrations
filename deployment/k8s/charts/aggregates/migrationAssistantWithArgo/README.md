@@ -76,11 +76,25 @@ kyvernoPolicies:
 
 ### Production Alternatives
 
-For production environments, use proper Kubernetes-native AWS authentication instead of mounting credentials:
+For production environments, use proper Kubernetes-native cloud authentication
+instead of mounting credentials:
+
+**AWS / EKS:**
 - **IAM Roles for Service Accounts (IRSA)** - EKS native IAM integration
 - **EKS Pod Identity** - Simplified IAM for pods
 - **AWS Secrets Manager** - Store credentials securely with CSI driver
 - **EC2 Instance Profiles** - Node-level credentials
+
+**GCP / GKE:**
+- **Workload Identity** - GKE-native binding of a Kubernetes ServiceAccount to a
+  Google Service Account; the chart's GKE overlay
+  ([`valuesGke.yaml`](./valuesGke.yaml)) annotates the migration console and
+  Argo workflow-executor ServiceAccounts with
+  `iam.gke.io/gcp-service-account` so RFS / metadata / snapshot pods can read
+  and write GCS without static credentials. Set `gcp.project=<your-gcp-project>`
+  when installing with this overlay (see
+  [deployment/terraform/gcp/README.md](../../../terraform/gcp/README.md) for the
+  full walkthrough that provisions the required GSA and IAM bindings).
 
 ## Additional Documentation
 

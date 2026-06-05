@@ -5,6 +5,10 @@ kind: ServiceAccount
 metadata:
   name: argo-workflow-executor
   namespace: {{ .Release.Namespace }}
+  {{- if and (eq .Values.cloudProvider "gcp") .Values.gcp.serviceAccountEmail }}
+  annotations:
+    iam.gke.io/gcp-service-account: {{ .Values.gcp.serviceAccountEmail | quote }}
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

@@ -1,0 +1,13 @@
+{{- if eq .Values.cloudProvider "gcp" }}
+{{- $gcpProject := required "Missing required value: .Values.gcp.project" .Values.gcp.project }}
+{{- $bucketName := .Values.gcsBucketConfiguration.bucketName | default (printf "migration-snapshots-%s" $gcpProject) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: migrations-default-gcs-config
+  labels:
+    workflows.argoproj.io/configmap-type: Parameter
+data:
+  GCS_BUCKET_NAME: {{ $bucketName | quote }}
+  GCS_ENDPOINT_URL: ""
+{{- end }}

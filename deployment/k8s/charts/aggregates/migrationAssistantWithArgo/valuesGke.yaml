@@ -1,0 +1,70 @@
+conditionalPackageInstalls:
+  localstack: false
+  jaeger: false
+  strimzi-kafka-operator: true
+  aws-privateca-issuer: false
+  ack-acmpca-controller: false
+  ack-cloudwatch-controller: false
+
+cloudProvider: gcp
+
+aws:
+  configureAwsEksResources: false
+  region: ""
+  account: ""
+
+gcp:
+  configureGkeResources: true
+  project: ""
+  region: us-central1
+  zone: ""
+  serviceAccountEmail: ""
+
+cluster:
+  dedicatedKarpenterNodePoolForMigrationConsole: false
+  useCustomKarpenterNodePool: false
+
+logs:
+  sharedLogsVolume:
+    enabled: false
+
+defaultBucketConfiguration:
+  useLocalStack: false
+  deleteOnUninstall: true
+  create: false
+
+kafkaExternal:
+  enabled: false
+  brokers: ""
+  authType: scram-sha-512
+  userName: ""
+  password: ""
+
+gcsBucketConfiguration:
+  create: false
+  deleteOnUninstall: false
+  emptyBeforeDelete: true
+  endpoint: ""
+  bucketOperationImage: "google/cloud-sdk:latest"
+  bucketOperationImagePullPolicy: "IfNotPresent"
+  serviceAccountName: "migrations-service-account"
+
+charts:
+  argo-workflows:
+    values:
+      artifactRepository:
+        s3: null
+  fluent-bit:
+    values:
+      extraVolumes:
+        - name: logs-pv
+          emptyDir: {}
+        - name: lua-scripts
+          configMap:
+            name: fluentbit-lua-scripts
+      extraVolumeMounts:
+        - name: logs-pv
+          mountPath: /shared_logs
+        - name: lua-scripts
+          mountPath: /fluentbit/scripts
+          readOnly: true

@@ -1,5 +1,7 @@
 # Development-specific values for local kubernetes environments
 
+cloudProvider: aws
+
 conditionalPackageInstalls:
   kyverno: true
 
