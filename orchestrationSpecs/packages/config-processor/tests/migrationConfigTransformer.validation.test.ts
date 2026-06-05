@@ -527,9 +527,18 @@ describe('MigrationConfigTransformer validation', () => {
         const proxyConfig = result.proxies[0].proxyConfig;
         const mountPath = proxyConfig.fileSourceVolumeMounts![0].mountPath;
 
+        // clientAuth is retained in tls (rides into the gated CR spec.tls); the
+        // flat fields below are the Deployment/Java-process projection of it.
         expect(proxyConfig.tls).toEqual({
             mode: "existingSecret",
-            secretName: "proxy-tls"
+            secretName: "proxy-tls",
+            clientAuth: {
+                required: true,
+                trustedClientCaFile: {
+                    configMap: "trusted-client-roots",
+                    path: "ca.crt"
+                }
+            }
         });
         expect(proxyConfig.sslTrustCertFile).toBe(`${mountPath}/ca.crt`);
         expect(proxyConfig.requireClientAuth).toBe(true);
@@ -562,7 +571,11 @@ describe('MigrationConfigTransformer validation', () => {
 
         expect(proxyConfig.tls).toEqual({
             mode: "existingSecret",
-            secretName: "proxy-tls"
+            secretName: "proxy-tls",
+            clientAuth: {
+                trustedClientCaPem: pem,
+                required: false
+            }
         });
         expect(proxyConfig.sslTrustCertPem).toBe(pem);
         expect(proxyConfig.sslTrustCertPemEnvVar).toBe("CAPTURE_PROXY_SSL_TRUST_CERT_PEM");
