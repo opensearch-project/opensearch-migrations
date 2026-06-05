@@ -1,4 +1,6 @@
-{{- if and (get .Values.conditionalPackageInstalls "argo-workflows") .Values.defaultBucketConfiguration.useLocalStack }}
+{{- if get .Values.conditionalPackageInstalls "argo-workflows" }}
+{{- if eq .Values.cloudProvider "aws" }}
+{{- if .Values.defaultBucketConfiguration.useLocalStack }}
 ---
 apiVersion: v1
 kind: Secret
@@ -11,4 +13,6 @@ type: Opaque
 stringData:
   accessKey: "test"
   secretKey: "test"
+{{- end }}
+{{- end }}
 {{- end }}
