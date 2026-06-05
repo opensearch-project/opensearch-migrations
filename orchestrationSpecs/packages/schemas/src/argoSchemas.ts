@@ -217,8 +217,11 @@ export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pic
     fileSourceVolumeMounts: true,
 }));
 
-// Resolved-only proxy fields that bridge to the Deployment/Java process but are
-// not part of the CaptureProxy CRD; stripped from the custom resource before apply.
+// Resolved/lowered proxy fields produced for the Deployment + Java process: the
+// flat sslTrustCert*/requireClientAuth projection of tls.clientAuth, plus resolved
+// file-source volume specs. The declarative source of truth rides in the CR under
+// spec.tls.clientAuth; these flattened copies are stripped from the custom resource
+// (they aren't top-level CRD spec fields, and would duplicate spec.tls.clientAuth).
 export const ARGO_PROXY_RESOLVED_ONLY_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick({
     sslTrustCertFile: true,
     sslTrustCertPem: true,
@@ -230,9 +233,9 @@ export const ARGO_PROXY_RESOLVED_ONLY_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick(
 
 // All keys stripped from the CaptureProxy custom resource: workflow-option fields
 // (re-added explicitly as spec fields by makeCaptureProxyManifest) plus the
-// resolved-only bridge fields above. Deduped because the two sets legitimately
-// overlap (e.g. sslTrustCertPem, fileSource*), so the rendered sprig.omit lists
-// each key once.
+// resolved/lowered bridge fields above (the flat projection of spec.tls.clientAuth).
+// Deduped because the two sets legitimately overlap (e.g. sslTrustCertPem,
+// fileSource*), so the rendered sprig.omit lists each key once.
 export const ARGO_PROXY_CR_OMITTED_KEYS = [
     ...new Set([...ARGO_PROXY_WORKFLOW_OPTION_KEYS, ...ARGO_PROXY_RESOLVED_ONLY_KEYS]),
 ];
