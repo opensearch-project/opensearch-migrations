@@ -92,13 +92,6 @@ public class GzipJsonLinesSink implements TupleSink {
     }
 
     @Override
-    public void periodicFlush() {
-        if (!pendingFutures.isEmpty()) {
-            rotate();
-        }
-    }
-
-    @Override
     public void close() {
         if (gzipOut == null) {
             return;

@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
@@ -61,7 +62,13 @@ public class S3TupleSink implements TupleSink {
     private final Duration rotateAfterAge;
     private final int rotateAfterTuples;
     private final Duration uploadRetryDelay;
-    private final ScheduledExecutorService retryExecutor;
+    // Single work thread that owns ALL buffer state (gzipOut / pendingFutures / currentFile /
+    // counters). accept()/flush()/close() marshal onto it, and it self-schedules the age-based
+    // flush. Because every buffer mutation runs on this one thread, no lock is needed — this is
+    // the sink's own "event loop". (The async S3 upload callback runs on an SDK thread but only
+    // touches atomics, never buffer state.) This also frees the Netty event loop from the
+    // gzip/serialize work that accept() used to do inline.
+    private final ScheduledExecutorService executor;
     private final AtomicInteger activeUploads = new AtomicInteger();
     private final AtomicBoolean closeRequested = new AtomicBoolean();
     private final AtomicLong sequenceCounter = new AtomicLong();
@@ -118,24 +125,32 @@ public class S3TupleSink implements TupleSink {
         this.rotateAfterAge = rotateAfterAge;
         this.rotateAfterTuples = rotateAfterTuples;
         this.uploadRetryDelay = uploadRetryDelay;
-        this.retryExecutor = Executors.newSingleThreadScheduledExecutor(makeRetryThreadFactory());
+        this.executor = Executors.newSingleThreadScheduledExecutor(makeWorkerThreadFactory());
         openNewStream();
+        // Self-scheduled age flush: re-checks file age on its own thread so a sink that stops
+        // receiving tuples still rotates its trailing batch (otherwise those tuple futures never
+        // complete and the replayer's Kafka offset never advances). Cadence is a fraction of the
+        // max age so the worst-case extra latency past max-age is bounded. Min 1s floor avoids a
+        // busy schedule for tiny test ages.
+        var flushPeriodMs = Math.max(1000L, rotateAfterAge.toMillis() / 2);
+        executor.scheduleAtFixedRate(
+            this::periodicFlushOnWorker, flushPeriodMs, flushPeriodMs, TimeUnit.MILLISECONDS);
     }
-
-    // accept() runs on the owning Netty event loop, but periodicFlush() is now driven from
-    // the replayer's shared scheduler thread (so the age-based rotation fires when traffic
-    // goes quiet — otherwise the trailing buffer's tuple futures never complete and the
-    // replayer's Kafka offset never advances). That cross-thread flush means the methods
-    // mutating the buffer (gzipOut / pendingFutures / currentFile) can no longer assume
-    // single-threaded access, so they synchronize on this lock. The lock is only ever held
-    // for local buffer bookkeeping + kicking off the async upload — never across the S3 call.
-    private final Object bufferLock = new Object();
 
     @Override
     public void accept(Map<String, Object> tupleMap, CompletableFuture<Void> future) {
-        synchronized (bufferLock) {
+        // Serialize the tuple on the calling (event-loop) thread so a serialization failure can
+        // be reported synchronously and the tupleMap isn't retained across threads. The actual
+        // buffer write is marshalled onto the worker thread.
+        final byte[] json;
+        try {
+            json = mapper.writeValueAsBytes(tupleMap);
+        } catch (IOException e) {
+            future.completeExceptionally(e);
+            return;
+        }
+        runOnWorker(() -> {
             try {
-                byte[] json = mapper.writeValueAsBytes(tupleMap);
                 gzipOut.write(json);
                 gzipOut.write('\n');
                 uncompressedBytes += json.length + 1;
@@ -148,48 +163,72 @@ public class S3TupleSink implements TupleSink {
             if (shouldRotate()) {
                 rotate(true);
             }
-        }
+        }, future);
     }
 
     @Override
     public void flush() {
-        synchronized (bufferLock) {
-            if (pendingFutures.isEmpty()) {
-                return;
-            }
-            rotate(true);
-        }
-    }
-
-    @Override
-    public void periodicFlush() {
-        synchronized (bufferLock) {
-            // Age-driven safety flush: only rotate if there are buffered tuples AND the file
-            // has reached its max age. Without the age gate this would upload a tiny object on
-            // every scheduler tick under steady traffic; shouldRotate() already covers size/count.
-            if (!pendingFutures.isEmpty() && hasReachedMaxAge()) {
+        runOnWorker(() -> {
+            if (!pendingFutures.isEmpty()) {
                 rotate(true);
             }
+        }, null);
+    }
+
+    /** Age-driven safety flush; runs on the worker thread (self-scheduled in the constructor).
+     * Only rotates buffered tuples once the file has reached its max age (size/count rotation is
+     * handled inline in accept()). */
+    private void periodicFlushOnWorker() {
+        if (!pendingFutures.isEmpty() && hasReachedMaxAge()) {
+            rotate(true);
         }
     }
 
     @Override
     public void close() {
         closeRequested.set(true);
-        synchronized (bufferLock) {
-            if (gzipOut == null) {
-                shutdownRetryExecutorIfDone();
-                return;
-            }
-            if (!pendingFutures.isEmpty()) {
-                rotate(false);
-            } else {
-                closeCurrentStream();
-                deleteFile(currentFile);
-                clearCurrentStream();
+        // Drain on the worker thread and block until it's done, so resources are released and
+        // pending tuples are flushed (their futures complete via the async upload) before return.
+        try {
+            runAndAwaitOnWorker(() -> {
+                if (gzipOut == null) {
+                    return;
+                }
+                if (!pendingFutures.isEmpty()) {
+                    rotate(false);
+                } else {
+                    closeCurrentStream();
+                    deleteFile(currentFile);
+                    clearCurrentStream();
+                }
+            });
+        } finally {
+            shutdownExecutorIfDone();
+        }
+    }
+
+    /** Submit buffer work to the single worker thread; on rejection (post-close) fail the
+     * associated future if any, so callers never wait forever. */
+    private void runOnWorker(Runnable task, CompletableFuture<Void> futureToFailOnReject) {
+        try {
+            executor.execute(task);
+        } catch (RejectedExecutionException e) {
+            if (futureToFailOnReject != null) {
+                futureToFailOnReject.completeExceptionally(e);
             }
         }
-        shutdownRetryExecutorIfDone();
+    }
+
+    private void runAndAwaitOnWorker(Runnable task) {
+        try {
+            executor.submit(task).get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (RejectedExecutionException e) {
+            // already shutting down — nothing to drain
+        } catch (java.util.concurrent.ExecutionException e) {
+            log.atError().setCause(e.getCause()).setMessage("Error draining S3 tuple sink on close").log();
+        }
     }
 
     private boolean shouldRotate() {
@@ -288,7 +327,7 @@ public class S3TupleSink implements TupleSink {
                 deleteFile(file);
                 futures.forEach(f -> f.complete(null));
                 activeUploads.decrementAndGet();
-                shutdownRetryExecutorIfDone();
+                shutdownExecutorIfDone();
                 return;
             }
 
@@ -299,7 +338,7 @@ public class S3TupleSink implements TupleSink {
                 .addArgument(attempt)
                 .addArgument(uploadRetryDelay::toMillis)
                 .log();
-            retryExecutor.schedule(
+            executor.schedule(
                 () -> uploadFileWithRetries(key, file, futures, attempt + 1),
                 uploadRetryDelay.toMillis(),
                 TimeUnit.MILLISECONDS
@@ -317,17 +356,17 @@ public class S3TupleSink implements TupleSink {
             .thenApply(r -> null);
     }
 
-    private ThreadFactory makeRetryThreadFactory() {
+    private ThreadFactory makeWorkerThreadFactory() {
         return runnable -> {
-            var thread = new Thread(runnable, "s3-tuple-sink-retry-" + sinkIndex);
+            var thread = new Thread(runnable, "s3-tuple-sink-worker-" + sinkIndex);
             thread.setDaemon(false);
             return thread;
         };
     }
 
-    private void shutdownRetryExecutorIfDone() {
+    private void shutdownExecutorIfDone() {
         if (closeRequested.get() && activeUploads.get() == 0) {
-            retryExecutor.shutdown();
+            executor.shutdown();
         }
     }
 
