@@ -54,19 +54,35 @@ def normalizeS3Config:
   else
     .
   end)
-  | del(.repoName, .useLocalStack);
+  | del(.repoName, .useLocalStack, .type);
+
+# Normalize GCS config inside snapshot.
+# Maps orchestration field names → console_link snapshot schema:
+#   gcsRepoPathUri → repo_uri
+def normalizeGcsConfig:
+  (if has("gcsRepoPathUri") then
+    .repo_uri = .gcsRepoPathUri | del(.gcsRepoPathUri)
+  else
+    .
+  end)
+  | del(.repoName, .type, .gcsRegion, .gcsEndpoint);
 
 def normalizeRepoConfig:
   if has("repoConfig") then
-    .s3 = (.repoConfig |
-      if has("awsRegion") then
-        .aws_region = .awsRegion | del(.awsRegion)
-      else
-        .
-      end
-      | normalizeS3Config)
+    (if (.repoConfig.type // "s3") == "gcs" then
+      .gcs = (.repoConfig | normalizeGcsConfig)
+    else
+      .s3 = (.repoConfig |
+        if has("awsRegion") then
+          .aws_region = .awsRegion | del(.awsRegion)
+        else
+          .
+        end
+        | normalizeS3Config)
+    end)
     | del(.repoConfig)
   elif has("s3") then
+    # Legacy path: services config already in console_link shape with top-level s3.
     .s3 |= normalizeS3Config
   else
     .

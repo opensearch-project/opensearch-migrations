@@ -1,0 +1,209 @@
+# GCS variant of fullMigrationImportedClusters.yaml.
+# Builds an OVERALL_MIGRATION_CONFIG whose sourceClusters[*].snapshotInfo.repos.default
+# uses { type: "gcs", gcsRepoPathUri } instead of S3.
+#
+# Requires:
+#   - migrations-default-gcs-config configmap (rendered when cloudProvider=gcp) with keys:
+#       GCS_BUCKET_NAME, GCS_ENDPOINT_URL (optional)
+#   - argo-test-workflow-executor SA annotated with iam.gke.io/gcp-service-account
+#     bound to a GSA with roles/storage.objectAdmin on the bucket.
+#
+# Sizing note:
+#   The RFS migration request defaults to maxShardSizeBytes = 80 GiB, which
+#   produces an ephemeral-storage request of ~200 GiB per RFS worker
+#   (formula: ceil(2.5 * maxShardSizeBytes)). The default GKE node pool
+#   (e2-standard-4 + 50 GB boot disk) only has ~17.5 GiB allocatable
+#   ephemeral storage, so RFS pods will not schedule unless you either
+#   (a) lower maxShardSizeBytes in the submitted migrationConfig to match
+#   the largest real shard (e.g. 5368709120 / 5 GiB for the bundled
+#   ES 7.10 test snapshot), or (b) increase node_disk_size in terraform.
+#   See deployment/terraform/gcp/README.md for details.
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: full-migration-imported-clusters-gcs
+spec:
+  serviceAccountName: argo-test-workflow-executor
+  entrypoint: main
+  parallelism: 100
+
+  arguments:
+    parameters:
+      - name: gcs-snapshot-configmap
+        value: "migrations-default-gcs-config"
+      - name: migration-image-configmap
+        value: "migration-image-config"
+      - name: monitor-retry-limit
+        value: "33"
+
+  templates:
+    - name: main
+      inputs:
+        parameters:
+          - name: source-configs
+            description: "Array of source cluster configs with snapshot-and-migration-configs"
+          - name: target-config
+            description: "Target cluster configuration JSON"
+          - name: imageMigrationConsoleLocation
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.migration-image-configmap}}"
+                key: migrationConsoleImage
+          - name: imageMigrationConsolePullPolicy
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.migration-image-configmap}}"
+                key: migrationConsolePullPolicy
+      steps:
+        - - name: generate-migration-configs
+            template: generate-migration-configs
+            arguments:
+              parameters:
+                - name: source-configs
+                  value: "{{inputs.parameters.source-configs}}"
+                - name: target-config
+                  value: "{{inputs.parameters.target-config}}"
+                - name: imageMigrationConsoleLocation
+                  value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                - name: imageMigrationConsolePullPolicy
+                  value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+
+        - - name: run-full-migration-with-workflow-cli
+            templateRef:
+              name: full-migration-with-workflow-cli
+              template: main
+            arguments:
+              parameters:
+                - name: migrationConfigBase64
+                  value: "{{steps.generate-migration-configs.outputs.parameters.migrationConfigBase64}}"
+                - name: imageMigrationConsoleLocation
+                  value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                - name: imageMigrationConsolePullPolicy
+                  value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+
+    - name: generate-migration-configs
+      inputs:
+        parameters:
+          - name: source-configs
+          - name: target-config
+          - name: imageMigrationConsoleLocation
+          - name: imageMigrationConsolePullPolicy
+          - name: gcsBucketName
+            valueFrom:
+              configMapKeyRef:
+                name: "{{workflow.parameters.gcs-snapshot-configmap}}"
+                key: GCS_BUCKET_NAME
+      container:
+        image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+        imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+        command: [sh, -c]
+        args:
+          - |
+            set -e
+
+            SOURCE_CONFIGS='{{inputs.parameters.source-configs}}'
+            TARGET_CONFIG='{{inputs.parameters.target-config}}'
+            GCS_BUCKET='{{inputs.parameters.gcsBucketName}}'
+
+            SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+
+            # Build snapshot repo config (GCS discriminator)
+            SNAPSHOT_REPO=$(jq -n \
+              --arg bucket "$GCS_BUCKET" \
+              --arg suffix "$SUFFIX" \
+              '{
+                "type": "gcs",
+                "gcsRepoPathUri": ("gs://" + $bucket + "/" + $suffix)
+              }')
+
+            # Build sourceClusters map from source-configs array with schema transformation
+            # Supports both standard (configmap GCS repo) and BYOS (source-provided snapshotRepo)
+            SOURCE_CLUSTERS=$(echo "$SOURCE_CONFIGS" | jq --argjson repo "$SNAPSHOT_REPO" '
+              reduce to_entries[] as $e ({};
+                .["source\($e.key + 1)"] = (
+                  $e.value as $entry |
+                  $entry.source
+                  # Transform version format: ES_7.10 -> ES 7.10
+                  | .version = (.version | gsub("_"; " "))
+                  # Rename allow_insecure to allowInsecure
+                  | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+                  # Move sigv4 under authConfig
+                  | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+                  # Move basic_auth under authConfig.basic with secretName
+                  | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
+                  # Remove unrecognized fields
+                  | del(.no_auth) | del(.snapshotRepo)
+                  # Build snapshotInfo based on whether snapshot is externally managed (BYOS) or not
+                  | (($entry["snapshot-and-migration-configs"][0].snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName // null) as $extSnap |
+                    if $extSnap != null then
+                      (($entry.source.snapshotRepo // null) as $srcRepo |
+                      . + {"snapshotInfo": {
+                        "repos": {"default": (if $srcRepo != null then ($repo + {gcsRepoPathUri: $srcRepo.gcsRepoPathUri}) else $repo end)},
+                        "snapshots": {
+                          ($extSnap): {
+                            "repoName": "default",
+                            "config": {"externallyManagedSnapshotName": $extSnap}
+                          }
+                        }
+                      }})
+                    else
+                      . + {"snapshotInfo": {
+                        "repos": {"default": $repo},
+                        "snapshots": {
+                          "testsnapshot": {
+                            "repoName": "default",
+                            "config": {"createSnapshotConfig": {}}
+                          }
+                        }
+                      }}
+                    end)
+                )
+              )')
+
+            # Transform target config to match schema
+            TARGET_TRANSFORMED=$(echo "$TARGET_CONFIG" | jq '
+              del(.version)
+              | if has("allow_insecure") then .allowInsecure = .allow_insecure | del(.allow_insecure) else . end
+              | if has("sigv4") then .authConfig = {sigv4: .sigv4} | del(.sigv4) else . end
+              | if has("basic_auth") then .authConfig = {basic: {secretName: .basic_auth.k8s_secret_name}} | del(.basic_auth) else . end
+            ')
+
+            # Build perSnapshotConfig: snapshot name -> migrations array
+            SNAPSHOT_CONFIGS=$(echo "$SOURCE_CONFIGS" | jq '
+              .[0]["snapshot-and-migration-configs"][0] as $smc |
+              if ($smc.snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName // null) != null then
+                {($smc.snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName): $smc.migrations}
+              else
+                {"testsnapshot": $smc.migrations}
+              end
+            ')
+
+            # Build the complete OVERALL_MIGRATION_CONFIG
+            MIGRATION_CONFIG=$(jq -n \
+              --argjson sources "$SOURCE_CLUSTERS" \
+              --argjson target "$TARGET_TRANSFORMED" \
+              --argjson snapshotConfigs "$SNAPSHOT_CONFIGS" \
+              '{
+                "skipApprovals": true,
+                "sourceClusters": $sources,
+                "targetClusters": {
+                  "target1": $target
+                },
+                "snapshotMigrationConfigs": [{
+                  "fromSource": "source1",
+                  "toTarget": "target1",
+                  "perSnapshotConfig": $snapshotConfigs
+                }]
+              }')
+
+            MIGRATION_CONFIG_BASE64=$(echo "$MIGRATION_CONFIG" | base64 | tr -d '\n')
+
+            echo "Generated GCS migration config:"
+            echo "$MIGRATION_CONFIG" | jq .
+
+            echo "$MIGRATION_CONFIG_BASE64" > /tmp/migration-config-base64
+      outputs:
+        parameters:
+          - name: migrationConfigBase64
+            valueFrom:
+              path: /tmp/migration-config-base64
