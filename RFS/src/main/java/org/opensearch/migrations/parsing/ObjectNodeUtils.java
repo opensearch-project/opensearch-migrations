@@ -9,8 +9,20 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 public class ObjectNodeUtils {
     private ObjectNodeUtils() {}
 
+    /**
+     * Removes a setting addressed by a dotted path, tolerating both shapes seen in
+     * index-settings JSON: a literal flat key (settings["index.knn.algo_param.m"])
+     * or a nested-object path (settings.index.knn.algo_param.m). The flat key is
+     * matched first. This flat-key handling is what stops ES 7.x index-level knn
+     * params from surviving IndexCreator's strip-and-retry into an infinite loop.
+     */
     public static void removeFieldsByPath(ObjectNode node, String path) {
-        if (node == null) {
+        if (node == null || path == null || path.isEmpty()) {
+            return;
+        }
+
+        if (node.has(path)) {
+            node.remove(path);
             return;
         }
 
