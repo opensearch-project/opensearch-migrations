@@ -107,7 +107,7 @@ class S3TupleSinkTest {
     }
 
     @Test
-    void closeUploadsPendingTuple() throws Exception {
+    void closeUploadsPendingTupleAndAwaitsUpload() throws Exception {
         var s3Client = mock(S3AsyncClient.class);
         var upload = new CompletableFuture<PutObjectResponse>();
         var putCallCount = new AtomicInteger();
@@ -119,19 +119,19 @@ class S3TupleSinkTest {
             });
 
         var sink = makeSink(s3Client, 100);
-        try {
-            var future = new CompletableFuture<Void>();
-            sink.accept(makeTuple("conn1.0"), future);
+        var future = new CompletableFuture<Void>();
+        sink.accept(makeTuple("conn1.0"), future);
 
-            sink.close();
-            assertEquals(1, putCallCount.get(), "Close should upload pending tuples before releasing them");
-            assertFalse(future.isDone(), "Tuple future should still wait for the upload result");
+        // Complete the upload shortly after close() starts waiting for it
+        var closer = new Thread(() -> sink.close());
+        closer.start();
+        waitForPutCalls(putCallCount, 1);
+        upload.complete(PutObjectResponse.builder().build());
+        closer.join(5000);
+        assertFalse(closer.isAlive(), "close() should return after uploads complete");
 
-            upload.complete(PutObjectResponse.builder().build());
-            future.get(1, TimeUnit.SECONDS);
-        } finally {
-            sink.close();
-        }
+        assertTrue(future.isDone(), "Tuple future should be done after close() awaits upload");
+        future.get(1, TimeUnit.SECONDS);
     }
 
     @Test

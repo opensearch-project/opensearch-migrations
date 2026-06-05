@@ -694,26 +694,21 @@ describe('MigrationConfigTransformer validation', () => {
                     },
                     template: {
                         pod: {
-                            affinity: {
-                                podAntiAffinity: {
-                                    preferredDuringSchedulingIgnoredDuringExecution: [
-                                        {
-                                            weight: 100,
-                                            podAffinityTerm: {
-                                                labelSelector: {
-                                                    matchExpressions: [
-                                                        {
-                                                            key: "strimzi.io/name",
-                                                            operator: "Exists",
-                                                        },
-                                                    ],
-                                                },
-                                                topologyKey: "kubernetes.io/hostname",
+                            topologySpreadConstraints: [
+                                {
+                                    maxSkew: 1,
+                                    topologyKey: "kubernetes.io/hostname",
+                                    whenUnsatisfiable: "ScheduleAnyway",
+                                    labelSelector: {
+                                        matchExpressions: [
+                                            {
+                                                key: "strimzi.io/name",
+                                                operator: "Exists",
                                             },
-                                        },
-                                    ],
+                                        ],
+                                    },
                                 },
-                            },
+                            ],
                         },
                     },
                 },

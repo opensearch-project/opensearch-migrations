@@ -202,8 +202,30 @@ public class S3TupleSink implements TupleSink {
                     clearCurrentStream();
                 }
             });
+            // Wait for all in-flight S3 uploads to finish so their tuple futures complete
+            // (which triggers Kafka offset commits) before the JVM exits. Without this,
+            // the replayer would re-deliver already-processed messages on the next startup.
+            awaitUploadsComplete();
         } finally {
             shutdownExecutorIfDone();
+        }
+    }
+
+    private void awaitUploadsComplete() {
+        long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(5);
+        while (activeUploads.get() > 0) {
+            if (System.nanoTime() - deadline > 0) {
+                log.atError().setMessage("Timed out waiting for {} in-flight S3 uploads to complete on close")
+                    .addArgument(activeUploads::get).log();
+                break;
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.atWarn().setMessage("Interrupted while waiting for S3 uploads to complete on close").log();
+                break;
+            }
         }
     }
 
