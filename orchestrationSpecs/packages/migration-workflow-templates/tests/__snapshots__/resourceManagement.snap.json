@@ -14,6 +14,10 @@
           "value": "s3-snapshot-config"
         },
         {
+          "name": "gcsSnapshotConfigMap",
+          "value": "gcs-snapshot-config"
+        },
+        {
           "name": "imageConfigMapName",
           "value": "migration-image-config"
         },
@@ -247,6 +251,12 @@
               "name": "resourceCreationTimestamp",
               "valueFrom": {
                 "jsonPath": "{.metadata.creationTimestamp}"
+              }
+            },
+            {
+              "name": "resourceUid",
+              "valueFrom": {
+                "jsonPath": "{.metadata.uid}"
               }
             }
           ]
@@ -1410,6 +1420,12 @@
               "name": "resourceCreationTimestamp",
               "valueFrom": {
                 "expression": "((steps.tryApply.status == 'Succeeded') ? (steps.tryApply.outputs.parameters.resourceCreationTimestamp) : (''))"
+              }
+            },
+            {
+              "name": "resourceUid",
+              "valueFrom": {
+                "expression": "((steps.tryApply.status == 'Succeeded') ? (steps.tryApply.outputs.parameters.resourceUid) : (''))"
               }
             }
           ]
