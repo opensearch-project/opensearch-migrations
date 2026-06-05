@@ -35,6 +35,9 @@ TrafficCapture/dockerSolution/src/main/docker/migrationConsole/staging
 DocumentsFromSnapshotMigration/docker/snapshots/
 transformation/standardJavascriptTransforms/coverage/
 transformation/standardJavascriptTransforms/node_modules/
+schema-viewer/node_modules/
+schema-viewer/package-lock.json
+schema-viewer/schemas/
 orchestrationSpecs/k8sResources/
 orchestrationSpecs/dist/
 orchestrationSpecs/node_modules/
