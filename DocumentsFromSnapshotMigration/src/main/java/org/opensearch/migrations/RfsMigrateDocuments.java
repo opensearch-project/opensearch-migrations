@@ -29,6 +29,8 @@ import org.opensearch.migrations.bulkload.SnapshotExtractor;
 import org.opensearch.migrations.bulkload.common.DeltaMode;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
+import org.opensearch.migrations.bulkload.common.GcsRepo;
+import org.opensearch.migrations.bulkload.common.GcsUri;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3Repo;
@@ -189,6 +191,20 @@ public class RfsMigrateDocuments {
             description = ("The endpoint URL to use for S3 calls.  " +
                 "For use when the default AWS ones won't work for a particular context."))
         public String s3Endpoint = null;
+
+        @Parameter(required = false,
+            names = { "--gcs-repo-uri", "--gcsRepoUri" },
+            description = ("The GCS URI of the snapshot repo, like: gs://my-bucket/dir1/dir2.  " +
+                "If you supply this, you must also supply --gcs-local-dir.  " +
+                "Mutually exclusive with --snapshot-local-dir and S3 args."))
+        public String gcsRepoUri = null;
+
+        @Parameter(required = false,
+            names = { "--gcs-local-dir", "--gcsLocalDir" },
+            description = ("The absolute path to the directory on local disk to download GCS files to.  " +
+                "If you supply this, you must also supply --gcs-repo-uri.  " +
+                "Mutually exclusive with --snapshot-local-dir and S3 args."))
+        public String gcsLocalDir = null;
 
         @Parameter(required = false,
             names = { "--lucene-dir", "--luceneDir" },
@@ -436,6 +452,8 @@ public class RfsMigrateDocuments {
         boolean isSnapshotLocalDirProvided = args.snapshotLocalDir != null;
         boolean areAllS3ArgsProvided = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
         boolean areAnyS3ArgsProvided = args.s3LocalDir != null || args.s3RepoUri != null || args.s3Region != null;
+        boolean areAllGcsArgsProvided = args.gcsRepoUri != null && args.gcsLocalDir != null;
+        boolean areAnyGcsArgsProvided = args.gcsRepoUri != null || args.gcsLocalDir != null;
 
         // Solr backup path requires either local dir or S3 args
         if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
@@ -464,9 +482,11 @@ public class RfsMigrateDocuments {
             throw new ParameterException("--source-version is required when --source-type is SNAPSHOT.");
         }
 
-        if (isSnapshotLocalDirProvided && areAnyS3ArgsProvided) {
+        // Count how many source types are provided
+        int sourceCount = (isSnapshotLocalDirProvided ? 1 : 0) + (areAnyS3ArgsProvided ? 1 : 0) + (areAnyGcsArgsProvided ? 1 : 0);
+        if (sourceCount > 1) {
             throw new ParameterException(
-                "You must provide either --snapshot-local-dir or --s3-local-dir, --s3-repo-uri, and --s3-region, but not both."
+                "You must provide only one of: --snapshot-local-dir, S3 args (--s3-local-dir, --s3-repo-uri, --s3-region), or GCS args (--gcs-repo-uri, --gcs-local-dir)."
             );
         }
 
@@ -476,9 +496,15 @@ public class RfsMigrateDocuments {
             );
         }
 
-        if (!isSnapshotLocalDirProvided && !areAllS3ArgsProvided) {
+        if (areAnyGcsArgsProvided && !areAllGcsArgsProvided) {
             throw new ParameterException(
-                "You must provide either --snapshot-local-dir or --s3-local-dir, --s3-repo-uri, and --s3-region."
+                "If providing GCS args, you must provide both --gcs-repo-uri and --gcs-local-dir."
+            );
+        }
+
+        if (!isSnapshotLocalDirProvided && !areAllS3ArgsProvided && !areAllGcsArgsProvided) {
+            throw new ParameterException(
+                "You must provide either --snapshot-local-dir, S3 args (--s3-local-dir, --s3-repo-uri, --s3-region), or GCS args (--gcs-repo-uri, --gcs-local-dir)."
             );
         }
         
@@ -722,14 +748,22 @@ public class RfsMigrateDocuments {
                     arguments.sourceVersion,
                     arguments.versionStrictness.allowLooseVersionMatches);
 
-            SourceRepo sourceRepo = (snapshotLocalDirPath == null)
-                ? S3Repo.create(
+            SourceRepo sourceRepo;
+            if (snapshotLocalDirPath != null) {
+                sourceRepo = new FileSystemRepo(snapshotLocalDirPath, finder);
+            } else if (arguments.gcsRepoUri != null) {
+                sourceRepo = GcsRepo.create(
+                    Paths.get(arguments.gcsLocalDir),
+                    new GcsUri(arguments.gcsRepoUri),
+                    finder);
+            } else {
+                sourceRepo = S3Repo.create(
                     Paths.get(arguments.s3LocalDir),
                     new S3Uri(arguments.s3RepoUri),
                     arguments.s3Region,
                     Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null),
-                    finder)
-                : new FileSystemRepo(snapshotLocalDirPath, finder);
+                    finder);
+            }
 
             var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(
                 arguments.sourceVersion, sourceRepo, arguments.versionStrictness.allowLooseVersionMatches);
