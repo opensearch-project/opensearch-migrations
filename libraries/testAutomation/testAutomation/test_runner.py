@@ -418,7 +418,6 @@ class TestRunner:
                                              target_version=target_version,
                                              keep_workflows=keep_workflows,
                                              reuse_clusters=reuse_clusters,
-                                             skip_workflow_reset=skip_delete,
                                              test_reports_dir=test_reports_dir)
                 test_reports.append(test_report)
 
