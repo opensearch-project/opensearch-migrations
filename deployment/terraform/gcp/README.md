@@ -23,9 +23,9 @@ terraform apply -var="project=my-project" \
   -var="region=us-central1" \
   -var="cluster_type=standard"
 
-# Get kubeconfig
-gcloud container clusters get-credentials migration-cluster \
-  --region us-central1 --project my-project
+# Get kubeconfig (cluster name is dynamically generated)
+gcloud container clusters get-credentials $(terraform output -raw cluster_name) \
+  --region $(terraform output -raw cluster_location) --project my-project
 
 # Deploy migration assistant Helm chart
 helm install migration-assistant \

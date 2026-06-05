@@ -156,7 +156,7 @@ describe('migration initializer CRD resource generation', () => {
         expect(enrichScript).toContain('snapshotMigrations: {');
         expect(enrichScript).toContain('"source-target-snap1-migration-0": $snapshot_migration_source_target_snap1_migration_0');
         expect(enrichScript).toContain(
-            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[crdname(.sourceLabel + "-" + .targetConfig.label + "-" + .label + "-" + .migrationLabel)]}))'
+            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + "-" + .targetConfig.label + "-" + .label + "-" + .migrationLabel)]}))'
         );
     });
 
@@ -376,7 +376,7 @@ describe('migration initializer CRD resource generation', () => {
         expect(enrichScript).toContain('snapshotMigrations: {');
         expect(enrichScript).toContain('"source-target-snap1-migration-0": $snapshot_migration_source_target_snap1_migration_0');
         expect(enrichScript).toContain(
-            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[crdname(.sourceLabel + "-" + .targetConfig.label + "-" + .label + "-" + .migrationLabel)]}))'
+            '.snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + "-" + .targetConfig.label + "-" + .label + "-" + .migrationLabel)]}))'
         );
     });
 });

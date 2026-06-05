@@ -153,8 +153,10 @@ To deploy the solution on Google Cloud:
    ```bash
    terraform -chdir=deployment/terraform/gcp apply \
      -var="project=<your-gcp-project>"
-   gcloud container clusters get-credentials migration-cluster \
-     --region us-central1 --project <your-gcp-project>
+   gcloud container clusters get-credentials \
+     $(terraform -chdir=deployment/terraform/gcp output -raw cluster_name) \
+     --region $(terraform -chdir=deployment/terraform/gcp output -raw cluster_location) \
+     --project <your-gcp-project>
    ```
 
 2. **Install the Helm chart** with the GKE overlay
