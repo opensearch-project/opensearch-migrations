@@ -217,6 +217,17 @@ export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pic
     fileSourceVolumeMounts: true,
 }));
 
+// Resolved-only proxy fields that bridge to the Deployment/Java process but are
+// not part of the CaptureProxy CRD; stripped from the custom resource before apply.
+export const ARGO_PROXY_RESOLVED_ONLY_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick({
+    sslTrustCertFile: true,
+    sslTrustCertPem: true,
+    sslTrustCertPemEnvVar: true,
+    requireClientAuth: true,
+    fileSourceVolumes: true,
+    fileSourceVolumeMounts: true,
+}));
+
 export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
     USER_REPLAYER_OPTIONS.omit({
         requestTransforms: true,

@@ -421,7 +421,7 @@ function prepareProxyConfig(
     const tls = config.tls;
 
     if (tls !== undefined && "clientAuth" in tls && tls.clientAuth !== undefined) {
-        const {clientAuth, ...tlsWithoutClientAuth} = tls;
+        const {clientAuth} = tls;
         const trustCertConfig = clientAuth.trustedClientCaFile !== undefined
             ? {
                 sslTrustCertFile: fileSourceRegistry.resolveFileRef(clientAuth.trustedClientCaFile)
@@ -430,9 +430,10 @@ function prepareProxyConfig(
                 sslTrustCertPem: clientAuth.trustedClientCaPem,
                 sslTrustCertPemEnvVar: CAPTURE_PROXY_SSL_TRUST_CERT_PEM_ENV_VAR
             };
+        // Keep clientAuth inside tls so it rides into the CR's gated spec.tls subtree;
+        // the flat sslTrustCert*/requireClientAuth fields are Deployment-only plumbing.
         return ARGO_PROXY_OPTIONS.parse({
             ...config,
-            tls: tlsWithoutClientAuth,
             ...trustCertConfig,
             requireClientAuth: clientAuth.required ?? true,
             ...fileSourceRegistry.resolvedFields,
