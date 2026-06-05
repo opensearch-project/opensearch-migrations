@@ -29,6 +29,17 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>Each instance is single-threaded (one per Netty event loop). The {@code threadIndex}
  * is embedded in filenames to avoid collisions between concurrent writers.</p>
+ *
+ * <p><b>Known limitation — no idle age-flush.</b> Like the original {@link S3TupleSink},
+ * the {@code maxFileAge} threshold is only re-evaluated inside {@link #accept} (via
+ * {@link #shouldRotate}). If this sink stops receiving tuples, the trailing batch is never
+ * rotated and its pending futures never complete — which, in a replay context, would pin the
+ * Kafka consumer offset (the commit is gated on durable tuple output). {@code S3TupleSink} was
+ * fixed by self-scheduling the age flush on its own worker thread; this sink does NOT yet do
+ * that. It is currently test-only (no production {@code new GzipJsonLinesSink}), so this is a
+ * latent gap, not a live bug — but anything that wires it into a running replayer must add an
+ * equivalent self-scheduled/periodic age flush first. See {@code S3TupleSink}'s scheduled
+ * {@code periodicFlushOnWorker} for the pattern.</p>
  */
 @Slf4j
 public class GzipJsonLinesSink implements TupleSink {
@@ -111,6 +122,11 @@ public class GzipJsonLinesSink implements TupleSink {
     }
 
     private boolean shouldRotate() {
+        // NOTE: the maxFileAge branch only fires when this is evaluated — and it is only
+        // evaluated from accept(). A sink that goes idle will therefore never rotate on age
+        // alone; the trailing batch waits for the next tuple (or close()). S3TupleSink solved
+        // this with a self-scheduled age flush; replicate that here before using this sink in a
+        // running replayer. See the class-level "Known limitation" note.
         return uncompressedBytes >= rotateAfterBytes
             || Duration.between(fileOpenedAt, Instant.now()).compareTo(maxFileAge) >= 0;
     }

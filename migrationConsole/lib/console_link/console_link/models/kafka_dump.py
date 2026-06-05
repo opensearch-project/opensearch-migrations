@@ -135,7 +135,6 @@ def _discover_kafka_auth_configmap(k8s_client, namespace: str) -> str:
 
 def _build_dump_args(
     kafka: Kafka,
-    cluster_name: Optional[str],
     topic: str,
     mode: str,
     start_offset: Optional[int],
@@ -174,6 +173,51 @@ def _build_dump_args(
     return args
 
 
+def _build_scram_pod_extras(
+    is_scram: bool,
+    cluster_name: Optional[str],
+    mount_auth: bool,
+    kafka_auth_configmap: Optional[str],
+) -> tuple:
+    """Build (env, volumes, volume_mounts) for the dump pod's SCRAM wiring.
+
+    Returns empty lists for non-SCRAM auth. The SCRAM password is injected by k8s
+    from the same Secret the replayer uses (secretKeyRef) — never handled by the
+    console or placed in argv. The CA cert + client.properties are mounted from the
+    workflow's existing kafka-auth ConfigMap / cluster-ca-cert Secret.
+    """
+    env: List[dict] = []
+    volumes: List[dict] = []
+    volume_mounts: List[dict] = []
+    if not is_scram:
+        return env, volumes, volume_mounts
+
+    scram_secret = f"{cluster_name}-migration-app" if cluster_name else None
+    if scram_secret:
+        env.append({
+            "name": SCRAM_PASSWORD_ENV_VAR,
+            "valueFrom": {"secretKeyRef": {"name": scram_secret, "key": "password"}},
+        })
+    if not mount_auth:
+        return env, volumes, volume_mounts
+
+    volumes.append({"name": "kafka-auth-config", "configMap": {"name": kafka_auth_configmap}})
+    volume_mounts.append({
+        "name": "kafka-auth-config",
+        "mountPath": KAFKA_AUTH_CONFIG_MOUNT_PATH,
+        "readOnly": True,
+    })
+    ca_secret = f"{cluster_name}-cluster-ca-cert" if cluster_name else None
+    if ca_secret:
+        volumes.append({"name": "kafka-ca", "secret": {"secretName": ca_secret}})
+        volume_mounts.append({
+            "name": "kafka-ca",
+            "mountPath": KAFKA_CA_MOUNT_PATH,
+            "readOnly": True,
+        })
+    return env, volumes, volume_mounts
+
+
 def build_dump_pod_manifest(
     kafka: Kafka,
     *,
@@ -202,46 +246,14 @@ def build_dump_pod_manifest(
         "image": image,
         "imagePullPolicy": pull_policy,
         "args": _build_dump_args(
-            kafka, cluster_name, topic, mode,
+            kafka, topic, mode,
             start_offset, end_offset, start_time, end_time,
             auth_configmap_mounted=mount_auth,
         ),
     }
 
-    volumes: List[dict] = []
-    volume_mounts: List[dict] = []
-    env: List[dict] = []
-
-    if is_scram:
-        # Password injected by k8s from the same Secret the replayer uses;
-        # never handled by the console or placed in argv.
-        scram_secret = f"{cluster_name}-migration-app" if cluster_name else None
-        if scram_secret:
-            env.append({
-                "name": SCRAM_PASSWORD_ENV_VAR,
-                "valueFrom": {"secretKeyRef": {"name": scram_secret, "key": "password"}},
-            })
-        if mount_auth:
-            volumes.append({
-                "name": "kafka-auth-config",
-                "configMap": {"name": kafka_auth_configmap},
-            })
-            volume_mounts.append({
-                "name": "kafka-auth-config",
-                "mountPath": KAFKA_AUTH_CONFIG_MOUNT_PATH,
-                "readOnly": True,
-            })
-            ca_secret = f"{cluster_name}-cluster-ca-cert" if cluster_name else None
-            if ca_secret:
-                volumes.append({
-                    "name": "kafka-ca",
-                    "secret": {"secretName": ca_secret},
-                })
-                volume_mounts.append({
-                    "name": "kafka-ca",
-                    "mountPath": KAFKA_CA_MOUNT_PATH,
-                    "readOnly": True,
-                })
+    env, volumes, volume_mounts = _build_scram_pod_extras(
+        is_scram, cluster_name, mount_auth, kafka_auth_configmap)
 
     if volume_mounts:
         container["volumeMounts"] = volume_mounts
@@ -342,53 +354,63 @@ def launch_dump_pod(
     echo(f"Launching dump pod '{pod_name}' (mode={mode}, topic={topic}, image={image}{bounds_str})")
 
     try:
-        apply = subprocess.run(
-            _kubectl(["apply", "-f", "-"], namespace),
-            input=json.dumps(manifest), capture_output=True, text=True,
-        )
-        if apply.returncode != 0:
-            return CommandResult(
-                success=False,
-                value=f"Failed to create dump pod: {apply.stderr.strip() or apply.stdout.strip()}",
-            )
-
-        # Wait for the pod to start (or fail to schedule) before tailing.
-        wait = subprocess.run(
-            _kubectl(["wait", f"pod/{pod_name}", "--for=condition=Ready",
-                      f"--timeout={pod_timeout_seconds}s"], namespace),
-            capture_output=True, text=True,
-        )
-        # `kubectl wait` returns non-zero if the pod already completed (Ready
-        # never goes true for a short-lived pod). That's fine — fall through to
-        # logs, which will replay everything from the start.
-        if wait.returncode != 0:
-            logger.debug("kubectl wait returned %d (pod may have already completed): %s",
-                         wait.returncode, wait.stderr.strip())
-
-        echo(f"--- begin {topic} dump ({mode}) ---")
-        logs = subprocess.run(
-            _kubectl(["logs", "-f", pod_name, "--all-containers=true"], namespace),
-            capture_output=True, text=True, timeout=pod_timeout_seconds,
-        )
-        if logs.stdout:
-            echo(logs.stdout.rstrip())
-        if logs.returncode != 0 and logs.stderr:
-            echo(f"(log stream warning: {logs.stderr.strip()})")
-        echo(f"--- end {topic} dump ---")
-        return CommandResult(success=True, value=f"Dump pod '{pod_name}' completed.")
+        return _apply_and_stream_dump_pod(
+            manifest, pod_name, namespace, topic, mode, pod_timeout_seconds, echo)
     except subprocess.TimeoutExpired:
         return CommandResult(
             success=False,
             value=f"Dump pod '{pod_name}' did not finish within {pod_timeout_seconds}s.",
         )
     finally:
-        # Best-effort teardown — also covers Ctrl-C during the log stream.
-        delete = subprocess.run(
-            _kubectl(["delete", "pod", pod_name, "--ignore-not-found",
-                      "--wait=false"], namespace),
-            capture_output=True, text=True,
+        _delete_dump_pod(pod_name, namespace)
+
+
+def _apply_and_stream_dump_pod(manifest, pod_name, namespace, topic, mode,
+                               pod_timeout_seconds, echo) -> CommandResult:
+    """Apply the dump pod, wait for it to start, and stream its logs to `echo`.
+    Teardown is the caller's responsibility (finally block)."""
+    apply = subprocess.run(
+        _kubectl(["apply", "-f", "-"], namespace),
+        input=json.dumps(manifest), capture_output=True, text=True,
+    )
+    if apply.returncode != 0:
+        return CommandResult(
+            success=False,
+            value=f"Failed to create dump pod: {apply.stderr.strip() or apply.stdout.strip()}",
         )
-        if delete.returncode == 0:
-            logger.info("Deleted dump pod '%s'", pod_name)
-        else:
-            logger.warning("Could not delete dump pod '%s': %s", pod_name, delete.stderr.strip())
+
+    # Wait for the pod to start (or fail to schedule) before tailing. `kubectl wait`
+    # returns non-zero if the pod already completed (Ready never goes true for a
+    # short-lived pod). That's fine — fall through to logs, which replay from the start.
+    wait = subprocess.run(
+        _kubectl(["wait", f"pod/{pod_name}", "--for=condition=Ready",
+                  f"--timeout={pod_timeout_seconds}s"], namespace),
+        capture_output=True, text=True,
+    )
+    if wait.returncode != 0:
+        logger.debug("kubectl wait returned %d (pod may have already completed): %s",
+                     wait.returncode, wait.stderr.strip())
+
+    echo(f"--- begin {topic} dump ({mode}) ---")
+    logs = subprocess.run(
+        _kubectl(["logs", "-f", pod_name, "--all-containers=true"], namespace),
+        capture_output=True, text=True, timeout=pod_timeout_seconds,
+    )
+    if logs.stdout:
+        echo(logs.stdout.rstrip())
+    if logs.returncode != 0 and logs.stderr:
+        echo(f"(log stream warning: {logs.stderr.strip()})")
+    echo(f"--- end {topic} dump ---")
+    return CommandResult(success=True, value=f"Dump pod '{pod_name}' completed.")
+
+
+def _delete_dump_pod(pod_name: str, namespace: str) -> None:
+    """Best-effort teardown — also covers Ctrl-C during the log stream."""
+    delete = subprocess.run(
+        _kubectl(["delete", "pod", pod_name, "--ignore-not-found", "--wait=false"], namespace),
+        capture_output=True, text=True,
+    )
+    if delete.returncode == 0:
+        logger.info("Deleted dump pod '%s'", pod_name)
+    else:
+        logger.warning("Could not delete dump pod '%s': %s", pod_name, delete.stderr.strip())
