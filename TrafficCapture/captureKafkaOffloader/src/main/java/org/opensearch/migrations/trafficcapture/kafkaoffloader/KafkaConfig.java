@@ -16,6 +16,7 @@ public class KafkaConfig {
     public static final String AUTH_TYPE_NONE = "none";
     public static final String AUTH_TYPE_MSK_IAM = "msk-iam";
     public static final String AUTH_TYPE_SCRAM_SHA_512 = "scram-sha-512";
+    public static final String AUTH_TYPE_SSL = "ssl";
 
     private KafkaConfig() {
         throw new IllegalStateException("Utility class should not be instantiated");
@@ -45,7 +46,7 @@ public class KafkaConfig {
         @Parameter(required = false,
                 names = { "--kafkaAuthType" },
                 arity = 1,
-                description = "Kafka client auth mode. Supported values: none, msk-iam, scram-sha-512.")
+                description = "Kafka client auth mode. Supported values: none, msk-iam, scram-sha-512, ssl.")
         public String kafkaAuthType;
         @Parameter(required = false,
                 names = { "--kafkaListenerName" },
@@ -90,7 +91,8 @@ public class KafkaConfig {
                 }
                 if (!AUTH_TYPE_NONE.equals(kafkaAuthType)
                         && !AUTH_TYPE_MSK_IAM.equals(kafkaAuthType)
-                        && !AUTH_TYPE_SCRAM_SHA_512.equals(kafkaAuthType)) {
+                        && !AUTH_TYPE_SCRAM_SHA_512.equals(kafkaAuthType)
+                        && !AUTH_TYPE_SSL.equals(kafkaAuthType)) {
                     throw new IllegalArgumentException(
                             "Unsupported --kafkaAuthType value: " + kafkaAuthType
                     );
@@ -155,6 +157,8 @@ public class KafkaConfig {
                                 + "username=\"" + kafkaUserName + "\" "
                                 + "password=\"" + kafkaPassword + "\";");
             }
+        } else if (AUTH_TYPE_SSL.equals(authType)) {
+            props.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SSL");
         }
     }
 }
