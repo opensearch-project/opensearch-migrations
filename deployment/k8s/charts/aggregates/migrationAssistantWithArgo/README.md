@@ -93,7 +93,7 @@ instead of mounting credentials:
   `iam.gke.io/gcp-service-account` so RFS / metadata / snapshot pods can read
   and write GCS without static credentials. Set `gcp.project=<your-gcp-project>`
   when installing with this overlay (see
-  [deployment/terraform/gcp/README.md](../../../terraform/gcp/README.md) for the
+  [deployment/terraform/gcp/README.md](../../../../terraform/gcp/README.md) for the
   full walkthrough that provisions the required GSA and IAM bindings).
 
 ## Additional Documentation

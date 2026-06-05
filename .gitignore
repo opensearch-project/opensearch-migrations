@@ -71,5 +71,8 @@ deployment/k8s/aws/cli/dist/
 .scannerwork/
 .sisyphus/
 
-# Local-only Claude Code settings
-.claude/settings.local.json
+# Argo workflow files
+*.wf.yaml
+
+# Agent related files
+.claude/
