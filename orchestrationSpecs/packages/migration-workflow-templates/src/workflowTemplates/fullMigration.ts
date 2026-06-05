@@ -757,6 +757,8 @@ export const FullMigration = WorkflowBuilder.create({
         .addRequiredInput("sourceVersion", typeToken<string>())
         .addRequiredInput("sourceLabel", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addOptionalInput("sourceConfig", c =>
+            expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG_GCS>>())
         .addRequiredInput("migrationLabel", typeToken<string>())
         .addRequiredInput("crdName", typeToken<string>())
@@ -914,7 +916,14 @@ export const FullMigration = WorkflowBuilder.create({
                         resourceUid: c.steps.reconcileSnapshotMigrationResource.outputs.resourceUid,
                         resourceCreationTimestamp: c.steps.reconcileSnapshotMigrationResource.outputs.resourceCreationTimestamp,
                         groupName_view: expr.get(snapshotMigrationConfig, "migrationLabel"),
-                        sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], "")
+                        sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], ""),
+                        sourceConfig: expr.serialize(expr.makeDict({
+                            label: expr.get(snapshotMigrationConfig, "sourceLabel"),
+                            version: expr.get(snapshotMigrationConfig, "sourceVersion"),
+                            endpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], ""),
+                            allowInsecure: expr.dig(snapshotMigrationConfig, ["sourceAllowInsecure"], false),
+                            authConfig: expr.dig(snapshotMigrationConfig, ["sourceAuth"], expr.makeDict({}))
+                        })),
                     });
                 }, {
                     when: c => ({templateExp: checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum)}),

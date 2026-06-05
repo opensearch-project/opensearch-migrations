@@ -4,6 +4,7 @@ import {
     DEFAULT_RESOURCES,
     ARGO_METADATA_OPTIONS,
     ARGO_METADATA_WORKFLOW_OPTION_KEYS,
+    NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO,
     NAMED_TARGET_CLUSTER_CONFIG,
 } from "@opensearch-migrations/schemas";
 import {
@@ -19,9 +20,9 @@ import {
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
-import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
+import {makeSourceParamDict, makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
-import {getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
+import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {
     getApprovalMap,
@@ -87,12 +88,16 @@ function makeSnapshotParamsDict(
 
 function makeSourceHostParamsDict(
     sourceVersion: BaseExpression<string>,
-    sourceEndpoint: BaseExpression<string>
+    sourceEndpoint: BaseExpression<string>,
+    sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>>
 ) {
-    return expr.makeDict({
-        "sourceHost": sourceEndpoint,
-        "sourceVersion": sourceVersion
-    });
+    return expr.mergeDicts(
+        makeSourceParamDict(sourceConfig),
+        expr.makeDict({
+            "sourceHost": sourceEndpoint,
+            "sourceVersion": sourceVersion
+        })
+    );
 }
 
 function makeParamsDict(
@@ -100,7 +105,8 @@ function makeParamsDict(
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG_GCS>>>,
     options: BaseExpression<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>,
-    sourceEndpoint?: BaseExpression<string>
+    sourceEndpoint?: BaseExpression<string>,
+    sourceConfig?: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>>
 ) {
     const targetAndOptions = expr.mergeDicts(
         makeTargetParamDict(targetConfig),
@@ -111,15 +117,18 @@ function makeParamsDict(
 
     const base = expr.mergeDicts(
         expr.mergeDicts(targetAndOptions, snapshotParams),
-        expr.makeDict({"outputFile": expr.literal(METADATA_OUTPUT_PATH)})
+        expr.makeDict({
+            "outputFile": expr.literal(METADATA_OUTPUT_PATH),
+            "allowExistingIndexes": expr.literal(true)
+        })
     );
 
-    if (sourceEndpoint) {
+    if (sourceEndpoint && sourceConfig) {
         return expr.mergeDicts(base,
             expr.ternary(
                 expr.isEmpty(sourceEndpoint),
                 expr.makeDict({}),
-                makeSourceHostParamsDict(sourceVersion, sourceEndpoint)
+                makeSourceHostParamsDict(sourceVersion, sourceEndpoint, sourceConfig)
             )
         );
     }
@@ -158,6 +167,8 @@ export const MetadataMigrationGcs = WorkflowBuilder.create({
         .addRequiredInput("commandMode", typeToken<"evaluate" | "migrate">())
         .addRequiredInput("sourceVersion", typeToken<string>())
         .addRequiredInput("targetConfig", typeToken<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>())
+        .addOptionalInput("sourceConfig", c =>
+            expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addRequiredInput("snapshotConfig", typeToken<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG_GCS>>())
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof ARGO_METADATA_OPTIONS>>())
         .addOptionalInput("sourceEndpoint", c => expr.literal(""))
@@ -183,6 +194,7 @@ export const MetadataMigrationGcs = WorkflowBuilder.create({
                 expr.dig(expr.deserializeRecord(b.inputs.metadataMigrationConfig), ["jvmArgs"], "")
             )
             .addEnvVarsFromRecord(getTargetHttpAuthCreds(getHttpAuthSecretName(b.inputs.targetConfig)))
+            .addEnvVarsFromRecord(getSourceHttpAuthCreds(getHttpAuthSecretName(b.inputs.sourceConfig)))
             .addResources(DEFAULT_RESOURCES.JAVA_MIGRATION_CONSOLE_CLI)
             .addCommand(["/root/metadataMigration/bin/MetadataMigration"])
             .addArgs([
@@ -190,7 +202,8 @@ export const MetadataMigrationGcs = WorkflowBuilder.create({
                 expr.literal("---INLINE-JSON"),
                 expr.asString(expr.serialize(
                     makeParamsDict(b.inputs.sourceVersion, b.inputs.targetConfig, b.inputs.snapshotConfig, b.inputs.metadataMigrationConfig,
-                        b.inputs.sourceEndpoint
+                        b.inputs.sourceEndpoint,
+                        b.inputs.sourceConfig
                     )
                 ))
             ])
@@ -237,6 +250,8 @@ export const MetadataMigrationGcs = WorkflowBuilder.create({
     .addTemplate("migrateMetaData", t => t
         .addRequiredInput("metadataMigrationConfig", typeToken<z.infer<typeof ARGO_METADATA_OPTIONS>>())
         .addOptionalInput("sourceEndpoint", c => expr.literal(""))
+        .addOptionalInput("sourceConfig", c =>
+            expr.empty<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>())
         .addInputsFromRecord(COMMON_METADATA_PARAMETERS)
         .addInputsFromRecord(
             getApprovalMap(t.inputs.workflowParameters.approvalConfigMapName, typeToken<{}>()))

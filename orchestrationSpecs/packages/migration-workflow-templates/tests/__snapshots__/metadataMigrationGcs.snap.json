@@ -50,6 +50,10 @@
               "name": "targetConfig"
             },
             {
+              "name": "sourceConfig",
+              "value": ""
+            },
+            {
               "name": "snapshotConfig"
             },
             {
@@ -125,6 +129,26 @@
                   "optional": true
                 }
               }
+            },
+            {
+              "name": "SOURCE_USERNAME",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig))))}}",
+                  "key": "username",
+                  "optional": true
+                }
+              }
+            },
+            {
+              "name": "SOURCE_PASSWORD",
+              "valueFrom": {
+                "secretKeyRef": {
+                  "name": "{{=((0 == len(sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig)))) ? ('empty') : (sprig.dig('authConfig', 'basic', 'secretName', '', fromJSON(inputs.parameters.sourceConfig))))}}",
+                  "key": "password",
+                  "optional": true
+                }
+              }
             }
           ],
           "image": "{{inputs.parameters.imageMigrationConsoleLocation}}",
@@ -145,7 +169,7 @@
           "args": [
             "{{inputs.parameters.commandMode}}",
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'fileSourceVolumes', 'fileSourceVolumeMounts')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion), sprig.dict(\"gcsRepoUri\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['gcsRepoPathUri'], \"gcsLocalDir\", '/tmp'))), sprig.dict(\"outputFile\", '/tmp/outputs/metadata-output.log')), ((0 == len(inputs.parameters.sourceEndpoint)) ? (sprig.dict()) : (sprig.dict(\"sourceHost\", inputs.parameters.sourceEndpoint, \"sourceVersion\", inputs.parameters.sourceVersion)))))}}"
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'fileSourceVolumes', 'fileSourceVolumeMounts')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion), sprig.dict(\"gcsRepoUri\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['gcsRepoPathUri'], \"gcsLocalDir\", '/tmp'))), sprig.dict(\"outputFile\", '/tmp/outputs/metadata-output.log', \"allowExistingIndexes\", true)), ((0 == len(inputs.parameters.sourceEndpoint)) ? (sprig.dict()) : (sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.sourceConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceAwsServiceSigningName\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['service'], \"sourceAwsRegion\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.sourceConfig)['authConfig']) ? (sprig.dict(\"sourceCaCert\", fromJSON(inputs.parameters.sourceConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.sourceConfig)) ? (sprig.dict(\"sourceHost\", fromJSON(inputs.parameters.sourceConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"sourceInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.sourceConfig)))), sprig.dict(\"sourceHost\", inputs.parameters.sourceEndpoint, \"sourceVersion\", inputs.parameters.sourceVersion))))))}}"
           ]
         },
         "metadata": {
@@ -261,6 +285,10 @@
               "value": ""
             },
             {
+              "name": "sourceConfig",
+              "value": ""
+            },
+            {
               "name": "snapshotConfig",
               "description": "Snapshot storage details (gcs bucket/path, region, endpoint)"
             },
@@ -340,6 +368,10 @@
                   {
                     "name": "targetConfig",
                     "value": "{{inputs.parameters.targetConfig}}"
+                  },
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}"
                   },
                   {
                     "name": "snapshotConfig",
@@ -466,6 +498,10 @@
                   {
                     "name": "targetConfig",
                     "value": "{{inputs.parameters.targetConfig}}"
+                  },
+                  {
+                    "name": "sourceConfig",
+                    "value": "{{inputs.parameters.sourceConfig}}"
                   },
                   {
                     "name": "snapshotConfig",
