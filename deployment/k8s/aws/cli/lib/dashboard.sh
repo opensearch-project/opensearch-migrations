@@ -73,6 +73,16 @@ dash_init() {
   eval "__DASH_${ns}_KEYS=()"
   eval "__DASH_${ns}_VALS=()"
   term_hide_cursor
+  # Disable autowrap for the lifetime of the panel. dash_render redraws in
+  # place by moving the cursor up by the number of LOGICAL lines it last
+  # emitted; if any line wraps onto a second physical row, that count
+  # under-shoots the rows actually on screen and the redraw leaves a ghost
+  # frame behind on every poll. With autowrap off, one logical line == one
+  # physical row, so the redraw math is exact. dash_render also pre-clips
+  # its rows to the terminal width so the truncation is clean rather than
+  # chopped at the margin. term.sh's EXIT trap restores autowrap on any
+  # exit path; dash_finish restores it on the normal path.
+  term_wrap_off
 }
 
 # dash_status_classifier <ns> <fn-name>
@@ -165,8 +175,11 @@ dash_render() {
   local height=0
   local elapsed; elapsed=$(_dash_fmt_elapsed "$started")
 
-  # Bar width tracks terminal width; clamp into a sane band.
-  local bar_w; bar_w=$(( $(term_columns) / 4 ))
+  # Bar width tracks terminal width; clamp into a sane band. cols is also
+  # the clip budget for over-long lines below (autowrap is off while the
+  # panel is live, so each logical line must fit one physical row).
+  local cols; cols=$(term_columns)
+  local bar_w=$(( cols / 4 ))
   (( bar_w < DASH_BAR_MIN )) && bar_w=$DASH_BAR_MIN
   (( bar_w > DASH_BAR_MAX )) && bar_w=$DASH_BAR_MAX
 
@@ -200,21 +213,23 @@ dash_render() {
 
   # Resource rows: failed first, in_progress next, then most-recent done.
   local rows_left=$DASH_PANEL_MAX printed
-  printed=$(_dash_emit_class "$ns" fail "$failed" "$rows_left" "$classifier")
+  printed=$(_dash_emit_class "$ns" fail "$failed" "$rows_left" "$classifier" "$cols")
   height=$(( height + printed ))
   rows_left=$(( rows_left - printed ))
   if (( rows_left > 0 )); then
-    printed=$(_dash_emit_class "$ns" prog "$in_progress" "$rows_left" "$classifier")
+    printed=$(_dash_emit_class "$ns" prog "$in_progress" "$rows_left" "$classifier" "$cols")
     height=$(( height + printed ))
     rows_left=$(( rows_left - printed ))
   fi
   if (( rows_left > 0 )); then
-    printed=$(_dash_emit_class "$ns" "done" "$completed" "$rows_left" "$classifier")
+    printed=$(_dash_emit_class "$ns" "done" "$completed" "$rows_left" "$classifier" "$cols")
     height=$(( height + printed ))
   fi
 
-  printf '%s  (Ctrl-C to abort; full log: %s)%s\n' \
-    "$__UI_C_DIM" "$LOG_FILE" "$__UI_C_RESET" >&2
+  # Footer. Clip the (often long) log path so the line fits one physical row
+  # while autowrap is off — otherwise it wraps and breaks the redraw count.
+  _dash_clip "  (Ctrl-C to abort; full log: ${LOG_FILE})" "$cols"
+  printf '%s%s%s\n' "$__UI_C_DIM" "$__DASH_CLIP" "$__UI_C_RESET" >&2
   height=$(( height + 1 ))
 
   printf -v "$last_h_var" '%s' "$height"
@@ -226,6 +241,7 @@ dash_finish() {
   printf -v "__DASH_${ns}_TICK" '%s' '0'
   dash_render "$ns" "$started"
   term_show_cursor
+  term_wrap_on
 }
 
 # ---------- internals ----------
@@ -294,9 +310,41 @@ _dash_repeat_char() {
   printf '%s' "${out// /$ch}"
 }
 
-# _dash_emit_class <ns> <class> <count_in_class> <max> <classifier>
+# _dash_clip <text> <cols> — truncate <text> to at most <cols> columns,
+# appending an ellipsis when cut. Result is written to the shared
+# __DASH_CLIP variable rather than stdout — same fork-free ABI as
+# _dash_set_cls, so the render path stays subshell-free (clipping runs
+# once per emitted row).
+#
+# No-op (passes the text through unchanged) when <cols> is empty/0 or when
+# not interactive: CI logs and bats captures want the full text, and
+# autowrap is only ever disabled on a real TTY, so clipping is only needed
+# there. Counts on the text being plain (no embedded SGR escapes) —
+# callers clip the raw string and wrap the result in color, which is how
+# dash_render builds its lines (color/reset are zero-width).
+__DASH_CLIP=''
+_dash_clip() {
+  local text="$1" cols="$2"
+  if ! (( __TERM_INTERACTIVE )) || [[ -z "$cols" || "$cols" -le 0 ]]; then
+    __DASH_CLIP="$text"
+    return 0
+  fi
+  if (( ${#text} > cols )); then
+    local cut=$(( cols - 1 ))
+    (( cut < 0 )) && cut=0
+    # Substring is byte-based in C locale / codepoint-based in UTF-8 —
+    # same tradeoff as the _dash_emit_class `${short:0:35}` clip above;
+    # CFN reasons + log paths are ASCII, and over-clipping only ever cuts
+    # MORE, never wraps. Matching the existing convention deliberately.
+    printf -v __DASH_CLIP '%s…' "${text:0:$cut}"
+  else
+    __DASH_CLIP="$text"
+  fi
+}
+
+# _dash_emit_class <ns> <class> <count_in_class> <max> <classifier> [<cols>]
 _dash_emit_class() {
-  local ns="$1" cls="$2" cls_count="$3" max="$4" classifier="$5"
+  local ns="$1" cls="$2" cls_count="$3" max="$4" classifier="$5" cols="${6:-0}"
   if (( cls_count == 0 )) || (( max == 0 )); then
     printf '0\n'
     return
@@ -338,13 +386,19 @@ _dash_emit_class() {
     if (( ${#short} > 38 )); then
       short="${short:0:35}…"
     fi
+    # Build the row as PLAIN text first (color/reset are zero-width and only
+    # bracket the whole line), clip it to one physical row, then wrap it in
+    # color. Clipping the assembled string — not just `reason` — guarantees
+    # the trailing reset SGR lands on-row even when the logical id + status
+    # alone already fill the width, so autowrap-off never chops mid-escape.
+    local row
     if [[ -n "$reason" && "$reason" != "None" ]]; then
-      printf '  %s%s %-38s %-22s  %s%s\n' \
-        "$color" "$glyph" "$short" "$status" "$reason" "$__UI_C_RESET" >&2
+      printf -v row '  %s %-38s %-22s  %s' "$glyph" "$short" "$status" "$reason"
     else
-      printf '  %s%s %-38s %-22s%s\n' \
-        "$color" "$glyph" "$short" "$status" "$__UI_C_RESET" >&2
+      printf -v row '  %s %-38s %-22s' "$glyph" "$short" "$status"
     fi
+    _dash_clip "$row" "$cols"
+    printf '%s%s%s\n' "$color" "$__DASH_CLIP" "$__UI_C_RESET" >&2
     printed=$((printed + 1))
   done < <(printf '%s\n' "${entries[@]+"${entries[@]}"}" | sort -t'|' -k1,1 -nr)
 

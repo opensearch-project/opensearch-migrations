@@ -46,6 +46,11 @@ __TERM_COLUMNS=80
 # reset trap doesn't double-emit show.
 __TERM_CURSOR_HIDDEN=0
 
+# Current autowrap-disabled state, so term_wrap_off is idempotent. Mirrors
+# __TERM_CURSOR_HIDDEN: the dedicated EXIT trap restores autowrap (\e[?7h)
+# unconditionally, this flag just avoids redundant emits.
+__TERM_WRAP_DISABLED=0
+
 # Color constants. Set in term_init. 8-color ANSI SGR. Truecolor /
 # 256-color sidestepped: this is an installer, the eight colors are
 # sufficient and CI-log-safe.
@@ -116,6 +121,7 @@ _term_reset() {
   # Even when not interactive, this is a no-op; emit anyway for safety.
   printf '\e[?25h\e[?7h' >&2
   __TERM_CURSOR_HIDDEN=0
+  __TERM_WRAP_DISABLED=0
 }
 
 # term_interactive — returns 0 iff term_init detected a real TTY.
@@ -143,6 +149,36 @@ term_show_cursor() {
   (( __TERM_INTERACTIVE )) || return 0
   printf '\e[?25h' >&2
   __TERM_CURSOR_HIDDEN=0
+}
+
+# term_wrap_off — disable terminal autowrap (DECAWM reset, \e[?7l). Idempotent
+# and tracked so the dedicated EXIT trap can restore unconditionally without
+# double-emitting.
+#
+# Why a sticky panel needs this: dash_render redraws in place by moving the
+# cursor up by the number of LOGICAL lines it last printed (one `printf …\n`
+# == one count). With autowrap ON, a line wider than the terminal wraps onto
+# several PHYSICAL rows, so the logical-line count under-shoots the physical
+# rows on screen — the cursor-up + erase clears only part of the previous
+# frame and every poll leaves a ghost copy behind. Disabling autowrap makes
+# one logical line occupy exactly one physical row, so the redraw math is
+# exact; over-long lines are truncated at the right margin instead of
+# wrapping (dash_render also pre-clips its rows, this is the backstop).
+term_wrap_off() {
+  (( __TERM_INTERACTIVE )) || return 0
+  if (( __TERM_WRAP_DISABLED == 0 )); then
+    printf '\e[?7l' >&2
+    __TERM_WRAP_DISABLED=1
+  fi
+}
+
+# term_wrap_on — re-enable autowrap (\e[?7h). Most callers should NOT call
+# this directly; the dedicated EXIT trap restores it. Used by dash_finish to
+# restore normal wrapping once the sticky panel is done.
+term_wrap_on() {
+  (( __TERM_INTERACTIVE )) || return 0
+  printf '\e[?7h' >&2
+  __TERM_WRAP_DISABLED=0
 }
 
 # term_save_cursor — \e7 (DEC). Bracket transient overlays.

@@ -105,6 +105,48 @@ capture_stderr() {
   [[ "$STDERR" == *$'\e[?7h'* ]]
 }
 
+# ---------- autowrap (DECAWM) ----------
+#
+# The sticky dashboard disables autowrap so its logical-line redraw count
+# matches the physical rows on screen (a wrapped line would otherwise leave
+# a ghost frame behind on every poll). These mirror the cursor-hide tests.
+
+@test "term_wrap_off emits CSI ?7l and tracks state" {
+  __TERM_WRAP_DISABLED=0
+  capture_stderr term_wrap_off
+  [[ "$STDERR" == *$'\e[?7l'* ]]
+  [ "$__TERM_WRAP_DISABLED" -eq 1 ]
+}
+
+@test "term_wrap_off is idempotent — second call emits nothing" {
+  __TERM_WRAP_DISABLED=0
+  capture_stderr term_wrap_off
+  [ -n "$STDERR" ]
+  capture_stderr term_wrap_off
+  [ -z "$STDERR" ]
+}
+
+@test "term_wrap_on emits CSI ?7h and clears the tracked state" {
+  __TERM_WRAP_DISABLED=1
+  capture_stderr term_wrap_on
+  [[ "$STDERR" == *$'\e[?7h'* ]]
+  [ "$__TERM_WRAP_DISABLED" -eq 0 ]
+}
+
+@test "term_wrap_off is a no-op when not interactive" {
+  __TERM_INTERACTIVE=0
+  __TERM_WRAP_DISABLED=0
+  capture_stderr term_wrap_off
+  [ -z "$STDERR" ]
+  [ "$__TERM_WRAP_DISABLED" -eq 0 ]
+}
+
+@test "_term_reset clears the autowrap-disabled flag" {
+  __TERM_WRAP_DISABLED=1
+  capture_stderr _term_reset
+  [ "$__TERM_WRAP_DISABLED" -eq 0 ]
+}
+
 # ---------- geometry ----------
 
 @test "term_lines / term_columns echo the cached geometry" {
