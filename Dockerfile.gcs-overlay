@@ -12,6 +12,9 @@ COPY migrationConsole/lib/console_link /root/lib/console_link
 RUN rm -rf /root/configProcessor
 COPY migrationConsole/build/dockerContext/nodeStaging/configProcessor /root/configProcessor
 
+# Overlay generated migration resources (CRDs + admission policies)
+COPY migrationConsole/build/dockerContext/nodeStaging/migrationResources /root/migrationResources
+
 # Overlay workflow templates with GCS support
 COPY migrationConsole/build/dockerContext/nodeStaging/workflowTemplates /root/workflows
 

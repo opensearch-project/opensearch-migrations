@@ -23,6 +23,7 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
                 snapshotInfo: {
                     repos: {
                         default: {
+                            type: "s3",
                             awsRegion: "us-east-2",
                             s3RepoPathUri: "s3://bucket/path",
                         },

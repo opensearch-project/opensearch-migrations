@@ -28,6 +28,12 @@ steps:
         npm run make-templates -- --outputDirectory /workspace/migrationConsole/build/dockerContext/nodeStaging/workflowTemplates
         echo "=== Workflow templates built ==="
         ls /workspace/migrationConsole/build/dockerContext/nodeStaging/workflowTemplates/
+        echo "=== Generating migration resources (CRDs + admission policies) ==="
+        cd /workspace/orchestrationSpecs
+        mkdir -p /workspace/migrationConsole/build/dockerContext/nodeStaging/migrationResources
+        npm run stage-migration-resources -- --outputDirectory /workspace/migrationConsole/build/dockerContext/nodeStaging/migrationResources
+        echo "=== Migration resources generated ==="
+        ls /workspace/migrationConsole/build/dockerContext/nodeStaging/migrationResources/
 
   # Build reindex-from-snapshot image
   - name: 'gcr.io/cloud-builders/docker'
