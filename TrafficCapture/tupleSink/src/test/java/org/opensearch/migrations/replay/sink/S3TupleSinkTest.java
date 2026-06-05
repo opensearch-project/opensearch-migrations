@@ -166,6 +166,49 @@ class S3TupleSinkTest {
         }
     }
 
+    @Test
+    void acceptAfterCloseFailsFutureWithoutNpe() throws Exception {
+        var s3Client = mock(S3AsyncClient.class);
+        when(s3Client.putObject(any(PutObjectRequest.class), any(AsyncRequestBody.class)))
+            .thenReturn(CompletableFuture.completedFuture(PutObjectResponse.builder().build()));
+
+        var sink = makeSink(s3Client, 100);
+        sink.close();
+
+        var future = new CompletableFuture<Void>();
+        sink.accept(makeTuple("conn-after-close"), future);
+
+        assertTrue(future.isCompletedExceptionally());
+        var ex = assertThrows(ExecutionException.class, () -> future.get(1, TimeUnit.SECONDS));
+        assertTrue(ex.getCause() instanceof IllegalStateException);
+    }
+
+    @Test
+    void closeTerminatesWorkerThread() throws Exception {
+        Thread workerThread;
+        try (var sink = new S3TupleSink(
+            S3AsyncClient.create(),
+            "unused-bucket",
+            "tuples/",
+            "replayer-test",
+            99,
+            1024 * 1024,
+            Duration.ofMinutes(10),
+            100
+        )) {
+            workerThread = Thread.getAllStackTraces().keySet().stream()
+                .filter(t -> t.getName().equals("s3-tuple-sink-worker-99"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("Worker thread not found"));
+            assertTrue(workerThread.isAlive());
+        }
+        // After try-with-resources calls close(), the non-daemon worker thread must terminate
+        // so it cannot keep the JVM alive.
+        workerThread.join(5000);
+        assertFalse(workerThread.isAlive(),
+            "Worker thread must terminate after close() so it does not keep the JVM alive");
+    }
+
     private void waitForPutCalls(AtomicInteger putCallCount, int expectedCalls) throws InterruptedException {
         var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
         while (putCallCount.get() < expectedCalls && System.nanoTime() < deadline) {
