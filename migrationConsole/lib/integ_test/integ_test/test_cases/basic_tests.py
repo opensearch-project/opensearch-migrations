@@ -3,6 +3,7 @@ import subprocess
 import time
 import uuid
 from ..cluster_version import RFS_MIGRATION_COMBINATIONS
+from ..integration_test_argo_service import ENDING_ARGO_PHASES
 from .ma_argo_test_base import MATestBase, MigrationType, MATestUserArguments, MIGRATION_COMPLETION_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -106,16 +107,25 @@ class Test0003ApprovalGateIntegration(MATestBase):
 
     def workflow_perform_migrations(self, timeout_seconds: int = MIGRATION_COMPLETION_TIMEOUT_SECONDS):
         self.argo_service.resume_workflow(workflow_name=self.workflow_name)
-        self._wait_and_approve_gates(timeout_seconds)
-        self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=timeout_seconds)
+        self._approve_gates_until_suspended_or_ended(timeout_seconds)
 
-    def _wait_and_approve_gates(self, timeout_seconds: int):
-        """Keep approving gates until none remain (workflow moves past all approval points)."""
+    def _approve_gates_until_suspended_or_ended(self, timeout_seconds: int):
+        """Approve gates until the workflow suspends (post-migration verification) or ends."""
         deadline = time.time() + timeout_seconds
         interval = 10
         approved_any = False
-        consecutive_failures = 0
         while time.time() < deadline:
+            status_result = self.argo_service.get_workflow_status(self.workflow_name)
+            if status_result.success:
+                phase = status_result.value.get("phase", "")
+                has_suspended = status_result.value.get("has_suspended_nodes", False)
+                if phase == "Running" and has_suspended:
+                    logger.info("Workflow reached suspend (post-migration verification)")
+                    return
+                if phase in ENDING_ARGO_PHASES:
+                    logger.info("Workflow reached ending phase: %s", phase)
+                    return
+
             result = subprocess.run(
                 ["workflow", "approve", "step", "--all"],
                 capture_output=True, text=True, timeout=30,
@@ -123,17 +133,13 @@ class Test0003ApprovalGateIntegration(MATestBase):
             if result.returncode == 0:
                 logger.info("Approval gates approved: %s", result.stdout.strip())
                 approved_any = True
-                consecutive_failures = 0
             else:
-                consecutive_failures += 1
-                if approved_any and consecutive_failures >= 3:
-                    # Already approved at least one gate and no new ones appeared — done
-                    return
                 logger.debug("Approve not ready yet (rc=%d): %s", result.returncode, result.stderr.strip())
             time.sleep(interval)
-        if approved_any:
-            return
-        raise TimeoutError(f"No approval gates became available within {timeout_seconds}s")
+        raise TimeoutError(
+            f"Workflow did not reach suspend or ending phase within {timeout_seconds}s "
+            f"(approved_any={approved_any})"
+        )
 
     def verify_clusters(self):
         self.target_operations.get_document(cluster=self.target_cluster, index_name=self.index_name,
