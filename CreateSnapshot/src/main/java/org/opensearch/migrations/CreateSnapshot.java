@@ -1,6 +1,8 @@
 package org.opensearch.migrations;
 
 import java.util.List;
+import java.util.Objects;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
@@ -68,6 +70,12 @@ public class CreateSnapshot {
                 required = false,
                 description = "The S3 endpoint setting to specify when creating a snapshot repository")
         public String s3Endpoint;
+
+        @Parameter(
+                names = {"--gcs-repo-uri" },
+                required = false,
+                description = "GCS repo URI (gs://bucket/path)")
+        public String gcsRepoUri;
 
         @ParametersDelegate
         public ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();
@@ -152,11 +160,18 @@ public class CreateSnapshot {
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
         );
 
-        if (arguments.fileSystemRepoPath == null && arguments.s3RepoUri == null) {
-            throw new ParameterException("Either file-system-repo-path or s3-repo-uri must be set");
+        long repoCount = Stream.of(
+                arguments.fileSystemRepoPath,
+                arguments.s3RepoUri,
+                arguments.gcsRepoUri
+            )
+            .filter(Objects::nonNull)
+            .count();
+        if (repoCount == 0) {
+            throw new ParameterException("One of file-system-repo-path, s3-repo-uri, or gcs-repo-uri must be set");
         }
-        if (arguments.fileSystemRepoPath != null && arguments.s3RepoUri != null) {
-            throw new ParameterException("Only one of file-system-repo-path and s3-repo-uri can be set");
+        if (repoCount > 1) {
+            throw new ParameterException("Only one of file-system-repo-path, s3-repo-uri, and gcs-repo-uri can be set");
         }
         if (arguments.s3RepoUri != null && arguments.s3Region == null) {
             throw new ParameterException("If an s3 repo is being used, s3-region must be set");
