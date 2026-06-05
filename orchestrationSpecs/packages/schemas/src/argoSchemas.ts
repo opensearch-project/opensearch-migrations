@@ -197,13 +197,22 @@ export const ARGO_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_RFS_OPTIONS.pick({
     fileSourceVolumeMounts: true,
 }));
 
+// Fields that config lowering ADDS on top of the user-facing proxy schema: the
+// flat sslTrustCert*/requireClientAuth projection of tls.clientAuth (consumed by
+// the Java process), plus the resolved file-source volume specs. The declarative
+// source of truth still rides in the CR under spec.tls.clientAuth; these flattened
+// copies exist only for the Deployment/Java process. Named as a single shape so
+// ARGO_PROXY_OPTIONS and ARGO_PROXY_RESOLVED_ONLY_KEYS share one source of truth.
+const PROXY_RESOLVED_FIELDS = {
+    sslTrustCertFile: z.string().min(1).optional(),
+    sslTrustCertPem: z.string().min(1).optional(),
+    sslTrustCertPemEnvVar: z.string().min(1).optional(),
+    requireClientAuth: z.boolean().optional(),
+    ...FILE_SOURCE_RESOLVED_FIELDS,
+} as const;
+
 export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_PROXY_OPTIONS.extend({
-        sslTrustCertFile: z.string().min(1).optional(),
-        sslTrustCertPem: z.string().min(1).optional(),
-        sslTrustCertPemEnvVar: z.string().min(1).optional(),
-        requireClientAuth: z.boolean().optional(),
-    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
+    USER_PROXY_OPTIONS.extend(PROXY_RESOLVED_FIELDS)
 );
 export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick({
     loggingConfigurationOverrideConfigMap: true,
@@ -217,19 +226,13 @@ export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pic
     fileSourceVolumeMounts: true,
 }));
 
-// Resolved/lowered proxy fields produced for the Deployment + Java process: the
-// flat sslTrustCert*/requireClientAuth projection of tls.clientAuth, plus resolved
-// file-source volume specs. The declarative source of truth rides in the CR under
-// spec.tls.clientAuth; these flattened copies are stripped from the custom resource
-// (they aren't top-level CRD spec fields, and would duplicate spec.tls.clientAuth).
-export const ARGO_PROXY_RESOLVED_ONLY_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick({
-    sslTrustCertFile: true,
-    sslTrustCertPem: true,
-    sslTrustCertPemEnvVar: true,
-    requireClientAuth: true,
-    fileSourceVolumes: true,
-    fileSourceVolumeMounts: true,
-}));
+// Resolved-only keys = exactly the fields PROXY_RESOLVED_FIELDS adds over the user
+// schema, i.e. keys(ARGO_PROXY_OPTIONS) - keys(USER_PROXY_OPTIONS). Because the
+// CaptureProxy CRD is projected from USER_PROXY_OPTIONS, these are precisely the
+// top-level keys the CRD does not define, so they must be stripped from the CR.
+// Derived from the shape (not hand-listed) so a new resolved field can't drift.
+export const ARGO_PROXY_RESOLVED_ONLY_KEYS =
+    Object.keys(PROXY_RESOLVED_FIELDS) as (keyof typeof PROXY_RESOLVED_FIELDS)[];
 
 // All keys stripped from the CaptureProxy custom resource: workflow-option fields
 // (re-added explicitly as spec fields by makeCaptureProxyManifest) plus the
