@@ -210,6 +210,9 @@ public class S3TupleSink implements TupleSink {
                     clearCurrentStream();
                 }
             });
+            // Wait for all in-flight S3 uploads to finish so their tuple futures complete
+            // (which triggers Kafka offset commits) before the JVM exits. Without this,
+            // the replayer would re-deliver already-processed messages on the next startup.
             awaitUploadsComplete();
         } finally {
             shutdownExecutorIfDone();
