@@ -139,6 +139,10 @@ public class S3TupleSink implements TupleSink {
 
     @Override
     public void accept(Map<String, Object> tupleMap, CompletableFuture<Void> future) {
+        if (closeRequested.get()) {
+            future.completeExceptionally(new IllegalStateException("S3TupleSink is closed"));
+            return;
+        }
         // Serialize the tuple on the calling (event-loop) thread so a serialization failure can
         // be reported synchronously and the tupleMap isn't retained across threads. The actual
         // buffer write is marshalled onto the worker thread.
@@ -150,6 +154,10 @@ public class S3TupleSink implements TupleSink {
             return;
         }
         runOnWorker(() -> {
+            if (gzipOut == null) {
+                future.completeExceptionally(new IllegalStateException("S3TupleSink is closed"));
+                return;
+            }
             try {
                 gzipOut.write(json);
                 gzipOut.write('\n');
@@ -202,8 +210,29 @@ public class S3TupleSink implements TupleSink {
                     clearCurrentStream();
                 }
             });
+            awaitUploadsComplete();
         } finally {
             shutdownExecutorIfDone();
+        }
+    }
+
+    private void awaitUploadsComplete() {
+        long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(5);
+        boolean done = false;
+        while (!done && activeUploads.get() > 0) {
+            if (System.nanoTime() - deadline > 0) {
+                log.atError().setMessage("Timed out waiting for {} in-flight S3 uploads to complete on close")
+                    .addArgument(activeUploads::get).log();
+                done = true;
+            } else {
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.atWarn().setMessage("Interrupted while waiting for S3 uploads to complete on close").log();
+                    done = true;
+                }
+            }
         }
     }
 
