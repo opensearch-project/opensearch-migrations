@@ -24,6 +24,14 @@
         {
           "name": "approvalConfigMapName",
           "value": "approval-config"
+        },
+        {
+          "name": "migrationRunNumber",
+          "value": "0"
+        },
+        {
+          "name": "workflowScriptsRoot",
+          "value": "/root/workflows/.workflowScripts"
         }
       ]
     },
@@ -137,7 +145,7 @@
           "args": [
             "{{inputs.parameters.commandMode}}",
             "---INLINE-JSON",
-            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion), sprig.dict(\"gcsRepoUri\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['gcsRepoPathUri'], \"gcsLocalDir\", '/tmp'))), sprig.dict(\"outputFile\", '/tmp/outputs/metadata-output.log')), ((0 == len(inputs.parameters.sourceEndpoint)) ? (sprig.dict()) : (sprig.dict(\"sourceHost\", inputs.parameters.sourceEndpoint, \"sourceVersion\", inputs.parameters.sourceVersion)))))}}"
+            "{{=toJSON(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge(sprig.merge((('authConfig' in fromJSON(inputs.parameters.targetConfig)) ? ((('sigv4' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetAwsServiceSigningName\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['service'], \"targetAwsRegion\", fromJSON(inputs.parameters.targetConfig)['authConfig']['sigv4']['region'])) : ((('mtls' in fromJSON(inputs.parameters.targetConfig)['authConfig']) ? (sprig.dict(\"targetCaCert\", fromJSON(inputs.parameters.targetConfig)['authConfig']['mtls']['caCert'])) : (sprig.dict()))))) : (sprig.dict())), (('endpoint' in fromJSON(inputs.parameters.targetConfig)) ? (sprig.dict(\"targetHost\", fromJSON(inputs.parameters.targetConfig)['endpoint'])) : (sprig.dict()))), sprig.dict(\"targetInsecure\", sprig.dig('allowInsecure', false, fromJSON(inputs.parameters.targetConfig)))), sprig.omit(fromJSON(inputs.parameters.metadataMigrationConfig), 'jvmArgs', 'loggingConfigurationOverrideConfigMap', 'fileSourceVolumes', 'fileSourceVolumeMounts')), sprig.merge(sprig.dict(\"snapshotName\", fromJSON(inputs.parameters.snapshotConfig)['snapshotName'], \"sourceVersion\", inputs.parameters.sourceVersion), sprig.dict(\"gcsRepoUri\", fromJSON(inputs.parameters.snapshotConfig)['repoConfig']['gcsRepoPathUri'], \"gcsLocalDir\", '/tmp'))), sprig.dict(\"outputFile\", '/tmp/outputs/metadata-output.log')), ((0 == len(inputs.parameters.sourceEndpoint)) ? (sprig.dict()) : (sprig.dict(\"sourceHost\", inputs.parameters.sourceEndpoint, \"sourceVersion\", inputs.parameters.sourceVersion)))))}}"
           ]
         },
         "metadata": {
@@ -190,7 +198,7 @@
           [
             {
               "templateRef": {
-                "template": "waitforapproval",
+                "template": "waitforuserapproval",
                 "name": "resource-management"
               },
               "arguments": {
@@ -201,7 +209,7 @@
                   }
                 ]
               },
-              "name": "waitForApproval"
+              "name": "waitForUserApproval"
             }
           ]
         ],
@@ -222,7 +230,7 @@
           [
             {
               "templateRef": {
-                "template": "waitforapproval",
+                "template": "waitforuserapproval",
                 "name": "resource-management"
               },
               "arguments": {
@@ -233,7 +241,7 @@
                   }
                 ]
               },
-              "name": "waitForApproval"
+              "name": "waitForUserApproval"
             }
           ]
         ],

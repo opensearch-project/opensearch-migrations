@@ -24,6 +24,14 @@
         {
           "name": "approvalConfigMapName",
           "value": "approval-config"
+        },
+        {
+          "name": "migrationRunNumber",
+          "value": "0"
+        },
+        {
+          "name": "workflowScriptsRoot",
+          "value": "/root/workflows/.workflowScripts"
         }
       ]
     },
