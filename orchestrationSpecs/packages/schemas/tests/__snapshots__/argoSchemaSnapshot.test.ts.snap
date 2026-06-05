@@ -235,35 +235,81 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         "repos": {
                           "type": "object",
                           "additionalProperties": {
-                            "type": "object",
-                            "properties": {
-                              "awsRegion": {
-                                "type": "string",
-                                "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": [
+                                      "s3"
+                                    ],
+                                    "description": "Discriminator selecting an S3-backed snapshot repository."
+                                  },
+                                  "awsRegion": {
+                                    "type": "string",
+                                    "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
+                                  },
+                                  "endpoint": {
+                                    "type": "string",
+                                    "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                                    "default": "",
+                                    "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
+                                  },
+                                  "s3RepoPathUri": {
+                                    "type": "string",
+                                    "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                                    "description": "S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster."
+                                  },
+                                  "s3RoleArn": {
+                                    "type": "string",
+                                    "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                                    "default": "",
+                                    "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. This is passed to the cluster when registering the snapshot repository. Leave empty if the cluster's own IAM role already has S3 access."
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "awsRegion",
+                                  "s3RepoPathUri"
+                                ],
+                                "description": "Configuration for an S3-backed snapshot repository used by the source cluster."
                               },
-                              "endpoint": {
-                                "type": "string",
-                                "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
-                                "default": "",
-                                "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
-                              },
-                              "s3RepoPathUri": {
-                                "type": "string",
-                                "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                                "description": "S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster."
-                              },
-                              "s3RoleArn": {
-                                "type": "string",
-                                "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
-                                "default": "",
-                                "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. This is passed to the cluster when registering the snapshot repository. Leave empty if the cluster's own IAM role already has S3 access."
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "enum": [
+                                      "gcs"
+                                    ],
+                                    "description": "Discriminator selecting a Google Cloud Storage-backed snapshot repository."
+                                  },
+                                  "gcsRepoPathUri": {
+                                    "type": "string",
+                                    "pattern": "^gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                                    "description": "GCS URI for the snapshot repository in the format 'gs://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster, and the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                                  },
+                                  "gcsRegion": {
+                                    "type": "string",
+                                    "default": "",
+                                    "description": "Optional GCS bucket region, e.g. 'us-central1'. Forwarded to the snapshot creation tool via --gcs-region."
+                                  },
+                                  "gcsEndpoint": {
+                                    "type": "string",
+                                    "pattern": "(?:^https?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                                    "default": "",
+                                    "description": "Override the GCS endpoint URL. Leave empty to use the standard GCS endpoint. Primarily for emulators or private-service-connect deployments."
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "gcsRepoPathUri"
+                                ],
+                                "description": "Configuration for a Google Cloud Storage-backed snapshot repository used by the source cluster. Authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
                               }
-                            },
-                            "required": [
-                              "awsRegion",
-                              "s3RepoPathUri"
                             ],
-                            "description": "Configuration for an S3-backed snapshot repository used by the source cluster."
+                            "description": "Configuration for a snapshot repository used by the source cluster. Discriminated on \`type\`: 's3' for AWS S3, 'gcs' for Google Cloud Storage."
                           },
                           "description": "S3 snapshot repositories registered with the source cluster."
                         },
@@ -1120,6 +1166,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "repo": {
                         "type": "object",
                         "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "s3"
+                            ],
+                            "description": "Discriminator selecting an S3-backed snapshot repository."
+                          },
                           "awsRegion": {
                             "type": "string",
                             "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
@@ -1148,6 +1201,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                           }
                         },
                         "required": [
+                          "type",
                           "awsRegion",
                           "s3RepoPathUri",
                           "repoName"
@@ -1293,6 +1347,262 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "string",
                       "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
                       "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "proxy": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "endpoint": {
+                          "type": "string",
+                          "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$"
+                        },
+                        "allowInsecure": {
+                          "type": "boolean",
+                          "default": false
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "endpoint"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "label"
+                  ]
+                }
+              },
+              "required": [
+                "createSnapshotConfig",
+                "sourceConfig"
+              ]
+            },
+            "default": []
+          },
+          "snapshotsGcs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "createSnapshotConfig": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "type": "string"
+                      },
+                      "snapshotPrefix": {
+                        "type": "string"
+                      },
+                      "config": {
+                        "type": "object",
+                        "properties": {
+                          "jvmArgs": {
+                            "type": "string",
+                            "default": ""
+                          },
+                          "loggingConfigurationOverrideConfigMap": {
+                            "type": "string",
+                            "default": ""
+                          },
+                          "indexAllowlist": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            },
+                            "default": []
+                          },
+                          "maxSnapshotRateMbPerNode": {
+                            "type": "number",
+                            "default": 0
+                          },
+                          "compressionEnabled": {
+                            "type": "boolean",
+                            "default": false
+                          },
+                          "includeGlobalState": {
+                            "type": "boolean",
+                            "default": true
+                          }
+                        }
+                      },
+                      "repo": {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "gcs"
+                            ],
+                            "description": "Discriminator selecting a Google Cloud Storage-backed snapshot repository."
+                          },
+                          "gcsRepoPathUri": {
+                            "type": "string",
+                            "pattern": "^gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                            "description": "GCS URI for the snapshot repository in the format 'gs://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster, and the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                          },
+                          "gcsRegion": {
+                            "type": "string",
+                            "default": ""
+                          },
+                          "gcsEndpoint": {
+                            "type": "string",
+                            "pattern": "(?:^https?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                            "default": ""
+                          },
+                          "repoName": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "gcsRepoPathUri",
+                          "repoName"
+                        ]
+                      },
+                      "semaphoreConfigMapName": {
+                        "type": "string"
+                      },
+                      "semaphoreKey": {
+                        "type": "string"
+                      },
+                      "dependsOnProxySetups": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "configChecksum": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "configChecksum"
+                          ]
+                        }
+                      },
+                      "configChecksum": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "label",
+                      "snapshotPrefix",
+                      "config",
+                      "repo",
+                      "semaphoreConfigMapName",
+                      "semaphoreKey",
+                      "dependsOnProxySetups",
+                      "configChecksum"
+                    ]
+                  },
+                  "minItems": 1
+                },
+                "sourceConfig": {
+                  "type": "object",
+                  "properties": {
+                    "endpoint": {
+                      "type": "string",
+                      "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?)?$",
+                      "default": ""
+                    },
+                    "allowInsecure": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "authConfig": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "basic": {
+                              "type": "object",
+                              "properties": {
+                                "secretName": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                  "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication."
+                                }
+                              },
+                              "required": [
+                                "secretName"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "basic"
+                          ],
+                          "description": "HTTP Basic authentication using credentials from a Kubernetes Secret."
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "sigv4": {
+                              "type": "object",
+                              "properties": {
+                                "region": {
+                                  "type": "string",
+                                  "description": "AWS region for SigV4 request signing (e.g. 'us-east-1')."
+                                },
+                                "service": {
+                                  "type": "string",
+                                  "default": "es",
+                                  "description": "AWS service name for SigV4 signing. Use 'es' for Amazon OpenSearch Service or 'aoss' for OpenSearch Serverless."
+                                }
+                              },
+                              "required": [
+                                "region"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "sigv4"
+                          ],
+                          "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials via EKS Pod Identity."
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mtls": {
+                              "type": "object",
+                              "properties": {
+                                "caCert": {
+                                  "type": "string",
+                                  "description": "PEM-encoded CA certificate or path to CA certificate file for verifying the server's TLS certificate."
+                                },
+                                "clientSecretName": {
+                                  "type": "string",
+                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication."
+                                }
+                              },
+                              "required": [
+                                "caCert",
+                                "clientSecretName"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "mtls"
+                          ],
+                          "description": "Mutual TLS (mTLS) authentication using client certificates."
+                        }
+                      ],
+                      "description": "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS."
+                    },
+                    "version": {
+                      "type": "string",
+                      "pattern": "^(?:ES [125678]|OS [123]|SOLR [89])(?:\\\\.[0-9]+)+$",
+                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0'."
                     },
                     "label": {
                       "type": "string"
@@ -1958,6 +2268,13 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "repoConfig": {
                       "type": "object",
                       "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "s3"
+                          ],
+                          "description": "Discriminator selecting an S3-backed snapshot repository."
+                        },
                         "awsRegion": {
                           "type": "string",
                           "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
@@ -1986,6 +2303,7 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                         }
                       },
                       "required": [
+                        "type",
                         "awsRegion",
                         "s3RepoPathUri",
                         "repoName"
@@ -2038,6 +2356,492 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                 "configChecksum",
                 "checksumForReplayer",
                 "workloadIdentityChecksum",
+                "resourceUid"
+              ]
+            },
+            "default": []
+          },
+          "snapshotMigrationsGcs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "migrationLabel": {
+                  "type": "string"
+                },
+                "snapshotNameResolution": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "externalSnapshotName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "externalSnapshotName"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "dataSnapshotResourceName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "dataSnapshotResourceName"
+                      ]
+                    }
+                  ]
+                },
+                "snapshotConfigChecksum": {
+                  "type": "string"
+                },
+                "metadataMigrationConfig": {
+                  "type": "object",
+                  "properties": {
+                    "jvmArgs": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "loggingConfigurationOverrideConfigMap": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "componentTemplateAllowlist": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    },
+                    "indexAllowlist": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    },
+                    "indexTemplateAllowlist": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    },
+                    "allowLooseVersionMatching": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "clusterAwarenessAttributes": {
+                      "type": "number",
+                      "default": 1
+                    },
+                    "multiTypeBehavior": {
+                      "type": "string",
+                      "enum": [
+                        "NONE",
+                        "UNION",
+                        "SPLIT"
+                      ],
+                      "default": "NONE"
+                    },
+                    "otelCollectorEndpoint": {
+                      "type": "string",
+                      "default": "http://otel-collector:4317"
+                    },
+                    "output": {
+                      "type": "string",
+                      "enum": [
+                        "HUMAN_READABLE",
+                        "JSON"
+                      ],
+                      "default": "HUMAN_READABLE"
+                    },
+                    "transformerConfigBase64": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "transformerConfig": {
+                      "type": "string",
+                      "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Metadata transformers modify index mappings and settings during migration."
+                    },
+                    "transformerConfigFile": {
+                      "type": "string",
+                      "description": "Path to a JSON file containing transformer configuration. Metadata transformers modify index mappings and settings during migration. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default."
+                    },
+                    "enableSourcelessMigrations": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "useRecoverySource": {
+                      "type": "boolean",
+                      "default": false
+                    }
+                  }
+                },
+                "documentBackfillConfig": {
+                  "type": "object",
+                  "properties": {
+                    "podReplicas": {
+                      "type": "number",
+                      "default": 1
+                    },
+                    "jvmArgs": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "loggingConfigurationOverrideConfigMap": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "useTargetClusterForWorkCoordination": {
+                      "type": "boolean",
+                      "default": false,
+                      "description": "[Expert] When true, uses the target OpenSearch cluster for RFS work coordination (lease management and shard assignment). When false (default), a dedicated single-node OpenSearch coordinator cluster is automatically deployed within the Kubernetes cluster, used for the lifetime of the migration, then torn down on completion. Using a dedicated coordinator avoids adding coordination overhead to the target cluster."
+                    },
+                    "resources": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "limits": {
+                          "type": "object",
+                          "properties": {
+                            "cpu": {
+                              "type": "string",
+                              "pattern": "^[0-9]+m$",
+                              "description": "CPU allocation for the container in Kubernetes millicores."
+                            },
+                            "memory": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Memory allocation for the container."
+                            },
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            }
+                          },
+                          "required": [
+                            "cpu",
+                            "memory"
+                          ],
+                          "description": "Maximum resource limits for the container. The container will be terminated if it exceeds these limits."
+                        },
+                        "requests": {
+                          "type": "object",
+                          "properties": {
+                            "cpu": {
+                              "type": "string",
+                              "pattern": "^[0-9]+m$",
+                              "description": "CPU allocation for the container in Kubernetes millicores."
+                            },
+                            "memory": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Memory allocation for the container."
+                            },
+                            "ephemeral-storage": {
+                              "type": "string",
+                              "pattern": "^[0-9]+(([EPTGM])i?|Ki|k)$",
+                              "description": "Ephemeral storage allocation for the container. Used for temporary on-disk data such as Lucene index segments during RFS document migration."
+                            }
+                          },
+                          "required": [
+                            "cpu",
+                            "memory"
+                          ],
+                          "description": "Minimum guaranteed resources for the container. Used by the Kubernetes scheduler for pod placement."
+                        }
+                      },
+                      "required": [
+                        "limits",
+                        "requests"
+                      ],
+                      "description": "Kubernetes resource limits and requests for the RFS container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS. Ephemeral storage is auto-calculated from maxShardSizeBytes if not specified."
+                    },
+                    "indexAllowlist": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    },
+                    "allowLooseVersionMatching": {
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "docTransformerConfigBase64": {
+                      "type": "string",
+                      "default": ""
+                    },
+                    "docTransformerConfig": {
+                      "type": "string",
+                      "description": "Inline JSON transformer configuration. Keys are transformer names and values are their configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion).",
+                      "checksumFor": [
+                        "replayer"
+                      ],
+                      "changeRestriction": "impossible"
+                    },
+                    "docTransformerConfigFile": {
+                      "type": "string",
+                      "description": "Path to a JSON file containing transformer configuration. Document transformers modify each document during the snapshot backfill (e.g. field renaming, type conversion). [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
+                      "checksumFor": [
+                        "replayer"
+                      ],
+                      "changeRestriction": "impossible"
+                    },
+                    "documentsPerBulkRequest": {
+                      "type": "number",
+                      "default": 2147483647
+                    },
+                    "documentsSizePerBulkRequest": {
+                      "type": "number",
+                      "default": 10485760
+                    },
+                    "initialLeaseDuration": {
+                      "type": "string",
+                      "pattern": "^[-+]?P(?:(\\\\d+)D)?(?:T(?:(\\\\d+)H)?(?:(\\\\d+)M)?(?:(\\\\d+(?:\\\\.\\\\d+)?)S)?)?$",
+                      "default": "PT1H"
+                    },
+                    "maxConnections": {
+                      "type": "number",
+                      "default": 10
+                    },
+                    "maxShardSizeBytes": {
+                      "type": "number",
+                      "default": 85899345920
+                    },
+                    "otelCollectorEndpoint": {
+                      "type": "string",
+                      "default": "http://otel-collector:4317"
+                    },
+                    "serverGeneratedIds": {
+                      "type": "string",
+                      "enum": [
+                        "AUTO",
+                        "ALWAYS",
+                        "NEVER"
+                      ],
+                      "default": "AUTO"
+                    },
+                    "allowedDocExceptionTypes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "default": []
+                    },
+                    "coordinatorRetryMaxRetries": {
+                      "type": "number",
+                      "default": 7
+                    },
+                    "coordinatorRetryInitialDelayMs": {
+                      "type": "number",
+                      "default": 1000
+                    },
+                    "coordinatorRetryMaxDelayMs": {
+                      "type": "number",
+                      "default": 64000
+                    },
+                    "enableSourcelessMigrations": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "useRecoverySource": {
+                      "type": "boolean",
+                      "default": false
+                    }
+                  }
+                },
+                "sourceVersion": {
+                  "type": "string"
+                },
+                "sourceLabel": {
+                  "type": "string"
+                },
+                "targetConfig": {
+                  "type": "object",
+                  "properties": {
+                    "endpoint": {
+                      "type": "string",
+                      "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$",
+                      "description": "HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters."
+                    },
+                    "allowInsecure": {
+                      "type": "boolean",
+                      "default": false
+                    },
+                    "authConfig": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "basic": {
+                              "type": "object",
+                              "properties": {
+                                "secretName": {
+                                  "type": "string",
+                                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                                  "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication."
+                                }
+                              },
+                              "required": [
+                                "secretName"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "basic"
+                          ],
+                          "description": "HTTP Basic authentication using credentials from a Kubernetes Secret."
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "sigv4": {
+                              "type": "object",
+                              "properties": {
+                                "region": {
+                                  "type": "string",
+                                  "description": "AWS region for SigV4 request signing (e.g. 'us-east-1')."
+                                },
+                                "service": {
+                                  "type": "string",
+                                  "default": "es",
+                                  "description": "AWS service name for SigV4 signing. Use 'es' for Amazon OpenSearch Service or 'aoss' for OpenSearch Serverless."
+                                }
+                              },
+                              "required": [
+                                "region"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "sigv4"
+                          ],
+                          "description": "AWS SigV4 request signing authentication. Uses the pod's IAM role credentials via EKS Pod Identity."
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "mtls": {
+                              "type": "object",
+                              "properties": {
+                                "caCert": {
+                                  "type": "string",
+                                  "description": "PEM-encoded CA certificate or path to CA certificate file for verifying the server's TLS certificate."
+                                },
+                                "clientSecretName": {
+                                  "type": "string",
+                                  "description": "Name of a Kubernetes TLS Secret containing the client certificate and private key for mutual TLS authentication."
+                                }
+                              },
+                              "required": [
+                                "caCert",
+                                "clientSecretName"
+                              ]
+                            }
+                          },
+                          "required": [
+                            "mtls"
+                          ],
+                          "description": "Mutual TLS (mTLS) authentication using client certificates."
+                        }
+                      ],
+                      "description": "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS."
+                    },
+                    "label": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z0-9_]+$"
+                    }
+                  },
+                  "required": [
+                    "endpoint",
+                    "label"
+                  ]
+                },
+                "snapshotConfig": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "repoConfig": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "gcs"
+                          ],
+                          "description": "Discriminator selecting a Google Cloud Storage-backed snapshot repository."
+                        },
+                        "gcsRepoPathUri": {
+                          "type": "string",
+                          "pattern": "^gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "GCS URI for the snapshot repository in the format 'gs://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster, and the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                        },
+                        "gcsRegion": {
+                          "type": "string",
+                          "default": ""
+                        },
+                        "gcsEndpoint": {
+                          "type": "string",
+                          "pattern": "(?:^https?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                          "default": ""
+                        },
+                        "repoName": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "gcsRepoPathUri",
+                        "repoName"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "repoConfig"
+                  ]
+                },
+                "sourceEndpoint": {
+                  "type": "string"
+                },
+                "sourceAllowInsecure": {
+                  "type": "boolean"
+                },
+                "sourceAuth": {
+                  "nullable": true
+                },
+                "configChecksum": {
+                  "type": "string"
+                },
+                "checksumForReplayer": {
+                  "type": "string"
+                },
+                "resourceUid": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "migrationLabel",
+                "snapshotNameResolution",
+                "snapshotConfigChecksum",
+                "sourceVersion",
+                "sourceLabel",
+                "targetConfig",
+                "snapshotConfig",
+                "configChecksum",
+                "checksumForReplayer",
                 "resourceUid"
               ]
             },
@@ -2890,35 +3694,81 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
               "repos": {
                 "type": "object",
                 "additionalProperties": {
-                  "type": "object",
-                  "properties": {
-                    "awsRegion": {
-                      "type": "string",
-                      "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "s3"
+                          ],
+                          "description": "Discriminator selecting an S3-backed snapshot repository."
+                        },
+                        "awsRegion": {
+                          "type": "string",
+                          "description": "AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."
+                        },
+                        "endpoint": {
+                          "type": "string",
+                          "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                          "default": "",
+                          "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
+                        },
+                        "s3RepoPathUri": {
+                          "type": "string",
+                          "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster."
+                        },
+                        "s3RoleArn": {
+                          "type": "string",
+                          "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
+                          "default": "",
+                          "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. This is passed to the cluster when registering the snapshot repository. Leave empty if the cluster's own IAM role already has S3 access."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "awsRegion",
+                        "s3RepoPathUri"
+                      ],
+                      "description": "Configuration for an S3-backed snapshot repository used by the source cluster."
                     },
-                    "endpoint": {
-                      "type": "string",
-                      "pattern": "(?:^(http|localstack)s?:\\\\/\\\\/[^/]*\\\\/?$)?",
-                      "default": "",
-                      "description": "Override the S3 endpoint URL. Supports http://, https://, localstack://, and localstacks:// schemes. LocalStack endpoints are automatically resolved to IP addresses during config transformation."
-                    },
-                    "s3RepoPathUri": {
-                      "type": "string",
-                      "pattern": "^s3:\\\\/\\\\/[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
-                      "description": "S3 URI for the snapshot repository in the format 's3://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster."
-                    },
-                    "s3RoleArn": {
-                      "type": "string",
-                      "pattern": "^(arn:aws:iam::\\\\d{12}:(user|role|group|policy)\\\\/[a-zA-Z0-9+=,.@_-]+)?$",
-                      "default": "",
-                      "description": "IAM role ARN that the source cluster will assume to read/write snapshots to S3. This is passed to the cluster when registering the snapshot repository. Leave empty if the cluster's own IAM role already has S3 access."
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "gcs"
+                          ],
+                          "description": "Discriminator selecting a Google Cloud Storage-backed snapshot repository."
+                        },
+                        "gcsRepoPathUri": {
+                          "type": "string",
+                          "pattern": "^gs:\\\\/\\\\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9](\\\\/[a-zA-Z0-9!\\\\-_.*'()/]*)?$",
+                          "description": "GCS URI for the snapshot repository in the format 'gs://BUCKET_NAME/OPTIONAL_PATH'. The bucket must already exist and be accessible from the source cluster, and the source cluster must have the \`repository-gcs\` plugin installed with a configured client."
+                        },
+                        "gcsRegion": {
+                          "type": "string",
+                          "default": "",
+                          "description": "Optional GCS bucket region, e.g. 'us-central1'. Forwarded to the snapshot creation tool via --gcs-region."
+                        },
+                        "gcsEndpoint": {
+                          "type": "string",
+                          "pattern": "(?:^https?:\\\\/\\\\/[^/]*\\\\/?$)?",
+                          "default": "",
+                          "description": "Override the GCS endpoint URL. Leave empty to use the standard GCS endpoint. Primarily for emulators or private-service-connect deployments."
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "gcsRepoPathUri"
+                      ],
+                      "description": "Configuration for a Google Cloud Storage-backed snapshot repository used by the source cluster. Authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key loaded into the cluster keystore, or via Workload Identity)."
                     }
-                  },
-                  "required": [
-                    "awsRegion",
-                    "s3RepoPathUri"
                   ],
-                  "description": "Configuration for an S3-backed snapshot repository used by the source cluster."
+                  "description": "Configuration for a snapshot repository used by the source cluster. Discriminated on \`type\`: 's3' for AWS S3, 'gcs' for Google Cloud Storage."
                 },
                 "description": "S3 snapshot repositories registered with the source cluster."
               },

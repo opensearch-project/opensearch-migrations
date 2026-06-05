@@ -3,10 +3,15 @@
     "source": {
       "version": "ES 7.10.2",
       "endpoint": "https://my-domain.us-east-1.es.amazonaws.com",
-      "authConfig": { "sigv4": { "region": "us-east-1" } },
+      "authConfig": {
+        "sigv4": {
+          "region": "us-east-1"
+        }
+      },
       "snapshotInfo": {
         "repos": {
           "default": {
+            "type": "s3",
             "awsRegion": "us-east-1",
             "s3RepoPathUri": "s3://my-snapshot-bucket/snapshots",
             "s3RoleArn": "arn:aws:iam::123456789012:role/SnapshotRole"
@@ -15,21 +20,29 @@
         "snapshots": {
           "snap1": {
             "repoName": "default",
-            "config": { "createSnapshotConfig": {} }
+            "config": {
+              "createSnapshotConfig": {}
+            }
           }
         }
       }
     }
   },
   "targetClusters": {
-    "target": { "endpoint": "http://target:9200" }
+    "target": {
+      "endpoint": "http://target:9200"
+    }
   },
   "snapshotMigrationConfigs": [
     {
       "fromSource": "source",
       "toTarget": "target",
       "perSnapshotConfig": {
-        "snap1": [{ "metadataMigrationConfig": {} }]
+        "snap1": [
+          {
+            "metadataMigrationConfig": {}
+          }
+        ]
       }
     }
   ]

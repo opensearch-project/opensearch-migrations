@@ -134,6 +134,8 @@ function validateOptionalDefaultConsistency<T extends z.ZodTypeAny>(
 }
 
 export const S3_REPO_CONFIG = z.object({
+    type: z.literal("s3")
+        .describe("Discriminator selecting an S3-backed snapshot repository."),
     awsRegion: z.string()
         .describe("AWS region where the S3 bucket resides (e.g. 'us-east-2'). Used for S3 client configuration and snapshot repository registration."),
     endpoint: z.string().regex(/(?:^(http|localstack)s?:\/\/[^/]*\/?$)?/).default("").optional()
@@ -147,6 +149,28 @@ export const S3_REPO_CONFIG = z.object({
             "This is passed to the cluster when registering the snapshot repository. " +
             "Leave empty if the cluster's own IAM role already has S3 access.")
 }).describe("Configuration for an S3-backed snapshot repository used by the source cluster.");
+
+// GCS bucket names: 3-63 chars (or dotted segments up to 222), lowercase alphanumerics, hyphens, underscores, dots.
+// Conservative regex covering the common single-segment form.
+export const GCS_REPO_CONFIG = z.object({
+    type: z.literal("gcs")
+        .describe("Discriminator selecting a Google Cloud Storage-backed snapshot repository."),
+    gcsRepoPathUri: z.string().regex(/^gs:\/\/[a-z0-9][a-z0-9._-]{1,220}[a-z0-9](\/[a-zA-Z0-9!\-_.*'()/]*)?$/)
+        .describe("GCS URI for the snapshot repository in the format 'gs://BUCKET_NAME/OPTIONAL_PATH'. " +
+            "The bucket must already exist and be accessible from the source cluster, " +
+            "and the source cluster must have the `repository-gcs` plugin installed with a configured client."),
+    gcsRegion: z.string().default("").optional()
+        .describe("Optional GCS bucket region, e.g. 'us-central1'. Forwarded to the snapshot creation tool via --gcs-region."),
+    gcsEndpoint: z.string().regex(/(?:^https?:\/\/[^/]*\/?$)?/).default("").optional()
+        .describe("Override the GCS endpoint URL. Leave empty to use the standard GCS endpoint. " +
+            "Primarily for emulators or private-service-connect deployments.")
+}).describe("Configuration for a Google Cloud Storage-backed snapshot repository used by the source cluster. " +
+    "Authentication is expected to be provided to the source cluster out-of-band (e.g. via a service-account key " +
+    "loaded into the cluster keystore, or via Workload Identity).");
+
+export const REPO_CONFIG = z.discriminatedUnion("type", [S3_REPO_CONFIG, GCS_REPO_CONFIG])
+    .describe("Configuration for a snapshot repository used by the source cluster. " +
+        "Discriminated on `type`: 's3' for AWS S3, 'gcs' for Google Cloud Storage.");
 
 export const PORT_NUMBER_PATTERN = "(?:[1-9]\\d{0,3}|[1-5]\\d{4}|6[0-4]\\d{3}|65[0-4]\\d{2}|655[0-2]\\d|6553[0-5])";
 export const OPTIONAL_PORT_PATTERN = `(?::${PORT_NUMBER_PATTERN})?`;
@@ -1103,8 +1127,8 @@ export const TARGET_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
 }).describe("Connection configuration for a target OpenSearch cluster. Extends the base cluster config with a required endpoint.");
 
 export const SOURCE_CLUSTER_REPOS_RECORD =
-    z.record(z.string(), S3_REPO_CONFIG)
-    .describe("Map of snapshot repository names to their S3 configurations. Keys are the repository names as registered in the source cluster.");
+    z.record(z.string(), REPO_CONFIG)
+    .describe("Map of snapshot repository names to their backing-store configurations. Keys are the repository names as registered in the source cluster. Each value is discriminated on `type` ('s3' or 'gcs').");
 
 export const CAPTURE_CONFIG = z.object({
     kafka: z.string().regex(K8S_NAMING_PATTERN).default("default").optional()
@@ -1233,12 +1257,13 @@ export const SOURCE_CLUSTER_CONFIG = CLUSTER_CONFIG.extend({
         }
     }
 
-    // SigV4 auth + createSnapshotConfig requires s3RoleArn on the referenced repo
+    // SigV4 auth + createSnapshotConfig requires s3RoleArn on the referenced S3 repo.
+    // (GCS repos are not affected — they authenticate via the cluster's GCS keystore / Workload Identity.)
     if (data.authConfig && HTTP_AUTH_SIGV4.safeParse(data.authConfig).success) {
         for (const [snapName, snapConfig] of Object.entries(snapshots)) {
             if ("createSnapshotConfig" in snapConfig.config) {
                 const repo = repos?.[snapConfig.repoName];
-                if (repo && !repo.s3RoleArn) {
+                if (repo && repo.type === "s3" && !repo.s3RoleArn) {
                     ctx.addIssue({
                         code: z.ZodIssueCode.custom,
                         message: `Snapshot '${snapName}' uses SigV4 auth with createSnapshotConfig but repo '${snapConfig.repoName}' is missing s3RoleArn`,

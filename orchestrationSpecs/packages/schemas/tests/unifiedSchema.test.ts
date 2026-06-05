@@ -140,6 +140,51 @@ describe("unified schema builder", () => {
         ]));
     });
 
+    it("builds a base-only schema without Strimzi defs for external-Kafka deployments", () => {
+        const {schema, mode, source} = buildUnifiedSchema({baseOnly: true});
+        expect(mode).toBe("base-only");
+        expect(source).toBe("generated");
+        const ajv = new Ajv({allErrors: true, strict: false, strictTypes: false});
+        const validate = ajv.compile(schema);
+        const minimalGcsConfig = {
+            sourceClusters: {
+                source1: {
+                    version: "ES 7.10.2",
+                    endpoint: "",
+                    snapshotInfo: {
+                        repos: {
+                            default: {
+                                type: "gcs",
+                                gcsRegion: "us-central1",
+                                gcsRepoPathUri: "gs://bucket/path",
+                            },
+                        },
+                        snapshots: {
+                            global_state_snapshot: {
+                                repoName: "default",
+                                config: {externallyManagedSnapshotName: "global_state_snapshot"},
+                            },
+                        },
+                    },
+                },
+            },
+            targetClusters: {
+                target1: {endpoint: "https://target:443"},
+            },
+            snapshotMigrationConfigs: [{
+                fromSource: "source1",
+                toTarget: "target1",
+                perSnapshotConfig: {
+                    global_state_snapshot: [{
+                        metadataMigrationConfig: {},
+                        documentBackfillConfig: {podReplicas: 1},
+                    }],
+                },
+            }],
+        };
+        expect(validate(minimalGcsConfig)).toBe(true);
+    });
+
     it("does not probe the live cluster when an explicit schema path is configured", () => {
         const execSpy = jest.spyOn(childProcess, "execFileSync");
         const previousSchemaPath = process.env[UNIFIED_SCHEMA_PATH_ENV];

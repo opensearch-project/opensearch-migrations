@@ -6,6 +6,7 @@
       "snapshotInfo": {
         "repos": {
           "real-repo": {
+            "type": "s3",
             "awsRegion": "us-east-1",
             "s3RepoPathUri": "s3://my-bucket/snapshots"
           }
@@ -13,14 +14,18 @@
         "snapshots": {
           "snap1": {
             "repoName": "wrong-repo",
-            "config": { "externallyManagedSnapshotName": "snap1" }
+            "config": {
+              "externallyManagedSnapshotName": "snap1"
+            }
           }
         }
       }
     }
   },
   "targetClusters": {
-    "target": { "endpoint": "http://target:9200" }
+    "target": {
+      "endpoint": "http://target:9200"
+    }
   },
   "snapshotMigrationConfigs": []
 }
