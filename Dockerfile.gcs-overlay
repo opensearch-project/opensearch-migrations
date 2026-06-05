@@ -1,0 +1,28 @@
+FROM public.ecr.aws/opensearchproject/opensearch-migrations-console:latest
+
+# Overlay GCS-enabled Java tools (built from this fork)
+COPY CreateSnapshot/build/install/CreateSnapshot /root/createSnapshot
+COPY MetadataMigration/build/install/MetadataMigration /root/metadataMigration
+COPY DocumentsFromSnapshotMigration/build/install/DocumentsFromSnapshotMigration /root/documentMigration
+
+# Overlay updated Python console_link with GCS support
+COPY migrationConsole/lib/console_link /root/lib/console_link
+
+# Overlay updated config processor with GCS schema
+RUN rm -rf /root/configProcessor
+COPY migrationConsole/build/dockerContext/nodeStaging/configProcessor /root/configProcessor
+
+# Overlay workflow templates with GCS support
+COPY migrationConsole/build/dockerContext/nodeStaging/workflowTemplates /root/workflows
+
+# Overlay jq config transformer with GCS support
+COPY migrationConsole/workflowConfigToServicesConfig.jq /root/workflowConfigToServicesConfig.jq
+
+# Reinstall Python packages to pick up GCS changes
+WORKDIR /root/lib/console_link
+RUN /.venv/bin/pip install -e .
+
+# Regenerate the workflow schema with GCS support
+WORKDIR /root
+RUN mkdir -p /root/schema && \
+    node /root/configProcessor/index.js buildUnifiedSchema --base-only --output /root/schema/workflowMigration.schema.json
