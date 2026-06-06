@@ -38,15 +38,16 @@ let __mode = "default"
 let __tick = 0
 let __last_height = 0
 
-// Parallel arrays — index i describes one resource row. Seeded with one
-// placeholder element (Amber's `let` can't take the empty-typed-array literal);
-// __count is the logical length and every path honors it.
+// Parallel arrays — index i describes one resource row. Declared with a typed
+// seed ([""]/[0]) to ANCHOR the element type: a bare module-level `let xs = []`
+// leaves the type Generic across function boundaries (a `for x in xs`+`==` in
+// another fn fails when imported). dash_init/dash_clear reset to `[]`; rows grow
+// via `+= [v]`; `len __keys` IS the row count (no separate counter).
 let __keys = [""]
 let __statuses = [""]
 let __reasons = [""]
 let __tss = [""]
 let __epochs = [0]
-let __count = 0
 
 // dash_init <header> — reset the instance + hide the cursor.
 pub fun dash_init(header: Text): Null {
@@ -54,7 +55,11 @@ pub fun dash_init(header: Text): Null {
     __mode = "default"
     __tick = 0
     __last_height = 0
-    __count = 0
+    __keys = []
+    __statuses = []
+    __reasons = []
+    __tss = []
+    __epochs = []
     term_hide_cursor()
 }
 
@@ -128,8 +133,8 @@ pub fun dash_classify(st: Text): Text {
 // ---- upsert / clear --------------------------------------------------------
 
 fun dash_idx(key: Text): Int {
-    for i in 0..__count {
-        if __keys[i] == key { return i }
+    for i, k in __keys {
+        if k == key { return i }
     }
     return -1
 }
@@ -146,40 +151,31 @@ pub fun dash_upsert(key: Text, st: Text, reason: Text, ts: Text): Null {
         __epochs[i] = epoch
         return null
     }
-    // Append at the logical index __count. The arrays carry a seed placeholder
-    // at index 0 (Amber `let` has no empty-typed-array literal), so the FIRST
-    // row reuses that slot (write at index 0) and later rows grow the array.
-    // Writing past __count rather than blindly appending keeps physical length
-    // == logical length, so the 0..__count count/render loops read real data.
-    if __count < len __keys {
-        __keys[__count] = key
-        __statuses[__count] = st
-        __reasons[__count] = reason
-        __tss[__count] = ts
-        __epochs[__count] = epoch
-    } else {
-        __keys += [key]
-        __statuses += [st]
-        __reasons += [reason]
-        __tss += [ts]
-        __epochs += [epoch]
-    }
-    __count += 1
+    // New row — append in lockstep across the parallel arrays.
+    __keys += [key]
+    __statuses += [st]
+    __reasons += [reason]
+    __tss += [ts]
+    __epochs += [epoch]
 }
 
 // dash_clear — drop all rows (e.g. between helm phases). Keeps header/mode.
 pub fun dash_clear(): Null {
-    __count = 0
+    __keys = []
+    __statuses = []
+    __reasons = []
+    __tss = []
+    __epochs = []
 }
 
-// dash_count — logical row count (test seam + render).
-pub fun dash_count(): Int { return __count }
+// dash_count — row count (test seam + render).
+pub fun dash_count(): Int { return len __keys }
 
 // dash_count_class <cls> — number of rows whose status maps to <cls>.
 pub fun dash_count_class(cls: Text): Int {
     let n = 0
-    for i in 0..__count {
-        if dash_classify(__statuses[i]) == cls { n += 1 }
+    for st in __statuses {
+        if dash_classify(st) == cls { n += 1 }
     }
     return n
 }
@@ -209,17 +205,13 @@ fun build_class_rows(cls: Text, max: Int, color: Text, glyph: Text): Text {
 
     // Collect matching rows as "zero-padded-epoch|index" so a lexical descending
     // sort yields most-recent-first without numeric sort support.
-    let packed = [""]
-    let pc = 0
-    for i in 0..__count {
-        if dash_classify(__statuses[i]) == cls {
-            let ep = zfill(__epochs[i] as Text, 12)
-            if pc == 0 { packed[0] = "{ep}|{i}" }
-            else { packed += ["{ep}|{i}"] }
-            pc += 1
+    let packed = []
+    for i, st in __statuses {
+        if dash_classify(st) == cls {
+            packed += ["{zfill(__epochs[i] as Text, 12)}|{i}"]
         }
     }
-    if pc == 0 { return "" }
+    if len packed == 0 { return "" }
 
     // sort IN PLACE (ref) — std `sorted` returns a [Generic] that then can't be
     // compared against a Text literal; `sort` mutates and keeps the [Text] type.
@@ -265,7 +257,7 @@ pub fun dash_render(started: Int, header_override: Text): Text {
     let n_failed = dash_count_class("fail")
     let in_progress = dash_count_class("prog")
     let completed = dash_count_class("done")
-    let total = __count
+    let total = len __keys
 
     let e = esc()
     let bold = "{e}[1m"
