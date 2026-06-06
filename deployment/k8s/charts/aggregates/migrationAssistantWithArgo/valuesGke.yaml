@@ -1,17 +1,8 @@
 conditionalPackageInstalls:
   localstack: false
   jaeger: false
-  strimzi-kafka-operator: true
-  aws-privateca-issuer: false
-  ack-acmpca-controller: false
-  ack-cloudwatch-controller: false
 
 cloudProvider: gcp
-
-aws:
-  configureAwsEksResources: false
-  region: ""
-  account: ""
 
 gcp:
   configureGkeResources: true
@@ -20,25 +11,13 @@ gcp:
   zone: ""
   serviceAccountEmail: ""
 
-cluster:
-  dedicatedKarpenterNodePoolForMigrationConsole: false
-  useCustomKarpenterNodePool: false
-
 logs:
   sharedLogsVolume:
     enabled: false
 
 defaultBucketConfiguration:
   useLocalStack: false
-  deleteOnUninstall: true
   create: false
-
-kafkaExternal:
-  enabled: false
-  brokers: ""
-  authType: scram-sha-512
-  userName: ""
-  password: ""
 
 gcsBucketConfiguration:
   create: false

@@ -364,18 +364,20 @@ export class MigrationInitializer {
     static readonly CRD_API_VERSION = `${MigrationInitializer.CRD_GROUP}/v1alpha1`;
 
     private makeCrdName(...labels: string[]): string {
-        // CRD metadata.name must be a valid RFC 1123 subdomain:
-        //   lowercase alphanumeric, '-' or '.', start/end alphanumeric.
-        // User-provided labels (e.g. externallyManagedSnapshotName like
-        // "global_state_snapshot") may contain underscores or uppercase.
-        // Normalize: lowercase, replace any disallowed char with '-',
-        // collapse runs, strip leading/trailing '-'.
-        return labels
-            .join('-')
-            .toLowerCase()
-            .replace(/[^a-z0-9.-]+/g, '-')
-            .replace(/-+/g, '-')
-            .replace(/^[-.]+|[-.]+$/g, '');
+        const raw = labels.join('-').toLowerCase();
+        const chars: string[] = [];
+        for (const ch of raw) {
+            if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch === '.') {
+                chars.push(ch);
+            } else if (chars.length > 0 && chars[chars.length - 1] !== '-') {
+                chars.push('-');
+            }
+        }
+        let start = 0;
+        while (start < chars.length && (chars[start] === '-' || chars[start] === '.')) start++;
+        let end = chars.length - 1;
+        while (end >= start && (chars[end] === '-' || chars[end] === '.')) end--;
+        return chars.slice(start, end + 1).join('');
     }
 
     private sanitizeResourceName(value: string): string {
