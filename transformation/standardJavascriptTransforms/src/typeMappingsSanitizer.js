@@ -324,6 +324,22 @@ function processMetadataRequest(document, context) {
         return processAsDoc(document, context);
     }
 
+    // A mappings collection that declares no types (e.g. an analysis-settings-only
+    // template with empty "mappings") has nothing to union. Retarget its name via
+    // the default "_doc" route and keep it, rather than dropping it.
+    if (mappingsHasNoTypes(mappings)) {
+        const targetIndex = convertSourceIndexToTarget(
+            document.get('name'),
+            "_doc",
+            context.index_mappings,
+            context.regex_mappings
+        );
+        if (!targetIndex) return [];
+        const newMetadataItem = deepCloneMap(document);
+        newMetadataItem.set('name', targetIndex);
+        return [newMetadataItem];
+    }
+
     const creationObjects = new Map();
     for (const [type, mappingValue] of mappings.entries()) {
         const targetIndex = convertSourceIndexToTarget(
@@ -363,6 +379,14 @@ function shouldProcessAsDoc(mappings) {
     // No type exists if mappings is falsy OR if mappings has a "properties" key
     // that does not itself have a nested "properties" object.
     return (!mappings || (mappings.properties && !mappings.properties?.properties));
+}
+
+function mappingsHasNoTypes(mappings) {
+    // A normalized (Map) mappings collection with no entries declares no types
+    // — e.g. a legacy index template that carries only analysis settings and an
+    // empty "mappings". There is nothing to union, so the item must be passed
+    // through (name-retargeted) rather than dropped.
+    return mappings instanceof Map && mappings.size === 0;
 }
 
 function processAsDoc(document, context) {
