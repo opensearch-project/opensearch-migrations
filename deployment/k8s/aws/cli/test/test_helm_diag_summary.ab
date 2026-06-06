@@ -1,0 +1,54 @@
+// test_helm_diag_summary.ab — e2e coverage for helm_diag.ab (the diagnostics-dump
+// half of the bash helm.sh port). PART 3 of 3: the pure pods-summary formatter.
+//
+// Split out of the former test_helm_diag.ab because that single file compiled to
+// ~134KB and Linux caps one `eval` arg at 128KB (MAX_ARG_STRLEN) → 'Argument list
+// too long (os error 7)' on CI (it passed on macOS). The world+mock+helm_diag
+// closure floors the command-issuing test files near ~110KB, so the 10 blocks
+// split three ways: test_helm_diag_dump.ab (cluster-state capture),
+// test_helm_diag_explain.ab (failure-explain + install-notes), and this file (the
+// pure tally formatter — which needs NO world/mock, so it stays small).
+//
+// Style (see test/TEST_GUIDE.md): pure formatters/parsers are the minority of
+// these tests but are welcome — assert on the returned Text directly, no world or
+// mock fleet needed.
+//
+// What's covered in this part:
+//   * helm_pods_summary — the pure one-awk-pass tally replacement (formatter over
+//     a `kubectl get pods` custom-columns snapshot). Kept as direct return-value
+//     asserts; exercises the private _first/_second/_third_field extractors.
+//
+// NO `return` inside a test block (branch with `if`, per AMBER_IDIOMS).
+
+import { assert, assert_eq } from "std/test"
+import { text_contains } from "std/text"
+import { helm_pods_summary } from "../src/helm_diag.ab"
+
+// ============================================================================
+// helm_pods_summary — the awk-tally replacement (pure formatter; no world/mock).
+// ============================================================================
+
+test "helm_pods_summary tallies running/pending/failed with name lists" {
+    // NAME  PHASE  READY  — custom-columns output (space-separated).
+    let snap = "migration-console-0 Running true\ncapture-proxy-0 Running false\ninstaller-abc Pending <none>\nbad-pod Failed <none>"
+    let out = helm_pods_summary(snap)
+    assert(text_contains(out, "pods total=4 running=2 pending=1 failed=1"))
+    // Pending + failed name lists, and the not-ready (Running but READY=false) one.
+    assert(text_contains(out, "pending=[installer-abc]"))
+    assert(text_contains(out, "failed=[bad-pod]"))
+    assert(text_contains(out, "not_ready=[capture-proxy-0]"))
+}
+
+test "helm_pods_summary all-healthy omits the name lists" {
+    let snap = "a Running true\nb Running true"
+    let out = helm_pods_summary(snap)
+    assert(text_contains(out, "pods total=2 running=2 pending=0 failed=0"))
+    assert(not text_contains(out, "pending=["))
+    assert(not text_contains(out, "failed=["))
+    assert(not text_contains(out, "not_ready=["))
+}
+
+test "helm_pods_summary returns empty for an empty snapshot" {
+    assert_eq(helm_pods_summary(""), "")
+    assert_eq(helm_pods_summary("   \n  "), "")
+}

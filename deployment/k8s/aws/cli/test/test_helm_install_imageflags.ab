@@ -1,0 +1,71 @@
+// test_helm_install_imageflags.ab — pure-unit coverage for src/helm_install.ab's
+// image-flag builders + the pinned release/namespace constants (split from
+// test_helm_install.ab; the original compiled too large to eval on Linux, where a
+// single arg caps at 128KB — see test/TEST_GUIDE.md).
+//
+// Imports are trimmed to ONLY the symbols this part's test blocks use: amber
+// tree-shakes per imported symbol and keeps everything textually preceding the
+// entry, so importing the heavy install entrypoint here would inline the whole
+// flow (~246KB) and bust the Linux cap. The image builders sit early in the
+// module, so this file stays small.
+//
+// What's covered here (no world/mock needed — these are pure builders):
+//   * _helm_build_public_image_flags / _helm_build_mirrored_image_flags — the
+//     [Text] --set repository/tag builders (installer→console reuse, mirrored
+//     disambiguating-tag layout).
+//   * HELM_RELEASE_NAME / HELM_NAMESPACE — the pinned "ma" constants.
+//
+// NB (AMBER_IDIOMS): no `return` inside a `test` block — branch with `if`. Helpers
+// live ABOVE the test blocks (define-before-use across the import boundary).
+
+import { assert, assert_eq } from "std/test"
+import { array_contains } from "../src/std.ab"
+// The pinned release/namespace constants are owned by helm_ctx.ab (the install
+// flow imports them from there); the test asserts the same source of truth.
+import { HELM_RELEASE_NAME, HELM_NAMESPACE } from "../src/helm_ctx.ab"
+import {
+    _helm_build_public_image_flags, _helm_build_mirrored_image_flags
+} from "../src/helm_install.ab"
+
+// ---- pure unit: _helm_build_public_image_flags -----------------------------
+
+test "_helm_build_public_image_flags points all five images at public.ecr.aws" {
+    let flags = _helm_build_public_image_flags("3.2.1")
+    // 5 images × (2 --set + 2 values) = 20 elements.
+    let n = len flags
+    assert_eq(n, 20)
+    assert(array_contains("images.captureProxy.repository=public.ecr.aws/opensearchproject/opensearch-migrations-traffic-capture-proxy", flags))
+    assert(array_contains("images.captureProxy.tag=3.2.1", flags))
+    assert(array_contains("images.trafficReplayer.repository=public.ecr.aws/opensearchproject/opensearch-migrations-traffic-replayer", flags))
+    assert(array_contains("images.reindexFromSnapshot.repository=public.ecr.aws/opensearchproject/opensearch-migrations-reindex-from-snapshot", flags))
+    assert(array_contains("images.migrationConsole.repository=public.ecr.aws/opensearchproject/opensearch-migrations-console", flags))
+    // installer reuses the console image (bash pairs map installer→console).
+    assert(array_contains("images.installer.repository=public.ecr.aws/opensearchproject/opensearch-migrations-console", flags))
+    assert(array_contains("images.installer.tag=3.2.1", flags))
+}
+
+// ---- pure unit: _helm_build_mirrored_image_flags ---------------------------
+
+test "_helm_build_mirrored_image_flags uses the single repo + disambiguating tags" {
+    let reg = "111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr-default-us-east-1"
+    let flags = _helm_build_mirrored_image_flags(reg, "3.2.1")
+    let n = len flags
+    assert_eq(n, 20)
+    // Every image's repository is the SAME single registry.
+    assert(array_contains("images.captureProxy.repository={reg}", flags))
+    assert(array_contains("images.migrationConsole.repository={reg}", flags))
+    // The disambiguating tag layout: migrations_<build_name>_<ver>.
+    assert(array_contains("images.captureProxy.tag=migrations_capture_proxy_3.2.1", flags))
+    assert(array_contains("images.trafficReplayer.tag=migrations_traffic_replayer_3.2.1", flags))
+    assert(array_contains("images.reindexFromSnapshot.tag=migrations_reindex_from_snapshot_3.2.1", flags))
+    assert(array_contains("images.migrationConsole.tag=migrations_migration_console_3.2.1", flags))
+    // installer reuses the console build-name tag.
+    assert(array_contains("images.installer.tag=migrations_migration_console_3.2.1", flags))
+}
+
+// ---- HELM_RELEASE_NAME / HELM_NAMESPACE constants --------------------------
+
+test "release name + namespace are pinned to ma" {
+    assert_eq(HELM_RELEASE_NAME, "ma")
+    assert_eq(HELM_NAMESPACE, "ma")
+}

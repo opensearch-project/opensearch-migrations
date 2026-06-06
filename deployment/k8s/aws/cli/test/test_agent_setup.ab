@@ -1,0 +1,141 @@
+// test_agent_setup.ab — e2e coverage for agent.ab (the port of bash lib/agent.sh),
+// part 2 of 3: agent_setup (skills + config WITHOUT the handoff) + MCP
+// registration.
+//
+// Split out of the former test_agent.ab so each part's compiled script stays
+// under the Linux MAX_ARG_STRLEN cap (amber runs each test via `eval "<script>"`;
+// a single arg is capped at ~128KB on Linux, so each test FILE must compile to
+// <~120KB). This part holds the MEDIUM tier — agent_setup + the MCP writers /
+// mcp_install_from_manifest — which pull the manifest path but NOT the cmd_agent
+// helm-context / handoff graph (that lives in part 3).
+//
+// Style (see test/TEST_GUIDE.md): drive the REAL entrypoints — agent_setup /
+// mcp_install_from_manifest / _mcp_write_codex — against the faked external
+// world, then assert on the config files written into the stage. jq stays REAL
+// (the MCP writers hard-dep it). seed_skills() lays down a Startup.md + skill
+// tree and points _agent_skills_src() at it; the manifest is pointed at
+// test/fixtures/agent_manifest.json with AWS_REGION set so the ${AWS_REGION} arg
+// substitutes.
+//
+// NB (AMBER_IDIOMS): NO `return` inside a test block — branch with `if`. JSON is
+// brace-heavy, so canned manifests live in test/fixtures/*.json, never inline.
+
+import { assert } from "std/test"
+import { file_exists, file_read, file_write, dir_create } from "std/fs"
+import { env_var_set, env_var_unset } from "std/env"
+import { text_contains } from "std/text"
+import { fresh_world, world_noninteractive } from "./support/world.ab"
+import {
+    _mcp_write_codex, mcp_install_from_manifest, agent_setup
+} from "../src/agent.ab"
+
+// Pointed at by the tests that need a manifest (mcpServers + branding).
+const AGENT_MANIFEST = "test/fixtures/agent_manifest.json"
+
+// ---- file-local helpers (ABOVE the test blocks: define-before-use across the
+// import boundary; the test-file tree-shaker keeps only deps textually preceding
+// their use). ----
+
+// seed_skills — lay down a Startup.md + skill tree the agent setup copies from,
+// and point _agent_skills_src() at it (MIGRATE_SKILLS_SRC override, with an empty
+// LIB_DIR so the release/dev candidates miss). Mirrors the bundle's skills/ shape:
+// Startup.md at the root, per-skill <name>/SKILL.md subdirs (the auto-discovered
+// tree), the operator skill's steering docs, and a kiro/ config subtree.
+fun seed_skills(): Text {
+    let base = trust $mktemp -d$
+    let skills = "{base}/skills"
+    trust dir_create(skills)
+    trust file_write("{skills}/Startup.md", "# Startup runbook\nhello\n")
+
+    trust dir_create("{skills}/migration-assistant-operator")
+    trust file_write("{skills}/migration-assistant-operator/SKILL.md", "# operator skill\n")
+    trust file_write("{skills}/migration-assistant-operator/workflow.md", "# workflow\n")
+    trust file_write("{skills}/migration-assistant-operator/deployment.md", "# deployment\n")
+    trust file_write("{skills}/migration-assistant-operator/product.md", "# product\n")
+
+    trust dir_create("{skills}/another-skill")
+    trust file_write("{skills}/another-skill/SKILL.md", "# another skill\n")
+
+    // Upstream kiro config tree (agent_setup kiro copies skills/kiro/. into .kiro/).
+    trust dir_create("{skills}/kiro/agents")
+    trust file_write("{skills}/kiro/agents/opensearch.json", "agent-config\n")
+
+    let emptylib = "{base}/emptylib"
+    trust dir_create(emptylib)
+    trust env_var_set("LIB_DIR", emptylib)
+    trust env_var_set("MIGRATE_SKILLS_SRC", skills)
+    return skills
+}
+
+// ---- agent_setup: skills + config without the handoff -----------------------
+
+test "agent_setup claude drops Startup.md + the operator skill tree into .claude/skills" {
+    let w = fresh_world()
+    world_noninteractive()
+    seed_skills()
+    // Skip MCP so this stays a pure skills-layout check (no uvx / jq needed).
+    trust env_var_set("MIGRATE_SKIP_MCP", "1")
+    agent_setup("claude")
+    // Startup runbook at the stage root under all three auto-load names.
+    assert(file_exists("{w}/Startup.md"))
+    assert(file_exists("{w}/CLAUDE.md"))
+    assert(file_exists("{w}/AGENTS.md"))
+    // Claude's auto-loadable skill + the auto-discovered tree.
+    assert(file_exists("{w}/.claude/skills/opensearch-migration/Startup.md"))
+    assert(file_exists("{w}/skills/migration-assistant-operator/SKILL.md"))
+    assert(file_exists("{w}/skills/another-skill/SKILL.md"))
+    env_var_unset("MIGRATE_SKIP_MCP")
+}
+
+test "agent_setup codex drops AGENTS.md at the root + a copy in .codex" {
+    let w = fresh_world()
+    world_noninteractive()
+    seed_skills()
+    trust env_var_set("MIGRATE_SKIP_MCP", "1")
+    agent_setup("codex")
+    assert(file_exists("{w}/AGENTS.md"))
+    assert(file_exists("{w}/.codex/Startup.md"))
+    env_var_unset("MIGRATE_SKIP_MCP")
+}
+
+// ---- MCP registration -------------------------------------------------------
+
+test "codex MCP registration writes the [mcp_servers.<name>] section + command" {
+    let w = fresh_world()
+    world_noninteractive()
+    trust env_var_set("MIGRATE_MANIFEST", AGENT_MANIFEST)
+    trust env_var_set("AWS_REGION", "ca-central-1")
+    _mcp_write_codex("aws-mcp")
+    // The section header + command line are plain-text file_append (jq-independent).
+    // The region-substituted args content is covered on the claude .mcp.json above.
+    let body = file_read("{w}/.codex/config.toml") failed { "" }
+    assert(text_contains(body, "[mcp_servers.aws-mcp]"))
+    assert(text_contains(body, "command = \"uvx\""))
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "mcp_install_from_manifest is a no-op when MIGRATE_SKIP_MCP=1" {
+    let w = fresh_world()
+    world_noninteractive()
+    trust env_var_set("MIGRATE_MANIFEST", AGENT_MANIFEST)
+    trust env_var_set("MIGRATE_SKIP_MCP", "1")
+    mcp_install_from_manifest("claude")
+    // No project-scope config written when MCP registration is skipped wholesale.
+    assert(not file_exists("{w}/.mcp.json"))
+    env_var_unset("MIGRATE_SKIP_MCP")
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "mcp_install_from_manifest honors a per-MCP skip var (MIGRATE_SKIP_MCP_<NAME>)" {
+    let w = fresh_world()
+    world_noninteractive()
+    trust env_var_set("MIGRATE_MANIFEST", AGENT_MANIFEST)
+    trust env_var_set("AWS_REGION", "us-east-1")
+    // Skip just aws-mcp (normalized to AWS_MCP) → nothing registered for codex,
+    // and (crucially) uvx is never required, so no install prompt is reached.
+    trust env_var_set("MIGRATE_SKIP_MCP_AWS_MCP", "1")
+    mcp_install_from_manifest("codex")
+    assert(not file_exists("{w}/.codex/config.toml"))
+    env_var_unset("MIGRATE_SKIP_MCP_AWS_MCP")
+    env_var_unset("MIGRATE_MANIFEST")
+}

@@ -1,12 +1,18 @@
-// test_cfn_deploy.ab — e2e coverage for cfn_deploy.ab (the DEPLOY half of the
-// bash cfn.sh port).
+// test_cfn_deploy_decision.ab — e2e coverage for cfn_deploy.ab (the DEPLOY half
+// of the bash cfn.sh port): the deploy/skip DECISION + spine.
+//
+// This is one of two parts split out of the original test_cfn_deploy.ab (which
+// compiled to ~176KB and tripped Linux's 128KB MAX_ARG_STRLEN cap on the
+// `eval "<compiled script>"` amber uses per test). This part holds the
+// cfn_deploy_or_skip blocks; the pure param-building units live in
+// test_cfn_deploy_params.ab.
 //
 // Reference style (see test/TEST_GUIDE.md): drive the real cfn_deploy_or_skip
 // entrypoint against the faked external world, then assert on what the CLI DID —
 // which commands it issued (mock_called) and how on-disk state changed — rather
 // than poking internals. The mock fleet + per-test world come from test/support/.
 //
-// What's covered:
+// What's covered here:
 //   * cfn_deploy_or_skip — the full deploy DECISION + spine against a faked `aws`:
 //       - already-healthy stack (describe-stacks → CREATE_COMPLETE) → skip, no
 //         deploy, the chosen stack name is persisted.
@@ -14,12 +20,6 @@
 //       - an unhealthy stack → it runs `aws cloudformation deploy` (mock_called),
 //         tails events, and advances state to last_step=cfn_done.
 //       - a custom CFN_STACK_NAME is the one deployed (mock_called) + persisted.
-//   * _cfn_import_vpc_endpoint_params — kept as a direct unit (pure param
-//     building): the eval-array-append the bash version did is now a returned
-//     [Text]; assert the Create*Endpoint=true list per requested endpoint, plus
-//     the s3 gateway's resolved route-table ids.
-//   * _cfn_subnet_route_table_ids — direct unit for the S3-gateway route-table
-//     resolution (per-subnet lookup, None→main fallback, dedup, comma-join).
 //
 // State reconciles through the on-disk state.env: the world seeds it, and
 // cfn_deploy_or_skip calls state_load() at entry. Each test mints its OWN
@@ -46,12 +46,8 @@ import { is_command } from "std/env"
 import { split_words } from "std/text"
 import { fresh_world, world_seed, world_noninteractive } from "./support/world.ab"
 import { mock_install, mock_respond, mock_called, mock_call_count } from "./support/mock.ab"
-import { array_contains } from "../src/std.ab"
 import { state_load, state_get } from "../src/state.ab"
-import {
-    _cfn_subnet_route_table_ids, _cfn_import_vpc_endpoint_params,
-    cfn_deploy_or_skip
-} from "../src/cfn_deploy.ab"
+import { cfn_deploy_or_skip } from "../src/cfn_deploy.ab"
 
 // The MA artifact version the deploy tests seed + the import-vpc template name
 // (the variant whose const survives import; see the DEPLOY-PATH NOTE). The cache
@@ -167,79 +163,4 @@ test "cfn_deploy_or_skip skips entirely when --skip-cfn-deploy is set" {
     assert(not mock_called(w, "aws", "deploy"))
     state_load()
     assert_eq(state_get("last_step", ""), "")
-}
-
-// ---- _cfn_import_vpc_endpoint_params (pure param building) ----------------
-
-test "import-vpc endpoint params map each named endpoint to Create*Endpoint=true" {
-    let w = deploy_world()
-    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-a", "us-east-1", "ecr,ecrDocker,cloudwatchLogs,efs,sts,eksAuth")
-    assert(array_contains("CreateECREndpoint=true", extras))
-    assert(array_contains("CreateECRDockerEndpoint=true", extras))
-    assert(array_contains("CreateCloudWatchLogsEndpoint=true", extras))
-    assert(array_contains("CreateEFSEndpoint=true", extras))
-    assert(array_contains("CreateSTSEndpoint=true", extras))
-    assert(array_contains("CreateEKSAuthEndpoint=true", extras))
-    // No s3 requested → no gateway/route-table params.
-    assert(not array_contains("CreateS3Endpoint=true", extras))
-}
-
-test "import-vpc endpoint params return [] when nothing is requested" {
-    let w = deploy_world()
-    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-a", "us-east-1", "")
-    // Bind `len` to a local first: in 0.6 a `len arr` passed DIRECTLY as a call
-    // arg mis-resolves the array length var in a test block ("bad array subscript").
-    let n = len extras
-    assert_eq(n, 0)
-}
-
-test "import-vpc endpoint params ignore unknown entries, keep the known ones" {
-    let w = deploy_world()
-    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-a", "us-east-1", "bogus,ecr")
-    assert(array_contains("CreateECREndpoint=true", extras))
-    let n = len extras
-    assert_eq(n, 1)
-}
-
-test "import-vpc s3 endpoint adds the gateway + resolved route-table ids" {
-    let w = deploy_world()
-    // s3 is a Gateway endpoint → it resolves route-table ids per subnet. The mock
-    // matches whole arg tokens, and the subnet id rides inside the --filters value
-    // `Name=association.subnet-id,Values=<id>` (one shell arg), so key on the full
-    // filter token, not the bare id.
-    mock_respond(w, "aws", "Name=association.subnet-id,Values=subnet-a", "rtb-aaa")
-    mock_respond(w, "aws", "Name=association.subnet-id,Values=subnet-b", "rtb-bbb")
-    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-a,subnet-b", "us-east-1", "s3")
-    assert(array_contains("CreateS3Endpoint=true", extras))
-    assert(array_contains("S3EndpointRouteTableIds=rtb-aaa,rtb-bbb", extras))
-}
-
-// ---- _cfn_subnet_route_table_ids (pure resolution) ------------------------
-
-test "subnet route-table ids are resolved, de-duped, and comma-joined" {
-    let w = deploy_world()
-    mock_respond(w, "aws", "Name=association.subnet-id,Values=subnet-a", "rtb-aaa")
-    mock_respond(w, "aws", "Name=association.subnet-id,Values=subnet-b", "rtb-bbb")
-    let rt = _cfn_subnet_route_table_ids("vpc-1", "subnet-a,subnet-b", "us-east-1")
-    assert_eq(rt, "rtb-aaa,rtb-bbb")
-}
-
-test "subnet route-table ids de-dupe repeated entries" {
-    let w = deploy_world()
-    // Both subnets resolve to the same route table → one entry after dedup.
-    mock_respond(w, "aws", "Name=association.subnet-id,Values=subnet-a", "rtb-aaa")
-    mock_respond(w, "aws", "Name=association.subnet-id,Values=subnet-dup", "rtb-aaa")
-    let rt = _cfn_subnet_route_table_ids("vpc-1", "subnet-a,subnet-dup", "us-east-1")
-    assert_eq(rt, "rtb-aaa")
-}
-
-test "subnet route-table ids fall back to the VPC main route table" {
-    let w = deploy_world()
-    // subnet-none has no explicit association → its per-subnet lookup yields None,
-    // so the helper falls back to the VPC main route table (the second filter set,
-    // keyed on its association.main token).
-    mock_respond(w, "aws", "Name=association.subnet-id,Values=subnet-none", "None")
-    mock_respond(w, "aws", "Name=association.main,Values=true", "rtb-main")
-    let rt = _cfn_subnet_route_table_ids("vpc-1", "subnet-none", "us-east-1")
-    assert_eq(rt, "rtb-main")
 }

@@ -1,0 +1,60 @@
+// test_helm_install_flags.ab — TLS flag builder coverage for src/helm_install.ab
+// (split from test_helm_install.ab; the original compiled too large to eval on
+// Linux, where a single arg caps at 128KB — see test/TEST_GUIDE.md). Imports are
+// trimmed to only what these blocks use so tree-shaking keeps the file small.
+// _helm_tls_flags reads TLS_MODE / PCA_ARN / AWS_REGION via state.ab + state_load()s
+// at entry, so seeding via the world's on-disk state.env round-trips through its
+// own state instance. NB (AMBER_IDIOMS): no `return` in a `test`; helpers above.
+
+import { assert, assert_eq } from "std/test"
+import { array_contains } from "../src/std.ab"
+import { fresh_world, world_seed } from "./support/world.ab"
+import { _helm_tls_flags } from "../src/helm_install.ab"
+
+// ---- pure unit: _helm_tls_flags --------------------------------------------
+
+test "_helm_tls_flags is empty for unset/none/self-signed" {
+    let w = fresh_world()
+    // UNSET: TLS_MODE absent → default "" → no-flags branch. (Don't persist
+    // TLS_MODE="" — state.ab round-trips empty as a stray quote, out of scope.)
+    world_seed(w, "AWS_REGION", "us-east-1")
+    let f0 = _helm_tls_flags()
+    let n0 = len f0
+    assert_eq(n0, 0)
+
+    world_seed(w, "TLS_MODE", "none")
+    let f1 = _helm_tls_flags()
+    let n1 = len f1
+    assert_eq(n1, 0)
+}
+
+test "_helm_tls_flags self-signed adds no flags" {
+    let w = fresh_world()
+    world_seed(w, "AWS_REGION", "us-east-1")
+    world_seed(w, "TLS_MODE", "self-signed")
+    let f = _helm_tls_flags()
+    let n = len f
+    assert_eq(n, 0)
+}
+
+test "_helm_tls_flags pca-existing sets the issuer + arn + region" {
+    let w = fresh_world()
+    world_seed(w, "TLS_MODE", "pca-existing")
+    world_seed(w, "PCA_ARN", "arn:aws:acm-pca:us-east-1:111:ca/abc")
+    world_seed(w, "AWS_REGION", "us-east-1")
+    let flags = _helm_tls_flags()
+    assert(array_contains("conditionalPackageInstalls.aws-privateca-issuer=true", flags))
+    assert(array_contains("awsPrivateCA.arn=arn:aws:acm-pca:us-east-1:111:ca/abc", flags))
+    assert(array_contains("awsPrivateCA.region=us-east-1", flags))
+}
+
+test "_helm_tls_flags pca-create enables both controllers + create" {
+    let w = fresh_world()
+    world_seed(w, "TLS_MODE", "pca-create")
+    world_seed(w, "AWS_REGION", "us-west-2")
+    let flags = _helm_tls_flags()
+    assert(array_contains("conditionalPackageInstalls.aws-privateca-issuer=true", flags))
+    assert(array_contains("conditionalPackageInstalls.ack-acmpca-controller=true", flags))
+    assert(array_contains("awsPrivateCA.create=true", flags))
+    assert(array_contains("awsPrivateCA.region=us-west-2", flags))
+}

@@ -1,4 +1,11 @@
-// test_build.ab — e2e coverage for build.ab (the --build image path).
+// test_build_seams.ab — e2e coverage for build.ab's drivable seams: ECR login,
+// the Kubernetes-hosted buildkit builder, the gradle invocation, repo-root
+// resolution, and the builder-name sanitizer. SPLIT from the former test_build.ab
+// (which compiled to ~131KB — over Linux's 128KB single-arg cap that `amber
+// test`'s `eval "<script>"` hits as 'Argument list too long'). The public
+// entrypoint (build_images_or_skip) inlines the whole build spine on its own and
+// lives in the sibling test_build_gate.ab; these per-seam pub helpers compile far
+// smaller, so they share this file.
 //
 // Reference style (see test/TEST_GUIDE.md, test/test_cleanup.ab): drive the real
 // build.ab seams against a faked external world and assert on what the CLI DID —
@@ -17,12 +24,7 @@
 //      asserted via their own recorded call log (built_repo() / gradlew_calls()).
 //
 //   2. state isolation (verified empirically, not a coverage gap). Every module
-//      that imports state.ab gets its OWN private module-level store, and
-//      build_images_or_skip — unlike cmd_cleanup — never calls state_load() at
-//      entry. So world_seed() (which writes the on-disk state.env) is INVISIBLE
-//      to build.ab's state_get: the orchestrator always sees an EMPTY state from a
-//      test, which means the only branch reachable end-to-end through the public
-//      entrypoint is its BUILD_FROM_SOURCE!=Y no-op gate. The rest of the build
+//      that imports state.ab gets its OWN private module-level store. The build
 //      spine — ECR login, buildkit setup, the gradle invocation it composes and
 //      retries — takes its inputs as ARGUMENTS via the pub helpers it calls
 //      (_build_ecr_login / _build_setup_buildkit / _build_gradle_invoke /
@@ -43,8 +45,7 @@ import {
 } from "./support/mock.ab"
 import {
     _build_builder_name, _build_resolve_base_dir,
-    _build_ecr_login, _build_setup_buildkit, _build_gradle_invoke,
-    build_images_or_skip
+    _build_ecr_login, _build_setup_buildkit, _build_gradle_invoke
 } from "../src/build.ab"
 
 // ---- file-local helpers (ABOVE the tests: Amber needs define-before-use across
@@ -104,22 +105,6 @@ fun built_repo(w: Text, gradlew_rc: Text): Text {
 // gradlew_calls <repo> — the recorded gradlew argument log (or "" if never run).
 fun gradlew_calls(repo: Text): Text {
     return file_read("{repo}/gradlew.calls") failed { "" }
-}
-
-// ---- build_images_or_skip: the public entrypoint gate (end to end) ----------
-//
-// With the empty state every test presents (see the file header), the orchestrator
-// takes its BUILD_FROM_SOURCE!=Y no-op path: it returns 0 having issued NO aws /
-// docker / gradle work. This is the full e2e contract reachable through the
-// entrypoint — "ran without --build does nothing".
-
-test "build is skipped (returns 0, issues no aws/docker work) when --build was not requested" {
-    let w = built_world()
-    let rc = build_images_or_skip()
-    assert_eq(rc, 0)
-    assert(not mock_called(w, "aws", "get-login-password"))
-    assert(not mock_called(w, "docker", "buildx"))
-    assert(not mock_called(w, "docker", "login"))
 }
 
 // ---- _build_ecr_login: aws get-login-password | docker login (the auth seam) -

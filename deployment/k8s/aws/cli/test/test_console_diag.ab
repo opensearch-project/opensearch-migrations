@@ -1,0 +1,75 @@
+// test_console_diag.ab — e2e coverage for cmd_diag, the standalone diagnostics
+// dump (port of bash lib/diag.sh). Split from test_console.ab (the original
+// compiled to ~178KB and tripped Linux MAX_ARG_STRLEN). cmd_diag is the heavy
+// half of console.ab: it inlines the helm_diag.ab bundle (helm status + kubectl
+// get pods/events + per-pod describe), which is by far the largest transitive
+// graph, so it lives in its own file apart from the console-entry tests in
+// test_console_exec.ab.
+//
+// Style (see test/TEST_GUIDE.md): drive the real cmd_diag entrypoint against the
+// faked external world, then assert on what the CLI DID — which commands it
+// issued (mock_called kubectl/helm/aws) — not on internals. The per-test world +
+// mock fleet come from test/support/, so this file does NOT hand-roll a stub
+// fleet / mktemp / PATH dance.
+//
+// console.ab pins HELM_NAMESPACE / HELM_RELEASE_NAME = "ma", so the diag bundle
+// always targets namespace ma regardless of the operator's stage. State
+// reconciles through the on-disk state.env: the world seeds it; cmd_diag calls
+// state_load() / helm_kctx_init() at entry, which read the same stage dir the
+// world pinned (MIGRATE_HOME/STAGE).
+//
+// What's covered here:
+//   * cmd_diag — issues the helm_dump_diagnostics bundle (helm status + kubectl
+//     get pods -o wide + get events) against namespace ma; returns 0.
+//
+// NB: the STAGE_NAME-missing guard die()s (exits the process), so it is NOT
+// exercised here — every world seeds STAGE_NAME so the happy path runs. NO
+// `return` inside a test block (AMBER_IDIOMS) — branch with `if`.
+
+import { assert, assert_eq } from "std/test"
+import { fresh_world, world_seed, world_noninteractive } from "./support/world.ab"
+import {
+    mock_install_default, mock_respond, mock_respond_rc,
+    mock_called, mock_call_count
+} from "./support/mock.ab"
+import { cmd_diag } from "../src/console.ab"
+
+// ---- helpers (ABOVE the test blocks: define-before-use across the import
+// boundary; the test-file tree-shaker keeps only deps textually preceding use) --
+
+// deployed_world — a world with a deployed stage on disk (STAGE_NAME=ma) + the
+// fleet faked to succeed: the kubectl `exec` handoff exits clean (rc 0), helm
+// status reports deployed, aws sts returns a fake identity. `ctx` binds an
+// optional KUBECTL_CONTEXT (seed "" for the bare-kubectl case). The shape behind
+// the cmd_diag test. Returns the WORLD.
+fun deployed_world(ctx: Text): Text {
+    let w = fresh_world()
+    world_noninteractive()
+    world_seed(w, "STAGE_NAME", "ma")
+    if ctx != "" {
+        world_seed(w, "KUBECTL_CONTEXT", ctx)
+    }
+    mock_install_default()
+    // kubectl `exec` → clean exit (the operator left the console cleanly).
+    mock_respond_rc(w, "kubectl", "exec", "0")
+    // helm status (the diag bundle) → a deployed release.
+    mock_respond(w, "helm", "status", "NAME: ma\nSTATUS: deployed\n")
+    // aws sts get-caller-identity (console_exec's identity print) → an identity.
+    mock_respond(w, "aws", "get-caller-identity", "arn:aws:iam::123456789012:user/test\n")
+    return w
+}
+
+// ---- cmd_diag: the standalone diagnostics dump ------------------------------
+
+test "cmd_diag issues the helm status + kubectl pods/events diagnostics bundle" {
+    let w = deployed_world("")
+    let rc = cmd_diag(["diag"])
+    assert_eq(rc, 0)
+    // helm_dump_diagnostics ran against namespace ma: helm status + pods + events.
+    assert(mock_called(w, "helm", "status"))
+    assert(mock_called(w, "kubectl", "get pods"))
+    assert(mock_called(w, "kubectl", "-o wide"))
+    assert(mock_called(w, "kubectl", "get events"))
+    // The diag bundle never opens an interactive console.
+    assert_eq(mock_call_count(w, "aws"), 0)
+}

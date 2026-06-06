@@ -1,0 +1,88 @@
+// test_agent_units.ab — e2e coverage for agent.ab (the port of bash lib/agent.sh),
+// part 1 of 3: discovery + pure/near-pure units.
+//
+// Split out of the former test_agent.ab so each part's compiled script stays
+// under the Linux MAX_ARG_STRLEN cap (amber runs each test via `eval "<script>"`;
+// a single arg is capped at ~128KB on Linux, so each test FILE must compile to
+// <~120KB). This part holds the LIGHT entrypoints — discover_agents / the agent
+// binary resolvers / the pure MCP formatters — none of which pull the heavy
+// manifest-writer / helm-context / handoff call graph, so it stays small.
+//
+// Style (see test/TEST_GUIDE.md): drive the REAL entrypoints against the faked
+// external world, then assert on what the CLI DID. The per-test world + mock
+// fleet come from test/support/.
+//
+// Host-robust: real claude/kiro may be on the developer's PATH, and exact
+// count/membership of a cross-import array is flaky, so we assert that a freshly
+// FAKED agent (codex — not normally installed) shows up, not an exact set.
+//
+// NB (AMBER_IDIOMS): NO `return` inside a test block — branch with `if`.
+
+import { assert, assert_eq } from "std/test"
+import { env_var_set } from "std/env"
+import { fresh_world, world_noninteractive } from "./support/world.ab"
+import { mock_install } from "./support/mock.ab"
+import { array_contains } from "../src/std.ab"
+import {
+    discover_agents, _agent_bin_for, _agent_bins_for,
+    _mcp_norm_envvar, _mcp_pretty,
+    _agent_print_install_hints_for_missing, _agent_has_session
+} from "../src/agent.ab"
+
+// ---- discover_agents: probe the PATH for installed agents -------------------
+
+test "discover_agents includes a freshly-installed agent on PATH" {
+    let w = fresh_world()
+    world_noninteractive()
+    mock_install(["codex"])
+    let agents = discover_agents()
+    assert(array_contains("codex", agents))
+}
+
+test "agent binary resolution: present resolves to a path, absent resolves to empty" {
+    let w = fresh_world()
+    world_noninteractive()
+    mock_install(["codex"])
+    // codex is faked onto PATH → command -v resolves an absolute path.
+    assert(_agent_bin_for("codex") != "")
+    // a canonical name with no candidate binary anywhere → "".
+    assert_eq(_agent_bin_for("no-such-agent"), "")
+}
+
+// ---- pure / near-pure units -------------------------------------------------
+
+test "_mcp_norm_envvar uppercases and maps non-alpha to underscore" {
+    assert_eq(_mcp_norm_envvar("aws-mcp"), "AWS_MCP")
+    assert_eq(_mcp_norm_envvar("my.org/secrets"), "MY_ORG_SECRETS")
+}
+
+test "_agent_bins_for lists a canonical name's candidate binaries" {
+    // kiro probes kiro-cli first, then kiro (comma-joined for diagnostics).
+    assert_eq(_agent_bins_for("kiro"), "kiro-cli,kiro")
+    assert_eq(_agent_bins_for("claude"), "claude")
+}
+
+test "_mcp_pretty abbreviates a path under HOME to ~/…" {
+    trust env_var_set("HOME", "/home/op")
+    assert_eq(_mcp_pretty("/home/op/.mcp.json"), "~/.mcp.json")
+    // A path outside HOME is returned verbatim.
+    assert_eq(_mcp_pretty("/etc/hosts"), "/etc/hosts")
+}
+
+test "install hints for missing agents run without error" {
+    let w = fresh_world()
+    world_noninteractive()
+    // claude already installed → only codex + kiro hints are surfaced (to stderr);
+    // this exercises the missing-set computation + dispatch (returns Null).
+    _agent_print_install_hints_for_missing(["claude"])
+    assert(true)
+}
+
+test "_agent_has_session is optimistically true for non-claude agents" {
+    let w = fresh_world()
+    world_noninteractive()
+    // Only claude has an inspectable per-cwd session dir; every other agent
+    // returns true (its resume is harmless on no history).
+    assert(_agent_has_session("codex"))
+    assert(_agent_has_session("kiro"))
+}

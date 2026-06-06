@@ -1,0 +1,89 @@
+// test_helm_recover_gate.ab — e2e coverage for the PUBLIC recovery gate of
+// helm_recover.ab (stuck-release recovery slice of the bash helm.sh port).
+//
+// Split out of the former monolithic test_helm_recover.ab (~161KB compiled; amber
+// runs each test via eval, and Linux caps a single arg at 128KB / MAX_ARG_STRLEN,
+// so the monolith failed CI). Sibling test_helm_recover_*.ab parts carry the other
+// slices; the four parts together carry EVERY original test block.
+//
+// Held to ONLY the five recovery-gate e2e blocks. The gate inlines its whole
+// recovery tree (~124KB compiled floor even for one test), so it cannot reach the
+// 120KB target without editing src (forbidden); kept test-minimal to stay under
+// the 128KB hard cap. (Naming the inlined private helpers in comments inflates the
+// compiled output — amber's test-file tree-shaker scans comment text — so avoid it.)
+//
+// e2e style (test/TEST_GUIDE.md): drive the real entry against the faked
+// helm+kubectl fleet, assert on which helm subcommands it issued. Each block mints
+// its OWN fresh world; the non-interactive world makes prompts take their defaults
+// ("Y" yes; "Choose" 1 rollback) so the recovery paths run unattended.
+//
+// NB: no `return` in test blocks (AMBER_IDIOMS — branch with `if`). Literal `{` in
+// an Amber Text is interpolation, so the status JSON braces are escaped (\{ \}).
+import { assert, assert_eq } from "std/test"
+import { fresh_world, world_noninteractive } from "./support/world.ab"
+import {
+    mock_install_default, mock_respond, mock_fail,
+    mock_called, mock_call_count
+} from "./support/mock.ab"
+import { helm_recover_if_stuck } from "../src/helm_recover.ab"
+
+// helpers ABOVE the test blocks (define-before-use; the test-file tree-shaker
+// keeps only deps textually preceding their use).
+fun helm_status_json(st: Text): Text {
+    return "\{\"info\":\{\"status\":\"{st}\"}}"
+}
+
+fun world_with_helm_status(st: Text): Text {
+    let w = fresh_world()
+    world_noninteractive()
+    mock_install_default()
+    if st == "" {
+        mock_fail(w, "helm", "status", "1", "")
+    } else {
+        mock_respond(w, "helm", "status", helm_status_json(st))
+    }
+    mock_respond(w, "kubectl", "jobs", "")
+    return w
+}
+
+test "helm_recover_if_stuck is a clean no-op for a deployed release" {
+    let w = world_with_helm_status("deployed")
+    let rc = helm_recover_if_stuck("ma", "ma")
+    assert_eq(rc, 0)
+    assert_eq(mock_call_count(w, "helm"), 1)   // status check only; no recovery
+    assert(not mock_called(w, "helm", "uninstall"))
+    assert(not mock_called(w, "helm", "rollback"))
+}
+
+test "helm_recover_if_stuck is a clean no-op for an absent release" {
+    let w = world_with_helm_status("")
+    let rc = helm_recover_if_stuck("ma", "ma")
+    assert_eq(rc, 0)
+    assert(not mock_called(w, "helm", "uninstall"))
+    assert(not mock_called(w, "helm", "rollback"))
+}
+
+test "helm_recover_if_stuck proceeds (0) without acting on an unknown status" {
+    let w = world_with_helm_status("weird-unhandled-state")
+    let rc = helm_recover_if_stuck("ma", "ma")
+    assert_eq(rc, 0)
+    assert(not mock_called(w, "helm", "uninstall"))
+    assert(not mock_called(w, "helm", "rollback"))
+}
+
+test "helm_recover_if_stuck uninstalls a pending-install release" {
+    let w = world_with_helm_status("pending-install")
+    // pending-install → ui_confirm defaults to Yes (noninteractive) → uninstall.
+    let rc = helm_recover_if_stuck("ma", "ma")
+    assert_eq(rc, 0)
+    assert(mock_called(w, "helm", "uninstall"))
+}
+
+test "helm_recover_if_stuck rolls back a pending-upgrade release (menu default [1])" {
+    let w = world_with_helm_status("pending-upgrade")
+    // pending-upgrade → the recovery menu; ui_prompt("Choose","1") returns the
+    // default "1" in non-interactive mode → helm rollback is issued.
+    let rc = helm_recover_if_stuck("ma", "ma")
+    assert_eq(rc, 0)
+    assert(mock_called(w, "helm", "rollback"))
+}

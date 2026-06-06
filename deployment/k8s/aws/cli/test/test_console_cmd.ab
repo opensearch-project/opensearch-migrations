@@ -1,30 +1,31 @@
-// test_console.ab — e2e coverage for console.ab (cmd_console / console_exec /
-// cmd_diag, the port of bash lib/console.sh + lib/diag.sh).
+// test_console_cmd.ab — e2e coverage for console.ab's full-flow entrypoints:
+// cmd_console (the `console` subcommand) and console_exec (the post-deploy
+// handoff). Split from test_console.ab (the original compiled to ~178KB and
+// tripped Linux MAX_ARG_STRLEN). Both entrypoints run the resume spine
+// (log_init / state_load / helm_kctx_init / --stage handling), so this file
+// inlines state.ab + log.ab + common.ab. Siblings: test_console_exec.ab (the
+// lighter _console_exec_into_pod signal-mapping tests) and test_console_diag.ab
+// (cmd_diag — the helm_diag bundle).
 //
-// Style (see test/TEST_GUIDE.md): drive the real cmd_* / console_exec entrypoints
-// against the faked external world, then assert on what the CLI DID — which
-// commands it issued (mock_called kubectl/helm/aws) and how state changed — not on
-// internals. The per-test world + mock fleet come from test/support/, so this file
-// does NOT hand-roll a stub fleet / mktemp / PATH dance.
+// Style (see test/TEST_GUIDE.md): drive the real cmd_console / console_exec
+// entrypoints against the faked external world, then assert on what the CLI DID —
+// which commands it issued (mock_called kubectl/aws) and how state changed
+// (state_get after) — not on internals. The per-test world + mock fleet come from
+// test/support/, so this file does NOT hand-roll a stub fleet / mktemp / PATH
+// dance.
 //
-// console.ab shells out to kubectl (the interactive `exec` handoff + the diag
-// dumps), helm (diag status), and aws (sts get-caller-identity). It pins
-// HELM_NAMESPACE / HELM_RELEASE_NAME = "ma", so the exec + diag always target
-// namespace ma regardless of the operator's stage. State reconciles through the
-// on-disk state.env: the world seeds it; cmd_* call state_load() / helm_kctx_init()
-// at entry, which read the same stage dir the world pinned (MIGRATE_HOME/STAGE).
+// console.ab pins HELM_NAMESPACE / HELM_RELEASE_NAME = "ma", so the exec always
+// targets namespace ma regardless of the operator's stage. State reconciles
+// through the on-disk state.env: the world seeds it; cmd_* call state_load() /
+// helm_kctx_init() at entry, which read the same stage dir the world pinned
+// (MIGRATE_HOME/STAGE).
 //
-// What's covered (kept at parity with the prior unit-style file):
-//   * _console_exec_into_pod — the 130/131/143→0 operator-signal mapping AND a
-//     passthrough of an arbitrary non-zero rc; the exec command shape; the bound
-//     --context threading through unquoted.
+// What's covered here:
 //   * cmd_console — STAGE_NAME present → exec fires against namespace ma; a bound
 //     KUBECTL_CONTEXT reaches the exec; --stage repoints the stage that's read.
 //   * console_exec — SKIP_CONSOLE_EXEC=Y → returns 0 with NO exec, but still
 //     persists last_step=console_handoff; the default path runs the aws sts call +
 //     the exec and persists last_step.
-//   * cmd_diag — issues the helm_dump_diagnostics bundle (helm status + kubectl
-//     get pods -o wide + get events) against namespace ma; returns 0.
 //
 // NB: the STAGE_NAME-missing guard die()s (exits the process), so it is NOT
 // exercised here — every world seeds STAGE_NAME so the happy path runs. NO
@@ -33,12 +34,11 @@
 import { assert, assert_eq } from "std/test"
 import { fresh_world, world_seed, world_noninteractive, world_stage } from "./support/world.ab"
 import {
-    mock_install_default, mock_respond, mock_respond_rc,
-    mock_called, mock_call_count
+    mock_install_default, mock_respond, mock_respond_rc, mock_called
 } from "./support/mock.ab"
 import { state_load, state_get } from "../src/state.ab"
 import {
-    cmd_console, console_exec, cmd_diag, _console_exec_into_pod
+    cmd_console, console_exec
 } from "../src/console.ab"
 
 // ---- helpers (ABOVE the test blocks: define-before-use across the import
@@ -48,7 +48,7 @@ import {
 // fleet faked to succeed: the kubectl `exec` handoff exits clean (rc 0), helm
 // status reports deployed, aws sts returns a fake identity. `ctx` binds an
 // optional KUBECTL_CONTEXT (seed "" for the bare-kubectl case). The shape behind
-// the cmd_console / console_exec / cmd_diag tests. Returns the WORLD.
+// the cmd_console / console_exec tests. Returns the WORLD.
 fun deployed_world(ctx: Text): Text {
     let w = fresh_world()
     world_noninteractive()
@@ -64,57 +64,6 @@ fun deployed_world(ctx: Text): Text {
     // aws sts get-caller-identity (console_exec's identity print) → an identity.
     mock_respond(w, "aws", "get-caller-identity", "arn:aws:iam::123456789012:user/test\n")
     return w
-}
-
-// ---- _console_exec_into_pod: the operator-signal exit-code mapping ----------
-
-test "console exec maps a clean exit (0) to rc 0" {
-    let w = deployed_world("")
-    mock_respond_rc(w, "kubectl", "exec", "0")
-    let rc = _console_exec_into_pod("ma")
-    assert_eq(rc, 0)
-    assert(mock_called(w, "kubectl", "exec"))
-}
-
-test "console exec maps SIGINT (130) to rc 0" {
-    let w = deployed_world("")
-    mock_respond_rc(w, "kubectl", "exec", "130")
-    let rc = _console_exec_into_pod("ma")
-    assert_eq(rc, 0)
-}
-
-test "console exec maps SIGQUIT (131) to rc 0" {
-    let w = deployed_world("")
-    mock_respond_rc(w, "kubectl", "exec", "131")
-    let rc = _console_exec_into_pod("ma")
-    assert_eq(rc, 0)
-}
-
-test "console exec maps SIGTERM (143) to rc 0" {
-    let w = deployed_world("")
-    mock_respond_rc(w, "kubectl", "exec", "143")
-    let rc = _console_exec_into_pod("ma")
-    assert_eq(rc, 0)
-}
-
-test "console exec passes through a genuine non-zero rc verbatim" {
-    let w = deployed_world("")
-    // 7 is not an operator-driven signal → returned verbatim (bash exit "$rc").
-    mock_respond_rc(w, "kubectl", "exec", "7")
-    let rc = _console_exec_into_pod("ma")
-    assert_eq(rc, 7)
-}
-
-test "console exec issues a TTY-attached kubectl exec into migration-console-0" {
-    let w = deployed_world("")
-    mock_respond_rc(w, "kubectl", "exec", "0")
-    _console_exec_into_pod("ma")
-    assert(mock_called(w, "kubectl", "exec"))
-    assert(mock_called(w, "kubectl", "--stdin"))
-    assert(mock_called(w, "kubectl", "--tty"))
-    assert(mock_called(w, "kubectl", "migration-console-0"))
-    assert(mock_called(w, "kubectl", "/bin/bash"))
-    assert(mock_called(w, "kubectl", "--namespace ma"))
 }
 
 // ---- cmd_console: jump straight into the console pod ------------------------
@@ -172,19 +121,4 @@ test "console_exec runs the sts identity call then execs by default" {
     // last_step persisted on the handoff path too.
     state_load()
     assert_eq(state_get("last_step", ""), "console_handoff")
-}
-
-// ---- cmd_diag: the standalone diagnostics dump ------------------------------
-
-test "cmd_diag issues the helm status + kubectl pods/events diagnostics bundle" {
-    let w = deployed_world("")
-    let rc = cmd_diag(["diag"])
-    assert_eq(rc, 0)
-    // helm_dump_diagnostics ran against namespace ma: helm status + pods + events.
-    assert(mock_called(w, "helm", "status"))
-    assert(mock_called(w, "kubectl", "get pods"))
-    assert(mock_called(w, "kubectl", "-o wide"))
-    assert(mock_called(w, "kubectl", "get events"))
-    // The diag bundle never opens an interactive console.
-    assert_eq(mock_call_count(w, "aws"), 0)
 }

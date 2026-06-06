@@ -1,0 +1,59 @@
+// test_helm_recover_status.ab — coverage for the helm_ctx binding that
+// helm_recover.ab derives its context flags from (owned by helm_ctx.ab; the
+// whole helm tree, recovery included, reads it).
+//
+// Split out of the former test_helm_recover.ab: that single file compiled to
+// ~161KB, and amber runs each test via `eval "<compiled script>"` where Linux
+// caps a single arg at 128KB (MAX_ARG_STRLEN) → 'Argument list too long' on CI.
+// The public recovery gate (helm_recover_if_stuck) lives in
+// test_helm_recover_gate.ab, the release-status parse it consumes
+// (_helm_release_status) in test_helm_recover_release_status.ab, and the
+// namespace/orphan-job primitives in test_helm_recover_namespace.ab. Together
+// the four parts carry EVERY original test block.
+//
+// This part is the one that needs helm_kctx_init() — the ctx binding asserts on
+// the flags it derives from saved state — so it carries the cfn_outputs inline
+// weight that the other parts deliberately avoid. Kept ctx-only so it stays
+// well under the cap.
+//
+// e2e-focused style (see test/TEST_GUIDE.md): the per-test world comes from
+// test/support/; each block mints its OWN fresh_world(). State (KUBECTL_CONTEXT)
+// reconciles through the world's on-disk state.env: world pins
+// STAGE_DIR/MIGRATE_HOME/STAGE, helm_kctx_init() loads state from there then
+// derives the flags.
+//
+// What's covered here:
+//   * helm_ctx binding (owned by helm_ctx.ab; recovery reads it): KUBECTL_CONTEXT
+//     in state → "--kube-context X" / "--context X"; unset → "".
+//
+// NB: no `return` inside test blocks (AMBER_IDIOMS — branch with `if`).
+
+import { assert_eq } from "std/test"
+import { fresh_world } from "./support/world.ab"
+import { state_set, state_save } from "../src/state.ab"
+// The context binding lives in helm_ctx.ab (the whole helm tree imports it from
+// there); helm_recover.ab uses it but does NOT re-export it. helm_kctx_init()
+// loads state from disk then derives the flags, so the ctx surface is imported
+// from helm_ctx.ab directly.
+import {
+    helm_kctx_init, helm_ctx_flags, kubectl_ctx_flags
+} from "../src/helm_ctx.ab"
+
+// ---- helm_ctx binding (owned by helm_ctx.ab; recovery calls read it) -------
+
+test "ctx binding derives helm + kubectl context flags from saved KUBECTL_CONTEXT" {
+    let w = fresh_world()
+    state_set("KUBECTL_CONTEXT", "my-eks-ctx")
+    state_save()
+    helm_kctx_init()
+    assert_eq(helm_ctx_flags(), "--kube-context my-eks-ctx")
+    assert_eq(kubectl_ctx_flags(), "--context my-eks-ctx")
+}
+
+test "ctx binding collapses to empty flags when no context is saved" {
+    let w = fresh_world()
+    state_save()
+    helm_kctx_init()
+    assert_eq(helm_ctx_flags(), "")
+    assert_eq(kubectl_ctx_flags(), "")
+}

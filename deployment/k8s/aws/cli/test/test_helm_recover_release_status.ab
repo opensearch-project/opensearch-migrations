@@ -1,0 +1,85 @@
+// test_helm_recover_release_status.ab — unit coverage for _helm_release_status,
+// the helm `status -o json` parse that the public recovery gate
+// (helm_recover_if_stuck) consumes to decide whether a release is stuck.
+//
+// Split out of the former test_helm_recover.ab: that single file compiled to
+// ~161KB, and amber runs each test via `eval "<compiled script>"` where Linux
+// caps a single arg at 128KB (MAX_ARG_STRLEN) → 'Argument list too long' on CI.
+// The recovery gate itself (helm_recover_if_stuck) lives in
+// test_helm_recover_gate.ab, the ctx binding in test_helm_recover_status.ab, and
+// the namespace/orphan-job primitives in test_helm_recover_namespace.ab.
+// Together the four parts carry EVERY original test block.
+//
+// _helm_release_status only inlines the helm `status` call + jq parse (NOT the
+// full recovery tree), so this part is light (~86KB) and stays comfortably under
+// the cap on its own — which is exactly why it was pulled OUT of the gate file:
+// the gate carries helm_recover_if_stuck's irreducible ~124KB recovery-tree
+// floor, so keeping these three free-standing parse tests separate keeps the
+// gate as small as physically possible (5 e2e blocks, nothing else).
+//
+// We deliberately do NOT call helm_kctx_init() here (it would inline cfn_outputs
+// and add weight for no benefit); the context binding defaults to empty flags,
+// which is all _helm_release_status needs — the ctx-derivation contract is
+// covered in test_helm_recover_status.ab.
+//
+// e2e-focused style (see test/TEST_GUIDE.md): drive the real parse
+// (_helm_release_status) against a faked helm fleet steered per-world via
+// mock_respond/mock_fail, then assert on what it returns. Each block mints its
+// OWN fresh_world(), so nothing races under the parallel runner.
+//
+// NB: no `return` inside test blocks (AMBER_IDIOMS — branch with `if`). The
+// status JSON the helm `status` mock emits has literal `{}` which Amber captures
+// as interpolation, so it is built brace-escaped (\{ \}) — see helm_status_json.
+
+import { assert, assert_eq } from "std/test"
+import { fresh_world, world_noninteractive } from "./support/world.ab"
+import {
+    mock_install_default, mock_respond, mock_fail
+} from "./support/mock.ab"
+import { _helm_release_status } from "../src/helm_recover.ab"
+
+// ---- helpers (ABOVE the test blocks: define-before-use; the test-file tree-
+// shaker keeps only deps textually preceding their use) ----------------------
+
+// helm_status_json — the `{"info":{"status":"<st>"}}` blob the real helm emits
+// for `status -o json`, which _helm_release_status parses via jq. A literal `{`
+// in an Amber Text is interpolation, so the JSON braces are escaped (\{ \}).
+fun helm_status_json(st: Text): Text {
+    return "\{\"info\":\{\"status\":\"{st}\"}}"
+}
+
+// world_with_helm_status — a fresh, non-interactive world with the full fleet
+// faked and `helm status` steered to <st>. "" → the status lookup FAILS (rc 1),
+// the same "release absent" signal the live helm gives (Amber's `failed {""}`).
+// kubectl `get jobs` returns nothing so the orphan-jobs pre-pass is a no-op.
+fun world_with_helm_status(st: Text): Text {
+    let w = fresh_world()
+    world_noninteractive()
+    mock_install_default()
+    if st == "" {
+        // Absent release: empty stdout + non-zero exit → _helm_release_status "".
+        mock_fail(w, "helm", "status", "1", "")
+    } else {
+        mock_respond(w, "helm", "status", helm_status_json(st))
+    }
+    // No orphan helm-hook Jobs by default (recover_if_stuck always pre-checks).
+    mock_respond(w, "kubectl", "jobs", "")
+    return w
+}
+
+// ---- _helm_release_status (unit on the helm status fixture) ----------------
+
+test "_helm_release_status parses the status of an existing release" {
+    let w = world_with_helm_status("pending-upgrade")
+    assert_eq(_helm_release_status("ma", "ma"), "pending-upgrade")
+}
+
+test "_helm_release_status reads a deployed release" {
+    let w = world_with_helm_status("deployed")
+    assert_eq(_helm_release_status("ma", "ma"), "deployed")
+}
+
+test "_helm_release_status is empty when the release is absent" {
+    let w = world_with_helm_status("")
+    assert_eq(_helm_release_status("ma", "ma"), "")
+}

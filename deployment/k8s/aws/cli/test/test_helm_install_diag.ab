@@ -1,0 +1,75 @@
+// test_helm_install_diag.ab — coverage for src/helm_install.ab's post-install
+// diagnostics/toggle helpers (split from test_helm_install.ab; the original
+// compiled too large to eval on Linux, where a single arg caps at 128KB — see
+// test/TEST_GUIDE.md).
+//
+// Imports are trimmed to ONLY the symbols this part's test blocks use. These two
+// helpers sit later in helm_install.ab than the pure builders, so they drag in the
+// streaming-log / EKS plumbing they call (log_stream, helm_pods_summary, …) — this
+// file therefore compiles larger than the flag/values parts. It is still split out
+// so the lighter parts stay comfortably under the cap.
+//
+// What's covered here:
+//   * helm_watch_pods — the pod-snapshot one-line summary (counts + name lists)
+//     and the empty-namespace waiting branch.
+//   * _helm_apply_disable_general_purpose_pool — the post-install EKS Auto Mode
+//     toggle (node role arn → rc 0; no Auto Mode config → rc 0 short-circuit).
+//
+// NB (AMBER_IDIOMS): no `return` inside a `test` block — branch with `if`. Helpers
+// live ABOVE the test blocks (define-before-use across the import boundary).
+
+import { assert, assert_eq } from "std/test"
+import { text_contains } from "std/text"
+import { fresh_world } from "./support/world.ab"
+import { mock_install, mock_respond, mock_called } from "./support/mock.ab"
+import {
+    helm_watch_pods, _helm_apply_disable_general_purpose_pool
+} from "../src/helm_install.ab"
+
+// ---- pure unit: helm_watch_pods --------------------------------------------
+
+test "helm_watch_pods summarizes the pod snapshot counts + names" {
+    let w = fresh_world()
+    mock_install(["kubectl"])
+    // A 3-pod snapshot: 1 Running+ready, 1 Pending, 1 Failed — exercises every
+    // counter + name list.
+    mock_respond(w, "kubectl", "pods", "migration-console-0 Running true\nma-helm-installer-xyz Pending <none>\nbroken-pod Failed false\n")
+    let summary = helm_watch_pods("ma")
+    assert(text_contains(summary, "pods total=3"))
+    assert(text_contains(summary, "running=1"))
+    assert(text_contains(summary, "pending=1"))
+    assert(text_contains(summary, "failed=1"))
+    // The Pending + Failed pods are named in their lists.
+    assert(text_contains(summary, "pending=[ma-helm-installer-xyz]"))
+    assert(text_contains(summary, "failed=[broken-pod]"))
+}
+
+test "helm_watch_pods returns the waiting line when no pods exist" {
+    let w = fresh_world()
+    mock_install(["kubectl"])
+    // No `pods` fixture → the kubectl shim emits empty stdout → the waiting branch.
+    let summary = helm_watch_pods("ma")
+    assert_eq(summary, "")
+}
+
+// ---- _helm_apply_disable_general_purpose_pool ------------------------------
+
+test "_helm_apply_disable_general_purpose_pool succeeds with a node role arn" {
+    let w = fresh_world()
+    mock_install(["aws"])
+    // describe-cluster yields a nodeRoleArn; update-cluster-config exits 0.
+    mock_respond(w, "aws", "describe-cluster", "arn:aws:iam::111:role/node-role")
+    let rc = _helm_apply_disable_general_purpose_pool("good-cluster", "us-east-1")
+    assert_eq(rc, 0)
+    assert(mock_called(w, "aws", "update-cluster-config"))
+}
+
+test "_helm_apply_disable_general_purpose_pool short-circuits when no Auto Mode config" {
+    let w = fresh_world()
+    mock_install(["aws"])
+    // describe-cluster returns "None" → nothing to disable → rc 0, no update call.
+    mock_respond(w, "aws", "describe-cluster", "None")
+    let rc = _helm_apply_disable_general_purpose_pool("none-cluster", "us-east-1")
+    assert_eq(rc, 0)
+    assert(not mock_called(w, "aws", "update-cluster-config"))
+}

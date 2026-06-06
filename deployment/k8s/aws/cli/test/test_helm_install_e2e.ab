@@ -1,0 +1,166 @@
+// test_helm_install_e2e.ab — e2e coverage for src/helm_install.ab, part 1 of 3
+// (split from test_helm_install.ab; the file compiled too large to eval on Linux,
+// where a single arg caps at 128KB — see test/TEST_GUIDE.md).
+//
+// This part drives the real helm_install_or_upgrade entrypoint against the faked
+// external world end to end and asserts on what the CLI DID — which commands it
+// issued (mock_called / mock_calls) and how on-disk state changed.
+//
+// State reconciles through the on-disk state.env: the world seeds it, and
+// helm_install_or_upgrade calls state_load() at entry. Both resolve the same stage
+// dir from the pinned MIGRATE_HOME/STAGE the world sets. The flow's separate
+// state.ab instance writes HELM_RELEASE / last_step to the file on success; the
+// test re-state_load()s to observe them.
+//
+// What's covered here:
+//   E2E — helm_install_or_upgrade through the full mocked fleet:
+//     * issues `helm upgrade --install` for release/namespace "ma", waits for
+//       migration-console-0, advances state to last_step=helm_done + HELM_RELEASE.
+//     * mirrored image path (MIRROR_IMAGES=Y + a CFN-provisioned registry): the
+//       --set image flags point all five images at that registry with the
+//       disambiguating tags.
+//     * public image path (MIRROR_IMAGES=N): the --set image flags point at
+//       public.ecr.aws/opensearchproject at the MA version.
+//     * a failed helm upgrade collects diagnostics + does NOT advance state.
+//
+// NB (AMBER_IDIOMS): no `return` inside a `test` block — branch with `if`. Helpers
+// live ABOVE the test blocks (define-before-use across the import boundary).
+
+// Imports are trimmed to ONLY the symbols these e2e blocks use. NOTE: this part
+// drives the real helm_install_or_upgrade entrypoint, which transitively inlines
+// the entire install flow (~246KB compiled) — so unlike the flag/values/diag
+// parts, this file cannot be brought under the Linux 128KB single-arg cap by
+// regrouping or import-trimming alone; the floor is the flow itself. Splitting
+// further only multiplies over-cap files (every file importing the entrypoint
+// re-inlines the whole flow). Kept as one cohesive e2e file.
+import { assert, assert_eq } from "std/test"
+import { file_write, dir_create } from "std/fs"
+import { env_var_set } from "std/env"
+import { text_contains } from "std/text"
+import { fresh_world, world_seed, world_noninteractive } from "./support/world.ab"
+import {
+    mock_install_default, mock_respond, mock_fail,
+    mock_called, mock_calls
+} from "./support/mock.ab"
+import { state_load, state_get } from "../src/state.ab"
+import { helm_install_or_upgrade } from "../src/helm_install.ab"
+
+// ---- helpers (ABOVE the test blocks: define-before-use across imports) ------
+
+// The MA artifact version the install tests seed, and the CFN-provisioned ECR
+// registry the describe-stacks fixture surfaces (the mirrored-image path target).
+const MA_VER = "3.2.1"
+const ECR_REGISTRY = "111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr-ma-us-east-1"
+
+// fake_chart_dir <world> — build a local helm chart DIRECTORY inside the world so
+// the install flow takes the --ma-chart-dir branch (Chart.yaml present) and skips
+// the artifact/network fetch entirely. _helm_extract_chart_values copies the two
+// value files out of it. Returns the chart dir path.
+fun fake_chart_dir(world: Text): Text {
+    let chart = "{world}/chart"
+    trust dir_create(chart)
+    trust file_write("{chart}/Chart.yaml", "apiVersion: v2\nname: migration-assistant\nversion: 0.0.0\n")
+    trust file_write("{chart}/values.yaml", "# base values\nfoo: bar\n")
+    trust file_write("{chart}/valuesEks.yaml", "# eks values\nbaz: qux\n")
+    return chart
+}
+
+// installed_world — a world set up to drive helm_install_or_upgrade end to end:
+//   * region + stack + MA version + local chart dir seeded in state;
+//   * the aws/kubectl/helm fleet faked to SUCCEED (describe-stacks emits the ECR
+//     registry output so the mirrored path has a target; kubectl/helm default to
+//     exit 0 with empty stdout → namespace settles, no orphan jobs, release absent
+//     → recovery is a no-op, helm upgrade + kubectl wait both succeed);
+//   * the installation-notes poll pinned to 0s so the (immediately-satisfied)
+//     ConfigMap loop never sleeps.
+// MIRROR_IMAGES defaults to "Y" (the chart's mirrored path) unless a test overrides
+// it. Returns the WORLD.
+fun installed_world(): Text {
+    let w = fresh_world()
+    world_noninteractive()
+    world_seed(w, "STAGE_NAME", "ma")
+    world_seed(w, "CFN_STACK_NAME", "MigrationAssistant-ma")
+    world_seed(w, "AWS_REGION", "us-east-1")
+    world_seed(w, "AWS_ACCOUNT", "111")
+    world_seed(w, "MA_VERSION", MA_VER)
+    world_seed(w, "MA_CHART_DIR", fake_chart_dir(w))
+    mock_install_default()
+    // describe-stacks → one TAB-separated OutputKey\tOutputValue row carrying the
+    // ECR registry (cfn_outputs parses `--output text` rows split on the tab).
+    mock_respond(w, "aws", "describe-stacks", "MIGRATIONS_ECR_REGISTRY\t{ECR_REGISTRY}")
+    // The notes ConfigMap probe is satisfied by the default kubectl shim (exit 0);
+    // pin the poll/timeout to 0 so _helm_dump_install_notes never sleeps.
+    trust env_var_set("INSTALLER_NOTES_POLL_S", "0")
+    trust env_var_set("INSTALLER_NOTES_TIMEOUT_S", "0")
+    return w
+}
+
+// ---- e2e: helm_install_or_upgrade ------------------------------------------
+
+test "install issues helm upgrade --install for ma and advances state to helm_done" {
+    let w = installed_world()
+    let rc = helm_install_or_upgrade()
+    assert_eq(rc, 0)
+    // It ran the upgrade --install and waited for the console pod.
+    assert(mock_called(w, "helm", "upgrade"))
+    assert(mock_called(w, "helm", "--install"))
+    assert(mock_called(w, "kubectl", "wait"))
+    // State advanced + persisted: re-load THIS instance to read the file the
+    // install flow's own state instance wrote.
+    state_load()
+    assert_eq(state_get("last_step", ""), "helm_done")
+    assert_eq(state_get("HELM_RELEASE", ""), "ma")
+}
+
+test "install targets release ma in namespace ma" {
+    let w = installed_world()
+    let rc = helm_install_or_upgrade()
+    assert_eq(rc, 0)
+    let calls = mock_calls(w, "helm")
+    // The recorded args are shell-word-split (the shim records "$*"), so the
+    // quotes are gone: the upgrade names the pinned release + namespace (both "ma").
+    assert(text_contains(calls, "upgrade --install ma "))
+    assert(text_contains(calls, "--namespace ma "))
+}
+
+test "install uses the mirrored registry images when MIRROR_IMAGES=Y + a registry" {
+    let w = installed_world()
+    world_seed(w, "MIRROR_IMAGES", "Y")
+    let rc = helm_install_or_upgrade()
+    assert_eq(rc, 0)
+    let calls = mock_calls(w, "helm")
+    // Every image's repository is the CFN-provisioned ECR registry…
+    assert(text_contains(calls, "images.captureProxy.repository={ECR_REGISTRY}"))
+    assert(text_contains(calls, "images.migrationConsole.repository={ECR_REGISTRY}"))
+    // …with the disambiguating tags (build-name + MA version).
+    assert(text_contains(calls, "images.captureProxy.tag=migrations_capture_proxy_{MA_VER}"))
+    assert(text_contains(calls, "images.migrationConsole.tag=migrations_migration_console_{MA_VER}"))
+    // NOT the public.ecr.aws path.
+    assert(not text_contains(calls, "public.ecr.aws/opensearchproject"))
+}
+
+test "install uses the public.ecr.aws images when MIRROR_IMAGES=N" {
+    let w = installed_world()
+    world_seed(w, "MIRROR_IMAGES", "N")
+    let rc = helm_install_or_upgrade()
+    assert_eq(rc, 0)
+    let calls = mock_calls(w, "helm")
+    // The public path points all images at public.ecr.aws/opensearchproject at the
+    // MA version, NOT the mirrored ECR registry.
+    assert(text_contains(calls, "images.captureProxy.repository=public.ecr.aws/opensearchproject/opensearch-migrations-traffic-capture-proxy"))
+    assert(text_contains(calls, "images.migrationConsole.tag={MA_VER}"))
+    assert(not text_contains(calls, ECR_REGISTRY))
+}
+
+test "install collects diagnostics and does not advance state when helm fails" {
+    let w = installed_world()
+    // The helm upgrade fails; the flow dumps diagnostics + returns the rc.
+    mock_fail(w, "helm", "upgrade", "1", "Error: UPGRADE FAILED: timed out waiting")
+    let rc = helm_install_or_upgrade()
+    assert(rc != 0)
+    assert(mock_called(w, "helm", "upgrade"))
+    // A failed upgrade short-circuits before the readiness wait + state advance.
+    assert(not mock_called(w, "kubectl", "wait"))
+    state_load()
+    assert_eq(state_get("last_step", ""), "")
+}

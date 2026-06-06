@@ -1,0 +1,100 @@
+// test_build_gate.ab — e2e coverage for build.ab: the public entrypoint gate
+// (build_images_or_skip). SPLIT from the former test_build.ab (which compiled to
+// ~131KB — over Linux's 128KB single-arg cap that `amber test`'s
+// `eval "<script>"` hits as 'Argument list too long'). The public entrypoint
+// transitively inlines the WHOLE build spine (cfn_outputs + the state machine +
+// every _build_* helper), so on its own it compiles to ~113KB — too heavy to
+// import the shared support fleet (support/world.ab + support/mock.ab add ~9KB,
+// pushing past 120KB). So this file gets the entrypoint test ALONE and isolates
+// itself with a TINY inline recorder instead of the support library; the lighter
+// per-seam pub helpers live in the sibling test_build_seams.ab.
+//
+// Reference style (see test/TEST_GUIDE.md, test/test_cleanup.ab): drive the real
+// build.ab entrypoint against a faked external world and assert on what the CLI
+// DID — which commands it issued — not on internal state. Every test block mints
+// its OWN isolated world.
+//
+// state isolation (verified empirically, not a coverage gap). Every module that
+// imports state.ab gets its OWN private module-level store, and
+// build_images_or_skip — unlike cmd_cleanup — never calls state_load() at entry.
+// So a seeded on-disk state.env is INVISIBLE to build.ab's state_get: the
+// orchestrator always sees an EMPTY state from a test, which means the only branch
+// reachable end-to-end through the public entrypoint is its BUILD_FROM_SOURCE!=Y
+// no-op gate. The rest of the build spine takes its inputs as ARGUMENTS via the
+// pub helpers exercised in test_build_seams.ab.
+//
+// No network, no real cloud, no real gradle, no real builder. NO `return` in a
+// test block — branch with `if`.
+
+import { assert, assert_eq } from "std/test"
+import { env_var_set, env_var_get } from "std/env"
+import { file_write, file_chmod } from "std/fs"
+import { build_images_or_skip } from "../src/build.ab"
+
+// ---- file-local helpers (ABOVE the tests: Amber needs define-before-use across
+// the import boundary, and the tree-shaker keeps only deps preceding their use) --
+//
+// This file deliberately does NOT import support/world.ab + support/mock.ab: the
+// build_images_or_skip entrypoint already inlines ~113KB, and the support fleet
+// would push the compiled script past the 120KB Linux eval-arg ceiling this split
+// exists to dodge. The two helpers below are a minimal, equivalent stand-in for
+// the fleet's mock_install + mock_called, scoped to exactly what the gate test
+// needs (record aws/docker calls into a fresh sandbox, then assert none happened).
+
+// install_recorder <dir> <tool> — a PATH shim for <tool> that records every call's
+// args to <dir>/mock/calls/<tool>.log and exits 0 (same call-log contract as
+// support/mock.ab's shim). PATH-shadows the real tool so a regression that DID
+// invoke aws/docker would be caught by the assertions below.
+fun install_recorder(dir: Text, tool: Text): Null {
+    let b = "#!/usr/bin/env bash\n"
+    b += "mkdir -p \"{dir}/mock/calls\"\n"
+    b += "printf '%s\\n' \"$*\" >> \"{dir}/mock/calls/{tool}.log\"\n"
+    b += "exit 0\n"
+    trust file_write("{dir}/{tool}", b)
+    trust file_chmod("{dir}/{tool}", "755")
+}
+
+// recorded_call <dir> <tool> <needle> — Bool: did any recorded <tool> call contain
+// <needle>? (The local equivalent of support/mock.ab's mock_called.) False when
+// the tool was never invoked (no log file).
+fun recorded_call(dir: Text, tool: Text, needle: Text): Bool {
+    let f = "{dir}/mock/calls/{tool}.log"
+    trust $test -f "{f}"$
+    if status() != 0 { return false }
+    // grep -q is output-free, so no `silent` (which would rewrite fd 2 and collide
+    // with status()); trust because a no-match (rc 1) is the expected "not called".
+    trust $grep -q -- "{needle}" "{f}"$
+    return status() == 0
+}
+
+// built_world — a fresh isolated sandbox with the aws+docker call-recorders on
+// PATH (cf. built_world() in test_build_seams.ab). MIGRATE_HOME/STAGE/STAGE_DIR
+// are pinned into a unique mktemp dir so the recorded-call log is per-test. Returns
+// the sandbox dir.
+fun built_world(): Text {
+    let dir = trust $mktemp -d$
+    trust env_var_set("MIGRATE_HOME", dir)
+    trust env_var_set("STAGE", "g")
+    trust env_var_set("STAGE_DIR", "{dir}/g")
+    install_recorder(dir, "aws")
+    install_recorder(dir, "docker")
+    let old = env_var_get("PATH") failed { "" }
+    trust env_var_set("PATH", "{dir}:{old}")
+    return dir
+}
+
+// ---- build_images_or_skip: the public entrypoint gate (end to end) ----------
+//
+// With the empty state every test presents (see the file header), the orchestrator
+// takes its BUILD_FROM_SOURCE!=Y no-op path: it returns 0 having issued NO aws /
+// docker / gradle work. This is the full e2e contract reachable through the
+// entrypoint — "ran without --build does nothing".
+
+test "build is skipped (returns 0, issues no aws/docker work) when --build was not requested" {
+    let w = built_world()
+    let rc = build_images_or_skip()
+    assert_eq(rc, 0)
+    assert(not recorded_call(w, "aws", "get-login-password"))
+    assert(not recorded_call(w, "docker", "buildx"))
+    assert(not recorded_call(w, "docker", "login"))
+}

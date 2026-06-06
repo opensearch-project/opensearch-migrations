@@ -1,0 +1,67 @@
+// test_helm_diag_dump.ab — PART 1 of 3 of the helm_diag.ab e2e coverage:
+// helm_dump_diagnostics — the big on-failure cluster-state capture.
+//
+// Split from the former test_helm_diag.ab, which compiled to ~134KB: Linux caps a
+// single `eval` arg at 128KB (MAX_ARG_STRLEN), so amber's per-test eval blew up
+// with 'Argument list too long' on CI (it passed on macOS). The world+mock+
+// helm_diag closure floors a command-issuing file near ~113KB, so the 10 blocks
+// split across this file, test_helm_diag_explain.ab (failure-explain + failed-job
+// + install-notes), and test_helm_diag_summary.ab (the pure pods-summary
+// formatter) to keep each compiled <120KB.
+//
+// Style (see test/TEST_GUIDE.md): drive the real entry point against the faked
+// world; assert on which helm/kubectl commands were issued (mock_called) — the
+// dump is a synchronous post-hoc capture, so "which commands ran" is the contract.
+// helm_kctx_init binds this module's flag prefix from the world-seeded
+// KUBECTL_CONTEXT (binding owned + tested by test_helm_ctx.ab); the second test
+// here verifies helm_diag THREADS that bound context through to its commands.
+// NO `return` inside a test block (branch with `if`, per AMBER_IDIOMS).
+
+import { assert } from "std/test"
+import { fresh_world, world_seed } from "./support/world.ab"
+import { mock_install_default, mock_respond, mock_called } from "./support/mock.ab"
+import { helm_dump_diagnostics } from "../src/helm_diag.ab"
+
+// ---- helpers (ABOVE the tests: define-before-use across the import boundary) ----
+
+// diag_world — a world wired for a helm/kubectl dump: fleet faked, and optionally a
+// KUBECTL_CONTEXT seeded so helm_kctx_init binds the flag prefix. Pass "" for the
+// bare (no-context) case. Returns the world dir.
+fun diag_world(ctx: Text): Text {
+    let w = fresh_world()
+    mock_install_default()
+    if ctx != "" {
+        world_seed(w, "KUBECTL_CONTEXT", ctx)
+    }
+    return w
+}
+
+// ============================================================================
+// helm_dump_diagnostics — the on-failure capture; assert the commands issued.
+// ============================================================================
+
+test "helm_dump_diagnostics captures helm status, pods, events, and per-resource describe" {
+    let w = diag_world("")
+    // One unhealthy pod + one stuck Job → both per-pod & per-job describe branches fire.
+    mock_respond(w, "kubectl", "pods", "stuck-pod Pending")
+    mock_respond(w, "kubectl", "jobs", "ma-helm-installer <none>")
+
+    helm_dump_diagnostics("ma", "ma")
+
+    assert(mock_called(w, "helm", "status"))
+    assert(mock_called(w, "kubectl", "get pods"))
+    assert(mock_called(w, "kubectl", "-o wide"))
+    assert(mock_called(w, "kubectl", "get events"))
+    assert(mock_called(w, "kubectl", "describe pod stuck-pod"))
+    assert(mock_called(w, "kubectl", "describe job ma-helm-installer"))
+}
+
+test "helm_dump_diagnostics threads a bound kube-context through helm and kubectl" {
+    let w = diag_world("prod-ctx")
+
+    helm_dump_diagnostics("ma", "ma")
+
+    // The context flags reached helm + kubectl as argv tokens.
+    assert(mock_called(w, "helm", "--kube-context prod-ctx"))
+    assert(mock_called(w, "kubectl", "--context prod-ctx"))
+}

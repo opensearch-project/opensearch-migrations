@@ -1,0 +1,116 @@
+// test_helm_diag_explain.ab — PART 2 of 3 of the helm_diag.ab e2e coverage:
+// _helm_explain_failure, both _helm_dump_failed_job branches (live-pod + GC'd),
+// and _helm_dump_install_notes.
+//
+// Split from the former test_helm_diag.ab (~134KB compiled): Linux caps a single
+// `eval` arg at 128KB (MAX_ARG_STRLEN), so amber's per-test eval blew up with
+// 'Argument list too long' on CI. The world+mock+helm_diag closure floors each
+// command-issuing file near ~113KB, so the 10 blocks split across this file,
+// test_helm_diag_dump.ab, and test_helm_diag_summary.ab (the pure formatter) to
+// keep each compiled <120KB; grouping balances size, not purely theme.
+//
+// Style (test/TEST_GUIDE.md): drive the real entry points against the faked world;
+// assert on which helm/kubectl commands were issued (mock_called). These use the
+// bare (no-context) world; context threading is in test_helm_diag_dump.ab.
+// NO `return` in a test block (per AMBER_IDIOMS).
+
+import { assert } from "std/test"
+import { file_read } from "std/fs"
+import { env_var_set } from "std/env"
+import { fresh_world } from "./support/world.ab"
+import { mock_install_default, mock_respond, mock_respond_rc, mock_called } from "./support/mock.ab"
+import { _helm_explain_failure, _helm_dump_failed_job, _helm_dump_install_notes } from "../src/helm_diag.ab"
+
+// ---- helpers (ABOVE the tests: define-before-use across the import boundary) ----
+
+// diag_world — a world wired for a helm/kubectl dump: fleet faked. (Every test here
+// uses the bare, no-context case; helm_kctx_init then binds an empty flag prefix.)
+fun diag_world(): Text {
+    let w = fresh_world()
+    mock_install_default()
+    return w
+}
+
+// ============================================================================
+// _helm_explain_failure — the helm-description-driven failed-Job dump.
+// ============================================================================
+
+test "_helm_explain_failure dumps the Job named in the helm description and queries the console pod" {
+    let w = diag_world()
+    // helm status -o json names a failed Job; loaded from a fixture so the JSON
+    // braces don't need inline escaping.
+    let status_json = trust file_read("test/fixtures/helm_status_failed_job.json")
+    mock_respond(w, "helm", "status", status_json)
+
+    _helm_explain_failure("ma", "ma")
+
+    assert(mock_called(w, "helm", "status"))
+    // The parsed Job name drove the event dump — but only when `jq` is on PATH.
+    let have_jq = trust $command -v jq >/dev/null 2>&1 && echo yes || echo no$
+    if have_jq == "yes" {
+        assert(mock_called(w, "kubectl", "involvedObject.name=ma-helm-installer"))
+    }
+    // migration-console-0 phase + readiness is queried regardless.
+    assert(mock_called(w, "kubectl", "get pod migration-console-0"))
+}
+
+// ============================================================================
+// _helm_dump_failed_job — live-pod (tail-logs) vs GC'd-pod (no-logs) branches.
+// ============================================================================
+
+test "_helm_dump_failed_job tails the Job pod's logs when the pod still exists" {
+    let w = diag_world()
+    // The Job's pods resolve by selector (token `pods`) → the live pod name.
+    mock_respond(w, "kubectl", "pods", "ma-helm-installer-xyz12")
+
+    _helm_dump_failed_job("ma-helm-installer", "ma")
+
+    // Events lookup fired, pod resolved by selector, logs tailed.
+    assert(mock_called(w, "kubectl", "get events"))
+    assert(mock_called(w, "kubectl", "involvedObject.name=ma-helm-installer"))
+    assert(mock_called(w, "kubectl", "logs ma-helm-installer-xyz12"))
+    assert(mock_called(w, "kubectl", "--tail=50"))
+}
+
+test "_helm_dump_failed_job handles a GC'd pod (no pods found) without issuing logs" {
+    let w = diag_world()
+    // No `pods` fixture → selector lookup empty → GC'd-pod branch (no `logs`).
+
+    _helm_dump_failed_job("ma-helm-installer", "ma")
+
+    assert(mock_called(w, "kubectl", "get pods"))
+    assert(not mock_called(w, "kubectl", "logs ma-helm-installer-"))
+}
+
+// ============================================================================
+// _helm_dump_install_notes — present ConfigMap vs never-appearing ConfigMap.
+// ============================================================================
+
+test "_helm_dump_install_notes streams the notes when the ConfigMap exists" {
+    let w = diag_world()
+    // CM existence probe exits 0 (default rc); jsonpath read returns the notes.
+    mock_respond(w, "kubectl", "configmap", "line one\nline two")
+    trust env_var_set("INSTALLER_NOTES_TIMEOUT_S", "5")
+    trust env_var_set("INSTALLER_NOTES_POLL_S", "0")
+
+    _helm_dump_install_notes("ma", "ma")
+
+    // The existence probe AND the jsonpath notes read both fired against the CM.
+    assert(mock_called(w, "kubectl", "get configmap"))
+    assert(mock_called(w, "kubectl", "ma-installation-notes"))
+    assert(mock_called(w, "kubectl", "jsonpath"))
+}
+
+test "_helm_dump_install_notes times out fast when the ConfigMap never appears" {
+    let w = diag_world()
+    // CM probe exits 1 (absent); a 0s timeout → one probe then give up, so the
+    // jsonpath notes read is never reached.
+    mock_respond_rc(w, "kubectl", "configmap", "1")
+    trust env_var_set("INSTALLER_NOTES_TIMEOUT_S", "0")
+    trust env_var_set("INSTALLER_NOTES_POLL_S", "0")
+
+    _helm_dump_install_notes("ma", "ma")
+
+    assert(mock_called(w, "kubectl", "get configmap"))
+    assert(not mock_called(w, "kubectl", "jsonpath"))
+}
