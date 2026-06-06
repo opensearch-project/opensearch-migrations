@@ -60,7 +60,7 @@ public class ElasticsearchBackupStrategy implements SourceBackupStrategy {
                 client,
                 s.rawUri(),
                 args.s3Region,
-                args.s3Endpoint,
+                args.endpoint,
                 args.indexAllowlist,
                 args.maxSnapshotRateMBPerNode,
                 args.s3RoleArn,

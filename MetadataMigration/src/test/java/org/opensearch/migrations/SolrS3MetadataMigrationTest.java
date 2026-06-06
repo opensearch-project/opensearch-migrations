@@ -162,7 +162,7 @@ class SolrS3MetadataMigrationTest {
         createArgs.snapshotRepoName = "s3";
         createArgs.repoUri = s3RepoUri;
         createArgs.s3Region = REGION;
-        createArgs.s3Endpoint = localStackEndpoint();
+        createArgs.endpoint = localStackEndpoint();
         createArgs.solrCollections = List.of(collName);
         createArgs.noWait = false;
 
@@ -184,7 +184,7 @@ class SolrS3MetadataMigrationTest {
             metaArgs.snapshotName = snapshotName;
             metaArgs.repoUri = s3RepoUri;
             metaArgs.s3Region = REGION;
-            metaArgs.s3Endpoint = localStackEndpoint();
+            metaArgs.endpoint = localStackEndpoint();
             metaArgs.localDir = s3LocalDir.toString();
             metaArgs.targetArgs.host = target.getUrl();
 

@@ -31,7 +31,16 @@ public class GcsRepo implements SourceRepo {
     }
 
     public static GcsRepo create(Path localDir, GcsUri gcsUri, SnapshotFileFinder finder) {
-        Storage storage = StorageOptions.getDefaultInstance().getService();
+        return create(localDir, gcsUri, null, finder);
+    }
+
+    public static GcsRepo create(Path localDir, GcsUri gcsUri, String endpoint, SnapshotFileFinder finder) {
+        StorageOptions.Builder builder = StorageOptions.newBuilder();
+        if (endpoint != null && !endpoint.isEmpty()) {
+            builder.setHost(endpoint);
+            log.atInfo().setMessage("Using custom GCS endpoint: {}").addArgument(endpoint).log();
+        }
+        Storage storage = builder.build().getService();
         return new GcsRepo(localDir, gcsUri, storage, finder);
     }
 

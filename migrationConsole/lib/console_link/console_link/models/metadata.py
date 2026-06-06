@@ -314,7 +314,7 @@ class Metadata:
         })
         if hasattr(self, '_s3_endpoint') and self._s3_endpoint:
             command_args.update({
-                "--s3-endpoint": self._s3_endpoint,
+                "--endpoint": self._s3_endpoint,
             })
 
     def _add_gcs_args(self, command_args: Dict[str, Any]) -> None:
