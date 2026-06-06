@@ -256,7 +256,7 @@ public class RoutingShardColocationTest extends SourceTestBase {
     @SneakyThrows
     private void migrateMetadata(Version sourceVersion, String localDirPath, SearchClusterContainer targetCluster) {
         var arguments = new MigrateOrEvaluateArgs();
-        arguments.fileSystemRepoPath = localDirPath;
+        arguments.repoUri = localDirPath;
         arguments.snapshotName = MIGRATION_SNAPSHOT_NAME;
         arguments.sourceVersion = sourceVersion;
         arguments.targetArgs.host = targetCluster.getUrl();
