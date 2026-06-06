@@ -28,7 +28,7 @@
 // (stdout), stage_dir_init, plus accessors migrate_home/stage/stage_dir/
 // migrate_noninteractive.
 
-import { env_var_get, kill, is_command } from "std/env"
+import { env_var_get, kill, is_command, uname_os, uname_machine } from "std/env"
 import { dir_create } from "std/fs"
 import { slice } from "std/text"
 import { esc, eprintln } from "./core.ab"
@@ -230,8 +230,10 @@ pub fun on_exit_registered_count(): Int { return __exit_count }
 // no match/switch keyword.) Unknown OS/arch → die, matching bash `*) die`.
 // uname can't meaningfully fail on a supported host; trust it.
 pub fun arch_os(): Text {
-    let kernel = trust $uname -s$
-    let machine = trust $uname -m$
+    // std/env uname_os()/uname_machine() return the same kernel/machine strings
+    // as `uname -s`/`uname -m` (Darwin, arm64, …) — one builtin call, no fork.
+    let kernel = uname_os()
+    let machine = uname_machine()
 
     let os = ""
     if {

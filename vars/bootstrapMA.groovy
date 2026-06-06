@@ -3,11 +3,11 @@
  * stack. State and the run log land under
  * ./migration-assistant-workspace/<stage>/ in the Jenkins workspace.
  *
- * The CLI binary defaults to the source-checkout copy
- * (./deployment/k8s/aws/cli/bin/migration-assistant). Pass
- * useReleaseCli=true (typically wired to params.USE_RELEASE_CLI) to
- * download install.sh from the GitHub release for `version` and run
- * the released CLI instead — this is the path operators use via
+ * The CLI source is Amber (deployment/k8s/aws/cli/src/*.ab). By default
+ * resolveCli compiles src/main.ab to a Bash entrypoint from the source
+ * checkout. Pass useReleaseCli=true (typically wired to
+ * params.USE_RELEASE_CLI) to download install.sh from the GitHub release for
+ * `version` and run the released CLI instead — this is the path operators use via
  * curl-pipe install. Replaces the old USE_RELEASE_BOOTSTRAP toggle
  * (which downloaded aws-bootstrap.sh; that script no longer exists).
  *

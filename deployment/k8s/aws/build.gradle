@@ -5,20 +5,26 @@ plugins {
 // =============================================================================
 // deployment/k8s/aws/build.gradle
 //
-// One output: a release tarball of the migration-assistant CLI plus a
-// curl-pipe install.sh keyed to the same release.
+// The migration-assistant CLI is written in Amber (amber-lang.com) — typed
+// source that COMPILES to portable Bash. Source of truth: cli/src/*.ab (+
+// cli/test/*.ab). This build compiles the Amber entrypoint to a single
+// self-contained Bash script and packages a release tarball + a curl-pipe
+// install.sh keyed to the same release.
 //
 //   build/migrate-cli-dist/migration-assistant-cli-<version>.tar.gz
 //   build/migrate-cli-dist/install.sh
 //
+// Why compile here: Amber's `amber build --target bash-3.2` inlines every
+// imported module into ONE standalone Bash script (no runtime `source` of a
+// lib/ tree, no Amber dependency on the operator's host). The tarball therefore
+// ships bin/migration-assistant (the compiled entrypoint) + install.sh +
+// skills/ — there is no lib/ directory (it's inlined). Operators and CI run
+// plain Bash 3.2+; the Amber toolchain is a BUILD-time dependency only.
+//
 // Operators install via:
 //   curl -fsSL https://github.com/<owner>/<repo>/releases/<ver>/download/install.sh | bash
 //
-// `assemble` (the base plugin's lifecycle) depends on
-// packageMigrationAssistantCli. The CLI tarball is also runnable
-// directly out of the source checkout (deployment/k8s/aws/cli/bin/migration-assistant);
-// Jenkins / awsRunEksValidation.sh do exactly that and skip the tarball
-// entirely.
+// `assemble` depends on packageMigrationAssistantCli.
 // =============================================================================
 
 configurations {
@@ -29,21 +35,18 @@ configurations {
 }
 
 dependencies {
-    // Pull in agent-skills.tar.gz from the agent-skills module's
-    // declared producer artifact. A change to any skill file
-    // (Startup.md, manifest.json, any skills/<name>/SKILL.md, the kiro
-    // config) triggers a rebuild of the CLI tarball — no copy-by-hand
-    // drift. Partner packs add new skills the same way: drop a
-    // skills/<your-skill>/SKILL.md into the producer, and the
-    // consumer's tarball picks it up.
+    // Pull in agent-skills.tar.gz from the agent-skills module's declared
+    // producer artifact. A change to any skill file (Startup.md, manifest.json,
+    // any skills/<name>/SKILL.md, the kiro config) triggers a CLI-tarball
+    // rebuild — no copy-by-hand drift. Partner packs add skills the same way.
     agentSkills project(path: ':agent-skills', configuration: 'agentSkills')
 }
 
 def cliVersion = providers.environmentVariable('CLI_VERSION')
         .orElse(providers.gradleProperty('cliVersion'))
         .orElse(provider {
-            // Fall back to "0.0.0-dev-<git-short-sha>" so each commit
-            // gets its own cache slot.
+            // Fall back to "0.0.0-dev-<git-short-sha>" so each commit gets its
+            // own cache slot.
             def execResult = providers.exec {
                 workingDir = rootDir
                 commandLine 'git', 'rev-parse', '--short=10', 'HEAD'
@@ -58,20 +61,87 @@ def defaultRepo = providers.environmentVariable('DEFAULT_REPO')
         .orElse(providers.gradleProperty('defaultRepo'))
         .orElse('opensearch-project/opensearch-migrations')
 
-def distDir = layout.buildDirectory.dir('migrate-cli-dist')
+// Amber compiler binary. Default 'amber' (on PATH); override with -Pamber=… or
+// AMBER=… for pinned-toolchain CI. bash-3.2 target = the macOS / minimal-distro
+// floor the CLI supports.
+def amberBin = providers.environmentVariable('AMBER')
+        .orElse(providers.gradleProperty('amber'))
+        .orElse('amber')
+def amberTarget = 'bash-3.2'
+
+def distDir   = layout.buildDirectory.dir('migrate-cli-dist')
+def compileDir = layout.buildDirectory.dir('migrate-cli-compiled')
+
+// ---------- (0) compile Amber → Bash ----------
+//
+// src/main.ab     → bin/migration-assistant   (the self-contained entrypoint)
+// src/install.ab  → install.sh                (the curl-pipe installer)
+// Both are standalone compiled scripts; their imported modules are inlined.
+
+tasks.register('compileMigrationAssistantCli') {
+    description = 'Compile the Amber CLI sources to portable Bash (target ' + amberTarget + ')'
+    group = 'migrate-cli'
+
+    def srcDir = file('cli/src')
+    def outDir = compileDir.get().asFile
+
+    inputs.dir srcDir
+    inputs.property 'amberTarget', amberTarget
+    inputs.property 'amberBin', amberBin
+    outputs.dir compileDir
+
+    doLast {
+        def amber = amberBin.get()
+        // Fail early + actionably if the toolchain is missing.
+        def probe = project.exec {
+            commandLine amber, '--version'
+            setIgnoreExitValue(true)
+            standardOutput = new ByteArrayOutputStream()
+            errorOutput = new ByteArrayOutputStream()
+        }
+        if (probe.exitValue != 0) {
+            throw new GradleException(
+                "Amber compiler not found (tried '${amber}'). Install it:\n" +
+                "  brew install amber-lang/amber/amber-lang\n" +
+                "  # or: bash <(curl -sL https://github.com/amber-lang/amber/releases/download/0.6.0-alpha/install.sh)\n" +
+                "Then re-run, or pass -Pamber=/path/to/amber.")
+        }
+
+        outDir.mkdirs()
+        def binOut = new File(outDir, 'migration-assistant')
+        def installOut = new File(outDir, 'install.sh')
+
+        // Entrypoint.
+        project.exec {
+            workingDir file('cli')
+            commandLine amber, 'build', '--target', amberTarget, 'src/main.ab', binOut.absolutePath
+        }
+        // Installer.
+        project.exec {
+            workingDir file('cli')
+            commandLine amber, 'build', '--target', amberTarget, 'src/install.ab', installOut.absolutePath
+        }
+        binOut.setExecutable(true)
+        installOut.setExecutable(true)
+        logger.lifecycle "compiled cli/src/main.ab → ${binOut}"
+        logger.lifecycle "compiled cli/src/install.ab → ${installOut}"
+    }
+}
 
 // ---------- (1) CLI tarball ----------
 
 tasks.register('packageMigrationAssistantCliTarball') {
     description = 'Package the migration-assistant CLI into a release tarball'
     group = 'migrate-cli'
+    dependsOn 'compileMigrationAssistantCli'
 
-    def cliDir       = file('cli')
+    def compiledDir  = compileDir
     def licenseFile  = rootProject.file('LICENSE')
+    def readmeFile   = file('cli/README.md')
     def manifestFile = rootProject.file('deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh')
     def agentSkillsTar = configurations.agentSkills
 
-    inputs.dir cliDir
+    inputs.dir compiledDir
     inputs.file licenseFile
     inputs.file manifestFile
     inputs.files agentSkillsTar
@@ -88,76 +158,56 @@ tasks.register('packageMigrationAssistantCliTarball') {
         def stage = File.createTempFile("migrate-cli-stage", "").with { delete(); mkdirs(); it }
         try {
             def root = new File(stage, "migration-assistant-cli-${ver}")
-            root.mkdirs()
-            project.copy {
-                from cliDir
-                into root
-                include 'bin/**'
-                include 'lib/**'
-                include 'install.sh'
-                include 'README.md'
-            }
+            def binDir = new File(root, 'bin')
+            binDir.mkdirs()
 
-            // Bake CLI_VERSION into lib/version.sh so the banner reports the
-            // assembled version rather than "0.0.0-dev".
-            def versionFile = new File(root, 'lib/version.sh')
-            if (versionFile.exists()) {
-                def text = versionFile.text
-                versionFile.text = text.replaceAll(
-                    /CLI_VERSION="\$\{CLI_VERSION:-0\.0\.0-dev\}"/,
-                    "CLI_VERSION=\"\\\${CLI_VERSION:-${ver}}\""
-                )
+            // The compiled, self-contained entrypoint → bin/migration-assistant.
+            // (No lib/ — Amber inlines every imported module into this one file.)
+            def compiledBin = new File(compiledDir.get().asFile, 'migration-assistant')
+            def shippedBin  = new File(binDir, 'migration-assistant')
+            shippedBin.text = compiledBin.text
+
+            // Bake CLI_VERSION into the compiled entrypoint so the banner /
+            // `version` subcommand report the assembled version. version.ab
+            // compiles its default to `__CLI_VERSION_DEFAULT_<n>="0.0.0-dev"`;
+            // a runtime CLI_VERSION env var still overrides this at run time.
+            shippedBin.text = shippedBin.text.replaceAll(
+                /(__CLI_VERSION_DEFAULT_\d+=)"0\.0\.0-dev"/,
+                "\$1\"${ver}\"")
+            shippedBin.setExecutable(true)
+
+            if (readmeFile.exists()) {
+                project.copy { from readmeFile; into root }
             }
 
             // Drop the agent-skills tree under skills/ inside the tarball.
-            // The producer module emits its tarball with paths
-            //   skills/Startup.md, skills/manifest.json, skills/<name>/…, skills/kiro/…
-            // so untar-into-root matches the layout the CLI's agent.sh expects.
+            // Producer emits skills/Startup.md, skills/manifest.json,
+            // skills/<name>/…, skills/kiro/… — untar-into-root matches the
+            // layout the CLI's agent module + manifest resolution expect.
             def skillsTarFile = agentSkillsTar.singleFile
             project.copy {
                 from project.tarTree(project.resources.gzip(skillsTarFile))
                 into root
             }
 
-            // Vendor privateEcrManifest.sh so the CLI can mirror images
-            // without requiring the operator to clone the chart repo.
-            project.copy {
-                from manifestFile
-                into new File(root, 'skills')
-            }
-            project.copy {
-                from licenseFile
-                into root
-                rename '.*', 'LICENSE'
-            }
+            // Vendor privateEcrManifest.sh so the CLI can mirror images without
+            // requiring the operator to clone the chart repo.
+            project.copy { from manifestFile; into new File(root, 'skills') }
+            project.copy { from licenseFile; into root; rename '.*', 'LICENSE' }
 
             // ---- bundle manifest.json ----
-            // The agent-skills tarball already extracted skills/manifest.json
-            // into the bundle's skills/ directory above. Promote it to the
-            // tarball ROOT (sibling of bin/ + lib/) so manifest.sh's primary
-            // resolution path finds it instantly without descending. ALSO
-            // bake the build version into build.version so `migration-assistant
-            // version` and the banner report the assembled version rather
-            // than "0.0.0-dev".
+            // Promote skills/manifest.json to the tarball ROOT (sibling of bin/)
+            // so the CLI's manifest resolver finds it on its primary path, and
+            // bake the build version into build.version.
             def manifestJsonInner = new File(root, 'skills/manifest.json')
             def manifestJsonRoot  = new File(root, 'manifest.json')
             if (manifestJsonInner.exists()) {
-                def text = manifestJsonInner.text
-                // Substitute "version": "0.0.0-dev" → "version": "<ver>".
-                // Naive string replace — manifest.json is generated, the
-                // exact placeholder is constant.
-                text = text.replace(
-                    '"version": "0.0.0-dev"',
-                    "\"version\": \"${ver}\""
-                )
+                def text = manifestJsonInner.text.replace(
+                    '"version": "0.0.0-dev"', "\"version\": \"${ver}\"")
                 manifestJsonRoot.text = text
-                // Keep the inner copy in sync so resolution path #2 also
-                // sees the built version.
                 manifestJsonInner.text = text
             }
 
-            // Tar it. Gradle's Tar task is more portable than shelling out
-            // to BSD/GNU tar — it always emits POSIX-clean entries.
             project.exec {
                 workingDir stage
                 commandLine 'tar', '-czf', tarball.absolutePath, "migration-assistant-cli-${ver}"
@@ -165,7 +215,6 @@ tasks.register('packageMigrationAssistantCliTarball') {
         } finally {
             stage.deleteDir()
         }
-
         logger.lifecycle "wrote ${tarball}"
     }
 }
@@ -173,28 +222,46 @@ tasks.register('packageMigrationAssistantCliTarball') {
 // ---------- (2) install.sh with DEFAULT_REPO baked in ----------
 
 tasks.register('renderInstallScript') {
-    description = 'Render install.sh with DEFAULT_REPO substituted'
+    description = 'Render the compiled install.sh with DEFAULT_REPO substituted'
     group = 'migrate-cli'
-    def src = file('cli/install.sh')
+    dependsOn 'compileMigrationAssistantCli'
+
+    def compiledInstall = compileDir.map { it.file('install.sh') }
     def out = distDir.map { it.file('install.sh') }
-    inputs.file src
+    inputs.file compiledInstall
     inputs.property 'defaultRepo', defaultRepo
     outputs.file out
     doLast {
         def dst = out.get().asFile
         dst.parentFile.mkdirs()
-        dst.text = src.text.replace('@DEFAULT_REPO@', defaultRepo.get())
+        // install.ab compiles DEFAULT_REPO to a const assignment; substitute the
+        // upstream default with the repo this release is built from. The literal
+        // string "opensearch-project/opensearch-migrations" is the compiled
+        // const value of install.ab's DEFAULT_REPO.
+        dst.text = compiledInstall.get().asFile.text.replace(
+            'opensearch-project/opensearch-migrations', defaultRepo.get())
         dst.setExecutable(true)
         logger.lifecycle "wrote ${dst}"
     }
 }
 
+// ---------- (3) amber test (CI gate, optional locally) ----------
+
+tasks.register('testMigrationAssistantCli', Exec) {
+    description = 'Run the Amber test suite for the migration-assistant CLI'
+    group = 'verification'
+    workingDir file('cli')
+    environment 'MIGRATE_FORCE_TTY', '1'
+    commandLine amberBin.get(), 'test', 'test/'
+}
+
 // ---------- aggregator + lifecycle ----------
 
 tasks.register('packageMigrationAssistantCli') {
-    description = 'Build the CLI tarball and the curl-pipe installer'
+    description = 'Compile the Amber CLI, build the release tarball + curl-pipe installer'
     group = 'migrate-cli'
     dependsOn 'packageMigrationAssistantCliTarball', 'renderInstallScript'
 }
 
 assemble.dependsOn 'packageMigrationAssistantCli'
+check.dependsOn 'testMigrationAssistantCli'

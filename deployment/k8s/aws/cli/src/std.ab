@@ -16,7 +16,7 @@
 // (split, join, match_regex, …) and re-implements trim/starts_with/ends_with/
 // contains/array_contains natively, so the public names are ours to own and
 // consumers get one consistent API + the bash std.sh arg order.
-import { printf, env_var_get, env_var_test, is_command } from "std/env"
+import { printf, env_var_get, env_var_test, is_command, uname_os } from "std/env"
 import {
     split, join, match_regex, replace_regex, slice, lowercase, split_lines
 } from "std/text"
@@ -198,14 +198,13 @@ pub fun path_join(parts: [Text]): Text {
 
 // ---- environment -----------------------------------------------------------
 
-// is_macos / is_linux — OS branch from `uname -s` (no $OSTYPE in Amber).
+// is_macos / is_linux — OS branch via std/env uname_os() (no $OSTYPE in Amber;
+// uname_os() returns the same "Darwin"/"Linux" string as `uname -s`, builtin).
 pub fun is_macos(): Bool {
-    let k = trust $uname -s 2>/dev/null$
-    return k == "Darwin"
+    return uname_os() == "Darwin"
 }
 pub fun is_linux(): Bool {
-    let k = trust $uname -s 2>/dev/null$
-    return k == "Linux"
+    return uname_os() == "Linux"
 }
 
 // optional_cmd — is <name> on PATH? Never fails.

@@ -65,7 +65,7 @@ migration-assistant pack \
 
 The bundle contract (manifest.json schema, MCP shape, branding fields)
 is documented in `skills/manifest.json` and enforced by the CLI's
-`lib/manifest.sh` parser.
+`src/manifest.ab` parser (Amber source under deployment/k8s/aws/cli/).
 
 ## Gradle tasks
 

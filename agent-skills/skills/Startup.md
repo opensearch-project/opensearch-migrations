@@ -130,8 +130,8 @@ at their shell. The CLI's job is done; yours is not.
 
    Use `migration-assistant help` to see every flag if you need
    something not covered here. Use the `migration-assistant-cli-reference`
-   skill (`lib/cfn.sh`, `lib/helm.sh`, `lib/crane.sh`) to look up
-   what the CLI actually does at any given step — don't guess.
+   skill (`src/cfn_deploy.ab`, `src/helm_install.ab`, `src/crane.ab`) to
+   look up what the CLI actually does at any given step — don't guess.
 
    Once `migration-console-0` is Running, the migration itself runs
    from inside that pod. Two CLIs live there: **`workflow`** (modern,
@@ -162,9 +162,9 @@ at their shell. The CLI's job is done; yours is not.
      AND the user wants to MOVE DATA.
 
    - **`skills/migration-assistant-cli-reference/`** — reference for
-     the `migration-assistant` CLI itself (lib/cfn.sh, lib/helm.sh,
-     lib/crane.sh, lib/agent.sh). Read this when you need to know
-     what the CLI did or will do at a given step before guessing.
+     the `migration-assistant` CLI itself (Amber source: src/cfn_deploy.ab,
+     src/helm_install.ab, src/crane.ab, src/agent.ab). Read this when you
+     need to know what the CLI did or will do at a given step before guessing.
 
    ### Partner / pack skills
 
@@ -183,7 +183,7 @@ at their shell. The CLI's job is done; yours is not.
    ```
 
    The bundle's `manifest.json` (at the bundle root, sibling of
-   `bin/` + `lib/` + `skills/`) lists the build identity and any
+   `bin/` + `skills/`) lists the build identity and any
    applied packs:
 
    ```bash

@@ -1,91 +1,81 @@
-# migrate-cli
+# migration-assistant CLI
 
-A bash-native CLI for the OpenSearch Migration Assistant. Replaces the
-14k-line Go TUI proposed in
-[opensearch-project/opensearch-migrations#3008](https://github.com/opensearch-project/opensearch-migrations/pull/3008)
-with a single-binary install of pure shell scripts.
+The OpenSearch Migration Assistant deployment CLI — a guided, resumable flow
+that provisions the CloudFormation stack + EKS cluster, mirrors images, installs
+the helm chart, and hands off to the migration console (or an AI agent).
 
-## Install
+## Written in Amber, ships as Bash
 
-```sh
+The CLI is written in **[Amber](https://amber-lang.com/)** — typed source that
+**compiles to portable Bash**. The source of truth is `src/*.ab`; the build
+compiles the entrypoint to a single self-contained Bash script that runs on
+**Bash 3.2+** (the macOS / minimal-distro floor) with no Amber dependency on the
+operator's host.
+
+```
+src/        Amber modules (*.ab) — the CLI source of truth
+  main.ab     entrypoint: subcommand dispatch (the compiled bin/migration-assistant)
+  install.ab  the curl-pipe installer (compiled install.sh)
+  core/term/ui/dashboard/timeline   terminal UI layer (VT100, no tput/ncurses)
+  std/common/state/log/...          foundation
+  cfn_deploy/crane/build/helm_*/... deploy + orchestration
+  resume.ab                         the top-level controller
+test/       Amber test suite (amber test) + verify-bash32.sh (runs compiled
+            output under a real bash 3.2 interpreter) + fixtures/
+Makefile    check / build / test / verify targets
+```
+
+`amber build` inlines every imported module into ONE Bash file, so the compiled
+`migration-assistant` is fully standalone — there is no runtime `lib/` to source.
+
+## Build & test (requires the Amber toolchain)
+
+```bash
+# Install Amber 0.6 once:
+brew install amber-lang/amber/amber-lang
+#   or: bash <(curl -sL https://github.com/amber-lang/amber/releases/download/0.6.0-alpha/install.sh)
+
+make check     # parse + type-check every module (amber check)
+make test      # run the amber test suite (MIGRATE_FORCE_TTY=1 amber test test/)
+make build     # compile every module to bash-3.2 under build/
+make verify    # compile to bash-3.2 AND run the compiled output under bash 3.2.57
+make all       # check + build + test + verify
+```
+
+The release tarball + curl-pipe `install.sh` are produced by Gradle:
+
+```bash
+./gradlew :deployment:k8s:aws:packageMigrationAssistantCli -PcliVersion=<ver>
+#   → build/migrate-cli-dist/migration-assistant-cli-<ver>.tar.gz
+#   → build/migrate-cli-dist/install.sh
+```
+
+## Install (operators)
+
+```bash
 curl -fsSL https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/install.sh | bash
+# then, from your migration project directory:
+migration-assistant
 ```
 
-Default (`path` mode): installs a versioned tree at
-`~/.opensearch-migrate/cli/<version>/` and symlinks
-`~/.local/bin/migration-assistant` onto your PATH. Nothing is dropped in
-the current directory and the CLI is **not** auto-launched — you then
-`cd` into the directory you want to use as your migration project and run
-`migration-assistant` there.
+`MIGRATE_INSTALL=workspace` switches to a project-local install that writes an
+`activate` script and auto-launches. See `src/install.ab` for all env overrides.
 
-Workspace mode (project-local, auto-launches the deploy flow):
+## Subcommands
 
-```sh
-curl -fsSL .../install.sh | MIGRATE_INSTALL=workspace bash
-```
+`migration-assistant [flags]` (default: resume/deploy) · `console` · `agent` ·
+`diag` · `clear` · `cleanup` · `pack` · `version` · `help`.
 
-This unpacks under `./migration-assistant-workspace/`, writes an
-`activate` script, and launches the CLI.
+## Extending without forking (`pack`)
 
-## Use
+`migration-assistant pack` repackages the CLI with custom skills, MCP servers,
+and branding declared in a `manifest.json`. Skills are auto-discovered from the
+bundled `skills/` tree; the agent layer registers MCP servers per agent
+(claude/codex/kiro). See `src/manifest.ab` + `src/pack.ab`.
 
-```sh
-cd ~/my-solr-migration                 # this dir becomes the project
-migration-assistant                    # default: resume (or start) for stage 'default'
-                                        #   state -> ./migration-assistant-workspace/default/
-migration-assistant --stage staging    # named stage
-migration-assistant --switch           # re-prompt Manual / Agent
-migration-assistant cleanup            # tear down + archive
-migration-assistant help
-```
+## Notes for contributors
 
-Per-project state lives in `./migration-assistant-workspace/<stage>/`
-under the directory you run from. Set `MIGRATE_HOME` to share one state
-root across projects (e.g. the old global `~/.opensearch-migrate`).
-
-## What it does
-
-Discovery → wizard → CFN deploy (Create-VPC EKS template) → optional crane
-image mirror → helm install → either `kubectl exec migration-console-0`
-(Manual mode) **or** replaces itself with `claude|q|kiro|…` (Agent mode) and
-installs a `Startup.md` skill the agent reads first.
-
-State lives at `./migration-assistant-workspace/<stage>/` under the
-directory you run from (override with `MIGRATE_HOME`) and survives
-terminal restarts. Resume from any step; switch modes any time.
-
-## Layout
-
-```
-bin/migration-assistant  dispatcher
-lib/_common.sh       shell hardening + traps
-lib/ui.sh            color/prompt/spinner
-lib/log.sh           append-only log + rotation
-lib/state.sh         state.env + state.json I/O
-lib/discover.sh      OS / pkg-mgr / AWS / EKS / CFN
-lib/install_tools.sh kubectl/helm/crane/aws/jq install
-lib/artifacts.sh     SHA-256-pinned download + cache
-lib/wizard.sh        4-field deploy params
-lib/cfn.sh           CFN deploy + event tail
-lib/crane.sh         image mirror loop
-lib/helm.sh          helm install + readiness wait
-lib/console.sh       kubectl exec migration-console-0
-lib/agent.sh         agent discover/setup/exec
-lib/cleanup.sh       teardown
-lib/resume.sh        controller + mode select
-lib/version.sh       version constants
-skills/Startup.md    the agent's first read
-test/                bats-core tests
-```
-
-## Develop
-
-```sh
-make lint       # shellcheck
-make test       # bats-core
-make install    # install from CURDIR via install.sh
-```
-
-## License
-
-Apache-2.0 (matches opensearch-project).
+`AMBER_IDIOMS.md` captures the compiler-verified Amber 0.6 patterns + gotchas
+this codebase relies on (reserved keywords, module-array typing, the ESC-byte
+TUI technique, the test-runner cold-cache flake, …). `MODULE_APIS.md` lists every
+module's public API. Read both before adding a module.

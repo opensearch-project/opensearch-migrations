@@ -1,4 +1,7 @@
-# The repo-root .gitignore has `**/bin/` (intended for transient build
-# directories). The migration-assistant CLI's `bin/` is source code,
-# not build output — re-include it here so `git add cli/` works.
-!bin/
+# Compiled bash artifacts — generated from src/*.ab by `make build` /
+# packageMigrationAssistantCli. Not committed (sources are .ab).
+build/
+bin/
+lib/
+# Per-stage runtime state written by the CLI when run from this dir.
+migration-assistant-workspace/

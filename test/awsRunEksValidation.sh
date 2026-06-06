@@ -136,18 +136,30 @@ verify_cfn_stack() {
   esac
 }
 
-# Function to run the migration-assistant CLI (replaces aws-bootstrap.sh)
+# Function to run the migration-assistant CLI (replaces aws-bootstrap.sh).
+#
+# The CLI source is Amber (deployment/k8s/aws/cli/src/*.ab). Compile the
+# entrypoint to a single self-contained Bash script (target bash-3.2) with the
+# Amber toolchain, then run that. The compiled output is plain Bash, so only the
+# compile step needs `amber` on the agent.
 run_aws_bootstrap() {
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
   CLI_DIR="${REPO_ROOT}/deployment/k8s/aws/cli"
-  CLI_BIN="${CLI_DIR}/bin/migration-assistant"
+  AMBER_BIN="${AMBER:-amber}"
 
-  if [[ ! -x "${CLI_BIN}" ]]; then
-    fail "migration-assistant CLI not found or not executable at: ${CLI_BIN}"
+  if ! command -v "${AMBER_BIN}" >/dev/null 2>&1; then
+    fail "Amber compiler not found on PATH (tried ${AMBER_BIN}). Install it: brew install amber-lang/amber/amber-lang (the CLI source is Amber; this compiles it to Bash)."
   fi
 
-  echo "Running migration-assistant from ${CLI_DIR}."
+  CLI_BIN="${WORKSPACE:-$PWD}/.migrate-cli-bin/migration-assistant"
+  mkdir -p "$(dirname "${CLI_BIN}")"
+  echo "Compiling migration-assistant from ${CLI_DIR}/src/main.ab (target bash-3.2)."
+  ( cd "${CLI_DIR}" && "${AMBER_BIN}" build --target bash-3.2 src/main.ab "${CLI_BIN}" ) \
+    || fail "amber build of the migration-assistant CLI failed"
+  chmod +x "${CLI_BIN}"
+
+  echo "Running migration-assistant (compiled from ${CLI_DIR})."
 
   # Pin MIGRATE_HOME to a per-build workspace dir so each Jenkins run
   # starts from a clean state directory (no leftover state.env / cached

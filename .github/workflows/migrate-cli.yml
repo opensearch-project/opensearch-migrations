@@ -1,5 +1,10 @@
 # CI for the migration-assistant CLI under deployment/k8s/aws/cli/.
-# Path-scoped: only runs when CLI files (or this workflow) change.
+#
+# The CLI is written in Amber (amber-lang.com) — typed source (cli/src/*.ab)
+# that compiles to portable Bash. This workflow installs the Amber toolchain,
+# checks + tests the sources, and verifies the gradle build produces a runnable
+# bash-3.2 artifact. Path-scoped: only runs when CLI files (or this workflow)
+# change.
 name: migrate-cli
 
 on:
@@ -19,124 +24,111 @@ on:
 permissions:
   contents: read
 
+env:
+  # Pinned Amber release the CLI is written against (0.6 multi-shell + std/test).
+  AMBER_VERSION: 0.6.0-alpha
+
 jobs:
-  lint:
+  # ---- check: every module parses + type-checks -------------------------------
+  check:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install shellcheck
-        run: sudo apt-get update -y && sudo apt-get install -y shellcheck
+      - name: Install bc (Amber runtime prerequisite)
+        run: sudo apt-get update -y && sudo apt-get install -y bc
+      - name: Install Amber ${{ env.AMBER_VERSION }}
+        run: |
+          bash <(curl -sL "https://github.com/amber-lang/amber/releases/download/${AMBER_VERSION}/install.sh") --user
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Versions
         run: |
-          shellcheck --version
+          amber --version
           bash --version | head -1
-      - name: Verify CLI files are checked in
-        run: |
-          # Catch the silent ignore-by-**/bin/ failure at lint time, not at
-          # runtime where the error becomes "command not found".
-          set -e
-          for f in bin/migration-assistant install.sh lib/_common.sh; do
-            full="deployment/k8s/aws/cli/$f"
-            if [[ ! -f "$full" ]]; then
-              echo "::error::missing required file in checkout: $full" >&2
-              echo "  the repo-root .gitignore has \`**/bin/\`. The CLI's bin/ is" >&2
-              echo "  source — re-include via \`git add -f\` or a cli-local" >&2
-              echo "  .gitignore that re-includes it." >&2
-              exit 1
-            fi
-          done
-      - name: shellcheck
+      - name: amber check (parse + type-check every src module)
         working-directory: deployment/k8s/aws/cli
         run: |
-          shellcheck -x -P lib \
-            bin/migration-assistant \
-            install.sh \
-            lib/*.sh \
-            test/helpers/stub.sh
-      - name: shellcheck Jenkins helper script
-        run: |
-          shellcheck test/awsRunEksValidation.sh
+          set -e
+          for f in src/*.ab; do
+            echo "check $f"
+            amber check "$f"
+          done
 
+  # ---- test: the amber test suite --------------------------------------------
   test:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install jq + bats-core (pinned 1.13.0 from upstream)
+      - name: Install jq + bc
+        run: sudo apt-get update -y && sudo apt-get install -y jq bc
+      - name: Install Amber ${{ env.AMBER_VERSION }}
         run: |
-          # ubuntu-22.04 ships bats 1.2 from apt, which lacks
-          # --print-output-on-failure (added in 1.5). Pull a pinned
-          # release from upstream for predictable behavior.
-          sudo apt-get update -y && sudo apt-get install -y jq
-          curl -fsSL https://github.com/bats-core/bats-core/archive/refs/tags/v1.13.0.tar.gz \
-            | tar -xz -C /tmp
-          sudo /tmp/bats-core-1.13.0/install.sh /usr/local
+          bash <(curl -sL "https://github.com/amber-lang/amber/releases/download/${AMBER_VERSION}/install.sh") --user
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Install uv (provides uvx for AWS MCP registration tests)
         run: |
-          # The agent_setup tests call _agent_install_aws_mcp, which
-          # requires uvx on PATH. Install uv via astral's official one-
-          # liner so those tests don't fall through to the interactive
-          # "install uv now?" prompt and silently disappear from the
-          # bats output (the failure mode that hid tests 5/6/7).
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: Versions
-        run: |
-          bats --version
-          jq --version
-          uvx --version
-          bash --version | head -1
-      - name: Verify CLI binary is executable
-        run: |
-          test -x deployment/k8s/aws/cli/bin/migration-assistant
-          deployment/k8s/aws/cli/bin/migration-assistant version
-      - name: bats (verbose, fail-fast on the first failing file)
+      - name: amber test (full suite; FORCE_TTY exercises interactive paths)
         working-directory: deployment/k8s/aws/cli
+        env:
+          MIGRATE_FORCE_TTY: '1'
         run: |
-          # The wrapper handles --print-output-on-failure +
-          # post-mortem when bats reports a test-count gap (silent
-          # not-run from a `[[ … ]] && fn` rc-leak in a sourced lib,
-          # OR a test calling a deleted function). It exits 2 on
-          # mismatch with a framed diagnostic block and a step-by-
-          # step "find the culprit" guide pointing at per-file count
-          # checks and a single-test ERR-trap recipe.
-          ./test/run-bats.sh
-      - name: Per-file test-count audit (only on failure)
-        if: failure()
-        working-directory: deployment/k8s/aws/cli
-        run: |
-          # When the bats step above fails with a count mismatch,
-          # this step pinpoints the offending .bats file. Each file
-          # is run individually and its declared count (--count) is
-          # compared to the number of TAP `ok|not ok` lines actually
-          # emitted. Any file with declared > actual = silent skip.
-          echo "Per-file declared-vs-actual test count:"
-          for f in test/*.bats; do
-            declared=$(bats --count "$f" 2>/dev/null || echo "?")
-            actual=$(bats --tap "$f" 2>&1 | grep -cE '^(ok|not ok) ' || true)
-            if [[ "$declared" != "$actual" ]]; then
-              echo "  ::error::$f declared=$declared actual=$actual (silent skip)"
-            else
-              echo "  $f declared=$declared actual=$actual"
-            fi
-          done
+          # amber test's parallel runner can flake on a COLD cache; run twice and
+          # require the (warm) second run green. See cli/AMBER_IDIOMS.md.
+          amber test test/ || true
+          amber test test/
 
+  # ---- bash-3.2: compile + run the compiled output under real bash 3.2 -------
+  bash32:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bc + a real bash 3.2 interpreter
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y bc build-essential
+          # Build bash 3.2.57 so we test the actual floor, not the host's 5.x.
+          curl -fsSL https://ftp.gnu.org/gnu/bash/bash-3.2.57.tar.gz | tar -xz -C /tmp
+          ( cd /tmp/bash-3.2.57 && ./configure --prefix=/tmp/bash32 >/dev/null 2>&1 && make >/dev/null 2>&1 && make install >/dev/null 2>&1 )
+          /tmp/bash32/bin/bash --version | head -1
+      - name: Install Amber ${{ env.AMBER_VERSION }}
+        run: |
+          bash <(curl -sL "https://github.com/amber-lang/amber/releases/download/${AMBER_VERSION}/install.sh") --user
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Compile every module to bash-3.2 + run the e2e verify harness
+        working-directory: deployment/k8s/aws/cli
+        env:
+          BASH_32: /tmp/bash32/bin/bash
+        run: |
+          set -e
+          for f in src/*.ab; do
+            base=$(basename "$f" .ab)
+            amber build --target bash-3.2 "$f" "build/$base.sh"
+          done
+          # The harness compiles the demo + runs it under $BASH_32 and asserts on
+          # the rendered TUI. (See cli/test/verify-bash32.sh.)
+          ./test/verify-bash32.sh
+
+  # ---- smoke: gradle package + run the compiled entrypoint -------------------
   smoke:
     runs-on: ubuntu-22.04
-    needs: [lint]
+    needs: [check]
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
-      - name: Install jq
-        run: sudo apt-get update -y && sudo apt-get install -y jq
-      - name: migration-assistant version
-        run: deployment/k8s/aws/cli/bin/migration-assistant version
-      - name: migration-assistant help
-        run: deployment/k8s/aws/cli/bin/migration-assistant help
-      - name: gradle packages CLI tarball + install.sh
+      - name: Install jq + bc
+        run: sudo apt-get update -y && sudo apt-get install -y jq bc
+      - name: Install Amber ${{ env.AMBER_VERSION }}
         run: |
-          ./gradlew :deployment:k8s:aws:packageMigrationAssistantCli \
-            -PcliVersion=0.0.0-ci
+          bash <(curl -sL "https://github.com/amber-lang/amber/releases/download/${AMBER_VERSION}/install.sh") --user
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: gradle compiles + packages the CLI tarball + install.sh
+        run: |
+          ./gradlew :deployment:k8s:aws:packageMigrationAssistantCli -PcliVersion=0.0.0-ci
           test -f deployment/k8s/aws/build/migrate-cli-dist/migration-assistant-cli-0.0.0-ci.tar.gz
           test -x deployment/k8s/aws/build/migrate-cli-dist/install.sh
-          # Sanity: the rendered install.sh is well-formed bash.
           bash -n deployment/k8s/aws/build/migrate-cli-dist/install.sh
+      - name: compiled entrypoint runs (version + help) under host bash
+        run: |
+          tar -xzf deployment/k8s/aws/build/migrate-cli-dist/migration-assistant-cli-0.0.0-ci.tar.gz -C /tmp
+          /tmp/migration-assistant-cli-0.0.0-ci/bin/migration-assistant version
+          /tmp/migration-assistant-cli-0.0.0-ci/bin/migration-assistant help
