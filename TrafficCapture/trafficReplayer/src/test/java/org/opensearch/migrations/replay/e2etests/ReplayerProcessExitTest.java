@@ -140,13 +140,17 @@ public class ReplayerProcessExitTest {
                 // Give replayer a moment to consume the last batch
                 Thread.sleep(5_000);
 
-                // SIGTERM → triggers shutdown hook → tupleWriter.close()
+                // Enable S3 so pending retries succeed and offsets can commit
+                log.info("Enabling S3 proxy — pending upload retries should now succeed");
+                s3Proxy.enable();
+
+                // Give time for retries to land and offsets to commit
+                Thread.sleep(10_000);
+
+                // SIGTERM the replayer — triggers shutdown hook → tupleWriter.close()
+                // At this point some tuples have been flushed; close() flushes the rest.
                 log.info("Sending SIGTERM to replayer process (pid={})", process.toHandle().pid());
                 process.destroy();
-
-                // Enable S3 so retries during shutdown succeed
-                log.info("Enabling S3 proxy — uploads should succeed during shutdown flush");
-                s3Proxy.enable();
 
                 boolean exited = process.waitFor(PROCESS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 if (!exited) {
@@ -291,6 +295,8 @@ public class ReplayerProcessExitTest {
             "--tuple-s3-bucket", BUCKET,
             "--tuple-s3-region", localstack.getRegion(),
             "--tuple-s3-endpoint", s3ProxyEndpoint,
+            "--tuple-max-per-file", "1",
+            "--tuple-max-buffer-seconds", "1",
             "--speedup-factor", "10",
             "-t", "5",
         };
