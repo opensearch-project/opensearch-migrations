@@ -284,7 +284,7 @@ public class ReplayerProcessExitTest {
             javaExecutable,
             "-cp", classpath,
             "org.opensearch.migrations.replay.TrafficReplayer",
-            targetUri,
+            "--target-uri", targetUri,
             "--kafka-traffic-brokers", kafka.getBootstrapServers(),
             "--kafka-traffic-topic", TOPIC,
             "--kafka-traffic-group-id", GROUP_ID,
