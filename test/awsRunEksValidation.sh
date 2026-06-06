@@ -138,26 +138,20 @@ verify_cfn_stack() {
 
 # Function to run the migration-assistant CLI (replaces aws-bootstrap.sh).
 #
-# The CLI source is Amber (deployment/k8s/aws/cli/src/*.ab). Compile the
-# entrypoint to a single self-contained Bash script (target bash-3.2) with the
-# Amber toolchain, then run that. The compiled output is plain Bash, so only the
-# compile step needs `amber` on the agent.
+# The CLI source is Amber (deployment/k8s/aws/cli/src/*.ab). We compile the
+# entrypoint to a single self-contained Bash script via Gradle, which PROVISIONS
+# the Amber toolchain itself (downloads + caches the pinned release binary, like
+# the Java/Corretto toolchain) — so the agent needs no host `amber`. The compiled
+# output is plain Bash; only the compile step (Gradle) touches the toolchain.
 run_aws_bootstrap() {
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-  CLI_DIR="${REPO_ROOT}/deployment/k8s/aws/cli"
-  AMBER_BIN="${AMBER:-amber}"
+  CLI_BIN="${REPO_ROOT}/deployment/k8s/aws/build/migrate-cli-compiled/migration-assistant"
 
-  if ! command -v "${AMBER_BIN}" >/dev/null 2>&1; then
-    fail "Amber compiler not found on PATH (tried ${AMBER_BIN}). Install it: brew install amber-lang/amber/amber-lang (the CLI source is Amber; this compiles it to Bash)."
-  fi
-
-  CLI_BIN="${WORKSPACE:-$PWD}/.migrate-cli-bin/migration-assistant"
-  mkdir -p "$(dirname "${CLI_BIN}")"
-  echo "Compiling migration-assistant from ${CLI_DIR}/src/main.ab (target bash-3.2)."
-  ( cd "${CLI_DIR}" && "${AMBER_BIN}" build --target bash-3.2 src/main.ab "${CLI_BIN}" ) \
-    || fail "amber build of the migration-assistant CLI failed"
-  chmod +x "${CLI_BIN}"
+  echo "Compiling migration-assistant via Gradle (provisions the Amber toolchain)."
+  ( cd "${REPO_ROOT}" && ./gradlew :deployment:k8s:aws:compileMigrationAssistantCli ) \
+    || fail "gradle compile of the migration-assistant CLI failed"
+  test -x "${CLI_BIN}" || fail "compiled CLI not found at ${CLI_BIN}"
 
   echo "Running migration-assistant (compiled from ${CLI_DIR})."
 

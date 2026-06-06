@@ -36,25 +36,23 @@ def call(Map config = [:]) {
     def amber = config.containsKey('amber') ? config.amber : (env.AMBER ?: 'amber')
 
     if (!useReleaseCli) {
-        // Source checkout. Compile the Amber entrypoint to a workspace-private
-        // bin (plain Bash, target 3.2). The amber-compiled script inlines every
-        // imported module, so the single output file IS the CLI — no lib/.
-        def cliSrc = 'deployment/k8s/aws/cli'
-        def outBin = "${env.WORKSPACE}/.migrate-cli-src/migration-assistant"
+        // Source checkout. Compile the Amber entrypoint to a Bash script via
+        // Gradle, which PROVISIONS the Amber toolchain itself (downloads the
+        // pinned release binary and caches it under build/amber-toolchain — like
+        // the Java/Corretto toolchain) so the agent needs no host `amber`. The
+        // compiled script inlines every imported module, so that single file IS
+        // the CLI — no lib/. We return its absolute path.
+        //
+        // A pre-installed toolchain can still be pinned via AMBER=/path (Gradle's
+        // provisionAmber honors it). gradlew runs from the workspace root.
+        def amberArg = (env.AMBER?.trim()) ? "-Pamber='${env.AMBER}'" : ''
+        def compiled = "${env.WORKSPACE}/deployment/k8s/aws/build/migrate-cli-compiled/migration-assistant"
         sh """
             set -e
-            if ! command -v '${amber}' >/dev/null 2>&1; then
-              echo 'resolveCli: Amber compiler not found on PATH (tried ${amber}).' >&2
-              echo '  Install it on the agent: brew install amber-lang/amber/amber-lang' >&2
-              echo '  or pin AMBER=/path/to/amber. The CLI source is Amber (.ab); the' >&2
-              echo '  source-checkout mode compiles it to Bash here.' >&2
-              exit 1
-            fi
-            mkdir -p "${env.WORKSPACE}/.migrate-cli-src"
-            ( cd "${cliSrc}" && '${amber}' build --target bash-3.2 src/main.ab "${outBin}" )
-            chmod +x "${outBin}"
+            ./gradlew :deployment:k8s:aws:compileMigrationAssistantCli ${amberArg}
+            test -x "${compiled}"
         """
-        return outBin
+        return compiled
     }
 
     // Release CLI. install.sh is the canonical curl-pipe entry point;

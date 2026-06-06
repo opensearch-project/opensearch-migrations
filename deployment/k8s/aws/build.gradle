@@ -61,16 +61,105 @@ def defaultRepo = providers.environmentVariable('DEFAULT_REPO')
         .orElse(providers.gradleProperty('defaultRepo'))
         .orElse('opensearch-project/opensearch-migrations')
 
-// Amber compiler binary. Default 'amber' (on PATH); override with -Pamber=… or
-// AMBER=… for pinned-toolchain CI. bash-3.2 target = the macOS / minimal-distro
-// floor the CLI supports.
-def amberBin = providers.environmentVariable('AMBER')
+// =============================================================================
+// Amber toolchain — provisioned by the build, like the Java/Corretto toolchain.
+//
+// CI agents don't ship `amber`, so we download the pinned release binary and
+// cache it under build/, exactly the way a toolchain should self-provision
+// rather than assuming a host install. Resolution order:
+//   1. AMBER env var          (pre-installed / pinned path — CI may set this)
+//   2. -Pamber=/path          (gradle property override)
+//   3. provisioned binary     (downloaded from the GitHub release, cached)
+// The bash-3.2 target is the macOS / minimal-distro floor the CLI supports.
+// =============================================================================
+
+def amberVersion = providers.environmentVariable('AMBER_VERSION')
+        .orElse(providers.gradleProperty('amberVersion'))
+        .orElse('0.6.0-alpha')
+def amberOverride = providers.environmentVariable('AMBER')
         .orElse(providers.gradleProperty('amber'))
-        .orElse('amber')
+        .orElse('')
 def amberTarget = 'bash-3.2'
 
-def distDir   = layout.buildDirectory.dir('migrate-cli-dist')
-def compileDir = layout.buildDirectory.dir('migrate-cli-compiled')
+def distDir       = layout.buildDirectory.dir('migrate-cli-dist')
+def compileDir    = layout.buildDirectory.dir('migrate-cli-compiled')
+def amberToolDir  = layout.buildDirectory.dir('amber-toolchain')
+
+// Map the host OS/arch to the Amber release asset name. The archives are a single
+// `amber` binary at the root (.tar.xz). Mirrors how toolchain resolvers pick a
+// platform-specific JDK.
+def amberAssetFor = { String osName, String osArch ->
+    def os = osName.toLowerCase()
+    def arch = osArch.toLowerCase()
+    def a = (arch in ['aarch64', 'arm64']) ? 'aarch64' : 'x86_64'
+    if (os.contains('mac') || os.contains('darwin')) return "amber-macos-${a}.tar.xz"
+    if (os.contains('win'))                          return "amber-windows-x86_64.tar.xz"
+    // Linux: prefer gnu; musl hosts can override AMBER. (Alpine CI → set AMBER.)
+    return "amber-linux-gnu-${a}.tar.xz"
+}
+
+// provisionAmber — download + extract + cache the pinned Amber binary. No-op when
+// AMBER / -Pamber points at an existing binary. Output: build/amber-toolchain/amber.
+tasks.register('provisionAmber') {
+    description = 'Download + cache the pinned Amber compiler toolchain'
+    group = 'migrate-cli'
+
+    def ver = amberVersion
+    def override = amberOverride
+    def toolDir = amberToolDir
+    def asset = amberAssetFor(
+            System.getProperty('os.name'), System.getProperty('os.arch'))
+
+    inputs.property 'amberVersion', ver
+    inputs.property 'amberOverride', override
+    inputs.property 'asset', asset
+    outputs.dir toolDir
+
+    doLast {
+        if (override.get()?.trim()) {
+            logger.lifecycle "Amber: using override '${override.get()}' (skipping provision)"
+            return
+        }
+        def dir = toolDir.get().asFile
+        dir.mkdirs()
+        def bin = new File(dir, 'amber')
+        if (bin.exists() && bin.canExecute()) {
+            logger.lifecycle "Amber: cached toolchain at ${bin}"
+            return
+        }
+        def url = "https://github.com/amber-lang/amber/releases/download/${ver.get()}/${asset}"
+        def archive = new File(dir, asset)
+        logger.lifecycle "Amber: downloading ${url}"
+        new java.net.URL(url).withInputStream { i -> archive.withOutputStream { o -> o << i } }
+        // Extract the single `amber` binary. tar handles .xz on the runners we
+        // target (GNU tar / bsdtar both do --xz / -J).
+        project.exec {
+            workingDir dir
+            commandLine 'tar', '-xf', archive.name
+        }
+        if (!bin.exists()) {
+            // Some archives may nest; find it.
+            def found = project.fileTree(dir).matching { include '**/amber' }.files.find { it.isFile() }
+            if (found == null) {
+                throw new GradleException("Amber: no `amber` binary found in ${asset}. " +
+                    "Set AMBER=/path/to/amber to use a pre-installed toolchain.")
+            }
+            project.copy { from found; into dir }
+        }
+        bin.setExecutable(true)
+        archive.delete()
+        logger.lifecycle "Amber: provisioned ${bin}"
+    }
+}
+
+// resolveAmber() — the binary path every amber-invoking task should use. Honors
+// the override; otherwise the provisioned binary. (A closure so it's evaluated at
+// execution time, after provisionAmber has run.)
+def resolveAmber = {
+    def o = amberOverride.get()?.trim()
+    if (o) return o
+    return amberToolDir.get().file('amber').asFile.absolutePath
+}
 
 // ---------- (0) compile Amber → Bash ----------
 //
@@ -81,18 +170,18 @@ def compileDir = layout.buildDirectory.dir('migrate-cli-compiled')
 tasks.register('compileMigrationAssistantCli') {
     description = 'Compile the Amber CLI sources to portable Bash (target ' + amberTarget + ')'
     group = 'migrate-cli'
+    dependsOn 'provisionAmber'
 
     def srcDir = file('cli/src')
     def outDir = compileDir.get().asFile
 
     inputs.dir srcDir
     inputs.property 'amberTarget', amberTarget
-    inputs.property 'amberBin', amberBin
     outputs.dir compileDir
 
     doLast {
-        def amber = amberBin.get()
-        // Fail early + actionably if the toolchain is missing.
+        def amber = resolveAmber()
+        // The toolchain is provisioned by provisionAmber; verify it runs.
         def probe = project.exec {
             commandLine amber, '--version'
             setIgnoreExitValue(true)
@@ -101,10 +190,9 @@ tasks.register('compileMigrationAssistantCli') {
         }
         if (probe.exitValue != 0) {
             throw new GradleException(
-                "Amber compiler not found (tried '${amber}'). Install it:\n" +
-                "  brew install amber-lang/amber/amber-lang\n" +
-                "  # or: bash <(curl -sL https://github.com/amber-lang/amber/releases/download/0.6.0-alpha/install.sh)\n" +
-                "Then re-run, or pass -Pamber=/path/to/amber.")
+                "Amber toolchain at '${amber}' did not run. The build provisions it " +
+                "automatically (task provisionAmber); to use a pre-installed one set " +
+                "AMBER=/path/to/amber or -Pamber=…")
         }
 
         outDir.mkdirs()
@@ -247,12 +335,17 @@ tasks.register('renderInstallScript') {
 
 // ---------- (3) amber test (CI gate, optional locally) ----------
 
-tasks.register('testMigrationAssistantCli', Exec) {
+tasks.register('testMigrationAssistantCli') {
     description = 'Run the Amber test suite for the migration-assistant CLI'
     group = 'verification'
-    workingDir file('cli')
-    environment 'MIGRATE_FORCE_TTY', '1'
-    commandLine amberBin.get(), 'test', 'test/'
+    dependsOn 'provisionAmber'
+    doLast {
+        project.exec {
+            workingDir file('cli')
+            environment 'MIGRATE_FORCE_TTY', '1'
+            commandLine resolveAmber(), 'test', 'test/'
+        }
+    }
 }
 
 // ---------- aggregator + lifecycle ----------
