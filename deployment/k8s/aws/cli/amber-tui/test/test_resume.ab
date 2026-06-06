@@ -1,0 +1,267 @@
+// test_resume.ab — coverage for src/resume.ab (the top-level controller port of
+// bash lib/resume.sh).
+//
+// What's covered HERE (the happy-path + the pre-helm gates + the parser):
+//   * cmd_help / _help_body        — the usage header, subcommand lines, flag
+//                                    groups; cmd_help runs clean end-to-end.
+//   * _select_mode                 — the no-manifest fallback: current="" →
+//                                    Manual (default idx 1), current="Agent" →
+//                                    Agent (idx 2). Driven via MIGRATE_NONINTER-
+//                                    ACTIVE so ui_prompt returns the default idx.
+//   * _manual_can_skip_to_console  — TRUE when last_step is terminal AND helm
+//                                    reports `deployed` AND the console pod
+//                                    exists; FALSE on the two PRE-helm gates
+//                                    (mid-deploy last_step / unset STAGE_NAME)
+//                                    that short-circuit before any cluster call.
+//   * cmd_resume FLAG PARSER       — argv → state writes via the full cmd_resume
+//                                    with --mode Manual + the fast-path stubs +
+//                                    SKIP_CONSOLE_EXEC=Y (console_exec returns 0
+//                                    without an interactive exec).
+//
+// The two cluster-dependent NEGATIVE branches (helm-not-deployed / pod-missing)
+// live in SEPARATE files (test_resume_notdeployed.ab / test_resume_nopod.ab):
+//
+//   amber test runs every `test` block in ONE parallel process tree, and the
+//   helm/kubectl CONTEXT binding (helm_ctx.ab's __helm_ctx_flags_v) is a single
+//   process-global (helm_ctx.ab is compiled once and SHARED by resume.ab +
+//   helm_recover.ab). A shim steered off that context is therefore racy across
+//   parallel blocks: whichever block last called helm_kctx_init wins. The fix is
+//   one CONSISTENT shim behavior per file — this file's shims always report
+//   `deployed` + pod-present, so no two blocks here need conflicting answers.
+//   The not-deployed / no-pod scenarios get their own files (each with its own
+//   single consistent shim), exactly the "run each file individually = author-
+//   itative" model the AMBER_IDIOMS test-flake note prescribes.
+//
+// NB: no `return` inside `test` blocks (the AMBER_IDIOMS rule); branch with `if`.
+
+import { assert, assert_eq } from "std/test"
+import { file_write, file_chmod, dir_create } from "std/fs"
+import { env_var_set, env_var_get } from "std/env"
+import { text_contains } from "std/text"
+import { state_load, state_set, state_get, state_save, state_unset } from "../src/state.ab"
+import { _select_mode, _manual_can_skip_to_console, cmd_resume, cmd_help, _help_body } from "../src/resume.ab"
+
+// ---- helpers (ABOVE the test blocks: define-before-use) --------------------
+
+let __seq = 0
+const STUB_DIR = "/tmp/amber_resume_stub"
+let __installed = false
+
+// install_stubs — write the aws + kubectl + helm shims (this file: ALWAYS report
+// helm=deployed + pod-present) into a PATH-shadow dir, at most ONCE (atomic
+// publish via mktemp + mv). BRACE-FREE bash (a `{` in an Amber Text literal is
+// interpolation). `$` written bare. The helm `status -o json` body is assembled
+// at SHIM RUNTIME from octal-escaped braces (lb=$(printf '\\173')→'{', rb='}') so
+// no literal `{` appears in this Amber Text and jq still parses it.
+fun install_stubs(): Null {
+    trust dir_create(STUB_DIR)
+    if __installed {
+        let oldp0 = env_var_get("PATH") failed { "" }
+        if not text_contains(oldp0, "{STUB_DIR}:") {
+            trust env_var_set("PATH", "{STUB_DIR}:{oldp0}")
+        }
+        return null
+    }
+    __installed = true
+
+    let aws = "#!/usr/bin/env bash
+args=\"$*\"
+case \"$args\" in
+  *'sts get-caller-identity'*)
+    printf '%s\\n' 'arn:aws:iam::123456789012:user/test' ;;
+  *)
+    exit 0 ;;
+esac
+exit 0
+"
+    let atmp = trust $mktemp$
+    trust file_write(atmp, aws)
+    trust file_chmod(atmp, "755")
+    trust $mv -f "{atmp}" "{STUB_DIR}/aws"$
+
+    let kubectl = "#!/usr/bin/env bash
+args=\"$*\"
+case \"$args\" in
+  *'get pod migration-console-0'*)
+    exit 0 ;;
+  *exec*)
+    exit 0 ;;
+  *)
+    exit 0 ;;
+esac
+exit 0
+"
+    let ktmp = trust $mktemp$
+    trust file_write(ktmp, kubectl)
+    trust file_chmod(ktmp, "755")
+    trust $mv -f "{ktmp}" "{STUB_DIR}/kubectl"$
+
+    let helm = "#!/usr/bin/env bash
+args=\"$*\"
+lb=\"$(printf '\\173')\"
+rb=\"$(printf '\\175')\"
+case \"$args\" in
+  *status*json*)
+    printf '%s\"info\":%s\"status\":\"deployed\"%s%s\\n' \"$lb\" \"$lb\" \"$rb\" \"$rb\" ;;
+  *status*)
+    printf 'NAME: ma\\nSTATUS: deployed\\n' ;;
+  *)
+    exit 0 ;;
+esac
+exit 0
+"
+    let htmp = trust $mktemp$
+    trust file_write(htmp, helm)
+    trust file_chmod(htmp, "755")
+    trust $mv -f "{htmp}" "{STUB_DIR}/helm"$
+
+    let oldpath = env_var_get("PATH") failed { "" }
+    if not text_contains(oldpath, "{STUB_DIR}:") {
+        trust env_var_set("PATH", "{STUB_DIR}:{oldpath}")
+    }
+}
+
+// fresh_stage — pin a unique stage (STAGE_DIR/MIGRATE_HOME/STAGE) so each test's
+// on-disk state.env is isolated. Returns nothing of interest (no steering token
+// needed: this file's shims are constant).
+fun fresh_stage(): Null {
+    __seq += 1
+    let base = trust $mktemp -d$
+    let dir = "{base}/stage-{__seq}"
+    trust dir_create(dir)
+    trust dir_create("{dir}/log")
+    trust env_var_set("STAGE_DIR", dir)
+    trust env_var_set("MIGRATE_HOME", base)
+    trust env_var_set("STAGE", "stage-{__seq}")
+}
+
+// ---- cmd_help --------------------------------------------------------------
+
+test "cmd_help body contains the usage header and subcommand lines" {
+    install_stubs()
+    fresh_stage()
+    let body = _help_body()
+    assert(text_contains(body, "Usage:"))
+    assert(text_contains(body, "migration-assistant resume"))
+    assert(text_contains(body, "migration-assistant console"))
+    assert(text_contains(body, "migration-assistant agent"))
+    assert(text_contains(body, "migration-assistant cleanup"))
+}
+
+test "cmd_help body documents the deploy-control flag groups" {
+    install_stubs()
+    fresh_stage()
+    let body = _help_body()
+    assert(text_contains(body, "--stage NAME"))
+    assert(text_contains(body, "--region REGION"))
+    assert(text_contains(body, "--deploy-import-vpc-cfn"))
+    assert(text_contains(body, "--tls-mode MODE"))
+    assert(text_contains(body, "--build"))
+}
+
+test "cmd_help runs clean (header + body + Version line to stdout)" {
+    install_stubs()
+    fresh_stage()
+    // cmd_help prints to stdout; an Amber fn's own stdout is not capturable from
+    // inside Amber, so we assert it RUNS without die()/an unhandled command
+    // failure (which would abort the test block). Content asserted above.
+    cmd_help()
+    assert(true)
+}
+
+// ---- _select_mode (no-manifest fallback) -----------------------------------
+
+test "_select_mode fallback defaults to Manual on a fresh pick" {
+    install_stubs()
+    fresh_stage()
+    trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
+    // No manifest in this stage dir → fallback list; current="" → default_idx=1
+    // → ui_prompt returns "1" → Manual.
+    let picked = _select_mode("")
+    assert_eq(picked, "Manual")
+}
+
+test "_select_mode fallback honors current=Agent as the default" {
+    install_stubs()
+    fresh_stage()
+    trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
+    // current="Agent" → default_idx=2 → ui_prompt returns "2" → Agent.
+    let picked = _select_mode("Agent")
+    assert_eq(picked, "Agent")
+}
+
+// ---- _manual_can_skip_to_console (positive + the pre-helm gates) -----------
+
+test "_manual_can_skip_to_console is true when ready + deployed + pod present" {
+    install_stubs()
+    fresh_stage()
+    state_load()
+    state_set("STAGE_NAME", "ma")
+    state_set("last_step", "ready")
+    state_save()
+    assert(_manual_can_skip_to_console())
+}
+
+test "_manual_can_skip_to_console is false mid-deploy (last_step=cfn_done)" {
+    install_stubs()
+    fresh_stage()
+    // Gated by last_step != terminal → returns false BEFORE any helm/kubectl call,
+    // so the always-deployed shim is irrelevant here (no cross-test conflict).
+    state_load()
+    state_set("STAGE_NAME", "ma")
+    state_set("last_step", "cfn_done")
+    state_save()
+    assert(not _manual_can_skip_to_console())
+}
+
+test "_manual_can_skip_to_console is false when STAGE_NAME is unset" {
+    install_stubs()
+    fresh_stage()
+    // Gated by the empty STAGE_NAME → returns false BEFORE any helm/kubectl call.
+    state_load()
+    state_unset("STAGE_NAME")
+    state_set("last_step", "ready")
+    state_save()
+    assert(not _manual_can_skip_to_console())
+}
+
+// ---- cmd_resume flag parser (argv → state writes) --------------------------
+//
+// Drive the FULL cmd_resume with --mode Manual so the picker is bypassed, the
+// fast-path skip-to-console gate is satisfied (last_step=ready + the always-
+// deployed shim + pod present), and SKIP_CONSOLE_EXEC=Y so console_exec returns 0
+// without an interactive kubectl exec. Then re-load state and assert each parsed
+// flag landed.
+
+test "cmd_resume parses deploy-control flags into state" {
+    install_stubs()
+    fresh_stage()
+    trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
+    // Seed the on-disk state that makes the manual fast-path return cleanly.
+    state_load()
+    state_set("STAGE_NAME", "ma")
+    state_set("last_step", "ready")
+    state_set("SKIP_CONSOLE_EXEC", "Y")
+    state_save()
+
+    // --mode Manual bypasses the picker; the rest are deploy-control flags. Mix a
+    // space form (--region us-west-2), flag-only toggles (--build,
+    // --use-public-images), and an =form (--stack-name=My-Stack).
+    let rc = cmd_resume([
+        "--mode", "Manual",
+        "--region", "us-west-2",
+        "--build",
+        "--use-public-images",
+        "--stack-name=My-Stack"
+    ])
+    assert_eq(rc, 0)
+
+    // Re-load THIS test's state instance to observe what cmd_resume's instance
+    // persisted to disk (the modules reconcile only through state.env).
+    state_load()
+    assert_eq(state_get("AWS_REGION", ""), "us-west-2")
+    assert_eq(state_get("BUILD_FROM_SOURCE", ""), "Y")
+    assert_eq(state_get("MIRROR_IMAGES", ""), "N")
+    assert_eq(state_get("CFN_STACK_NAME", ""), "My-Stack")
+    assert_eq(state_get("MODE", ""), "Manual")
+}

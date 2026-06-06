@@ -1,0 +1,955 @@
+// agent.ab — agent discovery, skill installation, and exec-handoff.
+//
+// Port of bash lib/agent.sh. Public fn names preserved verbatim so the
+// entrypoint dispatches to them unchanged:
+//   cmd_agent / agent_path / discover_agents / agent_setup /
+//   mcp_install_from_manifest / agent_exec
+// (plus the per-agent MCP writers _mcp_write_claude / _mcp_write_codex /
+// _mcp_write_kiro and the _agent_* helpers).
+//
+// Supported agents (detection order): claude, codex, kiro. kiro ships its
+// installed binary as `kiro-cli` (not `kiro`), so each canonical agent carries
+// a SPACE-SEPARATED list of candidate binaries to probe on PATH.
+//
+// Skill installation per agent:
+//   claude → <stage>/.claude/skills/opensearch-migration/Startup.md (+ tree)
+//   codex  → <stage>/.codex/Startup.md
+//   kiro   → <stage>/.kiro/{agents,prompts,settings,steering}/ (full upstream)
+//
+// AWS MCP + any manifest-declared MCP servers get registered project-scope for
+// the chosen agent so the handoff session has them. Then `cd <stage>; exec
+// <agent-bin>` replaces the current process — no parent remains.
+//
+// ============================================================================
+// PORT NOTES vs the bash original
+// ============================================================================
+//   * AGENT_CANDIDATES_SPEC=("claude:claude" "codex:codex" "kiro:kiro-cli kiro")
+//     → TWO parallel arrays (Amber forbids nested arrays): __agent_names[] and
+//     __agent_bins[] (the space-separated candidate list per canonical name).
+//     Built once by _agent_specs(), the dashboard.ab / state.ab parallel-array
+//     shape.
+//   * discover_agents returned newline-printed names that the caller split via
+//     `read -r -d '' -a`; here it RETURNS a [Text] of found canonical names
+//     directly (the process-sub + read collapses to a typed return). An empty
+//     list is the "none found" signal (bash `return 1`).
+//   * _agent_bin_for / _agent_bins_for use std is_command (`command -v`) to probe
+//     and `command -v` to resolve the absolute path for the exec.
+//   * The MCP-config writers build the config Text and file_write it. The .mcp.json
+//     / mcp.json JSON merges keep jq (the model layer hard-deps jq, exactly as
+//     bash did) — jq filters use `\$n` / `\$e` to escape the `$` so Amber leaves
+//     the jq param refs intact. The codex config.toml is plain text + file_append.
+//   * `<(printf … | jq …)` process-sub for the requires set → iterate this agent's
+//     MCP names (manifest_mcp_names) collecting manifest_mcp_requires per server
+//     into a deduped [Text]; no process-sub.
+//   * mktemp-then-mv atomic JSON publish is preserved (a reader never sees a
+//     half-written .mcp.json).
+//   * agent_exec's `cd <stage>; exec <bin> …` stays a raw `trust $…$` (exec /
+//     CODEX_HOME export have no stdlib equivalent — the documented escape).
+//   * No raw ${} inside $…$: env values come from env_var_get; $PWD etc. via a
+//     trust $pwd$ capture. `{` in a JSON/string literal is escaped or routed
+//     through jq's --arg.
+
+import { env_var_get, env_var_set, env_var_test, is_command } from "std/env"
+import { file_exists, file_read, file_write, file_append, dir_create } from "std/fs"
+import { split_lines, split, slice, uppercase, trim } from "std/text"
+import {
+    state_load, state_get, state_set, state_save
+} from "./state.ab"
+import { die } from "./common.ab"
+import {
+    ui_info, ui_ok, ui_warn, ui_err, ui_step, ui_dim,
+    ui_select, ui_confirm, ui_bold, ui_reset
+} from "./ui.ab"
+import { log_init, log_info, log_warn, log_file } from "./log.ab"
+import { optional_cmd, array_contains } from "./std.ab"
+import {
+    manifest_have, manifest_brand, manifest_mcp_names,
+    manifest_mcp_command, manifest_mcp_args, manifest_mcp_requires,
+    manifest_all_perms
+} from "./manifest.ab"
+import { eprintln } from "./core.ab"
+// helm_kctx_init: cmd_agent calls it before the handoff to bind the kube
+// context (bash did the same). Owned by helm_ctx.ab.
+import { helm_kctx_init } from "./helm_ctx.ab"
+
+// ============================================================================
+// Private helpers FIRST. Amber tree-shakes per imported symbol and keeps only
+// transitive deps that textually PRECEDE the public entry point across an import
+// boundary, so every callee MUST appear above its caller or it is silently
+// dropped (→ "Function 'x' does not exist" when this module is imported).
+// ============================================================================
+
+// ---- agent candidate spec (parallel arrays, mirrors AGENT_CANDIDATES_SPEC) --
+//
+// Each canonical name maps to a SPACE-SEPARATED list of candidate binaries to
+// probe on PATH. kiro's installed binary is `kiro-cli`, not `kiro`. Modeled as
+// two parallel arrays (Amber forbids nested arrays) built once per call — the
+// state.ab / crane.ab parallel-array idiom. These are pure data, so rebuilding
+// them on each access is cheap and keeps the module free of init-order coupling.
+
+// _agent_names — the canonical agent names, in detection order.
+fun _agent_names(): [Text] {
+    let names = [""]
+    names = []
+    names += ["claude"]
+    names += ["codex"]
+    names += ["kiro"]
+    return names
+}
+
+// _agent_bins_spec — the space-separated candidate-binary list for each
+// canonical name, in lockstep with _agent_names().
+fun _agent_bins_spec(): [Text] {
+    let bins = [""]
+    bins = []
+    bins += ["claude"]
+    bins += ["codex"]
+    bins += ["kiro-cli kiro"]
+    return bins
+}
+
+// _agent_index <canonical> → index in _agent_names(), or -1. The lockstep key
+// for looking up a canonical name's binary candidates.
+fun _agent_index(canonical: Text): Int {
+    let names = _agent_names()
+    for i, n in names {
+        if n == canonical { return i }
+    }
+    return -1
+}
+
+// _agent_bin_candidates <canonical> → the [Text] of candidate binaries for the
+// canonical name (split of the space-separated spec). Empty when unknown.
+fun _agent_bin_candidates(canonical: Text): [Text] {
+    let idx = _agent_index(canonical)
+    if idx < 0 {
+        let none = [""]
+        none = []
+        return none
+    }
+    let spec = _agent_bins_spec()[idx]
+    let out = [""]
+    out = []
+    for b in split(spec, " ") {
+        if b != "" { out += [b] }
+    }
+    return out
+}
+
+// ---- _agent_bin_for / _agent_bins_for --------------------------------------
+
+// _agent_bin_for <canonical> → the absolute path of the FIRST candidate binary
+// on PATH, or "" when none found. (bash `command -v "$b"` over the candidate
+// list, first hit wins.) is_command is the std `command -v` test; `command -v`
+// (raw) recovers the resolved path for the exec.
+pub fun _agent_bin_for(canonical: Text): Text {
+    for b in _agent_bin_candidates(canonical) {
+        if is_command(b) {
+            let path = trust $command -v "{b}" 2>/dev/null$
+            let p = trim(path)
+            if p != "" { return p }
+        }
+    }
+    return ""
+}
+
+// _agent_bins_for <canonical> → the comma-separated candidate-binary list for
+// diagnostic messages. (bash `printf … | tr ' ' ','`.)
+pub fun _agent_bins_for(canonical: Text): Text {
+    let cands = _agent_bin_candidates(canonical)
+    let out = ""
+    for b in cands {
+        out = out == "" then b else "{out},{b}"
+    }
+    return out
+}
+
+// ---- skill source resolution ------------------------------------------------
+
+// _agent_skills_src → the directory holding Startup.md + the skill subtree.
+// Resolution order (unchanged from bash):
+//   1. <LIB_DIR>/../skills        (release tarball — sibling of bin/ + lib/)
+//   2. <LIB_DIR>/../../../../../agent-skills/skills  (repo checkout / dev mode)
+//   3. $MIGRATE_SKILLS_SRC        (operator override)
+// die()s with the same message when none has a Startup.md (bash die).
+fun _agent_skills_src(): Text {
+    let lib = env_var_get("LIB_DIR") failed { "" }
+    if file_exists("{lib}/../skills/Startup.md") {
+        return "{lib}/../skills"
+    }
+    if file_exists("{lib}/../../../../../agent-skills/skills/Startup.md") {
+        return "{lib}/../../../../../agent-skills/skills"
+    }
+    let override = env_var_get("MIGRATE_SKILLS_SRC") failed { "" }
+    if override != "" and file_exists("{override}/Startup.md") {
+        return override
+    }
+    die("could not locate Startup.md (looked in lib/../skills + agent-skills/skills + MIGRATE_SKILLS_SRC)")
+    return ""
+}
+
+// ---- skill tree copy --------------------------------------------------------
+
+// _agent_copy_skill_tree <skills_src> <dest_dir> — copy every <skills_src>/<name>/
+// subdir that contains a SKILL.md into <dest_dir>/. (bash `for skill_dir in
+// "$src"/*/; do [[ -f "${skill_dir}SKILL.md" ]] || continue; cp -R "${skill_dir%/}"
+// "$dest/"; done`.) `ls -d */`-style enumeration has no clean stdlib form, so the
+// subdir walk + SKILL.md guard is one raw `find -maxdepth 1` escape; the cp -R of
+// each matched subdir (stripping the trailing slash so it copies AS a subdir, not
+// its contents — the BSD/macOS cp note) stays a raw trust.
+fun _agent_copy_skill_tree(skills_src: Text, dest_dir: Text): Null {
+    trust $mkdir -p "{dest_dir}"$
+    // find direct subdirs of skills_src that hold a SKILL.md, emit the subdir path.
+    let raw = trust $find "{skills_src}" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null$
+    for line in split_lines(raw) {
+        if line == "" { continue }
+        // line = .../<skill>/SKILL.md → the skill dir is its parent.
+        let segs = split(line, "/")
+        let n = len segs
+        if n < 2 { continue }
+        // Rebuild the parent path (everything except the trailing "SKILL.md").
+        let parent = ""
+        for i in 0..(n - 1) {
+            parent = parent == "" then segs[i] else "{parent}/{segs[i]}"
+        }
+        // A leading-slash absolute path lost its root in the join above; restore.
+        if slice(line, 0, 1) == "/" { parent = "/{parent}" }
+        trust $cp -R "{parent}" "{dest_dir}/"$
+    }
+}
+
+// ---- MCP env-var normalization ---------------------------------------------
+
+// _mcp_norm_envvar <name> — uppercase + non-alpha → '_' for the skip-env-var
+// suffix. aws-mcp → AWS_MCP, my.org/secrets → MY_ORG_SECRETS. (bash tr
+// '[:lower:]/.-' '[:upper:]___'.) Done in pure Amber (uppercase + per-char map)
+// so there's no tr-range portability trap.
+pub fun _mcp_norm_envvar(name: Text): Text {
+    let up = uppercase(name)
+    let n = len up
+    let out = ""
+    for i in 0..n {
+        let c = slice(up, i, 1)
+        if c == "/" or c == "." or c == "-" {
+            out = "{out}_"
+        } else {
+            out = "{out}{c}"
+        }
+    }
+    return out
+}
+
+// ---- _mcp_pretty ------------------------------------------------------------
+
+// _mcp_pretty <path> — a path shown relative to $HOME ("~/…") for log messages.
+pub fun _mcp_pretty(p: Text): Text {
+    let home = env_var_get("HOME") failed { "" }
+    if home != "" {
+        let pref = "{home}/"
+        let pl = len pref
+        if (len p) >= pl and slice(p, 0, pl) == pref {
+            return "~/{slice(p, pl, (len p) - pl)}"
+        }
+    }
+    return p
+}
+
+// ---- _mcp_args_jq_array -----------------------------------------------------
+
+// _mcp_args_jq_array <name> — the substituted args list as a one-line JSON array
+// (for jq --argjson injection). Reads manifest_mcp_args (one substituted arg per
+// line) and folds via `jq -R . | jq -sc .`. (bash identical.)
+fun _mcp_args_jq_array(name: Text): Text {
+    let args = manifest_mcp_args(name)
+    // manifest_mcp_args returns one arg per line (trailing newline). Feed it to
+    // jq -R (raw-line → JSON string) then jq -sc (slurp → compact array). An empty
+    // args list → "[]".
+    return trust $printf '%s' "{args}" | jq -R . | jq -sc .$
+}
+
+// ---- per-agent MCP writers --------------------------------------------------
+
+// _mcp_write_claude <name> — project-scope <stage>/.mcp.json. Claude auto-loads
+// project MCPs on first session (one-time trust prompt per stage). Idempotent:
+// skips when the server is already present. The JSON merge keeps jq (brace-heavy
+// JSON; jq --arg/--argjson is the clean way), with mktemp-then-mv atomic publish.
+pub fun _mcp_write_claude(name: Text): Null {
+    let stage_dir = _agent_stage_dir()
+    let cfg = "{stage_dir}/.mcp.json"
+    if file_exists(cfg) {
+        trust $jq -e --arg n "{name}" '.mcpServers[\$n] // empty' "{cfg}" >/dev/null 2>&1$
+        if status() == 0 {
+            ui_dim("  claude: {name} already in {_mcp_pretty(cfg)}")
+            return null
+        }
+    }
+    ui_step("Registering {name} with claude ({cfg})")
+
+    let cmd = manifest_mcp_command(name)
+    let args_array = _mcp_args_jq_array(name)
+    let entry = trust $jq -nc --arg cmd "{cmd}" --argjson args '{args_array}' '\{command: \$cmd, args: \$args}'$
+
+    let tmp = trust $mktemp "{stage_dir}/.mcp.json.tmp.XXXXXX"$
+    if file_exists(cfg) {
+        trust $jq --arg n "{name}" --argjson e '{entry}' '.mcpServers[\$n] = \$e' "{cfg}" > "{tmp}"$
+    } else {
+        trust $jq -nc --arg n "{name}" --argjson e '{entry}' '\{mcpServers: \{(\$n): \$e}}' > "{tmp}"$
+    }
+    trust $mv -f "{tmp}" "{cfg}"$
+    ui_ok("{name} registered with claude")
+}
+
+// _mcp_write_codex <name> — project-scope <stage>/.codex/config.toml. Set
+// CODEX_HOME=<stage>/.codex at exec time (agent_exec) so codex resolves config
+// from the stage. Idempotent: a `[mcp_servers.<name>]` section already present is
+// left alone. The TOML is plain text (no JSON braces), so it's built as Text +
+// file_append; the args JSON array is converted to a TOML array literal via jq.
+pub fun _mcp_write_codex(name: Text): Null {
+    let stage_dir = _agent_stage_dir()
+    let cfg_dir = "{stage_dir}/.codex"
+    let cfg = "{cfg_dir}/config.toml"
+    dir_create(cfg_dir) failed {}
+    trust $touch "{cfg}"$
+    // Already present? (bash `grep -qE "^\[mcp_servers\.<name>\]"`.) A `[` in the
+    // pattern is literal; the whole pattern is passed as a single argument.
+    let section = "[mcp_servers.{name}]"
+    let body = file_read(cfg) failed { "" }
+    for line in split_lines(body) {
+        if trim(line) == section {
+            ui_dim("  codex: {name} already in {cfg}")
+            return null
+        }
+    }
+    ui_step("Registering {name} with codex ({cfg})")
+
+    let cmd = manifest_mcp_command(name)
+    let args_array = _mcp_args_jq_array(name)
+    // JSON args array → TOML array literal (quote + escape each element).
+    let args_toml = trust $printf '%s' "{args_array}" | jq -r 'map("\"" + (. | gsub("\\\\"; "\\\\") | gsub("\""; "\\\"")) + "\"") | "[" + join(", ") + "]"'$
+
+    // Append the section. Plain Text (no JSON braces) → file_append; a leading
+    // newline separates it from any prior content (bash `printf '\n[…]\n'`).
+    let chunk = "\n[mcp_servers.{name}]\ncommand = \"{cmd}\"\nargs = {args_toml}\n"
+    file_append(cfg, chunk) failed { die("could not write codex config: {cfg}") }
+    ui_ok("{name} registered with codex")
+}
+
+// _mcp_write_kiro <name> — project-scope <stage>/.kiro/settings/mcp.json. Same
+// JSON shape + atomic-publish as claude. Idempotent.
+pub fun _mcp_write_kiro(name: Text): Null {
+    let stage_dir = _agent_stage_dir()
+    let settings_dir = "{stage_dir}/.kiro/settings"
+    let cfg = "{settings_dir}/mcp.json"
+    dir_create(settings_dir) failed {}
+    if file_exists(cfg) {
+        trust $jq -e --arg n "{name}" '.mcpServers[\$n] // empty' "{cfg}" >/dev/null 2>&1$
+        if status() == 0 {
+            ui_dim("  kiro: {name} already in {cfg}")
+            return null
+        }
+    }
+    ui_step("Registering {name} with kiro ({cfg})")
+
+    let cmd = manifest_mcp_command(name)
+    let args_array = _mcp_args_jq_array(name)
+    let entry = trust $jq -nc --arg cmd "{cmd}" --argjson args '{args_array}' '\{command: \$cmd, args: \$args}'$
+
+    let tmp = trust $mktemp "{settings_dir}/mcp.json.tmp.XXXXXX"$
+    if file_exists(cfg) {
+        trust $jq --arg n "{name}" --argjson e '{entry}' '.mcpServers[\$n] = \$e' "{cfg}" > "{tmp}"$
+    } else {
+        trust $jq -nc --arg n "{name}" --argjson e '{entry}' '\{mcpServers: \{(\$n): \$e}}' > "{tmp}"$
+    }
+    trust $mv -f "{tmp}" "{cfg}"$
+    ui_ok("{name} registered with kiro")
+}
+
+// _mcp_register_for_agent <agent> <name> — dispatch to the per-agent writer.
+// (bash case.) if-chain (no match/switch keyword).
+fun _mcp_register_for_agent(agent: Text, name: Text): Null {
+    if {
+        agent == "claude" { _mcp_write_claude(name) }
+        agent == "codex"  { _mcp_write_codex(name) }
+        agent == "kiro"   { _mcp_write_kiro(name) }
+        else {
+            log_warn("mcp: no project-scope writer for agent={agent}; skipping {name}")
+        }
+    }
+}
+
+// ---- claude settings.json ---------------------------------------------------
+
+// _agent_cli_perms_json — the CLI's read-only operator allowlist as a one-line
+// JSON array (NOT MCP-specific; CLI-owned, so it lives here not in the manifest).
+// Verbatim port of the bash `jq -nc '[ … ]'` list. Built on disk via jq -nc from
+// a fixture file so the brace-free Amber Text holds the literal allowlist, then
+// jq emits canonical JSON (matches the bash entry set exactly).
+fun _agent_cli_perms_json(): Text {
+    // The allowlist is brace-heavy ("Bash(...)" tokens contain no braces, but the
+    // jq array literal does). Write the jq program to a fixture file and run it by
+    // path so no `{` lands inside a `$…$` command.
+    let stage_dir = _agent_stage_dir()
+    let prog = "{stage_dir}/.claude/cli-perms.jq"
+    dir_create("{stage_dir}/.claude") failed {}
+    let jq_prog = "[
+  \"Bash(aws sts get-caller-identity:*)\",
+  \"Bash(aws eks list-clusters:*)\",
+  \"Bash(aws eks describe-cluster:*)\",
+  \"Bash(aws cloudformation list-stacks:*)\",
+  \"Bash(aws cloudformation describe-stacks:*)\",
+  \"Bash(aws cloudformation describe-stack-events:*)\",
+  \"Bash(aws cloudformation describe-stack-resources:*)\",
+  \"Bash(aws ecr describe-repositories:*)\",
+  \"Bash(aws ecr list-images:*)\",
+  \"Bash(aws s3 ls:*)\",
+  \"Bash(aws iam get-role:*)\",
+  \"Bash(aws iam list-attached-role-policies:*)\",
+  \"Bash(kubectl get:*)\",
+  \"Bash(kubectl describe:*)\",
+  \"Bash(kubectl logs:*)\",
+  \"Bash(kubectl wait:*)\",
+  \"Bash(kubectl version:*)\",
+  \"Bash(kubectl config current-context:*)\",
+  \"Bash(kubectl config get-contexts:*)\",
+  \"Bash(helm status:*)\",
+  \"Bash(helm list:*)\",
+  \"Bash(helm history:*)\",
+  \"Bash(helm get values:*)\",
+  \"Bash(cat:*)\", \"Bash(ls:*)\", \"Bash(jq:*)\", \"Bash(grep:*)\", \"Bash(rg:*)\",
+  \"Bash(find:*)\", \"Bash(head:*)\", \"Bash(tail:*)\", \"Bash(wc:*)\",
+  \"Read(*)\", \"Glob(*)\", \"Grep(*)\",
+  \"Write(*)\", \"Edit(*)\", \"MultiEdit(*)\", \"NotebookEdit(*)\",
+  \"Bash(mkdir:*)\", \"Bash(touch:*)\", \"Bash(cp:*)\", \"Bash(mv:*)\"
+]"
+    file_write(prog, jq_prog) failed { die("could not write {prog}") }
+    let out = trust $jq -nc -f "{prog}"$
+    return out
+}
+
+// _agent_write_claude_settings — drop a project-scope <stage>/.claude/settings.json
+// with pre-approved permissions. MCP-tool perms come from each MCP's
+// permissionsAllow in the manifest (manifest_all_perms, deduped); the CLI bash/
+// aws/kubectl read-only allowlist comes from _agent_cli_perms_json. Idempotent:
+// an existing settings.json is left alone (operator may have customized it).
+// Skipped when MIGRATE_NO_CLAUDE_SETTINGS=1.
+pub fun _agent_write_claude_settings(): Null {
+    let no_settings = env_var_get("MIGRATE_NO_CLAUDE_SETTINGS") failed { "0" }
+    if no_settings == "1" { return null }
+
+    let stage_dir = _agent_stage_dir()
+    let settings = "{stage_dir}/.claude/settings.json"
+    dir_create("{stage_dir}/.claude") failed {}
+
+    if file_exists(settings) {
+        log_info("claude: {settings} already exists; not overwriting")
+        return null
+    }
+
+    let cli_perms_json = _agent_cli_perms_json()
+
+    // Manifest-driven MCP tool perms (may be empty). manifest_all_perms emits one
+    // perm per line, deduped; fold into a JSON array via jq -R | jq -sc.
+    let mcp_perms_json = "[]"
+    if manifest_have() {
+        let perms = manifest_all_perms()
+        if trim(perms) != "" {
+            mcp_perms_json = trust $printf '%s' "{perms}" | jq -R . | jq -sc 'unique'$
+        }
+    }
+
+    // Merge CLI + MCP perms (unique) and emit the canonical settings.json. The jq
+    // object literal is brace-heavy → run from a fixture file (no `{` in a $…$).
+    let prog = "{stage_dir}/.claude/settings.jq"
+    // Brace-heavy jq object literal: a `{` starts Amber interpolation even in a
+    // plain Text, so each is escaped `\{`; `}` is literal. $ keeps the jq
+    // `$mcp`/`$cli` param refs out of Amber interpolation (a literal `$` token is
+    // fine, but $ is unambiguous through the file_write).
+    let jq_prog = "\{
+  \"\\u0024schema\": \"https://json.schemastore.org/claude-code-settings.json\",
+  permissions: \{ allow: (\\u0024mcp + \\u0024cli | unique) }
+}"
+    file_write(prog, jq_prog) failed { die("could not write {prog}") }
+    trust $jq -n --argjson mcp '{mcp_perms_json}' --argjson cli '{cli_perms_json}' -f "{prog}" > "{settings}"$
+    let count = trust $jq '.permissions.allow|length' "{settings}" 2>/dev/null || echo "0"$
+    log_info("claude: wrote pre-approved permissions to {settings} ({trim(count)} entries)")
+}
+
+// ---- _agent_ensure_uvx ------------------------------------------------------
+
+// _agent_ensure_uvx → Bool (true = uvx on PATH afterwards). uvx is required for
+// AWS MCP registration. Missing → offer astral's official installer; bail (false)
+// when the operator declines or the install fails. (bash returned 0/1.)
+fun _agent_ensure_uvx(): Bool {
+    if is_command("uvx") { return true }
+    ui_warn("uvx is required for AWS MCP registration but is not on PATH")
+    ui_dim("  uv (the package manager that ships uvx) is a single-binary")
+    ui_dim("  install — astral's official one-liner takes ~3 seconds and")
+    ui_dim("  drops it at \$HOME/.local/bin/uvx (no sudo, no system changes).")
+    if not ui_confirm("Install uv now via astral's official installer?", "Y") {
+        ui_err("aws-mcp registration aborted; install uv yourself: https://github.com/astral-sh/uv")
+        return false
+    }
+
+    ui_step("Installing uv (curl -LsSf https://astral.sh/uv/install.sh | sh)")
+    let lf = log_file()
+    trust $curl -LsSf --max-time 60 https://astral.sh/uv/install.sh | sh >> "{lf}" 2>&1$
+    if status() != 0 {
+        ui_err("uv install failed; see {lf}")
+        return false
+    }
+
+    // uv installs to ~/.local/bin. bash caches command lookups; `hash -r` clears
+    // it before the next probe. (env_var_get can't relaunch the shell hash, so the
+    // raw `hash -r` escape mirrors bash.)
+    trust $hash -r 2>/dev/null || true$
+    if not is_command("uvx") {
+        ui_err("uv installed but uvx still not on PATH; add \$HOME/.local/bin to your PATH and rerun")
+        return false
+    }
+    let ver = trust $uvx --version 2>&1 | head -1$
+    ui_ok("uv installed: {ver}")
+    return true
+}
+
+// ---- stage dir resolution (shared) ------------------------------------------
+
+// _agent_stage_dir — resolve <stage> the way the other ported modules do
+// (crane.ab / helm_install.ab): explicit STAGE_DIR env wins, else MIGRATE_HOME
+// (default "$PWD/migration-assistant-workspace") joined with STAGE (default
+// "default"). cmd_agent persists STAGE_DIR into the env after parsing --stage, so
+// the writers below resolve it consistently.
+fun _agent_stage_dir(): Text {
+    let explicit = env_var_get("STAGE_DIR") failed { "" }
+    if explicit != "" { return explicit }
+    let home = env_var_get("MIGRATE_HOME") failed { "" }
+    if home == "" {
+        let pwd = trust $pwd$
+        home = "{pwd}/migration-assistant-workspace"
+    }
+    let st = env_var_get("STAGE") failed { "" }
+    if st == "" { st = "default" }
+    return "{home}/{st}"
+}
+
+// ---- install hints ----------------------------------------------------------
+
+// _agent_print_install_hints — full install table (used when NOTHING is on PATH
+// and we have to bail). UI chrome → stderr (ui_info / raw printf to >&2). The bold
+// agent names use ui_bold/ui_reset.
+fun _agent_print_install_hints(): Null {
+    ui_info("Install one of:")
+    let b = ui_bold()
+    let r = ui_reset()
+    eprintln("  {b}claude{r}  Anthropic Claude Code   https://code.claude.com/docs/en/quickstart")
+    eprintln("  {b}codex{r}   OpenAI Codex CLI        https://developers.openai.com/codex/cli")
+    eprintln("  {b}kiro{r}    AWS Kiro CLI            https://kiro.dev/cli/")
+}
+
+// _agent_print_install_hints_for_missing <installed[]> — a dim hint line per
+// supported-but-not-installed agent so the operator knows the other choices a
+// `brew install` away. (bash built " $* " then substring-tested each candidate.)
+pub fun _agent_print_install_hints_for_missing(installed: [Text]): Null {
+    let missing = [""]
+    missing = []
+    for a in _agent_names() {
+        if not array_contains(a, installed) {
+            missing += [a]
+        }
+    }
+    if len missing == 0 { return null }
+    ui_dim("  other supported agents you could install:")
+    for a in missing {
+        if {
+            a == "claude" { ui_dim("    claude — https://code.claude.com/docs/en/quickstart") }
+            a == "codex"  { ui_dim("    codex  — https://developers.openai.com/codex/cli") }
+            a == "kiro"   { ui_dim("    kiro   — https://kiro.dev/cli/") }
+        }
+    }
+}
+
+// ---- _agent_has_session -----------------------------------------------------
+
+// _agent_has_session <agent> → Bool: does the agent's session storage hold at
+// least one conversation rooted in the CURRENT working directory (agent_exec
+// cd'd into <stage>)? Only claude has an inspectable per-cwd session dir; every
+// other agent optimistically returns true (its `resume --last` is harmless on no
+// history). (bash case.)
+pub fun _agent_has_session(agent: Text): Bool {
+    if agent != "claude" { return true }
+    // Claude's session dir: replace '/' and '.' with '-' in the CWD.
+    let pwd = trust $pwd$
+    let n = len pwd
+    let key = ""
+    for i in 0..n {
+        let c = slice(pwd, i, 1)
+        if c == "/" or c == "." {
+            key = "{key}-"
+        } else {
+            key = "{key}{c}"
+        }
+    }
+    let home = env_var_get("HOME") failed { "" }
+    let dir = "{home}/.claude/projects/{key}"
+    trust $test -d "{dir}"$
+    if status() != 0 { return false }
+    // At least one .jsonl file present? (bash `compgen -G`.) `ls` over the glob;
+    // a non-zero exit (no match) → false.
+    trust $ls "{dir}"/*.jsonl >/dev/null 2>&1$
+    return status() == 0
+}
+
+// ============================================================================
+// discover_agents — public.
+// ============================================================================
+
+// discover_agents → [Text] of canonical agent names whose binary is on PATH, in
+// detection order. (bash printed one per line + `return 1` when none; here an
+// EMPTY list is the "none found" signal — callers check `len`.) The bash
+// `read -r -d '' -a agents <<<…` split collapses to this typed return.
+pub fun discover_agents(): [Text] {
+    let found = [""]
+    found = []
+    for canonical in _agent_names() {
+        if _agent_bin_for(canonical) != "" {
+            found += [canonical]
+        }
+    }
+    return found
+}
+
+// ============================================================================
+// mcp_install_from_manifest — public.
+// ============================================================================
+
+// mcp_install_from_manifest <agent> — register every manifest-declared MCP server
+// that targets <agent> into the agent's project-scope config. Driven entirely by
+// manifest.json's mcpServers (adding an MCP is a one-line JSON edit). Resolves
+// required binaries up front (one uvx prompt covers N uvx MCPs). Bypass:
+//   MIGRATE_SKIP_MCP=1               → skip every MCP
+//   MIGRATE_SKIP_MCP_<NAME_NORMED>=1 → skip a specific MCP by normalized name
+pub fun mcp_install_from_manifest(agent: Text): Null {
+    let skip_all = env_var_get("MIGRATE_SKIP_MCP") failed { "0" }
+    if skip_all == "1" {
+        ui_dim("  MIGRATE_SKIP_MCP=1 → skipping all MCP registration")
+        return null
+    }
+    if not manifest_have() {
+        log_warn("mcp: no manifest loaded; skipping MCP registration")
+        return null
+    }
+
+    let mcp_names_raw = manifest_mcp_names(agent)
+    // Collect the deduped `requires` set across THIS agent's MCP servers (bash
+    // computed it across ALL servers via `[.mcpServers[].requires[]?] | unique`;
+    // the only servers we register are this agent's, so resolving their requires
+    // is the relevant set — and matches what actually gets installed).
+    let reqs = [""]
+    reqs = []
+    for mcp in split_lines(mcp_names_raw) {
+        if mcp == "" { continue }
+        for req in split_lines(manifest_mcp_requires(mcp)) {
+            if req == "" { continue }
+            if not array_contains(req, reqs) { reqs += [req] }
+        }
+    }
+    for req in reqs {
+        if {
+            req == "uvx" {
+                if not _agent_ensure_uvx() {
+                    die("MCP registration requires uvx; rerun with MIGRATE_SKIP_MCP=1 to opt out")
+                }
+            }
+            else {
+                if not optional_cmd(req) {
+                    die("MCP registration requires '{req}' on PATH; install it or rerun with MIGRATE_SKIP_MCP=1")
+                }
+            }
+        }
+    }
+
+    // Register each MCP that targets this agent, honoring per-MCP skip vars.
+    for mcp in split_lines(mcp_names_raw) {
+        if mcp == "" { continue }
+        let skip_var = "MIGRATE_SKIP_MCP_{_mcp_norm_envvar(mcp)}"
+        let skip_val = ""
+        if env_var_test(skip_var) {
+            skip_val = env_var_get(skip_var) failed { "" }
+        }
+        if skip_val == "1" {
+            ui_dim("  {skip_var}=1 → skipping {mcp} for {agent}")
+            continue
+        }
+        _mcp_register_for_agent(agent, mcp)
+    }
+
+    // Claude only: merge manifest perms into the project-scope settings.json.
+    if agent == "claude" {
+        _agent_write_claude_settings()
+    }
+}
+
+// ============================================================================
+// agent_setup — public.
+// ============================================================================
+
+// agent_setup <agent> — write Startup.md under the names each agent auto-loads
+// (CLAUDE.md / AGENTS.md / Startup.md), drop the bundled skill tree (every
+// skills/<name>/SKILL.md auto-discovered), wire up agent-specific config, and
+// register MCP servers from the manifest. Source skill dir is resolved by
+// _agent_skills_src().
+pub fun agent_setup(agent: Text): Null {
+    let skills_src = _agent_skills_src()
+    let stage_dir = _agent_stage_dir()
+
+    // Startup runbook at the stage root under all three auto-load names.
+    trust $cp -f "{skills_src}/Startup.md" "{stage_dir}/CLAUDE.md"$
+    trust $cp -f "{skills_src}/Startup.md" "{stage_dir}/AGENTS.md"$
+    trust $cp -f "{skills_src}/Startup.md" "{stage_dir}/Startup.md"$
+
+    // Auto-discovered skill tree: every <skills_src>/<name>/SKILL.md ships.
+    _agent_copy_skill_tree(skills_src, "{stage_dir}/skills")
+
+    let dest_dir = stage_dir
+    if {
+        agent == "claude" {
+            // Claude's auto-loadable skills live under .claude/skills/.
+            dest_dir = "{stage_dir}/.claude/skills"
+            trust $mkdir -p "{dest_dir}/opensearch-migration"$
+            trust $cp -f "{skills_src}/Startup.md" "{dest_dir}/opensearch-migration/Startup.md"$
+            _agent_copy_skill_tree(skills_src, dest_dir)
+            _agent_write_claude_settings()
+        }
+        agent == "codex" {
+            // AGENTS.md at the stage root is the auto-load target; drop a copy in
+            // .codex/ for completeness.
+            dest_dir = "{stage_dir}/.codex"
+            trust $mkdir -p "{dest_dir}"$
+            trust $cp -f "{skills_src}/Startup.md" "{dest_dir}/Startup.md"$
+        }
+        agent == "kiro" {
+            // Drop the upstream kiro config tree directly into .kiro/.
+            dest_dir = "{stage_dir}/.kiro"
+            trust $mkdir -p "{dest_dir}/steering"$
+            let kiro_src = ""
+            trust $test -d "{skills_src}/kiro"$
+            if status() == 0 {
+                kiro_src = "{skills_src}/kiro"
+            } else {
+                trust $test -d "{skills_src}/../kiro"$
+                if status() == 0 { kiro_src = "{skills_src}/../kiro" }
+            }
+            if kiro_src != "" {
+                trust $cp -R "{kiro_src}/." "{dest_dir}/"$
+            }
+            // Startup.md as the FIRST steering doc (00- prefix sorts it first).
+            trust $cp -f "{skills_src}/Startup.md" "{dest_dir}/steering/00-Startup.md"$
+            trust $cp -f "{skills_src}/Startup.md" "{dest_dir}/Startup.md"$
+
+            // The migration-assistant-operator skill's docs ARE kiro's canonical
+            // steering docs; copy them into .kiro/steering/ so `kiro chat` loads them.
+            trust $test -d "{skills_src}/migration-assistant-operator"$
+            if status() == 0 {
+                let docs = [""]
+                docs = []
+                docs += ["workflow"]
+                docs += ["deployment"]
+                docs += ["migration-prompt"]
+                docs += ["product"]
+                for d in docs {
+                    let src_doc = "{skills_src}/migration-assistant-operator/{d}.md"
+                    if file_exists(src_doc) {
+                        trust $cp -f "{src_doc}" "{dest_dir}/steering/{d}.md"$
+                    }
+                }
+            }
+        }
+        else {
+            dest_dir = stage_dir
+        }
+    }
+
+    mcp_install_from_manifest(agent)
+
+    log_info("agent_setup: agent={agent} skill_dir={dest_dir}")
+}
+
+// ============================================================================
+// agent_exec — public. Replace this process with the agent. Never returns.
+// ============================================================================
+
+// agent_exec <agent> — `cd <stage>; exec <agent-bin>` with the right args (resume
+// vs fresh, agent-specific subcommand). Tries the agent's native session-resume
+// flag when state shows a prior handoff AND the agent's own session storage has a
+// conversation rooted in <stage>. The exec (and CODEX_HOME export) stay raw trust
+// escapes — the documented no-stdlib-equivalent handoff.
+pub fun agent_exec(agent: Text): Null {
+    let bin = _agent_bin_for(agent)
+    if bin == "" {
+        die("agent not on PATH: {agent} (binary candidates: {_agent_bins_for(agent)})")
+    }
+    let stage_dir = _agent_stage_dir()
+    trust $cd "{stage_dir}"$
+    if status() != 0 {
+        die("could not enter stage dir: {stage_dir}")
+    }
+
+    ui_info("Working directory at handoff:")
+    eprintln("  {stage_dir}")
+    ui_info("AWS identity at handoff:")
+    trust $aws sts get-caller-identity --output table 2>/dev/null || printf '%s\n' "could not call sts:GetCallerIdentity" >&2$
+
+    // Resume only when state shows a prior handoff AND the agent's session storage
+    // has a conversation rooted at THIS cwd (claude --continue / codex resume both
+    // exit 0 even with no conversation, so we can't trust their rc).
+    let resuming = false
+    if state_get("last_step", "") == "agent_handoff" and _agent_has_session(agent) {
+        resuming = true
+    }
+
+    // Fresh-handoff prompt: manifest.branding.agentFreshPrompt if declared, else
+    // the upstream default.
+    let fresh_prompt = manifest_brand("agentFreshPrompt")
+    if fresh_prompt == "" {
+        fresh_prompt = "Greet the operator. Briefly (3-5 sentences max) introduce what you can help with — deploy + operate Migration Assistant, run a Solr/ES/OpenSearch migration end-to-end. Suggest 3-4 example asks. DO NOT run any tools yet. Wait for the operator to tell you what they want. The CLAUDE.md / AGENTS.md in this directory has been auto-loaded; you already know the rules. Be concise and friendly."
+    }
+    let resume_str = resuming then "1" else "0"
+    ui_dim("  exec {bin} (resume={resume_str})")
+
+    if {
+        agent == "claude" {
+            if resuming {
+                trust $exec "{bin}" --continue$
+            } else {
+                trust $exec "{bin}" "{fresh_prompt}"$
+            }
+        }
+        agent == "codex" {
+            // CODEX_HOME → the per-stage project-scope config dir so codex picks up
+            // the MCP servers we wrote there (not the user-global ~/.codex).
+            trust $export CODEX_HOME="{stage_dir}/.codex"$
+            if resuming {
+                trust $exec "{bin}" resume --last$
+            } else {
+                trust $exec "{bin}" "{fresh_prompt}"$
+            }
+        }
+        agent == "kiro" {
+            if resuming {
+                trust $exec "{bin}" chat --agent opensearch-migration --resume$
+            } else {
+                trust $exec "{bin}" chat --agent opensearch-migration "{fresh_prompt}"$
+            }
+        }
+        else {
+            die("unsupported agent: {agent}")
+        }
+    }
+}
+
+// ============================================================================
+// agent_path — public. The discover→picker→setup→handoff flow used by the main
+// orchestration when it reaches the agent step (NOT the `agent` subcommand).
+// ============================================================================
+
+// agent_path — discover installed agents, surface install hints for the rest,
+// let the operator pick, set up skills + MCP, persist state, hand off. die/exit
+// when nothing is on PATH.
+pub fun agent_path(): Null {
+    ui_step("Discover installed agents")
+    let agents = discover_agents()
+    if len agents == 0 {
+        ui_err("no supported agent CLI found on PATH")
+        _agent_print_install_hints()
+        exit(1)
+    }
+
+    _agent_print_install_hints_for_missing(agents)
+
+    let picked = ui_select("Which agent should drive this migration?", agents)
+    state_set("AGENT", picked)
+
+    ui_step("Setup agent skills")
+    agent_setup(picked)
+    state_set("last_step", "agent_handoff")
+    state_save()
+
+    ui_ok("Handing off to: {picked}")
+    agent_exec(picked)
+}
+
+// ============================================================================
+// cmd_agent — public entry point for `migration-assistant agent [<name>]
+// [--stage <name>]`. Skip the resume/discover/wizard/CFN/helm flow and go
+// straight to the agent handoff. Picks up the saved AGENT from state when no
+// <name> is given. Errors clearly when the stage isn't deployed.
+// ============================================================================
+
+pub fun cmd_agent(args: [Text]): Null {
+    let picked = ""
+    let n = len args
+    let i = 0
+    while i < n {
+        let a = args[i]
+        if {
+            a == "--stage" {
+                if i + 1 < n {
+                    let st = args[i + 1]
+                    let home = env_var_get("MIGRATE_HOME") failed { "" }
+                    if home == "" {
+                        let pwd = trust $pwd$
+                        home = "{pwd}/migration-assistant-workspace"
+                    }
+                    trust env_var_set("STAGE", st)
+                    trust env_var_set("STAGE_DIR", "{home}/{st}")
+                }
+            }
+            slice(a, 0, 8) == "--stage=" {
+                let st = slice(a, 8, (len a) - 8)
+                let home = env_var_get("MIGRATE_HOME") failed { "" }
+                if home == "" {
+                    let pwd = trust $pwd$
+                    home = "{pwd}/migration-assistant-workspace"
+                }
+                trust env_var_set("STAGE", st)
+                trust env_var_set("STAGE_DIR", "{home}/{st}")
+            }
+            slice(a, 0, 2) == "--" {
+                // ignore other flags
+            }
+            else {
+                if picked == "" { picked = a }
+            }
+        }
+        i += 1
+    }
+
+    log_init()
+    state_load()
+    if state_get("STAGE_NAME", "") == "" {
+        die("no deployed stage found in state. Run `migration-assistant` first or pass --stage <name>.")
+    }
+    helm_kctx_init()
+
+    if picked == "" {
+        picked = state_get("AGENT", "")
+    }
+    if picked == "" {
+        let agents = discover_agents()
+        if len agents == 0 {
+            die("no supported agent CLI found on PATH")
+        }
+        picked = ui_select("Which agent should drive this migration?", agents)
+    } else {
+        if _agent_bin_for(picked) == "" {
+            die("agent not on PATH: {picked} (binary candidates: {_agent_bins_for(picked)})")
+        }
+    }
+
+    state_set("AGENT", picked)
+    state_set("last_step", "agent_handoff")
+    state_save()
+
+    agent_setup(picked)
+    ui_ok("Handing off to: {picked}")
+    agent_exec(picked)
+}

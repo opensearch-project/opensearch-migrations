@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "build": { "name": "test", "version": "0.0.0-test", "packs": [] },
+  "branding": {
+    "appName": "Test Migrate",
+    "binaryName": "test-migrate",
+    "agentFreshPrompt": "Hello from the test manifest."
+  },
+  "skills": { "discovery": "auto" },
+  "mcpServers": {
+    "aws-mcp": {
+      "command": "uvx",
+      "args": [
+        "mcp-proxy-for-aws@latest",
+        "https://aws-mcp.us-east-1.api.aws/mcp",
+        "--metadata",
+        "AWS_REGION=${AWS_REGION}"
+      ],
+      "scope": "project",
+      "agents": ["claude", "codex", "kiro"],
+      "requires": ["uvx"],
+      "permissionsAllow": [
+        "mcp__aws-mcp__aws___read_documentation",
+        "mcp__aws-mcp__aws___search_documentation"
+      ]
+    }
+  }
+}

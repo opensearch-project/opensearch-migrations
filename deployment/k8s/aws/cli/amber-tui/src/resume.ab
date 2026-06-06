@@ -1,0 +1,789 @@
+// resume.ab — top-level controller. Routes a user run to manual or agent path,
+// resuming from the previous step where applicable.
+//
+// Port of bash lib/resume.sh:
+//   cmd_resume       — the big two-pass CLI flag parser + path dispatch.
+//   _select_mode     — the Manual/Agent picker (manifest_modes-driven).
+//   manual_path      — the full deploy + console-exec spine.
+//   _manual_can_skip_to_console — the ready→console fast-path gate.
+//   cmd_help         — the help text.
+//
+// PORTING NOTES vs the bash original
+// ----------------------------------
+// * The `__MIGRATE_RESUME_LOADED` source-guard is GONE — Amber modules are
+//   imported, not `source`d.
+// * The bash `STAGE`/`STAGE_DIR` shell-var rebind in the first --stage pass is
+//   re-expressed as env_var_set(STAGE) + env_var_set(STAGE_DIR) so state.ab /
+//   log.ab (which resolve the stage env-first) pick up the operator's stage —
+//   exactly the pattern console.ab / cleanup.ab use.
+// * Two-pass flag parse preserved verbatim: pass 1 walks argv for --stage ONLY
+//   (so state_load reads the right stage's state), pass 2 (after state_load)
+//   runs every state_set so flag overrides MERGE into the loaded values rather
+//   than clobber them.
+// * The bash flag loop was `while [[ $# -gt 0 ]]; case "$1" … shift/shift 2`.
+//   Amber walks an index over args[] and advances by 1 or 2; `--flag=value`
+//   forms are handled by a slice prefix test (slice(a,0,n)==prefix), value =
+//   slice(a, n, len a - n) — std/text has no native split-on-first-=.
+// * `${force_mode:-Manual}` (the -y default) → an explicit "" check.
+// * `eval "$cmd"` for tool installs is NOT ported: install_tools.sh's
+//   sudo/static-binary machinery wasn't lifted into the Amber tree, so
+//   ensure_tools_basic / ensure_tools_extended here degrade to a presence check
+//   (is_command) + a clear install hint on a miss, never a silent sudo. This is
+//   the documented "add minimal versions / stub via is_command" fallback.
+// * `aws sts get-caller-identity --output table 2>/dev/null || true` stays a raw
+//   `trust $aws …$` (external cloud call, no stdlib equivalent; the table goes
+//   to the operator's stdout exactly as bash).
+// * cmd_help's `cat <<'EOF' … EOF` heredoc → one multi-line Text (printf '%s').
+// * `case "$mode" in Manual|Agent` dispatch → an if-chain (no match/switch in
+//   0.6). manual_path returns its console rc as an Int up to cmd_resume; the
+//   entrypoint owns the single process-exit site.
+
+import { env_var_get, env_var_set, is_command } from "std/env"
+import { slice, lowercase } from "std/text"
+import { regex_match, parse_flag_value } from "./std.ab"
+import {
+    state_load, state_set, state_get, state_save, state_resumable_step
+} from "./state.ab"
+import { die } from "./common.ab"
+import {
+    ui_banner, ui_info, ui_ok, ui_warn, ui_err, ui_step, ui_dim,
+    ui_prompt, ui_confirm, ui_bold, ui_reset
+} from "./ui.ab"
+import { log_init, log_announce, log_announce_exit } from "./log.ab"
+import { cli_version, upgrade_notice_for_cli } from "./version.ab"
+import {
+    manifest_init, manifest_have, manifest_brand, manifest_pack_summary,
+    manifest_modes
+} from "./manifest.ab"
+import { on_exit_register } from "./common.ab"
+import { timeline_phase_label, timeline_render } from "./timeline.ab"
+import { artifacts_reset_cache } from "./artifacts.ab"
+import { eprintln, eprint } from "./core.ab"
+import { split_lines } from "std/text"
+
+// Discover / wizard / deploy spine modules.
+import { discover_os, discover_aws, discover_resources } from "./discover.ab"
+import { wizard_collect } from "./wizard.ab"
+import { cfn_deploy_or_skip } from "./cfn_deploy.ab"
+import {
+    helm_kubeconfig_setup, helm_ctx_init, helm_kctx_init,
+    kubectl_ctx_flags, HELM_RELEASE_NAME, HELM_NAMESPACE
+} from "./helm_ctx.ab"
+import { _helm_release_status } from "./helm_recover.ab"
+import { build_images_or_skip } from "./build.ab"
+import { crane_mirror_or_skip } from "./crane.ab"
+import { helm_install_or_upgrade } from "./helm_install.ab"
+import { console_exec } from "./console.ab"
+import { agent_path } from "./agent.ab"
+
+// ============================================================================
+// Private helpers FIRST. Amber tree-shakes per imported symbol and keeps only
+// transitive deps that textually PRECEDE the public entry point across an import
+// boundary, so every callee MUST appear above its caller or it is silently
+// dropped (→ "Function 'x' does not exist" when this module is imported).
+// ============================================================================
+
+// _migrate_home — the state root. An explicit MIGRATE_HOME wins; else
+// "$PWD/migration-assistant-workspace" (matches common.ab / state.ab).
+fun _migrate_home(): Text {
+    let home = env_var_get("MIGRATE_HOME") failed { "" }
+    if home != "" { return home }
+    let pwd = trust $pwd$
+    return "{pwd}/migration-assistant-workspace"
+}
+
+// _apply_stage_env <stage> — set STAGE + the derived STAGE_DIR in the env so the
+// lazy env-first accessors (state.ab / log.ab) pick up the operator-chosen stage,
+// exactly as bash's `STAGE=…; STAGE_DIR="$MIGRATE_HOME/$STAGE"` rebind did.
+fun _apply_stage_env(st: Text): Null {
+    if st == "" { return null }
+    trust env_var_set("STAGE", st)
+    trust env_var_set("STAGE_DIR", "{_migrate_home()}/{st}")
+}
+
+// _flag_value <arg> <prefix> — value of a `--flag=value` token (prefix is
+// "--flag="). Returns "" if the arg doesn't start with the prefix.
+fun _flag_value(a: Text, prefix: Text): Text {
+    let pn = len prefix
+    if len a < pn { return "" }
+    if slice(a, 0, pn) != prefix { return "" }
+    return slice(a, pn, (len a) - pn)
+}
+
+// _flag_is <arg> <prefix> — does arg start with "--flag=" (the equals form)?
+fun _flag_is(a: Text, prefix: Text): Bool {
+    let pn = len prefix
+    if len a < pn { return false }
+    return slice(a, 0, pn) == prefix
+}
+
+// ---- minimal tool-presence checks (install_tools.sh was NOT ported) ---------
+//
+// The bash ensure_tools_basic / ensure_tools_extended would auto-install missing
+// CLIs via the package manager (with a sudo confirm) or a SHA-pinned static
+// binary. That machinery (install_tools.sh) is not in the Amber tree, so here we
+// degrade safely: check presence with is_command and emit a clear install hint
+// on a miss. We never run sudo from Amber. A genuinely-missing tool surfaces a
+// loud warning; the subsequent aws/kubectl/helm/crane call fails fast with its
+// own error if the operator ignores it (the same net outcome as the bash
+// static-binary path being skipped in a sandboxed CI).
+
+// _ensure_tool <name> <hint> — warn (with an install hint) when <name> is not on
+// PATH; log presence otherwise. No-op when present.
+fun _ensure_tool(name: Text, hint: Text): Null {
+    if is_command(name) { return null }
+    ui_warn("missing tool: {name} — install it to continue ({hint})")
+}
+
+// ensure_tools_basic — aws, kubectl, jq must be present for the deploy spine.
+fun ensure_tools_basic(): Null {
+    _ensure_tool("aws", "https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html")
+    _ensure_tool("kubectl", "https://kubernetes.io/docs/tasks/tools/")
+    _ensure_tool("jq", "https://jqlang.github.io/jq/download/")
+}
+
+// ensure_tools_extended — helm, crane needed for chart install + image mirror.
+fun ensure_tools_extended(): Null {
+    _ensure_tool("helm", "https://helm.sh/docs/intro/install/")
+    _ensure_tool("crane", "https://github.com/google/go-containerregistry/blob/main/cmd/crane/README.md")
+}
+
+// _split_pipe4 <line> — split a "a|b|c|d" record into exactly 4 fields, padding
+// missing trailing fields with "". std/text has no first-N split, and the
+// manifest record is fixed-arity, so a hand split on '|' keeps it dependency-
+// light + handles a short line (fewer than 3 bars) gracefully. Defined ABOVE
+// _select_mode (its only caller) so the tree-shaker keeps it across the import
+// boundary (deps must textually precede the public entry — gotcha #2).
+fun _split_pipe4(line: Text): [Text] {
+    let out = ["", "", "", ""]
+    let field = 0
+    let cur = ""
+    let total = len line
+    let c = 0
+    while c < total {
+        let ch = slice(line, c, 1)
+        if ch == "|" and field < 3 {
+            out[field] = cur
+            field += 1
+            cur = ""
+        } else {
+            cur = "{cur}{ch}"
+        }
+        c += 1
+    }
+    out[field] = cur
+    return out
+}
+
+// ============================================================================
+// _select_mode — the Manual/Agent picker.
+// ============================================================================
+
+// _select_mode <current> → the selected mode id (Manual / Agent / a pack id) on
+// the VALUE channel (the return Text — chrome to STDERR per ui.ab discipline).
+//
+// Mode list comes from branding.modes[] in manifest.json (manifest_modes emits
+// "id|label|description|isDefault" lines). The default index: a non-empty
+// <current> that matches a mode wins; else the manifest's default:true entry;
+// else position 1. When no manifest is present, fall back to Manual then Agent
+// with today's strings.
+//
+// Numeric pick → look up by index. Name pick → match id or label, plus a
+// case-insensitive first-letter match for the legacy m/a shortcuts.
+pub fun _select_mode(current: Text): Text {
+    manifest_init()
+
+    // Parallel arrays of visible modes (typed seed [""] → reset to []).
+    let ids = [""]
+    ids = []
+    let labels = [""]
+    labels = []
+    let descs = [""]
+    descs = []
+    let default_idx = 1
+
+    if manifest_have() {
+        let raw = manifest_modes()
+        let idx = 1
+        for line in split_lines(raw) {
+            if line == "" { continue }
+            // "id|label|description|isDefault" — split on '|'. A description may
+            // not contain '|' (the manifest contract), so a fixed 4-field split.
+            let id = ""
+            let label = ""
+            let desc = ""
+            let is_default = "0"
+            let parts = _split_pipe4(line)
+            id = parts[0]
+            label = parts[1]
+            desc = parts[2]
+            is_default = parts[3]
+            if id == "" { continue }
+            ids += [id]
+            labels += [label]
+            descs += [desc]
+            // prior MODE wins; else the manifest default:true; else position 1.
+            if {
+                current != "" and id == current { default_idx = idx }
+                current == "" and is_default == "1" { default_idx = idx }
+            }
+            idx += 1
+        }
+    }
+
+    // Fallback (no manifest): Manual then Agent, today's strings.
+    if len ids == 0 {
+        ids += ["Manual"]
+        ids += ["Agent"]
+        labels += ["Manual"]
+        labels += ["AI"]
+        descs += ["you in control. CLI deploys the chart, then drops you into migration-console-0 to run the migration commands yourself."]
+        descs += ["an LLM coding agent (claude/codex/q/kiro) drives the migration. CLI deploys the chart, then hands control to the agent with a pre-loaded skill set (preview — refine your invocation as needed)."]
+        if current == "Agent" { default_idx = 2 }
+    }
+
+    ui_step("How do you want to drive this migration?")
+    let bold = ui_bold()
+    let reset = ui_reset()
+    let n = len ids
+    let j = 0
+    while j < n {
+        let num = j + 1
+        eprintln("  {bold}[{num}] {labels[j]}{reset} — {descs[j]}")
+        j += 1
+    }
+
+    let dflt_str = "{default_idx}"
+    let pick = ui_prompt("Select", dflt_str)
+
+    // Numeric pick → look up by index.
+    if regex_match(pick, "^[0-9]+$") {
+        let num = pick as Int
+        if num >= 1 and num <= n {
+            return ids[num - 1]
+        }
+    }
+
+    // Name pick → match id / label, else case-insensitive first-letter shortcut.
+    let k = 0
+    while k < n {
+        if pick == ids[k] or pick == labels[k] {
+            return ids[k]
+        }
+        let id_lower = lowercase(slice(ids[k], 0, 1))
+        let pick_lower = ""
+        if len pick > 0 { pick_lower = lowercase(slice(pick, 0, 1)) }
+        if pick_lower != "" and pick_lower == id_lower {
+            return ids[k]
+        }
+        k += 1
+    }
+
+    die("invalid selection: {pick}")
+    // die() exits; this return is unreachable but satisfies the type checker.
+    return ""
+}
+
+// ============================================================================
+// _manual_can_skip_to_console — the ready→console fast-path gate.
+// ============================================================================
+
+// _manual_can_skip_to_console → Bool. True when we can re-enter the console
+// WITHOUT re-running the full deploy pipeline. Conditions (all must hold):
+//   * state.last_step ∈ {ready, console_handoff, agent_handoff}
+//   * STAGE_NAME present in state (a deploy actually happened)
+//   * the helm release is `deployed`
+//   * the migration-console-0 pod exists in HELM_NAMESPACE
+// Any miss → false → the full flow runs.
+//
+// Port note: bash returned exit 0 (success) for "can skip"; here a Bool true.
+// helm_kctx_init() refreshes THIS module's context binding from the saved
+// KUBECTL_CONTEXT (each Amber importer owns a private copy of helm_ctx.ab's
+// globals). `_helm_release_status` (helm_recover.ab) echoes "" when the release
+// is absent. The `kubectl get pod … >/dev/null 2>&1` liveness probe stays a raw
+// trust escape; status()==0 means the pod exists.
+pub fun _manual_can_skip_to_console(): Bool {
+    // Load THIS module's state from disk first so the gate reads the current
+    // last_step / STAGE_NAME. In bash, state was a single shared global already
+    // loaded by cmd_resume before manual_path ran; in Amber each module owns a
+    // private copy, so make the gate self-contained (idempotent) — this both
+    // matches cmd_resume's flow (which state_load()s first anyway) AND lets the
+    // gate be called / unit-tested standalone.
+    state_load()
+
+    let last = state_resumable_step()
+    if last != "ready" and last != "console_handoff" and last != "agent_handoff" {
+        return false
+    }
+
+    if state_get("STAGE_NAME", "") == "" { return false }
+
+    let ns = HELM_NAMESPACE
+    let release = HELM_RELEASE_NAME
+
+    // Refresh the helm/kubectl context binding from the saved context.
+    helm_kctx_init()
+
+    // helm release must be `deployed`.
+    let st = _helm_release_status(release, ns)
+    if st != "deployed" { return false }
+
+    // console pod must exist.
+    trust $kubectl {kubectl_ctx_flags()} get pod migration-console-0 --namespace "{ns}" >/dev/null 2>&1$
+    if status() != 0 { return false }
+
+    return true
+}
+
+// ============================================================================
+// manual_path — the full deploy + console-exec spine.
+// ============================================================================
+
+// manual_path → Int (the console exec rc). Fast-path: when the deploy already
+// completed AND the release + console pod still resolve, skip straight into the
+// console. Otherwise run the full idempotent spine:
+//   discover_os → discover_aws → ensure_tools_basic → discover_resources →
+//   ensure_tools_extended → wizard_collect → cfn_deploy_or_skip →
+//   helm_kubeconfig_setup → build_images_or_skip → crane_mirror_or_skip →
+//   helm_install_or_upgrade → console_exec.
+//
+// Each deploy step that returns an rc is checked: a non-zero rc die()s with a
+// clear message (the bash spine ran under `set -e`, so any step failing aborted
+// the run; here we make that explicit per step). discover_aws returning non-zero
+// is the "no AWS creds" hard error the bash `if ! discover_aws` branch raised.
+pub fun manual_path(): Int {
+    if _manual_can_skip_to_console() {
+        ui_ok("deploy already complete (last_step=ready); skipping to console")
+        return console_exec()
+    }
+
+    ui_step("Discover environment")
+    discover_os()
+    if discover_aws() != 0 {
+        die("AWS credentials are required. Set up 'aws configure' and rerun.")
+    }
+    state_save()
+
+    ui_info("AWS identity:")
+    // The identity TABLE goes to the operator's stdout exactly as bash; a failed
+    // sts call is tolerated (bash `… 2>/dev/null || true`).
+    trust $aws sts get-caller-identity --output table 2>/dev/null || true$
+
+    ensure_tools_basic()
+    state_save()
+
+    discover_resources()
+    state_save()
+
+    ensure_tools_extended()
+
+    wizard_collect()
+
+    if cfn_deploy_or_skip() != 0 {
+        die("CFN deploy failed")
+    }
+
+    // Kubeconfig must be set up before --build (which talks to the EKS-hosted
+    // buildkit) and before crane (which logs into ECR for the operator's
+    // context). Idempotent: helm_install_or_upgrade no-ops the setup if done here.
+    helm_kubeconfig_setup()
+
+    if build_images_or_skip() != 0 {
+        die("image build failed")
+    }
+    if crane_mirror_or_skip() != 0 {
+        die("image mirror failed")
+    }
+    if helm_install_or_upgrade() != 0 {
+        die("helm install/upgrade failed")
+    }
+
+    state_set("last_step", "ready")
+    state_save()
+
+    return console_exec()
+}
+
+// ============================================================================
+// cmd_resume — the two-pass CLI flag parser + path dispatch.
+// ============================================================================
+
+// cmd_resume <args[]> → Int (the path's exit code). Parses CLI flags, dispatches
+// to the Manual or Agent path, resuming where applicable.
+//
+// args[] is the subcommand-stripped argv (the entrypoint passes "${@:2}" for
+// `resume`, or the whole argv for a flag-led invocation). The bash code indexed
+// from 1; Amber arrays are 0-based, so we walk 0..len args.
+pub fun cmd_resume(args: [Text]): Int {
+    let force_switch = 0
+    let force_mode = ""
+
+    // ---- First pass: parse only --stage, so we know which stage's state to
+    // load. Everything else is parsed in the second pass AFTER state_load —
+    // else the flag-driven state_set calls would write against an empty state.
+    let n = len args
+    let p = 0
+    while p < n {
+        let a = args[p]
+        if {
+            a == "--stage" {
+                if p + 1 < n { _apply_stage_env(args[p + 1]) }
+            }
+            _flag_is(a, "--stage=") {
+                _apply_stage_env(_flag_value(a, "--stage="))
+            }
+        }
+        p += 1
+    }
+
+    log_init()
+
+    // Banner uses branding.appName from manifest.json when set, else the upstream
+    // string. Same for the optional tagline + version line. manifest_init is cheap.
+    manifest_init()
+    let app_name = manifest_brand("appName")
+    if app_name == "" { app_name = "OpenSearch Migration Assistant" }
+    ui_banner(app_name)
+    let tagline = manifest_brand("tagline")
+    if tagline != "" { ui_dim("  {tagline}") }
+
+    let version_str = manifest_brand("versionString")
+    if version_str == "" {
+        version_str = "{cli_version()}{manifest_pack_summary()}"
+    }
+    let st_name = env_var_get("STAGE") failed { "" }
+    if st_name == "" { st_name = "default" }
+    let workdir = env_var_get("STAGE_DIR") failed { "" }
+    if workdir == "" { workdir = "{_migrate_home()}/{st_name}" }
+    ui_dim("  cli={version_str}  stage={st_name}  workdir={workdir}")
+
+    // First-run welcome (only when state is fresh — no last_step set). state.ab
+    // resolves the stage env-first, so this reads the just-pinned stage's state.
+    state_load()
+    if state_resumable_step() == "" {
+        let welcome = manifest_brand("welcomeMessage")
+        if welcome != "" { ui_info(welcome) }
+    }
+
+    log_announce("")
+    on_exit_register("log_announce_exit")
+    upgrade_notice_for_cli()
+
+    // ---- Second pass: now safe to state_set (state already holds disk values).
+    let i = 0
+    while i < n {
+        let a = args[i]
+        let adv = 1
+        if {
+            // --stage: native; STAGE_NAME is the AWS-side identifier (CFN stack
+            // suffix + ECR repo + state dir). It does NOT flow to helm/namespace.
+            a == "--stage" {
+                if i + 1 < n { state_set("STAGE_NAME", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--stage=") { state_set("STAGE_NAME", _flag_value(a, "--stage=")) }
+            a == "--switch" { force_switch = 1 }
+            a == "--verbose" or a == "-v" { trust env_var_set("MIGRATE_VERBOSE", "1") }
+            a == "--reset-cache" { artifacts_reset_cache() }
+            a == "--non-interactive" or a == "-y" {
+                trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
+                if force_mode == "" { force_mode = "Manual" }
+            }
+            a == "--mode" {
+                if i + 1 < n { force_mode = args[i + 1] adv = 2 }
+            }
+            _flag_is(a, "--mode=") { force_mode = _flag_value(a, "--mode=") }
+
+            // Deploy-control flags → state.env entries.
+            a == "--region" {
+                if i + 1 < n {
+                    state_set("AWS_REGION", args[i + 1])
+                    trust env_var_set("AWS_REGION", args[i + 1])
+                    adv = 2
+                }
+            }
+            _flag_is(a, "--region=") {
+                let v = _flag_value(a, "--region=")
+                state_set("AWS_REGION", v)
+                trust env_var_set("AWS_REGION", v)
+            }
+            a == "--stack-name" {
+                if i + 1 < n { state_set("CFN_STACK_NAME", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--stack-name=") { state_set("CFN_STACK_NAME", _flag_value(a, "--stack-name=")) }
+            a == "--version" {
+                if i + 1 < n { state_set("MA_VERSION", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--version=") { state_set("MA_VERSION", _flag_value(a, "--version=")) }
+            a == "--use-public-images" { state_set("MIRROR_IMAGES", "N") }
+            a == "--skip-cfn-deploy" { state_set("SKIP_CFN_DEPLOY", "Y") }
+            a == "--skip-console-exec" { state_set("SKIP_CONSOLE_EXEC", "Y") }
+            a == "--skip-setting-k8s-context" { state_set("SKIP_KUBECONFIG_UPDATE", "Y") }
+            a == "--kubectl-context" {
+                if i + 1 < n { state_set("KUBECTL_CONTEXT", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--kubectl-context=") { state_set("KUBECTL_CONTEXT", _flag_value(a, "--kubectl-context=")) }
+            a == "--namespace" {
+                if i + 1 < n { state_set("STAGE_NAME", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--namespace=") { state_set("STAGE_NAME", _flag_value(a, "--namespace=")) }
+            a == "--helm-values" {
+                if i + 1 < n { state_set("HELM_EXTRA_VALUES_FILE", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--helm-values=") { state_set("HELM_EXTRA_VALUES_FILE", _flag_value(a, "--helm-values=")) }
+
+            // CFN deploy modes (mutually exclusive; last flag wins).
+            a == "--deploy-create-vpc-cfn" { state_set("CFN_TEMPLATE_VARIANT", "create-vpc") }
+            a == "--deploy-import-vpc-cfn" { state_set("CFN_TEMPLATE_VARIANT", "import-vpc") }
+            a == "--vpc-id" {
+                if i + 1 < n { state_set("IMPORT_VPC_ID", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--vpc-id=") { state_set("IMPORT_VPC_ID", _flag_value(a, "--vpc-id=")) }
+            a == "--subnet-ids" {
+                if i + 1 < n { state_set("IMPORT_SUBNET_IDS", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--subnet-ids=") { state_set("IMPORT_SUBNET_IDS", _flag_value(a, "--subnet-ids=")) }
+
+            a == "--eks-access-principal-arn" {
+                if i + 1 < n { state_set("EKS_ACCESS_PRINCIPAL_ARN", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--eks-access-principal-arn=") { state_set("EKS_ACCESS_PRINCIPAL_ARN", _flag_value(a, "--eks-access-principal-arn=")) }
+            a == "--ma-images-source" {
+                if i + 1 < n { state_set("MA_IMAGES_SOURCE", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--ma-images-source=") { state_set("MA_IMAGES_SOURCE", _flag_value(a, "--ma-images-source=")) }
+
+            // Local chart override.
+            a == "--ma-chart-dir" {
+                if i + 1 < n { state_set("MA_CHART_DIR", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--ma-chart-dir=") { state_set("MA_CHART_DIR", _flag_value(a, "--ma-chart-dir=")) }
+
+            // NodePool selection.
+            a == "--use-general-node-pool" { state_set("USE_GENERAL_NODE_POOL", "Y") }
+            a == "--disable-general-purpose-pool" { state_set("DISABLE_GENERAL_NODE_POOL", "Y") }
+
+            // Build-from-source path.
+            a == "--build" { state_set("BUILD_FROM_SOURCE", "Y") }
+            a == "--image-tag" {
+                if i + 1 < n { state_set("IMAGE_TAG", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--image-tag=") { state_set("IMAGE_TAG", _flag_value(a, "--image-tag=")) }
+            a == "--base-dir" {
+                if i + 1 < n { state_set("BASE_DIR", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--base-dir=") { state_set("BASE_DIR", _flag_value(a, "--base-dir=")) }
+            a == "--skip-test-images" { state_set("SKIP_TEST_IMAGES", "Y") }
+
+            // TLS configuration.
+            a == "--tls-mode" {
+                if i + 1 < n { state_set("TLS_MODE", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--tls-mode=") { state_set("TLS_MODE", _flag_value(a, "--tls-mode=")) }
+            a == "--pca-arn" {
+                if i + 1 < n { state_set("PCA_ARN", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--pca-arn=") { state_set("PCA_ARN", _flag_value(a, "--pca-arn=")) }
+
+            // Import-VPC endpoint control.
+            a == "--create-vpc-endpoints" {
+                if i + 1 < n { state_set("CREATE_VPC_ENDPOINTS", args[i + 1]) adv = 2 }
+            }
+            _flag_is(a, "--create-vpc-endpoints=") { state_set("CREATE_VPC_ENDPOINTS", _flag_value(a, "--create-vpc-endpoints=")) }
+
+            // Skip the import-VPC subnet-connectivity preflight.
+            a == "--ignore-checks" { state_set("IGNORE_CHECKS", "Y") }
+            a == "--" { i = n }
+            else {
+                // Unrecognized positional / flag — bash collected these into args[]
+                // (the manual path consumes none today), so we just ignore it.
+            }
+        }
+        i += adv
+    }
+
+    // Persist the merged state (loaded values + any flag-driven overrides).
+    state_save()
+
+    // ---- `resuming` toggles whether we ask the operator anything.
+    let resuming = 0
+    let prev_step = state_resumable_step()
+    if prev_step != "" {
+        if prev_step == "agent_handoff" or prev_step == "console_handoff" or prev_step == "ready" {
+            // The deploy is finished; the operator is re-running solely to get
+            // back into the agent / console. Skip the resume prompt.
+            resuming = 1
+        } else {
+            ui_info("previous run progressed to: {timeline_phase_label(prev_step)}")
+            timeline_render(prev_step)
+            eprintln("")
+            if ui_confirm("Resume from this point?", "Y") {
+                resuming = 1
+            } else {
+                // Operator chose "start over". Clear last_step AND the wizard
+                // inputs so the wizard re-prompts every value.
+                ui_warn("starting over: re-prompting wizard for stage / mirror / version")
+                state_set("last_step", "")
+                state_set("STAGE_NAME", "")
+                state_set("MIRROR_IMAGES", "")
+                state_set("MA_VERSION", "")
+                state_save()
+                resuming = 0
+            }
+        }
+    }
+
+    // ---- Mode selection. Picker fires on first run (no MODE) or --switch;
+    // --mode <name> bypasses the picker. The choice persists.
+    let mode = state_get("MODE", "")
+    if {
+        force_mode != "" {
+            mode = force_mode
+            state_set("MODE", mode)
+            state_save()
+        }
+        mode == "" or force_switch == 1 {
+            mode = _select_mode(mode)
+            state_set("MODE", mode)
+            state_save()
+        }
+        resuming == 1 {
+            ui_dim("  resuming with mode={mode} (use --switch to change)")
+        }
+        else {
+            if ui_confirm("Mode: {mode}. Switch?", "N") {
+                mode = _select_mode(mode)
+                state_set("MODE", mode)
+                state_save()
+            }
+        }
+    }
+    trust env_var_set("MIGRATE_RESUMING", "{resuming}")
+
+    if {
+        mode == "Manual" { return manual_path() }
+        mode == "Agent" { agent_path() return 0 }
+        else { die("unknown mode: {mode}") return 1 }
+    }
+}
+
+// ============================================================================
+// cmd_help — the help text.
+// ============================================================================
+
+// _help_body → the fixed usage block as one multi-line Text (the bash
+// `cat <<'EOF' … EOF` heredoc). Extracted as a pub helper so a test can assert
+// on the exact content without capturing cmd_help's stdout (an Amber fn's own
+// stdout is not capturable from inside Amber). Defined ABOVE cmd_help so the
+// tree-shaker keeps it across the import boundary (deps must precede the entry).
+pub fun _help_body(): Text {
+    return "Usage:
+  migration-assistant [flags]                    Deploy / resume (default)
+  migration-assistant resume   [flags]           Same as default
+  migration-assistant console  [--stage NAME]    kubectl exec migration-console-0
+  migration-assistant agent    [--stage NAME] [<agent>]
+                                                 Open an LLM coding agent
+                                                 (claude / codex / q / kiro)
+  migration-assistant diag     [--stage NAME]    Dump diagnostics to migrate.log
+  migration-assistant clear    [--stage NAME]    Wipe local state/history (no AWS changes)
+  migration-assistant cleanup  [--stage NAME]    Tear down deploy + archive state
+  migration-assistant version                    Print CLI version
+  migration-assistant help                       This help
+
+Common flags:
+  --stage NAME            Stage name. Suffixes the CFN stack name and
+                          ECR repo path. (helm release + k8s namespace
+                          are always 'ma' — chart contract.)
+  --region REGION         AWS region. Default: us-east-1.
+  --version VER           Pin Migration Assistant artifact version.
+                          Default: latest published release.
+  --use-public-images     Skip image mirror; pull from public.ecr.aws.
+  --non-interactive, -y   Accept defaults; for Jenkins / CI.
+  --verbose, -v           Mirror logs to stderr live.
+  --reset-cache           Wipe artifact cache before run.
+  --switch                Re-prompt the deploy wizard.
+
+CFN / EKS flags:
+  --stack-name NAME                 Override CFN stack name.
+  --skip-cfn-deploy                 Adopt an existing stack.
+  --skip-setting-k8s-context        Create kubeconfig entry but don't switch active context.
+  --kubectl-context CTX             Set the kubeconfig alias name.
+  --eks-access-principal-arn ARN    Extra principal granted EKS access.
+  --deploy-create-vpc-cfn           Deploy the Create-VPC EKS template (default).
+  --deploy-import-vpc-cfn           Deploy the Import-VPC EKS template.
+  --vpc-id VPC                      (with --deploy-import-vpc-cfn) target VPC.
+  --subnet-ids ID,ID                (with --deploy-import-vpc-cfn) target subnets.
+  --create-vpc-endpoints LIST       Comma-separated: s3, ecr, ecrDocker,
+                                    cloudwatchLogs, efs, sts, eksAuth. CFN
+                                    creates each as a VPC endpoint on
+                                    --vpc-id. S3 (gateway) endpoint pulls
+                                    route-table IDs from the subnets.
+  --ignore-checks                   Skip the import-VPC pre-flight checks.
+
+Build-from-source flags:
+  --build                           Build MA images from a local repo and
+                                    push to the per-stage ECR. Requires
+                                    docker buildx + a kube context.
+  --image-tag TAG                   Per-build image tag (default: latest).
+  --base-dir DIR                    opensearch-migrations repo root for
+                                    --build (auto-resolved from CLI install).
+  --ma-chart-dir DIR                Use a local helm chart instead of the
+                                    release tarball.
+  --skip-test-images                Skip the test-image build targets in
+                                    gradle (for CI smoke runs).
+
+Helm flags:
+  --skip-console-exec               Don't kubectl exec after install.
+  --namespace NS                    Alias for --stage.
+  --helm-values FILE                Extra helm values file.
+  --ma-images-source SRC            Pull MA images from a different ECR.
+  --use-general-node-pool           Disable the chart's custom Karpenter
+                                    NodePool; use EKS Auto Mode general-
+                                    purpose pool instead.
+  --disable-general-purpose-pool    Post-install: ask EKS to drop the
+                                    general-purpose pool from compute
+                                    config (rare prod-isolation case).
+
+TLS flags:
+  --tls-mode MODE                   none | self-signed | pca-existing | pca-create.
+  --pca-arn ARN                     ARN of the AWS PCA (required for
+                                    --tls-mode pca-existing).
+
+State layout (MIGRATE_HOME defaults to ./migration-assistant-workspace
+in the directory you run from — that directory is your migration project;
+set MIGRATE_HOME to share one state root across projects):
+  MIGRATE_HOME/<stage>/state.env        (sourceable bash)
+  MIGRATE_HOME/<stage>/state.json       (jq-canonical)
+  MIGRATE_HOME/<stage>/log/migrate.log  (run log + rotation)
+  MIGRATE_HOME/<stage>/artifacts/       (sha-pinned downloads)
+
+Examples:
+  # Default interactive deploy:
+  migration-assistant
+
+  # Re-enter the console after a deploy:
+  migration-assistant console
+
+  # Jenkins / CI from a checkout:
+  migration-assistant --non-interactive --skip-console-exec --skip-setting-k8s-context --build --skip-test-images --use-general-node-pool --stage ma --region us-east-1
+"
+}
+
+// cmd_help → Null. Short help. The bash header comes from branding.helpHeader
+// (manifest) when set; the body is _help_body(); the trailing Version line uses
+// branding.versionString or the cli version + pack summary. Help is a value the
+// operator reads, so it goes to stdout (printf), matching the bash printf/cat.
+pub fun cmd_help(): Null {
+    manifest_init()
+    let header = manifest_brand("helpHeader")
+    if header == "" { header = "migration-assistant — OpenSearch Migration Assistant CLI" }
+    trust $printf '%s\n\n' "{header}"$
+
+    let body = _help_body()
+    trust $printf '%s\n' "{body}"$
+
+    let version_str = manifest_brand("versionString")
+    if version_str == "" {
+        version_str = "{cli_version()}{manifest_pack_summary()}"
+    }
+    trust $printf '\nVersion: %s\n' "{version_str}"$
+}

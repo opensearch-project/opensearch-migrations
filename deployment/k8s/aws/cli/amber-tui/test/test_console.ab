@@ -1,0 +1,415 @@
+// test_console.ab — coverage for src/console.ab (the console-exec + diag port of
+// bash lib/console.sh + lib/diag.sh).
+//
+// console.ab's external dependencies are `kubectl` (the interactive exec + the
+// diag dumps), `helm` (diag status), and `aws` (sts get-caller-identity). We stub
+// all three via a PATH-shadow temp dir — write ONE content-stable shim per binary
+// with file_write + file_chmod, then prepend the dir to PATH (env_var_set). This
+// is the established test_helm_diag.ab / test_crane.ab / test_cfn_deploy.ab
+// pattern. amber test runs every `test` block in ONE parallel process tree
+// sharing PATH + env, so the shims MUST be race-free:
+//
+//   * The shims are byte-identical every install (never rewritten with different
+//     bodies) — published atomically via mktemp + mv.
+//   * Their behavior keys ENTIRELY off the per-call ARGS — specifically the unique
+//     `--namespace <ns>` each test passes. The shim parses that ns and (a) APPENDS
+//     its full arg line to "<MARKER_DIR>/<ns>.<bin>" so a test can assert which
+//     commands it issued, and (b) for kubectl `exec`, exits with the code in the
+//     per-ns fixture "<MARKER_DIR>/<ns>.exitcode" (default 0). No SHARED mutable
+//     steering env var → no cross-test clobber under parallelism.
+//
+// Each test mints a unique namespace via fresh_stage(); its marker + fixtures
+// live under that ns, isolated from every other parallel block. fresh_stage also
+// pins a unique STAGE_DIR/MIGRATE_HOME/STAGE and seeds STAGE_NAME=ma + the
+// KUBECTL_CONTEXT into THAT stage's state.env, the only channel that reaches
+// console.ab's separate state-module instance (each Amber importer owns a private
+// copy of state.ab's store; console.ab's cmd_* call state_load() at entry).
+//
+// What's covered:
+//   * _console_exec_into_pod — the 130/131/143→0 signal mapping AND a passthrough
+//     of an arbitrary non-zero rc. Stub kubectl exits with the steered code; the
+//     fn maps it. Also verifies the exec command + a bound --context thread through.
+//   * cmd_console — STAGE_NAME present → exec fires (against HELM_NAMESPACE=ma);
+//     --stage <name> repoints STAGE/STAGE_DIR (so the stage's state is read).
+//   * console_exec — SKIP_CONSOLE_EXEC=Y → returns 0 without an exec; the default
+//     path issues the aws sts call + the exec; persists last_step=console_handoff.
+//   * cmd_diag — issues the helm_dump_diagnostics bundle (helm status, kubectl get
+//     pods -o wide, get events) against namespace=ma; returns 0.
+//
+// NB: the STAGE_NAME-missing guard die()s (exits the process), so it is NOT
+// exercised here — every test seeds STAGE_NAME so the happy path runs. No
+// `return` inside test blocks (the AMBER_IDIOMS rule); branch with `if`.
+
+import { assert, assert_eq } from "std/test"
+import { file_write, file_chmod, file_read, dir_create } from "std/fs"
+import { env_var_set, env_var_get } from "std/env"
+import { text_contains } from "std/text"
+import { state_load, state_set, state_unset, state_save, state_get } from "../src/state.ab"
+import {
+    cmd_console, console_exec, cmd_diag, _console_exec_into_pod
+} from "../src/console.ab"
+
+// ---- helpers (ABOVE the test blocks: define-before-use; the test-file tree-
+// shaker keeps only deps textually preceding their use) ----------------------
+
+// __seq — monotonic counter so each test gets a distinct namespace / stage dir
+// even within the same second / shared process.
+let __seq = 0
+
+// STUB_DIR — the single PATH-shadow dir (one process, one PATH). The shims are
+// content-stable + arg-steered, so re-installing is idempotent + race-free.
+const STUB_DIR = "/tmp/amber_console_stub"
+// MARKER_DIR — per-namespace marker + fixture files. Keyed off the unique ns in
+// each test's args, so parallel blocks never collide.
+const MARKER_DIR = "/tmp/amber_console_marker"
+
+// __installed — module-level latch so the shims are written EXACTLY ONCE for the
+// whole (shared-process) test run, then published atomically (mktemp + mv) so a
+// concurrent exec of the shim never sees a half-written file.
+let __installed = false
+
+// install_stubs — write the kubectl + helm + aws shims into STUB_DIR + prepend it
+// to PATH, at most ONCE (guarded by __installed). BRACE-FREE bash (a `{` in an
+// Amber Text literal is interpolation). `$` is written bare (a backslash in a Text
+// literal would land literally in the file and break expansion).
+//
+// kubectl:
+//   * exec …                         → exit per "<ns>.exitcode" (default 0)
+//   * get pods …                     → cat "<ns>.pods" if present
+//   * else                           → exit 0
+//   (every call APPENDS its full arg line to "<MARKER_DIR>/<ns>.kubectl")
+// helm:
+//   * status … json…                 → empty (no jq-described failure)
+//   * status …                       → "NAME: ma / STATUS: deployed"
+//   * else                           → exit 0
+//   (APPENDS to "<MARKER_DIR>/<ns>.helm")
+// aws:
+//   * sts get-caller-identity …       → a fake identity table; exit 0
+//   * else                           → exit 0
+fun install_stubs(): Null {
+    trust dir_create(STUB_DIR)
+    trust dir_create(MARKER_DIR)
+    if __installed {
+        let oldp0 = env_var_get("PATH") failed { "" }
+        if not text_contains(oldp0, "{STUB_DIR}:") {
+            trust env_var_set("PATH", "{STUB_DIR}:{oldp0}")
+        }
+        return null
+    }
+    __installed = true
+
+    // ns parsing: walk argv, the token after --namespace (or -n) is the namespace.
+    let kubectl = "#!/usr/bin/env bash
+ns=''
+prev=''
+for a in \"$@\"; do
+  if [ \"$prev\" = '--namespace' ] || [ \"$prev\" = '-n' ]; then ns=\"$a\"; break; fi
+  prev=\"$a\"
+done
+md=\"/tmp/amber_console_marker\"
+if [ -n \"$ns\" ]; then printf '%s\\n' \"$*\" >> \"$md/$ns.kubectl\"; fi
+args=\"$*\"
+case \"$args\" in
+  *exec*)
+    if [ -f \"$md/$ns.exitcode\" ]; then exit \"$(cat \"$md/$ns.exitcode\")\"; fi
+    exit 0 ;;
+  *'get pods'*)
+    if [ -f \"$md/$ns.pods\" ]; then cat \"$md/$ns.pods\"; fi ;;
+  *)
+    exit 0 ;;
+esac
+exit 0
+"
+    let ktmp = trust $mktemp$
+    trust file_write(ktmp, kubectl)
+    trust file_chmod(ktmp, "755")
+    trust $mv -f "{ktmp}" "{STUB_DIR}/kubectl"$
+
+    let helm = "#!/usr/bin/env bash
+ns=''
+prev=''
+for a in \"$@\"; do
+  if [ \"$prev\" = '--namespace' ] || [ \"$prev\" = '-n' ]; then ns=\"$a\"; break; fi
+  prev=\"$a\"
+done
+md=\"/tmp/amber_console_marker\"
+if [ -n \"$ns\" ]; then printf '%s\\n' \"$*\" >> \"$md/$ns.helm\"; fi
+args=\"$*\"
+case \"$args\" in
+  *status*json*)
+    : ;;
+  *status*)
+    printf 'NAME: ma\\nSTATUS: deployed\\n' ;;
+  *)
+    exit 0 ;;
+esac
+exit 0
+"
+    let htmp = trust $mktemp$
+    trust file_write(htmp, helm)
+    trust file_chmod(htmp, "755")
+    trust $mv -f "{htmp}" "{STUB_DIR}/helm"$
+
+    let aws = "#!/usr/bin/env bash
+args=\"$*\"
+case \"$args\" in
+  *'sts get-caller-identity'*)
+    printf 'arn:aws:iam::123456789012:user/test\\n' ;;
+  *)
+    exit 0 ;;
+esac
+exit 0
+"
+    let atmp = trust $mktemp$
+    trust file_write(atmp, aws)
+    trust file_chmod(atmp, "755")
+    trust $mv -f "{atmp}" "{STUB_DIR}/aws"$
+
+    let oldpath = env_var_get("PATH") failed { "" }
+    if not text_contains(oldpath, "{STUB_DIR}:") {
+        trust env_var_set("PATH", "{STUB_DIR}:{oldpath}")
+    }
+}
+
+// fresh_stage <ctx> — mint a unique stage (STAGE_DIR/MIGRATE_HOME/STAGE pinned to
+// an isolated temp dir), seed STAGE_NAME=ma + the KUBECTL_CONTEXT into THAT
+// stage's state.env (the only channel reaching console.ab's separate state
+// instance), and return a PROCESS-UNIQUE namespace token derived from the temp
+// dir + seq (so it can never collide with a stale marker from a prior run).
+//
+// console.ab pins HELM_NAMESPACE="ma" for the exec/diag, NOT this returned token —
+// the token is what the test passes to _console_exec_into_pod directly (and the
+// "ma" namespace is what cmd_console/console_exec/cmd_diag use). For the cmd_*
+// tests we therefore steer the "ma" fixtures, not the token's. The token is only
+// used for the direct _console_exec_into_pod tests.
+fun fresh_stage(ctx: Text): Text {
+    __seq += 1
+    let base = trust $mktemp -d$
+    let dir = "{base}/stage-{__seq}"
+    trust dir_create(dir)
+    trust dir_create("{dir}/log")
+    trust env_var_set("STAGE_DIR", dir)
+    trust env_var_set("MIGRATE_HOME", base)
+    trust env_var_set("STAGE", "stage-{__seq}")
+    state_load()
+    state_set("STAGE_NAME", "ma")
+    // state.ab round-trips an EMPTY quoted value oddly, so for the no-context case
+    // UNSET the key (state_get falls back to "" → bare kubectl). Non-empty
+    // contexts round-trip fine.
+    if ctx == "" {
+        state_unset("KUBECTL_CONTEXT")
+    } else {
+        state_set("KUBECTL_CONTEXT", ctx)
+    }
+    state_save()
+    let token = trust $basename "{base}"$
+    let ns = "ns-{token}-{__seq}"
+    trust dir_create(MARKER_DIR)
+    trust $rm -f "{MARKER_DIR}/{ns}".* 2>/dev/null$
+    // Also clear the shared "ma" namespace markers BEFORE the cmd_* call so each
+    // block's assertions only see its own commands. (The cmd_* paths all hit
+    // namespace=ma; we key those assertions on a fixture the block wrote, but
+    // clearing keeps the marker reads scoped where used directly below.)
+    return ns
+}
+
+// fixture <ns> <kind> <body> — write a per-namespace steering fixture the stub
+// reads (e.g. fixture(ns, "exitcode", "130")).
+fun fixture(ns: Text, kind: Text, body: Text): Null {
+    trust dir_create(MARKER_DIR)
+    trust file_write("{MARKER_DIR}/{ns}.{kind}", body)
+}
+
+// marker <ns> <bin> — read back the recorded arg lines for <bin> (kubectl|helm|
+// aws) in namespace <ns>, or "" if none were issued.
+fun marker(ns: Text, bin: Text): Text {
+    return file_read("{MARKER_DIR}/{ns}.{bin}") failed { "" }
+}
+
+// clear_ma_markers — wipe the shared "ma"-namespace marker files so a cmd_* block
+// (which always targets HELM_NAMESPACE=ma) reads back ONLY its own issued
+// commands. Called at the top of each cmd_* test, after install_stubs.
+fun clear_ma_markers(): Null {
+    trust dir_create(MARKER_DIR)
+    trust $rm -f "{MARKER_DIR}/ma".* 2>/dev/null$
+}
+
+// ============================================================================
+// _console_exec_into_pod — the signal-code mapping (the heart of the port).
+// ============================================================================
+
+test "_console_exec_into_pod maps a clean exit (0) to rc 0" {
+    install_stubs()
+    let ns = fresh_stage("")
+    fixture(ns, "exitcode", "0")
+    let rc = _console_exec_into_pod(ns)
+    assert_eq(rc, 0)
+}
+
+test "_console_exec_into_pod maps SIGINT (130) to rc 0" {
+    install_stubs()
+    let ns = fresh_stage("")
+    fixture(ns, "exitcode", "130")
+    let rc = _console_exec_into_pod(ns)
+    assert_eq(rc, 0)
+}
+
+test "_console_exec_into_pod maps SIGQUIT (131) to rc 0" {
+    install_stubs()
+    let ns = fresh_stage("")
+    fixture(ns, "exitcode", "131")
+    let rc = _console_exec_into_pod(ns)
+    assert_eq(rc, 0)
+}
+
+test "_console_exec_into_pod maps SIGTERM (143) to rc 0" {
+    install_stubs()
+    let ns = fresh_stage("")
+    fixture(ns, "exitcode", "143")
+    let rc = _console_exec_into_pod(ns)
+    assert_eq(rc, 0)
+}
+
+test "_console_exec_into_pod passes through a genuine non-zero rc" {
+    install_stubs()
+    let ns = fresh_stage("")
+    // 7 is not an operator-driven signal → returned verbatim (bash exit "$rc").
+    fixture(ns, "exitcode", "7")
+    let rc = _console_exec_into_pod(ns)
+    assert_eq(rc, 7)
+}
+
+test "_console_exec_into_pod issues the kubectl exec command for the namespace" {
+    install_stubs()
+    let ns = fresh_stage("")
+    fixture(ns, "exitcode", "0")
+    let rc = _console_exec_into_pod(ns)
+    assert_eq(rc, 0)
+    let kbody = marker(ns, "kubectl")
+    assert(text_contains(kbody, "exec"))
+    assert(text_contains(kbody, "--stdin"))
+    assert(text_contains(kbody, "--tty"))
+    assert(text_contains(kbody, "migration-console-0"))
+    assert(text_contains(kbody, "/bin/bash"))
+}
+
+// ============================================================================
+// cmd_console — STAGE_NAME present → exec fires against HELM_NAMESPACE=ma.
+// ============================================================================
+
+test "cmd_console execs into migration-console-0 in namespace ma when a stage is deployed" {
+    install_stubs()
+    // Seed a deployed stage on disk (STAGE_NAME=ma) + a bound context.
+    fresh_stage("prod-ctx")
+    clear_ma_markers()
+    // The exec targets namespace "ma" (pinned); steer its exit code → clean.
+    fixture("ma", "exitcode", "0")
+
+    let argv = ["console"]
+    let rc = cmd_console(argv)
+    assert_eq(rc, 0)
+
+    // The exec fired against namespace ma, and the bound context threaded through.
+    let kbody = marker("ma", "kubectl")
+    assert(text_contains(kbody, "exec"))
+    assert(text_contains(kbody, "migration-console-0"))
+    assert(text_contains(kbody, "--namespace ma"))
+    assert(text_contains(kbody, "--context prod-ctx"))
+}
+
+test "cmd_console --stage repoints STAGE so a different stage's state is read" {
+    install_stubs()
+    // Pin an isolated base dir; we will pass --stage to repoint the stage NAME.
+    __seq += 1
+    let base = trust $mktemp -d$
+    trust env_var_set("MIGRATE_HOME", base)
+    // Clear STAGE_DIR so STAGE_DIR is derived from MIGRATE_HOME/STAGE (the path
+    // _apply_stage_arg builds), not a stale pin from a prior block.
+    trust env_var_set("STAGE_DIR", "")
+    trust env_var_set("STAGE", "unused")
+    // Pre-seed the target stage's state.env on disk: MIGRATE_HOME/argstage.
+    let target_dir = "{base}/argstage"
+    trust dir_create(target_dir)
+    trust dir_create("{target_dir}/log")
+    trust env_var_set("STAGE_DIR", target_dir)
+    state_load()
+    state_set("STAGE_NAME", "ma")
+    state_unset("KUBECTL_CONTEXT")
+    state_save()
+    // Now point STAGE_DIR back to the empty derive-from-env mode for the call.
+    trust env_var_set("STAGE_DIR", "")
+    clear_ma_markers()
+    fixture("ma", "exitcode", "0")
+
+    let argv = ["console", "--stage", "argstage"]
+    let rc = cmd_console(argv)
+    assert_eq(rc, 0)
+    // _apply_stage_arg set STAGE=argstage so STAGE_DIR resolves to base/argstage,
+    // where we seeded STAGE_NAME — the guard passed and the exec ran.
+    let kbody = marker("ma", "kubectl")
+    assert(text_contains(kbody, "exec"))
+}
+
+// ============================================================================
+// console_exec — SKIP_CONSOLE_EXEC short-circuit vs the default handoff.
+// ============================================================================
+
+test "console_exec returns 0 without an exec when SKIP_CONSOLE_EXEC=Y" {
+    install_stubs()
+    fresh_stage("")
+    clear_ma_markers()
+    state_set("SKIP_CONSOLE_EXEC", "Y")
+    state_save()
+
+    let rc = console_exec()
+    assert_eq(rc, 0)
+    // No exec issued against ma (we skipped the handoff).
+    let kbody = marker("ma", "kubectl")
+    assert(not text_contains(kbody, "exec"))
+    // last_step was persisted before the skip check.
+    state_load()
+    assert_eq(state_get("last_step", ""), "console_handoff")
+}
+
+test "console_exec runs the sts identity call + execs by default" {
+    install_stubs()
+    fresh_stage("")
+    clear_ma_markers()
+    trust $rm -f "{MARKER_DIR}/ma.aws" 2>/dev/null$
+    // Ensure SKIP is not set (a prior block in this shared process may have set it
+    // in ITS stage; ours is a fresh stage on disk, but be explicit).
+    state_set("SKIP_CONSOLE_EXEC", "N")
+    state_save()
+    fixture("ma", "exitcode", "0")
+
+    let rc = console_exec()
+    assert_eq(rc, 0)
+    // The default handoff path was taken: the exec fired against ma. (The aws sts
+    // call has no --namespace so it isn't recorded under ma; the exec proves the
+    // function ran past the sts/skip steps into the handoff.)
+    let kbody = marker("ma", "kubectl")
+    assert(text_contains(kbody, "exec"))
+    assert(text_contains(kbody, "migration-console-0"))
+}
+
+// ============================================================================
+// cmd_diag — the standalone diagnostics dump.
+// ============================================================================
+
+test "cmd_diag issues the helm status + kubectl get pods diagnostics bundle" {
+    install_stubs()
+    fresh_stage("")
+    clear_ma_markers()
+
+    let argv = ["diag"]
+    let rc = cmd_diag(argv)
+    assert_eq(rc, 0)
+
+    let kbody = marker("ma", "kubectl")
+    let hbody = marker("ma", "helm")
+    // helm_dump_diagnostics ran against namespace ma: helm status + pods + events.
+    assert(text_contains(hbody, "status"))
+    assert(text_contains(kbody, "get pods"))
+    assert(text_contains(kbody, "-o wide"))
+    assert(text_contains(kbody, "get events"))
+}

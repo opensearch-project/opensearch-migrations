@@ -1,0 +1,338 @@
+// cleanup.ab — tear down the deployed Migration Assistant.
+//
+// Port of bash lib/cleanup.sh. Public command names preserved verbatim so the
+// entrypoint dispatch (`cleanup` → cmd_cleanup, `clear` → cmd_clear) calls them
+// unchanged: cmd_cleanup / cmd_clear / _cmd_clear_agent_paths_for.
+//
+// Order matters (cmd_cleanup):
+//   1. helm uninstall   (drops k8s workloads)
+//   2. cfn delete-stack (drops EKS, ECR, VPC)
+//   3. archive state into <stage>/archive/<timestamp>/
+//
+// cmd_clear is the AWS-untouching sibling: it wipes the local stage workdir +
+// any agent session storage rooted in that workdir, for when state drifted from
+// reality and the operator wants a fresh deploy without `cleanup` failing on a
+// missing stack.
+//
+// PORTING NOTES vs the bash original:
+//   * The `--stage X` / `--stage=X` flags rebound STAGE + STAGE_DIR globals in
+//     bash. state.ab / log.ab resolve the stage dir LAZILY from the environment
+//     (STAGE_DIR wins, else MIGRATE_HOME/STAGE), so here `--stage` exports STAGE
+//     (env_var_set) and CLEARS any pinned STAGE_DIR so the per-stage path is
+//     re-derived; common_reset_cache() drops common.ab's memoized stage. This is
+//     the Amber re-expression of the bash `STAGE=…; STAGE_DIR="$MIGRATE_HOME/$STAGE"`
+//     rebind through the lazy env-first accessors every ported module shares.
+//   * `local helm_ns="$HELM_NAMESPACE"` + the `"${HELM[@]}" uninstall` splat →
+//     the HELM_NAMESPACE constant + helm_ctx_flags() prefix from helm_ctx.ab
+//     (the single context-binding site). helm_kctx_init() refreshes that binding
+//     from the saved KUBECTL_CONTEXT, exactly as bash re-derived HELM=()/KUBECTL=().
+//   * `helm uninstall … || ui_warn` and the two `aws cloudformation …` calls keep
+//     the bash tolerate-failure shape via `trust $…$ failed { ui_warn(...) }` —
+//     a non-zero uninstall / a wait timeout is a warn-and-continue, never fatal
+//     (the stack is still deleting in AWS; the operator's state is archived
+//     regardless).
+//   * The destruction-confirmation panel is built as a [Text] of body lines and
+//     handed to term_panel(title, lines) — the proven term.ab API. The previous
+//     flat ui_warn + [y/N] was too easy to autopilot through (the bash comment).
+//   * `eval "${out_arr}+=(…)"` (bash name-indirect array append in
+//     _cmd_clear_agent_paths_for) → RETURN a [Text] of the matching agent paths;
+//     cmd_clear concatenates with `+=`. Amber has no name-indirect array append,
+//     and returning the list keeps the helper pure + directly unit-testable —
+//     the same shape cfn_deploy.ab used for _cfn_import_vpc_endpoint_params.
+//   * The Claude cwd→key encoding (`${stage_dir//\//-}` then `${key//./-}`) is two
+//     std/text replace() calls — '/' → '-' then '.' → '-'.
+//   * cmd_cleanup / cmd_clear RETURN an Int (0 success / cancelled / nothing-to-do)
+//     rather than bash `return 0`; the entrypoint dispatch ignores the value but
+//     it makes the early-exit paths testable. NO process exit() here (cleanup is
+//     not a hard-fail command — a missing stack is a normal empty-state branch).
+
+import { env_var_get, env_var_set } from "std/env"
+import { dir_exists } from "std/fs"
+import { replace, slice } from "std/text"
+import {
+    state_load, state_get, state_archive
+} from "./state.ab"
+import {
+    helm_kctx_init, helm_ctx_flags, HELM_NAMESPACE, HELM_RELEASE_NAME
+} from "./helm_ctx.ab"
+import { stage, stage_dir, common_reset_cache, on_exit_register } from "./common.ab"
+import {
+    ui_banner, ui_info, ui_ok, ui_warn, ui_step, ui_dim, ui_confirm
+} from "./ui.ab"
+import { term_panel } from "./term.ab"
+import { log_init, log_announce } from "./log.ab"
+
+// ============================================================================
+// Private helpers FIRST. Amber tree-shakes per imported symbol and keeps only
+// transitive deps that textually PRECEDE the public entry point across an import
+// boundary, so every callee MUST appear above its caller or it is silently
+// dropped (→ "Function 'x' does not exist" when this module is imported).
+// ============================================================================
+
+// slice_eq <s> <prefix> — does s start with prefix? (a tiny local prefix test so
+// _apply_stage_flag stays import-light; the codebase has std.starts_with but the
+// arg order there is (prefix, s) and this reads clearer at the one call site.)
+// Defined ABOVE _apply_stage_flag: the tree-shaker keeps only deps that textually
+// precede their caller across an import boundary (gotcha #2).
+fun slice_eq(s: Text, prefix: Text): Bool {
+    let pl = len prefix
+    if pl > len s { return false }
+    return slice(s, 0, pl) == prefix
+}
+
+// _apply_stage_flag <argv> — honor `--stage X` / `--stage=X` by EXPORTING STAGE
+// and clearing any pinned STAGE_DIR so the lazy env-first accessors (state.ab /
+// log.ab / common.ab) re-derive the per-stage path. common_reset_cache() drops
+// common.ab's memoized stage so stage()/stage_dir() reflect the new value.
+//
+// This is the Amber re-expression of the bash `STAGE=…; STAGE_DIR="$MIGRATE_HOME/$STAGE"`
+// rebind: there is no shared mutable STAGE_DIR global here — the modules each
+// resolve it on demand — so we steer them through the environment they read.
+fun _apply_stage_flag(argv: [Text]): Null {
+    let n = len argv
+    let i = 0
+    while i < n {
+        let a = argv[i]
+        if a == "--stage" {
+            if i + 1 < n {
+                trust env_var_set("STAGE", argv[i + 1])
+                // Clear an explicit STAGE_DIR so MIGRATE_HOME/STAGE re-derives it.
+                trust env_var_set("STAGE_DIR", "")
+                common_reset_cache()
+            }
+            i += 2
+            continue
+        }
+        // `--stage=VALUE`
+        if len a > 8 and slice_eq(a, "--stage=") {
+            let val = slice(a, 8, (len a) - 8)
+            trust env_var_set("STAGE", val)
+            trust env_var_set("STAGE_DIR", "")
+            common_reset_cache()
+        }
+        i += 1
+    }
+}
+
+// _is_noninteractive <argv> — true when `--non-interactive` or `-y` is present.
+// (cmd_cleanup's headless flag — Jenkins / awsRun* skip the confirm prompt.) The
+// bash version also `export`ed MIGRATE_NONINTERACTIVE=1; we set it so any nested
+// ui_prompt/ui_confirm that re-reads the env also skips, matching bash.
+fun _is_noninteractive(argv: [Text]): Bool {
+    for a in argv {
+        if a == "--non-interactive" or a == "-y" {
+            trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
+            return true
+        }
+    }
+    return false
+}
+
+// _is_force <argv> — true when `-y` or `--yes` is present (cmd_clear's force
+// flag; cmd_clear uses -y/--yes rather than --non-interactive).
+fun _is_force(argv: [Text]): Bool {
+    for a in argv {
+        if a == "-y" or a == "--yes" { return true }
+    }
+    return false
+}
+
+// _claude_key <stage_dir> — encode a stage workdir into the Claude project key:
+// replace every '/' then every '.' with '-'. Mirrors the bash
+// `key="${stage_dir//\//-}"; key="${key//./-}"`.
+fun _claude_key(sdir: Text): Text {
+    let k = replace(sdir, "/", "-")
+    return replace(k, ".", "-")
+}
+
+// _cmd_clear_agent_paths_for <stage_dir> → [Text] of agent session-storage paths
+// keyed on this stage's workdir that ACTUALLY EXIST. Skips missing paths (the
+// picker handles "missing" gracefully). Each agent encodes the cwd differently:
+//   claude → ~/.claude/projects/<cwd-with-/-and-.-replaced-by->
+//   codex  → no public per-cwd storage; rely on its own /clear
+//   kiro   → ~/.kiro/conversations is workspace-scoped, not separately addressable
+// so only the Claude path is enumerable, exactly as in bash.
+//
+// Bash appended to a caller-named array via `eval "${out_arr}+=(…)"`; Amber has
+// no name-indirect array append, so we RETURN the list (cmd_clear concatenates
+// it with `+=`). Typed seed ([""]) → reset to [] anchors the [Text] element type
+// across the import boundary and declares a real empty bash array (so a no-match
+// run leaves the result iterable, not an undeclared-array bash-3.2 fault).
+pub fun _cmd_clear_agent_paths_for(sdir: Text): [Text] {
+    let out = [""]
+    out = []
+    let home = env_var_get("HOME") failed { "" }
+    if home == "" { return out }
+    let key = _claude_key(sdir)
+    let claude_dir = "{home}/.claude/projects/{key}"
+    if dir_exists(claude_dir) {
+        out += [claude_dir]
+    }
+    return out
+}
+
+// ============================================================================
+// cmd_cleanup — public entry point (entrypoint `cleanup` dispatch).
+// ============================================================================
+
+// cmd_cleanup <argv> → Int. Accepts --stage / --non-interactive / -y so callers
+// (Jenkins, awsRun*) can target the right stage and skip the confirm prompt.
+// Reads the deploy artifacts from state, shows a destruction panel, confirms,
+// then helm-uninstalls + deletes the CFN stack + archives state. Returns 0 on
+// success / cancel / nothing-to-do (a missing stack is a normal empty branch,
+// not a hard failure).
+pub fun cmd_cleanup(argv: [Text]): Int {
+    _apply_stage_flag(argv)
+    let noninteractive = _is_noninteractive(argv)
+
+    log_init()
+    log_announce("")
+    on_exit_register("log_announce_exit")
+    state_load()
+
+    let stack = state_get("CFN_STACK_NAME", "")
+    let release_raw = state_get("HELM_RELEASE", "")
+    let region = state_get("AWS_REGION", "")
+    // Release name AND namespace are pinned to "ma" (chart contract). If state
+    // has any deploy artifact at all (a stack) but no HELM_RELEASE row, assume
+    // the standard release name.
+    let helm_ns = HELM_NAMESPACE
+    let release = release_raw
+    if release == "" and stack != "" {
+        release = HELM_RELEASE_NAME
+    }
+    // Pick up KUBECTL_CONTEXT from state so cleanup operates on the right cluster
+    // when the operator's active context is something else (the bash
+    // helm_kctx_init refresh of HELM=()/KUBECTL=()).
+    helm_kctx_init()
+
+    let stage_name = stage()
+    if stack == "" and release == "" {
+        ui_warn("nothing to clean up; state is empty for stage '{stage_name}'")
+        return 0
+    }
+
+    ui_banner("Cleanup stage: {stage_name}")
+
+    // Build the panel body lines so the operator sees EXACTLY what's about to be
+    // deleted before they confirm — visceral safety. Typed seed ([""]) → reset to
+    // [] anchors the [Text] type and declares a real empty bash array.
+    let sdir = stage_dir()
+    let panel_lines = [""]
+    panel_lines = []
+    if stack != "" {
+        panel_lines += ["CloudFormation stack    {stack}"]
+        if region != "" {
+            panel_lines += ["Region                  {region}"]
+        }
+    }
+    if release != "" {
+        panel_lines += ["Helm release            {release}  (namespace: {helm_ns})"]
+    }
+    panel_lines += ["Local state             {sdir}"]
+    panel_lines += [""]
+    panel_lines += ["This will delete the EKS cluster, the VPC, and migration-console state."]
+
+    term_panel("Cleanup will remove", panel_lines)
+
+    // Non-interactive callers (Jenkins, scripts) skip the confirm. Anyone who got
+    // here interactively sees the prompt with a default of N — they MUST type y.
+    if not noninteractive {
+        if not ui_confirm("Proceed with cleanup?", "N") {
+            ui_info("cleanup cancelled")
+            return 0
+        }
+    }
+
+    // 1. helm uninstall — tolerate a non-zero exit (workloads may already be
+    // gone). helm {ctx-flags} uninstall RELEASE --namespace ma --wait. The ctx
+    // prefix is interpolated UNQUOTED so the shell word-splits it into the
+    // --kube-context flag tokens (or nothing when no context is bound), the
+    // helm_ctx.ab binding contract.
+    if release != "" {
+        ui_step("helm uninstall {release}")
+        let hflags = helm_ctx_flags()
+        trust $helm {hflags} uninstall "{release}" --namespace "{helm_ns}" --wait$ failed {
+            ui_warn("helm uninstall returned non-zero (continuing)")
+        }
+    }
+
+    // 2. delete the CFN stack (EKS, ECR, VPC) and wait. A wait timeout is a
+    // warn-and-continue — AWS keeps deleting asynchronously; the local state is
+    // archived regardless so the stage is "clean" from the operator's side.
+    if stack != "" {
+        ui_step("Deleting CFN stack: {stack}")
+        trust $aws cloudformation delete-stack --region "{region}" --stack-name "{stack}"$ failed {
+            ui_warn("delete-stack call returned non-zero (continuing)")
+        }
+        trust $aws cloudformation wait stack-delete-complete --region "{region}" --stack-name "{stack}"$ failed {
+            ui_warn("stack-delete-complete wait timed out (still deleting in AWS)")
+        }
+    }
+
+    // 3. archive the local state under <stage>/archive/<ts>/ (and clear the
+    // in-memory store).
+    state_archive()
+    ui_ok("stage '{stage_name}' cleaned up; state archived under {sdir}/archive/")
+    return 0
+}
+
+// ============================================================================
+// cmd_clear — public entry point (entrypoint `clear` dispatch).
+// ============================================================================
+
+// cmd_clear <argv> → Int. Wipe local state + history for the current stage AND
+// any agent session storage rooted in this stage's workdir, WITHOUT touching AWS
+// / kubernetes. Useful when state has drifted from the real world (e.g. AWS
+// resources got deleted out of band) and the operator wants a fresh deploy +
+// fresh agent conversation without `cleanup` failing on missing stacks.
+// Accepts --stage and -y/--yes (force). Returns 0 always (nothing-to-do / cancel
+// / done are all success).
+pub fun cmd_clear(argv: [Text]): Int {
+    _apply_stage_flag(argv)
+    let force = _is_force(argv)
+
+    log_init()
+    let stage_name = stage()
+    ui_banner("Clear local state for stage: {stage_name}")
+
+    // Build the list of paths we'll be removing so the operator sees exactly what
+    // disappears before they confirm.
+    let sdir = stage_dir()
+    let stage_dir_exists = dir_exists(sdir)
+    let agent_paths = _cmd_clear_agent_paths_for(sdir)
+    let n_agent = len agent_paths
+
+    if not stage_dir_exists and n_agent == 0 {
+        ui_info("nothing to clear; no state or agent sessions for stage '{stage_name}'")
+        return 0
+    }
+
+    if stage_dir_exists {
+        ui_dim("  workdir: {sdir}")
+        ui_dim("  removes state.env / state.json / log / plan / history")
+    }
+    if n_agent > 0 {
+        ui_dim("  agent sessions rooted in this stage's workdir:")
+        for p in agent_paths {
+            ui_dim("    {p}")
+        }
+    }
+    ui_dim("  this does NOT touch AWS resources or kubernetes (use 'cleanup' for that)")
+
+    if not force {
+        if not ui_confirm("Wipe local state + agent sessions for stage '{stage_name}'?", "N") {
+            ui_info("clear cancelled")
+            return 0
+        }
+    }
+
+    if stage_dir_exists {
+        trust $rm -rf "{sdir}"$
+    }
+    for p in agent_paths {
+        trust $rm -rf "{p}"$
+    }
+    ui_ok("stage '{stage_name}' state + agent sessions cleared")
+    return 0
+}

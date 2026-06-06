@@ -1,0 +1,485 @@
+// test_agent.ab — coverage for src/agent.ab, mirroring test_agent_handoff.bats.
+//
+// agent.sh does agent discovery, skill installation, MCP registration, and the
+// exec-handoff. We don't actually exec the agents (that would replace the test
+// process) — instead we install stub binaries on PATH (claude / codex / kiro-cli
+// / uvx / aws / jq passthrough) and call the setup/discover/MCP helpers, then
+// assert on the files + state they produce.
+//
+// Stubbing model (mirrors test_crane.ab / test_helm_ctx.ab): ONE content-stable
+// shim per binary in a shared PATH-shadow dir, steered by args; amber test runs
+// every block in one parallel process tree sharing PATH, so a single byte-
+// identical shim is race-free. The agent binaries are trivial `exit 0` stubs —
+// _agent_bin_for / discover_agents only probe their PRESENCE on PATH.
+//
+// MCP-write tests point MIGRATE_MANIFEST at fixtures/agent_manifest.json (an
+// aws-mcp server whose args carry AWS_REGION=${AWS_REGION} + the endpoint) and
+// assert the substituted config landed in the project-scope path. Requires jq
+// (the model layer hard-deps it); the real jq on PATH parses the fixtures.
+//
+// Skill-tree tests point MIGRATE_SKILLS_SRC at a temp dir holding Startup.md + a
+// discoverable skill subdir + the migration-assistant-operator dir. LIB_DIR is
+// pinned to an EMPTY temp dir so _agent_skills_src falls through to the override.
+//
+// NB: no `return` inside `test` blocks (the AMBER_IDIOMS rule) — branch with if.
+
+import { assert, assert_eq } from "std/test"
+import { file_write, file_chmod, file_exists, dir_create } from "std/fs"
+import { env_var_set, env_var_get, env_var_unset, is_command } from "std/env"
+import { text_contains } from "std/text"
+import { state_load, state_set, state_get, state_save } from "../src/state.ab"
+import {
+    discover_agents, _agent_bin_for, _agent_bins_for,
+    _mcp_norm_envvar, _mcp_pretty,
+    _mcp_write_claude, _mcp_write_codex, _mcp_write_kiro,
+    mcp_install_from_manifest, _agent_write_claude_settings,
+    agent_setup, _agent_has_session, _agent_print_install_hints_for_missing
+} from "../src/agent.ab"
+
+// ---- helpers (ABOVE the test blocks: define-before-use; the test-file tree-
+// shaker keeps only deps textually preceding their use) ----------------------
+
+// __seq — monotonic counter so each test gets a distinct stage/skills dir even
+// within the same second.
+let __seq = 0
+
+// AGENT_MANIFEST — the fixture path (relative to the repo root; amber test runs
+// from amber-tui/).
+const AGENT_MANIFEST = "test/fixtures/agent_manifest.json"
+
+// STUB_DIR — the single PATH-shadow dir for agent binaries + uvx. Shared across
+// tests; the shims are content-stable trivial exiters, so re-installing is
+// idempotent and race-free.
+const STUB_DIR = "/tmp/amber_agent_stub"
+
+// install_stubs <agents_csv> — write trivial `exit 0` shims for the named agent
+// binaries (+ uvx) into STUB_DIR and PREPEND it to PATH. Pass which agent
+// binaries to materialize (e.g. "claude kiro-cli"); uvx is always written. The
+// shims are BRACE-FREE bash (a `{` in an Amber Text literal is interpolation).
+fun install_stub_bin(name: Text): Null {
+    let body = "#!/usr/bin/env bash
+exit 0
+"
+    trust file_write("{STUB_DIR}/{name}", body)
+    trust file_chmod("{STUB_DIR}/{name}", "755")
+}
+
+// path_prepend_stub — ensure STUB_DIR is at the front of PATH (idempotent).
+fun path_prepend_stub(): Null {
+    let oldpath = env_var_get("PATH") failed { "" }
+    if not text_contains(oldpath, "{STUB_DIR}:") {
+        trust env_var_set("PATH", "{STUB_DIR}:{oldpath}")
+    }
+}
+
+// fresh_stage — mint + export a unique STAGE_DIR (+ MIGRATE_HOME/STAGE so every
+// path resolver agrees) with a log/ subdir. Returns the dir.
+fun fresh_stage(): Text {
+    __seq += 1
+    let base = trust $mktemp -d$
+    let dir = "{base}/stage-{__seq}"
+    trust dir_create(dir)
+    trust dir_create("{dir}/log")
+    trust env_var_set("STAGE_DIR", dir)
+    trust env_var_set("MIGRATE_HOME", base)
+    trust env_var_set("STAGE", "stage-{__seq}")
+    return dir
+}
+
+// build_skills_src — build a minimal skills source tree under a fresh temp dir,
+// point MIGRATE_SKILLS_SRC at it, and pin LIB_DIR at an EMPTY dir so
+// _agent_skills_src falls through past the two release/dev paths to the override.
+// Returns the skills dir. Contents:
+//   Startup.md
+//   migration-assistant-operator/SKILL.md + workflow.md + product.md
+//   another-skill/SKILL.md
+fun build_skills_src(): Text {
+    __seq += 1
+    let base = trust $mktemp -d$
+    let skills = "{base}/skills-{__seq}"
+    trust dir_create(skills)
+    trust file_write("{skills}/Startup.md", "# Startup runbook\nhello\n")
+
+    trust dir_create("{skills}/migration-assistant-operator")
+    trust file_write("{skills}/migration-assistant-operator/SKILL.md", "# operator skill\n")
+    trust file_write("{skills}/migration-assistant-operator/workflow.md", "# workflow\n")
+    trust file_write("{skills}/migration-assistant-operator/product.md", "# product\n")
+
+    trust dir_create("{skills}/another-skill")
+    trust file_write("{skills}/another-skill/SKILL.md", "# another skill\n")
+
+    // LIB_DIR → an empty dir so lib/../skills/Startup.md does NOT resolve.
+    let emptylib = "{base}/emptylib-{__seq}"
+    trust dir_create(emptylib)
+    trust env_var_set("LIB_DIR", emptylib)
+    trust env_var_set("MIGRATE_SKILLS_SRC", skills)
+    return skills
+}
+
+// seed_manifest — point MIGRATE_MANIFEST at the agent fixture + set AWS_REGION so
+// the args substitution has something to resolve.
+fun seed_manifest(region: Text): Null {
+    trust env_var_set("MIGRATE_MANIFEST", AGENT_MANIFEST)
+    trust env_var_set("AWS_REGION", region)
+}
+
+// ============================================================================
+// pure helpers — no stubs needed
+// ============================================================================
+
+test "_mcp_norm_envvar uppercases and maps non-alpha to underscore" {
+    assert_eq(_mcp_norm_envvar("aws-mcp"), "AWS_MCP")
+    assert_eq(_mcp_norm_envvar("my.org/secrets"), "MY_ORG_SECRETS")
+}
+
+test "_mcp_pretty shows a HOME-relative path" {
+    let home = env_var_get("HOME") failed { "" }
+    // A path under HOME collapses to ~/…; an unrelated path is returned verbatim.
+    if home != "" {
+        assert_eq(_mcp_pretty("{home}/foo/bar.json"), "~/foo/bar.json")
+    }
+    assert_eq(_mcp_pretty("/tmp/elsewhere.json"), "/tmp/elsewhere.json")
+}
+
+test "_agent_bins_for lists the candidate binaries comma-separated" {
+    // kiro carries two candidate binaries (kiro-cli kiro); claude carries one.
+    assert_eq(_agent_bins_for("kiro"), "kiro-cli,kiro")
+    assert_eq(_agent_bins_for("claude"), "claude")
+}
+
+// ============================================================================
+// _agent_has_session — claude session detection
+// ============================================================================
+
+test "_agent_has_session non-claude agents return true (optimistic)" {
+    assert(_agent_has_session("codex"))
+    assert(_agent_has_session("kiro"))
+}
+
+test "_agent_has_session claude is false when no session dir for cwd" {
+    let dir = fresh_stage()
+    trust $cd "{dir}"$
+    // Point HOME at a fresh temp so the claude projects dir certainly doesn't exist.
+    __seq += 1
+    let fakehome = trust $mktemp -d$
+    let oldhome = env_var_get("HOME") failed { "" }
+    trust env_var_set("HOME", fakehome)
+    assert(not _agent_has_session("claude"))
+    trust env_var_set("HOME", oldhome)
+}
+
+test "_agent_has_session claude is true when a jsonl session exists for cwd" {
+    let dir = fresh_stage()
+    trust $cd "{dir}"$
+    __seq += 1
+    let fakehome = trust $mktemp -d$
+    let oldhome = env_var_get("HOME") failed { "" }
+    trust env_var_set("HOME", fakehome)
+    // Replicate claude's CWD-encoding: replace / and . with -. Use pwd so we match
+    // exactly what _agent_has_session computes.
+    let pwd = trust $pwd$
+    let key = trust $printf '%s' "{pwd}" | tr './' '--'$
+    trust $mkdir -p "{fakehome}/.claude/projects/{key}"$
+    trust $touch "{fakehome}/.claude/projects/{key}/sess1.jsonl"$
+    assert(_agent_has_session("claude"))
+    trust env_var_set("HOME", oldhome)
+}
+
+test "_agent_has_session claude is false when dir exists but is empty" {
+    let dir = fresh_stage()
+    trust $cd "{dir}"$
+    __seq += 1
+    let fakehome = trust $mktemp -d$
+    let oldhome = env_var_get("HOME") failed { "" }
+    trust env_var_set("HOME", fakehome)
+    let pwd = trust $pwd$
+    let key = trust $printf '%s' "{pwd}" | tr './' '--'$
+    trust $mkdir -p "{fakehome}/.claude/projects/{key}"$
+    // dir present, no *.jsonl → false.
+    assert(not _agent_has_session("claude"))
+    trust env_var_set("HOME", oldhome)
+}
+
+// ============================================================================
+// discover_agents
+// ============================================================================
+
+test "discover_agents lists only candidates that resolve on PATH" {
+    // PATH points ONLY at the stub dir (+ system bins) so only the stubs we wrote
+    // resolve. Install claude + kiro-cli, NOT codex.
+    trust dir_create(STUB_DIR)
+    install_stub_bin("claude")
+    install_stub_bin("kiro-cli")
+    // Make sure codex is NOT present.
+    trust $rm -f "{STUB_DIR}/codex"$
+    let oldpath = env_var_get("PATH") failed { "" }
+    trust env_var_set("PATH", "{STUB_DIR}:/usr/bin:/bin")
+    let found = discover_agents()
+    trust env_var_set("PATH", oldpath)
+
+    assert(text_contains("|{found}|", "claude"))
+    assert(text_contains("|{found}|", "kiro"))
+    assert(not text_contains("|{found}|", "codex"))
+}
+
+test "discover_agents is empty when no candidate is installed" {
+    // PATH with no agent binaries → empty list (the bash `return 1` signal).
+    let oldpath = env_var_get("PATH") failed { "" }
+    __seq += 1
+    let empty = trust $mktemp -d$
+    trust env_var_set("PATH", "{empty}:/usr/bin:/bin")
+    let found = discover_agents()
+    trust env_var_set("PATH", oldpath)
+    assert_eq(len found, 0)
+}
+
+// ============================================================================
+// _agent_print_install_hints_for_missing
+// ============================================================================
+
+test "_agent_print_install_hints_for_missing covers absent agents only" {
+    // Only claude "installed" → codex + kiro hints emitted, claude not. This emits
+    // to stderr; we just assert it runs without error (chrome is side-effecting).
+    let installed = [""]
+    installed = []
+    installed += ["claude"]
+    _agent_print_install_hints_for_missing(installed)
+
+    // All present → nothing emitted (no crash).
+    let all = [""]
+    all = []
+    all += ["claude"]
+    all += ["codex"]
+    all += ["kiro"]
+    _agent_print_install_hints_for_missing(all)
+    assert(true)
+}
+
+// ============================================================================
+// agent_setup — skill files land in the right places
+// ============================================================================
+
+test "agent_setup claude drops Startup.md + operator skill into .claude/skills/" {
+    let dir = fresh_stage()
+    build_skills_src()
+    seed_manifest("us-east-1")
+    // Skip MCP so this test doesn't need uvx; the file targets are the contract.
+    trust env_var_set("MIGRATE_SKIP_MCP", "1")
+
+    agent_setup("claude")
+
+    assert(file_exists("{dir}/.claude/skills/opensearch-migration/Startup.md"))
+    assert(file_exists("{dir}/Startup.md"))
+    assert(file_exists("{dir}/CLAUDE.md"))
+    // Auto-discovery picks up every <name>/SKILL.md subdir.
+    assert(file_exists("{dir}/skills/migration-assistant-operator/SKILL.md"))
+    assert(file_exists("{dir}/skills/another-skill/SKILL.md"))
+    env_var_unset("MIGRATE_SKIP_MCP")
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "agent_setup codex drops AGENTS.md at stage root and Startup.md in .codex/" {
+    let dir = fresh_stage()
+    build_skills_src()
+    seed_manifest("us-east-1")
+    trust env_var_set("MIGRATE_SKIP_MCP", "1")
+
+    agent_setup("codex")
+
+    assert(file_exists("{dir}/.codex/Startup.md"))
+    assert(file_exists("{dir}/AGENTS.md"))
+    env_var_unset("MIGRATE_SKIP_MCP")
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "agent_setup kiro seeds steering docs from the operator skill" {
+    let dir = fresh_stage()
+    build_skills_src()
+    seed_manifest("us-east-1")
+    trust env_var_set("MIGRATE_SKIP_MCP", "1")
+
+    agent_setup("kiro")
+
+    // Startup.md auto-loaded as the first steering doc (00- prefix) + at root.
+    assert(file_exists("{dir}/.kiro/Startup.md"))
+    assert(file_exists("{dir}/.kiro/steering/00-Startup.md"))
+    // The operator skill's workflow/product docs are copied into steering/.
+    assert(file_exists("{dir}/.kiro/steering/workflow.md"))
+    assert(file_exists("{dir}/.kiro/steering/product.md"))
+    env_var_unset("MIGRATE_SKIP_MCP")
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+// ============================================================================
+// mcp_install_from_manifest
+// ============================================================================
+
+test "mcp_install_from_manifest skips everything when MIGRATE_SKIP_MCP=1" {
+    let dir = fresh_stage()
+    seed_manifest("us-east-1")
+    trust env_var_set("MIGRATE_SKIP_MCP", "1")
+
+    mcp_install_from_manifest("claude")
+
+    // Nothing written anywhere.
+    assert(not file_exists("{dir}/.mcp.json"))
+    assert(not file_exists("{dir}/.codex/config.toml"))
+    assert(not file_exists("{dir}/.kiro/settings/mcp.json"))
+    env_var_unset("MIGRATE_SKIP_MCP")
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "mcp_install_from_manifest codex writes mcp_servers.aws-mcp to config.toml" {
+    let dir = fresh_stage()
+    seed_manifest("us-west-2")
+    trust dir_create(STUB_DIR)
+    install_stub_bin("uvx")
+    path_prepend_stub()
+    env_var_unset("MIGRATE_SKIP_MCP")
+
+    mcp_install_from_manifest("codex")
+
+    assert(file_exists("{dir}/.codex/config.toml"))
+    let body = trust $cat "{dir}/.codex/config.toml"$
+    assert(text_contains(body, "[mcp_servers.aws-mcp]"))
+    assert(text_contains(body, "command = \"uvx\""))
+    // The ${AWS_REGION} arg got substituted.
+    assert(text_contains(body, "AWS_REGION=us-west-2"))
+    assert(text_contains(body, "aws-mcp.us-east-1.api.aws/mcp"))
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "mcp_install_from_manifest codex is idempotent (no duplicate block)" {
+    let dir = fresh_stage()
+    seed_manifest("us-east-1")
+    trust dir_create(STUB_DIR)
+    install_stub_bin("uvx")
+    path_prepend_stub()
+    env_var_unset("MIGRATE_SKIP_MCP")
+
+    mcp_install_from_manifest("codex")
+    mcp_install_from_manifest("codex")
+
+    let count = trust $grep -c '^\[mcp_servers\.aws-mcp\]' "{dir}/.codex/config.toml"$
+    assert_eq(count, "1")
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "mcp_install_from_manifest kiro writes settings/mcp.json with substituted args" {
+    let dir = fresh_stage()
+    seed_manifest("eu-west-1")
+    trust dir_create(STUB_DIR)
+    install_stub_bin("uvx")
+    path_prepend_stub()
+    env_var_unset("MIGRATE_SKIP_MCP")
+
+    mcp_install_from_manifest("kiro")
+
+    assert(file_exists("{dir}/.kiro/settings/mcp.json"))
+    let body = trust $cat "{dir}/.kiro/settings/mcp.json"$
+    assert(text_contains(body, "aws-mcp"))
+    assert(text_contains(body, "AWS_REGION=eu-west-1"))
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "mcp_install_from_manifest claude writes project-scope .mcp.json" {
+    let dir = fresh_stage()
+    seed_manifest("ap-southeast-1")
+    trust dir_create(STUB_DIR)
+    install_stub_bin("uvx")
+    path_prepend_stub()
+    env_var_unset("MIGRATE_SKIP_MCP")
+
+    mcp_install_from_manifest("claude")
+
+    assert(file_exists("{dir}/.mcp.json"))
+    // jq confirms the structured entry resolved with the substituted arg.
+    let cmd = trust $jq -r '.mcpServers["aws-mcp"].command' "{dir}/.mcp.json"$
+    assert_eq(cmd, "uvx")
+    let body = trust $cat "{dir}/.mcp.json"$
+    assert(text_contains(body, "AWS_REGION=ap-southeast-1"))
+    // claude also gets the project-scope settings.json (CLI + manifest perms).
+    assert(file_exists("{dir}/.claude/settings.json"))
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "mcp_install_from_manifest claude .mcp.json is idempotent" {
+    let dir = fresh_stage()
+    seed_manifest("us-east-1")
+    trust dir_create(STUB_DIR)
+    install_stub_bin("uvx")
+    path_prepend_stub()
+    env_var_unset("MIGRATE_SKIP_MCP")
+
+    mcp_install_from_manifest("claude")
+    let h1 = trust $cksum "{dir}/.mcp.json"$
+    mcp_install_from_manifest("claude")
+    let h2 = trust $cksum "{dir}/.mcp.json"$
+    assert_eq(h1, h2)
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+// ============================================================================
+// _agent_write_claude_settings
+// ============================================================================
+
+test "_agent_write_claude_settings writes CLI + manifest perms" {
+    let dir = fresh_stage()
+    seed_manifest("us-east-1")
+
+    _agent_write_claude_settings()
+
+    assert(file_exists("{dir}/.claude/settings.json"))
+    let body = trust $cat "{dir}/.claude/settings.json"$
+    // CLI read-only allowlist entries.
+    assert(text_contains(body, "Bash(aws sts get-caller-identity:*)"))
+    assert(text_contains(body, "kubectl get:*"))
+    // Manifest-driven MCP perms folded in.
+    assert(text_contains(body, "mcp__aws-mcp__aws___read_documentation"))
+    // Valid JSON: jq can read the allow array length (> 0).
+    let n = trust $jq '.permissions.allow | length' "{dir}/.claude/settings.json"$
+    assert(n as Int > 0)
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "_agent_write_claude_settings skipped via MIGRATE_NO_CLAUDE_SETTINGS=1" {
+    let dir = fresh_stage()
+    seed_manifest("us-east-1")
+    trust env_var_set("MIGRATE_NO_CLAUDE_SETTINGS", "1")
+
+    _agent_write_claude_settings()
+
+    assert(not file_exists("{dir}/.claude/settings.json"))
+    env_var_unset("MIGRATE_NO_CLAUDE_SETTINGS")
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "_agent_write_claude_settings leaves an existing settings.json alone" {
+    let dir = fresh_stage()
+    seed_manifest("us-east-1")
+    trust dir_create("{dir}/.claude")
+    trust file_write("{dir}/.claude/settings.json", "\{\"custom\":true}\n")
+
+    _agent_write_claude_settings()
+
+    let body = trust $cat "{dir}/.claude/settings.json"$
+    // Operator's customization preserved (not overwritten).
+    assert(text_contains(body, "custom"))
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+// ============================================================================
+// per-agent MCP writers (direct, with a stubbed manifest)
+// ============================================================================
+
+test "_mcp_write_codex appends a TOML section for the named server" {
+    let dir = fresh_stage()
+    seed_manifest("ca-central-1")
+
+    _mcp_write_codex("aws-mcp")
+
+    let body = trust $cat "{dir}/.codex/config.toml"$
+    assert(text_contains(body, "[mcp_servers.aws-mcp]"))
+    assert(text_contains(body, "mcp-proxy-for-aws@latest"))
+    env_var_unset("MIGRATE_MANIFEST")
+}

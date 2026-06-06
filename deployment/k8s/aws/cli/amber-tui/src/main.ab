@@ -1,0 +1,139 @@
+// main.ab — OpenSearch Migration Assistant CLI entry point.
+//
+// Port of bash bin/migration-assistant. The bash file sourced every lib in
+// dependency order then dispatched subcommands with `case "${1:-resume}"`. In
+// the Amber port every "lib" is an imported module (no sourcing), so this file
+// is purely the subcommand dispatch — the compiled bin/migration-assistant.
+//
+// DISPATCH (mirrors the bash case verbatim):
+//   resume | ""            → cmd_resume   <rest>
+//   console               → cmd_console  <rest>
+//   agent                 → cmd_agent    <rest>
+//   diag                  → cmd_diag     <rest>
+//   clear                 → cmd_clear    <rest>
+//   cleanup               → cmd_cleanup  <rest>
+//   pack                  → cmd_pack     <rest>
+//   version|--version|-V  → print versionString (manifest) or cli_version+packs
+//   help|--help|-h        → cmd_help
+//   -y | --<anything>     → cmd_resume   <whole argv>  (flag-led ⇒ resume)
+//   *                     → cmd_help + exit 64
+//
+// PORTING NOTES
+// -------------
+// * Amber `main (args)` delivers args[] WITH the program path as args[0] (exactly
+//   like bash's $0), so args[1] is the subcommand and args[2..] is the rest —
+//   the direct analogue of bash `args[1]` / `${@:2}`. _rest(args) builds the
+//   args[2..] tail; _argv_no_prog(args) builds args[1..] (the bash `"$@"`).
+// * The flag-led catch-all (`-y` / any `--flag` as the first token) passes
+//   args[1..] (the whole user argv, sans the program path) to cmd_resume,
+//   matching the bash `cmd_resume "$@"` so `migration-assistant --non-interactive
+//   --stage ma …` works with no explicit `resume` subcommand.
+// * cmd_resume / cmd_console / cmd_diag / cmd_cleanup / cmd_clear return an Int
+//   exit code; cmd_agent / cmd_help return Null (agent_exec / cmd_help do their
+//   own thing). We exit() on the Int rc — the SINGLE process-exit site, as the
+//   module headers (console.ab especially) intend. A Null-returning command
+//   falls through to a clean exit(0).
+// * `case` with `*` → an if-chain (no match/switch in 0.6). The `--<anything>`
+//   arm is the "starts with --" test on the first token.
+// * MIGRATE_OWNS_PROCESS=1 (bash exported it so the libs install the global
+//   INT/TERM trap) is set here too, then common_install_traps() wires the trap
+//   for the top-level process — the bash `source _common.sh` side effect.
+
+import { env_var_set, env_var_get } from "std/env"
+import { slice } from "std/text"
+import { cli_version } from "./version.ab"
+import {
+    manifest_init, manifest_brand, manifest_pack_summary
+} from "./manifest.ab"
+import { common_install_traps } from "./common.ab"
+import { cmd_resume, cmd_help } from "./resume.ab"
+import { cmd_console, cmd_diag } from "./console.ab"
+import { cmd_agent } from "./agent.ab"
+import { cmd_cleanup, cmd_clear } from "./cleanup.ab"
+import { cmd_pack } from "./pack.ab"
+
+// ---- helpers (define-before-use; the tree-shaker keeps deps preceding main) --
+
+// _rest <args> — args[2..]: the subcommand's arguments with BOTH the program
+// path (args[0]) and the subcommand (args[1]) dropped (bash `${@:2}`). Returns []
+// when there is no tail. Typed seed [""] → reset to [] anchors the [Text] element
+// type + declares a real empty bash array (a bare `let out = []` left it
+// undeclared → bash-3.2 "bad array subscript" on len).
+fun _rest(args: [Text]): [Text] {
+    let out = [""]
+    out = []
+    let n = len args
+    let i = 2
+    while i < n {
+        out += [args[i]]
+        i += 1
+    }
+    return out
+}
+
+// _argv_no_prog <args> — args[1..]: the user argv with only the program path
+// dropped (the bash `"$@"`). Used for the flag-led catch-all that routes to
+// cmd_resume with the whole flag set.
+fun _argv_no_prog(args: [Text]): [Text] {
+    let out = [""]
+    out = []
+    let n = len args
+    let i = 1
+    while i < n {
+        out += [args[i]]
+        i += 1
+    }
+    return out
+}
+
+// _print_version — the branded version line: branding.versionString from the
+// manifest if set, else cli_version() + the per-pack +name-ver suffix. Mirrors
+// the bash `version)` arm. Printed to stdout (it's a value the operator reads).
+fun _print_version(): Null {
+    manifest_init()
+    let v = manifest_brand("versionString")
+    if v == "" { v = "{cli_version()}{manifest_pack_summary()}" }
+    trust $printf '%s\n' "{v}"$
+}
+
+// _is_flag_led <tok> — true when the first token is `-y` or starts with `--`
+// (the bash `-y|--*)` arm that routes a flag-led invocation through cmd_resume).
+fun _is_flag_led(tok: Text): Bool {
+    if tok == "-y" { return true }
+    if len tok >= 2 and slice(tok, 0, 2) == "--" { return true }
+    return false
+}
+
+main (args) {
+    // Tell the modules we own the process so the global INT/TERM trap installs
+    // (the bash `export MIGRATE_OWNS_PROCESS=1` before sourcing _common.sh).
+    trust env_var_set("MIGRATE_OWNS_PROCESS", "1")
+    common_install_traps()
+
+    let n = len args
+    // args[0] is the program path (bash $0). bash `${1:-resume}` — no subcommand
+    // ⇒ resume. The subcommand is args[1].
+    let sub = ""
+    if n > 1 { sub = args[1] }
+    let rest = _rest(args)
+
+    if {
+        sub == "resume" or sub == "" { exit(cmd_resume(rest)) }
+        sub == "console" { exit(cmd_console(rest)) }
+        sub == "agent" { cmd_agent(rest) }
+        sub == "diag" { exit(cmd_diag(rest)) }
+        sub == "clear" { exit(cmd_clear(rest)) }
+        sub == "cleanup" { exit(cmd_cleanup(rest)) }
+        sub == "pack" { exit(cmd_pack(rest)) }
+        sub == "version" or sub == "--version" or sub == "-V" { _print_version() }
+        sub == "help" or sub == "--help" or sub == "-h" { cmd_help() }
+        // Flag-led invocation behaves like `resume <flags>`: pass the user argv
+        // sans the program path (bash `cmd_resume "$@"`), so
+        // `migration-assistant --stage ma …` works with no explicit `resume`.
+        _is_flag_led(sub) { exit(cmd_resume(_argv_no_prog(args))) }
+        else {
+            cmd_help()
+            exit(64)
+        }
+    }
+}
