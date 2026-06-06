@@ -1,0 +1,9 @@
+import { assert, assert_eq } from "std/test"
+import { esc, term_detect } from "../src/core.ab"
+
+test "esc is a single byte" {
+    assert_eq(len esc(), 1)
+}
+test "esc is stable across calls" {
+    assert(esc() == esc())
+}

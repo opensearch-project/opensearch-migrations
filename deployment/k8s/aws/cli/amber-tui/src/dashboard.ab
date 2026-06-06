@@ -1,0 +1,342 @@
+// dashboard.ab — sticky-panel TUI: a live, in-memory resource table rendered
+// into a fixed-height pane on stderr with a header, progress bar, counts, and
+// the most-recent rows per status class.
+//
+// Port of bash lib/dashboard.sh. The bash version carried two layers of `eval`:
+//   1. Dynamic namespace arrays (__DASH_${ns}_KEYS) — bash 3.2 has no
+//      associative arrays and can't indirect across array NAMES without eval.
+//   2. A per-row classifier indirection.
+// Amber removes BOTH. The migration-assistant runs exactly one dashboard at a
+// time (cfn, then later helm), so a single instance backed by module-level
+// PARALLEL ARRAYS is sufficient — and parallel arrays are the canonical Amber
+// answer to "no nested arrays". The classifier is selected by a MODE string via
+// an if-chain, so no function-pointer/eval is needed. User data never touches a
+// code-eval path.
+//
+// Cursor management is delegated to term.ab (which owns the EXIT-trap restore).
+
+import { printf } from "std/env"
+import { date_now } from "std/date"
+import { slice, zfill, rpad } from "std/text"
+import { sort } from "std/array"
+import { esc, eprint, term_interactive } from "./core.ab"
+import {
+    term_columns, term_hide_cursor, term_show_cursor,
+    term_spinner_frame, repeat_char, clip
+} from "./term.ab"
+
+// ---- tunables --------------------------------------------------------------
+
+const PANEL_MAX = 10
+const BAR_MIN = 12
+const BAR_MAX = 32
+
+// ---- instance state (parallel arrays + scalars) ----------------------------
+
+let __header = ""
+let __mode = "default"
+let __tick = 0
+let __last_height = 0
+
+// Parallel arrays — index i describes one resource row. Seeded with one
+// placeholder element (Amber's `let` can't take the empty-typed-array literal);
+// __count is the logical length and every path honors it.
+let __keys = [""]
+let __statuses = [""]
+let __reasons = [""]
+let __tss = [""]
+let __epochs = [0]
+let __count = 0
+
+// dash_init <header> — reset the instance + hide the cursor.
+pub fun dash_init(header: Text): Null {
+    __header = header
+    __mode = "default"
+    __tick = 0
+    __last_height = 0
+    __count = 0
+    term_hide_cursor()
+}
+
+// dash_set_mode <mode> — choose the status classifier ("cfn" | "default").
+pub fun dash_set_mode(mode: Text): Null {
+    __mode = mode
+}
+
+// ---- tiny string predicates (defined FIRST: Amber tree-shakes per imported
+// symbol and only pulls transitive deps that textually precede the entry point,
+// so private helpers MUST appear above their public callers) -----------------
+
+fun text_has(s: Text, needle: Text): Bool {
+    let n = len needle
+    if n == 0 { return true }
+    let limit = (len s) - n
+    if limit < 0 { return false }
+    for i in 0..=limit {
+        if slice(s, i, n) == needle { return true }
+    }
+    return false
+}
+fun ends(s: Text, suffix: Text): Bool {
+    let sl = len suffix
+    let total = len s
+    if sl > total { return false }
+    return slice(s, total - sl, sl) == suffix
+}
+fun index_of(s: Text, needle: Text): Int {
+    let total = len s
+    for i in 0..total {
+        if slice(s, i, 1) == needle { return i }
+    }
+    return -1
+}
+fun clampi(v: Int, lo: Int, hi: Int): Int {
+    if v < lo { return lo }
+    if v > hi { return hi }
+    return v
+}
+
+// ---- classifier (mode-dispatched, no eval) ---------------------------------
+
+// cfn_status_class — CloudFormation status → class. Order matters:
+// UPDATE_ROLLBACK_COMPLETE is a FAILURE despite ending COMPLETE, so
+// ROLLBACK/FAILED are tested before the COMPLETE/IN_PROGRESS suffixes.
+// Matches test_cfn_dashboard.bats classification table.
+//
+// NB: defined BEFORE dash_classify (its caller). Across an import boundary
+// Amber tree-shakes per symbol and only keeps transitive deps that textually
+// precede the entry point — so a callee defined after its caller is silently
+// dropped, making dash_classify return "other" for everything.
+pub fun cfn_status_class(st: Text): Text {
+    if {
+        text_has(st, "ROLLBACK") { return "fail" }
+        text_has(st, "FAILED")   { return "fail" }
+        ends(st, "IN_PROGRESS")  { return "prog" }
+        ends(st, "COMPLETE")     { return "done" }
+        else                     { return "other" }
+    }
+}
+
+// dash_classify <st> → "fail" | "prog" | "done" | "other"
+pub fun dash_classify(st: Text): Text {
+    if __mode == "cfn" {
+        return cfn_status_class(st)
+    }
+    return "other"
+}
+
+// ---- upsert / clear --------------------------------------------------------
+
+fun dash_idx(key: Text): Int {
+    for i in 0..__count {
+        if __keys[i] == key { return i }
+    }
+    return -1
+}
+
+// dash_upsert <key> <status> <reason> <ts> — insert or update a row in place.
+// Updating an existing key MUST NOT grow the table.
+pub fun dash_upsert(key: Text, st: Text, reason: Text, ts: Text): Null {
+    let epoch = date_now()
+    let i = dash_idx(key)
+    if i >= 0 {
+        __statuses[i] = st
+        __reasons[i] = reason
+        __tss[i] = ts
+        __epochs[i] = epoch
+        return null
+    }
+    // Append at the logical index __count. The arrays carry a seed placeholder
+    // at index 0 (Amber `let` has no empty-typed-array literal), so the FIRST
+    // row reuses that slot (write at index 0) and later rows grow the array.
+    // Writing past __count rather than blindly appending keeps physical length
+    // == logical length, so the 0..__count count/render loops read real data.
+    if __count < len __keys {
+        __keys[__count] = key
+        __statuses[__count] = st
+        __reasons[__count] = reason
+        __tss[__count] = ts
+        __epochs[__count] = epoch
+    } else {
+        __keys += [key]
+        __statuses += [st]
+        __reasons += [reason]
+        __tss += [ts]
+        __epochs += [epoch]
+    }
+    __count += 1
+}
+
+// dash_clear — drop all rows (e.g. between helm phases). Keeps header/mode.
+pub fun dash_clear(): Null {
+    __count = 0
+}
+
+// dash_count — logical row count (test seam + render).
+pub fun dash_count(): Int { return __count }
+
+// dash_count_class <cls> — number of rows whose status maps to <cls>.
+pub fun dash_count_class(cls: Text): Int {
+    let n = 0
+    for i in 0..__count {
+        if dash_classify(__statuses[i]) == cls { n += 1 }
+    }
+    return n
+}
+
+// ---- elapsed formatter -----------------------------------------------------
+
+// dash_fmt_elapsed <started_epoch> → "Mm SSs".
+pub fun dash_fmt_elapsed(started: Int): Text {
+    let d = date_now() - started
+    let m = d / 60
+    let s = d % 60
+    return "{m}m {zfill(s as Text, 2)}s"
+}
+
+// ---- row block builder -----------------------------------------------------
+
+// build_class_rows <cls> <max> <color> <glyph> → rendered rows (Text). Emits at
+// most <max> rows of class <cls>, most-recent first. Sets __emitted to the
+// number actually rendered (module-level so we avoid a second return value).
+let __emitted = 0
+
+fun build_class_rows(cls: Text, max: Int, color: Text, glyph: Text): Text {
+    __emitted = 0
+    if max <= 0 { return "" }
+    let e = esc()
+    let reset = "{e}[0m"
+
+    // Collect matching rows as "zero-padded-epoch|index" so a lexical descending
+    // sort yields most-recent-first without numeric sort support.
+    let packed = [""]
+    let pc = 0
+    for i in 0..__count {
+        if dash_classify(__statuses[i]) == cls {
+            let ep = zfill(__epochs[i] as Text, 12)
+            if pc == 0 { packed[0] = "{ep}|{i}" }
+            else { packed += ["{ep}|{i}"] }
+            pc += 1
+        }
+    }
+    if pc == 0 { return "" }
+
+    // sort IN PLACE (ref) — std `sorted` returns a [Generic] that then can't be
+    // compared against a Text literal; `sort` mutates and keeps the [Text] type.
+    sort(packed, true)
+    let body = ""
+    for entry in packed {
+        if __emitted >= max { break }
+        if entry == "" { continue }
+        let bar = index_of(entry, "|")
+        let idx = (slice(entry, bar + 1, (len entry) - bar - 1)) as Int
+        let logical = rpad(clip(__keys[idx], 38), " ", 38)
+        let stcol = rpad(__statuses[idx], " ", 22)
+        let reason = __reasons[idx]
+        if reason != "" {
+            if reason != "None" {
+                body = "{body}  {color}{glyph} {logical} {stcol}  {reason}{reset}\n"
+            } else {
+                body = "{body}  {color}{glyph} {logical} {stcol}{reset}\n"
+            }
+        } else {
+            body = "{body}  {color}{glyph} {logical} {stcol}{reset}\n"
+        }
+        __emitted += 1
+    }
+    return body
+}
+
+// ---- render ----------------------------------------------------------------
+
+// dash_render <started_epoch> <header_override> — repaint in place. Returns the
+// full frame (sans cursor-movement prefix) as Text; also writes the frame
+// (prefix + body) to stderr. The returned Text is what tests assert on.
+//
+// Redraw math: move cursor up by the PREVIOUS height and erase. One logical
+// line == one physical row because every row is width-clipped and callers
+// disable autowrap (term_wrap_off). This is the structural fix for the bash bug
+// where long ResourceStatusReason lines wrapped and the line count undercounted.
+pub fun dash_render(started: Int, header_override: Text): Text {
+    __tick += 1
+    let glyph = term_spinner_frame(__tick)
+    let header = header_override != "" then header_override else __header
+
+    let n_failed = dash_count_class("fail")
+    let in_progress = dash_count_class("prog")
+    let completed = dash_count_class("done")
+    let total = __count
+
+    let e = esc()
+    let bold = "{e}[1m"
+    let dim = "{e}[2m"
+    let green = "{e}[32m"
+    let red = "{e}[31m"
+    let reset = "{e}[0m"
+
+    let bar_w = clampi(term_columns() / 4, BAR_MIN, BAR_MAX)
+    let elapsed = dash_fmt_elapsed(started)
+
+    let height = 0
+
+    // Header line.
+    let frame = "{bold}{glyph}{reset}  {header}  {dim}elapsed {elapsed}{reset}\n"
+    height += 1
+
+    // Counts + progress bar.
+    let seen = total > 0 then total else 1
+    let pct = (completed * 100) / seen
+    let fill = clampi((completed * bar_w) / seen, 0, bar_w)
+    let empty = bar_w - fill
+    let filled = repeat_char("█", fill)
+    let blanks = repeat_char("░", empty)
+    frame = "{frame}  {green}{filled}{dim}{blanks}{reset}  {pct}%   {green}✓ {completed}{reset}  {dim}↻ {in_progress}{reset}  {red}✗ {n_failed}{reset}  total {total}\n"
+    frame = "{frame}{reset}\n"
+    height += 2
+
+    // Resource rows: failed, then in_progress, then most-recent done.
+    let rows_left = PANEL_MAX
+
+    let r_fail = build_class_rows("fail", rows_left, red, "✗")
+    frame = "{frame}{r_fail}"
+    height += __emitted
+    rows_left -= __emitted
+
+    if rows_left > 0 {
+        let r_prog = build_class_rows("prog", rows_left, dim, "↻")
+        frame = "{frame}{r_prog}"
+        height += __emitted
+        rows_left -= __emitted
+    }
+    if rows_left > 0 {
+        let r_done = build_class_rows("done", rows_left, green, "✓")
+        frame = "{frame}{r_done}"
+        height += __emitted
+    }
+
+    frame = "{frame}{dim}  (Ctrl-C to abort){reset}\n"
+    height += 1
+
+    // Emit: cursor-up over the previous frame + erase, then the new frame.
+    let prefix = ""
+    if __last_height > 0 {
+        prefix = "{e}[{__last_height}A{e}[J"
+    }
+    eprint("{prefix}{frame}")
+
+    __last_height = height
+    return frame
+}
+
+// dash_render_simple <started_epoch> — render with no header override.
+pub fun dash_render_simple(started: Int): Text {
+    return dash_render(started, "")
+}
+
+// dash_finish <started_epoch> — final repaint with the cursor restored.
+pub fun dash_finish(started: Int): Text {
+    __tick = 0
+    let out = dash_render(started, "")
+    term_show_cursor()
+    return out
+}

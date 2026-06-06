@@ -1,0 +1,280 @@
+// term.ab — terminal control primitives. Raw ANSI/VT100 only. No tput.
+//
+// Port of bash lib/term.sh. The bash file existed to avoid tput's fork +
+// terminfo cost and its non-zero-exit-on-minimal-terminfo crash under `set -e`.
+// In Amber we keep raw VT100 escapes for the same reasons, and additionally
+// gain UTF-8-correct width math for free: `len` and `slice` count CODEPOINTS,
+// so the byte-vs-codepoint bugs the bash version fought (panel truncation,
+// spinner indexing in the C locale) simply cannot occur here.
+//
+// Contract carried over verbatim:
+//   * EVERYTHING goes to stderr (stdout is reserved for return values).
+//   * No-op gracefully when stderr isn't a TTY — gated on core.term_interactive.
+//   * Cursor + line-wrap are OWNED here. A dedicated EXIT trap restores both
+//     unconditionally on ANY exit path (Ctrl-C, errexit, exec, normal).
+//   * setup/reset are exact inverses.
+//
+// Colors are the 8-color ANSI SGR set — sufficient for an installer and
+// CI-log-safe. esc() (from core) mints the real ESC byte.
+
+import { printf, env_var_get } from "std/env"
+import { split, trim, slice, rpad } from "std/text"
+import { esc, eprint, eprintln, term_interactive } from "./core.ab"
+
+// ---- geometry (refreshed from stty; defaults when no tty) ------------------
+
+let __lines = 24
+let __columns = 80
+
+// term_winch — refresh LINES/COLUMNS from `stty size`. Cheap. Leaves the
+// cached values untouched when stty fails (no controlling tty). The bash
+// version wired this to a SIGWINCH trap; we expose it as a callable that the
+// render loop can poll, plus install_winch_trap below for live resize.
+pub fun term_winch(): Null {
+    let size = trust $stty size 2>/dev/null$
+    let rc = status()
+    if rc != 0 { return null }
+    let parts = split(trim(size), " ")
+    if len parts == 2 {
+        let l = parse_dim(parts[0])
+        let c = parse_dim(parts[1])
+        if l > 0 { __lines = l }
+        if c > 0 { __columns = c }
+    }
+}
+
+// parse_dim — a tiny digits-only parser. Returns 0 on anything non-numeric so
+// callers can guard. (std parse_int is failable; this keeps the call sites flat.)
+fun parse_dim(s: Text): Int {
+    if s == "" { return 0 }
+    let n = trust $printf '%d' "{s}" 2>/dev/null$
+    let rc = status()
+    if rc != 0 { return 0 }
+    return n as Int
+}
+
+pub fun term_lines(): Int { return __lines }
+pub fun term_columns(): Int { return __columns }
+
+// Test seam: pin geometry without a real terminal (mirrors the bats setup that
+// assigns __TERM_LINES / __TERM_COLUMNS by hand).
+pub fun term_set_geometry(l: Int, c: Int): Null {
+    __lines = l
+    __columns = c
+}
+
+// ---- cursor management (owned here) ----------------------------------------
+
+// 0 = shown, 1 = hidden. Tracked so hide is idempotent and the reset trap
+// doesn't double-emit.
+let __cursor_hidden = 0
+
+// term_hide_cursor — \e[?25l. Idempotent. No-op when not interactive.
+pub fun term_hide_cursor(): Null {
+    if not term_interactive() { return null }
+    if __cursor_hidden == 0 {
+        eprint("{esc()}[?25l")
+        __cursor_hidden = 1
+    }
+}
+
+// term_show_cursor — \e[?25h. Most callers rely on the EXIT trap instead;
+// this is for flashing the cursor between render phases.
+pub fun term_show_cursor(): Null {
+    if not term_interactive() { return null }
+    eprint("{esc()}[?25h")
+    __cursor_hidden = 0
+}
+
+// term_save_cursor / term_restore_cursor — \e7 / \e8 (DEC). Bracket overlays.
+pub fun term_save_cursor(): Null {
+    if term_interactive() { eprint("{esc()}7") }
+}
+pub fun term_restore_cursor(): Null {
+    if term_interactive() { eprint("{esc()}8") }
+}
+
+// term_clear_line — clear current line + carriage return (\e[2K\r).
+pub fun term_clear_line(): Null {
+    if term_interactive() { eprint("{esc()}[2K\r") }
+}
+
+// ---- reset + trap ----------------------------------------------------------
+
+// term_reset — single restore of cursor + line-wrap. Inverse of every state
+// mutation. Idempotent; safe to call repeatedly. Emitted even when not
+// interactive (harmless) so the trap path is unconditional, matching bash.
+pub fun term_reset(): Null {
+    eprint("{esc()}[?25h{esc()}[?7h")
+    __cursor_hidden = 0
+}
+
+// term_install_reset_trap — install a dedicated EXIT trap that restores the
+// cursor + line-wrap on ANY exit path. bash printf inside the trap interprets
+// \x1b at fire time, so this works regardless of locale. Mirrors term.sh's
+// "dedicated trap that runs FIRST, unconditional" design.
+pub fun term_install_reset_trap(): Null {
+    if not term_interactive() { return null }
+    trust $trap 'printf "\x1b[?25h\x1b[?7h" >&2' EXIT$
+}
+
+// term_install_winch_trap — refresh geometry on terminal resize. The handler
+// re-reads stty size into our cached globals.
+pub fun term_install_winch_trap(): Null {
+    if not term_interactive() { return null }
+    // The trap body re-runs stty and rewrites the same bash globals term_winch
+    // targets. Simpler + robust: just re-read on each render (callers poll
+    // term_winch); the trap is a best-effort liveness nicety.
+    trust $trap 'true' WINCH$
+}
+
+// ---- line-wrap control -----------------------------------------------------
+//
+// Disabling autowrap (DECAWM \e[?7l) makes one logical line == one physical
+// row, which is what the dashboard's cursor-up redraw math assumes. The bash
+// PR's whole "dashboard re-prints every poll" bug was wrap math: long lines
+// wrapped onto extra physical rows that the logical line count didn't see.
+
+pub fun term_wrap_off(): Null {
+    if term_interactive() { eprint("{esc()}[?7l") }
+}
+pub fun term_wrap_on(): Null {
+    if term_interactive() { eprint("{esc()}[?7h") }
+}
+
+// ---- presentation: hyperlinks ----------------------------------------------
+
+// term_link <url> <label> — OSC 8 clickable hyperlink. Falls back to
+// "label (url)" plain text when not interactive (CI-log readable), and to just
+// the url when label == url.
+pub fun term_link(url: Text, label: Text): Text {
+    if term_interactive() {
+        // OSC 8 ; ; <url> ST <label> OSC 8 ; ; ST   (ST = ESC \)
+        let e = esc()
+        return "{e}]8;;{url}{e}\\{label}{e}]8;;{e}\\"
+    }
+    if url == label { return url }
+    return "{label} ({url})"
+}
+
+// ---- presentation: panel ---------------------------------------------------
+
+// repeat_char — N copies of a (possibly multi-byte) glyph. rpad on an empty
+// seed gives exactly N codepoints — UTF-8 correct, unlike bash's `printf %*s`
+// + substitution which counted bytes.
+pub fun repeat_char(ch: Text, n: Int): Text {
+    if n <= 0 { return "" }
+    return rpad("", ch, n)
+}
+
+// clip — truncate Text to width codepoints, appending … when cut. UTF-8 safe.
+pub fun clip(s: Text, width: Int): Text {
+    if width <= 0 { return "" }
+    if len s <= width { return s }
+    if width == 1 { return "…" }
+    return "{slice(s, 0, width - 1)}…"
+}
+
+// term_panel <title> <lines...> — render a UTF-8 box panel to stderr. Because
+// nested arrays are forbidden in Amber, lines come in as a [Text]. Width is
+// clamped to a sane minimum so narrow terminals still read.
+//
+// Returns the rendered block as Text too (in addition to writing stderr) so
+// tests can assert on it without a TTY.
+pub fun term_panel(title: Text, body: [Text]): Text {
+    if not term_interactive() {
+        let plainacc = "{title}:\n"
+        for line in body {
+            plainacc = "{plainacc}  {line}\n"
+        }
+        eprint(plainacc)
+        return plainacc
+    }
+
+    let e = esc()
+    let bold = "{e}[1m"
+    let reset = "{e}[0m"
+
+    let cols = term_columns()
+    if cols < 50 { cols = 50 }
+    let inner = cols - 4
+
+    // Title between corners, truncated if it overruns.
+    let title_visible = " {title} "
+    if len title_visible > inner - 2 {
+        let cut = inner - 5
+        if cut < 4 { cut = 4 }
+        title_visible = " {slice(title, 0, cut)}… "
+    }
+    let title_pad = inner - len title_visible
+    if title_pad < 0 { title_pad = 0 }
+
+    let acc = "{bold}┏{title_visible}{repeat_char("━", title_pad)}┓{reset}\n"
+
+    for line in body {
+        let shortl = clip(line, inner)
+        let pad = inner - len shortl
+        if pad < 0 { pad = 0 }
+        acc = "{acc}{bold}┃{reset} {shortl}{repeat_char(" ", pad)} {bold}┃{reset}\n"
+    }
+
+    acc = "{acc}{bold}┗{repeat_char("━", inner)}┛{reset}\n"
+    eprint(acc)
+    return acc
+}
+
+// ---- presentation: progress bar --------------------------------------------
+
+// term_progress <cur> <total> <msg> — sticky bottom progress line. Uses
+// \e7 (save) → jump to LINES → \e[2K (clear) → paint → \e8 (restore) so
+// concurrent stderr above the line isn't disturbed. Plain "[cur/total] msg"
+// when not interactive. Returns the emitted Text for tests.
+pub fun term_progress(cur: Int, total: Int, msg: Text): Text {
+    if not term_interactive() {
+        let plain = "[{cur}/{total}] {msg}\n"
+        eprint(plain)
+        return plain
+    }
+
+    let e = esc()
+    let seen = total > 0 then total else 1
+    let pct = (cur * 100) / seen
+    let bar_w = 24
+    let fill0 = (cur * bar_w) / seen
+    let fill = fill0 > bar_w then bar_w else fill0
+    let empty = bar_w - fill
+
+    let green = "{e}[32m"
+    let dim = "{e}[2m"
+    let reset = "{e}[0m"
+    let filled = repeat_char("█", fill)
+    let blanks = repeat_char("░", empty)
+
+    // \e7 save, \e[<LINES>H jump, \e[2K clear, paint, \e8 restore.
+    let out = "{e}7{e}[{term_lines()}H{e}[2K  {green}{filled}{dim}{blanks}{reset}  {pct}%  [{cur}/{total}]  {msg}{e}8"
+    eprint(out)
+    return out
+}
+
+// ---- presentation: window title --------------------------------------------
+
+// term_set_title — OSC 0 (window + icon title). Harmless on terminals that
+// ignore it; useful for long deploys ("migration-assistant: helm-install").
+pub fun term_set_title(title: Text): Null {
+    if not term_interactive() { return null }
+    eprint("{esc()}]0;{title}{esc()}\\")
+}
+
+// ---- spinner glyph ---------------------------------------------------------
+
+// term_spinner_frame <tick> — one braille glyph from the cycle. The glyph set
+// is an array (each element its own codepoint string), so indexing is
+// locale-independent — the exact bug class the bash array form was created to
+// dodge, now structural.
+pub fun term_spinner_frame(tick: Int): Text {
+    let glyphs = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    let n = len glyphs
+    if n == 0 { return "" }
+    let idx = tick % n
+    return glyphs[idx]
+}

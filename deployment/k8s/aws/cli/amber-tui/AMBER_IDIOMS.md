@@ -1,0 +1,78 @@
+# Amber 0.6.0-alpha porting cheat-sheet (compiler-verified)
+
+Authoritative for this port. The published docs LAG the alpha — every rule here was checked against the installed `amber 0.6.0-alpha` compiler and `amber grammar-ebnf`. When in doubt, `amber check file.ab`.
+
+## Toolchain
+- `amber check src/foo.ab` — type/parse check, no output. **Run this on every file you write.**
+- `amber build src/foo.ab build/foo.sh` — compile to Bash. Add `--target bash-3.2` for the macOS floor.
+- `amber test test/test_foo.ab` — run `test "..." { }` blocks. `amber test .` recurses.
+- `amber run f.ab` — compile + run.
+
+## Hard syntax rules (things that WILL bite you)
+- Comments are `//` — **NOT `#`**.
+- `let x = e` takes **NO type annotation**. `let x: Int = 5` is a PARSE ERROR. Types live only on `fun` signatures: `fun f(a: Int): Text { }`.
+- `const X = e` for immutables. `pub const` to export a constant. **`pub let` is illegal** ("Public variables must be constants").
+- Command args must be **quoted**: `echo "hi"`, not `echo hi` (bare word → parse error).
+- Inside `$ ... $` commands, `{expr}` is **Amber interpolation**. So you **cannot** write raw bash `${VAR:-default}` — the `{` is captured by Amber. Use `env_var_get("VAR")` from `std/env` instead.
+- A `$cmd$` that can fail MUST have a handler or be `trust`-ed, else: *"The command can potentially fail."* Use `trust $cmd$`, `$cmd$ failed { }`, `$cmd$?`, or `silent $cmd$ ...`.
+- **`silent` redirects fd 2** → compiles to `cmd 2>/dev/null`. NEVER use `silent` with `test -t 2` / anything that depends on fd 2: `silent $test -t 2$` becomes `test -t 2>/dev/null 2>&1` and the `2` operand is eaten. Use bare `trust $test -t 2$` then read `status`.
+
+## Control flow
+- `if c { } else { }`.
+- **if_chain replaces match/switch** (there is NO `match`/`switch` keyword):
+  ```
+  if {
+      s == "A" { return "x" }
+      s == "B" { return "y" }
+      else     { return "z" }
+  }
+  ```
+- Ternary: `let r = cond then a else b`.
+- Loops: `for x in arr { }`, `for i, v in arr { }`, `for i in 0..n { }` (excl) / `0..=n` (incl), `while c { }`, infinite `loop { }`. `break` / `continue`.
+
+## Builtins (keywords — do NOT import)
+`echo e` · `len e` (UTF-8 **codepoint** count — this is why we drop the byte/codepoint bash workarounds) · `lines e` (split Text on `\n` → `[Text]`) · `status` (last command exit code) · `exit e` · `sleep e` · `nameof` · `cd/cp/mv/rm/touch`.
+
+## Commands & capture
+- Capture stdout: `let out = trust $some cmd$` or `let out = $cmd$ failed { "" }`.
+- Exit code: run the command, then read `status` on the next line.
+- Modifiers stack: `silent trust sudo $cmd$`. `trust` = ignore failure; `silent`/`suppress` = mute output.
+- Handlers: `failed { }`, `failed(e) { }` (e = captured stderr), `succeeded { }`, `exited(code) { }`.
+
+## Colors / ESC bytes (TUI core)
+- Mint a real ESC once and cache it: `let E = trust $printf '\x1b'$`. (`\x1b` hex works; `\033` octal stays literal in raw commands.)
+- Build SGR from it: `let RED = "{E}[31m"`, `let RESET = "{E}[0m"`.
+- Emit to stderr (the `%s` keeps payload literal — ESC, `%`, quotes all pass through):
+  ```
+  pub fun eprintln(s: Text): Null { trust $printf '%s\n' "{s}" >&2$ }
+  ```
+- **Use `src/core.ab`'s `esc()`, `eprint()`, `eprintln()`, `term_interactive()` — do not re-mint.**
+
+## Arrays
+- `[1,2,3]`, append `xs += [4]`, index `xs[0]`. Empty typed: `let xs: [Int] = []` is illegal (no let-types) → use `let xs = [0]` then clear, or build via funcs.
+- **Nested arrays are FORBIDDEN** (*"Arrays cannot be nested due to the Bash limitations"*). Model tables/maps as **PARALLEL arrays** (keys[], vals[]) — exactly what the bash `__DASH_*_KEYS` / `_VALS` design did. Or pack a record into one `Text` with a `|` delimiter and `split` it.
+- Module-level `let` arrays/scalars **persist across function calls** (compiled to bash globals). Use this for in-memory stores (dashboard rows, seen-sets). `ref` params mutate the caller's variable.
+
+## stdlib (FREE functions — `lowercase(s)`, NOT `s.lower()`)
+- `import { ... } from "std/text"`: `lowercase uppercase capitalized reversed trim trim_left trim_right split split_lines split_words split_chars join slice(t,start,len) lpad(t,pad,len) rpad cpad zfill starts_with ends_with text_contains text_contains_any text_contains_all replace replace_one replace_regex match_regex match_regex_any count_chars count_lines count_words char_at`
+- `import { ... } from "std/array"`: `array_contains array_find array_find_all array_first array_last array_pop(ref) array_shift(ref) array_remove_at(ref) sort(ref) sorted math_sum`
+- `import { ... } from "std/env"`: **`printf(fmt, [args])`** `env_var_get env_var_set env_var_test env_var_unset is_command input_prompt input_confirm input_hidden kill(pid,sig) pgrep pkill`
+- `import { ... } from "std/fs"`: `file_read file_write file_append file_exists dir_create dir_exists file_glob symlink_create file_chmod`
+- `import { assert, assert_eq } from "std/test"` — assertions for `test` blocks.
+- `import { ... } from "std/math"`: `math_floor math_ceil math_round math_abs math_sum`
+- repeat-a-char (replaces bash `printf '%*s' n ''` + `//`): `rpad("", "█", n)` → n copies of `█`.
+
+## Testing discipline (this port is "all the way with testing")
+- Keep PURE formatters (`fmt_*` return Text) separate from impure emitters (write stderr). Assert on the returned Text — you can check it contains the ESC sequences, the right counts, truncation, padding, etc., without a TTY.
+- Importing a module does NOT run its `main` — so `test_foo.ab` can `import { ... } from "../src/foo.ab"` freely.
+- Mirror the original bats test names/intent so the behavior contract is preserved.
+- Every module ships `test/test_<module>.ab`. CI: `amber test test/`.
+
+## Project layout
+```
+amber-tui/
+  src/      *.ab modules (core.ab is the proven foundation)
+  test/     test_*.ab (amber test blocks)
+  build/    compiled *.sh (gitignored)
+  Makefile  build + test targets
+```

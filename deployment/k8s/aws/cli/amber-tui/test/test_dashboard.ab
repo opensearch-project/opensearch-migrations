@@ -1,0 +1,153 @@
+// test_dashboard.ab — coverage for src/dashboard.ab, mirroring
+// test_cfn_dashboard.bats (the generic dashboard + cfn classifier glue).
+//
+// dash_render RETURNS the rendered frame, so we assert on it with FORCE_TTY=1
+// (set by the runner) — no real terminal needed.
+
+import { assert, assert_eq } from "std/test"
+import { term_detect } from "../src/core.ab"
+import { term_set_geometry } from "../src/term.ab"
+import {
+    dash_init, dash_set_mode, dash_upsert, dash_clear, dash_count,
+    dash_classify, cfn_status_class, dash_count_class,
+    dash_fmt_elapsed, dash_render, dash_render_simple
+} from "../src/dashboard.ab"
+import { date_now } from "std/date"
+import { text_contains, slice } from "std/text"
+
+// helper: count non-overlapping occurrences of needle in s. Defined at top —
+// Amber requires helpers to precede the test blocks that call them.
+fun count_occurrences(s: Text, needle: Text): Int {
+    let nl = len needle
+    if nl == 0 { return 0 }
+    let total = len s
+    let n = 0
+    let i = 0
+    while i <= total - nl {
+        if slice(s, i, nl) == needle {
+            n += 1
+            i += nl
+        } else {
+            i += 1
+        }
+    }
+    return n
+}
+
+// ---- (1) parallel-array store round-trip -----------------------------------
+
+test "dash_upsert inserts and updates without growing rows on update" {
+    dash_init("Test")
+    dash_set_mode("cfn")
+    dash_upsert("Vpc8378EB38", "CREATE_IN_PROGRESS", "", "ts1")
+    dash_upsert("AppRegistry", "CREATE_COMPLETE", "", "ts2")
+    assert_eq(dash_count(), 2)
+    // Update existing — must NOT add a row.
+    dash_upsert("Vpc8378EB38", "CREATE_COMPLETE", "", "ts3")
+    assert_eq(dash_count(), 2)
+}
+
+// ---- (2) status classification ---------------------------------------------
+
+test "cfn_status_class classifies CFN states" {
+    assert_eq(cfn_status_class("CREATE_IN_PROGRESS"), "prog")
+    assert_eq(cfn_status_class("UPDATE_IN_PROGRESS"), "prog")
+    assert_eq(cfn_status_class("CREATE_COMPLETE"), "done")
+    assert_eq(cfn_status_class("UPDATE_COMPLETE"), "done")
+    assert_eq(cfn_status_class("CREATE_FAILED"), "fail")
+    assert_eq(cfn_status_class("ROLLBACK_IN_PROGRESS"), "fail")
+    assert_eq(cfn_status_class("UPDATE_ROLLBACK_COMPLETE"), "fail")
+    assert_eq(cfn_status_class("SOMETHING_NEW"), "other")
+}
+
+test "dash_classify honors mode (default = other)" {
+    dash_init("X")
+    assert_eq(dash_classify("CREATE_COMPLETE"), "other")
+    dash_set_mode("cfn")
+    assert_eq(dash_classify("CREATE_COMPLETE"), "done")
+}
+
+// ---- (3) elapsed formatter -------------------------------------------------
+
+test "dash_fmt_elapsed renders Mm SSs" {
+    let now = date_now()
+    let out = dash_fmt_elapsed(now - 75)
+    // 1m 15s, tolerate +/-1s drift
+    assert(out == "1m 15s" or out == "1m 16s")
+    let out2 = dash_fmt_elapsed(now - 5)
+    assert(out2 == "0m 05s" or out2 == "0m 06s")
+}
+
+// ---- (4) counts ------------------------------------------------------------
+
+test "dash_count_class tallies per class" {
+    dash_init("S")
+    dash_set_mode("cfn")
+    dash_upsert("A", "CREATE_COMPLETE", "", "t")
+    dash_upsert("B", "CREATE_IN_PROGRESS", "", "t")
+    dash_upsert("C", "CREATE_FAILED", "boom", "t")
+    assert_eq(dash_count_class("done"), 1)
+    assert_eq(dash_count_class("prog"), 1)
+    assert_eq(dash_count_class("fail"), 1)
+}
+
+// ---- (5) render: counts, bar, reason, empty case ---------------------------
+
+test "dash_render shows header, counts, failed reason" {
+    term_detect()
+    term_set_geometry(24, 80)
+    dash_init("MyStack us-east-1")
+    dash_set_mode("cfn")
+    dash_upsert("A", "CREATE_COMPLETE", "", "ts1")
+    dash_upsert("B", "CREATE_IN_PROGRESS", "", "ts2")
+    dash_upsert("C", "CREATE_FAILED", "Insufficient capacity", "ts3")
+    let out = dash_render_simple(date_now())
+    assert(text_contains(out, "MyStack us-east-1"))
+    assert(text_contains(out, "✓ 1"))
+    assert(text_contains(out, "↻ 1"))
+    assert(text_contains(out, "✗ 1"))
+    assert(text_contains(out, "total 3"))
+    assert(text_contains(out, "CREATE_FAILED"))
+    assert(text_contains(out, "Insufficient capacity"))
+}
+
+test "dash_render percentage = completed/total" {
+    term_detect()
+    term_set_geometry(24, 80)
+    dash_init("S")
+    dash_set_mode("cfn")
+    dash_upsert("A", "CREATE_COMPLETE", "", "t")
+    dash_upsert("B", "CREATE_COMPLETE", "", "t")
+    dash_upsert("C", "CREATE_COMPLETE", "", "t")
+    dash_upsert("D", "CREATE_IN_PROGRESS", "", "t")
+    let out = dash_render_simple(date_now())
+    assert(text_contains(out, "75%"))
+}
+
+test "dash_render handles empty resource set" {
+    term_detect()
+    term_set_geometry(24, 80)
+    dash_init("EmptyStack")
+    dash_set_mode("cfn")
+    let out = dash_render_simple(date_now())
+    assert(text_contains(out, "EmptyStack"))
+    assert(text_contains(out, "total 0"))
+}
+
+// ---- (6) row cap -----------------------------------------------------------
+
+test "dash_render caps rows at PANEL_MAX" {
+    term_detect()
+    term_set_geometry(24, 80)
+    dash_init("Big")
+    dash_set_mode("cfn")
+    // 14 in-progress rows; panel cap is 10.
+    for i in 0..14 {
+        dash_upsert("R{i}", "CREATE_IN_PROGRESS", "", "ts{i}")
+    }
+    let out = dash_render_simple(date_now())
+    // count ↻ glyphs in the rows region — should be exactly 10 (the cap),
+    // plus one in the counts line ("↻ 14"). So 11 total occurrences.
+    let n = count_occurrences(out, "↻")
+    assert_eq(n, 11)
+}

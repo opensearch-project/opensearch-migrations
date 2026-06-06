@@ -1,0 +1,88 @@
+// core.ab — terminal foundation: ESC minting, interactivity detection, stderr emit.
+//
+// This is the bedrock the rest of the TUI builds on. Two hard rules, inherited
+// straight from the bash term.sh contract:
+//
+//   1. EVERYTHING visual goes to STDERR. Stdout is reserved for return values.
+//      Emitters here only ever write fd 2.
+//   2. No-op gracefully when stderr is not a TTY (CI logs, pipes). Detection is
+//      `test -t 2` plus `TERM != dumb` — decided once, cached.
+//
+// Why a real ESC byte is minted at runtime rather than embedded: Amber's `\x1b`
+// hex escape only lowers to a real ESC through the `printf` builtin, while inside
+// a raw `$...$` command the bytes stay literal. `printf '\x1b'` via the shell is
+// locale- and target-shell-independent, so we mint once and interpolate the
+// resulting Text everywhere. (Verified against amber 0.6.0-alpha.)
+
+import { printf, env_var_get } from "std/env"
+
+// ---- interactivity (decided once, cached) ---------------------------------
+
+// -1 = undecided, 0 = not a tty, 1 = interactive. Module-level mutable state
+// persists across calls in the compiled output, so this memoizes cleanly.
+let __interactive = -1
+
+// term_detect — force a (re)detection. Honors MIGRATE_FORCE_TTY=1 so tests can
+// pin interactive mode without a real terminal, mirroring the bats setup that
+// sets __TERM_INTERACTIVE=1 by hand.
+pub fun term_detect(): Bool {
+    let forced = env_var_get("MIGRATE_FORCE_TTY") failed { "" }
+    if forced == "1" {
+        __interactive = 1
+        return true
+    }
+    if forced == "0" {
+        __interactive = 0
+        return false
+    }
+    // `test -t 2` succeeds only when fd 2 is a real terminal. TERM=dumb (CI
+    // runners, some IDE consoles) also disqualifies.
+    let term = env_var_get("TERM") failed { "dumb" }
+    if term == "" { term = "dumb" }
+    // status reflects the last command's exit code; capture it explicitly.
+    // `trust` because a non-tty fd 2 makes `test -t 2` exit 1 by design — that
+    // is the signal we want, not an error to handle. NB: do NOT add `silent` —
+    // it compiles to `test -t 2>/dev/null 2>&1`, where the redirect swallows
+    // the `2` operand and the check always fails. `test` writes nothing anyway.
+    trust $test -t 2$
+    let rc = status()
+    if {
+        rc != 0 { __interactive = 0 }
+        term == "dumb" { __interactive = 0 }
+        else { __interactive = 1 }
+    }
+    return __interactive == 1
+}
+
+// term_interactive — cached predicate. Detects on first use.
+pub fun term_interactive(): Bool {
+    if __interactive == -1 {
+        return term_detect()
+    }
+    return __interactive == 1
+}
+
+// ---- ESC byte + stderr emit -----------------------------------------------
+
+// Minted lazily and cached. Empty until first esc() call.
+let __esc = ""
+
+// esc — a single real ESC (0x1b) byte as Text. Cached after first mint.
+pub fun esc(): Text {
+    if __esc == "" {
+        __esc = trust $printf '\x1b'$
+    }
+    return __esc
+}
+
+// eprint — write Text to stderr with NO trailing newline. The `%s` keeps the
+// payload (which may contain ESC, %, quotes) literal — it is an argument, not
+// the format string.
+pub fun eprint(s: Text): Null {
+    trust $printf '%s' "{s}" >&2$
+}
+
+// eprintln — write Text to stderr followed by a newline.
+pub fun eprintln(s: Text): Null {
+    trust $printf '%s\n' "{s}" >&2$
+}

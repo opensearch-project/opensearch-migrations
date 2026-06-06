@@ -1,0 +1,184 @@
+// ui.ab — terminal UI primitives: color chrome, prompts, banners, tables.
+//
+// Port of bash lib/ui.sh. The cardinal rule survives intact:
+//
+//   *** ALL UI CHROME GOES TO STDERR. Stdout is reserved for return values. ***
+//
+// In bash this rule prevented captured-stdout pollution (mode=$(_select_mode)
+// breaking when chrome leaked into the value). In Amber, functions RETURN their
+// value directly, so the discipline is even cleaner: ui_prompt/ui_select return
+// a Text; chrome is emitted via eprint/eprintln (stderr); the returned value is
+// never contaminated. Tests assert on the returned value AND can capture stderr.
+//
+// Colors come from core.esc(). No tput, no ncurses — same rationale as term.ab.
+
+import { printf, env_var_get, input_prompt, input_confirm } from "std/env"
+import { lowercase, starts_with, slice, rpad } from "std/text"
+import { esc, eprint, eprintln, term_interactive } from "./core.ab"
+import { repeat_char, term_clear_line, term_spinner_frame } from "./term.ab"
+
+// ---- color accessors -------------------------------------------------------
+//
+// Thin wrappers so call sites read `ui_red()` not `"{esc()}[31m"`. Each is ""
+// when not interactive, so chrome silently de-colors in CI logs.
+
+fun sgr(code: Text): Text {
+    if not term_interactive() { return "" }
+    return "{esc()}{code}"
+}
+
+// parse_choice — digits-only → Int, else 0 (invalid). Defined high so its
+// caller (ui_select) sees it across an import boundary (Amber tree-shakes per
+// imported symbol, keeping only deps that textually precede the entry point).
+fun parse_choice(s: Text): Int {
+    if s == "" { return 0 }
+    let n = trust $printf '%d' "{s}" 2>/dev/null$
+    let rc = status()
+    if rc != 0 { return 0 }
+    return n as Int
+}
+pub fun ui_reset(): Text  { return sgr("[0m") }
+pub fun ui_red(): Text    { return sgr("[31m") }
+pub fun ui_green(): Text  { return sgr("[32m") }
+pub fun ui_yellow(): Text { return sgr("[33m") }
+pub fun ui_blue(): Text   { return sgr("[34m") }
+pub fun ui_cyan(): Text   { return sgr("[36m") }
+pub fun ui_dim_c(): Text  { return sgr("[2m") }
+pub fun ui_bold(): Text   { return sgr("[1m") }
+
+// ---- one-line chrome -------------------------------------------------------
+
+pub fun ui_info(msg: Text): Null {
+    eprintln("{ui_cyan()}ℹ{ui_reset()} {msg}")
+}
+pub fun ui_ok(msg: Text): Null {
+    eprintln("{ui_green()}✓{ui_reset()} {msg}")
+}
+pub fun ui_warn(msg: Text): Null {
+    eprintln("{ui_yellow()}!{ui_reset()} {msg}")
+}
+pub fun ui_err(msg: Text): Null {
+    eprintln("{ui_red()}✗{ui_reset()} {msg}")
+}
+pub fun ui_step(msg: Text): Null {
+    eprintln("\n{ui_bold()}▶ {msg}{ui_reset()}")
+}
+pub fun ui_dim(msg: Text): Null {
+    eprintln("{ui_dim_c()}{msg}{ui_reset()}")
+}
+
+// ui_banner <title> — boxed title with ━ rules above and below. Returns the
+// rendered block (also written to stderr) for testability.
+pub fun ui_banner(title: Text): Text {
+    let bar = repeat_char("━", (len title) + 4)
+    let bold = ui_bold()
+    let reset = ui_reset()
+    let block = "\n{bold}{bar}{reset}\n{bold}  {title}  {reset}\n{bold}{bar}{reset}\n\n"
+    eprint(block)
+    return block
+}
+
+// ---- prompts ---------------------------------------------------------------
+
+// ui_prompt <prompt> <default> → the answer (Text), printed to STDOUT only when
+// called bare (mirrors the bash $(...) capture pattern); chrome/question go to
+// stderr. Honors MIGRATE_NONINTERACTIVE=1 (skip read, return default) and empty
+// input → default.
+//
+// The bash version read from /dev/tty (so a curl-piped installer could still
+// ask). std `input_prompt` reads stdin; for the non-interactive + default
+// semantics we gate on the env flag first and only call input_prompt when
+// genuinely interactive.
+pub fun ui_prompt(prompt: Text, fallback: Text): Text {
+    let noninteractive = env_var_get("MIGRATE_NONINTERACTIVE") failed { "0" }
+    if noninteractive == "1" {
+        return fallback
+    }
+
+    // Render the question to stderr (NOT stdout — keeps captured value clean).
+    let bold = ui_bold()
+    let reset = ui_reset()
+    if fallback != "" {
+        eprint("{bold}{prompt}{reset} [{fallback}]: ")
+    } else {
+        eprint("{bold}{prompt}{reset}: ")
+    }
+
+    // input_prompt echoes its own newline; we already wrote the prompt text, so
+    // pass an empty prompt to it. trust: a closed stdin yields "" → default.
+    let answer = trust $IFS= read -r __ui_ans; printf '%s' "\$__ui_ans"$
+    if answer == "" {
+        return fallback
+    }
+    return answer
+}
+
+// ui_confirm <prompt> <default Y|N> → Bool (true = yes). Empty input → default.
+// First-letter, case-insensitive. Unknown input → conservative no.
+pub fun ui_confirm(prompt: Text, default_yn: Text): Bool {
+    let dflt = lowercase(default_yn)
+    let hint = ""
+    let canonical = ""
+    if dflt == "y" {
+        hint = "Y/n"
+        canonical = "y"
+    } else {
+        hint = "y/N"
+        canonical = "n"
+    }
+
+    let raw = ui_prompt(prompt, hint)
+    // If ui_prompt handed back the hint (user just hit Enter → default), or
+    // empty, collapse to the canonical default before matching.
+    let ans = raw
+    if raw == hint or raw == "" {
+        ans = canonical
+    }
+    let first = lowercase(slice(ans, 0, 1))
+    if first == "y" { return true }
+    return false
+}
+
+// ui_select <prompt> <options[]> → chosen option Text, or "" on invalid input.
+// Numbered list to stderr, default 1.
+pub fun ui_select(prompt: Text, options: [Text]): Text {
+    eprintln("{ui_bold()}{prompt}{ui_reset()}")
+    let i = 1
+    for opt in options {
+        eprintln("  [{i}] {opt}")
+        i += 1
+    }
+    let choice = ui_prompt("Select", "1")
+    let num = parse_choice(choice)
+    if num < 1 or num > len options {
+        ui_err("invalid selection: {choice}")
+        return ""
+    }
+    return options[num - 1]
+}
+
+// ui_table <header> <rows[]> — simple monospace table to stderr. Returns the
+// rendered block for tests.
+pub fun ui_table(header: Text, rows: [Text]): Text {
+    let block = "{ui_bold()}{header}{ui_reset()}\n"
+    for row in rows {
+        block = "{block}  {row}\n"
+    }
+    eprint(block)
+    return block
+}
+
+// ui_spinner_frame <tick> <msg> → a single \r-prefixed spinner line (Text). The
+// bash version forked a background animator with an interruptible read; Amber
+// 0.6 has no background jobs, so callers drive the frame from their own poll
+// loop (the dashboard/cfn loop already ticks once per poll) and emit this.
+pub fun ui_spinner_frame(tick: Int, msg: Text): Text {
+    let line = "\r{term_spinner_frame(tick)} {msg} "
+    if term_interactive() { eprint(line) }
+    return line
+}
+
+// ui_spinner_clear — erase the spinner line.
+pub fun ui_spinner_clear(): Null {
+    term_clear_line()
+}

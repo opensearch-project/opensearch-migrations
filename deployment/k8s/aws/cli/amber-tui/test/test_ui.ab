@@ -1,0 +1,49 @@
+// test_ui.ab — coverage for src/ui.ab. Mirrors test_ui_confirm.bats +
+// stdout-discipline intent. Asserts on returned Text and on the
+// non-interactive default behavior (MIGRATE_NONINTERACTIVE).
+
+import { assert, assert_eq } from "std/test"
+import { term_detect } from "../src/core.ab"
+import { ui_banner, ui_table, ui_confirm, ui_select, ui_prompt } from "../src/ui.ab"
+import { text_contains } from "std/text"
+import { env_var_set, env_var_unset } from "std/env"
+
+test "ui_banner draws rule bars around the title" {
+    term_detect()
+    let out = ui_banner("Migration Assistant")
+    assert(text_contains(out, "Migration Assistant"))
+    assert(text_contains(out, "━"))
+}
+
+test "ui_table renders header + rows" {
+    term_detect()
+    let out = ui_table("NAME STATUS", ["vpc ready", "eks pending"])
+    assert(text_contains(out, "NAME STATUS"))
+    assert(text_contains(out, "vpc ready"))
+    assert(text_contains(out, "eks pending"))
+}
+
+// ui_prompt / ui_confirm in non-interactive mode → default, no read.
+
+test "ui_prompt returns default under MIGRATE_NONINTERACTIVE" {
+    env_var_set("MIGRATE_NONINTERACTIVE", "1")
+    assert_eq(ui_prompt("Region", "us-east-1"), "us-east-1")
+    env_var_unset("MIGRATE_NONINTERACTIVE")
+}
+
+test "ui_confirm honors Y default under non-interactive" {
+    env_var_set("MIGRATE_NONINTERACTIVE", "1")
+    // default Y, no input → yes
+    assert(ui_confirm("Resume?", "Y"))
+    // default N, no input → no
+    assert(not ui_confirm("Wipe everything?", "N"))
+    env_var_unset("MIGRATE_NONINTERACTIVE")
+}
+
+test "ui_select returns the default (1) under non-interactive" {
+    env_var_set("MIGRATE_NONINTERACTIVE", "1")
+    term_detect()
+    let pick = ui_select("Choose mode", ["Manual", "Agent"])
+    assert_eq(pick, "Manual")
+    env_var_unset("MIGRATE_NONINTERACTIVE")
+}

@@ -1,0 +1,44 @@
+// test_timeline.ab — coverage for src/timeline.ab, mirroring test_timeline.bats.
+//
+// timeline_render returns its Text, so we assert on markers (● ◐ ○) and labels
+// directly. Runner sets MIGRATE_FORCE_TTY=1 for the colored path.
+
+import { assert, assert_eq } from "std/test"
+import { term_detect } from "../src/core.ab"
+import { timeline_render, timeline_phase_label, timeline_index_of } from "../src/timeline.ab"
+import { text_contains } from "std/text"
+
+test "timeline_phase_label maps known keys" {
+    assert_eq(timeline_phase_label("cfn_done"), "Deploy CloudFormation")
+    assert_eq(timeline_phase_label("helm_done"), "Install helm chart")
+}
+test "timeline_phase_label echoes unknown key" {
+    assert_eq(timeline_phase_label("totally_unknown"), "totally_unknown")
+}
+test "timeline_index_of finds phase position" {
+    assert_eq(timeline_index_of("discover"), 0)
+    assert(timeline_index_of("helm_done") > timeline_index_of("cfn_done"))
+    assert_eq(timeline_index_of("nope"), -1)
+}
+
+test "timeline_render marks done / last / pending" {
+    term_detect()
+    // last_step = cfn_done (index 2). Phases 0,1 are done (●); 2 is last (◐);
+    // 3+ are pending (○).
+    let out = timeline_render("cfn_done")
+    assert(text_contains(out, "●"))   // at least one done
+    assert(text_contains(out, "◐"))   // the 'last' marker
+    assert(text_contains(out, "○"))   // at least one pending
+    assert(text_contains(out, "Discover environment"))
+    assert(text_contains(out, "Deploy CloudFormation"))
+    assert(text_contains(out, "Install helm chart"))
+}
+
+test "timeline_render at first phase has no done markers before it" {
+    term_detect()
+    let out = timeline_render("discover")
+    // discover is index 0 → it is the 'last' (◐), everything after pending (○),
+    // nothing before → no ● done markers at all.
+    assert(text_contains(out, "◐"))
+    assert(not text_contains(out, "●"))
+}
