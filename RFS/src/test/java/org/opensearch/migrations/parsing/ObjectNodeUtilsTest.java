@@ -262,4 +262,74 @@ class ObjectNodeUtilsTest {
         assertThat(getFilters(body, "my_analyzer"), equalTo(List.of("lowercase", "stop")));
     }
 
+    @Test
+    void testRemoveFieldsByPath_flatKeyWithDots() {
+        // ES 7.x index-level knn settings serialize as flat keys with embedded dots.
+        // Walking by dot segments would miss them; the flat literal must be removed.
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode settings = mapper.createObjectNode();
+        settings.put("index.knn", "true");
+        settings.put("index.knn.algo_param.ef_construction", "128");
+        settings.put("index.knn.algo_param.m", "24");
+        settings.put("index.knn.space_type", "l2");
+        settings.put("number_of_shards", 2);
+
+        ObjectNodeUtils.removeFieldsByPath(settings, "index.knn.algo_param.ef_construction");
+        ObjectNodeUtils.removeFieldsByPath(settings, "index.knn.algo_param.m");
+        ObjectNodeUtils.removeFieldsByPath(settings, "index.knn.space_type");
+
+        assertThat(settings.has("index.knn.algo_param.ef_construction"), equalTo(false));
+        assertThat(settings.has("index.knn.algo_param.m"), equalTo(false));
+        assertThat(settings.has("index.knn.space_type"), equalTo(false));
+        // Untouched siblings should still be present
+        assertThat(settings.has("index.knn"), equalTo(true));
+        assertThat(settings.get("number_of_shards").asInt(), equalTo(2));
+    }
+
+    @Test
+    void testRemoveFieldsByPath_flatKeyPrefersFlatOverNestedShadow() {
+        // If both forms exist, the literal flat key wins (it's an exact match);
+        // a nested shadow at the same dotted path is left alone.
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode node = mapper.createObjectNode();
+        node.put("a.b", "flat");
+        ObjectNode aNested = mapper.createObjectNode();
+        aNested.put("b", "nested");
+        node.set("a", aNested);
+
+        ObjectNodeUtils.removeFieldsByPath(node, "a.b");
+
+        assertThat(node.has("a.b"), equalTo(false));
+        assertThat(node.get("a").get("b").asText(), equalTo("nested"));
+    }
+
+    @Test
+    void testRemoveFieldsByPath_nestedFallbackWhenNoFlatKey() {
+        // No flat key present — the nested walk still removes the leaf,
+        // preserving the existing behavior used by mapping-param strips.
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode mappings = mapper.createObjectNode();
+        ObjectNode props = mappings.putObject("properties");
+        ObjectNode field = props.putObject("foo");
+        field.put("type", "text");
+        field.put("doc_values", true);
+
+        ObjectNodeUtils.removeFieldsByPath(mappings, "properties.foo.doc_values");
+
+        assertThat(mappings.get("properties").get("foo").has("doc_values"), equalTo(false));
+        assertThat(mappings.get("properties").get("foo").get("type").asText(), equalTo("text"));
+    }
+
+    @Test
+    void testRemoveFieldsByPath_nullPath_isNoOp() {
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode node = mapper.createObjectNode();
+        node.put("keep", 1);
+
+        ObjectNodeUtils.removeFieldsByPath(node, null);
+        ObjectNodeUtils.removeFieldsByPath(node, "");
+
+        assertThat(node.get("keep").asInt(), equalTo(1));
+    }
+
 }

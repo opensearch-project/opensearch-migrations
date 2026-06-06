@@ -19,7 +19,7 @@ import {
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
 import {
-    ARGO_PROXY_WORKFLOW_OPTION_KEYS,
+    ARGO_PROXY_CR_OMITTED_KEYS,
     ARGO_REPLAYER_OPTIONS,
     ARGO_REPLAYER_WORKFLOW_OPTION_KEYS,
     DEFAULT_RESOURCES,
@@ -277,7 +277,7 @@ function makeCaptureProxyManifest(
         },
         spec: makeDirectTypeProxy(expr.mergeDicts(
             workflowSpecFields,
-            expr.omit(proxyOpts, ...ARGO_PROXY_WORKFLOW_OPTION_KEYS)
+            expr.omit(proxyOpts, ...ARGO_PROXY_CR_OMITTED_KEYS)
         )),
     };
 }

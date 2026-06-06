@@ -1,0 +1,72 @@
+name: Deploy schema viewer to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'schema-viewer/**'
+      - '.github/workflows/deploy-schema-viewer.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Fetch schemas from GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p schema-viewer/schemas
+
+          # Fetch all releases that include the schema asset (newest first)
+          gh api repos/opensearch-project/opensearch-migrations/releases \
+            --paginate \
+            --jq '.[] | select(.assets | map(.name) | contains(["workflowMigration.schema.json"]))
+                      | .tag_name + " " + (.assets[] | select(.name == "workflowMigration.schema.json") | .browser_download_url)' \
+            > /tmp/schema-releases.txt
+
+          declare -a versions
+          while IFS=' ' read -r tag url; do
+            echo "Downloading schema for $tag..."
+            curl -fsSL "$url" -o "schema-viewer/schemas/${tag}.json"
+            versions+=("$tag")
+          done < /tmp/schema-releases.txt
+
+          node - "${versions[@]}" <<'EOF'
+          const fs = require('fs')
+          const versions = process.argv.slice(2)
+          if (versions.length === 0) { console.error('No schema versions found'); process.exit(1) }
+          const meta = { latest: versions[0], versions }
+          fs.writeFileSync('schema-viewer/schemas/versions.json', JSON.stringify(meta, null, 2) + '\n')
+          console.log(`Generated versions.json: latest=${meta.latest}, count=${versions.length}`)
+          EOF
+
+      - name: Configure Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
+        with:
+          path: schema-viewer
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5

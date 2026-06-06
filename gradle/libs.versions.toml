@@ -1,7 +1,7 @@
 [versions]
-aws-crt = "0.45.3"
-aws-msk-iam-auth = "2.3.6"
-aws-sdk = "2.44.4"
+aws-crt = "0.46.1"
+aws-msk-iam-auth = "2.3.7"
+aws-sdk = "2.46.3"
 bouncycastle = "1.84"
 commons-collections = "4.5.0"
 commons-compress = "1.26.2"
@@ -14,14 +14,14 @@ groovy = "3.0.25"
 guava = "33.6.0-jre"
 hamcrest = "3.0"
 httpclient5 = "5.6.1"
-jackson = "2.21.3"
-jackson-annotations = "2.21"
+jackson = "2.22.0"
+jackson-annotations = "2.22"
 jcommander = "2.0"
 jmespath-core = "0.6.0"
 jmeter = "5.6.3"
 jmh-core = "1.37"
 jolt-core = "0.1.8"
-json = "20251224"
+json = "20260522"
 junit-platform = "1.14.0"
 junit-jupiter = "5.14.0"
 kafka-clients = "4.2.0"
@@ -37,16 +37,16 @@ netty = "4.1.128.Final"
 opensearch-testcontainers = "2.0.1"
 opentelemetry = "1.62.0"
 opentelemetry-semconv = "1.23.1-alpha"
-protobuf = "4.34.1"
+protobuf = "4.35.0"
 reactor-core = "3.8.5"
 reactor-netty = "1.2.11"
 reactor-test = "3.7.12"
 semver4j = "6.0.0"
-slf4j = "2.0.17"
+slf4j = "2.0.18"
 testcontainers = "2.0.5"
 testcontainers-modules = "1.21.4"
 toxiproxy = "2.1.11"
-zstd-jni = "1.5.7-8"
+zstd-jni = "1.5.7-10"
 
 [libraries]
 aws-arns = { module = "software.amazon.awssdk:arns", version.ref = "aws-sdk" }
@@ -189,12 +189,12 @@ boms-opentelemetry    = { module = "io.opentelemetry:opentelemetry-bom", version
 transitive-apache-httpclient = { module = "org.apache.httpcomponents:httpclient",    version = "4.5.14"   }
 transitive-commons-lang3     = { module = "org.apache.commons:commons-lang3",        version = "3.20.0"   }
 transitive-commons-net       = { module = "commons-net:commons-net",                 version = "3.13.0"   }
-transitive-dnsjava           = { module = "dnsjava:dnsjava",                         version = "3.6.4"    }
+transitive-dnsjava           = { module = "dnsjava:dnsjava",                         version = "3.6.5"    }
 transitive-jersey-common     = { module = "org.glassfish.jersey.core:jersey-common", version = "4.0.2"   }
 transitive-json-path         = { module = "com.jayway.jsonpath:json-path",           version = "3.0.0"    }
 transitive-json-smart        = { module = "net.minidev:json-smart",                  version = "2.6.0"    }
 transitive-jsoup             = { module = "org.jsoup:jsoup",                         version = "1.22.2"   }
 transitive-snappy-java       = { module = "org.xerial.snappy:snappy-java",           version = "1.1.10.8" }
-transitive-tika-core         = { module = "org.apache.tika:tika-core",               version = "3.3.0"    }
+transitive-tika-core         = { module = "org.apache.tika:tika-core",               version = "3.3.1"    }
 transitive-xalan             = { module = "xalan:xalan",                             version = "2.7.3"    }
 transitive-xstream           = { module = "com.thoughtworks.xstream:xstream",        version = "1.4.21"   }
