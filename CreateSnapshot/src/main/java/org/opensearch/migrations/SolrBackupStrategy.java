@@ -139,7 +139,7 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
     private void runCloudBackup(String solrUrl, String backupLocation, RepoUri parsedUri) {
         log.info("Detected SolrCloud — using Collections API backup");
         switch (parsedUri) {
-            case RepoUri.S3RepoUri s -> ensureS3LocationExists(s.rawUri(), args.snapshotName, args.s3Region, args.s3Endpoint);
+            case RepoUri.S3RepoUri s -> ensureS3LocationExists(s.rawUri(), args.snapshotName, args.s3Region, args.endpoint);
             case RepoUri.FileRepoUri f -> ensureFileSystemLocationExists(f.path(), args.snapshotName);
             case RepoUri.GcsRepoUri g -> {} // GCS doesn't require pre-created directories
         }

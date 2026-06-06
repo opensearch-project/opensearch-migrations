@@ -74,13 +74,14 @@ public class ClusterReaderExtractor {
             case RepoUri.GcsRepoUri g -> GcsRepo.create(
                 Path.of(arguments.localDir),
                 new GcsUri(g.rawUri()),
+                arguments.endpoint,
                 fileFinder
             );
             case RepoUri.S3RepoUri s -> S3Repo.create(
                 Path.of(arguments.localDir),
                 s.s3Uri(),
                 arguments.s3Region,
-                Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null),
+                Optional.ofNullable(arguments.endpoint).map(URI::create).orElse(null),
                 fileFinder
             );
             case null -> throw new ParameterException("Unable to find valid resource provider");
@@ -127,7 +128,7 @@ public class ClusterReaderExtractor {
             Path.of(arguments.localDir),
             new S3Uri(backupS3Uri),
             arguments.s3Region,
-            Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null)
+            Optional.ofNullable(arguments.endpoint).map(URI::create).orElse(null)
         );
     }
 

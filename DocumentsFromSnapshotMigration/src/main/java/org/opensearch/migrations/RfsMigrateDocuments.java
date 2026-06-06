@@ -172,10 +172,9 @@ public class RfsMigrateDocuments {
         public String s3Region = null;
 
         @Parameter(required = false,
-            names = { "--s3-endpoint", "--s3Endpoint" },
-            description = ("The endpoint URL to use for S3 calls.  " +
-                "For use when the default AWS ones won't work for a particular context."))
-        public String s3Endpoint = null;
+            names = { "--endpoint", "--s3-endpoint", "--s3Endpoint" },
+            description = ("Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)"))
+        public String endpoint = null;
 
         @Parameter(required = false,
             names = { "--lucene-dir", "--luceneDir" },
@@ -670,12 +669,13 @@ public class RfsMigrateDocuments {
                 case RepoUri.GcsRepoUri g -> GcsRepo.create(
                     Paths.get(arguments.localDir),
                     new GcsUri(g.rawUri()),
+                    arguments.endpoint,
                     finder);
                 case RepoUri.S3RepoUri s -> S3Repo.create(
                     Paths.get(arguments.localDir),
                     s.s3Uri(),
                     arguments.s3Region,
-                    Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null),
+                    Optional.ofNullable(arguments.endpoint).map(URI::create).orElse(null),
                     finder);
             };
 
@@ -1101,7 +1101,7 @@ public class RfsMigrateDocuments {
                         Paths.get(arguments.localDir),
                         new S3Uri(backupS3Uri),
                         arguments.s3Region,
-                        arguments.s3Endpoint != null ? URI.create(arguments.s3Endpoint) : null
+                        arguments.endpoint != null ? URI.create(arguments.endpoint) : null
                     );
                     backupDir = s3Repo.getRepoRootDir();
                 }

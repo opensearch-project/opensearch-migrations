@@ -179,7 +179,7 @@ public class TestCreateSnapshotSolrS3 {
         args.snapshotRepoName = "s3";
         args.repoUri = s3RepoUri;
         args.s3Region = REGION;
-        args.s3Endpoint = localStackEndpoint();
+        args.endpoint = localStackEndpoint();
         args.noWait = false;
         return args;
     }
@@ -742,7 +742,7 @@ public class TestCreateSnapshotSolrS3 {
         String endpoint = localStackEndpoint();
         int schemeIdx = endpoint.indexOf("://");
         Assertions.assertTrue(schemeIdx > 0, "LocalStack endpoint should have a scheme");
-        args.s3Endpoint = endpoint.substring(schemeIdx + 3);
+        args.endpoint = endpoint.substring(schemeIdx + 3);
 
         var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
         new CreateSnapshot(args, snapshotContext.createSnapshotCreateContext()).run();

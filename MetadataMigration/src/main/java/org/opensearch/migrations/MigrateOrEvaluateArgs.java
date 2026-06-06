@@ -40,10 +40,9 @@ public class MigrateOrEvaluateArgs {
     public String s3Region;
 
     @Parameter(required = false,
-            names = { "--s3-endpoint", "--s3Endpoint" },
-            description = ("The endpoint URL to use for S3 calls.  " +
-                    "For use when the default AWS ones won't work for a particular context."))
-    public String s3Endpoint = null;
+            names = { "--endpoint", "--s3-endpoint", "--s3Endpoint" },
+            description = ("Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)"))
+    public String endpoint = null;
 
     @ParametersDelegate
     public ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();

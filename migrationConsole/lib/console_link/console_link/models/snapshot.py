@@ -216,7 +216,7 @@ class S3Snapshot(Snapshot):
         command_args["--repo-uri"] = self.s3_repo_uri
         command_args["--s3-region"] = self.s3_region
         if self.s3_endpoint:
-            command_args["--s3-endpoint"] = self.s3_endpoint
+            command_args["--endpoint"] = self.s3_endpoint
 
         if self._is_solr_source():
             collections = self._get_solr_collections()

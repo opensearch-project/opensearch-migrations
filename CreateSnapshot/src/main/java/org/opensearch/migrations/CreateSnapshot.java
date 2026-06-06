@@ -58,10 +58,10 @@ public class CreateSnapshot {
         public String s3Region;
 
         @Parameter(
-                names = {"--s3-endpoint" },
+                names = {"--endpoint", "--s3-endpoint" },
                 required = false,
-                description = "The S3 endpoint setting to specify when creating a snapshot repository")
-        public String s3Endpoint;
+                description = "Custom endpoint for the repository service (e.g. LocalStack for S3, fake-gcs-server for GCS)")
+        public String endpoint;
 
         @ParametersDelegate
         public ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();
