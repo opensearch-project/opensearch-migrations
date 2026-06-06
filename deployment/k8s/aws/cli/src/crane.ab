@@ -242,7 +242,13 @@ fun cli_root(): Text {
 // in one raw escape (sourcing arbitrary bash + reading a dynamic var name has no
 // stdlib equivalent), then filter/first-field in pure Amber below.
 fun source_images(manifest_path: Text): Text {
-    return trust $( . "{manifest_path}"; printf '%s\n' "\$IMAGES" )$
+    // NB: do NOT wrap in a subshell `$( … )` — Amber compiles a command whose
+    // first token is `(` into bash ARITHMETIC `$(( … ))` (observed: 'arithmetic
+    // syntax error: operand expected' on the EKS agent, breaking image mirroring).
+    // Amber already captures the command's stdout into the return value, so we
+    // just source + printf directly; the source happens inside Amber's own
+    // capture context, so $IMAGES doesn't leak into the caller's state.
+    return trust $. "{manifest_path}"; printf '%s\n' "\$IMAGES"$
 }
 
 // first_field <line> — the first whitespace-delimited token, or "". Replaces the

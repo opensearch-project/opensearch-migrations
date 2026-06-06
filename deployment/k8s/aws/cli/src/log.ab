@@ -348,22 +348,23 @@ pub fun log_stream(prefix: Text, cmd: Text): Int {
     let tmp = trust $mktemp 2>/dev/null$
     if tmp == "" {
         // No tempfile available — degrade to running the command with no capture
-        // rather than aborting. Rare (mktemp essentially always works). Subshell
-        // so the command's own `exit` can't terminate us (see below).
-        trust $( eval "{cmd}" )$
+        // rather than aborting. Rare (mktemp essentially always works). Run via
+        // `bash -c` (a SEPARATE process, like bash's `"$@"`) so the command's own
+        // `exit` can't terminate the CLI. NB: do NOT use `( eval … )` — Amber
+        // compiles a command starting with `(` into arithmetic `$(( … ))`.
+        trust $bash -c "{cmd}"$
         return status()
     }
 
-    // Run the command in a SUBSHELL, merging stdout+stderr into the temp file.
-    // The subshell is load-bearing: bash log_stream ran the child as `"$@"` (a
-    // separate process), so a command that ends in `exit N` set N as its status
-    // WITHOUT killing the parent. We run via `eval` (the command is one Text, not
-    // argv), and a bare `eval "…; exit 7"` runs in the CURRENT shell — its `exit`
-    // would terminate the whole CLI/test process. Wrapping in `( … )` confines the
-    // exit to the subshell, whose status `status()` then recovers — faithfully
-    // reproducing bash's `"$@" >fifo 2>&1; rc=$?`. `trust` because a non-zero exit
-    // is the DATA we propagate, not an error to handle.
-    trust $( eval "{cmd}" ) > "{tmp}" 2>&1$
+    // Run the command in a SEPARATE process, merging stdout+stderr into the temp
+    // file. The separate process is load-bearing: bash log_stream ran the child
+    // as `"$@"`, so a command ending in `exit N` set N as its status WITHOUT
+    // killing the parent. `bash -c "<cmd>"` gives exactly that — its `exit` is
+    // confined to the child, whose status `status()` recovers, reproducing bash's
+    // `"$@" >fifo 2>&1; rc=$?`. NB: do NOT use `( eval … )` — Amber compiles a
+    // command whose first token is `(` into arithmetic `$(( … ))` ('operand
+    // expected' error). `trust` because a non-zero exit is the DATA we propagate.
+    trust $bash -c "{cmd}" > "{tmp}" 2>&1$
     let rc = status()
 
     // Read the whole capture, then tee each line: file form via file_append, and
