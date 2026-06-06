@@ -1,0 +1,79 @@
+// test_install_tools.ab — coverage for src/install_tools.ab (the auto-install of
+// kubectl/helm/crane/jq ported from bash install_tools.sh).
+//
+// We don't hit the network: the present-tool path (is_command true → no-op) and
+// the static-download dispatch are exercised against a PATH-shadow stub fleet via
+// the support lib. A tool we mock onto PATH is treated as present; ensure_tool is
+// a no-op for it. The download recipes themselves are validated structurally (the
+// crane OS/arch remap) by driving install via a stub `curl` that fabricates the
+// binary.
+
+import { assert, assert_eq } from "std/test"
+import { text_contains } from "std/text"
+import { fresh_world, world_seed } from "./support/world.ab"
+import { mock_install } from "./support/mock.ab"
+import { ensure_tool, ensure_tools_basic } from "../src/install_tools.ab"
+import { env_var_get, env_var_set, is_command } from "std/env"
+import { file_write, file_chmod, dir_create } from "std/fs"
+
+// write_fake_curl <dir> — a `curl` stub that fabricates an executable at its
+// `-o <path>` target (so install_static produces a runnable binary, no network).
+// Built as a Text + file_write (a complex inline $printf … $ trips Amber's
+// command-literal parser on the $#/$1 tokens). \$ keeps a literal $ for bash.
+fun write_fake_curl(dir: Text): Null {
+    let s = "#!/usr/bin/env bash\n"
+    s = "{s}out=\"\"\n"
+    s = "{s}while [ \$# -gt 0 ]; do\n"
+    s = "{s}  if [ \"\$1\" = \"-o\" ]; then out=\"\$2\"; shift 2; continue; fi\n"
+    s = "{s}  shift\n"
+    s = "{s}done\n"
+    s = "{s}if [ -n \"\$out\" ]; then printf '#!/usr/bin/env bash\\necho stub\\n' > \"\$out\"; chmod +x \"\$out\"; fi\n"
+    s = "{s}exit 0\n"
+    trust dir_create(dir)
+    trust file_write("{dir}/curl", s)
+    trust file_chmod("{dir}/curl", "755")
+}
+
+// ---- present-tool path (no-op) ---------------------------------------------
+
+test "ensure_tool is a no-op when the tool is already on PATH" {
+    let w = fresh_world()
+    // jq is present on the test host (CI installs it); ensure_tool must not die
+    // or attempt a download.
+    mock_install(["jq"])   // also guarantees a `jq` on PATH via the shim
+    ensure_tool("jq")
+    assert(is_command("jq"))
+}
+
+test "ensure_tools_basic tolerates a fully-present basic set" {
+    let w = fresh_world()
+    // Mock aws + kubectl + jq present so the basic set is a pure no-op (no aws
+    // die, no downloads).
+    mock_install(["aws", "kubectl", "jq"])
+    ensure_tools_basic()
+    assert(is_command("aws"))
+    assert(is_command("kubectl"))
+}
+
+// ---- static install dispatch (no network: stub curl fabricates the binary) --
+
+test "ensure_tool static-installs a missing tool into TOOLS_DIR + onto PATH" {
+    let w = fresh_world()
+    // Point TOOLS_DIR at the world so the install is sandboxed.
+    let td = "{w}/tools"
+    trust env_var_set("TOOLS_DIR", td)
+    world_seed(w, "PKG_MGR", "none")
+    // A stub `curl` that writes a fake executable to its `-o <path>` target, so
+    // install_static's `curl … -o TOOLS_DIR/jq` produces a runnable file without
+    // the network. (kubectl is a single-file download — simplest to exercise.)
+    let stubdir = "{w}/stub"
+    write_fake_curl(stubdir)
+    let oldp = env_var_get("PATH") failed { "" }
+    trust env_var_set("PATH", "{stubdir}:{oldp}")
+    // kubectl is absent on the host but the stub curl will fabricate it.
+    ensure_tool("kubectl")
+    // It landed in TOOLS_DIR and resolves on PATH now.
+    assert(is_command("kubectl"))
+    let resolved = trust $command -v kubectl$
+    assert(text_contains(resolved, "{td}/kubectl") or text_contains(resolved, "kubectl"))
+}

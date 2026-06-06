@@ -1,0 +1,221 @@
+// install_tools.ab — auto-install missing CLIs (kubectl, helm, crane, jq).
+//
+// Port of bash lib/install_tools.sh. The deploy spine needs aws/kubectl/jq
+// (basic) and helm/crane (extended) on PATH. On a fresh CI agent (and many
+// operator machines) crane especially is absent — it has no apt/dnf package, so
+// the bash version fell back to a SHA-pinned static binary. The Amber port keeps
+// that static-binary path as the primary mechanism (no sudo, works headless) and
+// adds a brew fast-path on macOS.
+//
+// Safety rails carried over:
+//   * Already-present tools are left alone (is_command check).
+//   * Static binaries land in $TOOLS_DIR and are added to PATH for THIS process
+//     tree only (env_var_set PATH) — exactly what the bash export did.
+//   * aws is NOT static-installable (multi-step v2 installer); a missing aws is a
+//     hard, actionable die — matching bash _dl_aws.
+//
+// PUBLIC CONTRACT: ensure_tools_basic (aws/kubectl/jq) + ensure_tools_extended
+// (helm/crane), called by resume.ab's manual_path before the deploy steps that
+// need them. arch_os() (common.ab) gives os/arch; that's the only cross-module dep
+// beyond ui/log/state.
+
+import { env_var_get, env_var_set, is_command } from "std/env"
+import { text_contains, slice } from "std/text"
+import { eprintln } from "./core.ab"
+import { ui_info, ui_warn, ui_ok, ui_step } from "./ui.ab"
+import { log_info } from "./log.ab"
+import { die, arch_os } from "./common.ab"
+import { state_get } from "./state.ab"
+
+// ---- helpers FIRST (define-before-use across the import boundary) -----------
+
+// tools_dir — where static binaries are dropped (+ prepended to PATH). Mirrors
+// bash TOOLS_DIR default; honors an explicit override.
+fun tools_dir(): Text {
+    let override = env_var_get("TOOLS_DIR") failed { "" }
+    if override != "" { return override }
+    let home = env_var_get("HOME") failed { "" }
+    return "{home}/.opensearch-migrate/cli/tools"
+}
+
+// os_part / arch_part — split arch_os()'s "os/arch" (e.g. "linux/amd64").
+fun os_part(): Text {
+    let oa = arch_os()
+    let slash = index_of(oa, "/")
+    if slash < 0 { return oa }
+    return slice(oa, 0, slash)
+}
+fun arch_part(): Text {
+    let oa = arch_os()
+    let slash = index_of(oa, "/")
+    if slash < 0 { return "" }
+    return slice(oa, slash + 1, (len oa) - slash - 1)
+}
+fun index_of(s: Text, needle: Text): Int {
+    let total = len s
+    for i in 0..total {
+        if slice(s, i, 1) == needle { return i }
+    }
+    return -1
+}
+
+// add_tools_dir_to_path — prepend TOOLS_DIR to PATH for this process tree, once.
+fun add_tools_dir_to_path(): Null {
+    let td = tools_dir()
+    let old = env_var_get("PATH") failed { "" }
+    if not text_contains(old, "{td}:") {
+        trust env_var_set("PATH", "{td}:{old}")
+    }
+}
+
+// ---- static-binary downloads ------------------------------------------------
+//
+// Each returns true on a binary that lands executable in TOOLS_DIR. Pinned URLs
+// mirror the bash recipes (bumped in lockstep there). crane's release uses
+// capitalized OS + x86_64/arm64 naming, hence the remap.
+
+fun dl_kubectl(td: Text, os: Text, arch: Text): Bool {
+    let url = "https://dl.k8s.io/release/v1.30.0/bin/{os}/{arch}/kubectl"
+    trust $curl -fsSL "{url}" -o "{td}/kubectl"$ failed { return false }
+    trust $chmod +x "{td}/kubectl"$
+    return true
+}
+
+fun dl_helm(td: Text, os: Text, arch: Text): Bool {
+    let url = "https://get.helm.sh/helm-v3.15.0-{os}-{arch}.tar.gz"
+    let tmp = trust $mktemp -d$
+    let ok = trust $curl -fsSL "{url}" -o "{tmp}/helm.tgz"$ failed { "FAIL" }
+    if ok == "FAIL" { trust $rm -rf "{tmp}"$ return false }
+    trust $tar -xzf "{tmp}/helm.tgz" -C "{tmp}"$ failed { }
+    trust $mv "{tmp}/{os}-{arch}/helm" "{td}/helm"$ failed { trust $rm -rf "{tmp}"$ return false }
+    trust $chmod +x "{td}/helm"$
+    trust $rm -rf "{tmp}"$
+    return true
+}
+
+fun dl_crane(td: Text, os: Text, arch: Text): Bool {
+    // crane's release artifacts use Capitalized OS + x86_64/arm64.
+    let cap_os = ""
+    if {
+        os == "linux"  { cap_os = "Linux" }
+        os == "darwin" { cap_os = "Darwin" }
+        else           { cap_os = os }
+    }
+    let cap_arch = ""
+    if {
+        arch == "amd64" { cap_arch = "x86_64" }
+        arch == "arm64" { cap_arch = "arm64" }
+        else            { cap_arch = arch }
+    }
+    let url = "https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_{cap_os}_{cap_arch}.tar.gz"
+    let tmp = trust $mktemp -d$
+    let ok = trust $curl -fsSL "{url}" -o "{tmp}/crane.tgz"$ failed { "FAIL" }
+    if ok == "FAIL" { trust $rm -rf "{tmp}"$ return false }
+    trust $tar -xzf "{tmp}/crane.tgz" -C "{tmp}" crane$ failed { trust $rm -rf "{tmp}"$ return false }
+    trust $mv "{tmp}/crane" "{td}/crane"$ failed { trust $rm -rf "{tmp}"$ return false }
+    trust $chmod +x "{td}/crane"$
+    trust $rm -rf "{tmp}"$
+    return true
+}
+
+fun dl_jq(td: Text, os: Text, arch: Text): Bool {
+    let key = "{os}/{arch}"
+    let url = ""
+    if {
+        key == "linux/amd64"  { url = "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64" }
+        key == "linux/arm64"  { url = "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-arm64" }
+        key == "darwin/amd64" { url = "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-macos-amd64" }
+        key == "darwin/arm64" { url = "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-macos-arm64" }
+        else                  { return false }
+    }
+    trust $curl -fsSL "{url}" -o "{td}/jq"$ failed { return false }
+    trust $chmod +x "{td}/jq"$
+    return true
+}
+
+// install_static <name> — download a static release into TOOLS_DIR + add to PATH.
+fun install_static(name: Text): Bool {
+    let td = tools_dir()
+    trust $mkdir -p "{td}"$
+    let os = os_part()
+    let arch = arch_part()
+    ui_info("Downloading {name} ({os}/{arch}) into {td} …")
+    let ok = false
+    if {
+        name == "kubectl" { ok = dl_kubectl(td, os, arch) }
+        name == "helm"    { ok = dl_helm(td, os, arch) }
+        name == "crane"   { ok = dl_crane(td, os, arch) }
+        name == "jq"      { ok = dl_jq(td, os, arch) }
+        else              { ok = false }
+    }
+    if not ok { return false }
+    add_tools_dir_to_path()
+    return is_command(name)
+}
+
+// ---- brew fast-path (macOS) -------------------------------------------------
+
+fun brew_pkg(name: Text): Text {
+    if name == "aws" { return "awscli" }
+    return name
+}
+
+fun install_with_brew(name: Text): Bool {
+    let pkg = brew_pkg(name)
+    ui_info("About to run:")
+    eprintln("    brew install {pkg}")
+    trust $brew install "{pkg}"$ failed { return false }
+    return is_command(name)
+}
+
+// ---- ensure_tool ------------------------------------------------------------
+
+// ensure_tool <name> — bring <name> onto PATH; no-op if already there. brew on
+// macOS, else static binary. aws is special: no static recipe → actionable die.
+pub fun ensure_tool(name: Text): Null {
+    if is_command(name) {
+        log_info("tool present: {name}")
+        return null
+    }
+    ui_warn("missing tool: {name}")
+
+    if name == "aws" {
+        // aws CLI v2 has no clean static drop-in (multi-step installer); match
+        // bash _dl_aws — tell the operator how to install it, then die.
+        ui_warn("aws CLI must be installed before running migration-assistant:")
+        if os_part() == "darwin" {
+            eprintln("    brew install awscli")
+        } else {
+            eprintln("    curl 'https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip' -o awscliv2.zip && unzip awscliv2.zip && sudo ./aws/install")
+        }
+        die("aws CLI not found on PATH")
+    }
+
+    let pm = state_get("PKG_MGR", "none")
+    let done = false
+    if pm == "brew" {
+        done = install_with_brew(name)
+    }
+    if not done {
+        // Static binary is the headless-safe primary path (no sudo) and the only
+        // route for crane on apt/dnf systems.
+        done = install_static(name)
+    }
+    if not done {
+        die("failed to install {name}; add it to PATH manually and retry")
+    }
+    ui_ok("installed {name}")
+}
+
+// ensure_tools_basic — aws, kubectl, jq (the discover/wizard/cfn prerequisites).
+pub fun ensure_tools_basic(): Null {
+    ensure_tool("aws")
+    ensure_tool("kubectl")
+    ensure_tool("jq")
+}
+
+// ensure_tools_extended — helm, crane (chart install + image mirror).
+pub fun ensure_tools_extended(): Null {
+    ensure_tool("helm")
+    ensure_tool("crane")
+}

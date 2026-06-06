@@ -65,6 +65,7 @@ import { split_lines } from "std/text"
 import { discover_os, discover_aws, discover_resources } from "./discover.ab"
 import { wizard_collect } from "./wizard.ab"
 import { cfn_deploy_or_skip } from "./cfn_deploy.ab"
+import { ensure_tools_basic, ensure_tools_extended } from "./install_tools.ab"
 import {
     helm_kubeconfig_setup, helm_ctx_init, helm_kctx_init,
     kubectl_ctx_flags, HELM_RELEASE_NAME, HELM_NAMESPACE
@@ -117,36 +118,11 @@ fun _flag_is(a: Text, prefix: Text): Bool {
     return slice(a, 0, pn) == prefix
 }
 
-// ---- minimal tool-presence checks (install_tools.sh was NOT ported) ---------
-//
-// The bash ensure_tools_basic / ensure_tools_extended would auto-install missing
-// CLIs via the package manager (with a sudo confirm) or a SHA-pinned static
-// binary. That machinery (install_tools.sh) is not in the Amber tree, so here we
-// degrade safely: check presence with is_command and emit a clear install hint
-// on a miss. We never run sudo from Amber. A genuinely-missing tool surfaces a
-// loud warning; the subsequent aws/kubectl/helm/crane call fails fast with its
-// own error if the operator ignores it (the same net outcome as the bash
-// static-binary path being skipped in a sandboxed CI).
-
-// _ensure_tool <name> <hint> — warn (with an install hint) when <name> is not on
-// PATH; log presence otherwise. No-op when present.
-fun _ensure_tool(name: Text, hint: Text): Null {
-    if is_command(name) { return null }
-    ui_warn("missing tool: {name} — install it to continue ({hint})")
-}
-
-// ensure_tools_basic — aws, kubectl, jq must be present for the deploy spine.
-fun ensure_tools_basic(): Null {
-    _ensure_tool("aws", "https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html")
-    _ensure_tool("kubectl", "https://kubernetes.io/docs/tasks/tools/")
-    _ensure_tool("jq", "https://jqlang.github.io/jq/download/")
-}
-
-// ensure_tools_extended — helm, crane needed for chart install + image mirror.
-fun ensure_tools_extended(): Null {
-    _ensure_tool("helm", "https://helm.sh/docs/intro/install/")
-    _ensure_tool("crane", "https://github.com/google/go-containerregistry/blob/main/cmd/crane/README.md")
-}
+// Tool auto-install (aws/kubectl/jq basic; helm/crane extended) is provided by
+// install_tools.ab — ported from bash install_tools.sh. ensure_tools_basic /
+// ensure_tools_extended are imported below and called from manual_path. (The
+// earlier presence-check-only stub left crane missing on CI agents → image
+// mirroring failed; the real module static-installs it.)
 
 // _split_pipe4 <line> — split a "a|b|c|d" record into exactly 4 fields, padding
 // missing trailing fields with "". std/text has no first-N split, and the
