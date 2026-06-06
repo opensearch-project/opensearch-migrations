@@ -140,41 +140,7 @@ To deploy the solution on AWS, follow the steps outlined in [Migration Assistant
 
 ### GCP Deployment
 
-To deploy the solution on Google Cloud:
-
-1. **Provision infrastructure** with the GCP Terraform module
-   ([`deployment/terraform/gcp`](deployment/terraform/gcp/README.md)), which
-   creates a GKE cluster, a GCS snapshot bucket, a node service account with
-   `roles/storage.admin`, and the Workload Identity bindings used by the
-   migration console and Argo workflow executor:
-
-   ```bash
-   terraform -chdir=deployment/terraform/gcp apply \
-     -var="project=<your-gcp-project>"
-   gcloud container clusters get-credentials \
-     $(terraform -chdir=deployment/terraform/gcp output -raw cluster_name) \
-     --region $(terraform -chdir=deployment/terraform/gcp output -raw cluster_location) \
-     --project <your-gcp-project>
-   ```
-
-2. **Install the Helm chart** with the GKE overlay
-   ([`valuesGke.yaml`](deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesGke.yaml)),
-   which wires the migration components to GCS-backed snapshots via
-   Workload Identity instead of AWS-style IRSA:
-
-   ```bash
-   helm install --create-namespace -n ma ma \
-     deployment/k8s/charts/aggregates/migrationAssistantWithArgo \
-     --values deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesGke.yaml \
-     --set gcp.project=<your-gcp-project>
-   ```
-
-GCS snapshot repositories are configured per-workflow at submission time
-(via the `gcs` snapshot type), in the same way S3 repositories are configured
-for EKS deployments. See the [GCP Terraform README](deployment/terraform/gcp/README.md)
-for variables, `maxShardSizeBytes` sizing guidance, and a Bring-Your-Own-Snapshot
-walkthrough, and the [Kubernetes deployment README](deployment/k8s/README.md)
-for additional GKE notes.
+To deploy the solution on Google Cloud, use the GCP Terraform module to provision a GKE cluster with GCS-backed snapshots via Workload Identity. See the [GCP Terraform README](deployment/terraform/gcp/README.md) for full instructions, variables, and sizing guidance.
 
 
 ## Continuous Integration and Deployment
