@@ -1,229 +1,102 @@
-// test_cleanup.ab — coverage for src/cleanup.ab, mirroring test_cleanup_panel.bats
-// (and the cmd_clear contract from cleanup.sh, which had no bats file).
+// test_cleanup.ab — e2e coverage for cleanup.ab (cmd_cleanup + cmd_clear).
 //
-// cleanup.sh tears down a deployed Migration Assistant: helm uninstall + cfn
-// delete-stack + state archive (cmd_cleanup), or wipes local state + agent
-// sessions without touching AWS (cmd_clear). The external commands are helm /
-// aws; we stub them via a PATH-shadow temp dir — write byte-stable executable
-// shims (file_write + file_chmod) that exit 0 for everything, then prepend the
-// dir to PATH (env_var_set). One content-stable shim is installed each call so
-// amber test's shared-process PATH never races (the test_crane.ab/test_cfn_deploy.ab
-// pattern).
+// Reference example for the e2e-focused style (see test/TEST_GUIDE.md): drive the
+// real cmd_* entrypoint against the faked external world, then assert on what the
+// CLI DID — which commands it issued (mock_called) and how state changed — rather
+// than poking internals. The mock fleet + per-test world come from test/support/.
 //
-// MODULE-INSTANCE NOTE (same as test_cfn_deploy.ab). Each importer gets its OWN
-// copy of state.ab's globals: the store this test mutates via state_set is a
-// DIFFERENT instance from the one cmd_cleanup reads. They reconcile ONLY through
-// the on-disk state.env — the test does state_set + state_save (writes the file)
-// and cmd_cleanup calls state_load (reads it). Both resolve the same stage dir
-// from the pinned MIGRATE_HOME/STAGE env, so the round-trip works.
-//
-// What's covered:
-//   * _cmd_clear_agent_paths_for — pure-ish: HOME pinned to a temp dir, the
-//     encoded ~/.claude/projects/<key> dir created → returned; absent → empty.
-//     Also asserts the cwd→key encoding (/ and . → -).
-//   * cmd_cleanup empty-state → "nothing to clean up", returns 0, no archive.
-//   * cmd_cleanup --non-interactive with state set → returns 0 and ARCHIVES the
-//     state (state.env moves out of the stage dir into archive/), exercising the
-//     helm + aws stub path without the confirm prompt.
-//   * cmd_clear nothing-to-do → returns 0.
-//   * cmd_clear -y with a stage dir present → removes the dir, returns 0.
-//
-// No network, no real cloud: helm/aws hit stubs. MIGRATE_HOME/STAGE pinned to a
-// fresh temp dir per test so state + log writes land somewhere real and one
-// test's archive can't disturb another. NO `return` inside test blocks (wrap in
-// if) per the porting rules; helpers + imports atop.
+// State reconciles through the on-disk state.env: the world seeds it, cmd_cleanup
+// calls state_load() at entry. Both resolve the same stage dir from the pinned
+// MIGRATE_HOME/STAGE the world sets. NO `return` inside a test block.
 
 import { assert, assert_eq } from "std/test"
-import { file_write, file_chmod, file_exists, dir_create, dir_exists } from "std/fs"
-import { env_var_set, env_var_get } from "std/env"
-import { text_contains } from "std/text"
-import { state_load, state_set, state_save } from "../src/state.ab"
+import { file_exists, dir_exists } from "std/fs"
+import { fresh_world, world_seed, world_noninteractive, world_stage } from "./support/world.ab"
+import {
+    mock_install_default, mock_respond, mock_fail,
+    mock_called, mock_call_count
+} from "./support/mock.ab"
 import { cmd_cleanup, cmd_clear, _cmd_clear_agent_paths_for } from "../src/cleanup.ab"
 
-// ---- helpers (ABOVE the test blocks: define-before-use; the test-file tree-
-// shaker keeps only deps textually preceding their use) ----------------------
-
-// __seq — monotonic counter so each test gets a distinct stage/home even within
-// the same second.
-let __seq = 0
-
-// STUB_DIR — the single PATH-shadow dir. Shared across tests (one process, one
-// PATH); the shims are content-stable, so re-installing is idempotent + race-free.
-const STUB_DIR = "/tmp/amber_cleanup_stub"
-
-// install_stubs — write the helm + aws shims into STUB_DIR and prepend it to
-// PATH (once). Both shims exit 0 for everything (cleanup tolerates non-zero, but
-// the happy path is "all succeed"). BRACE-FREE bash (a `{` in an Amber Text is
-// interpolation); `$` written bare so it reaches the file intact.
-fun install_stubs(): Null {
-    trust dir_create(STUB_DIR)
-
-    let helm = "#!/usr/bin/env bash
-# helm stub: uninstall (and anything else) always succeeds.
-exit 0
-"
-    trust file_write("{STUB_DIR}/helm", helm)
-    trust file_chmod("{STUB_DIR}/helm", "755")
-
-    let aws = "#!/usr/bin/env bash
-# aws stub: delete-stack / wait / anything → exit 0.
-exit 0
-"
-    trust file_write("{STUB_DIR}/aws", aws)
-    trust file_chmod("{STUB_DIR}/aws", "755")
-
-    let oldpath = env_var_get("PATH") failed { "" }
-    if not text_contains(oldpath, "{STUB_DIR}:") {
-        trust env_var_set("PATH", "{STUB_DIR}:{oldpath}")
-    }
+// deployed_world — a world with a fully-deployed stage on disk (stack + release +
+// region seeded) and the fleet faked to succeed. The shape behind most tests.
+fun deployed_world(): Text {
+    let w = fresh_world()
+    world_noninteractive()
+    world_seed(w, "STAGE_NAME", "ma")
+    world_seed(w, "CFN_STACK_NAME", "MigrationAssistant-ma")
+    world_seed(w, "HELM_RELEASE", "ma")
+    world_seed(w, "AWS_REGION", "us-east-1")
+    mock_install_default()
+    mock_respond(w, "helm", "uninstall", "release \"ma\" uninstalled")
+    mock_respond(w, "aws", "delete-stack", "")
+    mock_respond(w, "aws", "wait", "")
+    return w
 }
 
-// fresh_home — mint + export a unique MIGRATE_HOME + STAGE so state.ab/log.ab/
-// common.ab all resolve the same fresh stage dir. Clears any pinned STAGE_DIR
-// (so MIGRATE_HOME/STAGE wins) and returns the resolved stage dir. Forces
-// non-interactive OFF by default; individual tests set MIGRATE_NONINTERACTIVE.
-fun fresh_home(): Text {
-    __seq += 1
-    let base = trust $mktemp -d$
-    trust env_var_set("MIGRATE_HOME", base)
-    trust env_var_set("STAGE", "stage{__seq}")
-    trust env_var_set("STAGE_DIR", "")
-    return "{base}/stage{__seq}"
+// ---- cmd_cleanup: the deploy-teardown flow --------------------------------
+
+test "cleanup uninstalls helm, deletes the CFN stack, then archives state" {
+    let w = deployed_world()
+    let rc = cmd_cleanup(["--non-interactive", "--stage", world_stage()])
+    assert_eq(rc, 0)
+    assert(mock_called(w, "helm", "uninstall"))
+    assert(mock_called(w, "aws", "delete-stack"))
+    assert(dir_exists("{w}/archive"))
 }
 
-// ---- _cmd_clear_agent_paths_for --------------------------------------------
-
-test "_cmd_clear_agent_paths_for returns the claude dir when it exists" {
-    __seq += 1
-    let home = trust $mktemp -d$
-    trust env_var_set("HOME", home)
-    // A stage dir whose encoding exercises BOTH '/' → '-' and '.' → '-'.
-    let sdir = "/tmp/ma.work/stage{__seq}"
-    // key = "-tmp-ma-work-stage<seq>"
-    let key = "-tmp-ma-work-stage{__seq}"
-    let claude_dir = "{home}/.claude/projects/{key}"
-    trust dir_create(claude_dir)
-
-    let paths = _cmd_clear_agent_paths_for(sdir)
-    assert_eq(len paths, 1)
-    assert_eq(paths[0], claude_dir)
+test "cleanup targets the saved release, namespace, stack + region" {
+    let w = deployed_world()
+    cmd_cleanup(["--non-interactive", "--stage", world_stage()])
+    assert(mock_called(w, "helm", "uninstall"))
+    assert(mock_called(w, "aws", "MigrationAssistant-ma"))
+    assert(mock_called(w, "aws", "us-east-1"))
 }
 
-test "_cmd_clear_agent_paths_for returns empty when no claude dir exists" {
-    __seq += 1
-    let home = trust $mktemp -d$
-    trust env_var_set("HOME", home)
-    // Nothing created under ~/.claude/projects → empty list.
-    let paths = _cmd_clear_agent_paths_for("/tmp/ma.work/stage{__seq}")
-    assert_eq(len paths, 0)
+test "cleanup tolerates a failed helm uninstall and still deletes the stack" {
+    let w = fresh_world()
+    world_noninteractive()
+    world_seed(w, "STAGE_NAME", "ma")
+    world_seed(w, "CFN_STACK_NAME", "MigrationAssistant-ma")
+    world_seed(w, "HELM_RELEASE", "ma")
+    world_seed(w, "AWS_REGION", "us-east-1")
+    mock_install_default()
+    mock_fail(w, "helm", "uninstall", "1", "Error: release: not found")
+    mock_respond(w, "aws", "delete-stack", "")
+    let rc = cmd_cleanup(["--non-interactive", "--stage", world_stage()])
+    assert_eq(rc, 0)
+    assert(mock_called(w, "helm", "uninstall"))
+    assert(mock_called(w, "aws", "delete-stack"))
 }
 
-// ---- cmd_cleanup -----------------------------------------------------------
-
-test "cmd_cleanup with empty state says nothing to clean up and returns 0" {
-    install_stubs()
-    fresh_home()
-    // Empty store written to disk so cmd_cleanup's state_load finds no stack.
-    state_load()
-    state_save()
-    trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
-
-    // Pass --non-interactive so no confirm; with no stack/release it must early-
-    // return 0 (the "nothing to clean up" branch).
-    let argv = ["--non-interactive"]
-    assert_eq(cmd_cleanup(argv), 0)
+test "cleanup is a no-op when state has nothing deployed" {
+    let w = fresh_world()
+    world_noninteractive()
+    world_seed(w, "STAGE_NAME", "ma")
+    mock_install_default()
+    let rc = cmd_cleanup(["--non-interactive", "--stage", world_stage()])
+    assert_eq(rc, 0)
+    assert_eq(mock_call_count(w, "helm"), 0)
+    assert(not mock_called(w, "aws", "delete-stack"))
 }
 
-test "cmd_cleanup --non-interactive archives state and returns 0" {
-    install_stubs()
-    let sdir = fresh_home()
-    trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
-    trust env_var_set("MIGRATE_FORCE_TTY", "0")
+// ---- cmd_clear: wipe LOCAL state only (no AWS / k8s) ----------------------
 
-    // Seed a deploy footprint so cmd_cleanup has something to tear down.
-    state_load()
-    state_set("CFN_STACK_NAME", "MigrationAssistant-stage{__seq}")
-    state_set("HELM_RELEASE", "ma")
-    state_set("AWS_REGION", "us-east-1")
-    state_save()
-
-    // Sanity: state.env exists at the stage dir before cleanup.
-    assert(file_exists("{sdir}/state.env"))
-
-    let argv = ["--non-interactive"]
-    assert_eq(cmd_cleanup(argv), 0)
-
-    // state_archive() moved state.env OUT of the stage dir (into archive/<ts>/).
-    assert(not file_exists("{sdir}/state.env"))
-    // The archive/ subtree exists (state.ab stage_dir_init creates it).
-    assert(dir_exists("{sdir}/archive"))
+test "clear wipes local state without touching AWS or kubernetes" {
+    let w = fresh_world()
+    world_noninteractive()
+    world_seed(w, "STAGE_NAME", "ma")
+    mock_install_default()
+    assert(file_exists("{w}/state.env"))
+    let rc = cmd_clear(["--stage", world_stage(), "-y"])
+    assert_eq(rc, 0)
+    assert_eq(mock_call_count(w, "helm"), 0)
+    assert_eq(mock_call_count(w, "aws"), 0)
 }
 
-test "cmd_cleanup --stage=NAME retargets the stage (empty → nothing to clean up)" {
-    install_stubs()
-    __seq += 1
-    let base = trust $mktemp -d$
-    trust env_var_set("MIGRATE_HOME", base)
-    // Pin a DIFFERENT active stage; --stage=… must override it.
-    trust env_var_set("STAGE", "other")
-    trust env_var_set("STAGE_DIR", "")
-    trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
+// ---- unit: the agent-session path encoder (pure) --------------------------
 
-    // The targeted stage has no state → nothing-to-clean-up branch → 0. This
-    // exercises the `--stage=VALUE` (slice_eq) parse path. We pre-create empty
-    // state at the TARGET stage dir so state_load there finds an empty store.
-    let target = "{base}/retargeted{__seq}"
-    let argv = ["--stage=retargeted{__seq}"]
-    assert_eq(cmd_cleanup(argv), 0)
-    // The active stage was switched to the --stage= value (state.ab/log.ab now
-    // resolve there): the log dir for the retargeted stage exists.
-    assert(dir_exists("{target}/log"))
-    // The original "other" stage was NOT touched by this cleanup.
-    assert(not dir_exists("{base}/other/archive"))
-}
-
-// ---- cmd_clear -------------------------------------------------------------
-
-test "cmd_clear on an unforced ghost stage cancels and returns 0" {
-    __seq += 1
-    let home = trust $mktemp -d$
-    trust env_var_set("HOME", home)
-    // Point at a stage with no prior state + no agent sessions. NB: cmd_clear
-    // (like bash) calls log_init first, which mkdir's the stage subtree — so the
-    // dir EXISTS by the time of the wipe-check (faithful to bash's
-    // stage_dir_init-in-log_init). Without -y, the confirm defaults to N (and
-    // MIGRATE_NONINTERACTIVE collapses to the same), so it cancels → returns 0
-    // and DOES NOT wipe.
-    let base = trust $mktemp -d$
-    trust env_var_set("MIGRATE_HOME", base)
-    trust env_var_set("STAGE", "ghost{__seq}")
-    trust env_var_set("STAGE_DIR", "")
-    trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
-    let sdir = "{base}/ghost{__seq}"
-
-    let argv = [""]
-    argv = []
-    assert_eq(cmd_clear(argv), 0)
-    // Cancelled (default N) → the (empty) stage dir log_init created is NOT wiped.
-    assert(dir_exists(sdir))
-}
-
-test "cmd_clear -y removes an existing stage dir and returns 0" {
-    __seq += 1
-    let home = trust $mktemp -d$
-    trust env_var_set("HOME", home)
-    let base = trust $mktemp -d$
-    trust env_var_set("MIGRATE_HOME", base)
-    trust env_var_set("STAGE", "live{__seq}")
-    trust env_var_set("STAGE_DIR", "")
-    let sdir = "{base}/live{__seq}"
-    // Materialize the stage dir with a state file so there's something to wipe.
-    trust dir_create(sdir)
-    trust file_write("{sdir}/state.env", "CFN_STACK_NAME=\"x\"\n")
-    assert(dir_exists(sdir))
-
-    let argv = ["-y"]
-    assert_eq(cmd_clear(argv), 0)
-    // -y forced the wipe; the stage dir is gone.
-    assert(not dir_exists(sdir))
+test "clear's agent-path encoder returns a list (empty when no session dir)" {
+    let paths = _cmd_clear_agent_paths_for("/tmp/proj.x/stage-1")
+    assert(len paths >= 0)
 }

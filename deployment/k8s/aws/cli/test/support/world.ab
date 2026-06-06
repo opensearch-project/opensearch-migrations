@@ -29,22 +29,36 @@ import { env_var_set } from "std/env"
 // differ. Module-level — resets per test block, which is fine: each block makes
 // its own world(s).
 let __wseq = 0
+// Current world's stage name (for cmd_* that take --stage). Set by fresh_world.
+let __wstage = ""
 
-// fresh_world — mint a unique sandbox dir, point the CLI's stage env at it, and
-// create its mock/ control-plane + log/ dir. Returns the world's absolute path.
+// fresh_world — mint a unique sandbox and wire the CLI's stage env to it the way
+// the CLI itself computes paths: STAGE_DIR = MIGRATE_HOME/STAGE. We set
+// MIGRATE_HOME to a fresh temp root and STAGE to a unique name; the stage dir is
+// the world. Returns the WORLD (stage dir) — where state.env + log/ + mock/ live.
+//
+// IMPORTANT: callers that pass `--stage <name>` to a cmd_* must use the world's
+// stage name (returned via world_stage()), or the CLI recomputes a different
+// STAGE_DIR and won't see the seeded state. Prefer NOT passing --stage in e2e
+// tests — the world already pins STAGE.
 pub fun fresh_world(): Text {
     __wseq += 1
     let base = trust $mktemp -d$
-    let dir = "{base}/w{__wseq}"
+    let stage = "w{__wseq}"
+    let dir = "{base}/{stage}"
     trust dir_create(dir)
     trust dir_create("{dir}/log")
     trust dir_create("{dir}/mock")
-    // The CLI reads these; children (aws/kubectl/…) inherit them.
-    trust env_var_set("MIGRATE_HOME", dir)
+    // The CLI derives STAGE_DIR = MIGRATE_HOME/STAGE; children inherit MIGRATE_HOME.
+    trust env_var_set("MIGRATE_HOME", base)
+    trust env_var_set("STAGE", stage)
     trust env_var_set("STAGE_DIR", dir)
-    trust env_var_set("STAGE", "w{__wseq}")
+    __wstage = stage
     return dir
 }
+
+// world_stage — the current world's stage name (for cmd_* that take --stage).
+pub fun world_stage(): Text { return __wstage }
 
 // world_seed — write a KEY=VALUE line into the world's state.env so the CLI's
 // state_load() picks it up at entry. Values are written raw (no quoting) — fine

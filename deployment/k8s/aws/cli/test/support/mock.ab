@@ -26,6 +26,16 @@
 import { dir_create, file_write, file_append, file_chmod, file_exists } from "std/fs"
 import { env_var_set, env_var_get } from "std/env"
 
+// mock_root — the control-plane dir, resolved the SAME way the shims do: from
+// $MIGRATE_HOME (which the world pins and every CLI child inherits). The `world`
+// args the public fns take are accepted for readability but the root is always
+// $MIGRATE_HOME/mock, so a test's queries and the shim's writes never disagree
+// even when the world (stage dir) differs from MIGRATE_HOME.
+fun mock_root(): Text {
+    let h = env_var_get("MIGRATE_HOME") failed { "" }
+    return "{h}/mock"
+}
+
 // ---- the generic shim body (brace-free Amber Text) -------------------------
 //
 // A `{` inside an Amber Text literal is interpolation, so this bash is written
@@ -89,14 +99,14 @@ pub fun mock_install_default(): Null {
 // mock_respond <world> <tool> <key> <stdout> — when <tool> is called with an arg
 // token == <key>, emit <stdout> (exit 0). <key>="default" sets the fallback.
 pub fun mock_respond(world: Text, tool: Text, key: Text, out: Text): Null {
-    trust dir_create("{world}/mock/resp/{tool}")
-    trust file_write("{world}/mock/resp/{tool}/{key}.out", out)
+    trust dir_create("{mock_root()}/resp/{tool}")
+    trust file_write("{mock_root()}/resp/{tool}/{key}.out", out)
 }
 
 // mock_respond_rc <world> <tool> <key> <rc> — set the exit code for a match.
 pub fun mock_respond_rc(world: Text, tool: Text, key: Text, rc: Text): Null {
-    trust dir_create("{world}/mock/resp/{tool}")
-    trust file_write("{world}/mock/resp/{tool}/{key}.rc", rc)
+    trust dir_create("{mock_root()}/resp/{tool}")
+    trust file_write("{mock_root()}/resp/{tool}/{key}.rc", rc)
 }
 
 // mock_fail <world> <tool> <key> <rc> <stderr-ish stdout> — convenience: a
@@ -112,7 +122,7 @@ pub fun mock_fail(world: Text, tool: Text, key: Text, rc: Text, msg: Text): Null
 // mock_calls <world> <tool> — the recorded call log for <tool> (every arg line,
 // newline-joined), or "" if the tool was never called.
 pub fun mock_calls(world: Text, tool: Text): Text {
-    let f = "{world}/mock/calls/{tool}.log"
+    let f = "{mock_root()}/calls/{tool}.log"
     if not file_exists(f) { return "" }
     let c = trust $cat "{f}"$ failed { "" }
     return c
@@ -121,15 +131,17 @@ pub fun mock_calls(world: Text, tool: Text): Text {
 // mock_called <world> <tool> <needle> — Bool: did any <tool> call contain
 // <needle> in its args? The primary e2e assertion ("the CLI ran helm uninstall").
 pub fun mock_called(world: Text, tool: Text, needle: Text): Bool {
-    let f = "{world}/mock/calls/{tool}.log"
+    let f = "{mock_root()}/calls/{tool}.log"
     if not file_exists(f) { return false }
-    silent trust $grep -q -- "{needle}" "{f}"$
+    // No `silent` — it compiles to a `2>` redirect that collides with status();
+    // grep -q is already output-free. trust because no-match (rc 1) is expected.
+    trust $grep -q -- "{needle}" "{f}"$
     return status() == 0
 }
 
 // mock_call_count <world> <tool> — number of times <tool> was invoked.
 pub fun mock_call_count(world: Text, tool: Text): Int {
-    let f = "{world}/mock/calls/{tool}.log"
+    let f = "{mock_root()}/calls/{tool}.log"
     if not file_exists(f) { return 0 }
     let n = trust $grep -c '' "{f}" 2>/dev/null$ failed { "0" }
     return n as Int
