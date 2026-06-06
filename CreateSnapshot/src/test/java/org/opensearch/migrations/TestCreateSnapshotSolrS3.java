@@ -153,7 +153,7 @@ public class TestCreateSnapshotSolrS3 {
         args.sourceType = "solr";
         args.snapshotName = snapshotName;
         args.snapshotRepoName = "s3";
-        args.s3RepoUri = s3RepoUri;
+        args.repoUri = s3RepoUri;
         args.s3Region = REGION;
         args.s3Endpoint = localStackEndpoint();
         args.noWait = false;

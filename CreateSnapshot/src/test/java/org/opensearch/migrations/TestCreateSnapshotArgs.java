@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 public class TestCreateSnapshotArgs {
 
     @Test
-    void noRepoArgs_throwsParameterException() {
+    void noRepoUri_throwsParameterException() {
         var ex = assertThrows(ParameterException.class, () ->
             CreateSnapshot.main(new String[]{
                 "--snapshot-name", "snap",
@@ -18,35 +18,58 @@ public class TestCreateSnapshotArgs {
                 "--source-host", "http://localhost:9200"
             })
         );
-        assertThat(ex.getMessage(), containsString("must be set"));
+        assertThat(ex.getMessage(), containsString("required"));
     }
 
     @Test
-    void bothS3AndGcs_throwsParameterException() {
+    void s3RepoWithoutRegion_throwsParameterException() {
         var ex = assertThrows(ParameterException.class, () ->
             CreateSnapshot.main(new String[]{
                 "--snapshot-name", "snap",
                 "--snapshot-repo-name", "repo",
                 "--source-host", "http://localhost:9200",
-                "--s3-repo-uri", "s3://bucket/path",
-                "--s3-region", "us-east-1",
-                "--gcs-repo-uri", "gs://bucket/path"
+                "--repo-uri", "s3://bucket/path"
             })
         );
-        assertThat(ex.getMessage(), containsString("Only one"));
+        assertThat(ex.getMessage(), containsString("s3-region"));
     }
 
     @Test
-    void bothFsAndGcs_throwsParameterException() {
+    void unrecognizedScheme_throwsIllegalArgumentException() {
+        assertThrows(IllegalArgumentException.class, () ->
+            CreateSnapshot.main(new String[]{
+                "--snapshot-name", "snap",
+                "--snapshot-repo-name", "repo",
+                "--source-host", "http://localhost:9200",
+                "--repo-uri", "ftp://invalid/path"
+            })
+        );
+    }
+
+    @Test
+    void s3AliasStillWorks() {
         var ex = assertThrows(ParameterException.class, () ->
             CreateSnapshot.main(new String[]{
                 "--snapshot-name", "snap",
                 "--snapshot-repo-name", "repo",
                 "--source-host", "http://localhost:9200",
-                "--file-system-repo-path", "/tmp/repo",
-                "--gcs-repo-uri", "gs://bucket/path"
+                "--s3-repo-uri", "s3://bucket/path"
             })
         );
-        assertThat(ex.getMessage(), containsString("Only one"));
+        assertThat(ex.getMessage(), containsString("s3-region"));
+    }
+
+    @Test
+    void fileSystemAliasStillWorks() throws Exception {
+        var ex = assertThrows(Exception.class, () ->
+            CreateSnapshot.main(new String[]{
+                "--snapshot-name", "snap",
+                "--snapshot-repo-name", "repo",
+                "--source-host", "http://localhost:9200",
+                "--file-system-repo-path", "/tmp/repo"
+            })
+        );
+        // Should get past arg parsing (no ParameterException) and fail on connection
+        assert !(ex instanceof ParameterException);
     }
 }

@@ -3,6 +3,7 @@ package org.opensearch.migrations;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.GcsSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
+import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.S3SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICreateSnapshotContext;
@@ -30,36 +31,34 @@ public class ElasticsearchBackupStrategy implements SourceBackupStrategy {
         var clientFactory = new OpenSearchClientFactory(args.sourceArgs.toConnectionContext());
         var client = clientFactory.determineVersionAndCreate();
 
-        SnapshotCreator snapshotCreator;
-        if (args.fileSystemRepoPath != null) {
-            snapshotCreator = new FileSystemSnapshotCreator(
+        var parsedUri = RepoUri.parse(args.repoUri);
+        SnapshotCreator snapshotCreator = switch (parsedUri) {
+            case RepoUri.FileRepoUri f -> new FileSystemSnapshotCreator(
                 args.snapshotName,
                 args.snapshotRepoName,
                 client,
-                args.fileSystemRepoPath,
+                f.path(),
                 args.indexAllowlist,
                 context,
                 args.compressionEnabled,
                 args.includeGlobalState
             );
-        } else if (args.gcsRepoUri != null) {
-            snapshotCreator = new GcsSnapshotCreator(
+            case RepoUri.GcsRepoUri g -> new GcsSnapshotCreator(
                 args.snapshotName,
                 args.snapshotRepoName,
                 client,
-                args.gcsRepoUri,
+                g.rawUri(),
                 args.indexAllowlist,
                 args.maxSnapshotRateMBPerNode,
                 context,
                 args.compressionEnabled,
                 args.includeGlobalState
             );
-        } else {
-            snapshotCreator = new S3SnapshotCreator(
+            case RepoUri.S3RepoUri s -> new S3SnapshotCreator(
                 args.snapshotName,
                 args.snapshotRepoName,
                 client,
-                args.s3RepoUri,
+                s.rawUri(),
                 args.s3Region,
                 args.s3Endpoint,
                 args.indexAllowlist,
@@ -69,7 +68,7 @@ public class ElasticsearchBackupStrategy implements SourceBackupStrategy {
                 args.compressionEnabled,
                 args.includeGlobalState
             );
-        }
+        };
 
         try {
             if (args.noWait) {
