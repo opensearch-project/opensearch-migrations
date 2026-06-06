@@ -28,7 +28,7 @@
 // (stdout), stage_dir_init, plus accessors migrate_home/stage/stage_dir/
 // migrate_noninteractive.
 
-import { env_var_get, kill, is_command, uname_os, uname_machine } from "std/env"
+import { env_var_get, kill, is_command, uname_kernel_name, uname_machine } from "std/env"
 import { dir_create } from "std/fs"
 import { slice } from "std/text"
 import { esc, eprintln } from "./core.ab"
@@ -230,9 +230,11 @@ pub fun on_exit_registered_count(): Int { return __exit_count }
 // no match/switch keyword.) Unknown OS/arch → die, matching bash `*) die`.
 // uname can't meaningfully fail on a supported host; trust it.
 pub fun arch_os(): Text {
-    // std/env uname_os()/uname_machine() return the same kernel/machine strings
-    // as `uname -s`/`uname -m` (Darwin, arm64, …) — one builtin call, no fork.
-    let kernel = uname_os()
+    // uname_kernel_name() == `uname -s` (Darwin / Linux / MINGW…), the kernel
+    // string this if-chain matches. NB: uname_os() is `uname -o`, which returns
+    // "GNU/Linux" on Linux (not "Linux") and would fall through to die — the bug
+    // that broke arch_os on the Linux CI agent. uname_machine() == `uname -m`.
+    let kernel = uname_kernel_name()
     let machine = uname_machine()
 
     let os = ""
