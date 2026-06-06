@@ -484,8 +484,8 @@ export const ResourceManagement = WorkflowBuilder.create({
             const snapshotOptions = expr.get(snapshotItemConfig, "config");
 
             return b.setDefinition({
-                action: "apply",
-                setOwnerReference: false,
+                action: "patch",
+                flags: ["--type", "merge"],
                 manifest: {
                     apiVersion: CRD_API_VERSION,
                     kind: "DataSnapshot",
