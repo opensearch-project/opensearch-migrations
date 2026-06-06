@@ -1,250 +1,208 @@
-// test_helm_ctx.ab — coverage for src/helm_ctx.ab (the kubeconfig + context-
+// test_helm_ctx.ab — e2e coverage for helm_ctx.ab (the kubeconfig + context-
 // binding slice of the bash helm.sh port).
 //
+// Style (see test/TEST_GUIDE.md): drive the real entrypoints against the faked
+// external world from test/support/, then assert on what the CLI DID — which
+// commands it issued (mock_called / mock_call_count) and how state changed
+// (state_get after) — rather than poking internals. Each block mints its OWN
+// fresh_world(); none depends on another. The mock fleet + per-test world come
+// from support/world.ab + support/mock.ab — no hand-rolled mktemp/PATH/stubs.
+//
 // What's covered + how:
-//   * HELM_RELEASE_NAME / HELM_NAMESPACE pinned to "ma" — plain constant asserts.
-//   * helm_ctx_flags / kubectl_ctx_flags — the binding READ-site. Empty when no
-//     context bound; the "--kube-context X" / "--context X" prefixes after a bind.
-//   * helm_ctx_init — reads KUBECTL_CONTEXT from THIS module's state and stores
-//     the flag prefixes (and clears them when the context is unset → bare
-//     helm/kubectl, the bash default arrays). Drives via the test's OWN state
-//     instance (same module-import as helm_ctx.ab uses, so state_set here lands
-//     in the very store helm_ctx_init reads — these are in the SAME process).
-//   * helm_kctx_init — the bash-compat alias: loads state.env from disk then
-//     binds. Seed KUBECTL_CONTEXT on disk (state_set + state_save under a pinned
-//     stage dir), call helm_kctx_init, assert the flags bind from the file.
-//   * helm_kubeconfig_setup — the full kubeconfig flow against PATH-shadow stubs.
-//     The `aws cloudformation describe-stacks` stub emits a MigrationsExportString
-//     blob carrying MIGRATIONS_EKS_CLUSTER_NAME + MIGRATIONS_ECR_REGISTRY; the
-//     `aws eks update-kubeconfig` + `kubectl config use-context` stubs exit 0. We
-//     assert it persisted EKS_CLUSTER / KUBECTL_CONTEXT / CRANE_REGISTRY and bound
-//     the context flags. A second run with SKIP_KUBECONFIG_UPDATE=Y still binds.
+//   * helm_kubeconfig_setup — THE flow under test. Drive it against the mock
+//     fleet: the `aws cloudformation describe-stacks` stub emits a TAB-separated
+//     MigrationsExportString row carrying MIGRATIONS_EKS_CLUSTER_NAME +
+//     MIGRATIONS_ECR_REGISTRY; `aws eks update-kubeconfig` + `kubectl config
+//     use-context` exit 0. Assert it issued update-kubeconfig + use-context,
+//     bound the ctx flags (helm_ctx_flags), and persisted EKS_CLUSTER /
+//     KUBECTL_CONTEXT / CRANE_REGISTRY + exported KUBE_CONTEXT. Variants:
+//       - explicit --kubectl-context alias (KUBECTL_CONTEXT seeded) is honored;
+//       - SKIP_KUBECONFIG_UPDATE=Y still creates the entry + binds but DOES NOT
+//         switch the active context (no `kubectl use-context` call);
+//       - legacy flat EKSClusterName / ECRRegistry outputs resolve via the
+//         _cfn_pick fallback chain.
+//   * helm_kctx_init — the bash-compat alias (load state.env from disk, then
+//     bind). Seed KUBECTL_CONTEXT on disk via world_seed; assert the flags bind
+//     from the file, that an empty context clears them (bare helm/kubectl), and
+//     that re-init re-derives the binding (not sticky from a prior process).
+//   * pinned constants HELM_RELEASE_NAME / HELM_NAMESPACE / HELM_CHART_NAME —
+//     pure return-value asserts (no world/mock).
 //
-// Stubbing model (mirrors test_crane.ab / test_cfn_deploy.ab): write ONE content-
-// stable `aws` + `kubectl` + `helm` shim into a temp dir whose OUTPUT is decided
-// by its args (a `case "$*"`), then PREPEND that dir to PATH via env_var_set so
-// every in-process `trust $aws…$ / $kubectl…$` resolves to the shim. amber test
-// runs all `test` blocks in one parallel process tree sharing PATH, so a single
-// byte-identical shim (never rewritten with conflicting bodies) is race-free.
-// The shims are BRACE-FREE (a `{` in an Amber Text literal is interpolation) and
-// write `$` bare (a backslash would land literally in the file).
-//
-// State is loaded by helm_ctx.ab's functions off the shared on-disk state.env,
-// so every stateful test pins a unique STAGE_DIR/MIGRATE_HOME/STAGE to a temp dir
-// and seeds state THROUGH that file (state_set + state_save). NB: no `return`
-// inside `test` blocks (the AMBER_IDIOMS rule) — branch with `if`.
+// State reconciles through the on-disk state.env: world_seed writes it; the
+// helm_ctx.ab fns call state_load() at entry. Both resolve the same stage dir
+// from the pinned MIGRATE_HOME/STAGE the world sets — so seeding KUBECTL_CONTEXT
+// / CFN_STACK_NAME / AWS_REGION on disk is the cross-instance channel a sibling
+// module's separate state store reads (Amber 0.6 gives each importer its own
+// module globals). NO `return` inside a test block — branch with `if`.
 
 import { assert, assert_eq } from "std/test"
-import { file_write, file_chmod, dir_create } from "std/fs"
-import { env_var_set, env_var_get } from "std/env"
 import { text_contains } from "std/text"
-import { state_load, state_set, state_get, state_save } from "../src/state.ab"
+import { env_var_get } from "std/env"
+import { fresh_world, world_seed, world_noninteractive } from "./support/world.ab"
+import {
+    mock_install_default, mock_respond, mock_called, mock_call_count
+} from "./support/mock.ab"
+import { state_load, state_get } from "../src/state.ab"
 import {
     HELM_RELEASE_NAME, HELM_NAMESPACE, HELM_CHART_NAME,
-    helm_ctx_init, helm_kctx_init, helm_ctx_flags, kubectl_ctx_flags,
+    helm_kctx_init, helm_ctx_flags, kubectl_ctx_flags,
     helm_kubeconfig_setup
 } from "../src/helm_ctx.ab"
 
-// ---- helpers (ABOVE the test blocks: define-before-use; the test-file tree-
-// shaker keeps only deps textually preceding their use) ----------------------
+// ---- helpers (ABOVE the test blocks: define-before-use across the import
+// boundary — the test-file tree-shaker keeps only deps textually preceding
+// their use) ------------------------------------------------------------------
 
-// __seq — monotonic counter so each test gets a distinct stage dir even within
-// the same second.
-let __seq = 0
+// EKS_BLOB — the describe-stacks row the real opensearch-migrations stack emits:
+// `aws … --output text` joins the [OutputKey,OutputValue] tuple with a TAB, and
+// the OutputValue is one big string of bash `export VAR=…;` clauses. cfn_outputs
+// expands it into the flat keys helm_kubeconfig_setup picks via _cfn_pick. The
+// `\t` / `\n` become real bytes when the mock writes the fixture, exactly what
+// `aws … --output text` produces. (No `{` braces here → safe as an Amber Text.)
+const EKS_BLOB = "MigrationsExportString\texport MIGRATIONS_EKS_CLUSTER_NAME=ma-eks-cluster; export MIGRATIONS_ECR_REGISTRY=111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr;"
 
-// STUB_DIR — the single PATH-shadow dir. Shared across tests (one process, one
-// PATH); the shims are content-stable and steered by args, so re-installing is
-// idempotent and race-free.
-const STUB_DIR = "/tmp/amber_helm_ctx_stub"
+// LEGACY_BLOB — a template that publishes FLAT OutputKey rows instead of the
+// blob (EKSClusterName / ECRRegistry). Exercises the _cfn_pick fallback chain
+// (MIGRATIONS_EKS_CLUSTER_NAME → EKSClusterName) through the real entrypoint.
+const LEGACY_BLOB = "EKSClusterName\tlegacy-eks\nECRRegistry\t222.dkr.ecr.us-east-1.amazonaws.com/legacy-ecr"
 
-// install_stubs — write the aws + kubectl + helm shims into STUB_DIR and prepend
-// it to PATH (once). All BRACE-FREE bash, steered off args.
-//
-// aws shim:
-//   * cloudformation describe-stacks → a single TAB row
-//       MigrationsExportString<TAB>export MIGRATIONS_EKS_CLUSTER_NAME=ma-eks-cluster; export MIGRATIONS_ECR_REGISTRY=111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr;
-//     (cfn_outputs expands the blob into the two flat keys helm_kubeconfig_setup
-//     picks via _cfn_pick).
-//   * eks update-kubeconfig → exit 0 (the kubeconfig entry "created").
-//   * anything else → exit 0.
-// kubectl shim: `config use-context …` → exit 0.
-// helm shim: anything → exit 0 (not exercised here, present for completeness).
-fun install_stubs(): Null {
-    trust dir_create(STUB_DIR)
-
-    let aws = "#!/usr/bin/env bash
-args=\"$*\"
-case \"$args\" in
-  *describe-stacks*)
-    printf '%s\\t%s\\n' 'MigrationsExportString' 'export MIGRATIONS_EKS_CLUSTER_NAME=ma-eks-cluster; export MIGRATIONS_ECR_REGISTRY=111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr;'
-    exit 0 ;;
-  *update-kubeconfig*) exit 0 ;;
-  *) exit 0 ;;
-esac
-"
-    trust file_write("{STUB_DIR}/aws", aws)
-    trust file_chmod("{STUB_DIR}/aws", "755")
-
-    let kubectl = "#!/usr/bin/env bash
-exit 0
-"
-    trust file_write("{STUB_DIR}/kubectl", kubectl)
-    trust file_chmod("{STUB_DIR}/kubectl", "755")
-
-    let helm = "#!/usr/bin/env bash
-exit 0
-"
-    trust file_write("{STUB_DIR}/helm", helm)
-    trust file_chmod("{STUB_DIR}/helm", "755")
-
-    let oldpath = env_var_get("PATH") failed { "" }
-    if not text_contains(oldpath, "{STUB_DIR}:") {
-        trust env_var_set("PATH", "{STUB_DIR}:{oldpath}")
-    }
+// kubeconfig_world — a world ready to run helm_kubeconfig_setup: stack + region
+// seeded on disk (it state_loads at entry), the fleet faked to succeed, and the
+// describe-stacks response carrying the EKS cluster + ECR registry. The shape
+// behind the kubeconfig tests. Returns the WORLD (stage dir).
+fun kubeconfig_world(): Text {
+    let w = fresh_world()
+    world_noninteractive()
+    world_seed(w, "CFN_STACK_NAME", "MigrationAssistant-test")
+    world_seed(w, "AWS_REGION", "us-east-1")
+    mock_install_default()
+    mock_respond(w, "aws", "describe-stacks", EKS_BLOB)
+    return w
 }
 
-// fresh_stage — mint + export a unique STAGE_DIR (+ MIGRATE_HOME/STAGE so every
-// path resolver in state.ab/log.ab agrees) with a log/ subdir. Returns the dir.
-fun fresh_stage(): Text {
-    __seq += 1
-    let base = trust $mktemp -d$
-    let dir = "{base}/stage-{__seq}"
-    trust dir_create(dir)
-    trust dir_create("{dir}/log")
-    trust env_var_set("STAGE_DIR", dir)
-    trust env_var_set("MIGRATE_HOME", base)
-    trust env_var_set("STAGE", "stage-{__seq}")
-    return dir
-}
+// ---- helm_kubeconfig_setup: the kubeconfig + context-bind flow -------------
 
-// ---- pinned names ----------------------------------------------------------
-
-test "HELM_RELEASE_NAME and HELM_NAMESPACE are pinned to ma" {
-    assert_eq(HELM_RELEASE_NAME, "ma")
-    assert_eq(HELM_NAMESPACE, "ma")
-    assert_eq(HELM_CHART_NAME, "migration-assistant")
-}
-
-// ---- helm_ctx_flags / kubectl_ctx_flags + helm_ctx_init --------------------
-
-test "helm_ctx_init clears flags when no KUBECTL_CONTEXT is set" {
-    fresh_stage()
-    state_load()
-    // No KUBECTL_CONTEXT in this fresh store → bare helm/kubectl (empty prefixes).
-    helm_ctx_init()
-    assert_eq(helm_ctx_flags(), "")
-    assert_eq(kubectl_ctx_flags(), "")
-}
-
-test "helm_ctx_init builds the --kube-context / --context flag prefixes" {
-    fresh_stage()
-    // MODULE-INSTANCE note: the test's state.ab store is a DIFFERENT instance from
-    // helm_ctx.ab's (each importer gets its own module globals). helm_ctx_init
-    // reads helm_ctx.ab's OWN store, so we seed KUBECTL_CONTEXT through the shared
-    // on-disk state.env (state_set + state_save here) and exercise the bind via
-    // helm_kctx_init — the documented "load from disk, then helm_ctx_init" path.
-    state_load()
-    state_set("KUBECTL_CONTEXT", "ma-eks-cluster")
-    state_save()
-    helm_kctx_init()
-    assert_eq(helm_ctx_flags(), "--kube-context ma-eks-cluster")
-    assert_eq(kubectl_ctx_flags(), "--context ma-eks-cluster")
-}
-
-test "helm_ctx_init re-init with an unset context clears a prior binding" {
-    // Bind to a context first (via disk, the cross-instance channel)…
-    fresh_stage()
-    state_load()
-    state_set("KUBECTL_CONTEXT", "ctx-was-set")
-    state_save()
-    helm_kctx_init()
-    assert_eq(helm_ctx_flags(), "--kube-context ctx-was-set")
-
-    // …then a fresh stage with NO KUBECTL_CONTEXT on disk must clear the flags
-    // back to bare helm/kubectl (the bash default arrays) — proving the binding
-    // is re-derived each init, not sticky from the prior process state.
-    fresh_stage()
-    helm_kctx_init()
-    assert_eq(helm_ctx_flags(), "")
-    assert_eq(kubectl_ctx_flags(), "")
-}
-
-// ---- helm_kctx_init (bash-compat alias: load from disk, then bind) ---------
-
-test "helm_kctx_init binds the context from the on-disk state.env" {
-    fresh_stage()
-    // Seed KUBECTL_CONTEXT ON DISK (the channel a sibling module's separate state
-    // instance reads). state_load + state_set + state_save writes state.env under
-    // the pinned stage dir; helm_kctx_init then state_loads it back and binds.
-    state_load()
-    state_set("KUBECTL_CONTEXT", "disk-ctx")
-    state_save()
-    helm_kctx_init()
-    assert_eq(helm_ctx_flags(), "--kube-context disk-ctx")
-    assert_eq(kubectl_ctx_flags(), "--context disk-ctx")
-}
-
-// ---- helm_kubeconfig_setup -------------------------------------------------
-
-test "helm_kubeconfig_setup resolves the cluster, binds, and persists state" {
-    install_stubs()
-    fresh_stage()
-    // Seed CFN_STACK_NAME + AWS_REGION on disk (helm_kubeconfig_setup state_loads
-    // at entry). No KUBECTL_CONTEXT yet → the alias defaults to the cluster name.
-    state_load()
-    state_set("CFN_STACK_NAME", "MigrationAssistant-test")
-    state_set("AWS_REGION", "us-east-1")
-    state_save()
+test "kubeconfig setup reads the EKS cluster, updates kubeconfig, binds + persists" {
+    let w = kubeconfig_world()
 
     helm_kubeconfig_setup()
 
-    // The flags bound to the resolved cluster (alias defaulted to cluster name).
+    // It issued the cloud calls: read the stack outputs, created the kubeconfig
+    // entry, and switched the active context.
+    assert(mock_called(w, "aws", "describe-stacks"))
+    assert(mock_called(w, "aws", "update-kubeconfig"))
+    assert(mock_called(w, "kubectl", "use-context"))
+
+    // It bound the helm/kubectl context flags to the resolved cluster (the alias
+    // defaulted to the cluster name, no explicit --kubectl-context).
     assert_eq(helm_ctx_flags(), "--kube-context ma-eks-cluster")
     assert_eq(kubectl_ctx_flags(), "--context ma-eks-cluster")
 
-    // Re-load this test's instance to observe what the function persisted to disk.
+    // It persisted the cluster, the context alias, and the ECR registry from the
+    // CFN blob (read this test's instance back off disk to see what it wrote).
     state_load()
     assert_eq(state_get("EKS_CLUSTER", ""), "ma-eks-cluster")
     assert_eq(state_get("KUBECTL_CONTEXT", ""), "ma-eks-cluster")
-    // The ECR registry from the CFN blob is captured for crane/helm.
     assert(text_contains(state_get("CRANE_REGISTRY", ""), "111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr"))
-    // KUBE_CONTEXT exported for the --build path.
+
+    // It exported KUBE_CONTEXT in-process for the --build path (build.ab reads it).
     assert_eq(env_var_get("KUBE_CONTEXT") failed { "" }, "ma-eks-cluster")
 }
 
-test "helm_kubeconfig_setup honors an explicit KUBECTL_CONTEXT alias" {
-    install_stubs()
-    fresh_stage()
-    state_load()
-    state_set("CFN_STACK_NAME", "MigrationAssistant-test")
-    state_set("AWS_REGION", "us-east-1")
-    // --kubectl-context override → the alias the entry is created under + bound.
-    state_set("KUBECTL_CONTEXT", "operator-chosen-ctx")
-    state_save()
+test "kubeconfig setup honors an explicit KUBECTL_CONTEXT alias" {
+    let w = kubeconfig_world()
+    // --kubectl-context override carried in KUBECTL_CONTEXT → the alias the entry
+    // is created under and the context that gets bound.
+    world_seed(w, "KUBECTL_CONTEXT", "operator-chosen-ctx")
 
     helm_kubeconfig_setup()
 
     assert_eq(helm_ctx_flags(), "--kube-context operator-chosen-ctx")
+    assert_eq(kubectl_ctx_flags(), "--context operator-chosen-ctx")
     state_load()
     assert_eq(state_get("KUBECTL_CONTEXT", ""), "operator-chosen-ctx")
     // The cluster name is still recorded separately from the context alias.
     assert_eq(state_get("EKS_CLUSTER", ""), "ma-eks-cluster")
 }
 
-test "helm_kubeconfig_setup with SKIP_KUBECONFIG_UPDATE=Y still binds the context" {
-    install_stubs()
-    fresh_stage()
-    state_load()
-    state_set("CFN_STACK_NAME", "MigrationAssistant-test")
-    state_set("AWS_REGION", "us-east-1")
-    state_set("SKIP_KUBECONFIG_UPDATE", "Y")
-    state_save()
+test "kubeconfig setup with SKIP_KUBECONFIG_UPDATE=Y binds but does not switch the active context" {
+    let w = kubeconfig_world()
+    world_seed(w, "SKIP_KUBECONFIG_UPDATE", "Y")
 
     helm_kubeconfig_setup()
 
     // Skipping the active-context switch must NOT skip creating the kubeconfig
-    // entry or binding the flags (the bash contract).
+    // entry or binding the flags (the bash contract): update-kubeconfig still
+    // ran and the flags are bound, but `kubectl config use-context` was skipped.
+    assert(mock_called(w, "aws", "update-kubeconfig"))
+    assert(not mock_called(w, "kubectl", "use-context"))
+    assert_eq(mock_call_count(w, "kubectl"), 0)
     assert_eq(helm_ctx_flags(), "--kube-context ma-eks-cluster")
     state_load()
     assert_eq(state_get("KUBECTL_CONTEXT", ""), "ma-eks-cluster")
+}
+
+test "kubeconfig setup falls back to the flat EKSClusterName / ECRRegistry outputs" {
+    let w = fresh_world()
+    world_noninteractive()
+    world_seed(w, "CFN_STACK_NAME", "MigrationAssistant-legacy")
+    world_seed(w, "AWS_REGION", "us-east-1")
+    mock_install_default()
+    // No MigrationsExportString blob — only flat OutputKey rows. The _cfn_pick
+    // fallback chain (MIGRATIONS_EKS_CLUSTER_NAME → EKSClusterName) must resolve.
+    mock_respond(w, "aws", "describe-stacks", LEGACY_BLOB)
+
+    helm_kubeconfig_setup()
+
+    assert_eq(helm_ctx_flags(), "--kube-context legacy-eks")
+    state_load()
+    assert_eq(state_get("EKS_CLUSTER", ""), "legacy-eks")
+    assert_eq(state_get("CRANE_REGISTRY", ""), "222.dkr.ecr.us-east-1.amazonaws.com/legacy-ecr")
+}
+
+// ---- helm_kctx_init: bash-compat alias (load state.env from disk, then bind) -
+
+test "kctx init binds the helm/kubectl flag prefixes from the on-disk context" {
+    let w = fresh_world()
+    // Seed KUBECTL_CONTEXT ON DISK — the channel a sibling module's separate
+    // state instance reads. helm_kctx_init state_loads it back, then binds.
+    world_seed(w, "KUBECTL_CONTEXT", "disk-ctx")
+
+    helm_kctx_init()
+
+    assert_eq(helm_ctx_flags(), "--kube-context disk-ctx")
+    assert_eq(kubectl_ctx_flags(), "--context disk-ctx")
+}
+
+test "kctx init clears the flags to bare helm/kubectl when no context is set" {
+    let w = fresh_world()
+    // A fresh world has no KUBECTL_CONTEXT on disk → empty prefixes (the bash
+    // default `HELM=(helm)` / `KUBECTL=(kubectl)` arrays).
+    helm_kctx_init()
+
+    assert_eq(helm_ctx_flags(), "")
+    assert_eq(kubectl_ctx_flags(), "")
+}
+
+test "kctx init re-derives the binding each call (an unset context clears a prior bind)" {
+    let w = fresh_world()
+    world_seed(w, "KUBECTL_CONTEXT", "ctx-was-set")
+    helm_kctx_init()
+    assert_eq(helm_ctx_flags(), "--kube-context ctx-was-set")
+
+    // A fresh world with NO KUBECTL_CONTEXT on disk must clear the flags back to
+    // bare helm/kubectl — proving the binding is re-derived each init, not sticky
+    // from the prior process state.
+    let w2 = fresh_world()
+    helm_kctx_init()
+    assert_eq(helm_ctx_flags(), "")
+    assert_eq(kubectl_ctx_flags(), "")
+}
+
+// ---- pinned names (pure constant asserts) ----------------------------------
+
+test "the helm release, namespace, and chart names are pinned" {
+    assert_eq(HELM_RELEASE_NAME, "ma")
+    assert_eq(HELM_NAMESPACE, "ma")
+    assert_eq(HELM_CHART_NAME, "migration-assistant")
 }

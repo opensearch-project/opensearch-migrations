@@ -1,58 +1,116 @@
-// test_install.ab — coverage for src/install.ab pure helpers + an end-to-end
-// local (INSTALL_FROM_LOCAL) path-mode install under the host shell.
+// test_install.ab — coverage for src/install.ab.
 //
-// install.ab is a `main`-bearing entrypoint; importing it does NOT run main, so
-// its pub/internal funcs are unit-testable. The functions under test here are
-// the pure ones (contains_path, read_binary_name) plus a real fetch_into via a
-// fake source tree. Network paths (resolve_version "latest") are not exercised —
-// no network in tests.
+// install.ab is the standalone curl-pipe installer: it runs BEFORE the lib tree
+// exists, imports nothing from the CLI, and ships as a self-contained install.sh.
+// It is `main`-bearing, but importing it does NOT run main, so its pub funcs are
+// directly testable. Network paths (resolve_version "latest") are intentionally
+// not exercised — there is no network in tests.
+//
+// Two layers, matching TEST_GUIDE.md:
+//   * UNIT (pure): contains_path — the PATH-membership classifier. No filesystem,
+//     no world; assert directly on the returned Bool.
+//   * E2E (filesystem): read_binary_name + fetch_into — the local-install copy.
+//     Each block mints its OWN fresh_world() sandbox (a unique temp dir) instead
+//     of sharing hardcoded /tmp paths, so blocks never collide under the parallel
+//     runner. install.ab reads/writes plain files (no aws/kubectl/helm), so the
+//     mock fleet isn't needed here — the world is purely the isolated workspace.
+//
+// NO `return` inside a test block. JSON `{` braces in inline Text are escaped (\{).
 
 import { assert, assert_eq } from "std/test"
+import { file_write, dir_create, file_exists } from "std/fs"
+import { fresh_world } from "./support/world.ab"
 import { contains_path, read_binary_name, fetch_into } from "../src/install.ab"
-import { file_write, file_read, dir_create, file_exists } from "std/fs"
-import { env_var_set } from "std/env"
 
-test "contains_path matches PATH elements exactly" {
-    // exact, prefix, middle, suffix, and non-member
-    assert(contains_path("/usr/bin", "/usr/bin"))
-    assert(contains_path("/a:/b:/c", "/a"))
-    assert(contains_path("/a:/b:/c", "/b"))
-    assert(contains_path("/a:/b:/c", "/c"))
-    assert(not contains_path("/a:/bb:/c", "/b"))
-    assert(not contains_path("/usr/bin", "/usr/local/bin"))
+// ---- file-local helpers (ABOVE the tests: define-before-use across imports) --
+
+// local_tree — build a fake released tree (bin/ lib/ skills/) inside the world so
+// fetch_into's INSTALL_FROM_LOCAL branch has something to copy. Returns the source
+// dir. Mirrors the on-disk shape fetch_into expects: an executable launcher under
+// bin/, plus the sibling lib/ and skills/ trees.
+fun local_tree(w: Text): Text {
+    let src = "{w}/src-tree"
+    trust dir_create("{src}/bin")
+    trust dir_create("{src}/lib")
+    trust dir_create("{src}/skills")
+    trust file_write("{src}/bin/migration-assistant", "#!/usr/bin/env bash\necho hi\n")
+    return src
 }
 
-test "read_binary_name defaults when no manifest present" {
-    dir_create("/tmp/amber_inst_a") failed { }
-    assert_eq(read_binary_name("/tmp/amber_inst_a"), "migration-assistant")
+// branding_manifest — a manifest.json string whose branding.binaryName is `name`.
+// The JSON braces are escaped (\{) since a bare { is Amber interpolation.
+fun branding_manifest(name: Text): Text {
+    return "\{\"branding\":\{\"binaryName\":\"{name}\"}}"
+}
+
+// ---- unit: contains_path (the PATH-membership classifier, pure) -------------
+
+test "contains_path matches a dir as exact, prefix, middle, or suffix element" {
+    assert(contains_path("/usr/bin", "/usr/bin"))   // sole element
+    assert(contains_path("/a:/b:/c", "/a"))         // prefix element
+    assert(contains_path("/a:/b:/c", "/b"))         // middle element
+    assert(contains_path("/a:/b:/c", "/c"))         // suffix element
+}
+
+test "contains_path rejects a non-member and a substring-but-not-element" {
+    assert(not contains_path("/usr/bin", "/usr/local/bin"))  // not present at all
+    assert(not contains_path("/a:/bb:/c", "/b"))             // /b is a substring of /bb only
+}
+
+// ---- e2e: read_binary_name (branding lookup off the installed tree) ----------
+
+test "read_binary_name defaults to migration-assistant when no manifest exists" {
+    let w = fresh_world()
+    let dst = "{w}/install"
+    trust dir_create(dst)
+    assert_eq(read_binary_name(dst), "migration-assistant")
 }
 
 test "read_binary_name reads branding.binaryName from skills/manifest.json" {
-    dir_create("/tmp/amber_inst_b/skills") failed { }
-    file_write("/tmp/amber_inst_b/skills/manifest.json", "\{\"branding\":\{\"binaryName\":\"acme-migrate\"}}") failed { }
-    assert_eq(read_binary_name("/tmp/amber_inst_b"), "acme-migrate")
+    let w = fresh_world()
+    let dst = "{w}/install"
+    trust dir_create("{dst}/skills")
+    trust file_write("{dst}/skills/manifest.json", branding_manifest("acme-migrate"))
+    assert_eq(read_binary_name(dst), "acme-migrate")
 }
 
-test "read_binary_name prefers root manifest.json over skills/" {
-    dir_create("/tmp/amber_inst_c/skills") failed { }
-    file_write("/tmp/amber_inst_c/manifest.json", "\{\"branding\":\{\"binaryName\":\"root-name\"}}") failed { }
-    file_write("/tmp/amber_inst_c/skills/manifest.json", "\{\"branding\":\{\"binaryName\":\"skills-name\"}}") failed { }
-    assert_eq(read_binary_name("/tmp/amber_inst_c"), "root-name")
+test "read_binary_name prefers the root manifest.json over skills/manifest.json" {
+    let w = fresh_world()
+    let dst = "{w}/install"
+    trust dir_create("{dst}/skills")
+    trust file_write("{dst}/manifest.json", branding_manifest("root-name"))
+    trust file_write("{dst}/skills/manifest.json", branding_manifest("skills-name"))
+    assert_eq(read_binary_name(dst), "root-name")
 }
 
-test "fetch_into copies a local tree + chmods the binary" {
-    // Build a fake source tree.
-    dir_create("/tmp/amber_inst_src/bin") failed { }
-    dir_create("/tmp/amber_inst_src/lib") failed { }
-    dir_create("/tmp/amber_inst_src/skills") failed { }
-    file_write("/tmp/amber_inst_src/bin/migration-assistant", "#!/usr/bin/env bash\necho hi\n") failed { }
-    dir_create("/tmp/amber_inst_dst") failed { }
+// ---- e2e: fetch_into (the INSTALL_FROM_LOCAL copy) ---------------------------
 
-    fetch_into("/tmp/amber_inst_dst", "local-test", "owner/repo", "/tmp/amber_inst_src")
+test "fetch_into copies bin/lib/skills from a local tree and makes the binary executable" {
+    let w = fresh_world()
+    let src = local_tree(w)
+    let dst = "{w}/install"
+    trust dir_create(dst)
 
-    assert(file_exists("/tmp/amber_inst_dst/bin/migration-assistant"))
-    assert(file_exists("/tmp/amber_inst_dst/lib"))
-    // binary is executable
-    let x = trust $test -x /tmp/amber_inst_dst/bin/migration-assistant && echo yes$
+    fetch_into(dst, "local-test", "owner/repo", src)
+
+    assert(file_exists("{dst}/bin/migration-assistant"))   // launcher copied
+    assert(file_exists("{dst}/lib"))                       // lib tree copied
+    assert(file_exists("{dst}/skills"))                    // skills tree copied
+    // chmod +x applied to the launcher.
+    let x = trust $test -x "{dst}/bin/migration-assistant" && echo yes$
     assert_eq(x, "yes")
+}
+
+test "fetch_into copies an optional root manifest.json when the local tree has one" {
+    let w = fresh_world()
+    let src = local_tree(w)
+    trust file_write("{src}/manifest.json", branding_manifest("packaged-name"))
+    let dst = "{w}/install"
+    trust dir_create(dst)
+
+    fetch_into(dst, "local-test", "owner/repo", src)
+
+    assert(file_exists("{dst}/manifest.json"))
+    // and read_binary_name then picks up the copied branding end-to-end.
+    assert_eq(read_binary_name(dst), "packaged-name")
 }

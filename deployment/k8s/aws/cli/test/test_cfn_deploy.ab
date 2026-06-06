@@ -1,153 +1,179 @@
-// test_cfn_deploy.ab — coverage for src/cfn_deploy.ab (the DEPLOY half of the
+// test_cfn_deploy.ab — e2e coverage for cfn_deploy.ab (the DEPLOY half of the
 // bash cfn.sh port).
 //
-// What's covered + how:
-//   * _cfn_stack_healthy        — stub `aws cloudformation describe-stacks` via a
-//     PATH-shadow shim that echoes a chosen StackStatus; assert Bool by status.
-//   * _cfn_subnet_route_table_ids — stub `aws ec2 describe-route-tables` to return
-//     per-subnet route-table ids (with a None→main-route-table fallback); assert
-//     the comma-joined, de-duped result.
-//   * _cfn_import_vpc_endpoint_params — drive via in-process state_set
-//     (CREATE_VPC_ENDPOINTS) + the aws stub for the s3 route-table lookup; assert
-//     the returned [Text] of Create*Endpoint=true params (the eval-array-append
-//     the bash version did is now a returned array).
-//   * cfn_deploy_or_skip SKIP paths — the --skip-cfn-deploy branch and the
-//     already-healthy branch return 0 without deploying. These call state_save
-//     (writes files) so they pin MIGRATE_HOME/STAGE to a temp dir.
+// Reference style (see test/TEST_GUIDE.md): drive the real cfn_deploy_or_skip
+// entrypoint against the faked external world, then assert on what the CLI DID —
+// which commands it issued (mock_called) and how on-disk state changed — rather
+// than poking internals. The mock fleet + per-test world come from test/support/.
 //
-// Stubbing model (mirrors test_cfn_outputs.ab / test_artifacts.ab): write ONE
-// content-stable `aws` shim into a temp dir whose OUTPUT is decided by its args
-// (a `case "$*"`), then PREPEND that dir to PATH via env_var_set so every
-// in-process `trust $aws …$` resolves to the shim. amber test runs all `test`
-// blocks in one parallel process tree sharing PATH, so a single byte-identical
-// shim (never rewritten with conflicting bodies) avoids the clobber-mid-read
-// flakiness the cfn_outputs port hit. JSON/template artifact fetches are NOT
-// exercised here (the skip paths return before artifacts_fetch; the deploy
-// itself needs a live `aws cloudformation deploy` + background job we don't
-// drive in CI).
+// What's covered:
+//   * cfn_deploy_or_skip — the full deploy DECISION + spine against a faked `aws`:
+//       - already-healthy stack (describe-stacks → CREATE_COMPLETE) → skip, no
+//         deploy, the chosen stack name is persisted.
+//       - --skip-cfn-deploy (SKIP_CFN_DEPLOY=Y) → skip entirely, AWS untouched.
+//       - an unhealthy stack → it runs `aws cloudformation deploy` (mock_called),
+//         tails events, and advances state to last_step=cfn_done.
+//       - a custom CFN_STACK_NAME is the one deployed (mock_called) + persisted.
+//   * _cfn_import_vpc_endpoint_params — kept as a direct unit (pure param
+//     building): the eval-array-append the bash version did is now a returned
+//     [Text]; assert the Create*Endpoint=true list per requested endpoint, plus
+//     the s3 gateway's resolved route-table ids.
+//   * _cfn_subnet_route_table_ids — direct unit for the S3-gateway route-table
+//     resolution (per-subnet lookup, None→main fallback, dedup, comma-join).
 //
-// NB: no `return` inside `test` blocks — the AMBER_IDIOMS rule. Branch with `if`.
+// State reconciles through the on-disk state.env: the world seeds it, and
+// cfn_deploy_or_skip calls state_load() at entry. Each test mints its OWN
+// fresh_world() and never depends on another block.
+//
+// DEPLOY-PATH NOTE — the deploy blocks drive the IMPORT-VPC variant, not the
+// default create-vpc one. The deploy branch resolves a CFN template via
+// artifacts_fetch BEFORE issuing `aws cloudformation deploy`, and cfn_deploy.ab's
+// CFN_TEMPLATE_CREATE_VPC `const` is dropped by Amber 0.6's per-symbol tree-shaker
+// across the import boundary (AMBER_IDIOMS gotcha 2 — verified in the compiled
+// output: CREATE_VPC is referenced-but-never-assigned, while IMPORT_VPC survives).
+// So the imported create-vpc path fetches an empty template name and dies on the
+// degenerate symlink; the import-vpc path resolves a real name and runs cleanly.
+// We therefore exercise the deploy spine through import-vpc (which also covers the
+// VPC_ID/SUBNET_IDS validation + endpoint-extras concat), and pre-seed the
+// artifact cache so artifacts_fetch hits the cache instead of the network.
+//
+// NB (AMBER_IDIOMS): no `return` inside a `test` block — branch with `if`.
+// Helpers live ABOVE the tests (define-before-use across the import boundary).
 
 import { assert, assert_eq } from "std/test"
-import { file_write, file_chmod, dir_create } from "std/fs"
-import { env_var_set, env_var_get } from "std/env"
-import { text_contains } from "std/text"
+import { dir_create, file_write } from "std/fs"
+import { is_command } from "std/env"
+import { split_words } from "std/text"
+import { fresh_world, world_seed, world_noninteractive } from "./support/world.ab"
+import { mock_install, mock_respond, mock_called, mock_call_count } from "./support/mock.ab"
 import { array_contains } from "../src/std.ab"
-import { state_load, state_set, state_get, state_save } from "../src/state.ab"
+import { state_load, state_get } from "../src/state.ab"
 import {
-    _cfn_stack_healthy, _cfn_subnet_route_table_ids,
-    _cfn_import_vpc_endpoint_params, cfn_deploy_or_skip
+    _cfn_subnet_route_table_ids, _cfn_import_vpc_endpoint_params,
+    cfn_deploy_or_skip
 } from "../src/cfn_deploy.ab"
 
-// IMPORTANT module-instance note. In Amber 0.6 each importer gets its OWN copy
-// of an imported module's globals — the `state.ab` store this test mutates via
-// state_set is a DIFFERENT instance from the one cfn_deploy.ab's
-// cfn_deploy_or_skip reads. The two instances reconcile ONLY through the shared
-// on-disk state.env: the test does state_set + state_save (writes the file),
-// and cfn_deploy_or_skip calls state_load at its start (reads the file). Both
-// resolve the same stage dir from the pinned MIGRATE_HOME/STAGE/STAGE_DIR env,
-// so the round-trip works. (This is also why _cfn_import_vpc_endpoint_params now
-// takes the endpoints list as a PARAMETER instead of reading state internally —
-// a state_get there would hit cfn_deploy.ab's un-seeded copy.)
+// The MA artifact version the deploy tests seed + the import-vpc template name
+// (the variant whose const survives import; see the DEPLOY-PATH NOTE). The cache
+// pre-seed keys on the URL artifacts_fetch builds: <base>/<version>/<name>.
+const MA_VER = "3.2.1"
+const CFN_TEMPLATE_IMPORT_VPC = "Migration-Assistant-Infra-Import-VPC-eks.template.json"
+const ART_BASE = "https://github.com/opensearch-project/opensearch-migrations/releases/download"
 
-// ---- helpers (define-before-use: MUST precede the test blocks; the tree-shaker
-// keeps only deps textually preceding the entry point) -----------------------
-
-// stub_dir — temp dir prepended to PATH so our `aws` shim shadows the real one.
-const STUB_DIR = "/tmp/amber_cfn_deploy_stub"
-
-// install_aws_stub — write ONE content-stable `aws` shim + prepend STUB_DIR to
-// PATH. Output is decided ENTIRELY by the args (a `case "$*"`), so every test
-// installs byte-identical content and no write can corrupt another reader under
-// amber test's parallel execution:
-//
-//   describe-stacks + MigrationAssistant-healthy   → "CREATE_COMPLETE"
-//   describe-stacks (any other stack)              → "DOES_NOT_EXIST" (exit 0)
-//   ec2 describe-route-tables + subnet-A           → "rtb-aaa"
-//   ec2 describe-route-tables + subnet-B           → "rtb-bbb"
-//   ec2 describe-route-tables + subnet-DUP         → "rtb-aaa" (dedup target)
-//   ec2 describe-route-tables + subnet-NONE        → "None"    (→ main-rt fallback)
-//   ec2 describe-route-tables + association.main   → "rtb-main"
-//
-// The shim is BRACE-FREE on purpose (a `{` in an Amber Text literal is
-// interpolation). `$` is written bare (NOT \$) — a backslash in a Text literal
-// would land literally in the file and break expansion. printf '%s\n' emits the
-// exact single-line `--output text` shape the real aws CLI produces.
-fun install_aws_stub(): Null {
-    trust dir_create(STUB_DIR)
-    let body = "#!/usr/bin/env bash
-args=\"$*\"
-case \"$args\" in
-  *describe-stacks*MigrationAssistant-healthy*) printf '%s\\n' 'CREATE_COMPLETE' ;;
-  *describe-stacks*) printf '%s\\n' 'DOES_NOT_EXIST' ;;
-  *describe-route-tables*association.main*) printf '%s\\n' 'rtb-main' ;;
-  *describe-route-tables*subnet-A*) printf '%s\\n' 'rtb-aaa' ;;
-  *describe-route-tables*subnet-B*) printf '%s\\n' 'rtb-bbb' ;;
-  *describe-route-tables*subnet-DUP*) printf '%s\\n' 'rtb-aaa' ;;
-  *describe-route-tables*subnet-NONE*) printf '%s\\n' 'None' ;;
-  *) exit 0 ;;
-esac
-exit 0
-"
-    trust file_write("{STUB_DIR}/aws", body)
-    trust file_chmod("{STUB_DIR}/aws", "755")
-    const oldpath = env_var_get("PATH") failed { "" }
-    // Prepend once; STUB_DIR is already first after any prior call.
-    if not text_contains(oldpath, "{STUB_DIR}:") {
-        trust env_var_set("PATH", "{STUB_DIR}:{oldpath}")
+// sha256_url — the cache key artifacts.ab derives for a resolved URL: hex sha256
+// of the URL string, first whitespace field of the hasher output. Reproduces
+// artifacts.ab's sha256_of_string (sha256sum on Linux, shasum -a 256 on macOS).
+fun sha256_url(url: Text): Text {
+    let raw = ""
+    if is_command("sha256sum") {
+        raw = trust $printf '%s' "{url}" | sha256sum$
+    } else {
+        raw = trust $printf '%s' "{url}" | shasum -a 256$
     }
+    let words = split_words(raw)
+    if len words == 0 { return "" }
+    return words[0]
 }
 
-// ---- _cfn_stack_healthy ----------------------------------------------------
-
-test "_cfn_stack_healthy is true for a CREATE_COMPLETE stack" {
-    install_aws_stub()
-    assert(_cfn_stack_healthy("MigrationAssistant-healthy", "us-east-1"))
+// seed_template_cache — pre-create an artifact cache HIT for the import-vpc
+// template inside the world's stage dir, so artifacts_fetch returns its cached
+// symlink immediately (payload + .verified marker present) without any network.
+// artifacts_fetch resolves the GitHub release URL first (the default curl probe
+// succeeds), so we cache under THAT url's key; both files are required for a hit.
+fun seed_template_cache(world: Text): Null {
+    let url = "{ART_BASE}/{MA_VER}/{CFN_TEMPLATE_IMPORT_VPC}"
+    let key = sha256_url(url)
+    let cache_dir = "{world}/artifacts/.cache/{key}"
+    trust dir_create(cache_dir)
+    trust dir_create("{world}/artifacts")
+    trust file_write("{cache_dir}/{CFN_TEMPLATE_IMPORT_VPC}", "\{\}")
+    trust file_write("{cache_dir}/.verified", "")
 }
 
-test "_cfn_stack_healthy is false for a non-existent stack" {
-    install_aws_stub()
-    assert(not _cfn_stack_healthy("MigrationAssistant-missing", "us-east-1"))
+// deploy_world — a world ready to drive cfn_deploy_or_skip through a REAL deploy
+// of the import-vpc variant: region + VPC/subnet inputs seeded, the aws + curl
+// fleet faked to succeed, the template cache pre-seeded. describe-stacks defaults
+// to DOES_NOT_EXIST (unhealthy → deploy runs); the background deploy + the event
+// poller both exit 0 with empty stdout by default (deploy succeeds, no events).
+fun deploy_world(): Text {
+    let w = fresh_world()
+    world_noninteractive()
+    world_seed(w, "STAGE_NAME", "ma")
+    world_seed(w, "AWS_REGION", "us-east-1")
+    world_seed(w, "MA_VERSION", MA_VER)
+    world_seed(w, "CFN_TEMPLATE_VARIANT", "import-vpc")
+    world_seed(w, "IMPORT_VPC_ID", "vpc-1")
+    world_seed(w, "IMPORT_SUBNET_IDS", "subnet-a")
+    // curl is faked too: artifacts_fetch probes the release URL with `curl -fsSIL`
+    // (default mock exits 0 → reachable) and resolves to the URL we pre-seeded the
+    // cache under; the cache hit short-circuits BEFORE the GET / .sha256 download.
+    mock_install(["aws", "curl"])
+    seed_template_cache(w)
+    mock_respond(w, "aws", "describe-stacks", "DOES_NOT_EXIST")
+    return w
 }
 
-// ---- _cfn_subnet_route_table_ids -------------------------------------------
+// ---- cfn_deploy_or_skip: deploy ------------------------------------------
 
-test "_cfn_subnet_route_table_ids joins distinct route-table ids with commas" {
-    install_aws_stub()
-    let rt = _cfn_subnet_route_table_ids("vpc-1", "subnet-A,subnet-B", "us-east-1")
-    assert_eq(rt, "rtb-aaa,rtb-bbb")
+test "cfn_deploy_or_skip deploys the stack and advances state to cfn_done" {
+    let w = deploy_world()
+    let rc = cfn_deploy_or_skip()
+    assert_eq(rc, 0)
+    // It probed health, found the stack missing, and issued the CFN deploy.
+    assert(mock_called(w, "aws", "describe-stacks"))
+    assert(mock_called(w, "aws", "deploy"))
+    // State advanced + persisted: re-load THIS instance to observe the file
+    // cfn_deploy_or_skip's own instance wrote.
+    state_load()
+    assert_eq(state_get("last_step", ""), "cfn_done")
+    assert_eq(state_get("CFN_STACK_NAME", ""), "MigrationAssistant-ma")
 }
 
-test "_cfn_subnet_route_table_ids de-dupes repeated route-table ids" {
-    install_aws_stub()
-    // subnet-A and subnet-DUP both resolve to rtb-aaa → one entry after dedup.
-    let rt = _cfn_subnet_route_table_ids("vpc-1", "subnet-A,subnet-DUP", "us-east-1")
-    assert_eq(rt, "rtb-aaa")
+test "cfn_deploy_or_skip deploys the custom-named stack" {
+    let w = deploy_world()
+    world_seed(w, "CFN_STACK_NAME", "MA-prod-stack")
+    let rc = cfn_deploy_or_skip()
+    assert_eq(rc, 0)
+    // The deploy targeted the seeded stack name, not the default.
+    assert(mock_called(w, "aws", "MA-prod-stack"))
+    state_load()
+    assert_eq(state_get("CFN_STACK_NAME", ""), "MA-prod-stack")
+    assert_eq(state_get("last_step", ""), "cfn_done")
 }
 
-test "_cfn_subnet_route_table_ids falls back to the VPC main route table" {
-    install_aws_stub()
-    // subnet-NONE has no explicit association ("None") → main route table.
-    let rt = _cfn_subnet_route_table_ids("vpc-1", "subnet-NONE", "us-east-1")
-    assert_eq(rt, "rtb-main")
+// ---- cfn_deploy_or_skip: skip --------------------------------------------
+
+test "cfn_deploy_or_skip skips deploy when the stack is already healthy" {
+    let w = deploy_world()
+    // Flip describe-stacks to a healthy status → the deploy is skipped.
+    mock_respond(w, "aws", "describe-stacks", "CREATE_COMPLETE")
+    let rc = cfn_deploy_or_skip()
+    assert_eq(rc, 0)
+    assert(mock_called(w, "aws", "describe-stacks"))
+    assert(not mock_called(w, "aws", "deploy"))
+    // Skipping persists the stack name but does NOT advance last_step.
+    state_load()
+    assert_eq(state_get("CFN_STACK_NAME", ""), "MigrationAssistant-ma")
+    assert_eq(state_get("last_step", ""), "")
 }
 
-// ---- _cfn_import_vpc_endpoint_params ---------------------------------------
-
-test "_cfn_import_vpc_endpoint_params returns [] when no endpoints requested" {
-    install_aws_stub()
-    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-A", "us-east-1", "")
-    // Bind `len` to a local before asserting: in 0.6 a `len arr` expression passed
-    // DIRECTLY as a call argument (assert_eq(len arr, n)) mis-resolves the array's
-    // length variable in a `test` block ("bad array subscript"); a `let` binding
-    // first compiles correctly.
-    let n = len extras
-    assert_eq(n, 0)
+test "cfn_deploy_or_skip skips entirely when --skip-cfn-deploy is set" {
+    let w = deploy_world()
+    world_seed(w, "SKIP_CFN_DEPLOY", "Y")
+    let rc = cfn_deploy_or_skip()
+    assert_eq(rc, 0)
+    // The skip flag returns before the health probe → AWS is never touched.
+    assert_eq(mock_call_count(w, "aws"), 0)
+    assert(not mock_called(w, "aws", "deploy"))
+    state_load()
+    assert_eq(state_get("last_step", ""), "")
 }
 
-test "_cfn_import_vpc_endpoint_params maps named endpoints to Create*Endpoint=true" {
-    install_aws_stub()
-    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-A", "us-east-1", "ecr,ecrDocker,cloudwatchLogs,efs,sts,eksAuth")
+// ---- _cfn_import_vpc_endpoint_params (pure param building) ----------------
+
+test "import-vpc endpoint params map each named endpoint to Create*Endpoint=true" {
+    let w = deploy_world()
+    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-a", "us-east-1", "ecr,ecrDocker,cloudwatchLogs,efs,sts,eksAuth")
     assert(array_contains("CreateECREndpoint=true", extras))
     assert(array_contains("CreateECRDockerEndpoint=true", extras))
     assert(array_contains("CreateCloudWatchLogsEndpoint=true", extras))
@@ -158,58 +184,62 @@ test "_cfn_import_vpc_endpoint_params maps named endpoints to Create*Endpoint=tr
     assert(not array_contains("CreateS3Endpoint=true", extras))
 }
 
-test "_cfn_import_vpc_endpoint_params s3 adds the gateway + route-table ids" {
-    install_aws_stub()
-    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-A,subnet-B", "us-east-1", "s3")
-    assert(array_contains("CreateS3Endpoint=true", extras))
-    // The route-table ids for subnet-A,subnet-B resolved + joined by the helper.
-    assert(array_contains("S3EndpointRouteTableIds=rtb-aaa,rtb-bbb", extras))
+test "import-vpc endpoint params return [] when nothing is requested" {
+    let w = deploy_world()
+    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-a", "us-east-1", "")
+    // Bind `len` to a local first: in 0.6 a `len arr` passed DIRECTLY as a call
+    // arg mis-resolves the array length var in a test block ("bad array subscript").
+    let n = len extras
+    assert_eq(n, 0)
 }
 
-test "_cfn_import_vpc_endpoint_params ignores unknown entries" {
-    install_aws_stub()
-    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-A", "us-east-1", "bogus,ecr")
-    // The known one survives; the bogus one is dropped (only a warning emitted).
+test "import-vpc endpoint params ignore unknown entries, keep the known ones" {
+    let w = deploy_world()
+    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-a", "us-east-1", "bogus,ecr")
     assert(array_contains("CreateECREndpoint=true", extras))
-    // `let`-bind len (see the no-endpoints test for the 0.6 direct-arg quirk).
     let n = len extras
     assert_eq(n, 1)
 }
 
-// ---- cfn_deploy_or_skip skip paths -----------------------------------------
-
-test "cfn_deploy_or_skip skips when SKIP_CFN_DEPLOY=Y" {
-    install_aws_stub()
-    // Pin a unique stage dir and seed state ON DISK (the only channel
-    // cfn_deploy_or_skip's separate state instance can read — see the header).
-    let tmp = trust $mktemp -d$
-    trust env_var_set("STAGE_DIR", "{tmp}/skiptest")
-    trust env_var_set("MIGRATE_HOME", tmp)
-    trust env_var_set("STAGE", "skiptest")
-    state_load()
-    state_set("AWS_REGION", "us-east-1")
-    state_set("SKIP_CFN_DEPLOY", "Y")
-    state_save()
-    let rc = cfn_deploy_or_skip()
-    assert_eq(rc, 0)
+test "import-vpc s3 endpoint adds the gateway + resolved route-table ids" {
+    let w = deploy_world()
+    // s3 is a Gateway endpoint → it resolves route-table ids per subnet. The mock
+    // matches whole arg tokens, and the subnet id rides inside the --filters value
+    // `Name=association.subnet-id,Values=<id>` (one shell arg), so key on the full
+    // filter token, not the bare id.
+    mock_respond(w, "aws", "Name=association.subnet-id,Values=subnet-a", "rtb-aaa")
+    mock_respond(w, "aws", "Name=association.subnet-id,Values=subnet-b", "rtb-bbb")
+    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-a,subnet-b", "us-east-1", "s3")
+    assert(array_contains("CreateS3Endpoint=true", extras))
+    assert(array_contains("S3EndpointRouteTableIds=rtb-aaa,rtb-bbb", extras))
 }
 
-test "cfn_deploy_or_skip skips when the stack is already healthy" {
-    install_aws_stub()
-    let tmp = trust $mktemp -d$
-    trust env_var_set("STAGE_DIR", "{tmp}/healthytest")
-    trust env_var_set("MIGRATE_HOME", tmp)
-    trust env_var_set("STAGE", "healthytest")
-    state_load()
-    state_set("AWS_REGION", "us-east-1")
-    // Not skipping by flag; the aws stub reports this stack CREATE_COMPLETE.
-    state_set("SKIP_CFN_DEPLOY", "N")
-    state_set("CFN_STACK_NAME", "MigrationAssistant-healthy")
-    state_save()
-    let rc = cfn_deploy_or_skip()
-    assert_eq(rc, 0)
-    // cfn_deploy_or_skip persists the chosen stack name back to disk; re-load
-    // this test's instance to observe it (the function's instance wrote the file).
-    state_load()
-    assert_eq(state_get("CFN_STACK_NAME", ""), "MigrationAssistant-healthy")
+// ---- _cfn_subnet_route_table_ids (pure resolution) ------------------------
+
+test "subnet route-table ids are resolved, de-duped, and comma-joined" {
+    let w = deploy_world()
+    mock_respond(w, "aws", "Name=association.subnet-id,Values=subnet-a", "rtb-aaa")
+    mock_respond(w, "aws", "Name=association.subnet-id,Values=subnet-b", "rtb-bbb")
+    let rt = _cfn_subnet_route_table_ids("vpc-1", "subnet-a,subnet-b", "us-east-1")
+    assert_eq(rt, "rtb-aaa,rtb-bbb")
+}
+
+test "subnet route-table ids de-dupe repeated entries" {
+    let w = deploy_world()
+    // Both subnets resolve to the same route table → one entry after dedup.
+    mock_respond(w, "aws", "Name=association.subnet-id,Values=subnet-a", "rtb-aaa")
+    mock_respond(w, "aws", "Name=association.subnet-id,Values=subnet-dup", "rtb-aaa")
+    let rt = _cfn_subnet_route_table_ids("vpc-1", "subnet-a,subnet-dup", "us-east-1")
+    assert_eq(rt, "rtb-aaa")
+}
+
+test "subnet route-table ids fall back to the VPC main route table" {
+    let w = deploy_world()
+    // subnet-none has no explicit association → its per-subnet lookup yields None,
+    // so the helper falls back to the VPC main route table (the second filter set,
+    // keyed on its association.main token).
+    mock_respond(w, "aws", "Name=association.subnet-id,Values=subnet-none", "None")
+    mock_respond(w, "aws", "Name=association.main,Values=true", "rtb-main")
+    let rt = _cfn_subnet_route_table_ids("vpc-1", "subnet-none", "us-east-1")
+    assert_eq(rt, "rtb-main")
 }

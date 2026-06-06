@@ -1,59 +1,53 @@
-// test_pack.ab — coverage for src/pack.ab, mirroring test_pack.bats
-// (cmd_pack + the _pack_* helpers).
+// test_pack.ab — coverage for src/pack.ab (cmd_pack + the _pack_* helpers).
 //
-// pack repacks a CLI tarball with new skills/MCPs/branding. Its only external
-// commands are local file tools (jq, tar, find, cp, mktemp, mv, date) — there
-// are NO aws/crane/docker/helm/gradle calls (pack is read-only against the
-// operator's environment), so the stubbing strategy here is:
-//   * The file-manipulation tools (jq/tar/find/cp/...) are exercised with the
-//     REAL host binaries against TEMP fixtures, exactly as test_pack.bats did —
-//     they touch only the temp dirs we create, never the network or cloud, so
-//     real ones give faithful, deterministic results we can assert on.
-//   * A PATH-shadow stub seam IS provided (stub_dir) so a genuinely external
-//     command could be shadowed; pack invokes none, so the happy paths use the
-//     real local tools.
+// e2e-focused style (see test/TEST_GUIDE.md, test/test_cleanup.ab): the primary
+// tests drive the real cmd_pack entrypoint against a fixture CLI tarball and then
+// assert on what it PRODUCED — they extract the repacked tarball and read back the
+// rewritten manifest (branding/MCPs/skills/build.packs) + the renamed top-level
+// dir. The manifest-merge helpers (_pack_add_mcp / _pack_apply_branding /
+// _pack_apply_brand_flags / _pack_append_entry), the validator (_pack_validate),
+// and the bundle-root finder (_pack_resolve_root) stay as focused units — they are
+// pure jq transforms over a manifest with no observable side effect beyond the
+// file, so a direct read-back assert is the clearest contract.
 //
-// JSON IS BRACE-HEAVY. A literal `{` starts interpolation in BOTH Amber Text
-// literals AND inside `$...$` commands (so even a heredoc body in `$...$` is
-// captured). The clean way the cheat-sheet recommends — and test_manifest.ab
-// uses — is ON-DISK fixtures under test/fixtures/*.json: we `cp` those into the
-// per-test temp bundle. No JSON ever appears in an Amber literal.
+// pack is READ-ONLY against the operator's environment: its only external commands
+// are local file tools (jq/tar/find/cp/mktemp/mv/date). There are NO aws/kubectl/
+// helm/crane/docker calls, so there is nothing to fake through the mock fleet — the
+// real host binaries touch only the per-test sandbox we build, giving faithful,
+// deterministic results. What we DO take from the shared support lib is the
+// isolation: every block mints its OWN fresh_world() (support/world.ab) as the
+// scratch root, so concurrent blocks under the parallel runner never collide on a
+// path (the old file hand-partitioned a shared /tmp dir by suffix; the world is the
+// per-test-unique channel instead).
 //
-// die() exits the process, so the death paths (missing --input, bad JSON, the
-// --strict escalation) are NOT asserted from inside a test block (an exit would
-// abort the whole run). We test the success paths + the rc=1 validation-fail
-// return where reachable (it is only reachable WITHOUT die when no hard error
-// fires — and the only soft-only path returns true, so we cover the non-fatal
-// unknown-id branch instead, mirroring the bats split of the two cases).
+// JSON IS BRACE-HEAVY: a literal `{` starts interpolation in BOTH Amber Text
+// literals AND inside `$...$` commands. So no JSON ever appears inline — canned
+// manifests/fragments live in test/fixtures/*.json and are `cp`'d into the world.
 //
-// Helpers + imports are ABOVE the test blocks (define-before-use). NO `return`
-// inside a test block.
+// die() exits the process, so the hard-error paths (missing --input, invalid JSON,
+// the --strict escalation) are NOT asserted from inside a test block — an exit
+// would abort the whole run. We cover the success paths + the soft (non-fatal)
+// unknown-mode-id branch, mirroring the bats split of the fatal/non-fatal cases.
+//
+// Helpers + imports are ABOVE the test blocks (define-before-use across the import
+// boundary). NO `return` inside a test block — branch with `if`.
 
 import { assert, assert_eq } from "std/test"
 import { file_exists, dir_create } from "std/fs"
 import { text_contains } from "std/text"
+import { fresh_world } from "./support/world.ab"
 import {
     cmd_pack, _pack_resolve_root, _pack_add_skill, _pack_add_mcp,
     _pack_apply_branding, _pack_apply_brand_flags, _pack_validate,
     _pack_append_entry
 } from "../src/pack.ab"
 
-// ---- fixture + temp-workspace plumbing (define-before-use) -----------------
+// ---- file-local helpers (ABOVE the tests: define-before-use across the import
+// boundary, and the tree-shaker keeps only deps preceding their use) ------------
 
-// WORK — scratch root for this run. amber runs every test block in the same
-// process tree; we partition per-test by a unique suffix so concurrent blocks
-// don't collide on paths.
-const WORK = "/tmp/amber_pack_test"
-
-// FIX — on-disk JSON fixtures (paths relative to repo root; amber test runs from
-// amber-tui/).
+// FIX — on-disk JSON fixtures (paths relative to the repo root; amber test runs
+// from amber-tui/). JSON stays out of Amber literals → brace-safe.
 const FIX = "test/fixtures"
-
-// mk <sub> — absolute path under WORK, creating WORK on the way.
-fun mk(sub: Text): Text {
-    trust dir_create(WORK)
-    return "{WORK}/{sub}"
-}
 
 // cp_fixture <fixture_name> <dest> — copy a fixtures/*.json into place (real cp).
 fun cp_fixture(name: Text, dest: Text): Null {
@@ -61,16 +55,23 @@ fun cp_fixture(name: Text, dest: Text): Null {
 }
 
 // jq_field <path> <filter> — read a scalar out of a JSON file (test assertion
-// helper; the production code never calls this). Real jq on the host.
+// helper only; the production code never calls this). Real jq on the host.
 fun jq_field(path: Text, filter: Text): Text {
     return trust $jq -r "{filter}" "{path}" 2>/dev/null$
 }
 
-// build_bundle <suffix> → root of an EXTRACTED CLI bundle layout
-// (root/manifest.json + root/skills/ + root/lib/ + root/bin/). Real dirs; the
-// manifest is the baseline fixture copied in.
-fun build_bundle(suffix: Text): Text {
-    let root = mk("bundle-{suffix}/migration-assistant-cli-3.2.1")
+// m_of <bundle_root> — the manifest path inside an extracted bundle root.
+fun m_of(root: Text): Text {
+    return "{root}/manifest.json"
+}
+
+// staged_bundle <world> → root of an EXTRACTED CLI bundle laid out under the
+// world (root/manifest.json + root/skills/ + root/lib/ + root/bin/). This is the
+// "already-extracted bundle" shape the manifest-merge + resolve-root units work
+// against — analogous to built_repo() in test_build.ab. The manifest is the
+// baseline fixture copied in. Returns the bundle root dir.
+fun staged_bundle(w: Text): Text {
+    let root = "{w}/bundle/migration-assistant-cli-3.2.1"
     trust dir_create(root)
     trust dir_create("{root}/skills")
     trust dir_create("{root}/lib")
@@ -79,186 +80,52 @@ fun build_bundle(suffix: Text): Text {
     return root
 }
 
-// build_tarball <suffix> → path to a .tar.gz of a bundle (top-level dir
-// migration-assistant-cli-3.2.1), for cmd_pack --input. Real tar.
-fun build_tarball(suffix: Text): Text {
-    build_bundle(suffix)
-    let parent = mk("bundle-{suffix}")
-    let tarball = mk("input-{suffix}.tar.gz")
-    trust $tar -czf "{tarball}" -C "{parent}" "migration-assistant-cli-3.2.1"$
+// input_tarball <world> → path to a .tar.gz of a baseline bundle (top-level dir
+// migration-assistant-cli-3.2.1), for cmd_pack --input. Real tar over the bundle
+// staged_bundle() lays down. This is the deployed-world equivalent for pack: the
+// realistic input the operator feeds the repacker.
+fun input_tarball(w: Text): Text {
+    staged_bundle(w)
+    let tarball = "{w}/input.tar.gz"
+    trust $tar -czf "{tarball}" -C "{w}/bundle" "migration-assistant-cli-3.2.1"$
     return tarball
 }
 
-// make_skill <suffix> <name> → a skill dir whose BASENAME is exactly <name>
-// (mirrors `--add-skill ./my-runbook`, where basename → "my-runbook"). The skill
-// lives under a per-test parent so the basename is the bare <name>, and
-// _pack_add_skill copies it under skills/<name>/. SKILL.md body is brace-free →
-// written via shell printf.
-fun make_skill(suffix: Text, name: Text): Text {
-    let parent = mk("skillparent-{suffix}")
-    trust dir_create(parent)
-    let d = "{parent}/{name}"
+// make_skill <world> <name> → a skill dir whose BASENAME is exactly <name>
+// (mirrors `--add-skill ./my-runbook`, where basename → "my-runbook"). Lives under
+// a per-world parent so the basename is the bare <name>; _pack_add_skill copies it
+// under skills/<name>/. SKILL.md body is brace-free → shell printf.
+fun make_skill(w: Text, name: Text): Text {
+    let d = "{w}/skillsrc/{name}"
     trust dir_create(d)
     trust $printf '# %s\n' "{name}" > "{d}/SKILL.md"$
     return d
 }
 
-// stub_dir — the PATH-shadow seam (created on demand). pack invokes no genuinely
-// external command, so no shim is installed in the happy paths; this documents
-// the mechanism the harness asks for.
-fun stub_dir(): Text {
-    let d = mk("stubs")
-    trust dir_create(d)
-    return d
+// extract_output <world> <output_tarball> → the repacked bundle's root dir, by
+// extracting the produced tarball into a probe dir under the world. The e2e tests
+// read the rewritten manifest back from here. <top> is the expected top-level dir
+// name (it can be renamed when binaryName changes).
+fun extract_output(w: Text, output: Text, top: Text): Text {
+    let probe = "{w}/probe"
+    trust dir_create(probe)
+    trust $tar -xzf "{output}" -C "{probe}"$
+    return "{probe}/{top}"
 }
 
-// ---- _pack_resolve_root -----------------------------------------------------
+// =====================================================================
+// cmd_pack — the end-to-end repack flow (primary coverage)
+// =====================================================================
 
-test "_pack_resolve_root finds the single bundle root" {
-    build_bundle("resolve")
-    let stage = mk("bundle-resolve")
-    let found = _pack_resolve_root(stage)
-    assert(text_contains(found, "migration-assistant-cli-3.2.1"))
-}
-
-test "_pack_resolve_root returns empty when no CLI-bundle dir is present" {
-    let stage = mk("empty-stage")
-    trust dir_create(stage)
-    trust dir_create("{stage}/random-dir")
-    let found = _pack_resolve_root(stage)
-    assert_eq(found, "")
-}
-
-// ---- _pack_add_skill --------------------------------------------------------
-
-test "_pack_add_skill copies a valid skill into the bundle" {
-    let root = build_bundle("addskill")
-    let skill = make_skill("addskill", "my-runbook")
-    _pack_add_skill(root, skill)
-    assert(file_exists("{root}/skills/my-runbook/SKILL.md"))
-}
-
-// ---- _pack_add_mcp ----------------------------------------------------------
-
-test "_pack_add_mcp deep-merges a fragment into mcpServers" {
-    let root = build_bundle("addmcp")
-    let manifest = "{root}/manifest.json"
-    let frag = mk("mcp-frag.json")
-    cp_fixture("pack_mcp_frag.json", frag)
-    _pack_add_mcp(manifest, frag)
-    let keys = jq_field(manifest, ".mcpServers | keys | join(\",\")")
-    assert(text_contains(keys, "aws"))
-    assert(text_contains(keys, "secrets"))
-    assert_eq(jq_field(manifest, ".mcpServers.secrets.command"), "npx")
-}
-
-// ---- _pack_apply_branding ---------------------------------------------------
-
-test "_pack_apply_branding deep-merges branding and replaces modes when given" {
-    let root = build_bundle("brand")
-    let manifest = "{root}/manifest.json"
-    let frag = mk("brand-frag.json")
-    cp_fixture("pack_brand_modes.json", frag)
-    _pack_apply_branding(manifest, frag)
-    assert_eq(jq_field(manifest, ".branding.appName"), "Acme Migrate")
-    assert_eq(jq_field(manifest, ".branding.tagline"), "ship it")
-    // modes[] REPLACED — only one entry now (the fragment's), not merged.
-    assert_eq(jq_field(manifest, ".branding.modes | length"), "1")
-}
-
-test "_pack_apply_branding keeps modes when the fragment omits them" {
-    let root = build_bundle("brand-nomodes")
-    let manifest = "{root}/manifest.json"
-    let frag = mk("brand-nomodes-frag.json")
-    cp_fixture("pack_brand_nomodes.json", frag)
-    _pack_apply_branding(manifest, frag)
-    assert_eq(jq_field(manifest, ".branding.appName"), "NoModes")
-    // Original two modes survive (fragment had no modes → not replaced).
-    assert_eq(jq_field(manifest, ".branding.modes | length"), "2")
-}
-
-// ---- _pack_apply_brand_flags ------------------------------------------------
-
-test "_pack_apply_brand_flags sets name/binary/tagline and picks the default" {
-    let root = build_bundle("brandflags")
-    let manifest = "{root}/manifest.json"
-    _pack_apply_brand_flags(manifest, "Acme", "acme-migrate", "tag", "Agent", "")
-    assert_eq(jq_field(manifest, ".branding.appName"), "Acme")
-    assert_eq(jq_field(manifest, ".branding.binaryName"), "acme-migrate")
-    assert_eq(jq_field(manifest, ".branding.tagline"), "tag")
-    // --mode-default Agent → Agent.default==true, Manual.default==false.
-    assert_eq(jq_field(manifest, ".branding.modes[] | select(.id==\"Agent\") | .default"), "true")
-    assert_eq(jq_field(manifest, ".branding.modes[] | select(.id==\"Manual\") | .default"), "false")
-}
-
-test "_pack_apply_brand_flags reorders modes per --mode-order" {
-    let root = build_bundle("brandorder")
-    let manifest = "{root}/manifest.json"
-    _pack_apply_brand_flags(manifest, "", "", "", "", "Agent,Manual")
-    assert_eq(jq_field(manifest, ".branding.modes[0].id"), "Agent")
-    assert_eq(jq_field(manifest, ".branding.modes[1].id"), "Manual")
-}
-
-// ---- _pack_validate ---------------------------------------------------------
-
-test "_pack_validate passes a well-formed manifest" {
-    let root = build_bundle("validate-ok")
-    let manifest = "{root}/manifest.json"
-    assert(_pack_validate(manifest, 0))
-}
-
-test "_pack_validate non-strict tolerates an unknown mode id (soft warning)" {
-    let root = build_bundle("validate-unknown")
-    let manifest = "{root}/manifest.json"
-    let frag = mk("validate-unknown-frag.json")
-    cp_fixture("pack_brand_unknown.json", frag)
-    // Inject the unknown visible mode id ("Console") via apply_branding: a SOFT
-    // warning, NOT escalated unless --strict. Single default preserved → no hard
-    // error → returns true.
-    _pack_apply_branding(manifest, frag)
-    assert(_pack_validate(manifest, 0))
-}
-
-// ---- _pack_append_entry -----------------------------------------------------
-
-test "_pack_append_entry records pack identity + additions" {
-    let root = build_bundle("append")
-    let manifest = "{root}/manifest.json"
-    let skill = make_skill("append", "my-runbook")
-    let frag = mk("append-mcp.json")
-    cp_fixture("pack_mcp_frag_empty.json", frag)
-    // skills_csv / mcps_csv are the SPACE-joined input lists (the bash form).
-    _pack_append_entry(manifest, "myorg", "1.0.0", skill, frag, 1)
-    assert_eq(jq_field(manifest, ".build.packs | length"), "1")
-    assert_eq(jq_field(manifest, ".build.packs[0].name"), "myorg")
-    assert_eq(jq_field(manifest, ".build.packs[0].version"), "1.0.0")
-    // addedSkills = basename of the skill path.
-    assert_eq(jq_field(manifest, ".build.packs[0].addedSkills[0]"), "my-runbook")
-    // addedMcpServers = the fragment's top-level key.
-    assert_eq(jq_field(manifest, ".build.packs[0].addedMcpServers[0]"), "secrets")
-    // brandingChanged derived from the int flag (1 → true).
-    assert_eq(jq_field(manifest, ".build.packs[0].brandingChanged"), "true")
-}
-
-test "_pack_append_entry with no additions yields empty arrays" {
-    let root = build_bundle("append-empty")
-    let manifest = "{root}/manifest.json"
-    _pack_append_entry(manifest, "barepack", "0.1", "", "", 0)
-    assert_eq(jq_field(manifest, ".build.packs[0].addedSkills | length"), "0")
-    assert_eq(jq_field(manifest, ".build.packs[0].addedMcpServers | length"), "0")
-    assert_eq(jq_field(manifest, ".build.packs[0].brandingChanged"), "false")
-}
-
-// ---- cmd_pack end-to-end ----------------------------------------------------
-
-test "cmd_pack repacks a tarball with a skill, MCP, branding, and pack entry" {
-    let tarball = build_tarball("e2e")
-    let skill = make_skill("e2e", "my-runbook")
-    let frag = mk("e2e-mcp.json")
-    cp_fixture("pack_mcp_frag.json", frag)
-    let brand = mk("e2e-brand.json")
+test "pack repacks a tarball with a new skill, MCP, and branding, then records the pack entry" {
+    let w = fresh_world()
+    let tarball = input_tarball(w)
+    let skill = make_skill(w, "my-runbook")
+    let mcp = "{w}/mcp-frag.json"
+    cp_fixture("pack_mcp_frag.json", mcp)
+    let brand = "{w}/brand.json"
     cp_fixture("pack_brand_app.json", brand)
-    let output = mk("out-e2e.tar.gz")
+    let output = "{w}/out.tar.gz"
 
     let rc = cmd_pack([
         "--input", tarball,
@@ -266,28 +133,38 @@ test "cmd_pack repacks a tarball with a skill, MCP, branding, and pack entry" {
         "--pack-name", "myorg",
         "--pack-version", "1.0.0",
         "--add-skill", skill,
-        "--add-mcp", frag,
+        "--add-mcp", mcp,
         "--branding", brand
     ])
     assert_eq(rc, 0)
     assert(file_exists(output))
 
-    // Inspect the produced tarball: extract, read the repacked manifest.
-    let probe = mk("probe-e2e")
-    trust dir_create(probe)
-    trust $tar -xzf "{output}" -C "{probe}"$
-    let m = "{probe}/migration-assistant-cli-3.2.1/manifest.json"
+    // Inspect the PRODUCED tarball — the full operator-observable contract.
+    let root = extract_output(w, output, "migration-assistant-cli-3.2.1")
+    let m = "{root}/manifest.json"
     assert(file_exists(m))
+    // Branding was deep-merged into the manifest.
     assert_eq(jq_field(m, ".branding.appName"), "Acme Migrate")
-    assert(text_contains(jq_field(m, ".mcpServers | keys | join(\",\")"), "secrets"))
-    assert(file_exists("{probe}/migration-assistant-cli-3.2.1/skills/my-runbook/SKILL.md"))
+    // The new MCP server landed alongside the baseline one.
+    let mcp_keys = jq_field(m, ".mcpServers | keys | join(\",\")")
+    assert(text_contains(mcp_keys, "aws"))
+    assert(text_contains(mcp_keys, "secrets"))
+    // The skill was copied under skills/<basename>/.
+    assert(file_exists("{root}/skills/my-runbook/SKILL.md"))
+    // The pack entry was appended with identity + brandingChanged.
+    assert_eq(jq_field(m, ".build.packs | length"), "1")
     assert_eq(jq_field(m, ".build.packs[0].name"), "myorg")
+    assert_eq(jq_field(m, ".build.packs[0].version"), "1.0.0")
+    assert_eq(jq_field(m, ".build.packs[0].addedSkills[0]"), "my-runbook")
+    assert_eq(jq_field(m, ".build.packs[0].addedMcpServers[0]"), "secrets")
     assert_eq(jq_field(m, ".build.packs[0].brandingChanged"), "true")
 }
 
-test "cmd_pack accepts --flag=value form" {
-    let tarball = build_tarball("eqform")
-    let output = mk("out-eqform.tar.gz")
+test "pack accepts the --flag=value form and writes the pack version through to the manifest" {
+    let w = fresh_world()
+    let tarball = input_tarball(w)
+    let output = "{w}/out.tar.gz"
+
     let rc = cmd_pack([
         "--input={tarball}",
         "--output={output}",
@@ -296,16 +173,16 @@ test "cmd_pack accepts --flag=value form" {
     ])
     assert_eq(rc, 0)
     assert(file_exists(output))
-    let probe = mk("probe-eqform")
-    trust dir_create(probe)
-    trust $tar -xzf "{output}" -C "{probe}"$
-    let m = "{probe}/migration-assistant-cli-3.2.1/manifest.json"
-    assert_eq(jq_field(m, ".build.packs[0].version"), "2.0")
+
+    let root = extract_output(w, output, "migration-assistant-cli-3.2.1")
+    assert_eq(jq_field(m_of(root), ".build.packs[0].version"), "2.0")
 }
 
-test "cmd_pack renames the top-level dir when binaryName changes" {
-    let tarball = build_tarball("rename")
-    let output = mk("out-rename.tar.gz")
+test "pack renames the top-level dir when --brand-binary changes binaryName" {
+    let w = fresh_world()
+    let tarball = input_tarball(w)
+    let output = "{w}/out.tar.gz"
+
     let rc = cmd_pack([
         "--input", tarball,
         "--output", output,
@@ -314,19 +191,24 @@ test "cmd_pack renames the top-level dir when binaryName changes" {
         "--brand-binary", "acme-migrate"
     ])
     assert_eq(rc, 0)
-    // The tarball's top-level dir is renamed acme-migrate-cli-3.2.1.
+    // The tarball's top-level dir self-describes the rebrand.
     let listing = trust $tar -tzf "{output}"$
     assert(text_contains(listing, "acme-migrate-cli-3.2.1/"))
+    // And the rebranded binaryName is in the repacked manifest.
+    let root = extract_output(w, output, "acme-migrate-cli-3.2.1")
+    assert_eq(jq_field(m_of(root), ".branding.binaryName"), "acme-migrate")
 }
 
-test "cmd_pack tolerates an unknown mode id without --strict (rc 0)" {
-    let tarball = build_tarball("unknownmode")
-    let output = mk("out-unknownmode.tar.gz")
-    let brand = mk("unknownmode-brand.json")
+test "pack tolerates an unknown mode id without --strict (returns 0, keeps the mode)" {
+    let w = fresh_world()
+    let tarball = input_tarball(w)
+    let brand = "{w}/brand-unknown.json"
     cp_fixture("pack_brand_unknown.json", brand)
-    // Without --strict the unknown-id ("Console") is a soft warning only → rc 0.
-    // (The --strict escalation die()s, which would abort the run, so it is not
-    // asserted here — mirrors the bats split of the two cases.)
+    let output = "{w}/out.tar.gz"
+
+    // Without --strict the unknown id ("Console") is a soft warning only → rc 0.
+    // (--strict would escalate to a die() that aborts the run, so it is not
+    // asserted here — mirrors the bats fatal/non-fatal split.)
     let rc = cmd_pack([
         "--input", tarball,
         "--output", output,
@@ -335,9 +217,164 @@ test "cmd_pack tolerates an unknown mode id without --strict (rc 0)" {
         "--branding", brand
     ])
     assert_eq(rc, 0)
-    let probe = mk("probe-unknownmode")
-    trust dir_create(probe)
-    trust $tar -xzf "{output}" -C "{probe}"$
-    let m = "{probe}/migration-assistant-cli-3.2.1/manifest.json"
-    assert(text_contains(jq_field(m, "[.branding.modes[].id] | join(\",\")"), "Console"))
+    let root = extract_output(w, output, "migration-assistant-cli-3.2.1")
+    let mode_ids = jq_field(m_of(root), "[.branding.modes[].id] | join(\",\")")
+    assert(text_contains(mode_ids, "Console"))
+}
+
+// =====================================================================
+// _pack_resolve_root — the single-bundle-root finder
+// =====================================================================
+
+test "resolve_root finds the one CLI-bundle subdir under the stage" {
+    let w = fresh_world()
+    staged_bundle(w)
+    let found = _pack_resolve_root("{w}/bundle")
+    assert(text_contains(found, "migration-assistant-cli-3.2.1"))
+}
+
+test "resolve_root returns empty when no dir carries a bundle marker" {
+    let w = fresh_world()
+    trust dir_create("{w}/bundle/random-dir")
+    let found = _pack_resolve_root("{w}/bundle")
+    assert_eq(found, "")
+}
+
+// =====================================================================
+// _pack_add_skill — validate + copy a skill into the bundle
+// =====================================================================
+
+test "add_skill copies a valid skill dir under skills/<basename>" {
+    let w = fresh_world()
+    let root = staged_bundle(w)
+    let skill = make_skill(w, "my-runbook")
+    _pack_add_skill(root, skill)
+    assert(file_exists("{root}/skills/my-runbook/SKILL.md"))
+}
+
+// =====================================================================
+// _pack_add_mcp — deep-merge an MCP fragment into mcpServers
+// =====================================================================
+
+test "add_mcp deep-merges a fragment, preserving the existing server" {
+    let w = fresh_world()
+    let root = staged_bundle(w)
+    let m = "{root}/manifest.json"
+    let frag = "{w}/mcp-frag.json"
+    cp_fixture("pack_mcp_frag.json", frag)
+    _pack_add_mcp(m, frag)
+    let keys = jq_field(m, ".mcpServers | keys | join(\",\")")
+    assert(text_contains(keys, "aws"))       // baseline server survives
+    assert(text_contains(keys, "secrets"))   // fragment merged in
+    assert_eq(jq_field(m, ".mcpServers.secrets.command"), "npx")
+}
+
+// =====================================================================
+// _pack_apply_branding — deep-merge branding (modes REPLACED when given)
+// =====================================================================
+
+test "apply_branding deep-merges fields and REPLACES modes when the fragment declares them" {
+    let w = fresh_world()
+    let root = staged_bundle(w)
+    let m = "{root}/manifest.json"
+    let frag = "{w}/brand-modes.json"
+    cp_fixture("pack_brand_modes.json", frag)
+    _pack_apply_branding(m, frag)
+    assert_eq(jq_field(m, ".branding.appName"), "Acme Migrate")
+    assert_eq(jq_field(m, ".branding.tagline"), "ship it")
+    // modes[] REPLACED (not merged) — only the fragment's single entry remains.
+    assert_eq(jq_field(m, ".branding.modes | length"), "1")
+}
+
+test "apply_branding keeps the existing modes when the fragment omits them" {
+    let w = fresh_world()
+    let root = staged_bundle(w)
+    let m = "{root}/manifest.json"
+    let frag = "{w}/brand-nomodes.json"
+    cp_fixture("pack_brand_nomodes.json", frag)
+    _pack_apply_branding(m, frag)
+    assert_eq(jq_field(m, ".branding.appName"), "NoModes")
+    // Original two modes survive (no modes in fragment → not replaced).
+    assert_eq(jq_field(m, ".branding.modes | length"), "2")
+}
+
+// =====================================================================
+// _pack_apply_brand_flags — the convenience --brand-*/--mode-* flags
+// =====================================================================
+
+test "apply_brand_flags sets name/binary/tagline and picks the single default mode" {
+    let w = fresh_world()
+    let root = staged_bundle(w)
+    let m = "{root}/manifest.json"
+    _pack_apply_brand_flags(m, "Acme", "acme-migrate", "tag", "Agent", "")
+    assert_eq(jq_field(m, ".branding.appName"), "Acme")
+    assert_eq(jq_field(m, ".branding.binaryName"), "acme-migrate")
+    assert_eq(jq_field(m, ".branding.tagline"), "tag")
+    // --mode-default Agent → Agent.default==true, Manual.default==false.
+    assert_eq(jq_field(m, ".branding.modes[] | select(.id==\"Agent\") | .default"), "true")
+    assert_eq(jq_field(m, ".branding.modes[] | select(.id==\"Manual\") | .default"), "false")
+}
+
+test "apply_brand_flags reorders modes to match --mode-order" {
+    let w = fresh_world()
+    let root = staged_bundle(w)
+    let m = "{root}/manifest.json"
+    _pack_apply_brand_flags(m, "", "", "", "", "Agent,Manual")
+    assert_eq(jq_field(m, ".branding.modes[0].id"), "Agent")
+    assert_eq(jq_field(m, ".branding.modes[1].id"), "Manual")
+}
+
+// =====================================================================
+// _pack_validate — the post-merge sanity checker
+// =====================================================================
+
+test "validate accepts a well-formed manifest" {
+    let w = fresh_world()
+    let root = staged_bundle(w)
+    assert(_pack_validate("{root}/manifest.json", 0))
+}
+
+test "validate (non-strict) tolerates an unknown mode id as a soft warning" {
+    let w = fresh_world()
+    let root = staged_bundle(w)
+    let m = "{root}/manifest.json"
+    let frag = "{w}/brand-unknown.json"
+    cp_fixture("pack_brand_unknown.json", frag)
+    // Inject the unknown visible id ("Console") via apply_branding: SOFT — not
+    // escalated unless --strict. Single default preserved → no hard error → true.
+    _pack_apply_branding(m, frag)
+    assert(_pack_validate(m, 0))
+}
+
+// =====================================================================
+// _pack_append_entry — append a build.packs[] record
+// =====================================================================
+
+test "append_entry records the pack identity, added skills and MCP servers" {
+    let w = fresh_world()
+    let root = staged_bundle(w)
+    let m = "{root}/manifest.json"
+    let skill = make_skill(w, "my-runbook")
+    let frag = "{w}/append-mcp.json"
+    cp_fixture("pack_mcp_frag_empty.json", frag)
+    // skills_csv / mcps_csv are the SPACE-joined input lists (the bash form).
+    _pack_append_entry(m, "myorg", "1.0.0", skill, frag, 1)
+    assert_eq(jq_field(m, ".build.packs | length"), "1")
+    assert_eq(jq_field(m, ".build.packs[0].name"), "myorg")
+    assert_eq(jq_field(m, ".build.packs[0].version"), "1.0.0")
+    // addedSkills = basename of the skill path; addedMcpServers = fragment keys.
+    assert_eq(jq_field(m, ".build.packs[0].addedSkills[0]"), "my-runbook")
+    assert_eq(jq_field(m, ".build.packs[0].addedMcpServers[0]"), "secrets")
+    // brandingChanged derives from the int flag (1 → true).
+    assert_eq(jq_field(m, ".build.packs[0].brandingChanged"), "true")
+}
+
+test "append_entry with no additions yields empty arrays and brandingChanged=false" {
+    let w = fresh_world()
+    let root = staged_bundle(w)
+    let m = "{root}/manifest.json"
+    _pack_append_entry(m, "barepack", "0.1", "", "", 0)
+    assert_eq(jq_field(m, ".build.packs[0].addedSkills | length"), "0")
+    assert_eq(jq_field(m, ".build.packs[0].addedMcpServers | length"), "0")
+    assert_eq(jq_field(m, ".build.packs[0].brandingChanged"), "false")
 }

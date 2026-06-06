@@ -1,9 +1,76 @@
-import { assert, assert_eq } from "std/test"
-import { esc, term_detect } from "../src/core.ab"
+// test_core.ab — unit coverage for src/core.ab (the terminal foundation).
+//
+// core.ab is the bedrock the TUI builds on: it mints a real ESC byte (cached),
+// classifies whether stderr is interactive (env-driven, cached), and emits Text
+// to stderr. It shells out only to `printf`/`test -t 2` — there is NO external
+// aws/kubectl/helm world to fake here, so per test/TEST_GUIDE.md this is the
+// genuinely-pure UNIT layer: assert directly on returned values / the env-driven
+// classifier, no fresh_world()/mock fleet needed.
+//
+// term_detect()/term_interactive() read MIGRATE_FORCE_TTY to pin the decision
+// without a real TTY (the runner exports MIGRATE_FORCE_TTY=1). Because env vars
+// LEAK across test blocks, any block that flips MIGRATE_FORCE_TTY restores it to
+// "1" before it ends so a sibling block never inherits a stale value.
+//
+// Coverage (behaviors): esc() mints a single stable ESC byte; term_detect()
+// honors the MIGRATE_FORCE_TTY override in both directions; term_interactive()
+// caches and agrees with the last detection; the stderr emitters run cleanly.
+//
+// NO `return` inside a test block — branch with `if`.
 
-test "esc is a single byte" {
+import { assert, assert_eq } from "std/test"
+import { esc, term_detect, term_interactive, eprint, eprintln } from "../src/core.ab"
+import { env_var_set } from "std/env"
+
+// force_tty — pin term detection via the MIGRATE_FORCE_TTY override and re-decide.
+// "1" → forced interactive, "0" → forced non-interactive. Returns the resulting
+// term_detect() Bool so a block can assert on it inline.
+fun force_tty(val: Text): Bool {
+    trust env_var_set("MIGRATE_FORCE_TTY", val)
+    return term_detect()
+}
+
+// ---- esc: a single, cached ESC byte ----------------------------------------
+
+test "esc mints exactly one codepoint" {
+    // 0x1b is a single byte / codepoint — not the literal "\x1b" escape text.
     assert_eq(len esc(), 1)
 }
-test "esc is stable across calls" {
+
+test "esc returns the same cached byte on every call" {
     assert(esc() == esc())
+}
+
+// ---- term_detect: env-driven interactivity classifier -----------------------
+
+test "term_detect honors MIGRATE_FORCE_TTY=1 as interactive" {
+    let interactive = force_tty("1")
+    assert(interactive)
+}
+
+test "term_detect honors MIGRATE_FORCE_TTY=0 as non-interactive" {
+    let interactive = force_tty("0")
+    assert(not interactive)
+    // restore the runner-forced default so sibling blocks don't inherit "0".
+    trust env_var_set("MIGRATE_FORCE_TTY", "1")
+}
+
+// ---- term_interactive: cached predicate agrees with the last detection ------
+
+test "term_interactive reports the most recent forced decision" {
+    force_tty("0")
+    assert(not term_interactive())
+    force_tty("1")
+    assert(term_interactive())
+    // leave the runner-forced default in place for sibling blocks.
+    trust env_var_set("MIGRATE_FORCE_TTY", "1")
+}
+
+// ---- emitters: write to stderr and return cleanly ---------------------------
+
+test "eprint and eprintln emit to stderr without failing" {
+    // Null-returning fire-and-forget writers (fd 2 only); assert they run clean.
+    eprint("core-eprint")
+    eprintln("core-eprintln")
+    assert(true)
 }

@@ -1,251 +1,96 @@
-// test_resume.ab — coverage for src/resume.ab (the top-level controller port of
+// test_resume.ab — e2e coverage for resume.ab (the top-level controller, port of
 // bash lib/resume.sh).
 //
-// What's covered HERE (the happy-path + the pre-helm gates + the parser):
-//   * cmd_help / _help_body        — the usage header, subcommand lines, flag
-//                                    groups; cmd_help runs clean end-to-end.
-//   * _select_mode                 — the no-manifest fallback: current="" →
-//                                    Manual (default idx 1), current="Agent" →
-//                                    Agent (idx 2). Driven via MIGRATE_NONINTER-
-//                                    ACTIVE so ui_prompt returns the default idx.
-//   * _manual_can_skip_to_console  — TRUE when last_step is terminal AND helm
-//                                    reports `deployed` AND the console pod
-//                                    exists; FALSE on the two PRE-helm gates
-//                                    (mid-deploy last_step / unset STAGE_NAME)
-//                                    that short-circuit before any cluster call.
-//   * cmd_resume FLAG PARSER       — argv → state writes via the full cmd_resume
-//                                    with --mode Manual + the fast-path stubs +
-//                                    SKIP_CONSOLE_EXEC=Y (console_exec returns 0
-//                                    without an interactive exec).
+// Reference example for the e2e-focused style (see test/TEST_GUIDE.md): drive the
+// real cmd_resume entrypoint against the faked external world, then assert on what
+// the CLI DID — which commands it issued + how state changed — rather than poking
+// internals. The mock fleet + per-test world come from test/support/.
 //
-// The two cluster-dependent NEGATIVE branches (helm-not-deployed / pod-missing)
-// live in SEPARATE files (test_resume_notdeployed.ab / test_resume_nopod.ab):
+// What's covered HERE:
+//   * cmd_resume FLAG PARSER (e2e)   — argv → persisted state. Driven through the
+//                                      FULL cmd_resume with --mode Manual (bypass
+//                                      the picker) onto a fast-path-ready world
+//                                      (last_step=ready + helm deployed + console
+//                                      pod present + SKIP_CONSOLE_EXEC=Y), so the
+//                                      whole controller runs to a clean rc 0 and
+//                                      we re-load state.env to see each flag land.
+//   * cmd_resume fast-path gate (e2e)— the ready→console skip: with the mock fleet
+//                                      faked to succeed it skips the deploy spine
+//                                      and lands last_step=console_handoff; the
+//                                      negative branches (not-deployed / pod-
+//                                      missing — see below) run the full flow.
+//   * _select_mode (manifest-driven) — picks via manifest_modes; the no-manifest
+//                                      fallback (Manual default / current=Agent).
+//   * _manual_can_skip_to_console    — the gate in isolation: TRUE when ready +
+//                                      deployed + pod present; FALSE on the two
+//                                      PRE-helm gates (mid-deploy / unset
+//                                      STAGE_NAME) AND the two cluster gates
+//                                      (helm-not-deployed / pod-missing).
+//   * cmd_help / _help_body (unit)   — the usage header, subcommand + flag lines;
+//                                      cmd_help runs clean end-to-end.
 //
-//   amber test runs every `test` block in ONE parallel process tree, and the
-//   helm/kubectl CONTEXT binding (helm_ctx.ab's __helm_ctx_flags_v) is a single
-//   process-global (helm_ctx.ab is compiled once and SHARED by resume.ab +
-//   helm_recover.ab). A shim steered off that context is therefore racy across
-//   parallel blocks: whichever block last called helm_kctx_init wins. The fix is
-//   one CONSISTENT shim behavior per file — this file's shims always report
-//   `deployed` + pod-present, so no two blocks here need conflicting answers.
-//   The not-deployed / no-pod scenarios get their own files (each with its own
-//   single consistent shim), exactly the "run each file individually = author-
-//   itative" model the AMBER_IDIOMS test-flake note prescribes.
+// FOLDED IN: the two former split files test_resume_nopod.ab + test_resume_not-
+// deployed.ab now live here as DISTINCT worlds. They were split because the old
+// hand-rolled, env-var-steered shims shared one process-global helm/kubectl
+// context, so a per-block helm-status answer raced under the parallel runner. The
+// support mock fleet steers responses off <MIGRATE_HOME>/mock/ — a per-test-unique
+// dir — so a per-world `mock_respond(w, "helm", "status", …)` is now race-safe and
+// the negative branches can be co-located. Those two files are DELETED.
 //
-// NB: no `return` inside `test` blocks (the AMBER_IDIOMS rule); branch with `if`.
+// State reconciles through the on-disk state.env: the world seeds it, cmd_resume /
+// the gate state_load() at entry; both resolve the same stage dir from the pinned
+// MIGRATE_HOME/STAGE the world sets. NO `return` inside a test block.
 
 import { assert, assert_eq } from "std/test"
-import { file_write, file_chmod, dir_create } from "std/fs"
-import { env_var_set, env_var_get } from "std/env"
 import { text_contains } from "std/text"
-import { state_load, state_set, state_get, state_save, state_unset } from "../src/state.ab"
-import { _select_mode, _manual_can_skip_to_console, cmd_resume, cmd_help, _help_body } from "../src/resume.ab"
+import { file_read } from "std/fs"
+import { env_var_set } from "std/env"
+import { fresh_world, world_seed, world_noninteractive } from "./support/world.ab"
+import {
+    mock_install_default, mock_respond, mock_respond_rc,
+    mock_called, mock_call_count
+} from "./support/mock.ab"
+import { state_load, state_get } from "../src/state.ab"
+import {
+    _select_mode, _manual_can_skip_to_console, cmd_resume, cmd_help, _help_body
+} from "../src/resume.ab"
 
-// ---- helpers (ABOVE the test blocks: define-before-use) --------------------
-
-let __seq = 0
-const STUB_DIR = "/tmp/amber_resume_stub"
-let __installed = false
-
-// install_stubs — write the aws + kubectl + helm shims (this file: ALWAYS report
-// helm=deployed + pod-present) into a PATH-shadow dir, at most ONCE (atomic
-// publish via mktemp + mv). BRACE-FREE bash (a `{` in an Amber Text literal is
-// interpolation). `$` written bare. The helm `status -o json` body is assembled
-// at SHIM RUNTIME from octal-escaped braces (lb=$(printf '\\173')→'{', rb='}') so
-// no literal `{` appears in this Amber Text and jq still parses it.
-fun install_stubs(): Null {
-    trust dir_create(STUB_DIR)
-    if __installed {
-        let oldp0 = env_var_get("PATH") failed { "" }
-        if not text_contains(oldp0, "{STUB_DIR}:") {
-            trust env_var_set("PATH", "{STUB_DIR}:{oldp0}")
-        }
-        return null
-    }
-    __installed = true
-
-    let aws = "#!/usr/bin/env bash
-args=\"$*\"
-case \"$args\" in
-  *'sts get-caller-identity'*)
-    printf '%s\\n' 'arn:aws:iam::123456789012:user/test' ;;
-  *)
-    exit 0 ;;
-esac
-exit 0
-"
-    let atmp = trust $mktemp$
-    trust file_write(atmp, aws)
-    trust file_chmod(atmp, "755")
-    trust $mv -f "{atmp}" "{STUB_DIR}/aws"$
-
-    let kubectl = "#!/usr/bin/env bash
-args=\"$*\"
-case \"$args\" in
-  *'get pod migration-console-0'*)
-    exit 0 ;;
-  *exec*)
-    exit 0 ;;
-  *)
-    exit 0 ;;
-esac
-exit 0
-"
-    let ktmp = trust $mktemp$
-    trust file_write(ktmp, kubectl)
-    trust file_chmod(ktmp, "755")
-    trust $mv -f "{ktmp}" "{STUB_DIR}/kubectl"$
-
-    let helm = "#!/usr/bin/env bash
-args=\"$*\"
-lb=\"$(printf '\\173')\"
-rb=\"$(printf '\\175')\"
-case \"$args\" in
-  *status*json*)
-    printf '%s\"info\":%s\"status\":\"deployed\"%s%s\\n' \"$lb\" \"$lb\" \"$rb\" \"$rb\" ;;
-  *status*)
-    printf 'NAME: ma\\nSTATUS: deployed\\n' ;;
-  *)
-    exit 0 ;;
-esac
-exit 0
-"
-    let htmp = trust $mktemp$
-    trust file_write(htmp, helm)
-    trust file_chmod(htmp, "755")
-    trust $mv -f "{htmp}" "{STUB_DIR}/helm"$
-
-    let oldpath = env_var_get("PATH") failed { "" }
-    if not text_contains(oldpath, "{STUB_DIR}:") {
-        trust env_var_set("PATH", "{STUB_DIR}:{oldpath}")
-    }
+// HELM_DEPLOYED_JSON — the `helm status … -o json` body for a live release, loaded
+// from a fixture so no literal `{` (Amber interpolation) sits in this file. The
+// gate's _helm_release_status pipes this to `jq -r '.info.status'` → "deployed".
+fun helm_deployed_json(): Text {
+    return file_read("test/fixtures/helm_status_deployed.json") failed { "" }
 }
 
-// fresh_stage — pin a unique stage (STAGE_DIR/MIGRATE_HOME/STAGE) so each test's
-// on-disk state.env is isolated. Returns nothing of interest (no steering token
-// needed: this file's shims are constant).
-fun fresh_stage(): Null {
-    __seq += 1
-    let base = trust $mktemp -d$
-    let dir = "{base}/stage-{__seq}"
-    trust dir_create(dir)
-    trust dir_create("{dir}/log")
-    trust env_var_set("STAGE_DIR", dir)
-    trust env_var_set("MIGRATE_HOME", base)
-    trust env_var_set("STAGE", "stage-{__seq}")
+// deployed_world — a world parked at the END of a successful deploy: last_step=
+// ready + STAGE_NAME seeded, the helm release reports `deployed`, and the console
+// pod exists. This is exactly the shape the ready→console fast-path requires. The
+// shape behind the fast-path tests.
+fun deployed_world(): Text {
+    let w = fresh_world()
+    world_noninteractive()
+    world_seed(w, "STAGE_NAME", "ma")
+    world_seed(w, "last_step", "ready")
+    mock_install_default()
+    // helm status -o json → live release (jq parses .info.status == "deployed").
+    mock_respond(w, "helm", "status", helm_deployed_json())
+    // kubectl get pod migration-console-0 → exists (default rc 0 is fine, but pin
+    // it explicitly so the intent is legible).
+    mock_respond_rc(w, "kubectl", "get", "0")
+    return w
 }
 
-// ---- cmd_help --------------------------------------------------------------
-
-test "cmd_help body contains the usage header and subcommand lines" {
-    install_stubs()
-    fresh_stage()
-    let body = _help_body()
-    assert(text_contains(body, "Usage:"))
-    assert(text_contains(body, "migration-assistant resume"))
-    assert(text_contains(body, "migration-assistant console"))
-    assert(text_contains(body, "migration-assistant agent"))
-    assert(text_contains(body, "migration-assistant cleanup"))
-}
-
-test "cmd_help body documents the deploy-control flag groups" {
-    install_stubs()
-    fresh_stage()
-    let body = _help_body()
-    assert(text_contains(body, "--stage NAME"))
-    assert(text_contains(body, "--region REGION"))
-    assert(text_contains(body, "--deploy-import-vpc-cfn"))
-    assert(text_contains(body, "--tls-mode MODE"))
-    assert(text_contains(body, "--build"))
-}
-
-test "cmd_help runs clean (header + body + Version line to stdout)" {
-    install_stubs()
-    fresh_stage()
-    // cmd_help prints to stdout; an Amber fn's own stdout is not capturable from
-    // inside Amber, so we assert it RUNS without die()/an unhandled command
-    // failure (which would abort the test block). Content asserted above.
-    cmd_help()
-    assert(true)
-}
-
-// ---- _select_mode (no-manifest fallback) -----------------------------------
-
-test "_select_mode fallback defaults to Manual on a fresh pick" {
-    install_stubs()
-    fresh_stage()
-    trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
-    // No manifest in this stage dir → fallback list; current="" → default_idx=1
-    // → ui_prompt returns "1" → Manual.
-    let picked = _select_mode("")
-    assert_eq(picked, "Manual")
-}
-
-test "_select_mode fallback honors current=Agent as the default" {
-    install_stubs()
-    fresh_stage()
-    trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
-    // current="Agent" → default_idx=2 → ui_prompt returns "2" → Agent.
-    let picked = _select_mode("Agent")
-    assert_eq(picked, "Agent")
-}
-
-// ---- _manual_can_skip_to_console (positive + the pre-helm gates) -----------
-
-test "_manual_can_skip_to_console is true when ready + deployed + pod present" {
-    install_stubs()
-    fresh_stage()
-    state_load()
-    state_set("STAGE_NAME", "ma")
-    state_set("last_step", "ready")
-    state_save()
-    assert(_manual_can_skip_to_console())
-}
-
-test "_manual_can_skip_to_console is false mid-deploy (last_step=cfn_done)" {
-    install_stubs()
-    fresh_stage()
-    // Gated by last_step != terminal → returns false BEFORE any helm/kubectl call,
-    // so the always-deployed shim is irrelevant here (no cross-test conflict).
-    state_load()
-    state_set("STAGE_NAME", "ma")
-    state_set("last_step", "cfn_done")
-    state_save()
-    assert(not _manual_can_skip_to_console())
-}
-
-test "_manual_can_skip_to_console is false when STAGE_NAME is unset" {
-    install_stubs()
-    fresh_stage()
-    // Gated by the empty STAGE_NAME → returns false BEFORE any helm/kubectl call.
-    state_load()
-    state_unset("STAGE_NAME")
-    state_set("last_step", "ready")
-    state_save()
-    assert(not _manual_can_skip_to_console())
-}
-
-// ---- cmd_resume flag parser (argv → state writes) --------------------------
+// ---- cmd_resume: the flag parser, driven end-to-end --------------------------
 //
 // Drive the FULL cmd_resume with --mode Manual so the picker is bypassed, the
-// fast-path skip-to-console gate is satisfied (last_step=ready + the always-
-// deployed shim + pod present), and SKIP_CONSOLE_EXEC=Y so console_exec returns 0
-// without an interactive kubectl exec. Then re-load state and assert each parsed
-// flag landed.
+// fast-path skip-to-console gate is satisfied (deployed_world), and
+// SKIP_CONSOLE_EXEC=Y so console_exec returns 0 without an interactive exec. Then
+// re-load state and assert each parsed flag landed.
 
-test "cmd_resume parses deploy-control flags into state" {
-    install_stubs()
-    fresh_stage()
-    trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
-    // Seed the on-disk state that makes the manual fast-path return cleanly.
-    state_load()
-    state_set("STAGE_NAME", "ma")
-    state_set("last_step", "ready")
-    state_set("SKIP_CONSOLE_EXEC", "Y")
-    state_save()
-
-    // --mode Manual bypasses the picker; the rest are deploy-control flags. Mix a
-    // space form (--region us-west-2), flag-only toggles (--build,
+test "cmd_resume parses space / =form / toggle flags into persisted state" {
+    let w = deployed_world()
+    world_seed(w, "SKIP_CONSOLE_EXEC", "Y")
+    // Mix a space form (--region us-west-2), flag-only toggles (--build,
     // --use-public-images), and an =form (--stack-name=My-Stack).
     let rc = cmd_resume([
         "--mode", "Manual",
@@ -255,13 +100,146 @@ test "cmd_resume parses deploy-control flags into state" {
         "--stack-name=My-Stack"
     ])
     assert_eq(rc, 0)
-
-    // Re-load THIS test's state instance to observe what cmd_resume's instance
-    // persisted to disk (the modules reconcile only through state.env).
+    // Re-load THIS test's state instance to observe what cmd_resume persisted to
+    // disk (the modules reconcile only through state.env).
     state_load()
     assert_eq(state_get("AWS_REGION", ""), "us-west-2")
     assert_eq(state_get("BUILD_FROM_SOURCE", ""), "Y")
     assert_eq(state_get("MIRROR_IMAGES", ""), "N")
     assert_eq(state_get("CFN_STACK_NAME", ""), "My-Stack")
     assert_eq(state_get("MODE", ""), "Manual")
+}
+
+test "cmd_resume routes --mode to the requested path and persists it" {
+    let w = deployed_world()
+    world_seed(w, "SKIP_CONSOLE_EXEC", "Y")
+    let rc = cmd_resume(["--mode", "Manual"])
+    assert_eq(rc, 0)
+    state_load()
+    assert_eq(state_get("MODE", ""), "Manual")
+}
+
+// ---- cmd_resume: the ready→console fast-path gate (e2e) ----------------------
+
+test "cmd_resume fast-path skips the deploy spine and re-enters the console" {
+    let w = deployed_world()
+    world_seed(w, "SKIP_CONSOLE_EXEC", "Y")
+    let rc = cmd_resume(["--mode", "Manual"])
+    assert_eq(rc, 0)
+    // Fast-path: it never re-ran the deploy spine, so cfn/crane were never touched
+    // and helm was only PROBED (status), never install/upgrade'd.
+    assert_eq(mock_call_count(w, "crane"), 0)
+    assert(not mock_called(w, "helm", "upgrade"))
+    assert(not mock_called(w, "helm", "install"))
+    // It DID probe the release status + the console pod, then handed off.
+    assert(mock_called(w, "helm", "status"))
+    assert(mock_called(w, "kubectl", "migration-console-0"))
+    state_load()
+    assert_eq(state_get("last_step", ""), "console_handoff")
+}
+
+// ---- _select_mode: the Manual/Agent picker -----------------------------------
+//
+// No manifest in the world's stage dir → the no-manifest fallback list. Driven
+// non-interactive so ui_prompt returns the default index.
+
+test "_select_mode fallback defaults to Manual on a fresh pick" {
+    let w = fresh_world()
+    world_noninteractive()
+    mock_install_default()
+    // No manifest → fallback list; current="" → default_idx=1 → prompt returns "1".
+    assert_eq(_select_mode(""), "Manual")
+}
+
+test "_select_mode fallback honors current=Agent as the default" {
+    let w = fresh_world()
+    world_noninteractive()
+    mock_install_default()
+    // current="Agent" → default_idx=2 → prompt returns "2" → Agent.
+    assert_eq(_select_mode("Agent"), "Agent")
+}
+
+// ---- _manual_can_skip_to_console: the gate in isolation ----------------------
+
+test "skip-to-console gate is true when ready + deployed + pod present" {
+    let w = deployed_world()
+    assert(_manual_can_skip_to_console())
+}
+
+test "skip-to-console gate is false mid-deploy (last_step not terminal)" {
+    let w = fresh_world()
+    world_noninteractive()
+    world_seed(w, "STAGE_NAME", "ma")
+    world_seed(w, "last_step", "cfn_done")
+    mock_install_default()
+    // Gated by last_step != terminal → returns false BEFORE any helm/kubectl call,
+    // so the helm response is irrelevant here.
+    assert(not _manual_can_skip_to_console())
+}
+
+test "skip-to-console gate is false when STAGE_NAME is unset" {
+    let w = fresh_world()
+    world_noninteractive()
+    world_seed(w, "last_step", "ready")
+    mock_install_default()
+    // Gated by the empty STAGE_NAME → returns false BEFORE any helm/kubectl call.
+    assert(not _manual_can_skip_to_console())
+}
+
+// folded in from test_resume_notdeployed.ab (now deleted): helm reports the
+// release absent, so the gate fails the deployed check even with the pre-helm
+// gates passing. The empty helm status response → _helm_release_status "" → not
+// "deployed".
+test "skip-to-console gate is false when the helm release is not deployed" {
+    let w = fresh_world()
+    world_noninteractive()
+    world_seed(w, "STAGE_NAME", "ma")
+    world_seed(w, "last_step", "ready")
+    mock_install_default()
+    mock_respond(w, "helm", "status", "")
+    assert(not _manual_can_skip_to_console())
+}
+
+// folded in from test_resume_nopod.ab (now deleted): helm reports `deployed` so
+// the gate reaches the pod check, but kubectl get-pod exits non-zero (pod absent)
+// → false.
+test "skip-to-console gate is false when the console pod is missing" {
+    let w = fresh_world()
+    world_noninteractive()
+    world_seed(w, "STAGE_NAME", "ma")
+    world_seed(w, "last_step", "ready")
+    mock_install_default()
+    mock_respond(w, "helm", "status", helm_deployed_json())
+    mock_respond_rc(w, "kubectl", "get", "1")
+    assert(not _manual_can_skip_to_console())
+}
+
+// ---- cmd_help / _help_body: pure usage text (unit) ---------------------------
+
+test "help body contains the usage header and subcommand lines" {
+    let body = _help_body()
+    assert(text_contains(body, "Usage:"))
+    assert(text_contains(body, "migration-assistant resume"))
+    assert(text_contains(body, "migration-assistant console"))
+    assert(text_contains(body, "migration-assistant agent"))
+    assert(text_contains(body, "migration-assistant cleanup"))
+}
+
+test "help body documents the deploy-control flag groups" {
+    let body = _help_body()
+    assert(text_contains(body, "--stage NAME"))
+    assert(text_contains(body, "--region REGION"))
+    assert(text_contains(body, "--deploy-import-vpc-cfn"))
+    assert(text_contains(body, "--tls-mode MODE"))
+    assert(text_contains(body, "--build"))
+}
+
+test "cmd_help runs clean (header + body + Version line to stdout)" {
+    let w = fresh_world()
+    mock_install_default()
+    // cmd_help prints to stdout; an Amber fn's own stdout is not capturable from
+    // inside Amber, so assert it RUNS without die()/an unhandled command failure
+    // (which would abort the block). Content asserted above.
+    cmd_help()
+    assert(true)
 }

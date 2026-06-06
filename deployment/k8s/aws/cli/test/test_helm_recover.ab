@@ -1,43 +1,51 @@
-// test_helm_recover.ab — coverage for src/helm_recover.ab (the stuck-release
+// test_helm_recover.ab — e2e coverage for helm_recover.ab (the stuck-release
 // recovery slice of the bash helm.sh port).
 //
-// External commands are helm + kubectl (+ jq for the JSON parse path). We stub
-// helm + kubectl via a PATH-shadow temp dir — one byte-identical executable shim
-// each, steered ENTIRELY by env vars so amber test (which runs every block in
-// one shared process + PATH) never races on a rewrite (the model test_crane.ab /
-// test_cfn_deploy.ab use). The shims also touch marker files so a test can assert
-// that a given kubectl/helm subcommand actually ran (create namespace / delete
-// job / uninstall).
+// e2e-focused style (see test/TEST_GUIDE.md): drive the real recovery
+// entrypoints (helm_recover_if_stuck / helm_ensure_namespace /
+// helm_recover_orphan_jobs) against the faked helm+kubectl fleet, then assert on
+// what the CLI DID — which helm/kubectl subcommands it issued (mock_called) —
+// rather than poking internals. The per-test world + mock fleet come from
+// test/support/; each block mints its OWN fresh_world() and steers helm/kubectl
+// per-world via mock_respond, so nothing races under the parallel runner (the
+// old file steered through shared HELM_STUB_* / KUBECTL_* env vars — replaced).
+//
+// State (KUBECTL_CONTEXT for the ctx binding) reconciles through the world's
+// on-disk state.env: world pins STAGE_DIR/MIGRATE_HOME/STAGE, helm_kctx_init()
+// loads state from there. world_noninteractive() makes ui_prompt/ui_confirm take
+// their defaults, so the recovery prompts auto-answer ("Y" → yes; "Choose" → 1 =
+// rollback) and the paths run unattended.
 //
 // What's covered:
-//   * helm_ctx_init / helm_ctx_flags / kubectl_ctx_flags — KUBECTL_CONTEXT in
-//     state → "--kube-context X" / "--context X"; unset → "".
-//   * _helm_release_status — helm status -o json steered by HELM_STUB_STATUS:
-//     a chosen status string, an absent release (empty), and the deployed case.
-//   * _helm_wait_namespace_settled — kubectl namespace phase steered by
-//     KUBECTL_NS_PHASE: gone ("") → true, Active → true, Terminating → false
-//     after a short (1s) timeout.
-//   * helm_ensure_namespace — namespace gone → create path runs (marker written);
-//     namespace Active → skip create (no marker).
-//   * helm_recover_orphan_jobs — kubectl get jobs steered by KUBECTL_JOBS: a
-//     stuck "<release>-helm-installer" with no completion → deleted (marker);
-//     a completed job / a non-matching name → NOT deleted.
-//   * helm_recover_if_stuck — status "" / "deployed" → 0 (clean); an unknown
-//     status → 0 (proceeds anyway); pending-install (auto-Yes) → uninstall runs.
+//   * helm_ctx binding (owned by helm_ctx.ab; recovery reads it): KUBECTL_CONTEXT
+//     in state → "--kube-context X" / "--context X"; unset → "".
+//   * _helm_release_status (unit on the status fixture): parses an existing
+//     release's status, deployed, and "" when the release is absent.
+//   * _helm_wait_namespace_settled: gone → true, Active → true, Terminating →
+//     false after a short timeout.
+//   * helm_ensure_namespace e2e: absent → issues `kubectl create namespace`;
+//     Active → issues NO create.
+//   * helm_recover_orphan_jobs e2e: a stuck "<release>-helm-*" Job with no
+//     completion → `kubectl delete job`; a completed / non-matching Job → none.
+//   * helm_recover_if_stuck e2e: deployed/absent/unknown status → 0 (no recovery
+//     action); pending-install → issues `helm uninstall`; pending-upgrade →
+//     issues `helm rollback` (the menu's default pick [1]).
 //
-// NB: no `return` inside test blocks (the AMBER_IDIOMS rule — branch with `if`).
-// MIGRATE_NONINTERACTIVE=1 makes ui_prompt/ui_confirm take their defaults (the
-// "Y" confirms collapse to yes), so the recovery paths run unattended.
+// NB: no `return` inside test blocks (AMBER_IDIOMS — branch with `if`). The
+// status JSON the helm `status` mock emits has literal `{}` which Amber captures
+// as interpolation, so it is built brace-escaped (\{ \}) — see helm_status_json.
 
 import { assert, assert_eq } from "std/test"
-import { file_write, file_chmod, file_exists, dir_create } from "std/fs"
-import { env_var_set, env_var_get } from "std/env"
-import { text_contains } from "std/text"
-import { state_load, state_set, state_save } from "../src/state.ab"
+import { fresh_world, world_noninteractive } from "./support/world.ab"
+import {
+    mock_install_default, mock_respond, mock_respond_rc, mock_fail,
+    mock_called, mock_call_count
+} from "./support/mock.ab"
+import { state_set, state_save } from "../src/state.ab"
 // The context binding lives in helm_ctx.ab (the whole helm tree imports it from
-// there); helm_recover.ab uses it but does NOT re-export it. So the ctx surface
-// is imported from helm_ctx.ab directly — helm_kctx_init loads state from disk
-// then derives the flags (the state-loading variant a sibling module uses).
+// there); helm_recover.ab uses it but does NOT re-export it. helm_kctx_init()
+// loads state from disk then derives the flags (the state-loading variant a
+// sibling module uses), so the ctx surface is imported from helm_ctx.ab directly.
 import {
     helm_kctx_init, helm_ctx_flags, kubectl_ctx_flags
 } from "../src/helm_ctx.ab"
@@ -49,118 +57,37 @@ import {
 // ---- helpers (ABOVE the test blocks: define-before-use; the test-file tree-
 // shaker keeps only deps textually preceding their use) ----------------------
 
-// __seq — monotonic counter so each test can mint a distinct marker dir.
-let __seq = 0
+// helm_status_json — the `{"info":{"status":"<st>"}}` blob the real helm emits
+// for `status -o json`, which _helm_release_status parses via jq. A literal `{`
+// in an Amber Text is interpolation, so the JSON braces are escaped (\{ \}).
+fun helm_status_json(st: Text): Text {
+    return "\{\"info\":\{\"status\":\"{st}\"}}"
+}
 
-// STUB_DIR — the single PATH-shadow dir. Shared across tests (one process, one
-// PATH); the shims are content-stable and steered by env vars, so re-installing
-// is idempotent and race-free.
-const STUB_DIR = "/tmp/amber_helm_recover_stub"
-
-// install_stubs — write the helm + kubectl shims into STUB_DIR and prepend it to
-// PATH (once). The shims are BRACE-FREE bash (a '{' in an Amber Text literal is
-// interpolation) and steer behavior off env vars rather than ${var} expansions.
-// `$` is written bare (NOT \$) — a backslash would land literally in the file.
-//
-// helm shim:
-//   * `helm status … -o json`     → emit {"info":{"status":"$HELM_STUB_STATUS"}}
-//                                     (exit 1 when HELM_STUB_STATUS is empty, so
-//                                     the Amber `failed {""}` "absent" path fires)
-//   * `helm uninstall …`          → touch $HELM_MARK.uninstall, exit 0
-//   * `helm rollback …`           → exit 0
-//   * `helm history …`            → emit a one-element array with HELM_STUB_REV
-//   * anything else               → exit 0
-// kubectl shim:
-//   * `kubectl get namespace …`   → print $KUBECTL_NS_PHASE (empty → exit 1, the
-//                                     "namespace gone" signal)
-//   * `kubectl create namespace …`→ touch $KUBECTL_MARK.create, exit 0
-//   * `kubectl get jobs …`        → print $KUBECTL_JOBS verbatim
-//   * `kubectl delete job …`      → touch $KUBECTL_MARK.deljob, exit 0
-//   * `kubectl label secret …`    → exit 0
-//   * `kubectl get pod …`         → exit 0 (empty phase)
-//   * anything else               → exit 0
-fun install_stubs(): Null {
-    trust dir_create(STUB_DIR)
-
-    let helm = "#!/usr/bin/env bash
-sub=\"$1\"
-case \"$sub\" in
-  status)
-    if [ -z \"$HELM_STUB_STATUS\" ]; then exit 1; fi
-    printf '%s\\n' \"\{\\\"info\\\":\{\\\"status\\\":\\\"$HELM_STUB_STATUS\\\"}}\"
-    exit 0 ;;
-  uninstall)
-    if [ -n \"$HELM_MARK\" ]; then : > \"$HELM_MARK.uninstall\"; fi
-    exit 0 ;;
-  rollback)
-    exit 0 ;;
-  history)
-    rev=\"$HELM_STUB_REV\"
-    if [ -z \"$rev\" ]; then rev=1; fi
-    printf '%s\\n' \"[\{\\\"revision\\\":$rev,\\\"status\\\":\\\"deployed\\\"}]\"
-    exit 0 ;;
-  *)
-    exit 0 ;;
-esac
-"
-    trust file_write("{STUB_DIR}/helm", helm)
-    trust file_chmod("{STUB_DIR}/helm", "755")
-
-    let kubectl = "#!/usr/bin/env bash
-verb=\"$1\"
-obj=\"$2\"
-if [ \"$verb\" = \"get\" ] && [ \"$obj\" = \"namespace\" ]; then
-  if [ -z \"$KUBECTL_NS_PHASE\" ]; then exit 1; fi
-  printf '%s' \"$KUBECTL_NS_PHASE\"
-  exit 0
-fi
-if [ \"$verb\" = \"create\" ] && [ \"$obj\" = \"namespace\" ]; then
-  if [ -n \"$KUBECTL_MARK\" ]; then : > \"$KUBECTL_MARK.create\"; fi
-  exit 0
-fi
-if [ \"$verb\" = \"get\" ] && [ \"$obj\" = \"jobs\" ]; then
-  printf '%s\\n' \"$KUBECTL_JOBS\"
-  exit 0
-fi
-if [ \"$verb\" = \"delete\" ] && [ \"$obj\" = \"job\" ]; then
-  if [ -n \"$KUBECTL_MARK\" ]; then : > \"$KUBECTL_MARK.deljob\"; fi
-  exit 0
-fi
-if [ \"$verb\" = \"label\" ]; then exit 0; fi
-exit 0
-"
-    trust file_write("{STUB_DIR}/kubectl", kubectl)
-    trust file_chmod("{STUB_DIR}/kubectl", "755")
-
-    let oldpath = env_var_get("PATH") failed { "" }
-    if not text_contains(oldpath, "{STUB_DIR}:") {
-        trust env_var_set("PATH", "{STUB_DIR}:{oldpath}")
+// world_with_helm_status — a fresh, non-interactive world with the full fleet
+// faked and `helm status` steered to <st>. "" → the status lookup FAILS (rc 1),
+// the same "release absent" signal the live helm gives (Amber's `failed {""}`).
+// kubectl `get jobs` returns nothing so the orphan-jobs pre-pass is a no-op.
+fun world_with_helm_status(st: Text): Text {
+    let w = fresh_world()
+    world_noninteractive()
+    mock_install_default()
+    helm_kctx_init()
+    if st == "" {
+        // Absent release: empty stdout + non-zero exit → _helm_release_status "".
+        mock_fail(w, "helm", "status", "1", "")
+    } else {
+        mock_respond(w, "helm", "status", helm_status_json(st))
     }
-}
-
-// fresh_stage — mint + export a unique STAGE_DIR with a log/ subdir (so the
-// migrate.log appends + state files land somewhere real). Returns the dir.
-fun fresh_stage(): Text {
-    __seq += 1
-    let base = trust $mktemp -d$
-    let dir = "{base}/stage-{__seq}"
-    trust dir_create(dir)
-    trust dir_create("{dir}/log")
-    trust env_var_set("STAGE_DIR", dir)
-    return dir
-}
-
-// noninteractive — make ui_prompt/ui_confirm take their defaults (so the
-// recovery prompts auto-answer and don't block the test run).
-fun noninteractive(): Null {
-    trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
+    // No orphan helm-hook Jobs by default (recover_if_stuck always pre-checks).
+    mock_respond(w, "kubectl", "jobs", "")
+    return w
 }
 
 // ---- helm_ctx binding (owned by helm_ctx.ab; recovery calls read it) -------
 
-test "helm_ctx_init records flags from a saved KUBECTL_CONTEXT" {
-    fresh_stage()
-    state_load()
+test "ctx binding derives helm + kubectl context flags from saved KUBECTL_CONTEXT" {
+    let w = fresh_world()
     state_set("KUBECTL_CONTEXT", "my-eks-ctx")
     state_save()
     helm_kctx_init()
@@ -168,190 +95,166 @@ test "helm_ctx_init records flags from a saved KUBECTL_CONTEXT" {
     assert_eq(kubectl_ctx_flags(), "--context my-eks-ctx")
 }
 
-test "helm_ctx_init leaves flags empty when no context is set" {
-    fresh_stage()
-    state_load()
-    // No KUBECTL_CONTEXT saved on this fresh stage → flags collapse to "".
+test "ctx binding collapses to empty flags when no context is saved" {
+    let w = fresh_world()
     state_save()
     helm_kctx_init()
     assert_eq(helm_ctx_flags(), "")
     assert_eq(kubectl_ctx_flags(), "")
 }
 
-// ---- _helm_release_status --------------------------------------------------
+// ---- _helm_release_status (unit on the helm status fixture) ----------------
 
-test "_helm_release_status returns the parsed status for an existing release" {
-    install_stubs()
-    fresh_stage()
-    helm_kctx_init()
-    trust env_var_set("HELM_STUB_STATUS", "pending-upgrade")
+test "_helm_release_status parses the status of an existing release" {
+    let w = world_with_helm_status("pending-upgrade")
     assert_eq(_helm_release_status("ma", "ma"), "pending-upgrade")
 }
 
-test "_helm_release_status is empty when the release is absent" {
-    install_stubs()
-    fresh_stage()
-    helm_kctx_init()
-    // Empty HELM_STUB_STATUS → the shim exits 1 → Amber `failed {""}` → "".
-    trust env_var_set("HELM_STUB_STATUS", "")
-    assert_eq(_helm_release_status("ma", "ma"), "")
+test "_helm_release_status reads a deployed release" {
+    let w = world_with_helm_status("deployed")
+    assert_eq(_helm_release_status("ma", "ma"), "deployed")
 }
 
-test "_helm_release_status reads a deployed release" {
-    install_stubs()
-    fresh_stage()
-    helm_kctx_init()
-    trust env_var_set("HELM_STUB_STATUS", "deployed")
-    assert_eq(_helm_release_status("ma", "ma"), "deployed")
+test "_helm_release_status is empty when the release is absent" {
+    let w = world_with_helm_status("")
+    assert_eq(_helm_release_status("ma", "ma"), "")
 }
 
 // ---- _helm_wait_namespace_settled ------------------------------------------
 
-test "_helm_wait_namespace_settled is true when the namespace is gone" {
-    install_stubs()
-    fresh_stage()
+test "_helm_wait_namespace_settled is true once the namespace is gone" {
+    let w = fresh_world()
+    mock_install_default()
     helm_kctx_init()
-    // Empty phase → the shim exits 1 → Amber reads "" → namespace gone → true.
-    trust env_var_set("KUBECTL_NS_PHASE", "")
+    // `get namespace -o jsonpath` fails (rc 1) → Amber reads "" → namespace gone.
+    mock_fail(w, "kubectl", "namespace", "1", "")
     assert(_helm_wait_namespace_settled("ma", 5))
 }
 
 test "_helm_wait_namespace_settled is true when the namespace is Active" {
-    install_stubs()
-    fresh_stage()
+    let w = fresh_world()
+    mock_install_default()
     helm_kctx_init()
-    trust env_var_set("KUBECTL_NS_PHASE", "Active")
+    mock_respond(w, "kubectl", "namespace", "Active")
     assert(_helm_wait_namespace_settled("ma", 5))
 }
 
 test "_helm_wait_namespace_settled times out on a stuck Terminating namespace" {
-    install_stubs()
-    fresh_stage()
+    let w = fresh_world()
+    mock_install_default()
     helm_kctx_init()
-    trust env_var_set("KUBECTL_NS_PHASE", "Terminating")
+    mock_respond(w, "kubectl", "namespace", "Terminating")
     // 1s timeout → one poll, then the elapsed check trips → false. (The poll
-    // sleeps 5s once, so this test takes ~5s; acceptable for the contract.)
+    // sleeps 5s once, so this block takes ~5s; acceptable for the contract.)
     assert(not _helm_wait_namespace_settled("ma", 1))
 }
 
-// ---- helm_ensure_namespace -------------------------------------------------
+// ---- helm_ensure_namespace (e2e: assert the issued kubectl create) ---------
 
 test "helm_ensure_namespace creates the namespace when it is absent" {
-    install_stubs()
-    let dir = fresh_stage()
+    let w = fresh_world()
+    world_noninteractive()
+    mock_install_default()
     helm_kctx_init()
-    noninteractive()
-    let mark = "{dir}/mark"
-    trust env_var_set("KUBECTL_MARK", mark)
-    // Empty phase → settle returns true (gone) AND get-namespace exits 1
-    // (absent) → the create branch runs and touches the marker.
-    trust env_var_set("KUBECTL_NS_PHASE", "")
+    // `get namespace` fails → settle sees gone (true) AND the existence check
+    // exits non-zero (absent) → the create branch runs.
+    mock_fail(w, "kubectl", "namespace", "1", "")
+    // `create namespace` shares the `namespace` token, so anchor a succeeding
+    // `create` key — it sorts before `namespace` in the args, so the create
+    // call resolves rc 0 instead of inheriting the absent-namespace failure.
+    mock_respond_rc(w, "kubectl", "create", "0")
     helm_ensure_namespace("ma")
-    assert(file_exists("{mark}.create"))
+    assert(mock_called(w, "kubectl", "create"))
+    assert(mock_called(w, "kubectl", "namespace"))
 }
 
 test "helm_ensure_namespace skips create when the namespace is Active" {
-    install_stubs()
-    let dir = fresh_stage()
+    let w = fresh_world()
+    world_noninteractive()
+    mock_install_default()
     helm_kctx_init()
-    noninteractive()
-    let mark = "{dir}/mark"
-    trust env_var_set("KUBECTL_MARK", mark)
     // Active → settle true AND get-namespace exits 0 (present) → no create.
-    trust env_var_set("KUBECTL_NS_PHASE", "Active")
+    mock_respond(w, "kubectl", "namespace", "Active")
     helm_ensure_namespace("ma")
-    assert(not file_exists("{mark}.create"))
+    assert(not mock_called(w, "kubectl", "create"))
 }
 
-// ---- helm_recover_orphan_jobs ----------------------------------------------
+// ---- helm_recover_orphan_jobs (e2e: assert the issued kubectl delete) ------
 
 test "helm_recover_orphan_jobs deletes a stuck helm-hook Job" {
-    install_stubs()
-    let dir = fresh_stage()
+    let w = fresh_world()
+    world_noninteractive()
+    mock_install_default()
     helm_kctx_init()
-    noninteractive()
-    let mark = "{dir}/mark"
-    trust env_var_set("KUBECTL_MARK", mark)
     // A helm-hook Job for release "ma" with no successful completion ("<none>").
-    trust env_var_set("KUBECTL_JOBS", "ma-helm-installer   <none>")
+    mock_respond(w, "kubectl", "jobs", "ma-helm-installer   <none>")
     helm_recover_orphan_jobs("ma", "ma")
-    assert(file_exists("{mark}.deljob"))
+    assert(mock_called(w, "kubectl", "delete"))
+    assert(mock_called(w, "kubectl", "ma-helm-installer"))
 }
 
 test "helm_recover_orphan_jobs leaves a completed Job alone" {
-    install_stubs()
-    let dir = fresh_stage()
+    let w = fresh_world()
+    world_noninteractive()
+    mock_install_default()
     helm_kctx_init()
-    noninteractive()
-    let mark = "{dir}/mark"
-    trust env_var_set("KUBECTL_MARK", mark)
-    // Completion count "1" → succeeded → not a stuck orphan → no delete.
-    trust env_var_set("KUBECTL_JOBS", "ma-helm-installer   1")
+    // Completion count "1" → succeeded → not a stuck orphan → no delete issued.
+    mock_respond(w, "kubectl", "jobs", "ma-helm-installer   1")
     helm_recover_orphan_jobs("ma", "ma")
-    assert(not file_exists("{mark}.deljob"))
+    assert(not mock_called(w, "kubectl", "delete"))
 }
 
 test "helm_recover_orphan_jobs ignores Jobs that don't match the release prefix" {
-    install_stubs()
-    let dir = fresh_stage()
+    let w = fresh_world()
+    world_noninteractive()
+    mock_install_default()
     helm_kctx_init()
-    noninteractive()
-    let mark = "{dir}/mark"
-    trust env_var_set("KUBECTL_MARK", mark)
     // Name doesn't start with "ma-helm-" → skipped even with no completion.
-    trust env_var_set("KUBECTL_JOBS", "other-job   <none>")
+    mock_respond(w, "kubectl", "jobs", "other-job   <none>")
     helm_recover_orphan_jobs("ma", "ma")
-    assert(not file_exists("{mark}.deljob"))
+    assert(not mock_called(w, "kubectl", "delete"))
 }
 
-// ---- helm_recover_if_stuck -------------------------------------------------
+// ---- helm_recover_if_stuck (e2e through the public recovery entry) ---------
 
-test "helm_recover_if_stuck returns 0 for a deployed release" {
-    install_stubs()
-    let dir = fresh_stage()
-    helm_kctx_init()
-    noninteractive()
-    trust env_var_set("KUBECTL_MARK", "{dir}/mark")
-    trust env_var_set("KUBECTL_JOBS", "")
-    trust env_var_set("HELM_STUB_STATUS", "deployed")
-    assert_eq(helm_recover_if_stuck("ma", "ma"), 0)
-}
-
-test "helm_recover_if_stuck returns 0 for an absent release" {
-    install_stubs()
-    let dir = fresh_stage()
-    helm_kctx_init()
-    noninteractive()
-    trust env_var_set("KUBECTL_MARK", "{dir}/mark")
-    trust env_var_set("KUBECTL_JOBS", "")
-    trust env_var_set("HELM_STUB_STATUS", "")
-    assert_eq(helm_recover_if_stuck("ma", "ma"), 0)
-}
-
-test "helm_recover_if_stuck proceeds (0) on an unknown status" {
-    install_stubs()
-    let dir = fresh_stage()
-    helm_kctx_init()
-    noninteractive()
-    trust env_var_set("KUBECTL_MARK", "{dir}/mark")
-    trust env_var_set("KUBECTL_JOBS", "")
-    // A status helm never emits → the else branch warns + proceeds (returns 0).
-    trust env_var_set("HELM_STUB_STATUS", "weird-unhandled-state")
-    assert_eq(helm_recover_if_stuck("ma", "ma"), 0)
-}
-
-test "helm_recover_if_stuck auto-uninstalls a pending-install release" {
-    install_stubs()
-    let dir = fresh_stage()
-    helm_kctx_init()
-    noninteractive()
-    let mark = "{dir}/mark"
-    trust env_var_set("KUBECTL_MARK", mark)
-    trust env_var_set("HELM_MARK", mark)
-    trust env_var_set("KUBECTL_JOBS", "")
-    // pending-install → ui_confirm defaults to Yes (noninteractive) → uninstall.
-    trust env_var_set("HELM_STUB_STATUS", "pending-install")
+test "helm_recover_if_stuck is a clean no-op for a deployed release" {
+    let w = world_with_helm_status("deployed")
     let rc = helm_recover_if_stuck("ma", "ma")
     assert_eq(rc, 0)
-    assert(file_exists("{mark}.uninstall"))
+    assert_eq(mock_call_count(w, "helm"), 1)   // status check only; no recovery
+    assert(not mock_called(w, "helm", "uninstall"))
+    assert(not mock_called(w, "helm", "rollback"))
+}
+
+test "helm_recover_if_stuck is a clean no-op for an absent release" {
+    let w = world_with_helm_status("")
+    let rc = helm_recover_if_stuck("ma", "ma")
+    assert_eq(rc, 0)
+    assert(not mock_called(w, "helm", "uninstall"))
+    assert(not mock_called(w, "helm", "rollback"))
+}
+
+test "helm_recover_if_stuck proceeds (0) without acting on an unknown status" {
+    let w = world_with_helm_status("weird-unhandled-state")
+    let rc = helm_recover_if_stuck("ma", "ma")
+    assert_eq(rc, 0)
+    assert(not mock_called(w, "helm", "uninstall"))
+    assert(not mock_called(w, "helm", "rollback"))
+}
+
+test "helm_recover_if_stuck uninstalls a pending-install release" {
+    let w = world_with_helm_status("pending-install")
+    // pending-install → ui_confirm defaults to Yes (noninteractive) → uninstall.
+    let rc = helm_recover_if_stuck("ma", "ma")
+    assert_eq(rc, 0)
+    assert(mock_called(w, "helm", "uninstall"))
+}
+
+test "helm_recover_if_stuck rolls back a pending-upgrade release (menu default [1])" {
+    let w = world_with_helm_status("pending-upgrade")
+    // pending-upgrade → the recovery menu; ui_prompt("Choose","1") returns the
+    // default "1" in non-interactive mode → helm rollback is issued.
+    let rc = helm_recover_if_stuck("ma", "ma")
+    assert_eq(rc, 0)
+    assert(mock_called(w, "helm", "rollback"))
 }

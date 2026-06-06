@@ -1,194 +1,184 @@
-// test_wizard.ab — coverage for src/wizard.ab, mirroring test_wizard.bats.
+// test_wizard.ab — e2e coverage for wizard.ab (wizard_collect + the adopt-stack
+// selector _wizard_offer_existing_stack).
 //
-// wizard.ab drives the four deploy inputs through ui.ab prompts and persists
-// them via state.ab. We make every prompt deterministic WITHOUT a TTY by
-// setting MIGRATE_NONINTERACTIVE=1 — ui.ab's ui_prompt then returns its fallback
-// and ui_confirm collapses to its default, so the wizard runs end-to-end on the
-// pre-fill defaults.
+// Style (see test/TEST_GUIDE.md): drive the real wizard entrypoint
+// non-interactively against a per-test world, then assert on what it PRODUCED —
+// the four deploy inputs it persisted to the on-disk state.env (AWS_REGION,
+// STAGE_NAME, MIRROR_IMAGES, MA_VERSION) + the resume checkpoint. The world
+// (test/support/world.ab) gives each block an isolated STAGE_DIR; the wizard's
+// state_save() writes state.env there, which we read back to verify the outcome.
 //
-// ── Why we assert on the on-disk state, not the in-memory store ──────────────
-// The Amber 0.6 compiler inlines a module ONCE PER DISTINCT IMPORT-PATH STRING.
-// This test imports state.ab as "../src/state.ab"; wizard.ab imports it as
-// "./state.ab" — different strings, so the compiler emits TWO independent copies
-// of state.ab's module-level store (STATE_KEYS/VALS). The test's state_get reads
-// one copy; wizard_collect's state_get/state_set touch the OTHER. They are NOT
-// the same store under `amber test`. (In the real CLI the entrypoint lives in
-// src/ and imports BOTH wizard.ab and state.ab via "./…" — identical strings to
-// wizard's — so the compiler dedupes to a single shared store and the adopt path
-// works; verified by inspecting the compiled bash.)
+// ── Why the persisted state.env is the observable channel ────────────────────
+// wizard_collect() drives ui.ab prompts; world_noninteractive() flips the CLI
+// non-interactive so ui_prompt returns its fallback and ui_confirm collapses to
+// its default — the wizard then runs end-to-end on its pre-fill defaults with no
+// TTY. Its OUTPUT is the state.env / state.json it writes via state_save() into
+// the world's STAGE_DIR. We read state.env back and assert the four inputs.
 //
-// Consequently the test cannot SEED wizard's store (CFN_MA_STACKS) nor READ it
-// directly. Two robust seams remain:
-//   1. _wizard_offer_existing_stack is PURE w.r.t. its <list> argument (it takes
-//      the stack list as a param, not from state), so the entire adopt-selection
-//      logic — single-stack adopt, multi-stack default-pick, whitespace
-//      word-split, empty/decline — is tested directly and deterministically.
-//   2. wizard_collect's OUTPUT is the state.env / state.json it writes via
-//      state_save(); those land in STAGE_DIR on disk. We read that file back to
-//      assert the four inputs wizard collected. Region + MA version are steered
-//      via process-global ENV (shared across both store copies), which is how the
-//      fresh-deploy path is made deterministic.
+// Region + MA version defaults are steered through process-global ENV
+// (AWS_REGION / AWS_DEFAULT_REGION / MA_VERSION), which the wizard reads at run
+// time. The fresh_world() helper here pins MA_VERSION offline so the version
+// prompt's default never hits the GitHub releases API (ma_default_version's
+// explicit-override branch short-circuits before curl), and clears the
+// region/resume env so each block starts from a known baseline (env leaks across
+// `amber test` blocks).
 //
-// Isolation: each test mints a unique STAGE_DIR under $TMPDIR (the test_state.ab
-// pattern). `amber test` runs blocks in parallel, so a per-test dir avoids
-// cross-test file collisions.
-//
-// Network: ma_default_version() can hit the GitHub releases API on a cold start;
-// the MA_VERSION env pin (explicit-override branch) short-circuits before curl,
-// keeping the version default offline + deterministic.
+// ── The adopt-existing path under `amber test` ───────────────────────────────
+// wizard_collect() reads CFN_MA_STACKS from its OWN state store, never calling
+// state_load() itself — so under `amber test` that store is empty and the
+// in-wizard adopt branch does not engage (the resume fast-path likewise can't see
+// the wizard-side inputs). The adopt LOGIC is still fully covered because
+// _wizard_offer_existing_stack is PURE w.r.t. its <list> argument (it takes the
+// stack list as a param, not from state): single-stack adopt, multi-stack
+// default-pick, and whitespace word-split are asserted directly + deterministically
+// as return-value units.
 
 import { assert, assert_eq } from "std/test"
 import { env_var_set, env_var_unset } from "std/env"
 import { file_read } from "std/fs"
-import { slice } from "std/text"
-import {
-    wizard_collect, _wizard_offer_existing_stack
-} from "../src/wizard.ab"
+import { text_contains } from "std/text"
+import { regex_match } from "../src/std.ab"
+import { fresh_world, world_noninteractive } from "./support/world.ab"
+import { wizard_collect, _wizard_offer_existing_stack } from "../src/wizard.ab"
 
-// ---- helpers (ABOVE the test blocks: define-before-use; the test-file tree
-// shaker keeps only deps that textually precede each test block) -------------
+// ---- file-local helpers (ABOVE the test blocks: define-before-use; the
+// test-file tree shaker keeps only deps that textually precede each block) ----
 
-// __seq — monotonic counter so each test gets a distinct STAGE_DIR even within
-// the same wall-clock second.
-let __seq = 0
-
-// fresh_stage — mint + export a unique empty STAGE_DIR, put us in non-interactive
-// mode so prompts resolve to defaults, and clear the env knobs each test sets
-// explicitly. Returns the dir so the test can read the persisted state file.
-fun fresh_stage(): Text {
-    __seq += 1
-    let base = trust $mktemp -d$
-    let dir = "{base}/wiz-{__seq}"
-    trust env_var_set("STAGE_DIR", dir)
-    trust env_var_set("MIGRATE_HOME", base)
-    trust env_var_set("STAGE", "wiz-{__seq}")
-    trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
-    // Clear resume + creds-region env so each test starts from a known baseline
-    // (a leftover value from another test must not leak in — env is
-    // process-wide). Tests that need them set them explicitly.
+// wizard_world — a fresh isolated world wired for a deterministic, offline wizard
+// run: non-interactive (prompts → defaults), region/resume env cleared to a known
+// baseline (env leaks across blocks), and MA_VERSION pinned so the version default
+// never touches the network. Returns the world dir (= STAGE_DIR) so a test can
+// read the state.env the wizard persists there.
+fun wizard_world(): Text {
+    let w = fresh_world()
+    world_noninteractive()
+    // Clear region + resume env so each block starts from a known baseline; a
+    // leftover from another block must not leak in (env is process-wide). Tests
+    // that need these set them explicitly.
     trust env_var_unset("MIGRATE_RESUMING")
     trust env_var_unset("AWS_REGION")
     trust env_var_unset("AWS_DEFAULT_REGION")
-    // Pin MA_VERSION so the version prompt's default never touches the network
-    // (explicit-override branch in ma_default_version).
+    // Pin MA_VERSION so the version prompt's default short-circuits before curl.
     trust env_var_set("MA_VERSION", "2.4.0")
-    return dir
+    return w
 }
 
-// contains_text — substring predicate over the persisted state file (the bats
-// tests grep'd the files; we do the same in-Amber).
-fun contains_text(needle: Text, s: Text): Bool {
-    let nl = len needle
-    if nl == 0 { return true }
-    let limit = (len s) - nl
-    if limit < 0 { return false }
-    for i in 0..=limit {
-        if slice(s, i, nl) == needle { return true }
-    }
-    return false
+// state_env — the state.env wizard_collect persisted under <world>, or "".
+fun state_env(world: Text): Text {
+    return file_read("{world}/state.env") failed { "" }
 }
 
-// read_env_file — the state.env wizard_collect persisted under <dir>, or "".
-fun read_env_file(dir: Text): Text {
-    return file_read("{dir}/state.env") failed { "" }
-}
+// ---- wizard_collect: fresh deploy persists the four inputs ------------------
 
-// ---- _wizard_offer_existing_stack (pure in <list>; fully deterministic) -----
-
-test "_wizard_offer_existing_stack: empty list returns empty" {
-    fresh_stage()
-    assert_eq(_wizard_offer_existing_stack(""), "")
-    // whitespace-only also word-splits to zero tokens → empty.
-    assert_eq(_wizard_offer_existing_stack("   "), "")
-}
-
-test "_wizard_offer_existing_stack: single stack adopted under default-Y" {
-    fresh_stage()
-    // n==1 → ui_confirm default Y (non-interactive) → adopt that stack.
-    assert_eq(_wizard_offer_existing_stack("MigrationAssistant-prod"), "MigrationAssistant-prod")
-}
-
-test "_wizard_offer_existing_stack: multiple stacks picks the first (default 1)" {
-    fresh_stage()
-    // n>1 → ui_prompt("Pick","1") returns "1" (non-interactive) → arr[0].
-    let chosen = _wizard_offer_existing_stack("MigrationAssistant-a MigrationAssistant-b MigrationAssistant-c")
-    assert_eq(chosen, "MigrationAssistant-a")
-}
-
-test "_wizard_offer_existing_stack: extra whitespace between names is word-split" {
-    fresh_stage()
-    // Runs of whitespace collapse (the bash `arr=($list)` word-split), so the
-    // count is 2, not 3, and the first token is intact (no empty leading token).
-    let chosen = _wizard_offer_existing_stack("  MigrationAssistant-x    MigrationAssistant-y  ")
-    assert_eq(chosen, "MigrationAssistant-x")
-}
-
-// ---- wizard_collect: fresh deploy — assert on the PERSISTED state.env -------
-
-test "wizard_collect persists region/stage/mirror/version (defaults)" {
-    let dir = fresh_stage()
-    // No CFN_MA_STACKS in wizard's store, no MIGRATE_RESUMING. Pre-fill defaults:
+test "wizard collects region, stage, mirror + version, then marks wizard_done" {
+    let w = wizard_world()
+    // Pre-fill defaults with nothing seeded:
     //   region  → resolve_region_default(): no saved, no env → "us-east-1"
     //   stage   → "ma" (the saved-STAGE_NAME default)
     //   mirror  → ui_confirm default Y → "Y"
     //   version → MA_VERSION env "2.4.0" (override branch)
     wizard_collect()
 
-    let body = read_env_file(dir)
+    let body = state_env(w)
     // state_save serializes each input as KEY="VALUE".
-    assert(contains_text("AWS_REGION=\"us-east-1\"", body))
-    assert(contains_text("STAGE_NAME=\"ma\"", body))
-    assert(contains_text("MIRROR_IMAGES=\"Y\"", body))
-    assert(contains_text("MA_VERSION=\"2.4.0\"", body))
-    // wizard marks the resume checkpoint.
-    assert(contains_text("last_step=\"wizard_done\"", body))
+    assert(text_contains(body, "AWS_REGION=\"us-east-1\""))
+    assert(text_contains(body, "STAGE_NAME=\"ma\""))
+    assert(text_contains(body, "MIRROR_IMAGES=\"Y\""))
+    assert(text_contains(body, "MA_VERSION=\"2.4.0\""))
+    // wizard marks the resume checkpoint so a later run skips the prompts.
+    assert(text_contains(body, "last_step=\"wizard_done\""))
 }
 
-test "wizard_collect: region default comes from AWS_DEFAULT_REGION env" {
-    let dir = fresh_stage()
+test "wizard defaults the region from AWS_DEFAULT_REGION when no AWS_REGION" {
+    let w = wizard_world()
     // No saved AWS_REGION, no AWS_REGION env, but AWS_DEFAULT_REGION set →
-    // resolve_region_default() returns it (env is shared across store copies).
+    // resolve_region_default() falls through to it.
     trust env_var_set("AWS_DEFAULT_REGION", "eu-west-1")
     wizard_collect()
-    assert(contains_text("AWS_REGION=\"eu-west-1\"", read_env_file(dir)))
+    assert(text_contains(state_env(w), "AWS_REGION=\"eu-west-1\""))
     trust env_var_unset("AWS_DEFAULT_REGION")
 }
 
-test "wizard_collect: AWS_REGION env wins over AWS_DEFAULT_REGION for the default" {
-    let dir = fresh_stage()
+test "wizard prefers AWS_REGION over AWS_DEFAULT_REGION for the region default" {
+    let w = wizard_world()
     // resolve_region_default() prefers AWS_REGION over AWS_DEFAULT_REGION.
     trust env_var_set("AWS_REGION", "ap-southeast-2")
     trust env_var_set("AWS_DEFAULT_REGION", "eu-west-1")
     wizard_collect()
-    assert(contains_text("AWS_REGION=\"ap-southeast-2\"", read_env_file(dir)))
+    assert(text_contains(state_env(w), "AWS_REGION=\"ap-southeast-2\""))
     trust env_var_unset("AWS_REGION")
     trust env_var_unset("AWS_DEFAULT_REGION")
 }
 
-test "wizard_collect: MA_VERSION env override flows into the saved version" {
-    let dir = fresh_stage()
-    // Override the fresh_stage pin to prove the version is sourced from the env
-    // (ma_default_version's explicit-override branch), not hardcoded.
+test "wizard sources the version from the MA_VERSION env override" {
+    let w = wizard_world()
+    // Override the pin to prove the version comes from the env
+    // (ma_default_version's explicit-override branch), not a hardcode.
     trust env_var_set("MA_VERSION", "7.7.7")
     wizard_collect()
-    assert(contains_text("MA_VERSION=\"7.7.7\"", read_env_file(dir)))
+    assert(text_contains(state_env(w), "MA_VERSION=\"7.7.7\""))
     trust env_var_set("MA_VERSION", "2.4.0")
 }
 
-// ---- wizard_collect: resume fast-path --------------------------------------
+// ---- wizard_collect: resume flag -------------------------------------------
 //
-// The resume fast-path returns BEFORE any state_save, so it writes NO state.env.
-// wizard's store is empty under `amber test` (the store-split documented above),
-// so the guard's state_get(...)!="" checks are all false → the fast-path does
-// NOT engage and the normal collection runs, persisting the file. We assert the
-// reachable contract: the resume FLAG alone does not suppress collection when the
-// (wizard-side) inputs are absent — last_step + the inputs ARE written.
+// The resume fast-path returns BEFORE any state_save (writing NO state.env) only
+// when all four wizard-side inputs are already in its store. Under `amber test`
+// the wizard's store is empty, so the guard's state_get(...)!="" checks are all
+// false → the fast-path does NOT engage and normal collection runs, persisting
+// the file. We assert that reachable contract: the resume flag ALONE does not
+// suppress collection when the wizard-side inputs are absent.
 
-test "wizard_collect: resume flag with empty store still collects + persists" {
-    let dir = fresh_stage()
+test "wizard still collects + persists when resuming with an empty store" {
+    let w = wizard_world()
     trust env_var_set("MIGRATE_RESUMING", "1")
     wizard_collect()
-    assert(contains_text("last_step=\"wizard_done\"", read_env_file(dir)))
-    assert(contains_text("MA_VERSION=\"2.4.0\"", read_env_file(dir)))
+    assert(text_contains(state_env(w), "last_step=\"wizard_done\""))
+    assert(text_contains(state_env(w), "MA_VERSION=\"2.4.0\""))
     trust env_var_unset("MIGRATE_RESUMING")
+}
+
+// ---- _wizard_offer_existing_stack: the adopt selector (pure in <list>) ------
+
+test "offer-existing returns empty for an empty or whitespace-only list" {
+    wizard_world()
+    assert_eq(_wizard_offer_existing_stack(""), "")
+    // whitespace-only also word-splits to zero tokens → empty.
+    assert_eq(_wizard_offer_existing_stack("   "), "")
+}
+
+test "offer-existing adopts the sole stack under the default-Y confirm" {
+    wizard_world()
+    // n==1 → ui_confirm default Y (non-interactive) → adopt that stack.
+    assert_eq(_wizard_offer_existing_stack("MigrationAssistant-prod"), "MigrationAssistant-prod")
+}
+
+test "offer-existing picks the first stack on the default index when many" {
+    wizard_world()
+    // n>1 → ui_prompt("Pick","1") returns "1" (non-interactive) → arr[0].
+    let chosen = _wizard_offer_existing_stack("MigrationAssistant-a MigrationAssistant-b MigrationAssistant-c")
+    assert_eq(chosen, "MigrationAssistant-a")
+}
+
+test "offer-existing word-splits runs of whitespace between stack names" {
+    wizard_world()
+    // Runs of whitespace collapse (the bash `arr=($list)` word-split), so the
+    // first token is intact (no empty leading token) and gets adopted.
+    let chosen = _wizard_offer_existing_stack("  MigrationAssistant-x    MigrationAssistant-y  ")
+    assert_eq(chosen, "MigrationAssistant-x")
+}
+
+// ---- unit: the numeric-index regex the menu pick is guarded by (pure) -------
+//
+// The multi-stack menu accepts an index only if it matches ^[0-9]+$ AND is in
+// range; the wizard guards the pick with regex_match(pick, "^[0-9]+$"). Cover
+// that classifier directly so the adopt selector's "non-numeric input declines"
+// edge is pinned without a TTY.
+
+test "menu-pick regex matches only bare digit runs" {
+    assert(regex_match("1", "^[0-9]+$"))
+    assert(regex_match("42", "^[0-9]+$"))
+    assert(not regex_match("", "^[0-9]+$"))
+    assert(not regex_match("1a", "^[0-9]+$"))
+    assert(not regex_match("none", "^[0-9]+$"))
 }

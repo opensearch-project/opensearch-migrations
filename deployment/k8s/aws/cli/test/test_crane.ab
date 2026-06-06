@@ -1,156 +1,79 @@
-// test_crane.ab — coverage for src/crane.ab, mirroring test_crane.bats.
+// test_crane.ab — e2e-focused coverage for src/crane.ab (image mirroring).
 //
-// crane.sh mirrors images to a private ECR with retry + error classification.
-// The external commands are crane / aws (and, for manifest resolution, an
-// on-disk privateEcrManifest.sh). We stub crane / aws via a PATH-shadow temp
-// dir — write an executable shim with file_write + file_chmod, then prepend the
-// dir to PATH (env_var_set). The shims' behavior is steered per-test by env
-// vars (CRANE_STUB_MODE, AWS_STUB_*) so one byte-identical content is installed
-// each call (amber test runs every block in one shared process+PATH — separate
-// rewrites of the same shim path would race; see test_cfn_outputs.ab's note).
+// crane.ab mirrors images from public registries into a private ECR with retry +
+// fatal-error classification. We drive the REAL crane.ab functions against the
+// shared mock fleet (test/support/mock.ab) — every `crane`/`aws` invocation hits
+// a recording shim — and assert on what the CLI DID: which commands it issued
+// (mock_called / mock_call_count) and what it returned. Per-test isolation +
+// env-pinning come from test/support/world.ab (no hand-rolled mktemp/PATH/stub).
 //
-// What's covered:
-//   * _dst_for / _ecr_repo_for — pure string transforms (no stub needed).
-//   * _crane_load_manifest — reads a vendored privateEcrManifest.sh; we point
-//     CLI_ROOT at a temp dir holding skills/privateEcrManifest.sh and assert the
-//     image list is parsed (blanks/comments dropped, field 1 kept).
-//   * _crane_copy_retry — crane stub steered by CRANE_STUB_MODE: ok / fatal
-//     (NAME_UNKNOWN bails with no retry) / flaky (fail then succeed) / always
-//     (exhaust attempts). CRANE_RETRY_ATTEMPTS + CRANE_RETRY_INITIAL_S keep it
-//     fast (initial 0s sleeps).
-//   * _ecr_login — crane-not-on-PATH → 1; full happy path with crane+aws stubs → 0.
-//   * _crane_mirror_ma_images — the parallel-array (src,dst) PAIRS produce the
-//     disambiguating tags; all-success → 0.
+// SEAM NOTE (why not crane_mirror_or_skip directly). In Amber 0.6 each importer
+// gets its OWN copy of an imported module's globals, so the state.ab store this
+// test could seed is a DIFFERENT instance from the one crane.ab reads — and,
+// unlike cmd_cleanup, crane_mirror_or_skip never calls state_load() at entry, so
+// there is no on-disk channel to reconcile through. The established peer-module
+// pattern (test_build.ab / test_cfn_deploy.ab) therefore drives the ARG-DRIVEN
+// flow functions that crane_mirror_or_skip composes — they take the
+// state-derived registry/version/region as PARAMETERS, so the same external
+// behavior is exercised end-to-end against the mock fleet:
+//   * _crane_copy_retry        — the per-image copy + retry/backoff + fatal-class
+//                                bail loop (what crane_mirror_or_skip calls once
+//                                per image).
+//   * _crane_mirror_ma_images  — the 4-image MA-team copy loop (parallel-array
+//                                src/dst PAIRS → disambiguating tags).
+//   * _ecr_login               — the aws ecr get-login-password → crane auth
+//                                login authentication step.
 //
-// No network, no real cloud: every crane/aws invocation hits a stub. STAGE_DIR
-// is pinned to a temp dir per test (so crane.log writes land somewhere real).
-// NO `return` inside test blocks (wrap in if) per the porting rules.
+// What's covered (behaviors, not internals):
+//   * _crane_copy_retry: a clean copy issues exactly one `crane copy` and returns
+//     0; a fatal NAME_UNKNOWN bails after a SINGLE call (no retry); a persistent
+//     transient failure retries up to CRANE_RETRY_ATTEMPTS times then gives up.
+//   * _crane_mirror_ma_images: issues one `crane copy` per MA image (4) under the
+//     disambiguating-tag scheme and succeeds when every copy does; returns 1 when
+//     copies fail.
+//   * _ecr_login: authenticates via aws + crane (issues get-login-password +
+//     crane auth login) → 0; fails fast (→ 1) when crane is not on PATH.
+//   * URL builders _dst_for / _ecr_repo_for + the manifest parser
+//     _crane_load_manifest stay PURE unit asserts (no world/mock needed).
+//
+// CRANE_RETRY_ATTEMPTS + CRANE_RETRY_INITIAL_S=0 keep the retry loop instant
+// (0s sleeps doubling stay 0). NO `return` inside a test block — branch with if.
 
 import { assert, assert_eq } from "std/test"
-import { file_write, file_chmod, dir_create } from "std/fs"
-import { env_var_set, env_var_get } from "std/env"
+import { env_var_set } from "std/env"
+import { dir_create, file_write } from "std/fs"
 import { text_contains } from "std/text"
+import { fresh_world } from "./support/world.ab"
+import {
+    mock_install, mock_respond, mock_fail,
+    mock_called, mock_call_count, mock_calls
+} from "./support/mock.ab"
 import {
     _dst_for, _ecr_repo_for, _crane_load_manifest,
     _crane_copy_retry, _ecr_login, _crane_mirror_ma_images
 } from "../src/crane.ab"
 
-// ---- helpers (ABOVE the test blocks: define-before-use; the test-file tree-
-// shaker keeps only deps textually preceding their use) ----------------------
+// ---- file-local helpers (ABOVE the test blocks: Amber tree-shakes per imported
+// symbol + keeps only deps textually preceding their use across the import
+// boundary, so helpers used by `test` blocks must come first) -----------------
 
-// __seq — monotonic counter so each test gets a distinct STAGE_DIR / CLI_ROOT
-// even within the same second.
-let __seq = 0
-
-// STUB_DIR — the single PATH-shadow dir. Shared across tests (one process, one
-// PATH); the shims are content-stable and steered by env vars, so re-installing
-// is idempotent and race-free.
-const STUB_DIR = "/tmp/amber_crane_stub"
-
-// install_stubs — write the crane + aws shims into STUB_DIR and prepend it to
-// PATH (once). The shims are BRACE-FREE bash (a `{` in an Amber Text literal is
-// interpolation) and steer behavior off env vars rather than ${var} expansions.
-//
-// crane shim:
-//   * `crane copy SRC DST` honors CRANE_STUB_MODE:
-//       ok      → exit 0
-//       fatal   → print NAME_UNKNOWN to stderr, exit 1 (must NOT be retried)
-//       flaky   → fail (rc 1) until the attempt count file hits CRANE_STUB_OK_AT,
-//                 then succeed — proves the retry loop eventually wins
-//       always  → always fail rc 1 (no fatal token → loop exhausts attempts)
-//   * `crane auth login …` → drain stdin, exit 0 (login always succeeds)
-// aws shim:
-//   * `ecr get-login-password`        → print a fake token, exit 0
-//   * `ecr-public get-login-password` → print a fake token, exit 0
-//   * `ecr create-repository`         → exit 0 (idempotent create)
-//   * anything else                   → exit 0
-fun install_stubs(): Null {
-    trust dir_create(STUB_DIR)
-
-    let crane = "#!/usr/bin/env bash
-sub=\"$1\"
-if [ \"$sub\" = \"auth\" ]; then
-  cat > /dev/null 2>&1 || true
-  exit 0
-fi
-if [ \"$sub\" = \"copy\" ]; then
-  mode=\"$CRANE_STUB_MODE\"
-  case \"$mode\" in
-    fatal)
-      printf 'NAME_UNKNOWN: repository does not exist\\n' >&2
-      exit 1 ;;
-    flaky)
-      cnt=0
-      if [ -f \"$CRANE_STUB_COUNT\" ]; then cnt=$(cat \"$CRANE_STUB_COUNT\"); fi
-      cnt=$((cnt + 1))
-      printf '%s' \"$cnt\" > \"$CRANE_STUB_COUNT\"
-      if [ \"$cnt\" -ge \"$CRANE_STUB_OK_AT\" ]; then exit 0; fi
-      printf 'transient error\\n' >&2
-      exit 1 ;;
-    always)
-      printf 'transient error\\n' >&2
-      exit 1 ;;
-    *)
-      exit 0 ;;
-  esac
-fi
-exit 0
-"
-    trust file_write("{STUB_DIR}/crane", crane)
-    trust file_chmod("{STUB_DIR}/crane", "755")
-
-    let aws = "#!/usr/bin/env bash
-svc=\"$1\"
-op=\"$2\"
-if [ \"$svc\" = \"ecr\" ] && [ \"$op\" = \"get-login-password\" ]; then
-  printf 'fake-private-token\\n'
-  exit 0
-fi
-if [ \"$svc\" = \"ecr-public\" ] && [ \"$op\" = \"get-login-password\" ]; then
-  printf 'fake-public-token\\n'
-  exit 0
-fi
-if [ \"$svc\" = \"ecr\" ] && [ \"$op\" = \"create-repository\" ]; then
-  exit 0
-fi
-exit 0
-"
-    trust file_write("{STUB_DIR}/aws", aws)
-    trust file_chmod("{STUB_DIR}/aws", "755")
-
-    let oldpath = env_var_get("PATH") failed { "" }
-    if not text_contains(oldpath, "{STUB_DIR}:") {
-        trust env_var_set("PATH", "{STUB_DIR}:{oldpath}")
-    }
-}
-
-// fresh_stage — mint + export a unique STAGE_DIR with a log/ subdir (so crane.log
-// writes land somewhere real). Returns the dir.
-fun fresh_stage(): Text {
-    __seq += 1
-    let base = trust $mktemp -d$
-    let dir = "{base}/stage-{__seq}"
-    trust dir_create(dir)
-    trust dir_create("{dir}/log")
-    trust env_var_set("STAGE_DIR", dir)
-    return dir
-}
-
-// fast_retry — pin the retry knobs so _crane_copy_retry runs quickly: <n>
-// attempts, 0-second initial sleep (doubling 0 stays 0).
-fun fast_retry(n: Text): Null {
-    trust env_var_set("CRANE_RETRY_ATTEMPTS", n)
+// mirror_world — a fresh sandbox with the crane + aws shims installed and the
+// retry knobs pinned fast (<attempts> tries, 0s initial sleep). The shape behind
+// every mirror test: callers then program the per-tool responses they want.
+fun mirror_world(attempts: Text): Text {
+    let w = fresh_world()
+    mock_install(["crane", "aws"])
+    trust env_var_set("CRANE_RETRY_ATTEMPTS", attempts)
     trust env_var_set("CRANE_RETRY_INITIAL_S", "0")
+    return w
 }
 
-// write_manifest <cli_root> — write skills/privateEcrManifest.sh holding an
-// IMAGES var with two real entries, a blank line, and a comment line (which must
-// be dropped). Braces here would be Amber interpolation, so the IMAGES value is
-// a plain newline-joined heredoc-free assignment built as a Text and written via
-// file_write (no $...$ braces involved).
+// write_manifest <cli_root> — drop a vendored skills/privateEcrManifest.sh whose
+// IMAGES var holds two real entries, a blank line, and a comment line (which must
+// be dropped). A `{` in an Amber Text is interpolation, so the bash body is
+// brace-free and written via file_write (no $...$ braces involved).
 fun write_manifest(cli_root: Text): Null {
     trust dir_create("{cli_root}/skills")
-    // The sourced bash reads $IMAGES; we build it with literal newlines. No '{'.
     let body = "#!/usr/bin/env bash
 IMAGES=\"
 quay.io/jetstack/cert-manager-controller:v1.17.2
@@ -162,15 +85,94 @@ public.ecr.aws/strimzi/kafka:0.50.1
     trust file_write("{cli_root}/skills/privateEcrManifest.sh", body)
 }
 
-// ---- _dst_for (pure) -------------------------------------------------------
+// ---- _crane_copy_retry: the per-image copy + retry/classify loop ------------
+
+test "crane copy issues a single copy and returns 0 on a clean mirror" {
+    let w = mirror_world("5")
+    mock_respond(w, "crane", "copy", "")
+    assert_eq(_crane_copy_retry("quay.io/strimzi/kafka:0.50.1", "ecr/mirrored/quay.io/strimzi/kafka:0.50.1"), 0)
+    // Exactly one copy — a clean copy must NOT spin the retry loop.
+    assert_eq(mock_call_count(w, "crane"), 1)
+    assert(mock_called(w, "crane", "copy"))
+}
+
+test "crane copy bails immediately on a fatal NAME_UNKNOWN without retrying" {
+    let w = mirror_world("5")
+    // NAME_UNKNOWN is the unrecoverable-class token: the loop must short-circuit
+    // on attempt 1 even though 5 attempts are allowed (retrying changes nothing).
+    mock_fail(w, "crane", "copy", "1", "NAME_UNKNOWN: repository does not exist")
+    let rc = _crane_copy_retry("src:tag", "dst:tag")
+    assert(rc != 0)
+    // The bail-early class means EXACTLY one call — no backoff, no retries.
+    assert_eq(mock_call_count(w, "crane"), 1)
+}
+
+test "crane copy retries a transient failure up to the configured attempts" {
+    let w = mirror_world("3")
+    // A non-fatal ("transient") failure is retried: the loop runs the full
+    // attempt budget (3), backing off between each, then gives up non-zero.
+    mock_fail(w, "crane", "copy", "1", "transient network error")
+    let rc = _crane_copy_retry("src:tag", "dst:tag")
+    assert(rc != 0)
+    assert_eq(mock_call_count(w, "crane"), 3)
+}
+
+// ---- _crane_mirror_ma_images: the 4-image MA-team copy loop -----------------
+
+test "ma-image mirror issues a copy per MA image under disambiguating tags" {
+    let w = mirror_world("3")
+    mock_respond(w, "crane", "copy", "")
+    let rc = _crane_mirror_ma_images("111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr", "3.2.1", "us-east-1")
+    assert_eq(rc, 0)
+    // One crane copy per MA-team image: capture_proxy / traffic_replayer /
+    // reindex_from_snapshot / migration_console.
+    assert_eq(mock_call_count(w, "crane"), 4)
+    // Sources are the public.ecr.aws MA repos at the requested version…
+    let calls = mock_calls(w, "crane")
+    assert(text_contains(calls, "public.ecr.aws/opensearchproject/opensearch-migrations-traffic-capture-proxy:3.2.1"))
+    assert(text_contains(calls, "public.ecr.aws/opensearchproject/opensearch-migrations-console:3.2.1"))
+    // …and the destinations carry the build-name-disambiguating tags.
+    assert(text_contains(calls, "111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr:migrations_capture_proxy_3.2.1"))
+    assert(text_contains(calls, "111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr:migrations_migration_console_3.2.1"))
+}
+
+test "ma-image mirror returns 1 when the copies fail" {
+    let w = mirror_world("2")
+    mock_fail(w, "crane", "copy", "1", "transient network error")
+    let rc = _crane_mirror_ma_images("111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr", "3.2.1", "us-east-1")
+    assert_eq(rc, 1)
+}
+
+// ---- _ecr_login: authenticate crane against the private ECR -----------------
+
+test "ecr login fetches a token via aws then logs crane in" {
+    let w = fresh_world()
+    mock_install(["crane", "aws"])
+    // aws ecr (and ecr-public) get-login-password must emit a NON-empty token —
+    // _ecr_login treats an empty password as a failure.
+    mock_respond(w, "aws", "get-login-password", "fake-ecr-token")
+    let rc = _ecr_login("111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr", "us-east-1")
+    assert_eq(rc, 0)
+    // It pulled the registry password and then logged crane in.
+    assert(mock_called(w, "aws", "get-login-password"))
+    assert(mock_called(w, "crane", "login"))
+}
+
+test "ecr login fails fast when crane is not on PATH" {
+    let w = fresh_world()
+    // Only aws is faked — crane resolves to nothing → is_command("crane") false.
+    mock_install(["aws"])
+    let rc = _ecr_login("111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr", "us-east-1")
+    assert_eq(rc, 1)
+}
+
+// ---- pure units: URL builders + manifest parser (no world/mock) -------------
 
 test "_dst_for prepends mirrored/ under the ecr host" {
     assert_eq(
         _dst_for("quay.io/strimzi/kafka:0.50.1-kafka-4.0.0", "111.dkr.ecr.us-east-1.amazonaws.com"),
         "111.dkr.ecr.us-east-1.amazonaws.com/mirrored/quay.io/strimzi/kafka:0.50.1-kafka-4.0.0")
 }
-
-// ---- _ecr_repo_for (pure) --------------------------------------------------
 
 test "_ecr_repo_for strips the tag and prepends mirrored/" {
     assert_eq(
@@ -185,10 +187,7 @@ test "_ecr_repo_for tolerates an untagged image" {
         "mirrored/public.ecr.aws/foo/bar")
 }
 
-// ---- _crane_load_manifest --------------------------------------------------
-
-test "_crane_load_manifest reads the vendored manifest, drops blanks + comments" {
-    __seq += 1
+test "_crane_load_manifest reads the vendored manifest, dropping blanks + comments" {
     let root = trust $mktemp -d$
     write_manifest(root)
     trust env_var_set("CLI_ROOT", root)
@@ -200,91 +199,4 @@ test "_crane_load_manifest reads the vendored manifest, drops blanks + comments"
     // …and the comment line does NOT.
     assert(not text_contains(out, "a comment"))
     assert(not text_contains(out, "#"))
-}
-
-// ---- _crane_copy_retry -----------------------------------------------------
-
-test "_crane_copy_retry returns 0 on a clean copy" {
-    install_stubs()
-    fresh_stage()
-    fast_retry("5")
-    trust env_var_set("CRANE_STUB_MODE", "ok")
-    assert_eq(_crane_copy_retry("src:tag", "dst:tag"), 0)
-}
-
-test "_crane_copy_retry bails early on a fatal NAME_UNKNOWN (no retry)" {
-    install_stubs()
-    fresh_stage()
-    // 5 attempts allowed, but a fatal class must short-circuit on attempt 1.
-    fast_retry("5")
-    trust env_var_set("CRANE_STUB_MODE", "fatal")
-    let rc = _crane_copy_retry("src:tag", "dst:tag")
-    // Non-zero (the stub's rc 1); the assertion is that it returned the failure,
-    // not that it spun 5 times (the no-retry behavior is the bail-early class).
-    assert(rc != 0)
-}
-
-test "_crane_copy_retry eventually succeeds across transient failures" {
-    install_stubs()
-    let dir = fresh_stage()
-    fast_retry("5")
-    trust env_var_set("CRANE_STUB_MODE", "flaky")
-    // Steer the flaky stub to succeed on the 3rd attempt.
-    let counter = "{dir}/flaky.count"
-    trust $rm -f "{counter}"$
-    trust env_var_set("CRANE_STUB_COUNT", counter)
-    trust env_var_set("CRANE_STUB_OK_AT", "3")
-    assert_eq(_crane_copy_retry("src:tag", "dst:tag"), 0)
-}
-
-test "_crane_copy_retry exhausts attempts on persistent failure" {
-    install_stubs()
-    fresh_stage()
-    fast_retry("3")
-    trust env_var_set("CRANE_STUB_MODE", "always")
-    let rc = _crane_copy_retry("src:tag", "dst:tag")
-    assert(rc != 0)
-}
-
-// ---- _ecr_login ------------------------------------------------------------
-
-test "_ecr_login fails when crane is not on PATH" {
-    fresh_stage()
-    // Point PATH at an empty dir so neither crane nor aws resolves → return 1.
-    __seq += 1
-    let empty = trust $mktemp -d$
-    let old = env_var_get("PATH") failed { "" }
-    trust env_var_set("PATH", empty)
-    let rc = _ecr_login("111.dkr.ecr.us-east-1.amazonaws.com/repo", "us-east-1")
-    // Restore PATH for the remaining tests (shared process).
-    trust env_var_set("PATH", old)
-    assert_eq(rc, 1)
-}
-
-test "_ecr_login succeeds with stubbed crane + aws" {
-    install_stubs()
-    fresh_stage()
-    let rc = _ecr_login("111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr-default-us-east-1", "us-east-1")
-    assert_eq(rc, 0)
-}
-
-// ---- _crane_mirror_ma_images -----------------------------------------------
-
-test "_crane_mirror_ma_images mirrors all 4 MA images on success" {
-    install_stubs()
-    fresh_stage()
-    fast_retry("3")
-    trust env_var_set("CRANE_STUB_MODE", "ok")
-    // No MA_IMAGES_SOURCE → public.ecr.aws source path. All copies succeed → 0.
-    let rc = _crane_mirror_ma_images("111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr-default-us-east-1", "3.2.1", "us-east-1")
-    assert_eq(rc, 0)
-}
-
-test "_crane_mirror_ma_images returns 1 when a copy fails" {
-    install_stubs()
-    fresh_stage()
-    fast_retry("2")
-    trust env_var_set("CRANE_STUB_MODE", "always")
-    let rc = _crane_mirror_ma_images("111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr-default-us-east-1", "3.2.1", "us-east-1")
-    assert_eq(rc, 1)
 }

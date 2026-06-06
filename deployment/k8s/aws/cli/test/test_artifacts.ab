@@ -1,55 +1,104 @@
-// test_artifacts.ab — coverage for src/artifacts.ab, mirroring test_artifacts.bats.
+// test_artifacts.ab — coverage for src/artifacts.ab (SHA-pinned download +
+// content-addressable cache).
 //
-// Strategy (carried over from the bats version): artifacts_fetch hits HEAD then
-// GET via curl. We can't stub curl in-process — artifacts_fetch also calls
-// die()→exit on a SHA mismatch, which would kill the test runner. So we mirror
-// bats' `run` (subshell) exactly:
+// Style (see test/TEST_GUIDE.md): drive the real public entrypoints —
+// artifacts_fetch / artifacts_fetch_raw / artifacts_reset_cache — against the
+// shared per-test world (support/world.ab) and mock fleet (support/mock.ab),
+// then assert on what the CLI DID: which curl calls it issued (mock_called) and
+// how the on-disk cache + symlinks changed.
 //
-//   1. PATH-shadow `curl` with an executable shim written via file_write +
-//      file_chmod (the AMBER_IDIOMS recipe). The shim:
-//        - HEAD (-I) → exit 0 (every URL "reachable")
-//        - GET .sha256 → writes a chosen digest line
-//        - GET anything else → writes the bytes "hello"
-//   2. Compile a tiny driver .ab that calls artifacts_fetch and echoes the
-//      returned symlink path, then run that compiled .sh in a child shell with
-//      PATH=<stub>:$PATH and MIGRATE_HOME/STAGE pinned to a temp dir.
-//   3. Capture the child's stdout (the link path) and exit code (status()).
+// COVERAGE MAP
+//   * cache HIT (fetch): a pre-seeded cache (payload + .verified) is served
+//     directly — the symlink points at the cached payload, and the GET is never
+//     issued (only the HEAD probe runs). This is the post-download steady state.
+//   * fetch_raw cache hit: same, but the raw-repo variant needs NO .verified
+//     marker (raw files ship no .sha256), and resolves under a DIFFERENT cache
+//     key than the release-asset URL for the same name.
+//   * reset_cache: wipes the .cache subtree AND the loose symlinks.
+//   * fresh DOWNLOAD happy path + SHA-mismatch die: these exercise the real
+//     `curl -o` GET + verify wiring, which the generic stdout-only mock curl
+//     cannot emulate (it never writes the -o target), and the mismatch branch
+//     calls die()→exit which would kill the in-process runner. So — exactly as
+//     the prior bats `run` subshell did — they run a compiled driver in a CHILD
+//     bash with an -o-honoring curl shim. The per-test world still supplies the
+//     sandbox (MIGRATE_HOME/STAGE), so no mktemp/PATH dance is hand-rolled.
 //
-// No network, no real cloud: the stub answers every curl. amber + the sha
-// hasher (sha256sum/shasum) still resolve because we PREPEND the stub dir
-// rather than replacing PATH.
+// AMBER_IDIOMS: helpers ABOVE the tests (define-before-use across the import
+// boundary); NO `return` inside a `test` block; a `{` in a Text/command is
+// interpolation, so the curl shim body is brace-free.
 
 import { assert, assert_eq } from "std/test"
-import { printf, env_var_get } from "std/env"
+import { env_var_get, is_command } from "std/env"
+import { split_words } from "std/text"
 import { file_write, file_chmod, file_exists, dir_create } from "std/fs"
+import { fresh_world, world_stage } from "./support/world.ab"
+import { mock_install, mock_called } from "./support/mock.ab"
+import { artifacts_fetch, artifacts_fetch_raw, artifacts_reset_cache } from "../src/artifacts.ab"
 
-// ---- helpers (defined ABOVE the test blocks: Amber needs define-before-use,
-// and tree-shaking keeps only deps textually preceding the entry point) ------
+// ---- repo URL bases (mirror artifacts.ab's ART_REPO + resolution order) -----
+//
+// artifacts_fetch resolves the GitHub RELEASE asset URL first (the mock HEAD
+// probe exits 0 → "reachable"), and keys the cache on the sha256 of THAT URL.
+// artifacts_fetch_raw skips the probe and keys on the raw.githubusercontent URL.
+const ART_BASE = "https://github.com/opensearch-project/opensearch-migrations/releases/download"
+const RAW_BASE = "https://raw.githubusercontent.com/opensearch-project/opensearch-migrations"
 
-// The sha256 of the literal bytes "hello" — the GET payload the stub writes.
-// Matches the bats fixture; artifacts_fetch must accept it as a valid digest.
+// The sha256 of the literal bytes "hello" — the GET payload the download shim
+// writes. artifacts_fetch must accept it as a valid digest in the happy path.
 const SHA_HELLO = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
 // A digest that will NOT match "hello" → forces the SHA-mismatch die() branch.
 const SHA_BAD = "deadbeef00000000000000000000000000000000000000000000000000000000"
 
-// module_path — absolute path to the module under test. amber test runs with
-// cwd == project root (verified), so src/artifacts.ab resolves from $PWD; we
-// hand the driver an absolute import path so it builds regardless of where the
-// temp driver file lives.
-fun module_path(): Text {
-    let pwd = trust $pwd$
-    return "{pwd}/src/artifacts.ab"
+// ---- helpers (ABOVE the tests: define-before-use across the import boundary) -
+
+// sha256_url <url> — reproduce artifacts.ab's sha256_of_string: the hex sha256
+// of the URL string (first whitespace field of sha256sum / shasum -a 256). This
+// is the cache-dir KEY the module derives for a resolved URL, so a test can
+// pre-seed the exact cache dir a fetch will look in.
+fun sha256_url(url: Text): Text {
+    let raw = ""
+    if is_command("sha256sum") {
+        raw = trust $printf '%s' "{url}" | sha256sum$
+    } else {
+        raw = trust $printf '%s' "{url}" | shasum -a 256$
+    }
+    let words = split_words(raw)
+    if len words == 0 { return "" }
+    return words[0]
 }
 
-// write_curl_stub <dir> <sha_hex> — write an executable curl shim into <dir>.
-// The bash body is BRACE-FREE on purpose: a `{` inside an Amber Text literal is
-// interpolation, so the stub uses positional/case logic instead of
-// ${var} / ${url%...} brace expansions. `$` is written bare (NOT \$) — backslash
-// in a Text literal would land literally in the file and break expansion.
-fun write_curl_stub(dir: Text, sha_hex: Text): Null {
+// seed_release_cache <world> <name> <version> <payload> — pre-create a cache HIT
+// for the RELEASE-asset variant: artifacts_fetch keys on the github release URL,
+// and a hit needs BOTH the payload AND the .verified marker. Returns the cache
+// dir so the caller can assert the GET never wrote to it.
+fun seed_release_cache(world: Text, name: Text, version: Text, payload: Text): Text {
+    let url = "{ART_BASE}/{version}/{name}"
+    let cdir = "{world}/artifacts/.cache/{sha256_url(url)}"
+    trust dir_create(cdir)
+    trust file_write("{cdir}/{name}", payload)
+    trust file_write("{cdir}/.verified", "")
+    return cdir
+}
+
+// seed_raw_cache <world> <name> <version> <repo_path> <payload> — pre-create a
+// cache HIT for the RAW-repo variant: artifacts_fetch_raw keys on the raw URL and
+// needs NO .verified marker (a present payload IS the cache). Returns the cache dir.
+fun seed_raw_cache(world: Text, name: Text, version: Text, repo_path: Text, payload: Text): Text {
+    let url = "{RAW_BASE}/{version}/{repo_path}"
+    let cdir = "{world}/artifacts/.cache/{sha256_url(url)}"
+    trust dir_create(cdir)
+    trust file_write("{cdir}/{name}", payload)
+    return cdir
+}
+
+// write_curl_download_stub <dir> <sha_hex> — an executable `curl` that HONORS
+// `-o` (the shared stdout-only mock cannot), so the compiled download driver
+// exercises the real GET + verify wiring. The bash body is BRACE-FREE (a `{` in
+// an Amber Text is interpolation): it tracks `-o`'s arg positionally, exits 0 for
+// HEAD (-I), writes the <sha_hex> line for *.sha256 GETs and the bytes "hello"
+// for everything else.
+fun write_curl_download_stub(dir: Text, sha_hex: Text): Null {
     trust dir_create(dir)
-    // -o's argument is the next arg; we track that with shift_next. HEAD (-I)
-    // exits 0; GET writes the sha line for *.sha256 URLs and "hello" otherwise.
     let body = "#!/usr/bin/env bash
 out=\"\"
 url=\"\"
@@ -75,70 +124,161 @@ exit 0
     trust file_chmod("{dir}/curl", "755")
 }
 
-// build_driver <driver_ab> <out_sh> <name> <version> — write + compile a driver
-// that calls artifacts_fetch(name, version) and echoes the returned path.
-fun build_driver(driver_ab: Text, out_sh: Text, name: Text, version: Text): Null {
-    let mp = module_path()
+// build_fetch_driver <driver_ab> <out_sh> <name> <version> — compile a tiny
+// driver that calls artifacts_fetch(name, version) and echoes the returned path,
+// run later in a child bash with the -o-honoring curl on PATH.
+fun build_fetch_driver(driver_ab: Text, out_sh: Text, name: Text, version: Text): Null {
+    let pwd = trust $pwd$
+    let mp = "{pwd}/src/artifacts.ab"
     let src = "import \{ artifacts_fetch } from \"{mp}\"
 main \{
     echo artifacts_fetch(\"{name}\", \"{version}\")
 }
 "
     trust file_write(driver_ab, src)
-    // Compile with amber (on PATH inside the test process). trust: a build
-    // failure surfaces as a missing out_sh, asserted by the caller.
     trust $amber build "{driver_ab}" "{out_sh}" > /dev/null 2>&1$
 }
 
-// ---- tests -----------------------------------------------------------------
+// ---- cache hits: the steady state served without a fresh download -----------
 
-test "artifacts_fetch caches on second call" {
-    let tmp = trust $mktemp -d$
-    let stub = "{tmp}/stub"
-    let home = "{tmp}/home"
-    write_curl_stub(stub, SHA_HELLO)
+test "fetch serves a cached artifact: symlink points at the cached payload" {
+    let w = fresh_world()
+    mock_install(["curl"])
+    let cdir = seed_release_cache(w, "some-artifact.tar.gz", "3.2.1", "PAYLOAD")
 
-    let driver_ab = "{tmp}/driver.ab"
-    let driver_sh = "{tmp}/driver.sh"
-    build_driver(driver_ab, driver_sh, "some-artifact.tar.gz", "3.2.1")
+    let link = artifacts_fetch("some-artifact.tar.gz", "3.2.1")
+    assert(link != "")
+    // The returned path is a symlink (bats: [ -L ])…
+    trust $test -L "{link}"$
+    assert_eq(status(), 0)
+    // …resolving to the cached payload bytes.
+    let content = trust $cat "{link}"$
+    assert_eq(content, "PAYLOAD")
+    // It lives under the keyed cache dir we seeded.
+    assert(file_exists("{cdir}/some-artifact.tar.gz"))
+}
+
+test "fetch cache hit issues only the HEAD probe, never the GET download" {
+    let w = fresh_world()
+    mock_install(["curl"])
+    let cdir = seed_release_cache(w, "asset.tgz", "3.2.1", "PAYLOAD")
+
+    artifacts_fetch("asset.tgz", "3.2.1")
+    // The release-URL HEAD probe ran (curl -fsSIL -o /dev/null …)…
+    assert(mock_called(w, "curl", "/dev/null"))
+    // …but the GET (which would curl -o the cached file) never fired.
+    assert(not mock_called(w, "curl", "{cdir}/asset.tgz"))
+}
+
+test "fetch is idempotent: a second call returns the same cached symlink" {
+    let w = fresh_world()
+    mock_install(["curl"])
+    seed_release_cache(w, "asset.tgz", "3.2.1", "PAYLOAD")
+
+    let link1 = artifacts_fetch("asset.tgz", "3.2.1")
+    let link2 = artifacts_fetch("asset.tgz", "3.2.1")
+    assert_eq(link1, link2)
+    let content = trust $cat "{link2}"$
+    assert_eq(content, "PAYLOAD")
+}
+
+// ---- fetch_raw: the .sha256-less raw-repo variant ---------------------------
+
+test "fetch_raw serves a cached raw file with no .verified marker required" {
+    let w = fresh_world()
+    mock_install(["curl"])
+    // Note: seed WITHOUT a .verified marker — raw files ship no .sha256.
+    seed_raw_cache(w, "list.sh", "3.2.1", "charts/foo/list.sh", "IMAGES")
+
+    let link = artifacts_fetch_raw("list.sh", "3.2.1", "charts/foo/list.sh")
+    assert(link != "")
+    let content = trust $cat "{link}"$
+    assert_eq(content, "IMAGES")
+}
+
+test "fetch_raw keys on the raw-repo URL, distinct from the release-asset key" {
+    let w = fresh_world()
+    mock_install(["curl"])
+    // Same name + version, but the raw fetch must NOT find a release-keyed cache:
+    // seed only the RELEASE cache, then fetch_raw → it looks under the raw key,
+    // misses, and (with the stdout-only mock that can't write -o) would die. So
+    // instead seed the RAW cache and confirm it resolves there independently.
+    let raw_dir = seed_raw_cache(w, "list.sh", "3.2.1", "charts/foo/list.sh", "RAWBODY")
+    let rel_url = "{ART_BASE}/3.2.1/list.sh"
+    let rel_dir = "{w}/artifacts/.cache/{sha256_url(rel_url)}"
+    assert(raw_dir != rel_dir)
+
+    let link = artifacts_fetch_raw("list.sh", "3.2.1", "charts/foo/list.sh")
+    let content = trust $cat "{link}"$
+    assert_eq(content, "RAWBODY")
+}
+
+// ---- reset_cache: wipe the stage's artifact cache ---------------------------
+
+test "reset_cache wipes the cache subtree and the loose symlinks" {
+    let w = fresh_world()
+    mock_install(["curl"])
+    let cdir = seed_release_cache(w, "asset.tgz", "3.2.1", "PAYLOAD")
+    let link = artifacts_fetch("asset.tgz", "3.2.1")
+    assert(file_exists(link))
+    assert(file_exists(cdir))
+
+    artifacts_reset_cache()
+    // Both the keyed cache dir and the symlink are gone.
+    assert(not file_exists(cdir))
+    assert(not file_exists(link))
+}
+
+// ---- fresh download: the real curl GET + verify wiring (subprocess) ---------
+//
+// die()→exit + the need for an -o-honoring curl mean these run a compiled driver
+// in a child bash. The world supplies the sandbox env; the child inherits it.
+
+test "fetch downloads, verifies the SHA, and symlinks on a cache miss" {
+    let w = fresh_world()
+    let stub = "{w}/curlstub"
+    write_curl_download_stub(stub, SHA_HELLO)
+
+    let driver_ab = "{w}/driver.ab"
+    let driver_sh = "{w}/driver.sh"
+    build_fetch_driver(driver_ab, driver_sh, "some-artifact.tar.gz", "3.2.1")
     assert(file_exists(driver_sh))
 
     let path0 = env_var_get("PATH") failed { "" }
+    let home = env_var_get("MIGRATE_HOME") failed { "" }
+    let st = world_stage()
 
     // First call: download + verify + symlink. Capture stdout (the link path).
-    let link = trust $PATH="{stub}:{path0}" MIGRATE_HOME="{home}" STAGE="testst" bash "{driver_sh}"$
-    let rc1 = status()
-    assert_eq(rc1, 0)
+    let link = trust $PATH="{stub}:{path0}" MIGRATE_HOME="{home}" STAGE="{st}" bash "{driver_sh}"$
+    assert_eq(status(), 0)
     assert(link != "")
-
-    // The returned path is a symlink ([ -L ] in bats)…
+    // The returned path is a symlink resolving to the canned "hello" bytes.
     trust $test -L "{link}"$
     assert_eq(status(), 0)
-
-    // …and reading through it yields the canned "hello" bytes.
     let content = trust $cat "{link}"$
     assert_eq(content, "hello")
 
-    // Second call → served from cache, still exit 0 (no additional writes).
-    trust $PATH="{stub}:{path0}" MIGRATE_HOME="{home}" STAGE="testst" bash "{driver_sh}"$
+    // Second call → served from the freshly-written cache, still exit 0.
+    trust $PATH="{stub}:{path0}" MIGRATE_HOME="{home}" STAGE="{st}" bash "{driver_sh}"$
     assert_eq(status(), 0)
 }
 
-test "artifacts_fetch fails on SHA mismatch" {
-    let tmp = trust $mktemp -d$
-    let stub = "{tmp}/stub"
-    let home = "{tmp}/home"
+test "fetch dies on a SHA mismatch (non-zero exit)" {
+    let w = fresh_world()
+    let stub = "{w}/curlstub"
     // Stub serves a digest that does NOT match the "hello" payload.
-    write_curl_stub(stub, SHA_BAD)
+    write_curl_download_stub(stub, SHA_BAD)
 
-    let driver_ab = "{tmp}/driver.ab"
-    let driver_sh = "{tmp}/driver.sh"
-    build_driver(driver_ab, driver_sh, "some.tgz", "3.2.1")
+    let driver_ab = "{w}/driver.ab"
+    let driver_sh = "{w}/driver.sh"
+    build_fetch_driver(driver_ab, driver_sh, "some.tgz", "3.2.1")
     assert(file_exists(driver_sh))
 
     let path0 = env_var_get("PATH") failed { "" }
+    let home = env_var_get("MIGRATE_HOME") failed { "" }
+    let st = world_stage()
 
-    // die() on mismatch → child exits non-zero (mirrors bats `[ "$status" -ne 0 ]`).
-    trust $PATH="{stub}:{path0}" MIGRATE_HOME="{home}" STAGE="testst" bash "{driver_sh}" > /dev/null 2>&1$
+    // die() on mismatch → child exits non-zero (bats: [ "$status" -ne 0 ]).
+    trust $PATH="{stub}:{path0}" MIGRATE_HOME="{home}" STAGE="{st}" bash "{driver_sh}" > /dev/null 2>&1$
     assert(status() != 0)
 }

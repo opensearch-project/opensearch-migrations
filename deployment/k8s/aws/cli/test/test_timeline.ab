@@ -1,44 +1,156 @@
-// test_timeline.ab — coverage for src/timeline.ab, mirroring test_timeline.bats.
+// test_timeline.ab — unit coverage for src/timeline.ab (the resume picker's
+// vertical phase checklist).
 //
-// timeline_render returns its Text, so we assert on markers (● ◐ ○) and labels
-// directly. Runner sets MIGRATE_FORCE_TTY=1 for the colored path.
+// timeline.ab is a PURE lookup + render-to-Text module: no cmd_* entrypoint, no
+// external tools, just a canonical phase list queried by key/index and painted
+// into a Text block. So these are genuinely unit tests (per TEST_GUIDE.md the
+// minority that stay direct return-value asserts) — they need no world/mock fleet.
+//
+// timeline_render RETURNS the block it paints (it also writes it to stderr), so we
+// assert on the returned Text. The colored vs. plain path is decided by
+// term_interactive(), which honors MIGRATE_FORCE_TTY — tty_mode() pins it per
+// block (mirroring the cfn_dash() priming helper in test_dashboard.ab) so each
+// test owns its terminal decision and never leans on the runner's env or another
+// block's setup.
+//
+// Coverage (behaviors preserved from the prior file, plus enrichment):
+//   * timeline_phase_label maps every known key to its label, echoes unknown keys
+//   * timeline_index_of returns the deploy-order position, -1 for unknown
+//   * timeline_render lists ALL phases, splitting markers exactly into
+//     done (●) / last (◐) / pending (○) around last_step's index
+//   * timeline_render at the first phase has no done markers; at an unknown
+//     last_step (idx -1) every phase is pending
+//   * timeline_render emits real ESC color when interactive and a plain,
+//     ESC-free block when not
 
 import { assert, assert_eq } from "std/test"
-import { term_detect } from "../src/core.ab"
+import { text_contains, slice } from "std/text"
+import { env_var_set } from "std/env"
+import { term_detect, esc } from "../src/core.ab"
 import { timeline_render, timeline_phase_label, timeline_index_of } from "../src/timeline.ab"
-import { text_contains } from "std/text"
 
-test "timeline_phase_label maps known keys" {
+// ---- file-local helpers (ABOVE the tests: Amber needs define-before-use across
+// the import boundary, same as the module's own private helpers) --------------
+
+// count_occurrences — non-overlapping count of <needle> in <s>. Used to verify
+// the exact done/last/pending marker split in a rendered checklist.
+fun count_occurrences(s: Text, needle: Text): Int {
+    let nl = len needle
+    if nl == 0 { return 0 }
+    let total = len s
+    let n = 0
+    let i = 0
+    while i <= total - nl {
+        if slice(s, i, nl) == needle {
+            n += 1
+            i += nl
+        } else {
+            i += 1
+        }
+    }
+    return n
+}
+
+// tty_mode — pin term interactivity for this block, then force a fresh detection.
+// term_detect() honors MIGRATE_FORCE_TTY ("1" => colored path, "0" => plain), and
+// timeline.ab reads the cached decision through term_interactive(). The cache is
+// module-level (resets per block), so each test sets the mode it wants up front.
+fun tty_mode(on: Bool): Null {
+    trust env_var_set("MIGRATE_FORCE_TTY", on then "1" else "0")
+    term_detect()
+}
+
+// ---- timeline_phase_label: key -> operator-visible label --------------------
+
+test "timeline_phase_label maps known phase keys to their labels" {
+    assert_eq(timeline_phase_label("discover"), "Discover environment")
     assert_eq(timeline_phase_label("cfn_done"), "Deploy CloudFormation")
     assert_eq(timeline_phase_label("helm_done"), "Install helm chart")
-}
-test "timeline_phase_label echoes unknown key" {
-    assert_eq(timeline_phase_label("totally_unknown"), "totally_unknown")
-}
-test "timeline_index_of finds phase position" {
-    assert_eq(timeline_index_of("discover"), 0)
-    assert(timeline_index_of("helm_done") > timeline_index_of("cfn_done"))
-    assert_eq(timeline_index_of("nope"), -1)
+    assert_eq(timeline_phase_label("ready"), "Ready")
+    assert_eq(timeline_phase_label("agent_handoff"), "Agent handoff (AI mode)")
 }
 
-test "timeline_render marks done / last / pending" {
-    term_detect()
-    // last_step = cfn_done (index 2). Phases 0,1 are done (●); 2 is last (◐);
-    // 3+ are pending (○).
+test "timeline_phase_label echoes an unknown key unchanged" {
+    assert_eq(timeline_phase_label("totally_unknown"), "totally_unknown")
+    assert_eq(timeline_phase_label(""), "")
+}
+
+// ---- timeline_index_of: deploy-order position -------------------------------
+
+test "timeline_index_of returns the deploy-order position of a phase" {
+    // discover is the first phase; the list is in deploy order so each later
+    // phase has a strictly greater index than the one before it.
+    assert_eq(timeline_index_of("discover"), 0)
+    assert(timeline_index_of("cfn_done") > timeline_index_of("wizard_done"))
+    assert(timeline_index_of("helm_done") > timeline_index_of("cfn_done"))
+    assert(timeline_index_of("ready") > timeline_index_of("helm_done"))
+}
+
+test "timeline_index_of returns -1 for an unknown last_step" {
+    assert_eq(timeline_index_of("nope"), -1)
+    assert_eq(timeline_index_of(""), -1)
+}
+
+// ---- timeline_render: the painted checklist ---------------------------------
+
+test "timeline_render splits markers into done / last / pending around last_step" {
+    tty_mode(true)
+    // last_step = cfn_done is index 2 in the 10-phase list: indices 0,1 are done
+    // (●), index 2 is the 'last' (◐), and the remaining 7 are pending (○).
     let out = timeline_render("cfn_done")
-    assert(text_contains(out, "●"))   // at least one done
-    assert(text_contains(out, "◐"))   // the 'last' marker
-    assert(text_contains(out, "○"))   // at least one pending
+    assert_eq(count_occurrences(out, "●"), 2)   // exactly the two phases before it
+    assert_eq(count_occurrences(out, "◐"), 1)   // exactly one 'last' marker
+    assert_eq(count_occurrences(out, "○"), 7)   // every phase after it
+    // and the rendered block carries the operator-visible labels for each phase.
     assert(text_contains(out, "Discover environment"))
     assert(text_contains(out, "Deploy CloudFormation"))
     assert(text_contains(out, "Install helm chart"))
 }
 
-test "timeline_render at first phase has no done markers before it" {
-    term_detect()
+test "timeline_render lists every phase on its own line with a status suffix" {
+    tty_mode(true)
+    let out = timeline_render("cfn_done")
+    // one marker per phase => 10 lines; the suffixes annotate done vs. last.
+    assert_eq(count_occurrences(out, "●") + count_occurrences(out, "◐") + count_occurrences(out, "○"), 10)
+    assert(text_contains(out, " done"))
+    assert(text_contains(out, " last"))
+}
+
+test "timeline_render at the first phase has no done markers before it" {
+    tty_mode(true)
+    // discover is index 0 => it is the 'last' (◐), everything after is pending
+    // (○), and nothing precedes it, so there are no ● done markers at all.
     let out = timeline_render("discover")
-    // discover is index 0 → it is the 'last' (◐), everything after pending (○),
-    // nothing before → no ● done markers at all.
-    assert(text_contains(out, "◐"))
-    assert(not text_contains(out, "●"))
+    assert_eq(count_occurrences(out, "◐"), 1)
+    assert_eq(count_occurrences(out, "●"), 0)
+    assert_eq(count_occurrences(out, "○"), 9)
+}
+
+test "timeline_render marks every phase pending when last_step is unknown" {
+    tty_mode(true)
+    // an unknown last_step => timeline_index_of returns -1, so no phase is at or
+    // before the 'last' index: all 10 phases render as pending (○).
+    let out = timeline_render("nope")
+    assert_eq(count_occurrences(out, "○"), 10)
+    assert_eq(count_occurrences(out, "●"), 0)
+    assert_eq(count_occurrences(out, "◐"), 0)
+}
+
+// ---- timeline_render: colored (interactive) vs. plain (non-tty) path --------
+
+test "timeline_render emits real ESC color sequences when interactive" {
+    tty_mode(true)
+    let out = timeline_render("cfn_done")
+    // the colored path interpolates the minted ESC byte into the SGR codes.
+    assert(text_contains(out, esc()))
+}
+
+test "timeline_render renders a plain, ESC-free block when not interactive" {
+    tty_mode(false)
+    let out = timeline_render("cfn_done")
+    // non-interactive => color/dim/reset collapse to "", so no ESC byte appears,
+    // but the markers and labels still render for log/pipe output.
+    assert(not text_contains(out, esc()))
+    assert(text_contains(out, "●"))
+    assert(text_contains(out, "Deploy CloudFormation"))
 }

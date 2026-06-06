@@ -1,247 +1,194 @@
-// test_helm_diag.ab — coverage for src/helm_diag.ab (the diagnostics-dump half
-// of the bash helm.sh port).
+// test_helm_diag.ab — e2e coverage for helm_diag.ab (the diagnostics-dump half of
+// the bash helm.sh port).
 //
-// helm_diag's external dependencies are `helm`, `kubectl` (+ `jq` for the
-// failure-description parse). We stub helm + kubectl via a PATH-shadow temp dir
-// — write ONE content-stable shim with file_write + file_chmod, then prepend the
-// dir to PATH (env_var_set). amber test runs every `test` block in ONE parallel
-// process tree sharing PATH + env vars, so the shims MUST be race-free:
+// Style (see test/TEST_GUIDE.md): drive the real helm_diag entry points against
+// the faked external world, then assert on what the CLI DID — which helm/kubectl
+// commands it issued (mock_called) — rather than poking internals. The per-test
+// world + the external-tool mock fleet come from test/support/. These dumps are
+// SYNCHRONOUS post-hoc captures, so the contract is "which commands were issued",
+// which mock_called over the recorded call log verifies directly.
 //
-//   * The shims are byte-identical every install (never rewritten with different
-//     bodies) — the established test_crane.ab / test_cfn_deploy.ab pattern.
-//   * Their behavior keys ENTIRELY off the per-call ARGS — specifically off the
-//     unique `--namespace <ns>` each test passes. The shim parses that ns and
-//     (a) APPENDS its full arg line to "<MARKER_DIR>/<ns>.<bin>" so a test can
-//     assert which commands it issued, and (b) reads any steered output from
-//     per-ns fixture files "<MARKER_DIR>/<ns>.<kind>" the test wrote first. No
-//     SHARED mutable steering env var → no cross-test clobber under parallelism.
+// Context threading: every dump entry point calls helm_ctx's helm_kctx_init() at
+// entry, which state_load()s from the world's pinned stage dir and binds THIS
+// module-instance's helm/kubectl flag prefix from the saved KUBECTL_CONTEXT. The
+// world seeds that key (or omits it for the no-context case) — the only channel
+// that reaches helm_diag's separate module instance. The binding itself is owned
+// + exhaustively tested by test_helm_ctx.ab; here we only verify helm_diag
+// THREADS a bound context through to its commands.
 //
-// Each test mints a unique namespace (ns{seq}); its marker + fixtures live under
-// that ns, isolated from every other parallel block.
-//
-// What's covered:
-//   * helm_pods_summary — the one-awk-pass tally replacement. Pure formatter over
-//     a `kubectl get pods` custom-columns snapshot: total/running/pending/failed
-//     counts + the pending/failed/not-ready name lists, byte-matched to the bash
-//     summary line. Exercises the private _first/_second/_third_field extractors
-//     transitively. Empty snapshot → "". (No stubs — pure.)
-//   * helm_dump_diagnostics — assert the diag commands fired (helm status,
-//     kubectl get pods -o wide, get events, per-unhealthy-pod describe, stuck-
-//     hook-Job describe), and that a bound KUBECTL_CONTEXT threads "--context X"
-//     through as argv tokens.
-//   * _helm_dump_failed_job — the live-pod branch tails logs; the GC'd-pod branch
-//     (no pods) issues no `logs` command.
+// What's covered (>= the prior file):
+//   * helm_dump_diagnostics — the big on-failure capture: helm status, kubectl
+//     get pods -o wide, get events, per-unhealthy-pod describe, stuck-hook-Job
+//     describe; and that a bound KUBECTL_CONTEXT threads "--kube-context X" /
+//     "--context X" through as argv tokens.
+//   * _helm_dump_failed_job — live-pod branch tails the pod's logs; GC'd-pod
+//     branch (no pods) issues no `logs` command.
 //   * _helm_explain_failure — the helm description's "name: <job>, kind: Job"
 //     drives a _helm_dump_failed_job; migration-console-0 status is always queried.
-//   * _helm_dump_install_notes — a present ConfigMap (probe exit 0) streams the
+//   * _helm_dump_install_notes — a present ConfigMap (probe exits 0) streams the
 //     notes (jsonpath read fires); a never-appearing CM times out fast
 //     (INSTALLER_NOTES_TIMEOUT_S=0) without reaching the jsonpath read.
+//   * helm_pods_summary — the pure one-awk-pass tally replacement (formatter over
+//     a `kubectl get pods` custom-columns snapshot). Kept as direct return-value
+//     asserts; exercises the private _first/_second/_third_field extractors.
 //
-// The context binding itself (helm_ctx_init / helm_kctx_init / the *_ctx_flags
-// accessors) is owned + exhaustively tested by test_helm_ctx.ab; here we only
-// verify helm_diag THREADS a bound context through to its commands.
-//
-// No network, no real cloud: every helm/kubectl invocation hits a stub. NO
-// `return` inside test blocks (wrap in if) per the porting rules.
+// NO `return` inside a test block (branch with `if`, per AMBER_IDIOMS).
 
 import { assert, assert_eq } from "std/test"
-import { file_write, file_chmod, file_read, dir_create } from "std/fs"
-import { env_var_set, env_var_get } from "std/env"
+import { file_read } from "std/fs"
+import { env_var_set } from "std/env"
 import { text_contains } from "std/text"
-import { state_load, state_set, state_unset, state_save } from "../src/state.ab"
+import { fresh_world, world_seed } from "./support/world.ab"
+import {
+    mock_install_default, mock_respond, mock_respond_rc,
+    mock_called, mock_call_count
+} from "./support/mock.ab"
 import {
     helm_pods_summary, helm_dump_diagnostics, _helm_dump_failed_job,
     _helm_explain_failure, _helm_dump_install_notes
 } from "../src/helm_diag.ab"
 
-// ---- helpers (ABOVE the test blocks: define-before-use; the test-file tree-
-// shaker keeps only deps textually preceding their use) ----------------------
+// ---- helpers (ABOVE the test blocks: define-before-use across the import
+// boundary — the test-file tree-shaker keeps only deps textually preceding their
+// use) ------------------------------------------------------------------------
 
-// __seq — monotonic counter so each test gets a distinct namespace / stage dir
-// even within the same second / shared process.
-let __seq = 0
-
-// STUB_DIR — the single PATH-shadow dir (one process, one PATH). The shims are
-// content-stable + arg-steered, so re-installing is idempotent + race-free.
-const STUB_DIR = "/tmp/amber_helm_diag_stub"
-// MARKER_DIR — per-namespace marker + fixture files. Keyed off the unique ns in
-// each test's args, so parallel blocks never collide.
-const MARKER_DIR = "/tmp/amber_helm_diag_marker"
-
-// install_once — module-level latch so the shims are written EXACTLY ONCE for
-// the whole (shared-process) test run. file_write truncates-then-writes, so two
-// parallel blocks both rewriting the SAME shim path while a third is mid-exec of
-// it reads a half-written script → "unexpected EOF" in the eval'd command. We
-// avoid that entirely by installing once and never rewriting (the bodies are
-// byte-stable anyway, so a single install is correct for every block).
-let __installed = false
-
-// install_stubs — write the kubectl + helm shims into STUB_DIR + prepend it to
-// PATH, exactly ONCE (guarded by __installed). BRACE-FREE bash (a `{` in an Amber
-// Text literal is interpolation).
-//
-// Both shims parse the namespace that follows `--namespace`/`-n` from "$@",
-// APPEND their full arg line to "<MARKER_DIR>/<ns>.<bin>", then emit canned
-// output keyed off the args + per-ns fixture files:
-//
-// kubectl:
-//   * logs …                         → "fake pod log line"
-//   * describe …                     → "Name: thing / Events: none"
-//   * get configmap … jsonpath…      → cat "<ns>.notes" if present
-//   * get configmap …                → exit per "<ns>.cm_exists" (default 1=absent)
-//   * get jobs …                     → cat "<ns>.jobs"
-//   * get events …                   → cat "<ns>.events"
-//   * get pod migration-console-0 …  → cat "<ns>.console"
-//   * get pods … selector…           → cat "<ns>.jobpods"
-//   * get pods …                     → cat "<ns>.pods"
-//   * else                           → exit 0
-// helm:
-//   * status … json…                 → cat "<ns>.status_json"
-//   * status …                       → "NAME: ma / STATUS: failed"
-//   * else                           → exit 0
-fun install_stubs(): Null {
-    trust dir_create(STUB_DIR)
-    trust dir_create(MARKER_DIR)
-    // Latch: install the shims at most once. Even if two parallel blocks both
-    // slip past the latch, each writes to a UNIQUE temp file then `mv`s it over
-    // the shim path — an atomic rename, so a concurrent exec of the shim always
-    // sees a COMPLETE file (the old one or the new one), never a half-written one.
-    if __installed {
-        let oldp0 = env_var_get("PATH") failed { "" }
-        if not text_contains(oldp0, "{STUB_DIR}:") {
-            trust env_var_set("PATH", "{STUB_DIR}:{oldp0}")
-        }
-        return null
+// diag_world — a world wired for a helm/kubectl diagnostics dump: the fleet faked
+// and (optionally) a KUBECTL_CONTEXT seeded so helm_kctx_init binds the flag
+// prefix. Pass "" for the bare (no-context) case — we simply don't seed the key,
+// so state_get falls back to "" → bare helm/kubectl (avoiding the empty-string
+// state round-trip). Returns the world dir. The shape behind every e2e test here.
+fun diag_world(ctx: Text): Text {
+    let w = fresh_world()
+    mock_install_default()
+    if ctx != "" {
+        world_seed(w, "KUBECTL_CONTEXT", ctx)
     }
-    __installed = true
-
-    // ns parsing: walk argv, the token after --namespace (or -n) is the namespace.
-    let kubectl = "#!/usr/bin/env bash
-ns=''
-prev=''
-for a in \"$@\"; do
-  if [ \"$prev\" = '--namespace' ] || [ \"$prev\" = '-n' ]; then ns=\"$a\"; break; fi
-  prev=\"$a\"
-done
-md=\"/tmp/amber_helm_diag_marker\"
-if [ -n \"$ns\" ]; then printf '%s\\n' \"$*\" >> \"$md/$ns.kubectl\"; fi
-args=\"$*\"
-case \"$args\" in
-  *' logs '*)
-    printf 'fake pod log line\\n' ;;
-  *describe*)
-    printf 'Name: thing\\nEvents: none\\n' ;;
-  *'get configmap'*jsonpath*)
-    if [ -f \"$md/$ns.notes\" ]; then cat \"$md/$ns.notes\"; fi ;;
-  *'get configmap'*)
-    if [ -f \"$md/$ns.cm_exists\" ]; then exit \"$(cat \"$md/$ns.cm_exists\")\"; fi
-    exit 1 ;;
-  *'get jobs'*)
-    if [ -f \"$md/$ns.jobs\" ]; then cat \"$md/$ns.jobs\"; fi ;;
-  *'get events'*)
-    if [ -f \"$md/$ns.events\" ]; then cat \"$md/$ns.events\"; fi ;;
-  *'get pod migration-console-0'*)
-    if [ -f \"$md/$ns.console\" ]; then cat \"$md/$ns.console\"; fi ;;
-  *'get pods'*selector*)
-    if [ -f \"$md/$ns.jobpods\" ]; then cat \"$md/$ns.jobpods\"; fi ;;
-  *'get pods'*)
-    if [ -f \"$md/$ns.pods\" ]; then cat \"$md/$ns.pods\"; fi ;;
-  *)
-    exit 0 ;;
-esac
-exit 0
-"
-    // Atomic publish: write to a unique temp, chmod, then mv over the live path.
-    let ktmp = trust $mktemp$
-    trust file_write(ktmp, kubectl)
-    trust file_chmod(ktmp, "755")
-    trust $mv -f "{ktmp}" "{STUB_DIR}/kubectl"$
-
-    let helm = "#!/usr/bin/env bash
-ns=''
-prev=''
-for a in \"$@\"; do
-  if [ \"$prev\" = '--namespace' ] || [ \"$prev\" = '-n' ]; then ns=\"$a\"; break; fi
-  prev=\"$a\"
-done
-md=\"/tmp/amber_helm_diag_marker\"
-if [ -n \"$ns\" ]; then printf '%s\\n' \"$*\" >> \"$md/$ns.helm\"; fi
-args=\"$*\"
-case \"$args\" in
-  *status*json*)
-    if [ -f \"$md/$ns.status_json\" ]; then cat \"$md/$ns.status_json\"; fi ;;
-  *status*)
-    printf 'NAME: ma\\nSTATUS: failed\\n' ;;
-  *)
-    exit 0 ;;
-esac
-exit 0
-"
-    let htmp = trust $mktemp$
-    trust file_write(htmp, helm)
-    trust file_chmod(htmp, "755")
-    trust $mv -f "{htmp}" "{STUB_DIR}/helm"$
-
-    let oldpath = env_var_get("PATH") failed { "" }
-    if not text_contains(oldpath, "{STUB_DIR}:") {
-        trust env_var_set("PATH", "{STUB_DIR}:{oldpath}")
-    }
-}
-
-// fresh_ns <ctx> — mint a unique namespace, pin a unique STAGE_DIR/MIGRATE_HOME/
-// STAGE (so log/state writes land in an isolated temp dir), and persist
-// KUBECTL_CONTEXT=<ctx> to THAT stage's state.env. helm_diag's dump entry points
-// call helm_kctx_init() at entry, which state_load()s from the pinned stage and
-// binds their own copy of helm_ctx's flag prefix — the only channel that reaches
-// helm_diag's separate module instance. Returns the namespace token.
-fun fresh_ns(ctx: Text): Text {
-    __seq += 1
-    let base = trust $mktemp -d$
-    let dir = "{base}/stage-{__seq}"
-    trust dir_create(dir)
-    trust dir_create("{dir}/log")
-    trust env_var_set("STAGE_DIR", dir)
-    trust env_var_set("MIGRATE_HOME", base)
-    trust env_var_set("STAGE", "stage-{__seq}")
-    state_load()
-    // NB: state.ab round-trips an EMPTY quoted value (KUBECTL_CONTEXT="") back as
-    // a lone `"` (a std/text slice(s,start,0) quirk), which would then leak into
-    // the flag prefix as `--kube-context "`. For the no-context case we UNSET the
-    // key instead (so state_get falls back to "" → bare helm/kubectl), avoiding
-    // the empty-string round-trip entirely. Non-empty contexts round-trip fine.
-    if ctx == "" {
-        state_unset("KUBECTL_CONTEXT")
-    } else {
-        state_set("KUBECTL_CONTEXT", ctx)
-    }
-    state_save()
-    // Namespace: a PROCESS-UNIQUE token (derived from the unique mktemp dir's
-    // basename) + the per-block seq, so it can never collide with a stale
-    // "<MARKER_DIR>/ns<n>.*" fixture/marker left by a PRIOR `amber test` run (the
-    // marker dir persists on disk between runs). Also proactively clear any
-    // files for this exact ns (belt + braces).
-    let token = trust $basename "{base}"$
-    let ns = "ns-{token}-{__seq}"
-    trust dir_create(MARKER_DIR)
-    trust $rm -f "{MARKER_DIR}/{ns}".* 2>/dev/null$
-    return ns
-}
-
-// fixture <ns> <kind> <body> — write a per-namespace steering fixture the stub
-// reads (e.g. fixture(ns, "pods", "p Running true")).
-fun fixture(ns: Text, kind: Text, body: Text): Null {
-    trust dir_create(MARKER_DIR)
-    trust file_write("{MARKER_DIR}/{ns}.{kind}", body)
-}
-
-// marker <ns> <bin> — read back the recorded arg lines for <bin> (kubectl|helm)
-// in namespace <ns>, or "" if none were issued.
-fun marker(ns: Text, bin: Text): Text {
-    return file_read("{MARKER_DIR}/{ns}.{bin}") failed { "" }
+    return w
 }
 
 // ============================================================================
-// helm_pods_summary — the awk-tally replacement (pure formatter).
+// helm_dump_diagnostics — the on-failure capture; assert the commands issued.
+// ============================================================================
+
+test "helm_dump_diagnostics captures helm status, pods, events, and per-resource describe" {
+    let w = diag_world("")
+    // One unhealthy pod (Pending) and one stuck Job so the per-pod describe + the
+    // per-job describe branches both fire. (Tokens `pods` / `jobs` steer these.)
+    mock_respond(w, "kubectl", "pods", "stuck-pod Pending")
+    mock_respond(w, "kubectl", "jobs", "ma-helm-installer <none>")
+
+    helm_dump_diagnostics("ma", "ma")
+
+    assert(mock_called(w, "helm", "status"))
+    assert(mock_called(w, "kubectl", "get pods"))
+    assert(mock_called(w, "kubectl", "-o wide"))
+    assert(mock_called(w, "kubectl", "get events"))
+    assert(mock_called(w, "kubectl", "describe pod stuck-pod"))
+    assert(mock_called(w, "kubectl", "describe job ma-helm-installer"))
+}
+
+test "helm_dump_diagnostics threads a bound kube-context through helm and kubectl" {
+    let w = diag_world("prod-ctx")
+
+    helm_dump_diagnostics("ma", "ma")
+
+    // The context flags reached helm + kubectl as argv tokens (shell word-split
+    // of the unquoted "--kube-context prod-ctx" / "--context prod-ctx" prefix).
+    assert(mock_called(w, "helm", "--kube-context prod-ctx"))
+    assert(mock_called(w, "kubectl", "--context prod-ctx"))
+}
+
+// ============================================================================
+// _helm_dump_failed_job — live-pod (tail logs) vs GC'd-pod (no logs) branches.
+// ============================================================================
+
+test "_helm_dump_failed_job tails the Job pod's logs when the pod still exists" {
+    let w = diag_world("")
+    // The Job's pods resolve by selector (token `pods`) → the live pod name.
+    mock_respond(w, "kubectl", "pods", "ma-helm-installer-xyz12")
+
+    _helm_dump_failed_job("ma-helm-installer", "ma")
+
+    // Job events lookup fired, the pod was resolved by selector, and its logs tailed.
+    assert(mock_called(w, "kubectl", "get events"))
+    assert(mock_called(w, "kubectl", "involvedObject.name=ma-helm-installer"))
+    assert(mock_called(w, "kubectl", "logs ma-helm-installer-xyz12"))
+    assert(mock_called(w, "kubectl", "--tail=50"))
+}
+
+test "_helm_dump_failed_job handles a GC'd pod (no pods found) without issuing logs" {
+    let w = diag_world("")
+    // No `pods` fixture → the selector lookup returns empty → the GC'd-pod hint
+    // branch (no `logs` command issued).
+
+    _helm_dump_failed_job("ma-helm-installer", "ma")
+
+    assert(mock_called(w, "kubectl", "get pods"))
+    assert(not mock_called(w, "kubectl", "logs ma-helm-installer-"))
+}
+
+// ============================================================================
+// _helm_explain_failure — the helm-description-driven failed-Job dump.
+// ============================================================================
+
+test "_helm_explain_failure dumps the Job named in the helm description and queries the console pod" {
+    let w = diag_world("")
+    // helm status -o json returns a description naming a failed Job (the canonical
+    // "name: <job>, kind: Job" shape). Loaded from an on-disk fixture so the JSON
+    // braces don't have to be escaped inline.
+    let status_json = trust file_read("test/fixtures/helm_status_failed_job.json")
+    mock_respond(w, "helm", "status", status_json)
+
+    _helm_explain_failure("ma", "ma")
+
+    assert(mock_called(w, "helm", "status"))
+    // The Job name parsed from the description drove the failed-Job event dump —
+    // but only when `jq` is on PATH to parse the description. Guard so the test is
+    // robust on hosts without jq (the flow must still not error there).
+    let have_jq = trust $command -v jq >/dev/null 2>&1 && echo yes || echo no$
+    if have_jq == "yes" {
+        assert(mock_called(w, "kubectl", "involvedObject.name=ma-helm-installer"))
+    }
+    // migration-console-0 phase + readiness is queried regardless.
+    assert(mock_called(w, "kubectl", "get pod migration-console-0"))
+}
+
+// ============================================================================
+// _helm_dump_install_notes — present ConfigMap vs never-appearing ConfigMap.
+// ============================================================================
+
+test "_helm_dump_install_notes streams the notes when the ConfigMap exists" {
+    let w = diag_world("")
+    // The CM existence probe exits 0 (default rc) and the jsonpath read returns
+    // notes — both keyed on the `configmap` token.
+    mock_respond(w, "kubectl", "configmap", "line one\nline two")
+    trust env_var_set("INSTALLER_NOTES_TIMEOUT_S", "5")
+    trust env_var_set("INSTALLER_NOTES_POLL_S", "0")
+
+    _helm_dump_install_notes("ma", "ma")
+
+    // The existence probe AND the jsonpath notes read both fired against the CM.
+    assert(mock_called(w, "kubectl", "get configmap"))
+    assert(mock_called(w, "kubectl", "ma-installation-notes"))
+    assert(mock_called(w, "kubectl", "jsonpath"))
+}
+
+test "_helm_dump_install_notes times out fast when the ConfigMap never appears" {
+    let w = diag_world("")
+    // The CM probe exits 1 (absent); a 0s timeout → one probe then give up, so the
+    // jsonpath notes read is never reached.
+    mock_respond_rc(w, "kubectl", "configmap", "1")
+    trust env_var_set("INSTALLER_NOTES_TIMEOUT_S", "0")
+    trust env_var_set("INSTALLER_NOTES_POLL_S", "0")
+
+    _helm_dump_install_notes("ma", "ma")
+
+    assert(mock_called(w, "kubectl", "get configmap"))
+    assert(not mock_called(w, "kubectl", "jsonpath"))
+}
+
+// ============================================================================
+// helm_pods_summary — the awk-tally replacement (pure formatter; no world/mock).
 // ============================================================================
 
 test "helm_pods_summary tallies running/pending/failed with name lists" {
@@ -267,140 +214,4 @@ test "helm_pods_summary all-healthy omits the name lists" {
 test "helm_pods_summary returns empty for an empty snapshot" {
     assert_eq(helm_pods_summary(""), "")
     assert_eq(helm_pods_summary("   \n  "), "")
-}
-
-// ============================================================================
-// helm_dump_diagnostics — assert the expected commands were issued.
-// ============================================================================
-
-test "helm_dump_diagnostics issues helm status + pods + events + per-resource describe" {
-    install_stubs()
-    let ns = fresh_ns("")
-    // One unhealthy pod (Pending) and one stuck Job so the per-pod + per-job
-    // describe branches fire.
-    fixture(ns, "pods", "stuck-pod Pending")
-    fixture(ns, "jobs", "ma-helm-installer <none>")
-
-    helm_dump_diagnostics("ma", ns)
-
-    let kbody = marker(ns, "kubectl")
-    let hbody = marker(ns, "helm")
-    assert(text_contains(hbody, "status"))
-    assert(text_contains(kbody, "get pods"))
-    assert(text_contains(kbody, "-o wide"))
-    assert(text_contains(kbody, "get events"))
-    assert(text_contains(kbody, "describe pod stuck-pod"))
-    assert(text_contains(kbody, "describe job ma-helm-installer"))
-}
-
-test "helm_dump_diagnostics with a bound context threads the flags through" {
-    install_stubs()
-    // KUBECTL_CONTEXT persisted to this stage's state.env; helm_dump_diagnostics'
-    // helm_kctx_init at entry reads it and binds its own instance's flag prefix.
-    let ns = fresh_ns("prod-ctx")
-
-    helm_dump_diagnostics("ma", ns)
-
-    let kbody = marker(ns, "kubectl")
-    let hbody = marker(ns, "helm")
-    // The context flags reached helm + kubectl as argv tokens (word-split).
-    assert(text_contains(hbody, "--kube-context prod-ctx"))
-    assert(text_contains(kbody, "--context prod-ctx"))
-}
-
-// ============================================================================
-// _helm_dump_failed_job — GC'd-pod vs live-pod branches.
-// ============================================================================
-
-test "_helm_dump_failed_job tails logs when the Job pod still exists" {
-    install_stubs()
-    let ns = fresh_ns("")
-    fixture(ns, "jobpods", "ma-helm-installer-xyz12")
-
-    _helm_dump_failed_job("ma-helm-installer", ns)
-
-    let kbody = marker(ns, "kubectl")
-    // Job events lookup fired, the pod was resolved by selector, and its logs tailed.
-    assert(text_contains(kbody, "get events"))
-    assert(text_contains(kbody, "involvedObject.name=ma-helm-installer"))
-    assert(text_contains(kbody, "logs ma-helm-installer-xyz12"))
-    assert(text_contains(kbody, "--tail=50"))
-}
-
-test "_helm_dump_failed_job handles a GC'd pod (no pods found) without erroring" {
-    install_stubs()
-    let ns = fresh_ns("")
-    // No jobpods fixture → the GC'd-pod hint branch (no `logs` command issued).
-
-    _helm_dump_failed_job("ma-helm-installer", ns)
-
-    let kbody = marker(ns, "kubectl")
-    assert(text_contains(kbody, "get pods"))
-    assert(not text_contains(kbody, "logs ma-helm-installer-"))
-}
-
-// ============================================================================
-// _helm_explain_failure — the description-driven failed-Job dump.
-// ============================================================================
-
-test "_helm_explain_failure dumps the Job named in the helm description" {
-    install_stubs()
-    let ns = fresh_ns("")
-    // helm status -o json with a description naming a failed Job (canonical shape).
-    // `{` is escaped (\{) so the JSON braces survive interpolation.
-    let json = "\{\"info\":\{\"description\":\"post-install: warning: Hook failed: timed out waiting; name: ma-helm-installer, kind: Job\"}}"
-    fixture(ns, "status_json", json)
-    fixture(ns, "console", "Running|true,")
-
-    _helm_explain_failure("ma", ns)
-
-    let kbody = marker(ns, "kubectl")
-    let hbody = marker(ns, "helm")
-    assert(text_contains(hbody, "status"))
-    // The Job name parsed from the description drove the failed-Job event dump
-    // (only if `jq` is on PATH to parse the description; guard so the test is
-    // robust on hosts without jq — it must still not error).
-    let have_jq = trust $command -v jq >/dev/null 2>&1 && echo yes || echo no$
-    if have_jq == "yes" {
-        assert(text_contains(kbody, "involvedObject.name=ma-helm-installer"))
-    }
-    // migration-console-0 status was queried regardless.
-    assert(text_contains(kbody, "get pod migration-console-0"))
-}
-
-// ============================================================================
-// _helm_dump_install_notes — present CM vs never-appearing CM.
-// ============================================================================
-
-test "_helm_dump_install_notes streams notes when the ConfigMap exists" {
-    install_stubs()
-    let ns = fresh_ns("")
-    // CM exists (probe exits 0) and has notes.
-    fixture(ns, "cm_exists", "0")
-    fixture(ns, "notes", "line one\nline two")
-    trust env_var_set("INSTALLER_NOTES_TIMEOUT_S", "5")
-    trust env_var_set("INSTALLER_NOTES_POLL_S", "0")
-
-    _helm_dump_install_notes("ma", ns)
-
-    let kbody = marker(ns, "kubectl")
-    // The existence probe AND the jsonpath notes read both fired against this ns.
-    assert(text_contains(kbody, "get configmap"))
-    assert(text_contains(kbody, "ma-installation-notes"))
-    assert(text_contains(kbody, "jsonpath"))
-}
-
-test "_helm_dump_install_notes times out fast when the ConfigMap never appears" {
-    install_stubs()
-    let ns = fresh_ns("")
-    // No cm_exists fixture → probe exits 1 (absent); 0s timeout → one probe, give up.
-    trust env_var_set("INSTALLER_NOTES_TIMEOUT_S", "0")
-    trust env_var_set("INSTALLER_NOTES_POLL_S", "0")
-
-    _helm_dump_install_notes("ma", ns)
-
-    let kbody = marker(ns, "kubectl")
-    // The probe fired but we never reached the jsonpath notes read (no notes dump).
-    assert(text_contains(kbody, "get configmap"))
-    assert(not text_contains(kbody, "jsonpath"))
 }

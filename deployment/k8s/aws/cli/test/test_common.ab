@@ -1,14 +1,28 @@
-// test_common.ab — coverage for src/common.ab, mirroring test_common.bats.
+// test_common.ab — coverage for src/common.ab (shell-hardening + helpers loaded
+// first by the CLI: die/require_cmd, the signal-PID + on-exit registries,
+// arch_os, the env-resolved globals, and stage_dir_init).
 //
-// What we can and cannot assert in-process:
-//   * die / require_cmd's FAILURE paths call exit(1)/exit(127) which would
-//     terminate the test runner, so we only exercise require_cmd's SUCCESS path
-//     (command present → returns, no exit) — proven via a PATH-shadow stub.
-//   * arch_os, the PID registry, the on_exit registry, the env-resolved globals,
-//     and stage_dir_init (real mkdir into a temp dir) are all assertable.
+// common.ab is the foundation layer — it does NOT shell out to the aws/kubectl/
+// helm fleet, so there is no cmd_* to drive end to end here. Its surface splits
+// into two kinds, tested accordingly (see test/TEST_GUIDE.md):
+//   * PURE UNITS — direct return-value asserts, no world needed: arch_os (the
+//     uname-driven os/arch classifier), the signal-PID registry (track/untrack/
+//     count + the MIGRATE_SIG_PIDS export the bash trap reads), the on-exit
+//     registry, and require_cmd's success path (a PATH-shadow stub via the mock
+//     fleet — no real binary needed).
+//   * SANDBOXED — needs the per-test world: the env-resolved globals
+//     (migrate_home/stage/stage_dir/migrate_noninteractive) and stage_dir_init
+//     (a real mkdir tree). fresh_world() pins MIGRATE_HOME/STAGE into a unique
+//     temp dir the way the CLI computes paths, so these read a real sandbox
+//     instead of hand-rolled /tmp paths.
 //
-// Module-level state in common.ab persists across test blocks (compiled to bash
-// globals), so each test that touches the registry/globals resets first.
+// Two cross-cutting facts drive the structure:
+//   * common.ab CACHES the globals on first read, so any test that observes them
+//     calls common_reset_cache() after pinning env (the world sets env, but a
+//     prior block may have populated the cache — env leaks across blocks, the
+//     module cache resets per block, so reset to be safe + explicit).
+//   * die/require_cmd's FAILURE paths call exit(1)/exit(127) which would kill the
+//     test runner, so only require_cmd's SUCCESS path is exercised in-process.
 
 import { assert, assert_eq } from "std/test"
 import {
@@ -19,87 +33,75 @@ import {
     stage_dir_init
 } from "../src/common.ab"
 import { env_var_set, env_var_unset, env_var_get, is_command } from "std/env"
-import { dir_create, file_write, file_chmod, file_exists } from "std/fs"
+import { dir_exists } from "std/fs"
 import { text_contains, starts_with, ends_with } from "std/text"
+import { fresh_world } from "./support/world.ab"
+import { mock_install } from "./support/mock.ab"
 
-// ---- helpers (ABOVE the test blocks — define-before-use) -------------------
+// ---- arch_os: uname → "<os>/<arch>" release-binary classifier (pure) --------
 
-// make_stub_dir — create a temp dir, write an executable shim named <cmd> into
-// it, and return the dir path. This is the PATH-shadow technique from
-// AMBER_IDIOMS: a file_write + file_chmod 755 shim that `command -v`/is_command
-// will find once the dir is on PATH. Used to test require_cmd's success path
-// without depending on any real binary's presence.
-fun make_stub_dir(cmd: Text): Text {
-    let dir = "/tmp/common_test_stub_{cmd}"
-    trust dir_create(dir)
-    let shim = "{dir}/{cmd}"
-    // Minimal shim: a bash no-op. The shebang + chmod make it executable.
-    trust file_write(shim, "#!/usr/bin/env bash\nexit 0\n")
-    trust file_chmod(shim, "755")
-    return dir
-}
-
-// ---- arch_os ---------------------------------------------------------------
-
-test "arch_os returns os/arch in the release convention" {
+test "arch_os returns a supported os/arch pair in the release convention" {
     let ao = arch_os()
-    // On the test host (mac or linux CI) it must be one of the supported pairs.
+    // On any supported test host (mac or linux CI) it must be one of these.
     let ok = ao == "darwin/arm64"
         or ao == "darwin/amd64"
         or ao == "linux/amd64"
         or ao == "linux/arm64"
     assert(ok)
-    // Structurally: "<os>/<arch>" — exactly one slash, non-empty halves.
-    // NB: std/text starts_with/ends_with take (string, affix) order.
+    // Structurally "<os>/<arch>": exactly one slash, both halves non-empty.
     assert(text_contains(ao, "/"))
     assert(not starts_with(ao, "/"))
     assert(not ends_with(ao, "/"))
 }
 
-// ---- PID registry ----------------------------------------------------------
+// ---- signal-PID registry: track / untrack / count (pure) -------------------
+//
+// The seed-slot parallel-array store the bash trap's kill sweep reads. Each
+// block starts from a clean registry (module-level state resets per block) and
+// drains what it adds so its assertions stand alone.
 
-test "on_signal_track_pid / untrack maintain the logical count" {
-    // start empty
+test "tracking three pids then untracking one keeps the logical count exact" {
     assert_eq(on_signal_tracked_count(), 0)
     on_signal_track_pid("100")
     on_signal_track_pid("200")
     on_signal_track_pid("300")
     assert_eq(on_signal_tracked_count(), 3)
-    // untrack the middle one — count drops, others remain
+    // Untrack the middle one — count drops, the others remain.
     on_signal_untrack_pid("200")
     assert_eq(on_signal_tracked_count(), 2)
-    // untrack a non-member — no change
+    // Untracking a non-member is a no-op.
     on_signal_untrack_pid("999")
     assert_eq(on_signal_tracked_count(), 2)
-    // drain the rest so later tests start clean
     on_signal_untrack_pid("100")
     on_signal_untrack_pid("300")
     assert_eq(on_signal_tracked_count(), 0)
 }
 
-test "on_signal_track_pid ignores empty pid" {
+test "tracking an empty pid is ignored" {
     assert_eq(on_signal_tracked_count(), 0)
     on_signal_track_pid("")
     assert_eq(on_signal_tracked_count(), 0)
 }
 
-test "seed-slot reuse: first append does not leave a phantom row" {
+test "the first real pid overwrites the seed slot (no phantom row)" {
     assert_eq(on_signal_tracked_count(), 0)
-    // Single append must yield count 1 (not 2 from a stale seed).
+    // A single append must yield count 1, not 2 from a stale placeholder.
     on_signal_track_pid("42")
     assert_eq(on_signal_tracked_count(), 1)
     on_signal_untrack_pid("42")
     assert_eq(on_signal_tracked_count(), 0)
 }
 
-test "track exports MIGRATE_SIG_PIDS for the trap body" {
+test "track / untrack keep MIGRATE_SIG_PIDS in sync for the trap body" {
     on_signal_track_pid("777")
     on_signal_track_pid("888")
-    // The trap (a raw bash string) reads $MIGRATE_SIG_PIDS; track/untrack keep
-    // it in sync. It must list both pids, space-separated.
+    // The INT/TERM trap is a raw bash string that loops over $MIGRATE_SIG_PIDS;
+    // track/untrack export it space-separated so the signal-time sweep sees the
+    // live set. Both pids must be listed.
     let exported = env_var_get("MIGRATE_SIG_PIDS") failed { "" }
     assert(text_contains(exported, "777"))
     assert(text_contains(exported, "888"))
+    // Untracking drops only that pid from the export.
     on_signal_untrack_pid("777")
     let exported2 = env_var_get("MIGRATE_SIG_PIDS") failed { "" }
     assert(not text_contains(exported2, "777"))
@@ -108,9 +110,9 @@ test "track exports MIGRATE_SIG_PIDS for the trap body" {
     assert_eq(on_signal_tracked_count(), 0)
 }
 
-// ---- on_exit registry ------------------------------------------------------
+// ---- on-exit registry: cleanup-callback names (pure) -----------------------
 
-test "on_exit_register accumulates names; empty ignored" {
+test "on_exit_register accumulates names and ignores the empty name" {
     let before = on_exit_registered_count()
     on_exit_register("cleanup_a")
     on_exit_register("cleanup_b")
@@ -119,44 +121,46 @@ test "on_exit_register accumulates names; empty ignored" {
     assert_eq(on_exit_registered_count(), before + 2)
 }
 
-// ---- require_cmd (success path via PATH-shadow stub) -----------------------
+// ---- require_cmd: success path via a PATH-shadow stub ----------------------
 
-test "require_cmd returns for a command on PATH (stubbed)" {
-    // Stub a command name that surely doesn't exist on the host, then put the
-    // stub dir on PATH so is_command finds it. require_cmd must then return
-    // (no exit). If it exited, the test process would die and the run would
-    // report this test as failed — so reaching the assert proves the contract.
-    let cmd = "migrate_stub_tool_xyz"
-    let dir = make_stub_dir(cmd)
-    let oldpath = env_var_get("PATH") failed { "" }
-    trust env_var_set("PATH", "{dir}:{oldpath}")
-    assert(is_command(cmd))
-    require_cmd(cmd, "should not need a hint")
-    // Reached here → require_cmd did NOT exit. Restore PATH.
-    trust env_var_set("PATH", oldpath)
+test "require_cmd returns without exiting for a command on PATH" {
+    // mock_install drops a 755 shim for the name onto PATH, so is_command finds
+    // it. require_cmd must then return (no exit). If it had exited, this process
+    // would die and the block would report failed — so reaching the assert is
+    // itself the proof of the contract.
+    fresh_world()
+    mock_install(["migrate_stub_tool_xyz"])
+    assert(is_command("migrate_stub_tool_xyz"))
+    require_cmd("migrate_stub_tool_xyz", "should not need a hint")
     assert(true)
 }
 
-// ---- globals (env-resolved, cached) ----------------------------------------
+// ---- env-resolved globals (cached) -----------------------------------------
+//
+// Each block mints its OWN world (unique sandbox; MIGRATE_HOME + STAGE pinned)
+// and resets the common.ab cache so the accessor reads the world's env. The
+// default-fallback cases instead UNSET the env to exercise the bash `:=default`
+// branch — the world's value would mask it.
 
-test "migrate_home honors MIGRATE_HOME env" {
+test "migrate_home honors the MIGRATE_HOME the world pins" {
+    fresh_world()
     common_reset_cache()
-    trust env_var_set("MIGRATE_HOME", "/tmp/pinned-home")
-    assert_eq(migrate_home(), "/tmp/pinned-home")
-    trust env_var_unset("MIGRATE_HOME")
-    common_reset_cache()
+    // fresh_world set MIGRATE_HOME to the world's temp root; the accessor reads it.
+    assert_eq(migrate_home(), env_var_get("MIGRATE_HOME") failed { "" })
+    // And it is a real, non-empty directory under the sandbox.
+    assert(migrate_home() != "")
+    assert(dir_exists(migrate_home()))
 }
 
 test "migrate_home defaults to PWD/migration-assistant-workspace when unset" {
     trust env_var_unset("MIGRATE_HOME")
     common_reset_cache()
-    let home = migrate_home()
-    assert(ends_with(home, "/migration-assistant-workspace"))
+    assert(ends_with(migrate_home(), "/migration-assistant-workspace"))
 }
 
-test "stage defaults to 'default', honors STAGE env" {
-    common_reset_cache()
+test "stage defaults to 'default' when unset and honors the STAGE env" {
     trust env_var_unset("STAGE")
+    common_reset_cache()
     assert_eq(stage(), "default")
     common_reset_cache()
     trust env_var_set("STAGE", "prod-cutover")
@@ -165,19 +169,18 @@ test "stage defaults to 'default', honors STAGE env" {
     common_reset_cache()
 }
 
-test "stage_dir is migrate_home/stage" {
+test "stage_dir composes migrate_home over the active stage" {
+    fresh_world()
     common_reset_cache()
-    trust env_var_set("MIGRATE_HOME", "/tmp/home2")
-    trust env_var_set("STAGE", "s1")
-    assert_eq(stage_dir(), "/tmp/home2/s1")
-    trust env_var_unset("MIGRATE_HOME")
-    trust env_var_unset("STAGE")
-    common_reset_cache()
+    // The world pins both halves; stage_dir is their join — and it is exactly the
+    // world's stage dir on disk.
+    assert_eq(stage_dir(), "{migrate_home()}/{stage()}")
+    assert(dir_exists(stage_dir()))
 }
 
-test "migrate_noninteractive reflects the env flag" {
-    common_reset_cache()
+test "migrate_noninteractive reflects the MIGRATE_NONINTERACTIVE flag" {
     trust env_var_unset("MIGRATE_NONINTERACTIVE")
+    common_reset_cache()
     assert(not migrate_noninteractive())
     common_reset_cache()
     trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
@@ -186,27 +189,23 @@ test "migrate_noninteractive reflects the env flag" {
     common_reset_cache()
 }
 
-// ---- stage_dir_init (real mkdir into a temp tree) --------------------------
+// ---- stage_dir_init: the real mkdir tree (sandboxed) -----------------------
 
-test "stage_dir_init creates the full stage subtree" {
+test "stage_dir_init creates the full stage subtree and is idempotent" {
+    fresh_world()
     common_reset_cache()
-    trust env_var_set("MIGRATE_HOME", "/tmp/common_test_home")
-    trust env_var_set("STAGE", "init-test")
     let base = stage_dir()
     stage_dir_init()
     // The seven subdirs (plus base) must all exist.
-    assert(file_exists(base))
-    assert(file_exists("{base}/log"))
-    assert(file_exists("{base}/artifacts"))
-    assert(file_exists("{base}/artifacts/.cache"))
-    assert(file_exists("{base}/skills"))
-    assert(file_exists("{base}/plan"))
-    assert(file_exists("{base}/history"))
-    assert(file_exists("{base}/archive"))
-    // Idempotent: a second call must not fail.
+    assert(dir_exists(base))
+    assert(dir_exists("{base}/log"))
+    assert(dir_exists("{base}/artifacts"))
+    assert(dir_exists("{base}/artifacts/.cache"))
+    assert(dir_exists("{base}/skills"))
+    assert(dir_exists("{base}/plan"))
+    assert(dir_exists("{base}/history"))
+    assert(dir_exists("{base}/archive"))
+    // A second call must not fail (mkdir -p semantics).
     stage_dir_init()
-    assert(file_exists(base))
-    trust env_var_unset("MIGRATE_HOME")
-    trust env_var_unset("STAGE")
-    common_reset_cache()
+    assert(dir_exists(base))
 }

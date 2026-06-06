@@ -1,9 +1,25 @@
-// test_term.ab — coverage for src/term.ab, mirroring test_term.bats.
+// test_term.ab — coverage for src/term.ab (raw VT100 render-to-Text).
 //
-// Strategy: term_panel / term_progress / term_link RETURN the Text they emit,
-// so we force interactive mode (MIGRATE_FORCE_TTY=1 in the test runner env) and
-// assert on the returned string — no real TTY needed. Pure helpers
-// (repeat_char, clip, term_spinner_frame) are asserted directly.
+// term.ab is a PURE rendering module: its formatters (term_panel, term_progress,
+// term_link, repeat_char, clip, term_spinner_frame) compute a Text and return it
+// (the visible emitters additionally write that same Text to stderr). It shells
+// out only to stty/printf/trap for geometry + traps — never to aws/kubectl/helm —
+// so there is no external "world" to fake here. Per test/TEST_GUIDE.md these are
+// the genuinely-pure unit case: assert directly on the returned Text, no
+// world/mock fleet. The runner pins interactive mode via MIGRATE_FORCE_TTY=1, and
+// each visual-emitter block calls term_detect() to settle that decision before
+// rendering. Geometry is pinned with term_set_geometry() so width-dependent
+// output is deterministic without a real terminal.
+//
+// Coverage (behaviors): repeat_char (count + zero/negative), clip (passthrough,
+// ellipsis truncation, codepoint width, width<=0 and width==1 edges),
+// term_spinner_frame (distinct glyphs + wrap at 10), term_set_geometry round-trip
+// and its feed into term_progress' line-jump, term_link OSC-8 hyperlink,
+// term_panel UTF-8 box (corners/edges/title/body) + long-title truncation,
+// term_progress sticky-bottom sequence + percentage/fill math + clamping.
+//
+// Helpers live ABOVE the test blocks (define-before-use across the import
+// boundary). NO `return` inside a test block — branch with `if`.
 
 import { assert, assert_eq } from "std/test"
 import { esc, term_detect } from "../src/core.ab"
@@ -11,69 +27,154 @@ import {
     repeat_char, clip, term_spinner_frame, term_panel, term_progress,
     term_link, term_set_geometry, term_lines, term_columns
 } from "../src/term.ab"
-import { text_contains, starts_with, ends_with } from "std/text"
+import { text_contains } from "std/text"
 
-// ---- pure helpers ----------------------------------------------------------
+// interactive — settle TTY detection to the runner-forced (MIGRATE_FORCE_TTY=1)
+// interactive mode and hand back the cached ESC byte the escapes are built from.
+// Every visual-emitter block opens with this so the colored/VT100 path is taken.
+fun interactive(): Text {
+    term_detect()
+    return esc()
+}
 
-test "repeat_char emits N copies (UTF-8 codepoints)" {
+// ---- repeat_char: N copies of a (possibly multi-byte) glyph -----------------
+
+test "repeat_char emits exactly N codepoints, single- and multi-byte" {
     assert_eq(repeat_char("x", 5), "xxxxx")
     assert_eq(repeat_char("█", 3), "███")
+    // codepoint count, not byte count: 3 copies of a 3-byte glyph is len 3.
+    assert_eq(len repeat_char("█", 3), 3)
 }
+
 test "repeat_char with n<=0 emits nothing" {
     assert_eq(repeat_char("#", 0), "")
     assert_eq(repeat_char("#", -3), "")
 }
-test "clip truncates with ellipsis past width" {
+
+// ---- clip: truncate-to-width with ellipsis (UTF-8 codepoint width) ----------
+
+test "clip leaves Text shorter than width untouched" {
     assert_eq(clip("hello", 10), "hello")
-    assert_eq(clip("hello world", 5), "hell…")
+    // exactly-at-width is also untouched (len s <= width).
+    assert_eq(clip("hello", 5), "hello")
 }
+
+test "clip truncates past width and appends an ellipsis" {
+    assert_eq(clip("hello world", 5), "hell…")
+    // result is exactly `width` codepoints: 4 kept + the ellipsis.
+    assert_eq(len clip("hello world", 5), 5)
+}
+
 test "clip counts codepoints not bytes" {
     // 5 codepoints, well under width → unchanged even though it's many bytes.
     assert_eq(clip("café☕", 10), "café☕")
 }
-test "term_spinner_frame cycles and wraps at 10" {
-    assert(term_spinner_frame(0) != term_spinner_frame(1))
-    assert_eq(term_spinner_frame(10), term_spinner_frame(0))
+
+test "clip handles the width<=0 and width==1 edges" {
+    assert_eq(clip("anything", 0), "")
+    assert_eq(clip("anything", -4), "")
+    // width 1 has no room to keep a char, so it is just the ellipsis.
+    assert_eq(clip("anything", 1), "…")
 }
 
-// ---- geometry --------------------------------------------------------------
+// ---- term_spinner_frame: braille glyph cycle --------------------------------
 
-test "term_set_geometry round-trips" {
+test "term_spinner_frame yields distinct glyphs and wraps at 10" {
+    assert(term_spinner_frame(0) != term_spinner_frame(1))
+    assert_eq(term_spinner_frame(10), term_spinner_frame(0))
+    assert_eq(term_spinner_frame(11), term_spinner_frame(1))
+    // every frame in one period is a single codepoint.
+    assert_eq(len term_spinner_frame(0), 1)
+    assert_eq(len term_spinner_frame(7), 1)
+}
+
+// ---- geometry: pinned dimensions feed the renderers -------------------------
+
+test "term_set_geometry round-trips lines and columns" {
     term_set_geometry(42, 120)
     assert_eq(term_lines(), 42)
     assert_eq(term_columns(), 120)
 }
 
-// ---- visual emitters (assert on returned Text) -----------------------------
+test "term_progress jumps to the pinned LINES row" {
+    let e = interactive()
+    term_set_geometry(30, 80)
+    let out = term_progress(1, 4, "x")
+    // sticky-bottom paint moves the cursor to row == term_lines().
+    assert(text_contains(out, "{e}[30H"))
+}
 
-test "term_link emits OSC 8 when interactive" {
-    term_detect()
-    let e = esc()
+// ---- term_link: OSC 8 hyperlink ---------------------------------------------
+
+test "term_link emits an OSC 8 hyperlink wrapping the label" {
+    let e = interactive()
     let out = term_link("https://example.com", "click me")
     assert(text_contains(out, "{e}]8;;https://example.com"))
     assert(text_contains(out, "click me"))
+    // closing OSC 8 with empty params.
+    assert(text_contains(out, "{e}]8;;{e}\\"))
 }
 
-test "term_panel renders UTF-8 box when interactive" {
-    term_detect()
+// ---- term_panel: UTF-8 box -------------------------------------------------
+
+test "term_panel draws a titled box around its body lines" {
+    let e = interactive()
     term_set_geometry(24, 80)
     let out = term_panel("Cleanup will remove", ["alpha", "beta"])
+    // top corners / vertical edges / bottom corners.
     assert(text_contains(out, "┏"))
+    assert(text_contains(out, "┓"))
     assert(text_contains(out, "┃"))
     assert(text_contains(out, "┗"))
+    assert(text_contains(out, "┛"))
+    // title and every body line are present.
+    assert(text_contains(out, "Cleanup will remove"))
     assert(text_contains(out, "alpha"))
     assert(text_contains(out, "beta"))
-    assert(text_contains(out, "Cleanup will remove"))
 }
 
-test "term_progress emits sticky-bottom sequence + pct + counts" {
-    term_detect()
+test "term_panel truncates an over-long title with an ellipsis" {
+    interactive()
+    // narrow box so the title cannot fit; renderer clamps cols to >=50.
+    term_set_geometry(24, 50)
+    let long = "This title is intentionally far too long to fit inside the panel"
+    let out = term_panel(long, ["body"])
+    // truncation marker is emitted and the full title is NOT.
+    assert(text_contains(out, "…"))
+    assert(not text_contains(out, long))
+}
+
+// ---- term_progress: sticky-bottom bar + percentage/fill math ----------------
+
+test "term_progress emits the save/restore frame, percentage and counts" {
+    let e = interactive()
     term_set_geometry(24, 80)
-    let e = esc()
     let out = term_progress(5, 10, "step msg")
     assert(text_contains(out, "{e}7"))   // save cursor
     assert(text_contains(out, "{e}8"))   // restore cursor
     assert(text_contains(out, "50%"))
     assert(text_contains(out, "[5/10]"))
     assert(text_contains(out, "step msg"))
+    // half-full bar: filled (█) and empty (░) glyphs both present.
+    assert(text_contains(out, "█"))
+    assert(text_contains(out, "░"))
+}
+
+test "term_progress clamps a zero total to avoid divide-by-zero" {
+    interactive()
+    term_set_geometry(24, 80)
+    // total 0 → seen clamps to 1; cur 0 over 1 is 0%.
+    let out = term_progress(0, 0, "init")
+    assert(text_contains(out, "0%"))
+    assert(text_contains(out, "[0/0]"))
+}
+
+test "term_progress caps fill at 100% when cur exceeds total" {
+    interactive()
+    term_set_geometry(24, 80)
+    // cur > total → pct overshoots but the fill is capped to the bar width, so no
+    // empty (░) cells remain.
+    let out = term_progress(12, 10, "overrun")
+    assert(text_contains(out, "█"))
+    assert(not text_contains(out, "░"))
 }

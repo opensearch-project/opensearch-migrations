@@ -1,63 +1,171 @@
-// test_manifest.ab — coverage for src/manifest.ab, mirroring test_manifest.bats.
+// test_manifest.ab — coverage for src/manifest.ab (the manifest.json parser).
 //
-// Each test points MIGRATE_MANIFEST at a fixture under test/fixtures/ and asserts
-// on parsed values. amber runs every `test` block in its own process, so the
-// manifest parse-once latch (a module-level let) resets between tests — each can
-// load a different fixture cleanly. Requires jq (the model layer hard-deps it);
-// parse-dependent tests early-return when jq is absent.
+// manifest.ab is a PURE accessor layer: it locates manifest.json, caches the raw
+// JSON, and answers questions about it (branding, build, mcpServers, modes,
+// skills) via jq. There is NO cmd_* entrypoint and NO external tool fleet to fake
+// — jq is the parsing engine, not a stubbed dependency — so per test/TEST_GUIDE.md
+// these are genuinely-pure unit tests asserting on returned values directly, in
+// the same shape as test_pack.ab's helper-unit sections.
 //
-// Fixtures live in test/fixtures/*.json (real files, not inline strings): JSON is
-// brace-heavy and `{` starts interpolation inside BOTH Amber Text literals AND
-// `$...$` commands, so an on-disk fixture is the clean way to feed canned JSON.
+// What we DO take from the shared support lib is the isolation: every block mints
+// its OWN fresh_world() (support/world.ab) and points $MIGRATE_MANIFEST at a
+// fixture copied INTO that world. The module is env-driven (MIGRATE_MANIFEST picks
+// the file; ${VAR} substitution reads the process env) and env vars LEAK across
+// amber test blocks, so a per-test world is the race-safe channel — no block
+// depends on another's MIGRATE_MANIFEST, and the ${VAR} probes set/unset their own
+// uniquely-named env keys.
+//
+// JSON IS BRACE-HEAVY: a literal `{` starts interpolation in BOTH Amber Text
+// literals AND inside `$...$` commands, so no JSON ever appears inline — every
+// manifest lives in test/fixtures/*.json and is cp'd into the world.
+//
+// Helpers + imports sit ABOVE the test blocks (define-before-use across the import
+// boundary; the tree-shaker keeps only deps that textually precede their use).
+// NO `return` inside a test block — branch with `if`. Requires jq (the model layer
+// hard-deps it); the parse-once latch resets per block, so each loads cleanly.
 
 import { assert, assert_eq } from "std/test"
-import {
-    manifest_have, manifest_brand, manifest_modes,
-    manifest_mcp_names, manifest_mcp_command, manifest_all_perms,
-    manifest_pack_summary, manifest_build_version
-} from "../src/manifest.ab"
-import { env_var_set, env_var_unset, is_command } from "std/env"
 import { text_contains } from "std/text"
+import { env_var_set, env_var_unset } from "std/env"
+import { fresh_world } from "./support/world.ab"
+import {
+    manifest_have, manifest_schema_ok, manifest_path,
+    manifest_brand, manifest_modes,
+    manifest_mcp_names, manifest_mcp_command, manifest_mcp_field,
+    manifest_mcp_args, manifest_mcp_requires, manifest_mcp_perms,
+    manifest_all_perms, manifest_pack_summary, manifest_build_version
+} from "../src/manifest.ab"
 
-// Fixture paths are relative to the repo root (amber test is run from amber-tui/).
-const MAIN = "test/fixtures/manifest_main.json"
-const MODES = "test/fixtures/manifest_modes.json"
+// ---- file-local helpers (ABOVE the tests: define-before-use across the import
+// boundary) -----------------------------------------------------------------
+
+// FIX — on-disk JSON fixtures (paths relative to the repo root; amber test runs
+// from the cli/ dir). JSON stays out of Amber literals → brace-safe.
+const FIX = "test/fixtures"
+
+// load_manifest <world> <fixture> → copy a fixtures/*.json into the world and
+// point $MIGRATE_MANIFEST (the operator-override candidate, highest priority) at
+// the world-local copy, so the module resolves THIS file. Returns its path.
+fun load_manifest(w: Text, fixture: Text): Text {
+    let path = "{w}/manifest.json"
+    trust $cp "{FIX}/{fixture}" "{path}"$
+    trust env_var_set("MIGRATE_MANIFEST", path)
+    return path
+}
+
+// ---- locate / load ---------------------------------------------------------
 
 test "manifest_have is false when no manifest path resolves" {
-    env_var_set("MIGRATE_MANIFEST", "/nonexistent/manifest.json")
+    let w = fresh_world()
+    // Point the override at a path that does not exist; the world sets no LIB_DIR,
+    // so the release/dev candidates ({lib}/../manifest.json …) cannot resolve
+    // either — nothing is found.
+    trust env_var_set("MIGRATE_MANIFEST", "{w}/nonexistent.json")
     assert(not manifest_have())
     env_var_unset("MIGRATE_MANIFEST")
 }
 
-test "manifest_brand reads branding fields" {
-    env_var_set("MIGRATE_MANIFEST", MAIN)
+test "manifest_have + manifest_path resolve the MIGRATE_MANIFEST override" {
+    let w = fresh_world()
+    let path = load_manifest(w, "manifest_main.json")
     assert(manifest_have())
+    assert_eq(manifest_path(), path)
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "manifest_schema_ok is true for schemaVersion 1, false otherwise" {
+    let w = fresh_world()
+    load_manifest(w, "manifest_main.json")
+    assert(manifest_schema_ok())
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "manifest_schema_ok rejects a non-1 schemaVersion" {
+    let w = fresh_world()
+    // The manifest still loads (have == true) but the schema gate fails.
+    load_manifest(w, "manifest_schema_bad.json")
+    assert(manifest_have())
+    assert(not manifest_schema_ok())
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+// ---- branding ---------------------------------------------------------------
+
+test "manifest_brand reads branding fields" {
+    let w = fresh_world()
+    load_manifest(w, "manifest_main.json")
     assert_eq(manifest_brand("appName"), "Acme Migrate")
     assert_eq(manifest_brand("binaryName"), "acme-migrate")
     env_var_unset("MIGRATE_MANIFEST")
 }
 
-test "manifest_build_version + pack_summary" {
-    env_var_set("MIGRATE_MANIFEST", MAIN)
+test "manifest_brand substitutes a set env var into a branding value" {
+    let w = fresh_world()
+    load_manifest(w, "manifest_vars.json")
+    trust env_var_set("MANIFEST_TEST_APP", "Substituted App")
+    assert_eq(manifest_brand("appName"), "Substituted App")
+    env_var_unset("MANIFEST_TEST_APP")
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+// ---- build ------------------------------------------------------------------
+
+test "manifest_build_version and manifest_pack_summary read build.*" {
+    let w = fresh_world()
+    load_manifest(w, "manifest_main.json")
     assert_eq(manifest_build_version(), "3.2.1")
     assert_eq(manifest_pack_summary(), " +acme-1.0")
     env_var_unset("MIGRATE_MANIFEST")
 }
 
-test "manifest_mcp_names filters by agent; command resolves" {
-    env_var_set("MIGRATE_MANIFEST", MAIN)
-    // codex is only on the aws server
+// ---- mcpServers -------------------------------------------------------------
+
+test "manifest_mcp_names filters by agent; command + field resolve per server" {
+    let w = fresh_world()
+    load_manifest(w, "manifest_main.json")
+    // codex is only on the aws server; claude is on both.
     assert_eq(manifest_mcp_names("codex"), "aws")
-    // claude is on both
     let claude = manifest_mcp_names("claude")
     assert(text_contains(claude, "aws"))
     assert(text_contains(claude, "k8s"))
+    // command is a convenience wrapper over the generic field accessor.
     assert_eq(manifest_mcp_command("aws"), "uvx")
+    assert_eq(manifest_mcp_field("k8s", "command"), "npx")
     env_var_unset("MIGRATE_MANIFEST")
 }
 
-test "manifest_all_perms dedupes across servers" {
-    env_var_set("MIGRATE_MANIFEST", MAIN)
+test "manifest_mcp_args substitutes set env vars and drops blank lines" {
+    let w = fresh_world()
+    load_manifest(w, "manifest_vars.json")
+    trust env_var_set("MANIFEST_TEST_REGION", "us-west-2")
+    let args = manifest_mcp_args("aws")
+    // The literal args survive; the ${MANIFEST_TEST_REGION} token is resolved.
+    assert(text_contains(args, "aws-mcp"))
+    assert(text_contains(args, "--region"))
+    assert(text_contains(args, "us-west-2"))
+    env_var_unset("MANIFEST_TEST_REGION")
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "manifest_mcp_requires lists a server's requires entries" {
+    let w = fresh_world()
+    load_manifest(w, "manifest_vars.json")
+    assert(text_contains(manifest_mcp_requires("aws"), "AWS_PROFILE"))
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "manifest_mcp_perms lists a single server's permissionsAllow" {
+    let w = fresh_world()
+    load_manifest(w, "manifest_main.json")
+    let perms = manifest_mcp_perms("aws")
+    assert(text_contains(perms, "s3:Get*"))
+    assert(text_contains(perms, "ec2:Describe*"))
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "manifest_all_perms dedupes permissionsAllow across servers" {
+    let w = fresh_world()
+    load_manifest(w, "manifest_main.json")
     // s3:Get* appears in both aws + k8s → must appear once after unique.
     let perms = manifest_all_perms()
     assert(text_contains(perms, "s3:Get*"))
@@ -65,8 +173,11 @@ test "manifest_all_perms dedupes across servers" {
     env_var_unset("MIGRATE_MANIFEST")
 }
 
+// ---- modes ------------------------------------------------------------------
+
 test "manifest_modes emits visible modes, omits hidden, flags default" {
-    env_var_set("MIGRATE_MANIFEST", MODES)
+    let w = fresh_world()
+    load_manifest(w, "manifest_modes.json")
     let modes = manifest_modes()
     // manual is default → trailing |1
     assert(text_contains(modes, "manual|Manual|hands-on|1"))

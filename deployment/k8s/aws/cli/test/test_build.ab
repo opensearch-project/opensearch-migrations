@@ -1,87 +1,74 @@
-// test_build.ab — coverage for src/build.ab, mirroring test_build_path.bats.
+// test_build.ab — e2e coverage for build.ab (the --build image path).
 //
-// build.ab drives gradle + docker buildx + aws ECR login. We never run real
-// gradle (it would build the whole MA image set), so — exactly like the bats
-// version — we PATH-shadow gradlew / docker / aws with recording stubs and
-// assert on the recorded calls.
+// Reference style (see test/TEST_GUIDE.md, test/test_cleanup.ab): drive the real
+// build.ab seams against a faked external world and assert on what the CLI DID —
+// which commands it issued (mock_called / mock_calls) and what it returned — not
+// on internal state. The per-test world + the aws/docker mock fleet come from
+// test/support/; every test block mints its OWN fresh world.
 //
-// TESTING MODEL (important Amber 0.6 constraint). Each module that imports
-// state.ab gets its OWN private copy of state.ab's module-level globals
-// (verified: the compiled output carries STATE_KEYS / STATE_KEYS_3 / … one set
-// per importer). So a test cannot seed build.ab's state from the outside —
-// state set through the test's own state.ab instance is invisible to build.ab's
-// `state_get`. The established peer-module pattern (test_crane.ab) therefore
-// tests the ARG-DRIVEN leaf helpers in-process rather than the state-reading
-// orchestrator end-to-end. We follow it:
+// Two facts shape HOW this module is driven e2e:
 //
-//   * PURE/arg-driven helpers (_build_builder_name, _build_ecr_login,
-//     _build_setup_buildkit, _build_gradle_invoke, _build_resolve_base_dir via
-//     its $PWD branch) — called directly, asserting on the return + recorded
-//     stub calls. External commands (aws/docker/gradlew) are PATH-shadow stubs
-//     written with file_write + file_chmod and prepended to PATH (the
-//     AMBER_IDIOMS recipe).
-//   * build_images_or_skip — only its no-op gate is in-process testable
-//     (BUILD_FROM_SOURCE absent → build.ab's empty state → returns 0). The full
-//     gradle invocation is covered transitively by _build_gradle_invoke +
-//     _build_ecr_login + _build_setup_buildkit, which is what it composes.
+//   1. PATH mocks vs absolute execs. build.ab shells out to PATH tools (aws,
+//      docker buildx) AND to in-repo tools by ABSOLUTE path under the resolved
+//      repo root ($base_dir/gradlew, $base_dir/buildImages/backends/…). The mock
+//      fleet shadows PATH, so aws+docker are faked through it and asserted via the
+//      recorded call log; gradlew + the buildkit backend can't be PATH-shadowed,
+//      so they're thin file helpers written into the world's /repo subtree and
+//      asserted via their own recorded call log (built_repo() / gradlew_calls()).
 //
-// No network, no real cloud, no real builder.
+//   2. state isolation (verified empirically, not a coverage gap). Every module
+//      that imports state.ab gets its OWN private module-level store, and
+//      build_images_or_skip — unlike cmd_cleanup — never calls state_load() at
+//      entry. So world_seed() (which writes the on-disk state.env) is INVISIBLE
+//      to build.ab's state_get: the orchestrator always sees an EMPTY state from a
+//      test, which means the only branch reachable end-to-end through the public
+//      entrypoint is its BUILD_FROM_SOURCE!=Y no-op gate. The rest of the build
+//      spine — ECR login, buildkit setup, the gradle invocation it composes and
+//      retries — takes its inputs as ARGUMENTS via the pub helpers it calls
+//      (_build_ecr_login / _build_setup_buildkit / _build_gradle_invoke /
+//      _build_builder_name / _build_resolve_base_dir), and those ARE drivable e2e
+//      against the mock fleet. That is what the seam tests below exercise.
+//
+// No network, no real cloud, no real gradle, no real builder. NO `return` in a
+// test block — branch with `if`.
 
 import { assert, assert_eq } from "std/test"
-import { printf, env_var_get, env_var_set } from "std/env"
-import { file_write, file_read, file_chmod, file_exists, dir_create } from "std/fs"
 import { text_contains } from "std/text"
+import { file_write, file_read, file_chmod, dir_create } from "std/fs"
+import { env_var_set } from "std/env"
+import { fresh_world, world_noninteractive } from "./support/world.ab"
 import {
-    _build_builder_name, _build_ecr_login, _build_setup_buildkit,
-    _build_gradle_invoke, _build_resolve_base_dir, build_images_or_skip
+    mock_install, mock_respond, mock_respond_rc, mock_fail,
+    mock_called, mock_calls
+} from "./support/mock.ab"
+import {
+    _build_builder_name, _build_resolve_base_dir,
+    _build_ecr_login, _build_setup_buildkit, _build_gradle_invoke,
+    build_images_or_skip
 } from "../src/build.ab"
 
-// ---- helpers (defined ABOVE the test blocks: Amber needs define-before-use,
-// and tree-shaking keeps only deps textually preceding the entry point) ------
+// ---- file-local helpers (ABOVE the tests: Amber needs define-before-use across
+// the import boundary, and the tree-shaker keeps only deps preceding their use) --
 
-// prepend_path <dir> — put <dir> first on PATH so its stubs shadow the real
-// commands. Idempotent-ish: a fresh mktemp dir per test means no clobber.
-fun prepend_path(dir: Text): Null {
-    let path0 = env_var_get("PATH") failed { "" }
-    trust env_var_set("PATH", "{dir}:{path0}")
+// built_world — the shape behind every docker/aws-driven build seam (cf.
+// deployed_world() in test_cleanup.ab). A fresh isolated world with the aws+docker
+// mock fleet installed and ECR auth primed to succeed: aws get-login-password
+// returns a token, docker (login / buildx *) defaults to exit 0. Tests tighten it
+// per scenario (e.g. mock_respond_rc to force `docker buildx inspect` unhealthy,
+// mock_fail to break get-login-password). Returns the WORLD dir; its /repo subtree
+// is where the absolute-path gradlew + backend script go.
+fun built_world(): Text {
+    let w = fresh_world()
+    world_noninteractive()
+    mock_install(["aws", "docker"])
+    mock_respond(w, "aws", "get-login-password", "PASSWORD")
+    return w
 }
 
-// write_aws_stub <dir> — an `aws` shim: cloudformation describe-stacks prints the
-// TAB-separated OutputKey/Value row cfn_outputs flattens into
-// MIGRATIONS_ECR_REGISTRY=<fake-ecr>; ecr get-login-password prints a token;
-// anything else exits 0. `case "$*"` (the bats mkstub shape) so one byte-stable
-// file serves every aws call regardless of which test wrote it last.
-fun write_aws_stub(dir: Text): Null {
-    trust dir_create(dir)
-    let aws = "#!/usr/bin/env bash\n"
-    aws += "case \"$*\" in\n"
-    aws += "  *describe-stacks*) printf '%b\\n' 'MIGRATIONS_ECR_REGISTRY\\t111111111111.dkr.ecr.us-east-1.amazonaws.com/fake-ecr' ;;\n"
-    aws += "  *get-login-password*) printf 'PASSWORD\\n' ;;\n"
-    aws += "  *) exit 0 ;;\n"
-    aws += "esac\n"
-    trust file_write("{dir}/aws", aws)
-    trust file_chmod("{dir}/aws", "755")
-}
-
-// write_docker_stub <dir> <inspect_rc> — a `docker` shim recording "$*" to
-// <dir>/docker.calls; `buildx inspect` exits <inspect_rc> (1 → unhealthy →
-// triggers backend setup; 0 → healthy → skips it), everything else exits 0.
-fun write_docker_stub(dir: Text, inspect_rc: Text): Null {
-    trust dir_create(dir)
-    let docker = "#!/usr/bin/env bash\n"
-    docker += "printf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/docker.calls\"\n"
-    docker += "case \"$1 $2\" in\n"
-    docker += "  \"buildx inspect\") exit {inspect_rc} ;;\n"
-    docker += "  *) exit 0 ;;\n"
-    docker += "esac\n"
-    trust file_write("{dir}/docker", docker)
-    trust file_chmod("{dir}/docker", "755")
-}
-
-// write_fake_gradlew <repo> <rc> — a gradlew under <repo> recording "$*" to
-// <repo>/gradlew.calls and exiting <rc>. <rc>=0 ok, 1 → forces the retry path.
-// BRACE-FREE bash ('{' in an Amber Text is interpolation); '$' written bare
-// lands literally in the file.
+// write_fake_gradlew <repo> <rc> — a gradlew under <repo> that records "$*" to
+// <repo>/gradlew.calls and exits <rc>. Invoked by absolute path ($base_dir/gradlew)
+// so it can't be a PATH mock. <rc>=0 ok, non-zero forces the caller's failure path.
+// BRACE-FREE bash ('{' in an Amber Text is interpolation); '$' lands literally.
 fun write_fake_gradlew(repo: Text, rc: Text): Null {
     trust dir_create(repo)
     let g = "#!/usr/bin/env bash\n"
@@ -92,50 +79,154 @@ fun write_fake_gradlew(repo: Text, rc: Text): Null {
 }
 
 // write_backend <repo> — the in-repo buildkit backend script defining
-// setup_build_backend (the function _build_setup_buildkit sources + calls). The
-// '{' after the function parens is escaped (\{) so Amber leaves it literal.
+// setup_build_backend (the function _build_setup_buildkit sources + calls by
+// absolute path). The '{' after the function parens is escaped (\{) so Amber
+// leaves it literal.
 fun write_backend(repo: Text): Null {
     trust dir_create("{repo}/buildImages/backends")
     let b = "setup_build_backend() \{ echo \"fake-buildkit ctx=$KUBE_CONTEXT name=$BUILDER_NAME\" >&2; }\n"
     trust file_write("{repo}/buildImages/backends/eksKubernetesBuildkit.sh", b)
 }
 
-// pin_log <tmp> — point LOG_FILE at a writable temp path so log_stream (used by
-// _build_gradle_invoke) and the docker/aws `>>"$LOG_FILE"` redirects land
-// somewhere harmless. Returns the path for later assertions.
-fun pin_log(tmp: Text): Text {
-    let lf = "{tmp}/migrate.log"
-    trust env_var_set("LOG_FILE", lf)
-    return lf
+// built_repo <world> <gradlew-rc> — lay a complete in-repo build tree under
+// <world>/repo: gradlew (recording, exits <gradlew-rc>), the buildImages/ dir, and
+// the buildkit backend script. Returns the repo path. This is the "repo with
+// everything in place" world the gradle + base-dir + buildkit-setup seams share,
+// the way deployed_world() seeds a fully-deployed stage for cleanup.
+fun built_repo(w: Text, gradlew_rc: Text): Text {
+    let repo = "{w}/repo"
+    trust dir_create("{repo}/buildImages")
+    write_fake_gradlew(repo, gradlew_rc)
+    write_backend(repo)
+    return repo
 }
 
-// =====================================================================
-// _build_builder_name (PURE)
-// =====================================================================
-
-test "_build_builder_name strips invalid chars" {
-    assert_eq(_build_builder_name("ctx.with/slashes:and:colons"), "builder-ctx-with-slashes-and-colons")
+// gradlew_calls <repo> — the recorded gradlew argument log (or "" if never run).
+fun gradlew_calls(repo: Text): Text {
+    return file_read("{repo}/gradlew.calls") failed { "" }
 }
 
-test "_build_builder_name leaves valid chars (alnum, _, -) intact" {
-    assert_eq(_build_builder_name("ctx-test"), "builder-ctx-test")
-    assert_eq(_build_builder_name("My_Ctx-1"), "builder-My_Ctx-1")
-}
-
-// =====================================================================
-// _build_resolve_base_dir — $PWD branch (no BASE_DIR seeded; LIB_DIR bogus)
-// =====================================================================
+// ---- build_images_or_skip: the public entrypoint gate (end to end) ----------
 //
-// build.ab's own state copy is empty here (no test seeds BASE_DIR through it),
-// so state_get("BASE_DIR","") == "" → LIB_DIR (bogus) skipped → $PWD branch.
-test "_build_resolve_base_dir resolves the cwd when it has gradlew + buildImages" {
-    let tmp = trust $mktemp -d$
-    trust dir_create("{tmp}/repo/buildImages")
-    write_fake_gradlew("{tmp}/repo", "0")
+// With the empty state every test presents (see the file header), the orchestrator
+// takes its BUILD_FROM_SOURCE!=Y no-op path: it returns 0 having issued NO aws /
+// docker / gradle work. This is the full e2e contract reachable through the
+// entrypoint — "ran without --build does nothing".
+
+test "build is skipped (returns 0, issues no aws/docker work) when --build was not requested" {
+    let w = built_world()
+    let rc = build_images_or_skip()
+    assert_eq(rc, 0)
+    assert(not mock_called(w, "aws", "get-login-password"))
+    assert(not mock_called(w, "docker", "buildx"))
+    assert(not mock_called(w, "docker", "login"))
+}
+
+// ---- _build_ecr_login: aws get-login-password | docker login (the auth seam) -
+
+test "ecr login authenticates docker against the bare ECR host, stripping the repo path" {
+    let w = built_world()
+    // Registry carries a /repo path → docker login must target the host only.
+    let rc = _build_ecr_login("111111111111.dkr.ecr.us-east-1.amazonaws.com/fake-ecr", "us-east-1")
+    assert_eq(rc, 0)
+    assert(mock_called(w, "aws", "get-login-password"))
+    assert(mock_called(w, "docker", "login"))
+    let dcalls = mock_calls(w, "docker")
+    assert(text_contains(dcalls, "111111111111.dkr.ecr.us-east-1.amazonaws.com"))
+    assert(not text_contains(dcalls, "amazonaws.com/fake-ecr"))
+}
+
+test "ecr login fails (returns 1, never reaches docker login) when aws get-login-password fails" {
+    let w = built_world()
+    mock_fail(w, "aws", "get-login-password", "1", "Unable to locate credentials")
+    let rc = _build_ecr_login("reg.example.com/repo", "us-east-1")
+    assert_eq(rc, 1)
+    // The pipe's first half failed → the second half (docker login) never ran.
+    assert(not mock_called(w, "docker", "login"))
+}
+
+// ---- _build_setup_buildkit: the Kubernetes-hosted buildx builder ------------
+
+test "buildkit reuses an already-healthy builder without rerunning the backend" {
+    let w = built_world()
+    // docker defaults to exit 0 → `buildx inspect --bootstrap` succeeds → reuse.
+    trust env_var_set("KUBE_CONTEXT", "ctx-test")
+    let rc = _build_setup_buildkit("builder-ctx-test", "{w}/repo")
+    assert_eq(rc, 0)
+    assert(mock_called(w, "docker", "inspect"))
+}
+
+test "buildkit runs the in-repo backend script when the builder is unhealthy" {
+    let w = built_world()
+    let repo = built_repo(w, "0")
+    // Force `docker buildx inspect` to fail → unhealthy → run setup_build_backend.
+    mock_respond_rc(w, "docker", "inspect", "1")
+    trust env_var_set("KUBE_CONTEXT", "ctx-test")
+    let rc = _build_setup_buildkit("builder-ctx-test", repo)
+    assert_eq(rc, 0)
+    assert(mock_called(w, "docker", "inspect"))
+}
+
+test "buildkit fails (returns 1) when the in-repo backend script is missing" {
+    let w = built_world()
+    mock_respond_rc(w, "docker", "inspect", "1")   // unhealthy → needs the backend…
+    trust dir_create("{w}/repo")                    // …but we never write it.
+    trust env_var_set("KUBE_CONTEXT", "ctx-test")
+    let rc = _build_setup_buildkit("builder-ctx-test", "{w}/repo")
+    assert_eq(rc, 1)
+}
+
+// ---- _build_gradle_invoke: gradle :buildImages:buildImagesToRegistry --------
+
+test "gradle invoke passes the registry/builder/version -P flags and -x test, no skip flag" {
+    let w = built_world()
+    let repo = built_repo(w, "0")
+
+    let rc = _build_gradle_invoke(repo, "111111111111.dkr.ecr.us-east-1.amazonaws.com/fake-ecr", "builder-ctx-test", "v1", "")
+    assert_eq(rc, 0)
+
+    let calls = gradlew_calls(repo)
+    assert(text_contains(calls, ":buildImages:buildImagesToRegistry"))
+    assert(text_contains(calls, "-PregistryEndpoint=111111111111.dkr.ecr.us-east-1.amazonaws.com/fake-ecr"))
+    assert(text_contains(calls, "-Pbuilder=builder-ctx-test"))
+    assert(text_contains(calls, "-PimageVersion=v1"))
+    assert(text_contains(calls, "-x test"))
+    // No skip flag supplied → must NOT appear.
+    assert(not text_contains(calls, "skipTestImages"))
+}
+
+test "gradle invoke adds -PskipTestImages=true when the skip flag is supplied" {
+    let w = built_world()
+    let repo = built_repo(w, "0")
+
+    let rc = _build_gradle_invoke(repo, "reg/x", "builder-z", "latest", "-PskipTestImages=true")
+    assert_eq(rc, 0)
+    assert(text_contains(gradlew_calls(repo), "-PskipTestImages=true"))
+}
+
+test "gradle invoke returns gradle's non-zero exit code on failure (single attempt, no retry)" {
+    let w = built_world()
+    let repo = built_repo(w, "1")   // gradle always fails
+
+    let rc = _build_gradle_invoke(repo, "reg/x", "builder-z", "latest", "")
+    assert(rc != 0)
+    // It WAS invoked once — the retry lives in build_images_or_skip, not here.
+    assert(text_contains(gradlew_calls(repo), "buildImagesToRegistry"))
+}
+
+// ---- _build_resolve_base_dir: repo-root resolution (the $PWD fallback) -------
+//
+// build.ab's own state copy is empty (no test can seed BASE_DIR through it), and
+// LIB_DIR is pointed at a bogus path → both earlier branches are skipped → the
+// $PWD branch, which accepts a cwd carrying gradlew + buildImages/.
+
+test "base-dir resolution falls back to the cwd when it has gradlew + buildImages" {
+    let w = built_world()
+    let repo = built_repo(w, "0")
     trust env_var_set("LIB_DIR", "/nonexistent/lib")
 
     let here = trust $pwd$
-    trust cd("{tmp}/repo")
+    trust cd(repo)
     let bd = _build_resolve_base_dir()
     trust cd(here)
 
@@ -144,142 +235,15 @@ test "_build_resolve_base_dir resolves the cwd when it has gradlew + buildImages
     assert(text_contains(bd, "repo"))
 }
 
-// =====================================================================
-// _build_ecr_login (aws get-login-password | docker login)
-// =====================================================================
-
-test "_build_ecr_login succeeds with stubbed aws + docker" {
-    let tmp = trust $mktemp -d$
-    let stub = "{tmp}/stub"
-    write_aws_stub(stub)
-    write_docker_stub(stub, "0")
-    pin_log(tmp)
-    prepend_path(stub)
-
-    // Registry carries a /repo path → login must target the bare host only.
-    let rc = _build_ecr_login("111111111111.dkr.ecr.us-east-1.amazonaws.com/fake-ecr", "us-east-1")
-    assert_eq(rc, 0)
-    // docker login recorded against the stripped domain (no /fake-ecr).
-    let calls = file_read("{stub}/docker.calls") failed { "" }
-    assert(text_contains(calls, "login"))
-    assert(text_contains(calls, "111111111111.dkr.ecr.us-east-1.amazonaws.com"))
-    assert(not text_contains(calls, "amazonaws.com/fake-ecr"))
-}
-
-test "_build_ecr_login fails when aws get-login-password fails" {
-    let tmp = trust $mktemp -d$
-    let stub = "{tmp}/stub"
-    // aws that fails on get-login-password.
-    trust dir_create(stub)
-    trust file_write("{stub}/aws", "#!/usr/bin/env bash\nexit 1\n")
-    trust file_chmod("{stub}/aws", "755")
-    write_docker_stub(stub, "0")
-    pin_log(tmp)
-    prepend_path(stub)
-
-    let rc = _build_ecr_login("reg.example.com/repo", "us-east-1")
-    assert_eq(rc, 1)
-}
-
-// =====================================================================
-// _build_setup_buildkit
-// =====================================================================
-
-test "_build_setup_buildkit reuses an already-healthy builder (inspect ok)" {
-    let tmp = trust $mktemp -d$
-    let stub = "{tmp}/stub"
-    write_aws_stub(stub)
-    write_docker_stub(stub, "0")   // buildx inspect → healthy
-    write_backend("{tmp}/repo")
-    pin_log(tmp)
-    trust env_var_set("KUBE_CONTEXT", "ctx-test")
-    prepend_path(stub)
-
-    let rc = _build_setup_buildkit("builder-ctx-test", "{tmp}/repo")
-    assert_eq(rc, 0)
-}
-
-test "_build_setup_buildkit runs the backend script when builder is unhealthy" {
-    let tmp = trust $mktemp -d$
-    let stub = "{tmp}/stub"
-    write_aws_stub(stub)
-    write_docker_stub(stub, "1")   // buildx inspect → unhealthy → run setup
-    write_backend("{tmp}/repo")
-    pin_log(tmp)
-    trust env_var_set("KUBE_CONTEXT", "ctx-test")
-    prepend_path(stub)
-
-    let rc = _build_setup_buildkit("builder-ctx-test", "{tmp}/repo")
-    assert_eq(rc, 0)
-}
-
-test "_build_setup_buildkit fails when the backend script is missing" {
-    let tmp = trust $mktemp -d$
-    let stub = "{tmp}/stub"
-    write_aws_stub(stub)
-    write_docker_stub(stub, "1")   // unhealthy → need the backend script…
-    trust dir_create("{tmp}/repo")  // …but we DON'T write it.
-    pin_log(tmp)
-    trust env_var_set("KUBE_CONTEXT", "ctx-test")
-    prepend_path(stub)
-
-    let rc = _build_setup_buildkit("builder-ctx-test", "{tmp}/repo")
-    assert_eq(rc, 1)
-}
-
-// =====================================================================
-// _build_gradle_invoke (streamed through log_stream → returns gradle's rc)
-// =====================================================================
-
-test "_build_gradle_invoke passes the right -P flags and -x test" {
-    let tmp = trust $mktemp -d$
-    write_fake_gradlew("{tmp}/repo", "0")
-    pin_log(tmp)
-
-    let rc = _build_gradle_invoke("{tmp}/repo", "111111111111.dkr.ecr.us-east-1.amazonaws.com/fake-ecr", "builder-ctx-test", "v1", "")
-    assert_eq(rc, 0)
-
-    let calls = file_read("{tmp}/repo/gradlew.calls") failed { "" }
-    assert(text_contains(calls, "-PimageVersion=v1"))
-    assert(text_contains(calls, "-PregistryEndpoint=111111111111.dkr.ecr.us-east-1.amazonaws.com/fake-ecr"))
-    assert(text_contains(calls, "-Pbuilder=builder-ctx-test"))
-    assert(text_contains(calls, ":buildImages:buildImagesToRegistry"))
-    assert(text_contains(calls, "-x test"))
-    // No skip flag passed → must NOT appear.
-    assert(not text_contains(calls, "skipTestImages"))
-}
-
-test "_build_gradle_invoke adds -PskipTestImages=true when the flag is supplied" {
-    let tmp = trust $mktemp -d$
-    write_fake_gradlew("{tmp}/repo", "0")
-    pin_log(tmp)
-
-    let rc = _build_gradle_invoke("{tmp}/repo", "reg/x", "builder-z", "latest", "-PskipTestImages=true")
-    assert_eq(rc, 0)
-    let calls = file_read("{tmp}/repo/gradlew.calls") failed { "" }
-    assert(text_contains(calls, "-PskipTestImages=true"))
-}
-
-test "_build_gradle_invoke returns gradle's non-zero exit code on failure" {
-    let tmp = trust $mktemp -d$
-    write_fake_gradlew("{tmp}/repo", "1")   // gradle always fails
-    pin_log(tmp)
-
-    let rc = _build_gradle_invoke("{tmp}/repo", "reg/x", "builder-z", "latest", "")
-    assert(rc != 0)
-    // It WAS invoked once (the caller's retry logic lives in build_images_or_skip).
-    let calls = file_read("{tmp}/repo/gradlew.calls") failed { "" }
-    assert(text_contains(calls, "buildImagesToRegistry"))
-}
-
-// =====================================================================
-// build_images_or_skip — no-op gate (empty state → returns 0)
-// =====================================================================
+// ---- _build_builder_name: the buildx builder-name sanitizer (PURE unit) ------
 //
-// build.ab's own state copy is empty (nothing seeds BUILD_FROM_SOURCE through
-// it), so state_get("BUILD_FROM_SOURCE","N") == "N" → immediate 0, with no AWS /
-// docker / gradle work. Mirrors the bats "no-op when BUILD_FROM_SOURCE unset".
-test "build_images_or_skip is a no-op (returns 0) when BUILD_FROM_SOURCE is not Y" {
-    let rc = build_images_or_skip()
-    assert_eq(rc, 0)
+// Pure string transform — no world/mock needed; assert on the return directly.
+
+test "builder name sanitizes characters docker buildx rejects" {
+    assert_eq(_build_builder_name("ctx.with/slashes:and:colons"), "builder-ctx-with-slashes-and-colons")
+}
+
+test "builder name leaves alphanumerics, underscores and dashes intact" {
+    assert_eq(_build_builder_name("ctx-test"), "builder-ctx-test")
+    assert_eq(_build_builder_name("My_Ctx-1"), "builder-My_Ctx-1")
 }

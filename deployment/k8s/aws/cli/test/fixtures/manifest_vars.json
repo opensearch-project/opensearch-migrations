@@ -1,0 +1,1 @@
+{"schemaVersion":1,"branding":{"appName":"${MANIFEST_TEST_APP}"},"mcpServers":{"aws":{"command":"uvx","args":["aws-mcp","--region","${MANIFEST_TEST_REGION}"],"agents":["claude"],"requires":["AWS_PROFILE"],"permissionsAllow":["s3:Get*"]}}}

@@ -1,145 +1,147 @@
-// test_version.ab — coverage for src/version.ab, mirroring test_version.bats.
+// test_version.ab — coverage for src/version.ab (CLI + MA version resolution).
 //
-// No network: `curl` is stubbed via a PATH-shadow temp dir (an executable shim
-// written with file_write+file_chmod, then prepended to PATH with
-// env_var_set), exactly as AMBER_IDIOMS prescribes. The shim ignores its args
-// and prints canned GitHub-releases JSON, so fetch_latest_tag() exercises the
-// real regex_capture parse + ${tag#v} strip without touching the internet.
+// e2e-focused style (see test/TEST_GUIDE.md): the network path is the heart of
+// this module, so we drive the real ma_default_version / upgrade_notice_for_cli
+// against a FAKED `curl` from the shared mock fleet (support/mock.ab) — no
+// network — and assert on what the CLI DID: that it issued the GitHub-releases
+// curl, and that the parsed value flowed back. The GitHub JSON lives in
+// test/fixtures/*.json (braces would interpolate inside an Amber Text), loaded
+// into the curl mock via mock_respond.
+//
+// The pure value/branch logic (CLI_VERSION default vs env override, the
+// resolution-order short-circuits that never touch the network, the public
+// MA_RELEASES_API constant) stays as direct return-value asserts — no world or
+// mock needed.
+//
+// Env hygiene: CLI_VERSION / MA_VERSION env vars LEAK across test blocks (shared
+// process env), so every block that depends on one being unset/pinned sets it
+// itself up front and never relies on another block's state.
 
 import { assert, assert_eq } from "std/test"
-import { env_var_get, env_var_set, env_var_unset } from "std/env"
-import { file_write, file_chmod, dir_create } from "std/fs"
+import { env_var_set, env_var_unset } from "std/env"
+import { file_read } from "std/fs"
+import { fresh_world } from "./support/world.ab"
+import { mock_install, mock_respond, mock_fail, mock_called } from "./support/mock.ab"
 import {
     cli_version, ma_default_version, upgrade_notice_for_cli, version_check,
     CLI_VERSION_DEFAULT, MA_RELEASES_API
 } from "../src/version.ab"
 
-// ---- PATH-shadow curl stub (helpers ABOVE the test blocks: define-before-use)
+// ---- file-local helpers (ABOVE the tests: define-before-use across imports) -
 
-// stub_dir <slot> — a temp dir we own, holding ONE fake `curl`. env_var_get
-// (NOT a raw `${TMPDIR:-/tmp}` in $...$ — the `{` would be eaten by Amber
-// interp). The <slot> suffix keeps each stub flavor in its OWN dir: `amber test`
-// runs test blocks in PARALLEL, so a single shared dir would let the failing
-// stub clobber the success stub's `curl` mid-run and flake the resolve tests.
-fun stub_dir(slot: Text): Text {
-    let base = env_var_get("TMPDIR") failed { "/tmp" }
-    if base == "" { base = "/tmp" }
-    return "{base}/ma_version_test_stub_{slot}"
+// gh_world <tag_fixture> — a fresh world with `curl` faked to answer the
+// GitHub-releases GET with a canned release JSON (read from a fixture so its
+// braces aren't interpolated). version.ab calls `curl -fsSL --max-time 3 <api>`;
+// the mock keys on `default` so it answers whatever URL the CLI hits. Clears the
+// MA_VERSION / CLI_VERSION env so the network branch is actually reached.
+fun gh_world(tag_fixture: Text): Text {
+    let w = fresh_world()
+    trust env_var_unset("MA_VERSION")
+    trust env_var_unset("CLI_VERSION")
+    mock_install(["curl"])
+    let json = trust file_read("test/fixtures/{tag_fixture}")
+    mock_respond(w, "curl", "default", json)
+    return w
 }
 
-// install_curl_stub <slot> <json> — write an executable `curl` shim that prints
-// <json> regardless of args into the <slot> dir, and prepend that dir to PATH
-// so version.ab's curl call (and is_command("curl")) resolve to it.
-fun install_curl_stub(slot: Text, json: Text): Null {
-    let dir = stub_dir(slot)
-    // dir_create + writes are failable; trust them (test fixtures, not the SUT).
-    trust dir_create(dir)
-    let path = "{dir}/curl"
-    // The shim ignores $@ (the -fsSL --max-time 3 <url> flags) and just emits
-    // the canned body on stdout. exit 0 so `trust $curl …$` sees success.
-    let script = "#!/usr/bin/env bash\ncat <<'STUB_EOF'\n{json}\nSTUB_EOF\nexit 0\n"
-    trust file_write(path, script)
-    trust file_chmod(path, "755")
-    let old = env_var_get("PATH") failed { "" }
-    trust env_var_set("PATH", "{dir}:{old}")
+// gh_world_offline — a fresh world with `curl` faked to FAIL (non-zero, no body),
+// simulating a 404/-f or transport error: version.ab must treat it as "" and
+// stay silent / non-fatal. is_command("curl") still resolves (the shim is on
+// PATH), so the real fetch_latest_tag curl path runs and collapses to empty.
+fun gh_world_offline(): Text {
+    let w = fresh_world()
+    trust env_var_unset("MA_VERSION")
+    trust env_var_unset("CLI_VERSION")
+    mock_install(["curl"])
+    mock_fail(w, "curl", "default", "22", "")
+    return w
 }
 
-// install_failing_curl_stub <slot> — a `curl` shim that exits non-zero with no
-// output, simulating a 404/-f failure or a network error.
-fun install_failing_curl_stub(slot: Text): Null {
-    let dir = stub_dir(slot)
-    trust dir_create(dir)
-    let path = "{dir}/curl"
-    let script = "#!/usr/bin/env bash\nexit 22\n"
-    trust file_write(path, script)
-    trust file_chmod(path, "755")
-    let old = env_var_get("PATH") failed { "" }
-    trust env_var_set("PATH", "{dir}:{old}")
-}
+// ---- cli_version: env override over baked-in default (pure) ----------------
 
-// Canned GitHub releases payload (same shape the real API returns). The leading
-// brace is `\{` — a bare `{` at string start is parsed as interpolation-open by
-// Amber and would swallow the rest of the literal; the closing `}` is literal
-// as-is (escaping it would leave a stray backslash).
-fun canned_release_json(tag: Text): Text {
-    return "\{\n  \"url\": \"https://api.github.com/x\",\n  \"tag_name\": \"{tag}\",\n  \"name\": \"Release {tag}\"\n}"
-}
-
-// ---- cli_version -----------------------------------------------------------
-
-test "cli_version: default when CLI_VERSION unset" {
+test "cli_version returns the baked-in default when CLI_VERSION is unset" {
     env_var_unset("CLI_VERSION")
     assert_eq(cli_version(), CLI_VERSION_DEFAULT)
     assert_eq(cli_version(), "0.0.0-dev")
 }
 
-test "cli_version: env CLI_VERSION wins" {
+test "cli_version lets the CLI_VERSION env override win over the default" {
     env_var_set("CLI_VERSION", "1.2.3")
     assert_eq(cli_version(), "1.2.3")
     env_var_unset("CLI_VERSION")
 }
 
 // ---- ma_default_version: resolution order ----------------------------------
-
-test "ma_default_version: MA_VERSION env override wins" {
-    env_var_set("MA_VERSION", "9.9.9")
-    // cached + network would lose to the explicit env override.
-    assert_eq(ma_default_version("3.3.3"), "9.9.9")
-    env_var_unset("MA_VERSION")
-}
-
-test "ma_default_version: cached param used when no env" {
-    env_var_unset("MA_VERSION")
-    // cached wins over the network (resumed deploy stays pinned).
-    assert_eq(ma_default_version("2.7.0"), "2.7.0")
-}
-
-test "ma_default_version: resolves from releases API, strips leading v" {
-    env_var_unset("MA_VERSION")
-    install_curl_stub("resolve_v", canned_release_json("v2.1.0"))
-    // No env, no cache → network. "v2.1.0" tag → bare "2.1.0".
-    assert_eq(ma_default_version(""), "2.1.0")
-}
-
-test "ma_default_version: tag without v prefix passes through" {
-    env_var_unset("MA_VERSION")
-    install_curl_stub("resolve_nov", canned_release_json("3.0.5"))
-    assert_eq(ma_default_version(""), "3.0.5")
-}
-
-// ---- upgrade_notice_for_cli / version_check --------------------------------
 //
-// These emit chrome to STDERR and return Null; the contract under test is that
-// they NEVER fail the process on a network error (silent best-effort) and never
-// write to stdout. We can't capture stderr from inside an Amber test block, so
-// we assert they run to completion (no abort) under both success and failure
-// stubs.
+// env override > caller-supplied cache > releases API > fail loudly. The first
+// two short-circuit BEFORE any network, so they need no curl; the API branch is
+// driven through the faked curl and asserts the CLI actually hit the network.
 
-test "upgrade_notice_for_cli: silent no-op on network failure" {
-    env_var_unset("CLI_VERSION")
-    install_failing_curl_stub("notice_fail")
-    // Empty body → early return, no chrome, no abort.
-    upgrade_notice_for_cli()
-    assert(true)
+test "ma_default_version prefers the MA_VERSION env override over cache and network" {
+    let w = gh_world("gh_release_v210.json")
+    env_var_set("MA_VERSION", "9.9.9")
+    // Even with a cache hint AND a reachable API, the explicit env override wins
+    // and the network is never touched.
+    assert_eq(ma_default_version("3.3.3"), "9.9.9")
+    assert(not mock_called(w, "curl", "tag_name"))
+    env_var_unset("MA_VERSION")
 }
 
-test "upgrade_notice_for_cli: completes when newer version published" {
+test "ma_default_version uses the cached value when no env, without hitting the network" {
+    let w = gh_world("gh_release_v210.json")
+    // No env override → the caller-supplied cache wins (a resumed deploy stays
+    // pinned) and short-circuits before the releases API.
+    assert_eq(ma_default_version("2.7.0"), "2.7.0")
+    assert(not mock_called(w, "curl", "github.com"))
+}
+
+test "ma_default_version resolves from the releases API and strips a leading v" {
+    let w = gh_world("gh_release_v210.json")
+    // No env, no cache → it GETs the releases API and parses tag_name.
+    assert_eq(ma_default_version(""), "2.1.0")
+    // It really issued the GitHub-API curl (e2e: assert on what the CLI did).
+    assert(mock_called(w, "curl", "opensearch-migrations"))
+}
+
+test "ma_default_version passes a tag through unchanged when it has no v prefix" {
+    let w = gh_world("gh_release_305.json")
+    assert_eq(ma_default_version(""), "3.0.5")
+    assert(mock_called(w, "curl", "github.com"))
+}
+
+// ---- upgrade_notice_for_cli / version_check: silent best-effort chrome ------
+//
+// These emit chrome to STDERR and return Null. The contract: NEVER fail the
+// process on a network error (silent best-effort), and only run when curl is
+// reachable. We can't capture stderr inside a test block, so we assert they run
+// to completion (no abort) and — on the success path — that they issued the curl.
+
+test "upgrade_notice_for_cli is a silent no-op when the network is unreachable" {
+    let w = gh_world_offline()
+    env_var_unset("CLI_VERSION")
+    // Empty body → early return: no chrome, no abort. It still attempted the GET.
+    upgrade_notice_for_cli()
+    assert(mock_called(w, "curl", "migrate-cli"))
+}
+
+test "upgrade_notice_for_cli completes after issuing the GET when a newer version exists" {
+    let w = gh_world("gh_release_v210.json")
     env_var_set("CLI_VERSION", "0.0.0-dev")
-    install_curl_stub("notice_new", canned_release_json("v5.0.0"))
-    // latest (5.0.0) != current (0.0.0-dev) → emits the dim notice, returns.
+    // latest (2.1.0) != current (0.0.0-dev) → it emits the dim notice and returns
+    // normally; the key contract is it issued the CLI-releases GET and never aborts.
     upgrade_notice_for_cli()
-    assert(true)
+    assert(mock_called(w, "curl", "migrate-cli"))
     env_var_unset("CLI_VERSION")
 }
 
-test "version_check: back-compat alias runs" {
-    install_failing_curl_stub("vcheck_fail")
+test "version_check back-compat alias runs without aborting on a network failure" {
+    let w = gh_world_offline()
     version_check()
-    assert(true)
+    assert(mock_called(w, "curl", "github.com"))
 }
 
-// ---- MA_RELEASES_API constant ----------------------------------------------
+// ---- MA_RELEASES_API constant (pure) ---------------------------------------
 
-test "MA_RELEASES_API points at opensearch-migrations latest" {
+test "MA_RELEASES_API points at the opensearch-migrations latest-release endpoint" {
     assert_eq(MA_RELEASES_API, "https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest")
 }

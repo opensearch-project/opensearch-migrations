@@ -1,78 +1,98 @@
-// test_std.ab — coverage for src/std.ab, mirroring test_std.bats.
+// test_std.ab — unit coverage for src/std.ab.
+//
+// std.ab is the CLI's pure-utility layer: trim/quote/affix predicates, csv split
+// + join, regex capture/match, line counting, array membership, line dedupe,
+// path join, OS branch, command/var probes, --flag parsing, and a shell-retry.
+// Everything here is a pure function (returns a value, no external fleet, no
+// persisted state), so per test/TEST_GUIDE.md this is the legitimate UNIT layer:
+// direct return-value asserts, no fresh_world()/mock fleet needed. Tests are
+// named as behaviors and grouped by the section of std.ab they exercise.
 
 import { assert, assert_eq } from "std/test"
 import {
     trim, trim_quotes, starts_with, ends_with, contains,
     split_csv, join_by, regex_capture, regex_match, count_lines_var,
     array_contains, dedupe, path_join, is_macos, is_linux,
-    optional_cmd, parse_flag_value, parse_flag_rest
+    optional_cmd, require_var, parse_flag_value, parse_flag_rest, retry_cmd
 } from "../src/std.ab"
 import { env_var_set, env_var_unset } from "std/env"
-import { require_var } from "../src/std.ab"
 
-// ---- strings ----
+// ---- strings: trim + quote stripping ---------------------------------------
 
-test "trim strips leading + trailing whitespace" {
+test "trim strips surrounding whitespace and is identity on clean / empty input" {
     assert_eq(trim("  hello world  "), "hello world")
-    assert_eq(trim(""), "")
+    assert_eq(trim("\t\n spaced \r\n"), "spaced")
     assert_eq(trim("no-ws"), "no-ws")
+    assert_eq(trim(""), "")
 }
 
-test "trim_quotes strips matched single OR double quotes" {
+test "trim_quotes removes one matched quote pair but leaves asymmetric quotes intact" {
     assert_eq(trim_quotes("\"hello\""), "hello")
     assert_eq(trim_quotes("'hello'"), "hello")
-    // asymmetric → unchanged
+    // only one side quoted → untouched (don't half-unquote)
     assert_eq(trim_quotes("\"only-leading"), "\"only-leading")
     assert_eq(trim_quotes("only-trailing\""), "only-trailing\"")
+    // mismatched pair → untouched
+    assert_eq(trim_quotes("\"mixed'"), "\"mixed'")
 }
 
-test "starts_with / ends_with / contains" {
+// ---- strings: affix + substring predicates ---------------------------------
+
+test "starts_with / ends_with / contains accept hits and reject misses" {
     assert(starts_with("abc", "abcdef"))
     assert(not starts_with("xyz", "abcdef"))
     assert(ends_with("def", "abcdef"))
     assert(not ends_with("xyz", "abcdef"))
     assert(contains("cd", "abcdef"))
     assert(not contains("zz", "abcdef"))
+    // the empty needle is contained in anything (bash std.sh contract)
+    assert(contains("", "abcdef"))
+    // a prefix/suffix longer than the string is never a match
+    assert(not starts_with("abcdefg", "abc"))
 }
 
-test "split_csv splits on commas" {
-    let parts = split_csv("a,b,c")
-    assert_eq(len parts, 3)
-    assert_eq(parts[0], "a")
-    assert_eq(parts[2], "c")
+// ---- strings: line counting -------------------------------------------------
+
+test "count_lines_var follows the bash line-count contract" {
+    assert_eq(count_lines_var("a\nb\nc"), 3)
+    assert_eq(count_lines_var("a\nb\n"), 2)        // trailing newline adds no phantom line
+    assert_eq(count_lines_var("one-line-no-newline"), 1)
+    assert_eq(count_lines_var(""), 0)
 }
 
-test "join_by joins with separator" {
-    assert_eq(join_by(",", ["a", "b", "c"]), "a,b,c")
-    assert_eq(join_by(" | ", ["one", "two", "three"]), "one | two | three")
-    assert_eq(join_by(",", ["single"]), "single")
-}
+// ---- regex: capture group + boolean match ----------------------------------
 
-test "regex_capture extracts a group" {
+test "regex_capture returns the requested capture group of the first match" {
     assert_eq(regex_capture("name: my-job, kind: Job", "name: ([A-Za-z0-9_-]+),", 1), "my-job")
     assert_eq(regex_capture("abc=123", "([a-z]+)=([0-9]+)", 2), "123")
 }
 
-test "regex_match is a boolean" {
+test "regex_match is a boolean over the whole string" {
     assert(regex_match("abc=123", "[0-9]+"))
     assert(not regex_match("no digits", "[0-9]+"))
 }
 
-test "count_lines_var counts lines" {
-    assert_eq(count_lines_var("a\nb\nc"), 3)
-    assert_eq(count_lines_var(""), 0)
-    assert_eq(count_lines_var("a\nb\n"), 2)
-    assert_eq(count_lines_var("one-line-no-newline"), 1)
+// ---- collections: csv split + join round-trip ------------------------------
+
+test "split_csv and join_by are inverses over comma-delimited lists" {
+    let parts = split_csv("a,b,c")
+    assert_eq(len parts, 3)
+    assert_eq(parts[0], "a")
+    assert_eq(parts[2], "c")
+    assert_eq(join_by(",", parts), "a,b,c")
+    // join_by handles multi-char separators and singletons
+    assert_eq(join_by(" | ", ["one", "two", "three"]), "one | two | three")
+    assert_eq(join_by(",", ["single"]), "single")
 }
 
-// ---- collections ----
+// ---- collections: membership + dedupe --------------------------------------
 
-test "array_contains finds / rejects" {
+test "array_contains finds present members and rejects absent ones" {
     assert(array_contains("beta", ["alpha", "beta", "gamma"]))
     assert(not array_contains("delta", ["alpha", "beta", "gamma"]))
 }
 
-test "dedupe drops duplicate lines, keeps order" {
+test "dedupe keeps the first occurrence of each line in order" {
     let out = dedupe("a\nb\na\nc\nb")
     assert_eq(len out, 3)
     assert_eq(out[0], "a")
@@ -80,56 +100,67 @@ test "dedupe drops duplicate lines, keeps order" {
     assert_eq(out[2], "c")
 }
 
-// ---- path ----
+// ---- path -------------------------------------------------------------------
 
-test "path_join collapses slashes" {
+test "path_join joins components with a single slash regardless of edge slashes" {
     assert_eq(path_join(["/var", "log", "migrate.log"]), "/var/log/migrate.log")
-    assert_eq(path_join(["/foo/", "/bar"]), "/foo/bar")
+    assert_eq(path_join(["/foo/", "/bar"]), "/foo/bar")     // collapses the doubled slash
     assert_eq(path_join(["foo", "bar", "baz"]), "foo/bar/baz")
 }
 
-// ---- environment ----
+// ---- environment probes -----------------------------------------------------
 
-test "is_macos / is_linux mutually exclusive" {
+test "is_macos and is_linux are mutually exclusive and cover the running host" {
     assert(is_macos() or is_linux())
     assert(not (is_macos() and is_linux()))
 }
 
-test "optional_cmd: present vs missing" {
+test "optional_cmd detects a present command and a missing one" {
     assert(optional_cmd("bash"))
     assert(not optional_cmd("this-command-definitely-does-not-exist-9876"))
 }
 
-test "require_var: set+nonempty vs empty/unset" {
+test "require_var is true only for a set, non-empty variable" {
     env_var_set("STD_TEST_VAR", "ok")
     assert(require_var("STD_TEST_VAR"))
+    env_var_set("STD_TEST_VAR", "")
+    assert(not require_var("STD_TEST_VAR"))     // set-but-empty is not satisfied
     env_var_unset("STD_TEST_VAR")
-    assert(not require_var("STD_TEST_VAR"))
+    assert(not require_var("STD_TEST_VAR"))     // unset is not satisfied
 }
 
-// ---- flag parsing ----
+// ---- flag parsing -----------------------------------------------------------
 
-test "parse_flag_value: space form" {
-    let v = parse_flag_value("--foo", ["--non-interactive", "--foo", "myval", "--bar", "x"])
-    assert_eq(v, "myval")
+test "parse_flag_value reads space form, equals form, and absent flags" {
+    // space form: --foo myval
+    assert_eq(parse_flag_value("--foo", ["--non-interactive", "--foo", "myval", "--bar", "x"]), "myval")
+    // equals form: --foo=combined
+    assert_eq(parse_flag_value("--foo", ["--foo=combined", "extra"]), "combined")
+    // absent → empty string
+    assert_eq(parse_flag_value("--missing", ["a", "b", "c"]), "")
 }
-test "parse_flag_value: equals form" {
-    let v = parse_flag_value("--foo", ["--foo=combined", "extra"])
-    assert_eq(v, "combined")
-}
-test "parse_flag_value: absent → empty" {
-    let v = parse_flag_value("--missing", ["a", "b", "c"])
-    assert_eq(v, "")
-}
-test "parse_flag_rest: removes flag+value (space form)" {
-    let rest = parse_flag_rest("--foo", ["--non-interactive", "--foo", "myval", "--bar", "x"])
+
+test "parse_flag_rest removes the flag and its value, leaving the remaining argv" {
+    // space form consumes both the flag and the following value token
+    const rest = parse_flag_rest("--foo", ["--non-interactive", "--foo", "myval", "--bar", "x"])
     assert_eq(len rest, 3)
     assert_eq(rest[0], "--non-interactive")
     assert_eq(rest[1], "--bar")
     assert_eq(rest[2], "x")
+    // equals form consumes only the single token
+    const rest2 = parse_flag_rest("--foo", ["--foo=combined", "extra"])
+    assert_eq(len rest2, 1)
+    assert_eq(rest2[0], "extra")
 }
-test "parse_flag_rest: equals form leaves one extra" {
-    let rest = parse_flag_rest("--foo", ["--foo=combined", "extra"])
-    assert_eq(len rest, 1)
-    assert_eq(rest[0], "extra")
+
+// ---- retry ------------------------------------------------------------------
+
+test "retry_cmd returns 0 immediately when the command succeeds" {
+    assert_eq(retry_cmd(3, 0, "true"), 0)
+}
+
+test "retry_cmd returns the last non-zero exit code after exhausting attempts" {
+    // run the failing command in a subshell so its non-zero exit becomes a status
+    // rather than terminating the test runner itself
+    assert_eq(retry_cmd(2, 0, "sh -c 'exit 7'"), 7)
 }
