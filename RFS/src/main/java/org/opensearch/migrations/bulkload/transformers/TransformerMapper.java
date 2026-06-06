@@ -8,8 +8,6 @@ import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.VersionStrictness;
 import org.opensearch.migrations.transformation.TransformationRule;
 import org.opensearch.migrations.transformation.entity.Index;
-import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
-import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemovalWithMergedSupport;
 import org.opensearch.migrations.transformation.rules.TemplateMatchClausePattern;
 
 import lombok.AllArgsConstructor;
@@ -23,7 +21,6 @@ public class TransformerMapper {
 
     public Transformer getTransformer(
         int awarenessAttributes,
-        MetadataTransformerParams metadataTransformerParams,
         boolean allowLooseMatches
     ) {
         if (allowLooseMatches) {
@@ -35,7 +32,7 @@ public class TransformerMapper {
         }
 
         validateTargetVersion(allowLooseMatches);
-        var rules = resolveRules(metadataTransformerParams, allowLooseMatches);
+        var rules = resolveRules(allowLooseMatches);
         var transformer = new CanonicalTransformer(awarenessAttributes, rules, rules);
 
         log.atInfo()
@@ -60,37 +57,31 @@ public class TransformerMapper {
         }
     }
 
-    private List<TransformationRule<Index>> resolveRules(MetadataTransformerParams params, boolean allowLooseMatches) {
-        // ES 1.x, 2.x (strict) / below ES 5.x (loose) — multi-type with merged support
-        if (allowLooseMatches
-            ? UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion)
-            : VersionMatchers.isES_2_X.or(VersionMatchers.isES_1_X).test(sourceVersion)) {
-            return List.of(
-                new IndexMappingTypeRemovalWithMergedSupport(params.getMultiTypeResolutionBehavior()),
-                new TemplateMatchClausePattern()
-            );
+    private List<TransformationRule<Index>> resolveRules(boolean allowLooseMatches) {
+        // Multi-type mapping resolution (ES <7 multiple types per index) is now handled by the
+        // auto-applied TypeMappingsSanitizationTransformer custom transform, which unions types
+        // by default and runs ahead of these version rules. The legacy IndexMappingTypeRemoval /
+        // IndexMappingTypeRemovalWithMergedSupport rules are no longer wired into the metadata
+        // path (see MetadataTransformationRegistry + MigratorEvaluatorBase.selectTransformer).
+
+        // ES 1.x-5.4 (strict ES 1.x/2.x; loose below ES 5.x; plus ES 5.0-5.4) — template clause shape fix
+        if ((allowLooseMatches
+                ? UnboundVersionMatchers.isBelowES_5_X.test(sourceVersion)
+                : VersionMatchers.isES_2_X.or(VersionMatchers.isES_1_X).test(sourceVersion))
+            || VersionMatchers.equalOrBetween_ES_5_0_and_5_4.test(sourceVersion)) {
+            return List.of(new TemplateMatchClausePattern());
         }
-        // ES 5.0-5.4 — multi-type with merged support
-        if (VersionMatchers.equalOrBetween_ES_5_0_and_5_4.test(sourceVersion)) {
-            return List.of(
-                new IndexMappingTypeRemovalWithMergedSupport(params.getMultiTypeResolutionBehavior()),
-                new TemplateMatchClausePattern()
-            );
-        }
-        // ES 5.5+ — single-type removal + template match clause
+        // ES 5.5+ — template match clause shape fix
         if (VersionMatchers.equalOrGreaterThanES_5_5.test(sourceVersion)) {
-            return List.of(
-                new IndexMappingTypeRemoval(params.getMultiTypeResolutionBehavior()),
-                new TemplateMatchClausePattern()
-            );
+            return List.of(new TemplateMatchClausePattern());
         }
-        // ES 6.x — single-type removal
+        // ES 6.x — type union handled by the custom transform; nothing version-specific here
         if (VersionMatchers.isES_6_X.test(sourceVersion)) {
-            return List.of(new IndexMappingTypeRemoval(params.getMultiTypeResolutionBehavior()));
+            return List.of();
         }
-        // ES 7.0-7.8 — single-type removal (strict only; loose falls through to empty)
+        // ES 7.0-7.8 — type union handled by the custom transform (strict only; loose falls through)
         if (!allowLooseMatches && VersionMatchers.equalOrBetween_ES_7_0_and_7_8.test(sourceVersion)) {
-            return List.of(new IndexMappingTypeRemoval(params.getMultiTypeResolutionBehavior()));
+            return List.of();
         }
         // ES 7.9+, 8.x, 9.x, OS — no type removal needed
         if (allowLooseMatches
