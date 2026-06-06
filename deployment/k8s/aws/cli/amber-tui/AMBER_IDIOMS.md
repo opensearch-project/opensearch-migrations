@@ -68,6 +68,18 @@ Authoritative for this port. The published docs LAG the alpha — every rule her
 - Mirror the original bats test names/intent so the behavior contract is preserved.
 - Every module ships `test/test_<module>.ab`. CI: `amber test test/`.
 
+## HARD-WON GOTCHAS (each cost a debugging cycle — heed them)
+1. **Reserved keywords as identifiers fail silently-ish.** Never name a var/param `status`, `failed`, `lines`, `pid`, `len`, `clear`, `is`, `as`, `in`, `not`, `and`, `or`. A param `status: Text` parses as the `status` keyword (Int) → baffling `Cannot assign 'Int' to array of 'Text'`. Use `st`, `n_failed`, etc.
+2. **Define-before-use ACROSS import boundaries.** A private (non-`pub`) helper must be defined ABOVE the `pub` fn that calls it, else `Function 'x' does not exist` — but ONLY when the module is imported (works via `amber run` on the file itself). Amber tree-shakes per imported symbol and keeps only deps textually preceding the entry. Put ALL private helpers at the top. Same applies to helpers used by `test` blocks in a test file.
+3. **`import { x as y }` aliasing is BROKEN.** Aliased fns return empty/no-op. Import under the real name; rename your own symbol to avoid the clash. You also CANNOT redeclare an imported name (`import {trim}` + `pub fun trim` → "Cannot redeclare"). Either re-export (`pub fun my_trim(s){return trim(s)}`) or implement natively under your own name and don't import the std one.
+4. **Empty-array seed + first-append pattern.** `let xs = [""]` (can't do `let xs = []`). Track logical `__count` separately. First append MUST reuse the seed slot: `if count < len xs { xs[count]=v } else { xs += [v] }`. Otherwise physical length ≠ count and `0..count` loops read the stale seed.
+5. **`sort(ref arr, desc)` not `sorted(arr, desc)`** — `sorted` returns `[Generic]` you can't `==` against Text. `sort` mutates in place, preserves `[Text]`.
+6. **No raw `${VAR}` in `$...$`** — `{` is Amber interpolation. Use `env_var_get("VAR") failed { "default" }`.
+7. **`silent` eats fd 2** (`cmd 2>/dev/null`). Don't use it with `test -t 2` / anything fd-2-sensitive — use bare `trust $test -t 2$` then read `status()`.
+8. **Splitting a Text on newlines:** `split_lines(s)` from std/text (NOT the `lines` builtin, which only works on a command). `split_lines` gives the bash count_lines contract: "a\nb\nc"→3, "a\nb\n"→2, ""→0, "x"→1.
+9. **Building sed/regex backrefs:** construct `let backref = "\\{n as Text}"` as a SEPARATE Text, then interpolate `{backref}` — inline `"\\{n}"` in a `$...$` mis-lowers the `\\` + var ref.
+10. **`status` builtin: call as `status()`** to avoid the deprecation warning.
+
 ## Project layout
 ```
 amber-tui/

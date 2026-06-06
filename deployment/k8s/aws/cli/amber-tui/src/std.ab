@@ -1,0 +1,293 @@
+// std.ab — pure utilities. Port of bash lib/std.sh.
+//
+// The bash file existed to replace ad-hoc patterns scattered across the CLI and
+// to stay bash-3.2-safe (no declare -A, no mapfile, no ${var,,}). In Amber many
+// of these are ONE-LINE wrappers over std/text + std/array — the value of the
+// module is now mostly a stable, tested, CLI-flavored API surface. Where Amber's
+// stdlib already nails it (trim/split/join/starts_with/ends_with/contains) we
+// re-export thin wrappers so call sites read the same as the bash ones; where it
+// doesn't (regex capture groups, path join, flag parse, retry) we implement.
+//
+// Everything is pure (returns a value) and unit-tested in test_std.ab.
+
+// NB: NO `import { x as y }` aliasing — it's broken in 0.6 (aliased fns return
+// empty). And you can't redeclare an imported name in the same scope. So this
+// module imports ONLY the std helpers whose names it does NOT itself export
+// (split, join, match_regex, …) and re-implements trim/starts_with/ends_with/
+// contains/array_contains natively, so the public names are ours to own and
+// consumers get one consistent API + the bash std.sh arg order.
+import { printf, env_var_get, env_var_test, is_command } from "std/env"
+import {
+    split, join, match_regex, replace_regex, slice, lowercase, split_lines
+} from "std/text"
+
+// ---- tiny shared helper ----------------------------------------------------
+
+// index_of — first index of a single-char needle, or -1.
+fun index_of(s: Text, needle: Text): Int {
+    let total = len s
+    for i in 0..total {
+        if slice(s, i, 1) == needle { return i }
+    }
+    return -1
+}
+
+// ---- strings ---------------------------------------------------------------
+
+// is_ws — single-char whitespace test (space, tab, newline, CR).
+fun is_ws(c: Text): Bool {
+    return c == " " or c == "\t" or c == "\n" or c == "\r"
+}
+
+// trim — strip leading + trailing whitespace (native; no std dep to own the name).
+pub fun trim(s: Text): Text {
+    let n = len s
+    if n == 0 { return "" }
+    let a = 0
+    while a < n {
+        if not is_ws(slice(s, a, 1)) { break }
+        a += 1
+    }
+    if a == n { return "" }
+    let b = n - 1
+    while b > a {
+        if not is_ws(slice(s, b, 1)) { break }
+        b -= 1
+    }
+    return slice(s, a, b - a + 1)
+}
+
+// trim_quotes — strip ONE matched leading+trailing ' or ". Asymmetric input is
+// left untouched (don't mangle "only-leading into a half-quoted string).
+pub fun trim_quotes(s: Text): Text {
+    let n = len s
+    if n < 2 { return s }
+    let first = slice(s, 0, 1)
+    let last = slice(s, n - 1, 1)
+    if first == "\"" and last == "\"" {
+        return slice(s, 1, n - 2)
+    }
+    if first == "'" and last == "'" {
+        return slice(s, 1, n - 2)
+    }
+    return s
+}
+
+// starts_with / ends_with / contains — Bool predicates (arg order matches bash
+// std.sh: (prefix|suffix|needle, string)). Native impls — own the names.
+pub fun starts_with(prefix: Text, s: Text): Bool {
+    let pl = len prefix
+    if pl > len s { return false }
+    return slice(s, 0, pl) == prefix
+}
+pub fun ends_with(suffix: Text, s: Text): Bool {
+    let sl = len suffix
+    let total = len s
+    if sl > total { return false }
+    return slice(s, total - sl, sl) == suffix
+}
+pub fun contains(needle: Text, s: Text): Bool {
+    let nl = len needle
+    if nl == 0 { return true }
+    let limit = (len s) - nl
+    if limit < 0 { return false }
+    for i in 0..=limit {
+        if slice(s, i, nl) == needle { return true }
+    }
+    return false
+}
+
+// split_csv — split on commas into a [Text]. (The bash version wrote into a
+// named array via eval; Amber returns the array directly — cleaner.)
+pub fun split_csv(s: Text): [Text] {
+    return split(s, ",")
+}
+
+// join_by — join args (as an array) with a separator. Multi-char seps work
+// (bash's ${arr[*]} only takes IFS's first byte; std join handles full seps).
+pub fun join_by(sep: Text, parts: [Text]): Text {
+    return join(parts, sep)
+}
+
+// regex_capture <string> <pattern> [group] — return capture group <group>
+// (default 1) of the FIRST match, or "" with success=false semantics. Amber's
+// match_regex is a Bool; to extract a group we shell to sed -nE once. Pattern is
+// caller-supplied (constructor input, never user data) per the bash contract.
+pub fun regex_capture(s: Text, pat: Text, group: Int): Text {
+    // Build the sed backreference "\N" in Amber FIRST, then interpolate it as a
+    // single token. Writing "\\{group}" inline mis-lowers: Amber turns {group}
+    // into a bash var ref and the \\ leaves a literal backslash, so sed sees
+    // "\${group_9}" verbatim. A pre-built Text sidesteps that. The replacement
+    // prints capture group <group> of the first whole-line match (the =~-anywhere
+    // shape the bash version used).
+    let backref = "\\{group as Text}"
+    let out = trust $printf '%s' "{s}" | sed -nE "s/.*{pat}.*/{backref}/p" 2>/dev/null | head -1$
+    return out
+}
+
+// regex_match — Bool: does <pattern> match anywhere in <string>?
+pub fun regex_match(s: Text, pat: Text): Bool {
+    return match_regex(s, pat, true)
+}
+
+// count_lines_var — number of lines in a Text. A trailing-newline-less last
+// fragment still counts as a line; empty string is 0.
+pub fun count_lines_var(s: Text): Int {
+    // std split_lines already gives the bash contract: "a\nb\nc"→3, "a\nb\n"→2,
+    // ""→0, "oneline"→1 (trailing-newline-less fragment counts; final newline
+    // does not add a phantom line).
+    return len split_lines(s)
+}
+
+// ---- collections -----------------------------------------------------------
+
+// array_contains — Bool membership (arg order matches bash: needle, array).
+pub fun array_contains(needle: Text, arr: [Text]): Bool {
+    for x in arr {
+        if x == needle { return true }
+    }
+    return false
+}
+
+// dedupe — keep first occurrence of each non-empty line in a Text, in order.
+pub fun dedupe(s: Text): [Text] {
+    let seen = [""]
+    let sc = 0
+    let out = [""]
+    let oc = 0
+    for line in split_lines(s) {
+        if line == "" { continue }
+        let dup = false
+        for k in 0..sc {
+            if seen[k] == line { dup = true }
+        }
+        if dup { continue }
+        if sc == 0 { seen[0] = line } else { seen += [line] }
+        sc += 1
+        if oc == 0 { out[0] = line } else { out += [line] }
+        oc += 1
+    }
+    if oc == 0 { return [] }
+    return out
+}
+
+// ---- path ------------------------------------------------------------------
+
+// path_join — join components with '/', collapsing duplicate slashes.
+pub fun path_join(parts: [Text]): Text {
+    let out = ""
+    for arg in parts {
+        if out == "" {
+            out = arg
+        } else {
+            // strip trailing slash from out, leading from arg
+            let a = out
+            if len a > 0 {
+                if slice(a, (len a) - 1, 1) == "/" { a = slice(a, 0, (len a) - 1) }
+            }
+            let b = arg
+            if len b > 0 {
+                if slice(b, 0, 1) == "/" { b = slice(b, 1, (len b) - 1) }
+            }
+            out = "{a}/{b}"
+        }
+    }
+    // collapse any surviving // runs
+    return replace_regex(out, "/+", "/", true)
+}
+
+// ---- environment -----------------------------------------------------------
+
+// is_macos / is_linux — OS branch from `uname -s` (no $OSTYPE in Amber).
+pub fun is_macos(): Bool {
+    let k = trust $uname -s 2>/dev/null$
+    return k == "Darwin"
+}
+pub fun is_linux(): Bool {
+    let k = trust $uname -s 2>/dev/null$
+    return k == "Linux"
+}
+
+// optional_cmd — is <name> on PATH? Never fails.
+pub fun optional_cmd(name: Text): Bool {
+    return is_command(name)
+}
+
+// require_var — Bool: is the named env var set AND non-empty? (The bash version
+// die()d; in Amber the caller decides — keeps std.ab side-effect-free.)
+pub fun require_var(name: Text): Bool {
+    if not env_var_test(name) { return false }
+    let v = env_var_get(name) failed { "" }
+    return v != ""
+}
+
+// ---- flag parsing ----------------------------------------------------------
+//
+// parse_flag_value <flag> <argv[]> — return the value of `--flag VALUE` or
+// `--flag=VALUE`, or "" if absent. (The bash parse_flag_into also returned the
+// REST of argv via a ref array; callers that need the rest use parse_flag_rest.)
+pub fun parse_flag_value(flag: Text, argv: [Text]): Text {
+    let eqpref = "{flag}="
+    let i = 0
+    let n = len argv
+    while i < n {
+        let a = argv[i]
+        if a == flag {
+            if i + 1 < n { return argv[i + 1] }
+            return ""
+        }
+        if starts_with(eqpref, a) {
+            return slice(a, len eqpref, (len a) - (len eqpref))
+        }
+        i += 1
+    }
+    return ""
+}
+
+// parse_flag_rest <flag> <argv[]> — argv with the first `--flag VALUE` /
+// `--flag=VALUE` removed.
+pub fun parse_flag_rest(flag: Text, argv: [Text]): [Text] {
+    let eqpref = "{flag}="
+    let rest = [""]
+    let rc = 0
+    let consumed = false
+    let i = 0
+    let n = len argv
+    while i < n {
+        let a = argv[i]
+        if not consumed and a == flag {
+            consumed = true
+            i += 2   // skip flag + its value
+            continue
+        }
+        if not consumed and starts_with(eqpref, a) {
+            consumed = true
+            i += 1
+            continue
+        }
+        if rc == 0 { rest[0] = a } else { rest += [a] }
+        rc += 1
+        i += 1
+    }
+    if rc == 0 { return [] }
+    return rest
+}
+
+// ---- retry -----------------------------------------------------------------
+//
+// retry_cmd <attempts> <delay_secs> <command-as-Text> — run a shell command up
+// to <attempts> times with <delay> between tries. Returns the last exit code.
+// (Amber can't take a function pointer, so the command is a Text run via the
+// shell — matching how the CLI's retried operations are external commands.)
+pub fun retry_cmd(attempts: Int, delay: Int, cmd: Text): Int {
+    let i = 0
+    let rc = 1
+    while i < attempts {
+        trust $eval "{cmd}"$
+        rc = status()
+        if rc == 0 { return 0 }
+        i += 1
+        if i < attempts { trust $sleep "{delay}"$ }
+    }
+    return rc
+}
