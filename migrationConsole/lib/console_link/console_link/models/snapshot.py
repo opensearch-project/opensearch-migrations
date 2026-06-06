@@ -212,15 +212,11 @@ class S3Snapshot(Snapshot):
             raise NoSourceClusterDefinedError
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
 
-        s3_command_args = {
-            "--s3-repo-uri": self.s3_repo_uri,
-            "--s3-region": self.s3_region,
-        }
-        if self.s3_endpoint:
-            s3_command_args["--s3-endpoint"] = self.s3_endpoint
-
         command_args = self._collect_universal_command_args()
-        command_args.update(s3_command_args)
+        command_args["--repo-uri"] = self.s3_repo_uri
+        command_args["--s3-region"] = self.s3_region
+        if self.s3_endpoint:
+            command_args["--s3-endpoint"] = self.s3_endpoint
 
         if self._is_solr_source():
             collections = self._get_solr_collections()
@@ -291,7 +287,7 @@ class FileSystemSnapshot(Snapshot):
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
 
         command_args = self._collect_universal_command_args()
-        command_args["--file-system-repo-path"] = self.repo_path
+        command_args["--repo-uri"] = f"file://{self.repo_path}"
 
         if self._is_solr_source():
             collections = self._get_solr_collections()
@@ -393,12 +389,8 @@ class GcsSnapshot(Snapshot):
         self._verify_gcs_plugin_installed()
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
 
-        gcs_command_args = {
-            "--gcs-repo-uri": self.gcs_repo_uri,
-        }
-
         command_args = self._collect_universal_command_args()
-        command_args.update(gcs_command_args)
+        command_args["--repo-uri"] = self.gcs_repo_uri
 
         if self._is_solr_source():
             collections = self._get_solr_collections()

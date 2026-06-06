@@ -421,7 +421,7 @@ def test_gcs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
                                   "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
-                                  "--gcs-repo-uri", config["snapshot"]["gcs"]["repo_uri"],
+                                  "--repo-uri", config["snapshot"]["gcs"]["repo_uri"],
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
@@ -451,7 +451,7 @@ def test_fs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
                                   "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
-                                  "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
+                                  "--repo-uri", "file://" + config["snapshot"]["fs"]["repo_path"],
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
@@ -481,7 +481,7 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
                                   "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
-                                  "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
+                                  "--repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
@@ -516,7 +516,7 @@ def test_s3_snapshot_create_with_custom_snapshot_repo_name_calls_subprocess_run_
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
                                   "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
-                                  "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
+                                  "--repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
@@ -549,7 +549,7 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_s3_role(mocker):
                                   '--snapshot-repo-name', snapshot.snapshot_repo_name,
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
-                                  "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
+                                  "--repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
@@ -580,7 +580,7 @@ def test_s3_snapshot_create_fails_for_clusters_with_auth(mocker):
                                   "--source-username", auth_details.username,
                                   "--source-password", auth_details.password,
                                   "--source-insecure",
-                                  "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
+                                  "--repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait"
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
@@ -609,7 +609,7 @@ def test_fs_snapshot_create_works_for_clusters_with_basic_auth(mocker):
                                   "--source-username", auth_details.username,
                                   "--source-password", auth_details.password,
                                   "--source-insecure",
-                                  "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
+                                  "--repo-uri", "file://" + config["snapshot"]["fs"]["repo_path"],
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
@@ -640,7 +640,7 @@ def test_fs_snapshot_create_works_for_clusters_with_sigv4(mocker):
                                   "--source-aws-service-signing-name", service_name,
                                   "--source-aws-region", signing_region,
                                   "--source-insecure",
-                                  "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
+                                  "--repo-uri", "file://" + config["snapshot"]["fs"]["repo_path"],
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 

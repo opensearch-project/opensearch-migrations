@@ -233,7 +233,7 @@ class Metadata:
             self._add_gcs_args(command_args=command_args)
         elif self._snapshot_location == 'fs':
             command_args.update({
-                "--file-system-repo-path": self._repo_path,
+                "--repo-uri": f"file://{self._repo_path}",
             })
 
         if self._target_cluster.auth_type == AuthMethod.BASIC_AUTH:
@@ -298,8 +298,8 @@ class Metadata:
 
     def _add_s3_args(self, command_args: Dict[str, Any]) -> None:
         command_args.update({
-            "--s3-local-dir": self._local_dir,
-            "--s3-repo-uri": self._s3_uri,
+            "--local-dir": self._local_dir,
+            "--repo-uri": self._s3_uri,
             "--s3-region": self._aws_region,
         })
         if hasattr(self, '_s3_endpoint') and self._s3_endpoint:
@@ -309,6 +309,6 @@ class Metadata:
 
     def _add_gcs_args(self, command_args: Dict[str, Any]) -> None:
         command_args.update({
-            "--gcs-local-dir": self._local_dir,
-            "--gcs-repo-uri": self._gcs_uri,
+            "--local-dir": self._local_dir,
+            "--repo-uri": self._gcs_uri,
         })
