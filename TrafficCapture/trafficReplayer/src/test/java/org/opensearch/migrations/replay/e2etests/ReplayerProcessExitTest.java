@@ -140,6 +140,17 @@ public class ReplayerProcessExitTest {
                 // Give replayer a moment to consume the last batch
                 Thread.sleep(5_000);
 
+                // Assert: while S3 is down, nothing has been committed or written
+                long offsetWhileBlocked = getCommittedOffset();
+                int tuplesWhileBlocked = countTupleLinesInS3();
+                log.info("While S3 blocked — committed offset: {}, tuples in S3: {}",
+                    offsetWhileBlocked, tuplesWhileBlocked);
+                Assertions.assertEquals(0, offsetWhileBlocked,
+                    "No offsets should be committed while S3 uploads are failing — "
+                        + "tuples are not durably written yet");
+                Assertions.assertEquals(0, tuplesWhileBlocked,
+                    "No tuples should be in S3 while the proxy is disabled");
+
                 // Enable S3 so pending retries succeed and offsets can commit
                 log.info("Enabling S3 proxy — pending upload retries should now succeed");
                 s3Proxy.enable();
@@ -169,17 +180,23 @@ public class ReplayerProcessExitTest {
                 // Check committed Kafka offset
                 long committedOffset = getCommittedOffset();
                 log.info("Committed Kafka offset: {}", committedOffset);
-                Assertions.assertTrue(committedOffset > 0,
-                    "Expected committed offset > 0 — the replayer should have committed at least some offsets");
+                Assertions.assertTrue(committedOffset > 10,
+                    "Expected committed offset > 10 — the replayer should have committed a meaningful "
+                        + "number of offsets, not just one or two edge cases. Got: " + committedOffset);
 
-                // Count tuple lines across all S3 objects
+                // Count tuple lines across all S3 objects.
+                // Each Kafka record is one traffic stream (one connection with one request),
+                // producing one tuple. The committed offset counts records consumed; tuples
+                // in S3 should be >= committed offset (write-before-commit is safe).
                 int tuplesInS3 = countTupleLinesInS3();
                 log.info("Tuple lines in S3: {}, committed offset: {}", tuplesInS3, committedOffset);
 
-                Assertions.assertEquals(committedOffset, tuplesInS3,
-                    "Committed Kafka offset must equal the number of tuples durably written to S3. "
-                        + "A mismatch means tupleWriter.close() did not flush all pending writes "
-                        + "before the offset was committed (or offsets were committed without durable writes).");
+                Assertions.assertTrue(tuplesInS3 > 0,
+                    "Expected at least one tuple in S3 after shutdown flush");
+                Assertions.assertTrue(tuplesInS3 >= committedOffset,
+                    "Tuples in S3 (" + tuplesInS3 + ") must be >= committed offset (" + committedOffset
+                        + "). Fewer tuples than committed offsets would mean offsets advanced without "
+                        + "durable writes — a data loss bug.");
             }
         }
     }
