@@ -24,16 +24,27 @@
 //     file_write(path, ""). `mkdir -p` → dir_create. `ln -sfn` → symlink_create
 //     (lowers to `ln -fs`, equivalent for our file-target symlinks).
 //   * curl HEAD/GET stay raw `trust $...$` commands — they're the external network
-//     calls and have no stdlib equivalent. The URL→cache-key hash also stays a
-//     `trust $...$` pipe (printf | sha256sum | awk) exactly as the bash helper.
-//   * log_warn/log_info/die have no Amber module yet, so this module carries
-//     thin local equivalents that honor the same stderr-only / exit-1 contract
-//     (chrome to stderr; the symlink path is the only thing on stdout). When
-//     log.ab/common.ab land, these collapse to imports.
+//     calls and have no stdlib equivalent. The sha256 HASHING (printf | sha256sum,
+//     shasum -a 256 <file>) also stays a `trust $...$` command — there is no
+//     stdlib hasher — but the trailing `awk '{print $1}'` field-extraction is now
+//     pure Amber: split_words(out)[0] from std/text (gotcha 8: stdlib over pipes).
+//   * die collapses to an import from ./common.ab now that it exists — its
+//     signature + behavior match the old local copy byte-for-byte
+//     (red "error:" to stderr via core.esc(), then exit 1).
+//   * log_info/log_warn and stage_dir stay LOCAL on purpose: log.ab's log_info/
+//     log_warn write to the migrate.log file and only mirror to stderr under
+//     MIGRATE_VERBOSE (a different sink + a `[ts] LVL` format), whereas this
+//     module's contract is an UNCONDITIONAL plain-prefix stderr chrome line; and
+//     common.ab's stage_dir() ignores a verbatim-exported $STAGE_DIR (it derives
+//     from migrate_home()/stage() and memoizes), whereas the bash _common.sh
+//     global lets an exported STAGE_DIR win. Importing either would change
+//     observable behavior, so per the dedup rule they remain local copies.
 
-import { printf, env_var_get, is_command } from "std/env"
-import { file_exists, file_write, dir_create, symlink_create } from "std/fs"
-import { esc, eprintln } from "./core.ab"
+import { env_var_get, is_command } from "std/env"
+import { file_exists, file_read, file_write, dir_create, symlink_create } from "std/fs"
+import { split_words } from "std/text"
+import { eprintln } from "./core.ab"
+import { die } from "./common.ab"
 
 // ---- repo constants (mirrors ART_REPO / ART_TAG_PREFIX) --------------------
 
@@ -73,24 +84,17 @@ fun current_stage(): Text {
     return stage
 }
 
-// log_info / log_warn — level-prefixed lines to stderr. The bash log.sh appended
-// to $STAGE_DIR/log/migrate.log and mirrored to stderr only under --verbose; here
-// we keep the operator-visible stderr line (the contract other modules rely on)
-// and leave the file sink to the eventual log.ab. Stdout stays clean for the
-// returned symlink path.
+// log_info / log_warn — level-prefixed lines to stderr. log.ab's namesakes write
+// to $STAGE_DIR/log/migrate.log and only mirror to stderr under MIGRATE_VERBOSE
+// (a different sink + a `[ts] LVL` format), so they're NOT drop-in replacements:
+// this module's contract is the UNCONDITIONAL operator-visible stderr line (the
+// chrome other modules rely on). Kept local; stdout stays clean for the returned
+// symlink path. (die, by contrast, matches common.ab's exactly and is imported.)
 fun log_info(msg: Text): Null {
     eprintln("INFO  {msg}")
 }
 fun log_warn(msg: Text): Null {
     eprintln("WARN  {msg}")
-}
-
-// die <msg> — red "error:" to stderr, then exit 1. Mirrors _common.sh die().
-// (No return type that callers depend on — it never returns.)
-fun die(msg: Text): Null {
-    let e = esc()
-    eprintln("{e}[31merror:{e}[0m {msg}")
-    exit(1)
 }
 
 // http_head <url> — Bool: is <url> reachable? Follows redirects (-L) so the
@@ -103,32 +107,44 @@ fun http_head(url: Text): Bool {
     return status() == 0
 }
 
+// first_field <out> — the first whitespace-delimited token of <out>, or "" when
+// blank. Replaces the `awk '{print $1}'` that trimmed the hasher/.sha256 output
+// (gotcha 8: stdlib over pipes). split_words collapses runs of whitespace and
+// drops the trailing newline, so it pulls the hex out of both "<hex>" (the pipe
+// form) and "<hex>  <name>" (the sha256sum file form); an empty input yields no
+// words, so we return "" to match awk's empty output rather than index a void.
+fun first_field(out: Text): Text {
+    let words = split_words(out)
+    if len words == 0 { return "" }
+    return words[0]
+}
+
 // sha256_of_string <s> — hex sha256 of a literal string. is_command if-chain
 // picks sha256sum (Linux) vs shasum -a 256 (macOS default), matching the bash
-// helper byte-for-byte. The printf|hasher|awk pipe stays a raw trust command
-// (per the port plan: URL→cache-key hashing remains a $...$ escape).
+// helper byte-for-byte. The printf|hasher pipe stays a raw trust command (no
+// stdlib hasher); the field-extraction is now first_field, not a trailing awk.
 fun sha256_of_string(s: Text): Text {
-    // The awk brace MUST be escaped (`\{`) so Amber doesn't read it as a `{expr}`
-    // interpolation; `\$1` keeps the field ref literal to the shell, not Amber.
     if is_command("sha256sum") {
-        return trust $printf '%s' "{s}" | sha256sum | awk '\{print \$1}'$
+        return first_field(trust $printf '%s' "{s}" | sha256sum$)
     }
-    return trust $printf '%s' "{s}" | shasum -a 256 | awk '\{print \$1}'$
+    return first_field(trust $printf '%s' "{s}" | shasum -a 256$)
 }
 
 // sha256_of_file <path> — hex sha256 of a file's contents. Same hasher if-chain.
 fun sha256_of_file(path: Text): Text {
     if is_command("sha256sum") {
-        return trust $sha256sum "{path}" | awk '\{print \$1}'$
+        return first_field(trust $sha256sum "{path}"$)
     }
-    return trust $shasum -a 256 "{path}" | awk '\{print \$1}'$
+    return first_field(trust $shasum -a 256 "{path}"$)
 }
 
 // verify_sha256 <file> <sha_file> — Bool: does <file>'s digest match the first
-// whitespace field of <sha_file> (sha256sum's "<hex>  <name>" format)? awk pulls
-// field 1 of the .sha256 file; we compare to the recomputed digest.
+// whitespace field of <sha_file> (sha256sum's "<hex>  <name>" format)? We read
+// the .sha256 file with std/fs file_read and pull field 1 via first_field,
+// replacing the `awk '{print $1}' < file` redirect; compare to the recomputed
+// digest. A missing/empty file → "" expected, which can't equal a real digest.
 fun verify_sha256(file: Text, sha_file: Text): Bool {
-    let expected = trust $awk '\{print \$1}' < "{sha_file}"$
+    let expected = first_field(file_read(sha_file) failed { "" })
     let actual = sha256_of_file(file)
     return expected == actual
 }

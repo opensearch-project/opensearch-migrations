@@ -25,6 +25,13 @@
 //   * `curl … || true` forgiving subshell → `trust $curl …$ failed { "" }`
 //     (trust+failed gives the same "network errors are silent, empty body on
 //     failure" contract without needing `set -e`/`pipefail` juggling).
+//     NB: std/http's fetch() was evaluated as a drop-in here and REJECTED — on a
+//     transport error its internal echo_error does a HARD `exit`, which a
+//     `trust … failed { }` handler CANNOT intercept (fetch is a plain bash fn,
+//     not a subshell), so it aborts the whole CLI AND prints red chrome to
+//     stderr. That violates the "silent best-effort, never abort" contract the
+//     two network-failure tests encode. The raw `curl … 2>/dev/null` stays
+//     because it is the only form that is genuinely non-fatal and silent.
 //   * `die "…"` (from common.sh, not present in this Amber rewrite) → an error
 //     line on stderr + `exit 1` via a surgical raw escape, preserving the
 //     "fail loudly" contract.
@@ -79,7 +86,8 @@ fun strip_v(tag: Text): Text {
 // `trust … failed { "" }`: a non-2xx (e.g. 404 from -f) or a transport error
 // must collapse to an empty body, NOT abort the CLI — same intent as the bash
 // `|| true` forgiving subshell. --max-time 3 bounds the wait so a slow/blocked
-// network never stalls the wizard.
+// network never stalls the wizard. (std/http's fetch() is NOT usable here: its
+// failure path hard-`exit`s, which `failed { }` can't catch — see header note.)
 fun fetch_latest_tag(api: Text): Text {
     if not is_command("curl") {
         return ""

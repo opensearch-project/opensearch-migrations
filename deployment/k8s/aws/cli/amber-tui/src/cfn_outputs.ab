@@ -23,21 +23,17 @@
 // in-Amber string work (the bash awk/tac pipelines are replaced by split +
 // slice + regex, NO tac/awk fork).
 
-import { printf } from "std/env"
 import { split, slice, trim_left, match_regex } from "std/text"
+import { starts_with } from "./std.ab"
 
 // ---- tiny private helpers (defined FIRST: Amber tree-shakes per imported
 // symbol and only keeps transitive deps that textually PRECEDE the public
 // entry point across an import boundary — a callee defined after its caller is
 // silently dropped) ----------------------------------------------------------
 
-// starts_with_local — single-prefix predicate. Native (own the name; std's
-// starts_with arg order + import aliasing are both things we avoid here).
-fun starts_with_local(prefix: Text, s: Text): Bool {
-    const pl = len prefix
-    if pl > len s { return false }
-    return slice(s, 0, pl) == prefix
-}
+// Prefix test is std.ab's `starts_with(prefix, s)` — its arg order already
+// matches how we call it (prefix first), so the old local copy is gone. (No
+// import cycle: std.ab depends only on std/*.)
 
 // first_eq_index — index of the FIRST '=' in s, or -1. Used to split a
 // KEY=VALUE line at the first '=' only, so values that themselves contain '='
@@ -91,8 +87,10 @@ fun is_export_kv(s: Text): Bool {
 // and kept records matching the identifier= pattern. Amber has no awk RS, so
 // we split on ";" ourselves (no fork) and apply the same three transforms.
 pub fun _cfn_extract_exports(blob: Text): [Text] {
-    let out = [""]
-    let oc = 0
+    // Local result array: a bare `let out = []` is fine here (NOT module-level)
+    // — the element type is inferred from the first `+= [clause]`, and `len out`
+    // is the count, so no typed seed / parallel counter is needed.
+    let out = []
     // Split on ';' — each clause is one (possibly-exported) assignment.
     for clause_raw in split(blob, ";") {
         // Trim leading whitespace (the bash `sub(/^[[:space:]]+/, "")`).
@@ -100,16 +98,14 @@ pub fun _cfn_extract_exports(blob: Text): [Text] {
         // Strip a leading "export " (the bash `sub(/^export[[:space:]]+/, "")`).
         // Only a single space follows `export` in the real payload; the regex
         // gate below tolerates any residual prefix by simply rejecting it.
-        if starts_with_local("export ", clause) {
+        if starts_with("export ", clause) {
             clause = trim_left(slice(clause, 7, (len clause) - 7))
         }
         // Keep only well-formed NAME=… assignments; drop bogus fragments.
         if is_export_kv(clause) {
-            if oc == 0 { out[0] = clause } else { out += [clause] }
-            oc += 1
+            out += [clause]
         }
     }
-    if oc == 0 { return [] }
     return out
 }
 
@@ -134,9 +130,11 @@ pub fun cfn_outputs(stack: Text, region: Text): [Text] {
     // not an error to handle.
     const raw = trust $aws cloudformation describe-stacks --region "{region}" --stack-name "{stack}" --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' --output text 2>/dev/null || true$
 
-    let out = [""]
-    let oc = 0
     if trim_left(raw) == "" { return [] }
+
+    // Local result array — `let out = []` (the element type comes from the first
+    // `+= ["{key}={value}"]`); `len out` is the count. No typed seed / counter.
+    let out = []
 
     // One row per output. `aws … --output text` joins the [OutputKey,
     // OutputValue] tuple with a TAB; a value never contains a TAB, so the first
@@ -150,19 +148,16 @@ pub fun cfn_outputs(stack: Text, region: Text): [Text] {
         const value = len cols > 1 then cols[1] else ""
 
         // Pass A: raw OutputKey=OutputValue.
-        if oc == 0 { out[0] = "{key}={value}" } else { out += ["{key}={value}"] }
-        oc += 1
+        out += ["{key}={value}"]
 
         // Pass B: when this output is the MigrationsExportString blob, expand
         // its embedded exports into additional flat KEY=VALUE lines.
         if key == "MigrationsExportString" {
             for kv in _cfn_extract_exports(value) {
-                if oc == 0 { out[0] = kv } else { out += [kv] }
-                oc += 1
+                out += [kv]
             }
         }
     }
-    if oc == 0 { return [] }
     return out
 }
 

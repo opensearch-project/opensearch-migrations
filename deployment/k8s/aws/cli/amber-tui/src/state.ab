@@ -12,12 +12,13 @@
 // Storage model. Bash 3.2 has no associative arrays, so the bash version used
 // the parallel-array pair STATE_KEYS[]/STATE_VALS[]. Amber forbids nested
 // arrays for the same bash reason, so we keep the EXACT same shape: two
-// module-level parallel arrays plus a logical __count. Module-level `let`
-// arrays compile to bash globals that persist across calls, which is what makes
-// load → set → save → load round-trip in one process. The seed-slot pattern is
-// mandatory (Amber `let` has no empty-typed-array literal): the arrays carry a
-// placeholder at index 0, __count is the real length, and the first append
-// reuses slot 0 rather than growing — so 0..__count never reads stale seed.
+// module-level parallel arrays. Module-level `let` arrays compile to bash
+// globals that persist across calls, which is what makes load → set → save →
+// load round-trip in one process. They are declared with a TYPED SEED ([""]) to
+// anchor the element type — a bare module-level `let xs = []` leaves the type
+// Generic across function boundaries and fails when imported. state_load resets
+// them to `[]`, rows grow via `+= [v]`, and `len STATE_KEYS` IS the entry count
+// (no separate counter, no index<count juggling).
 //
 // flock. The bash version opened fd 9 on .state.lock and flock-ed it to guard
 // against two concurrent migration-assistant runs writing the same stage. The
@@ -32,11 +33,12 @@ import { file_read, file_write, file_append, file_exists, dir_create } from "std
 import { split_lines, slice } from "std/text"
 import { trim_quotes } from "./std.ab"
 
-// ---- in-memory store (parallel arrays + seed-slot, mirrors STATE_KEYS/VALS) -
-
+// ---- in-memory store (parallel arrays, mirrors STATE_KEYS/VALS) ------------
+//
+// Typed seed ([""]) anchors the element type; state_load resets to []. len
+// STATE_KEYS is the logical entry count.
 let STATE_KEYS = [""]
 let STATE_VALS = [""]
-let __count = 0
 
 // ---- stage directory resolution --------------------------------------------
 //
@@ -83,8 +85,8 @@ fun stage_dir_init(): Null {
 // _state_index <key> → index in STATE_KEYS or -1. Bash returned "" / a number on
 // stdout; -1 is the Amber-idiomatic "not found" and every caller branches on it.
 fun _state_index(target: Text): Int {
-    for i in 0..__count {
-        if STATE_KEYS[i] == target { return i }
+    for i, k in STATE_KEYS {
+        if k == target { return i }
     }
     return -1
 }
@@ -135,7 +137,8 @@ fun unescape_quotes(s: Text): Text {
 // wrapping quotes, then unescape any \" back to ".
 pub fun state_load(): Null {
     stage_dir_init()
-    __count = 0
+    STATE_KEYS = []
+    STATE_VALS = []
     let env_file = "{stage_dir()}/state.env"
     if not file_exists(env_file) { return null }
     let body = file_read(env_file) failed { "" }
@@ -151,14 +154,8 @@ pub fun state_load(): Null {
         // strip ONE wrapping pair of quotes (how state_save serializes), then
         // unescape \" → " (the escaping state_save applied to inner quotes).
         let v = unescape_quotes(trim_quotes(raw))
-        if __count < len STATE_KEYS {
-            STATE_KEYS[__count] = k
-            STATE_VALS[__count] = v
-        } else {
-            STATE_KEYS += [k]
-            STATE_VALS += [v]
-        }
-        __count += 1
+        STATE_KEYS += [k]
+        STATE_VALS += [v]
     }
 }
 
@@ -172,15 +169,9 @@ pub fun state_set(k: Text, v: Text): Null {
         STATE_VALS[idx] = v
         return null
     }
-    // First append reuses the seed slot 0 so physical length == logical length.
-    if __count < len STATE_KEYS {
-        STATE_KEYS[__count] = k
-        STATE_VALS[__count] = v
-    } else {
-        STATE_KEYS += [k]
-        STATE_VALS += [v]
-    }
-    __count += 1
+    // New key — append in lockstep across the parallel arrays.
+    STATE_KEYS += [k]
+    STATE_VALS += [v]
 }
 
 // state_get <key> [default] — the stored value, or <default> when absent. Bash
@@ -201,24 +192,30 @@ pub fun state_has(k: Text): Bool {
 
 // state_unset <key> — remove a key from the in-memory store (no-op if absent).
 // Not in the bash file as a named function, but the parallel-array store needs
-// a compaction primitive and the port plan calls it out; it keeps physical ==
-// logical length so the seed-slot invariant holds.
+// a compaction primitive and the port plan calls it out. Rebuild both arrays
+// keeping every row except the target — surviving keys stay in order with their
+// values, and len STATE_KEYS shrinks by one.
 pub fun state_unset(k: Text): Null {
     let idx = _state_index(k)
     if idx < 0 { return null }
-    // shift every later element down one, then drop the logical count.
-    let i = idx
-    while i < __count - 1 {
-        STATE_KEYS[i] = STATE_KEYS[i + 1]
-        STATE_VALS[i] = STATE_VALS[i + 1]
-        i += 1
+    // Keep-guard (not `continue`): in a `for i, x` loop a `continue` skips the
+    // index-counter increment, desyncing i from the iteration. An `if i != idx`
+    // guard copies every row except the target with i intact.
+    let keys = []
+    let vals = []
+    for i, key in STATE_KEYS {
+        if i != idx {
+            keys += [key]
+            vals += [STATE_VALS[i]]
+        }
     }
-    __count -= 1
+    STATE_KEYS = keys
+    STATE_VALS = vals
 }
 
 // state_count — logical entry count. Test seam (no bash equivalent; the bash
 // tests inspected ${#STATE_KEYS[@]} directly).
-pub fun state_count(): Int { return __count }
+pub fun state_count(): Int { return len STATE_KEYS }
 
 // ---- persistence ------------------------------------------------------------
 
@@ -280,8 +277,8 @@ pub fun state_save(): Null {
     // the round-trip tests (which re-read it) aren't time-sensitive. The leading
     // '#' makes state_load skip it.
     let env_body = "# written by migration-assistant; do not edit while it is running.\n"
-    for i in 0..__count {
-        env_body = "{env_body}{STATE_KEYS[i]}=\"{esc_for_env(STATE_VALS[i])}\"\n"
+    for i, k in STATE_KEYS {
+        env_body = "{env_body}{k}=\"{esc_for_env(STATE_VALS[i])}\"\n"
     }
     trust file_write(env_tmp, env_body)
 
@@ -289,14 +286,15 @@ pub fun state_save(): Null {
     // dependency). Empty store → "{}".
     // NB: a literal '{' in an Amber Text starts interpolation, so it is escaped
     // as \{ ; '}' is literal and needs no escape.
+    let n = len STATE_KEYS
     let json_body = ""
-    if __count == 0 {
+    if n == 0 {
         json_body = "\{}\n"
     } else {
         json_body = "\{\n"
-        for i in 0..__count {
-            let sep = i < __count - 1 then ",\n" else "\n"
-            json_body = "{json_body}  \"{STATE_KEYS[i]}\": \"{esc_for_json(STATE_VALS[i])}\"{sep}"
+        for i, k in STATE_KEYS {
+            let sep = i < n - 1 then ",\n" else "\n"
+            json_body = "{json_body}  \"{k}\": \"{esc_for_json(STATE_VALS[i])}\"{sep}"
         }
         json_body = "{json_body}}\n"
     }
@@ -332,7 +330,8 @@ pub fun state_archive(): Null {
     if file_exists(json_file) {
         trust $mv -f "{json_file}" "{dest}/"$
     }
-    __count = 0
+    STATE_KEYS = []
+    STATE_VALS = []
 }
 
 // ---- resume -----------------------------------------------------------------

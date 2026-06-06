@@ -48,7 +48,8 @@
 
 import { printf, env_var_get, env_var_test } from "std/env"
 import { file_read, file_exists, dir_exists } from "std/fs"
-import { split_lines, slice, replace } from "std/text"
+import { split_lines, split, slice, replace, join } from "std/text"
+import { sort } from "std/array"
 
 // ---- module-level cache (compiled to bash globals → persist across calls) ---
 //
@@ -64,22 +65,18 @@ let __schema = -1
 // symbol and only keeps transitive deps that textually PRECEDE the public
 // entry point, so every private helper must sit above its callers) -----------
 
-// index_of_at — first index of a (possibly multi-char) needle at or after
-// `start`, or -1. Used to walk ${...} tokens without regex. (The offset param is
-// NOT named `from`: `from` is a reserved Amber keyword and, while the module
-// type-checks standalone, the tree-shaker re-parses this helper in every
-// IMPORTER's context where `from` is rejected as an identifier — so consumers of
-// manifest_brand/_substitute_vars failed to compile. Gotcha #1.)
-fun index_of_at(s: Text, needle: Text, start: Text): Int {
+// index_of — first index of a (possibly multi-char) needle in s, or -1. Used to
+// walk ${...} tokens without regex. The scan always starts at 0: the substitute
+// loop re-slices `rest` after each match, so no offset param is needed (a prior
+// version carried a `start` offset, which had to be Text-typed to dodge the
+// reserved `from` keyword — now gone with the offset).
+fun index_of(s: Text, needle: Text): Int {
     let nl = len needle
     if nl == 0 { return -1 }
-    let f = start as Int
     let limit = (len s) - nl
     if limit < 0 { return -1 }
-    let i = f
-    while i <= limit {
+    for i in 0..=limit {
         if slice(s, i, nl) == needle { return i }
-        i += 1
     }
     return -1
 }
@@ -96,7 +93,7 @@ fun _manifest_substitute_vars(s: Text): Text {
     let rest = s
     loop {
         // Find the next ${ token. Nothing left → append the tail and stop.
-        let open = index_of_at(rest, "$\{", "0")
+        let open = index_of(rest, "$\{")
         if open < 0 {
             out = "{out}{rest}"
             break
@@ -105,7 +102,7 @@ fun _manifest_substitute_vars(s: Text): Text {
         out = "{out}{slice(rest, 0, open)}"
         // The var name runs from just after "${" to the next "}".
         let after = slice(rest, open + 2, (len rest) - open - 2)
-        let close = index_of_at(after, "}", "0")
+        let close = index_of(after, "}")
         if close < 0 {
             // Unterminated ${ — emit the rest verbatim (bash would loop forever
             // here; we are defensive) and stop.
@@ -141,24 +138,19 @@ pub fun manifest_init(): Null {
     if __parsed { return null }
     __parsed = true
 
-    // Candidate list in priority order; first existing file wins. MIGRATE_MANIFEST
-    // (operator override) is consulted first when set, exactly like the bash
-    // `candidates+=("$MIGRATE_MANIFEST")` prepend.
+    // Candidate list in priority order; first existing file wins. Typed seed
+    // ([""]) anchors the element type, reset to [] to empty, += to append (the
+    // canonical module-array pattern). MIGRATE_MANIFEST (operator override) is
+    // appended first when set, exactly like the bash `candidates+=("$MIGRATE_MANIFEST")`
+    // prepend; the three release/dev paths follow unconditionally.
     let lib = env_var_get("LIB_DIR") failed { "" }
     let candidates = [""]
-    let cc = 0
+    candidates = []
     let override = env_var_get("MIGRATE_MANIFEST") failed { "" }
-    if override != "" {
-        candidates[0] = override
-        cc = 1
-    }
-    let c1 = "{lib}/../manifest.json"
-    let c2 = "{lib}/../skills/manifest.json"
-    let c3 = "{lib}/../../../../../agent-skills/skills/manifest.json"
-    if cc == 0 { candidates[0] = c1 } else { candidates += [c1] }
-    cc += 1
-    candidates += [c2]
-    candidates += [c3]
+    if override != "" { candidates += [override] }
+    candidates += ["{lib}/../manifest.json"]
+    candidates += ["{lib}/../skills/manifest.json"]
+    candidates += ["{lib}/../../../../../agent-skills/skills/manifest.json"]
 
     let found = ""
     for cand in candidates {
@@ -318,9 +310,22 @@ pub fun manifest_skills(): Text {
     let sdir = manifest_skills_dir()
     if sdir == "" { return "" }
     if not dir_exists(sdir) { return "" }
-    // Walk skills_dir/*/SKILL.md and emit the directory leaf name for each. The
-    // bash version used a `for d in "$sdir"/*/` glob + parameter expansion; here
-    // a single find|while shell pipeline does the same (no nested arrays, no
-    // glob-in-Amber surprises). basename of the parent dir of each SKILL.md.
-    return trust $find "{sdir}" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null | sed -E 's#/SKILL.md\$##; s#.*/##' | sort$
+    // Walk skills_dir/*/SKILL.md and emit the directory leaf name for each. find
+    // does the filesystem walk (no clean Amber equivalent for -mindepth/-maxdepth);
+    // the leaf-name extraction the bash version did with `sed -E` is now stdlib:
+    // each line is `.../<skill>/SKILL.md`, so split on "/" and take the parent of
+    // SKILL.md (the second-to-last segment), then sort ascending like `| sort`.
+    let raw = trust $find "{sdir}" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null$
+    let names = [""]
+    names = []
+    for line in split_lines(raw) {
+        if line == "" { continue }
+        let segs = split(line, "/")
+        let n = len segs
+        if n >= 2 { names += [segs[n - 2]] }
+    }
+    sort(names, false)
+    // join with "\n" (not a trailing-newline loop): a `trust $...$` capture strips
+    // the trailing newline, so the bash output was "a\nb\nc" — match that exactly.
+    return join(names, "\n")
 }

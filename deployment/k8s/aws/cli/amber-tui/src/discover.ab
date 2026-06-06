@@ -26,9 +26,11 @@
 //   (disc_state_get KEY -> Text on STDOUT) is what other modules call.
 // * Chrome/log discipline (inherited verbatim from the bash source): the
 //   discover_* functions RETURN an Int exit code (0 ok, 1 unauthenticated), and
-//   any human-facing message (log_info / log_warn / ui_warn) goes to STDERR.
-//   The discovered VALUES travel through the state store, never stdout — so a
-//   caller capturing a getter's stdout gets a clean value, never a log line.
+//   any human-facing message goes through log_info / log_warn (now imported from
+//   log.ab — the file logger, mirrored to stderr only under --verbose) or ui_warn
+//   (always stderr). NOTHING informational is ever written to STDOUT. The
+//   discovered VALUES travel through the state store, never stdout — so a caller
+//   capturing a getter's stdout gets a clean value, never a log line.
 // * JSON parse: bash piped `aws sts get-caller-identity --output json` into
 //   json_get '.Account' / '.Arn' (jq with a regex fallback). Amber has no jq
 //   dependency in this layer, so we extract both fields with std.ab's
@@ -40,27 +42,21 @@
 //   compiler's can-fail error while status() still reports the real rc, the
 //   direct analog of bash's `$?`.
 
-import { printf, env_var_get, is_command } from "std/env"
+import { printf, env_var_get, is_command, uname_os } from "std/env"
 import { file_read, file_exists } from "std/fs"
-import { lowercase, replace_regex } from "std/text"
-import { is_macos, is_linux, optional_cmd, regex_capture, contains } from "./std.ab"
-import { eprintln } from "./core.ab"
+import { lowercase, replace_regex, match_regex } from "std/text"
+import { optional_cmd, regex_capture } from "./std.ab"
+import { log_info, log_warn } from "./log.ab"
 import { ui_warn } from "./ui.ab"
 
-// ---- logging (stderr; mirrors lib/log.sh's log_info/log_warn discipline) ----
+// ---- logging --------------------------------------------------------------
 //
-// The bash module called log_info/log_warn from lib/log.sh. That module isn't
-// ported yet; the only contract discover relies on is "informational lines go
-// to STDERR, never stdout". So we emit minimal INFO/WARN lines to stderr via
-// core.eprintln — keeping stdout clean for getter return values. Defined FIRST:
-// Amber tree-shakes per imported symbol and only keeps transitive deps that
-// textually precede the public entry point, so private helpers live up top.
-fun log_info(msg: Text): Null {
-    eprintln("[INFO] {msg}")
-}
-fun log_warn(msg: Text): Null {
-    eprintln("[WARN] {msg}")
-}
+// The bash module called log_info/log_warn from lib/log.sh. That module is now
+// ported as log.ab, so discover imports log_info/log_warn directly rather than
+// carrying its own stderr-only copies (dedup against the canonical logger). The
+// contract discover relies on is unchanged: informational lines go to the log
+// (and stderr only when --verbose), never to stdout — so getter return values
+// stay clean. (See the imports above.)
 
 // ---- in-memory state store (parallel arrays — the dashboard.ab pattern) -----
 //
@@ -121,22 +117,27 @@ pub fun disc_state_reset(): Null {
 
 // ---- OS + package manager --------------------------------------------------
 
-// detect_os — linux|darwin|wsl|other. WSL is Linux whose /proc/version mentions
-// "microsoft" (case-insensitive), matching the bash `grep -qi microsoft`.
+// detect_os — linux|darwin|wsl|other. The kernel name comes from std/env's
+// uname_os() (one call, no hand-parsed `uname -s` and no double fork through
+// is_linux()+is_macos()). WSL is Linux whose /proc/version mentions "microsoft"
+// (case-insensitive), matching the bash `grep -qi microsoft`.
 fun detect_os(): Text {
-    if is_linux() {
+    let kernel = uname_os()
+    if kernel == "Linux" {
         // /proc/version only exists on Linux; guard the read so a missing file
         // (or a non-Linux host that somehow reports Linux) degrades to "linux"
-        // rather than erroring.
+        // rather than erroring. match_regex over the lowercased text is the Amber
+        // analog of `grep -qi microsoft` (case folded first — there is no working
+        // (?i) inline flag in 0.6).
         if file_exists("/proc/version") {
             let v = file_read("/proc/version") failed { "" }
-            if contains("microsoft", lowercase(v)) {
+            if match_regex(lowercase(v), "microsoft", true) {
                 return "wsl"
             }
         }
         return "linux"
     }
-    if is_macos() {
+    if kernel == "Darwin" {
         return "darwin"
     }
     return "other"
