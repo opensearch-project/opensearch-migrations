@@ -1,0 +1,326 @@
+// manifest.ab — load + parse the bundle's manifest.json.
+//
+// Port of bash lib/manifest.sh. manifest.json lives at the tarball root next to
+// bin/ + lib/ + skills/. It declares build identity (build.name/version/packs[]),
+// operator-visible branding (appName, modes, prompts), skill discovery, and the
+// mcpServers map (name → command/args/agents/requires/permissionsAllow).
+//
+// Resolution order (first found wins) — same candidate list as the bash version:
+//   1. $MIGRATE_MANIFEST                (operator override, highest priority)
+//   2. $LIB_DIR/../manifest.json        (release tarball — sibling of bin/)
+//   3. $LIB_DIR/../skills/manifest.json (release tarball — bundled in skills/)
+//   4. $LIB_DIR/../../../../../agent-skills/skills/manifest.json   (repo dev mode)
+//
+// PUBLIC API (callable from other modules; return value on stdout, never chrome):
+//   manifest_init                     Parse manifest.json once. Cache the raw text.
+//   manifest_have                     Bool: is a manifest loaded?
+//   manifest_brand <field>            branding.<field>, with ${VAR} substitution.
+//   manifest_skills_dir               Absolute path of the skills/ directory.
+//   manifest_mcp_names <agent>        MCP names whose `agents` includes <agent>.
+//   manifest_mcp_field <name> <field> mcpServers.<name>.<field>.
+//   manifest_mcp_command <name>       mcpServers.<name>.command.
+//   manifest_mcp_args <name>          One arg per line, with ${VAR} substituted.
+//   manifest_mcp_requires <name>      One requires[] entry per line.
+//   manifest_mcp_perms <name>         One permissionsAllow[] entry per line.
+//   manifest_all_perms                Every permissionsAllow string, deduped.
+//   manifest_pack_summary             " +pack-ver +pack-ver" for build.packs[].
+//   manifest_build_version            build.version.
+//   manifest_modes                    "id|label|description|is_default" per visible mode.
+//   manifest_skills                   Skill names (subdirs of skills/ with a SKILL.md).
+//
+// Implementation notes vs the bash module:
+//   * jq stays the parsing engine (the model layer already hard-deps jq, so there
+//     is no fallback). Each call is a `trust $... | jq ...$`. Inside `$...$`,
+//     Amber captures `{`, so jq filters with `${f}`-style indexing use `\$f`
+//     (the bash var ref) — but our filters use jq's --arg so the only `$` tokens
+//     are jq parameter refs, escaped `\$a` / `\$n`.
+//   * The raw JSON is read once with file_read and cached in a module-level `let`
+//     (compiled to a bash global → persists across calls), replacing the bash
+//     `__MANIFEST_RAW` global + the parse-once latch.
+//   * ${VAR} substitution: the bash version did `${!var}` indirection plus an
+//     optional state_get hook discovered via `declare -F`. Amber has no dynamic
+//     name indirection and we keep this module static + self-contained, so we
+//     resolve ${VAR} from the environment only (env_var_get). Callers that want
+//     state-backed values export them into the env first. $$ → $ is preserved.
+//   * schemaVersion!=1 is a hard error in bash (`die`). Amber has no shared die
+//     here; manifest_init records the bad version and manifest_schema_ok() lets
+//     the caller decide — keeps the module side-effect-light and testable.
+
+import { printf, env_var_get, env_var_test } from "std/env"
+import { file_read, file_exists, dir_exists } from "std/fs"
+import { split_lines, slice, replace } from "std/text"
+
+// ---- module-level cache (compiled to bash globals → persist across calls) ---
+//
+// Mirrors the bash __MANIFEST_* globals. __parsed is the parse-once latch
+// (manifest_init is idempotent); __raw holds the JSON text; __path the file we
+// loaded; __schema the parsed schemaVersion (-1 = no manifest / not yet parsed).
+let __parsed = false
+let __raw = ""
+let __path = ""
+let __schema = -1
+
+// ---- tiny string helpers (defined FIRST: Amber tree-shakes per imported
+// symbol and only keeps transitive deps that textually PRECEDE the public
+// entry point, so every private helper must sit above its callers) -----------
+
+// index_of_at — first index of a (possibly multi-char) needle at or after
+// `start`, or -1. Used to walk ${...} tokens without regex. (The offset param is
+// NOT named `from`: `from` is a reserved Amber keyword and, while the module
+// type-checks standalone, the tree-shaker re-parses this helper in every
+// IMPORTER's context where `from` is rejected as an identifier — so consumers of
+// manifest_brand/_substitute_vars failed to compile. Gotcha #1.)
+fun index_of_at(s: Text, needle: Text, start: Text): Int {
+    let nl = len needle
+    if nl == 0 { return -1 }
+    let f = start as Int
+    let limit = (len s) - nl
+    if limit < 0 { return -1 }
+    let i = f
+    while i <= limit {
+        if slice(s, i, nl) == needle { return i }
+        i += 1
+    }
+    return -1
+}
+
+// _manifest_substitute_vars <string> — replace ${VAR} tokens with the env value
+// of VAR; leave the literal ${VAR} (with a stderr WARN) when unresolved. $$ → $.
+//
+// Port of the bash while-loop that split on the next ${…}. The bash version did
+// ${!var} indirection (+ an optional state_get); we resolve from the env only —
+// the module stays static, no eval/indirection (see header). The scan is:
+// find "${", emit the prefix, read up to the next "}", look the name up.
+fun _manifest_substitute_vars(s: Text): Text {
+    let out = ""
+    let rest = s
+    loop {
+        // Find the next ${ token. Nothing left → append the tail and stop.
+        let open = index_of_at(rest, "$\{", "0")
+        if open < 0 {
+            out = "{out}{rest}"
+            break
+        }
+        // Everything before ${ is literal.
+        out = "{out}{slice(rest, 0, open)}"
+        // The var name runs from just after "${" to the next "}".
+        let after = slice(rest, open + 2, (len rest) - open - 2)
+        let close = index_of_at(after, "}", "0")
+        if close < 0 {
+            // Unterminated ${ — emit the rest verbatim (bash would loop forever
+            // here; we are defensive) and stop.
+            out = "{out}$\{{after}"
+            break
+        }
+        let name = slice(after, 0, close)
+        // Consume name + closing brace from `rest`.
+        rest = slice(after, close + 1, (len after) - close - 1)
+
+        // Resolve from the environment. Unset OR empty → leave the literal token
+        // and warn, matching the bash "could not be resolved" path.
+        let v = ""
+        if env_var_test(name) {
+            v = env_var_get(name) failed { "" }
+        }
+        if v == "" {
+            trust $printf '%s\n' "manifest: \$\{{name}} could not be resolved (env unset)" >&2$
+            out = "{out}$\{{name}}"
+        } else {
+            out = "{out}{v}"
+        }
+    }
+    // $$ → $ (bash: out=${out//$$/\$}). A doubled dollar collapses to one.
+    return replace(out, "$$", "$")
+}
+
+// ---- load / locate ---------------------------------------------------------
+
+// manifest_init — locate + parse manifest.json. Idempotent (parse-once latch),
+// matching the bash __MANIFEST_PARSED guard. Caches the raw JSON in __raw.
+pub fun manifest_init(): Null {
+    if __parsed { return null }
+    __parsed = true
+
+    // Candidate list in priority order; first existing file wins. MIGRATE_MANIFEST
+    // (operator override) is consulted first when set, exactly like the bash
+    // `candidates+=("$MIGRATE_MANIFEST")` prepend.
+    let lib = env_var_get("LIB_DIR") failed { "" }
+    let candidates = [""]
+    let cc = 0
+    let override = env_var_get("MIGRATE_MANIFEST") failed { "" }
+    if override != "" {
+        candidates[0] = override
+        cc = 1
+    }
+    let c1 = "{lib}/../manifest.json"
+    let c2 = "{lib}/../skills/manifest.json"
+    let c3 = "{lib}/../../../../../agent-skills/skills/manifest.json"
+    if cc == 0 { candidates[0] = c1 } else { candidates += [c1] }
+    cc += 1
+    candidates += [c2]
+    candidates += [c3]
+
+    let found = ""
+    for cand in candidates {
+        if found == "" and file_exists(cand) {
+            found = cand
+        }
+    }
+    if found == "" {
+        // No manifest. manifest_have() will report not-loaded so the caller can
+        // fall back to hard-coded behavior.
+        return null
+    }
+
+    __path = found
+    __raw = file_read(found) failed { "" }
+
+    // Parse + validate schemaVersion. Unknown versions are recorded (not die'd
+    // here — see header) so manifest_schema_ok() can gate.
+    let sv = trust $printf '%s' "{__raw}" | jq -r '.schemaVersion // 0'$
+    __schema = sv as Int
+}
+
+// manifest_have — Bool: is a manifest loaded? (Triggers manifest_init.)
+pub fun manifest_have(): Bool {
+    manifest_init()
+    return __raw != ""
+}
+
+// manifest_schema_ok — Bool: is the loaded manifest schemaVersion == 1? The bash
+// version die()d on mismatch; here the caller decides what to do.
+pub fun manifest_schema_ok(): Bool {
+    if not manifest_have() { return false }
+    return __schema == 1
+}
+
+// manifest_path — the resolved manifest.json path (test seam + diagnostics).
+pub fun manifest_path(): Text {
+    manifest_init()
+    return __path
+}
+
+// ---- branding ---------------------------------------------------------------
+
+// manifest_brand <field> — branding.<field> with ${VAR} substitution. "" when
+// the field is absent or no manifest is loaded.
+pub fun manifest_brand(field: Text): Text {
+    if not manifest_have() { return "" }
+    let v = trust $printf '%s' "{__raw}" | jq -r --arg f "{field}" '.branding[\$f] // ""'$
+    return _manifest_substitute_vars(v)
+}
+
+// manifest_skills_dir — absolute path of the skills/ directory (the dir
+// containing the manifest, since today the manifest lives inside skills/). ""
+// when no manifest is loaded.
+pub fun manifest_skills_dir(): Text {
+    if not manifest_have() { return "" }
+    // dirname + cd -P resolves to an absolute, symlink-free path, matching the
+    // bash `cd "$(dirname ...)" && pwd`.
+    let dir = trust $cd "\$(dirname "{__path}")" 2>/dev/null && pwd$
+    return dir
+}
+
+// ---- mcpServers --------------------------------------------------------------
+
+// manifest_mcp_names <agent> — MCP names whose `agents` array includes <agent>,
+// one per line. "" when none / no manifest.
+pub fun manifest_mcp_names(agent: Text): Text {
+    if not manifest_have() { return "" }
+    return trust $printf '%s' "{__raw}" | jq -r --arg a "{agent}" '.mcpServers | to_entries[] | select(.value.agents | index(\$a)) | .key'$
+}
+
+// manifest_mcp_field <name> <field> — mcpServers.<name>.<field>. "" when absent.
+pub fun manifest_mcp_field(name: Text, field: Text): Text {
+    if not manifest_have() { return "" }
+    return trust $printf '%s' "{__raw}" | jq -r --arg n "{name}" --arg f "{field}" '.mcpServers[\$n][\$f] // ""'$
+}
+
+// manifest_mcp_command <name> — mcpServers.<name>.command (convenience wrapper).
+pub fun manifest_mcp_command(name: Text): Text {
+    return manifest_mcp_field(name, "command")
+}
+
+// manifest_mcp_args <name> — one arg per line, with ${VAR} substituted. The bash
+// version read the raw arg list and post-processed each line; here we split the
+// jq output on newlines and substitute per arg (blank lines dropped).
+pub fun manifest_mcp_args(name: Text): Text {
+    if not manifest_have() { return "" }
+    let raw = trust $printf '%s' "{__raw}" | jq -r --arg n "{name}" '.mcpServers[\$n].args[]?'$
+    let out = ""
+    for line in split_lines(raw) {
+        if line == "" { continue }
+        let sub = _manifest_substitute_vars(line)
+        out = "{out}{sub}\n"
+    }
+    return out
+}
+
+// manifest_mcp_requires <name> — one requires[] entry per line. "" when none.
+pub fun manifest_mcp_requires(name: Text): Text {
+    if not manifest_have() { return "" }
+    return trust $printf '%s' "{__raw}" | jq -r --arg n "{name}" '.mcpServers[\$n].requires[]? // empty'$
+}
+
+// manifest_mcp_perms <name> — one permissionsAllow[] entry per line. "" when none.
+pub fun manifest_mcp_perms(name: Text): Text {
+    if not manifest_have() { return "" }
+    return trust $printf '%s' "{__raw}" | jq -r --arg n "{name}" '.mcpServers[\$n].permissionsAllow[]? // empty'$
+}
+
+// manifest_all_perms — every permissionsAllow string from every MCP, deduped
+// (jq `unique` sorts + uniques). One per line.
+pub fun manifest_all_perms(): Text {
+    if not manifest_have() { return "" }
+    return trust $printf '%s' "{__raw}" | jq -r '[.mcpServers[].permissionsAllow[]?] | unique[]'$
+}
+
+// ---- build -------------------------------------------------------------------
+
+// manifest_pack_summary — " +pack-ver +pack-ver" for each build.packs[] entry,
+// or "" when there are no packs. Used by the banner.
+pub fun manifest_pack_summary(): Text {
+    if not manifest_have() { return "" }
+    return trust $printf '%s' "{__raw}" | jq -r '.build.packs // [] | map(" +" + .name + "-" + .version) | join("")'$
+}
+
+// manifest_build_version — build.version, or "" when absent.
+pub fun manifest_build_version(): Text {
+    if not manifest_have() { return "" }
+    return trust $printf '%s' "{__raw}" | jq -r '.build.version // ""'$
+}
+
+// ---- modes -------------------------------------------------------------------
+
+// manifest_modes — one line per visible mode, in array order:
+//   id|label|description|is_default
+// Hidden modes (available: false) are omitted; default flag is "1"/"0".
+pub fun manifest_modes(): Text {
+    if not manifest_have() { return "" }
+    // The jq filter builds the |-joined record. The \\(...) interpolations need a
+    // LITERAL backslash-paren in the filter; in an Amber `$...$` a single `\(` is
+    // consumed, so each is written `\\(` to survive lowering into the bash arg.
+    return trust $printf '%s' "{__raw}" | jq -r '.branding.modes // [] | map(select(.available != false)) | .[] | "\\(.id)|\\(.label)|\\(.description)|\\(if .default then "1" else "0" end)"'$
+}
+
+// ---- skills ------------------------------------------------------------------
+
+// manifest_skills — names of skills the manifest declares. `skills.discovery ==
+// "auto"` (the only legal value today) means: every subdir of skills_dir that
+// contains a SKILL.md is a skill. One name per line. Non-"auto" warns + falls
+// back to auto, matching the bash log_warn path.
+pub fun manifest_skills(): Text {
+    if not manifest_have() { return "" }
+    let mode = trust $printf '%s' "{__raw}" | jq -r '.skills.discovery // "auto"'$
+    if mode != "auto" {
+        trust $printf '%s\n' "manifest: skills.discovery={mode} is not implemented; falling back to auto" >&2$
+    }
+    let sdir = manifest_skills_dir()
+    if sdir == "" { return "" }
+    if not dir_exists(sdir) { return "" }
+    // Walk skills_dir/*/SKILL.md and emit the directory leaf name for each. The
+    // bash version used a `for d in "$sdir"/*/` glob + parameter expansion; here
+    // a single find|while shell pipeline does the same (no nested arrays, no
+    // glob-in-Amber surprises). basename of the parent dir of each SKILL.md.
+    return trust $find "{sdir}" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null | sed -E 's#/SKILL.md\$##; s#.*/##' | sort$
+}

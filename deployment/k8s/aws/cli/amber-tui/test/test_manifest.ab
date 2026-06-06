@@ -1,0 +1,78 @@
+// test_manifest.ab — coverage for src/manifest.ab, mirroring test_manifest.bats.
+//
+// Each test points MIGRATE_MANIFEST at a fixture under test/fixtures/ and asserts
+// on parsed values. amber runs every `test` block in its own process, so the
+// manifest parse-once latch (a module-level let) resets between tests — each can
+// load a different fixture cleanly. Requires jq (the model layer hard-deps it);
+// parse-dependent tests early-return when jq is absent.
+//
+// Fixtures live in test/fixtures/*.json (real files, not inline strings): JSON is
+// brace-heavy and `{` starts interpolation inside BOTH Amber Text literals AND
+// `$...$` commands, so an on-disk fixture is the clean way to feed canned JSON.
+
+import { assert, assert_eq } from "std/test"
+import {
+    manifest_have, manifest_brand, manifest_modes,
+    manifest_mcp_names, manifest_mcp_command, manifest_all_perms,
+    manifest_pack_summary, manifest_build_version
+} from "../src/manifest.ab"
+import { env_var_set, env_var_unset, is_command } from "std/env"
+import { text_contains } from "std/text"
+
+// Fixture paths are relative to the repo root (amber test is run from amber-tui/).
+const MAIN = "test/fixtures/manifest_main.json"
+const MODES = "test/fixtures/manifest_modes.json"
+
+test "manifest_have is false when no manifest path resolves" {
+    env_var_set("MIGRATE_MANIFEST", "/nonexistent/manifest.json")
+    assert(not manifest_have())
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "manifest_brand reads branding fields" {
+    env_var_set("MIGRATE_MANIFEST", MAIN)
+    assert(manifest_have())
+    assert_eq(manifest_brand("appName"), "Acme Migrate")
+    assert_eq(manifest_brand("binaryName"), "acme-migrate")
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "manifest_build_version + pack_summary" {
+    env_var_set("MIGRATE_MANIFEST", MAIN)
+    assert_eq(manifest_build_version(), "3.2.1")
+    assert_eq(manifest_pack_summary(), " +acme-1.0")
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "manifest_mcp_names filters by agent; command resolves" {
+    env_var_set("MIGRATE_MANIFEST", MAIN)
+    // codex is only on the aws server
+    assert_eq(manifest_mcp_names("codex"), "aws")
+    // claude is on both
+    let claude = manifest_mcp_names("claude")
+    assert(text_contains(claude, "aws"))
+    assert(text_contains(claude, "k8s"))
+    assert_eq(manifest_mcp_command("aws"), "uvx")
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "manifest_all_perms dedupes across servers" {
+    env_var_set("MIGRATE_MANIFEST", MAIN)
+    // s3:Get* appears in both aws + k8s → must appear once after unique.
+    let perms = manifest_all_perms()
+    assert(text_contains(perms, "s3:Get*"))
+    assert(text_contains(perms, "ec2:Describe*"))
+    env_var_unset("MIGRATE_MANIFEST")
+}
+
+test "manifest_modes emits visible modes, omits hidden, flags default" {
+    env_var_set("MIGRATE_MANIFEST", MODES)
+    let modes = manifest_modes()
+    // manual is default → trailing |1
+    assert(text_contains(modes, "manual|Manual|hands-on|1"))
+    // console is visible, not default → |0
+    assert(text_contains(modes, "console|Console|web|0"))
+    // agent is available:false → omitted entirely
+    assert(not text_contains(modes, "agent|Agent"))
+    env_var_unset("MIGRATE_MANIFEST")
+}

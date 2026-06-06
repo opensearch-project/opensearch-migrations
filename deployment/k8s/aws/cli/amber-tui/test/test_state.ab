@@ -1,0 +1,167 @@
+// test_state.ab — coverage for src/state.ab, mirroring test_state.bats.
+//
+// Verifies: load → set → save → load round-trip, the both-artifacts write,
+// space/quote-bearing values, archive, and the resumable-step accessors.
+//
+// Isolation. The bats harness used setup_isolated_home to point STAGE_DIR at a
+// fresh temp dir per test. We do the same here: each test calls fresh_stage()
+// to mint a unique STAGE_DIR under $TMPDIR and export it (state.ab resolves
+// STAGE_DIR from the env on every op), then state_load() to reset the
+// module-level in-memory store — which is what stands in for the bash
+// `STATE=()` + new-process reset (all test blocks share one process, so a clean
+// dir + state_load is the equivalent fresh start).
+//
+// No network/cloud: state.ab only touches the filesystem under STAGE_DIR. The
+// archive timestamp uses the real `date` (deterministic enough — we just assert
+// the file landed under archive/, not its exact name), so no external command
+// needs a PATH-shadow shim for these cases.
+
+import { assert, assert_eq } from "std/test"
+import { env_var_set } from "std/env"
+import { file_read } from "std/fs"
+import { slice } from "std/text"
+import {
+    state_load, state_set, state_get, state_has, state_unset,
+    state_save, state_archive, state_resumable_step, state_count
+} from "../src/state.ab"
+
+// ---- helpers (ABOVE the test blocks: define-before-use) --------------------
+
+// __seq — a monotonically increasing counter so every test gets a distinct
+// STAGE_DIR even within the same second (date_now() alone could collide).
+let __seq = 0
+
+// fresh_stage — mint + export a unique empty STAGE_DIR and reset the in-memory
+// store via state_load(). Returns the dir so a test can probe the files.
+fun fresh_stage(): Text {
+    __seq += 1
+    let base = trust $mktemp -d$
+    let dir = "{base}/stage-{__seq}"
+    trust env_var_set("STAGE_DIR", dir)
+    // also pin MIGRATE_HOME/STAGE so the fallback path is exercised cleanly if
+    // STAGE_DIR were ever cleared; harmless otherwise.
+    trust env_var_set("MIGRATE_HOME", base)
+    trust env_var_set("STAGE", "stage-{__seq}")
+    state_load()   // creates the subtree (stage_dir_init) + clears memory
+    return dir
+}
+
+// contains_text — substring predicate (the bats tests grep'd the files).
+fun contains_text(needle: Text, s: Text): Bool {
+    let nl = len needle
+    if nl == 0 { return true }
+    let limit = (len s) - nl
+    if limit < 0 { return false }
+    for i in 0..=limit {
+        if slice(s, i, nl) == needle { return true }
+    }
+    return false
+}
+
+// file_present — file_exists wrapper kept local so the test imports stay tight.
+fun file_present(path: Text): Bool {
+    let rc = 1
+    trust $test -f "{path}"$
+    rc = status()
+    return rc == 0
+}
+
+// ---- tests (one per bats @test) --------------------------------------------
+
+// @test "state_save / state_load round-trips a single key"
+test "state_save / state_load round-trips a single key" {
+    fresh_stage()
+    state_load()
+    state_set("FOO", "bar")
+    state_save()
+
+    // simulate a fresh process: re-load from disk.
+    state_load()
+    assert_eq(state_get("FOO", ""), "bar")
+}
+
+// @test "state_get returns the default when key absent"
+test "state_get returns the default when key absent" {
+    fresh_stage()
+    state_load()
+    assert_eq(state_get("MISSING", "fallback"), "fallback")
+}
+
+// @test "state_save writes both state.env and state.json"
+test "state_save writes both state.env and state.json" {
+    let dir = fresh_stage()
+    state_load()
+    state_set("REGION", "us-west-2")
+    state_save()
+
+    assert(file_present("{dir}/state.env"))
+    assert(file_present("{dir}/state.json"))
+    let env_body = file_read("{dir}/state.env") failed { "" }
+    let json_body = file_read("{dir}/state.json") failed { "" }
+    assert(contains_text("REGION=\"us-west-2\"", env_body))
+    assert(contains_text("\"REGION\"", json_body))
+}
+
+// @test "state_save handles values with spaces and quotes"
+test "state_save handles values with spaces and quotes" {
+    fresh_stage()
+    state_load()
+    let v = "arn:aws:iam::1234:user/\"john doe\""
+    state_set("NOTE", v)
+    state_save()
+
+    state_load()
+    assert_eq(state_get("NOTE", ""), v)
+}
+
+// @test "state_archive moves state into archive/<ts>"
+test "state_archive moves state into archive/<ts>" {
+    let dir = fresh_stage()
+    state_load()
+    state_set("FOO", "bar")
+    state_save()
+    state_archive()
+
+    // live files gone; archive subtree exists with the archived state.env.
+    assert(not file_present("{dir}/state.env"))
+    assert(not file_present("{dir}/state.json"))
+    let found = trust $find "{dir}/archive" -name 'state.env' | wc -l | tr -d ' '$
+    assert_eq(found, "1")
+}
+
+// @test "state_resumable_step echoes empty when last_step missing"
+test "state_resumable_step echoes empty when last_step missing" {
+    fresh_stage()
+    state_load()
+    assert_eq(state_resumable_step(), "")
+}
+
+// @test "state_resumable_step returns last_step value"
+test "state_resumable_step returns last_step value" {
+    fresh_stage()
+    state_load()
+    state_set("last_step", "helm_done")
+    state_save()
+    state_load()
+    assert_eq(state_resumable_step(), "helm_done")
+}
+
+// ---- extra coverage for the parallel-array primitives ----------------------
+
+// state_has / state_unset round-trip (state_unset has no bash named fn, but the
+// seed-slot store needs a compaction test to lock the invariant in).
+test "state_has + state_unset compact the store" {
+    fresh_stage()
+    state_load()
+    state_set("A", "1")
+    state_set("B", "2")
+    state_set("C", "3")
+    assert_eq(state_count(), 3)
+    assert(state_has("B"))
+    state_unset("B")
+    assert(not state_has("B"))
+    assert_eq(state_count(), 2)
+    // surviving keys keep their values (no slot corruption from the shift).
+    assert_eq(state_get("A", ""), "1")
+    assert_eq(state_get("C", ""), "3")
+}

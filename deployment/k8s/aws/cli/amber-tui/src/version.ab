@@ -1,0 +1,175 @@
+// version.ab — CLI + Migration Assistant version resolution.
+//
+// Port of bash lib/version.sh.
+//
+// CLI_VERSION is baked at install time. MA_VERSION is the artifact version we
+// pin when downloading CFN/helm/skills artifacts. ma_default_version() resolves
+// it dynamically from the opensearch-migrations releases API so a CLI release
+// does NOT need to update this file every time MA cuts a new version.
+//
+// Bash constructs replaced here:
+//   * The `__MIGRATE_VERSION_LOADED` source-guard at the top is GONE — Amber
+//     modules are imported, not `source`d, so there is no re-source hazard and
+//     no idempotency guard to port.
+//   * `CLI_VERSION="${CLI_VERSION:-0.0.0-dev}"` → a `pub const` default plus an
+//     env_var_get override in cli_version() (Amber `const` can't read env at
+//     definition time, and `${VAR:-default}` is illegal inside `$...$`).
+//   * The `grep -o … | head -1 | sed -E 's/.*"([^"]+)"$/\1/'` tag-parse pipeline
+//     → ONE regex_capture() call (no sed pipeline of our own — std.ab owns the
+//     single shell-to-sed hop).
+//   * `${latest#v}` (strip a leading "v") → starts_with()+slice().
+//   * `declare -F state_get` runtime probe → REMOVED. The bash version probed
+//     whether the state module was loaded; here the cached value is a PASSED-IN
+//     PARAM (the caller, which already owns state, supplies it), so version.ab
+//     stays decoupled from state.ab and side-effect-free on the read path.
+//   * `curl … || true` forgiving subshell → `trust $curl …$ failed { "" }`
+//     (trust+failed gives the same "network errors are silent, empty body on
+//     failure" contract without needing `set -e`/`pipefail` juggling).
+//   * `die "…"` (from common.sh, not present in this Amber rewrite) → an error
+//     line on stderr + `exit 1` via a surgical raw escape, preserving the
+//     "fail loudly" contract.
+//
+// PUBLIC CONTRACT (callable from other modules):
+//   cli_version()                       -> Text   (the reported CLI version)
+//   upgrade_notice_for_cli()            -> Null   (chrome to STDERR only)
+//   version_check()                     -> Null   (back-compat alias)
+//   ma_default_version(cached: Text)    -> Text   (the MA version on the value
+//                                                  channel; chrome stays off it)
+
+import { env_var_get, is_command } from "std/env"
+import { slice } from "std/text"
+import { regex_capture, starts_with } from "../src/std.ab"
+import { ui_dim } from "../src/ui.ab"
+
+// ---- constants -------------------------------------------------------------
+
+// Default reported version. assemble-bootstrap.sh rewrites the bash line at
+// build time; the Amber equivalent is a const default that a CLI_VERSION env
+// var (set by the same bootstrap) can override at runtime — see cli_version().
+pub const CLI_VERSION_DEFAULT = "0.0.0-dev"
+
+// Releases APIs.
+const CLI_RELEASES_API = "https://api.github.com/repos/opensearch-project/migrate-cli/releases/latest"
+pub const MA_RELEASES_API = "https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest"
+
+// Last-resort fallback for ma_default_version when the releases API isn't
+// reachable AND the operator has no cached value. Empty means "fail loudly
+// rather than silently use a hardcoded version" — hardcoding has the
+// rotting-comment property: the value drifts every release and operators can't
+// tell. Keep it empty unless a release explicitly needs a floor.
+const LAST_RESORT_MA_VERSION = ""
+
+// ---- private helpers (defined FIRST: Amber tree-shakes per imported symbol
+// and keeps only transitive deps that textually precede the entry point, so a
+// helper defined after its caller is silently dropped) ----------------------
+
+// strip_v — drop a single leading "v" (the `${latest#v}` prefix-strip). Tags
+// are published as "v2.1.0"; the CLI reports/pins bare "2.1.0".
+fun strip_v(tag: Text): Text {
+    if starts_with("v", tag) {
+        return slice(tag, 1, (len tag) - 1)
+    }
+    return tag
+}
+
+// fetch_latest_tag — GET <api>, parse tag_name, return the bare version (no
+// leading "v"), or "" on any failure (no curl, network error, missing field).
+// Network errors are SILENT by design — this is best-effort version discovery.
+//
+// `trust … failed { "" }`: a non-2xx (e.g. 404 from -f) or a transport error
+// must collapse to an empty body, NOT abort the CLI — same intent as the bash
+// `|| true` forgiving subshell. --max-time 3 bounds the wait so a slow/blocked
+// network never stalls the wizard.
+fun fetch_latest_tag(api: Text): Text {
+    if not is_command("curl") {
+        return ""
+    }
+    let body = trust $curl -fsSL --max-time 3 "{api}" 2>/dev/null$ failed { "" }
+    if body == "" {
+        return ""
+    }
+    // ONE regex_capture (std.ab) replaces grep|head|sed. GitHub returns
+    // tag_name on its own line, so the first capture is the latest release's
+    // tag. group 1 = the value between the quotes.
+    let tag = regex_capture(body, "\"tag_name\":[[:space:]]*\"([^\"]*)\"", 1)
+    if tag == "" {
+        return ""
+    }
+    return strip_v(tag)
+}
+
+// ---- public API ------------------------------------------------------------
+
+// cli_version — the reported CLI version. Env CLI_VERSION wins (the bootstrap
+// sets it); otherwise the baked-in default. (Replaces the bash
+// `CLI_VERSION="${CLI_VERSION:-0.0.0-dev}"` module-scope assignment.)
+pub fun cli_version(): Text {
+    let v = env_var_get("CLI_VERSION") failed { "" }
+    if v != "" {
+        return v
+    }
+    return CLI_VERSION_DEFAULT
+}
+
+// upgrade_notice_for_cli — print a one-liner if a newer CLI version is
+// published. Never auto-updates. Network errors are silent. Chrome goes to
+// STDERR (ui_dim), never stdout — preserving the "stdout is for return values"
+// discipline so a caller capturing another function's stdout is never polluted.
+pub fun upgrade_notice_for_cli(): Null {
+    let latest = fetch_latest_tag(CLI_RELEASES_API)
+    if latest == "" {
+        return null
+    }
+    let current = cli_version()
+    if latest != current {
+        ui_dim("  ↳ new migration-assistant available: {latest} (you: {current}) — upgrade: curl -fsSL .../install.sh | bash")
+    }
+}
+
+// version_check — back-compat alias. Older callers (and the integ scripts) call
+// version_check; keep that name working.
+pub fun version_check(): Null {
+    upgrade_notice_for_cli()
+}
+
+// ma_default_version — return the MA artifact version on the VALUE channel
+// (the return Text; chrome never touches it). Resolution order:
+//   1. MA_VERSION env var (operator explicit override)
+//   2. <cached> param (state.env MA_VERSION, supplied by the caller that owns
+//      state — replaces the bash `declare -F state_get` probe + state_get call)
+//   3. opensearch-migrations releases API (network)
+//   4. LAST_RESORT_MA_VERSION if non-empty; otherwise fail loudly
+//
+// Called both at wizard time (to pre-fill the prompt default) and on resume
+// (when state has no MA_VERSION yet). The order means a fresh deploy gets the
+// latest released version, while a resumed deploy stays pinned to whatever it
+// was running before — no accidental version drift mid-deploy.
+pub fun ma_default_version(cached: Text): Text {
+    // 1. explicit env override.
+    let env_ver = env_var_get("MA_VERSION") failed { "" }
+    if env_ver != "" {
+        return env_ver
+    }
+    // 2. caller-supplied cached value (state may not be loaded on cold start;
+    //    the caller passes "" when it has nothing — tolerated, we fall through).
+    if cached != "" {
+        return cached
+    }
+    // 3. resolve from the releases API (best-effort; "" on any failure).
+    let latest = fetch_latest_tag(MA_RELEASES_API)
+    if latest != "" {
+        return latest
+    }
+    // 4. last-resort floor, if a release set one.
+    if LAST_RESORT_MA_VERSION != "" {
+        return LAST_RESORT_MA_VERSION
+    }
+    // Fail loudly: no env, no cache, no network, no floor. The bash `die`
+    // (common.sh) isn't ported into this Amber tree, so inline its behavior —
+    // an error line to STDERR + a non-zero exit. `exit 1` is the only escape
+    // hatch here because Amber's `exit` builtin would print nothing first.
+    trust $printf '%s\n' "error: could not determine Migration Assistant version: pass --version <ver> or check network access to {MA_RELEASES_API}" >&2$
+    exit(1)
+    // unreachable; satisfies the Text return type.
+    return ""
+}

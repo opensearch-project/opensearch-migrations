@@ -1,0 +1,145 @@
+// test_version.ab — coverage for src/version.ab, mirroring test_version.bats.
+//
+// No network: `curl` is stubbed via a PATH-shadow temp dir (an executable shim
+// written with file_write+file_chmod, then prepended to PATH with
+// env_var_set), exactly as AMBER_IDIOMS prescribes. The shim ignores its args
+// and prints canned GitHub-releases JSON, so fetch_latest_tag() exercises the
+// real regex_capture parse + ${tag#v} strip without touching the internet.
+
+import { assert, assert_eq } from "std/test"
+import { env_var_get, env_var_set, env_var_unset } from "std/env"
+import { file_write, file_chmod, dir_create } from "std/fs"
+import {
+    cli_version, ma_default_version, upgrade_notice_for_cli, version_check,
+    CLI_VERSION_DEFAULT, MA_RELEASES_API
+} from "../src/version.ab"
+
+// ---- PATH-shadow curl stub (helpers ABOVE the test blocks: define-before-use)
+
+// stub_dir <slot> — a temp dir we own, holding ONE fake `curl`. env_var_get
+// (NOT a raw `${TMPDIR:-/tmp}` in $...$ — the `{` would be eaten by Amber
+// interp). The <slot> suffix keeps each stub flavor in its OWN dir: `amber test`
+// runs test blocks in PARALLEL, so a single shared dir would let the failing
+// stub clobber the success stub's `curl` mid-run and flake the resolve tests.
+fun stub_dir(slot: Text): Text {
+    let base = env_var_get("TMPDIR") failed { "/tmp" }
+    if base == "" { base = "/tmp" }
+    return "{base}/ma_version_test_stub_{slot}"
+}
+
+// install_curl_stub <slot> <json> — write an executable `curl` shim that prints
+// <json> regardless of args into the <slot> dir, and prepend that dir to PATH
+// so version.ab's curl call (and is_command("curl")) resolve to it.
+fun install_curl_stub(slot: Text, json: Text): Null {
+    let dir = stub_dir(slot)
+    // dir_create + writes are failable; trust them (test fixtures, not the SUT).
+    trust dir_create(dir)
+    let path = "{dir}/curl"
+    // The shim ignores $@ (the -fsSL --max-time 3 <url> flags) and just emits
+    // the canned body on stdout. exit 0 so `trust $curl …$` sees success.
+    let script = "#!/usr/bin/env bash\ncat <<'STUB_EOF'\n{json}\nSTUB_EOF\nexit 0\n"
+    trust file_write(path, script)
+    trust file_chmod(path, "755")
+    let old = env_var_get("PATH") failed { "" }
+    trust env_var_set("PATH", "{dir}:{old}")
+}
+
+// install_failing_curl_stub <slot> — a `curl` shim that exits non-zero with no
+// output, simulating a 404/-f failure or a network error.
+fun install_failing_curl_stub(slot: Text): Null {
+    let dir = stub_dir(slot)
+    trust dir_create(dir)
+    let path = "{dir}/curl"
+    let script = "#!/usr/bin/env bash\nexit 22\n"
+    trust file_write(path, script)
+    trust file_chmod(path, "755")
+    let old = env_var_get("PATH") failed { "" }
+    trust env_var_set("PATH", "{dir}:{old}")
+}
+
+// Canned GitHub releases payload (same shape the real API returns). The leading
+// brace is `\{` — a bare `{` at string start is parsed as interpolation-open by
+// Amber and would swallow the rest of the literal; the closing `}` is literal
+// as-is (escaping it would leave a stray backslash).
+fun canned_release_json(tag: Text): Text {
+    return "\{\n  \"url\": \"https://api.github.com/x\",\n  \"tag_name\": \"{tag}\",\n  \"name\": \"Release {tag}\"\n}"
+}
+
+// ---- cli_version -----------------------------------------------------------
+
+test "cli_version: default when CLI_VERSION unset" {
+    env_var_unset("CLI_VERSION")
+    assert_eq(cli_version(), CLI_VERSION_DEFAULT)
+    assert_eq(cli_version(), "0.0.0-dev")
+}
+
+test "cli_version: env CLI_VERSION wins" {
+    env_var_set("CLI_VERSION", "1.2.3")
+    assert_eq(cli_version(), "1.2.3")
+    env_var_unset("CLI_VERSION")
+}
+
+// ---- ma_default_version: resolution order ----------------------------------
+
+test "ma_default_version: MA_VERSION env override wins" {
+    env_var_set("MA_VERSION", "9.9.9")
+    // cached + network would lose to the explicit env override.
+    assert_eq(ma_default_version("3.3.3"), "9.9.9")
+    env_var_unset("MA_VERSION")
+}
+
+test "ma_default_version: cached param used when no env" {
+    env_var_unset("MA_VERSION")
+    // cached wins over the network (resumed deploy stays pinned).
+    assert_eq(ma_default_version("2.7.0"), "2.7.0")
+}
+
+test "ma_default_version: resolves from releases API, strips leading v" {
+    env_var_unset("MA_VERSION")
+    install_curl_stub("resolve_v", canned_release_json("v2.1.0"))
+    // No env, no cache → network. "v2.1.0" tag → bare "2.1.0".
+    assert_eq(ma_default_version(""), "2.1.0")
+}
+
+test "ma_default_version: tag without v prefix passes through" {
+    env_var_unset("MA_VERSION")
+    install_curl_stub("resolve_nov", canned_release_json("3.0.5"))
+    assert_eq(ma_default_version(""), "3.0.5")
+}
+
+// ---- upgrade_notice_for_cli / version_check --------------------------------
+//
+// These emit chrome to STDERR and return Null; the contract under test is that
+// they NEVER fail the process on a network error (silent best-effort) and never
+// write to stdout. We can't capture stderr from inside an Amber test block, so
+// we assert they run to completion (no abort) under both success and failure
+// stubs.
+
+test "upgrade_notice_for_cli: silent no-op on network failure" {
+    env_var_unset("CLI_VERSION")
+    install_failing_curl_stub("notice_fail")
+    // Empty body → early return, no chrome, no abort.
+    upgrade_notice_for_cli()
+    assert(true)
+}
+
+test "upgrade_notice_for_cli: completes when newer version published" {
+    env_var_set("CLI_VERSION", "0.0.0-dev")
+    install_curl_stub("notice_new", canned_release_json("v5.0.0"))
+    // latest (5.0.0) != current (0.0.0-dev) → emits the dim notice, returns.
+    upgrade_notice_for_cli()
+    assert(true)
+    env_var_unset("CLI_VERSION")
+}
+
+test "version_check: back-compat alias runs" {
+    install_failing_curl_stub("vcheck_fail")
+    version_check()
+    assert(true)
+}
+
+// ---- MA_RELEASES_API constant ----------------------------------------------
+
+test "MA_RELEASES_API points at opensearch-migrations latest" {
+    assert_eq(MA_RELEASES_API, "https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest")
+}

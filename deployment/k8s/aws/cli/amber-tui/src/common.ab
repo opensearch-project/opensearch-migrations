@@ -1,0 +1,389 @@
+// common.ab — shell hardening, traps, helpers used by every other module.
+//
+// Port of bash lib/_common.sh. Loaded first by the migration-assistant entry
+// point. The bash file carried four things Amber models differently:
+//
+//   1. `set -e/-u/-o pipefail/extglob/umask 077` — Amber compiles to a script
+//      whose header the BUILD step controls; per-module `set` is neither needed
+//      nor honored from a library. The umask is the one runtime-relevant bit, so
+//      common_harden() applies it via a raw `trust $umask 077$` once.
+//   2. Globals (MIGRATE_HOME, STAGE, STAGE_DIR, MIGRATE_NONINTERACTIVE) that bash
+//      seeded with `: "${VAR:=default}"`. Amber can't write `${VAR:=...}` inside
+//      `$...$` ({ is interpolation), so each is a module-level cached scalar
+//      resolved from env via env_var_get with an Amber-side default.
+//   3. The EXIT/INT/TERM trap chain + the background-PID registry. Amber has no
+//      `trap` keyword and can't invoke a function by its Text name (the bash
+//      `"$fn"` indirection), so:
+//        * the PID registry is module-level PARALLEL state (a [Text] + __count,
+//          the dashboard.ab pattern) and cleanup is a kill sweep, exactly what
+//          bash __on_signal did;
+//        * the trap itself is installed ONCE via a single raw `trust $trap ...$`
+//          (documented escape hatch) — bash's printf/kill in the trap body fire
+//          at signal time regardless of locale.
+//   4. die/require_cmd error chrome → core.eprintln (red, stderr) + exit, since
+//      EVERYTHING visual goes to stderr (stdout reserved for return values).
+//
+// PUBLIC CONTRACT preserved for callers: die, require_cmd, on_exit_register,
+// on_signal_track_pid, on_signal_untrack_pid, on_signal_cleanup, arch_os
+// (stdout), stage_dir_init, plus accessors migrate_home/stage/stage_dir/
+// migrate_noninteractive.
+
+import { env_var_get, kill, is_command } from "std/env"
+import { dir_create } from "std/fs"
+import { slice } from "std/text"
+import { esc, eprintln } from "./core.ab"
+
+// =====================================================================
+// Private helpers FIRST. Amber tree-shakes per imported symbol and keeps only
+// transitive deps that textually PRECEDE the public entry point, so every
+// private helper a `pub fn` calls must be defined above it or it's silently
+// dropped (→ "Function 'x' does not exist" when this module is imported).
+// =====================================================================
+
+// red_error_prefix — the bash hard-coded \033[31m error tag, but minted via
+// core.esc() so the byte is a real ESC (the reason core.ab exists).
+fun red_error_prefix(): Text {
+    let e = esc()
+    return "{e}[31merror:{e}[0m"
+}
+
+// starts_with_lit — prefix test over a (codepoint-correct) std slice. Used only
+// on short uname kernel strings ("MINGW…"/"MSYS…"/"CYGWIN…").
+fun starts_with_lit(s: Text, prefix: Text): Bool {
+    let pl = len prefix
+    if pl > len s { return false }
+    return slice(s, 0, pl) == prefix
+}
+
+// kill_one <pid> <sig> — guarded single kill of the leader PID. An already-dead
+// PID makes kill exit non-zero, which is expected (bash used `|| true`), so the
+// failure is swallowed. Returns true if the kill call itself succeeded.
+fun kill_one(pid: Text, sig: Text): Bool {
+    let p = pid as Int
+    return kill(p, sig) failed { false }
+}
+
+// pkill_group <pid> <sig> — TERM/KILL the children of <pid> (bash signalled the
+// whole pgroup via "-$pid"; pkill -P reaches the immediate children, the common
+// case for our `aws … &` / spinner forks). Raw escape: std pkill matches by
+// NAME, not parent PID, so the -P form is shelled directly. Guarded — no
+// children is a non-zero exit, not an error.
+fun pkill_group(pid: Text, sig: Text): Bool {
+    trust $pkill "-{sig}" -P "{pid}" 2>/dev/null$
+    return status() == 0
+}
+
+// =====================================================================
+// die / require_cmd
+// =====================================================================
+
+// die <msg> — print a red error to STDERR and exit 1. (bash: printf red >&2;
+// exit 1.)
+pub fun die(msg: Text): Null {
+    eprintln("{red_error_prefix()} {msg}")
+    exit(1)
+}
+
+// require_cmd <name> <hint> — abort with an actionable message (exit 127) if
+// <name> is not on PATH. (bash: command -v >/dev/null; printf red + hint >&2;
+// exit 127.) Pass "" for hint to omit the hint line. is_command is the std
+// equivalent of `command -v`. 127 ("command not found") is preserved verbatim so
+// callers/CI that key on the code still match.
+pub fun require_cmd(name: Text, hint: Text): Null {
+    if is_command(name) { return null }
+    eprintln("{red_error_prefix()} required command not found: {name}")
+    if hint != "" {
+        eprintln("  hint: {hint}")
+    }
+    exit(127)
+}
+
+// =====================================================================
+// background-PID registry (signal cleanup)
+// =====================================================================
+//
+// bash kept __SIG_TRACKED_PIDS as a plain array indexed by ${#arr[@]}. Amber:
+// a seeded [Text] + a logical __sig_count (the dashboard.ab seed-slot pattern —
+// `let` has no empty-typed-array literal, so index 0 is a placeholder reused by
+// the first real append). PIDs are Text because modules capture them as text
+// from `$!` and kill/pkill take string pids.
+
+let __sig_pids = [""]
+let __sig_count = 0
+
+// __export_pids — mirror the registry into $MIGRATE_SIG_PIDS so the bash trap
+// body (which runs in signal context, outside Amber's control flow) sees the
+// live PID set. Space-separated, matching the trap's `for __p in $MIGRATE_SIG_PIDS`
+// loop. Raw escape: env_var_set doesn't `export`, and the trap's shell needs the
+// export to inherit the value.
+fun __export_pids(): Null {
+    let joined = ""
+    for i in 0..__sig_count {
+        let p = __sig_pids[i]
+        if p == "" { continue }
+        joined = joined == "" then p else "{joined} {p}"
+    }
+    trust $export MIGRATE_SIG_PIDS="{joined}"$
+}
+
+// on_signal_track_pid <pid> — register a live background PID so the cleanup
+// sweep can kill it. (bash: __SIG_TRACKED_PIDS[${#...}]="$1".) Modules that fork
+// a subprocess MUST call this right after capturing the pid.
+pub fun on_signal_track_pid(pid: Text): Null {
+    if pid == "" { return null }
+    // Seed-slot reuse: the FIRST real pid overwrites the placeholder at index 0
+    // so physical length stays equal to the logical count and the 0..__sig_count
+    // loops never read the stale seed.
+    if __sig_count < len __sig_pids {
+        __sig_pids[__sig_count] = pid
+    } else {
+        __sig_pids += [pid]
+    }
+    __sig_count += 1
+    __export_pids()
+}
+
+// on_signal_untrack_pid <pid> — remove a PID once reaped cleanly. (bash rebuilt
+// the array skipping the match; we compact in place and shrink the logical
+// count, leaving trailing physical slots as harmless dead entries the
+// 0..__sig_count loops never visit.)
+pub fun on_signal_untrack_pid(pid: Text): Null {
+    let w = 0
+    for r in 0..__sig_count {
+        let cur = __sig_pids[r]
+        if cur != pid {
+            __sig_pids[w] = cur
+            w += 1
+        }
+    }
+    __sig_count = w
+    __export_pids()
+}
+
+// on_signal_tracked_count — test seam + introspection: how many PIDs are live.
+pub fun on_signal_tracked_count(): Int { return __sig_count }
+
+// on_signal_cleanup — TERM then KILL every tracked PID + its children. This is
+// the body of bash __on_signal's kill loop, callable so tests (and an Amber-side
+// caller) can invoke it without a real signal. Each kill is guarded because an
+// already-dead PID exits non-zero — expected, not an error (bash: `|| true`).
+pub fun on_signal_cleanup(): Null {
+    if __sig_count == 0 { return null }
+    // First pass: polite TERM — children, then the leader (bash signalled the
+    // pgroup leader-last after the group).
+    for i in 0..__sig_count {
+        let p = __sig_pids[i]
+        if p == "" { continue }
+        let t1 = pkill_group(p, "TERM")
+        let t2 = kill_one(p, "TERM")
+    }
+    // bash slept 1s, then hard-KILLed survivors. Same two-phase shape.
+    sleep 1
+    for i in 0..__sig_count {
+        let p = __sig_pids[i]
+        if p == "" { continue }
+        let k1 = pkill_group(p, "KILL")
+        let k2 = kill_one(p, "KILL")
+    }
+    __sig_count = 0
+    __export_pids()
+}
+
+// =====================================================================
+// on_exit_register — cleanup-callback registry
+// =====================================================================
+//
+// bash stored cleanup FUNCTION NAMES and invoked them by name (`"$fn" "$rc"`).
+// Amber cannot call a function by its Text name, so this keeps the NAMES (for
+// introspection / a future dispatcher) but the only cleanup that actually runs
+// is the PID sweep above — which is what every registered hook in the bash CLI
+// ultimately did (kill a backgrounded child). Callers that registered a custom
+// hook should instead call on_signal_track_pid for the PIDs they own.
+
+let __exit_fns = [""]
+let __exit_count = 0
+
+// on_exit_register <fn_name> — record a cleanup callback name. (bash appended to
+// __ON_EXIT_FNS.) Kept for contract compatibility; see the note above on why the
+// PID sweep is the effective cleanup.
+pub fun on_exit_register(fn_name: Text): Null {
+    if fn_name == "" { return null }
+    if __exit_count < len __exit_fns {
+        __exit_fns[__exit_count] = fn_name
+    } else {
+        __exit_fns += [fn_name]
+    }
+    __exit_count += 1
+}
+
+// on_exit_registered_count — test seam.
+pub fun on_exit_registered_count(): Int { return __exit_count }
+
+// =====================================================================
+// arch_os
+// =====================================================================
+
+// arch_os — return "<os>/<arch>" using the release-binary convention:
+//   os:   linux | darwin | windows
+//   arch: amd64 | arm64
+// (bash used two `case "$(uname -X)"` blocks; Amber uses an if-chain — there is
+// no match/switch keyword.) Unknown OS/arch → die, matching bash `*) die`.
+// uname can't meaningfully fail on a supported host; trust it.
+pub fun arch_os(): Text {
+    let kernel = trust $uname -s$
+    let machine = trust $uname -m$
+
+    let os = ""
+    if {
+        kernel == "Linux"  { os = "linux" }
+        kernel == "Darwin" { os = "darwin" }
+        // MINGW*/MSYS*/CYGWIN* → windows.
+        starts_with_lit(kernel, "MINGW")  { os = "windows" }
+        starts_with_lit(kernel, "MSYS")   { os = "windows" }
+        starts_with_lit(kernel, "CYGWIN") { os = "windows" }
+        else { die("unsupported OS: {kernel}") }
+    }
+
+    let arch = ""
+    if {
+        machine == "x86_64"  { arch = "amd64" }
+        machine == "amd64"   { arch = "amd64" }
+        machine == "arm64"   { arch = "arm64" }
+        machine == "aarch64" { arch = "arm64" }
+        else { die("unsupported arch: {machine}") }
+    }
+
+    // bash printf '%s/%s\n'. We RETURN the value (stdout discipline); the caller
+    // captures it.
+    return "{os}/{arch}"
+}
+
+// =====================================================================
+// globals: MIGRATE_HOME / STAGE / STAGE_DIR / MIGRATE_NONINTERACTIVE
+// =====================================================================
+//
+// bash seeded these with `: "${VAR:=default}"`. Amber can't write that brace
+// form inside `$...$`, and module scalars persist across calls, so each accessor
+// resolves from the environment once and caches.
+
+let __migrate_home = ""
+let __stage = ""
+let __noninteractive = ""
+
+// migrate_home — per-project state root. Env MIGRATE_HOME wins; else
+// "$PWD/migration-assistant-workspace" (so the cwd becomes the project root,
+// exactly as bash documented).
+pub fun migrate_home(): Text {
+    if __migrate_home != "" { return __migrate_home }
+    let env_home = env_var_get("MIGRATE_HOME") failed { "" }
+    if env_home != "" {
+        __migrate_home = env_home
+        return __migrate_home
+    }
+    let cwd = trust $pwd$
+    __migrate_home = "{cwd}/migration-assistant-workspace"
+    return __migrate_home
+}
+
+// stage — the active stage name (env STAGE, default "default").
+pub fun stage(): Text {
+    if __stage != "" { return __stage }
+    let env_stage = env_var_get("STAGE") failed { "" }
+    __stage = env_stage != "" then env_stage else "default"
+    return __stage
+}
+
+// stage_dir — "$MIGRATE_HOME/$STAGE". Recomputed from the two accessors so a
+// test that pins env before first use sees a consistent value.
+pub fun stage_dir(): Text {
+    return "{migrate_home()}/{stage()}"
+}
+
+// migrate_noninteractive — Bool: headless mode? (env MIGRATE_NONINTERACTIVE ==
+// "1", default 0.) Used by ui_prompt/ui_confirm callers.
+pub fun migrate_noninteractive(): Bool {
+    if __noninteractive == "" {
+        let v = env_var_get("MIGRATE_NONINTERACTIVE") failed { "0" }
+        __noninteractive = v != "" then v else "0"
+    }
+    return __noninteractive == "1"
+}
+
+// common_reset_cache — test seam: drop the cached globals so a test can re-pin
+// the environment and observe new values. (No bash analogue — bash re-sources to
+// reset; Amber memoizes, so we expose an explicit invalidate.)
+pub fun common_reset_cache(): Null {
+    __migrate_home = ""
+    __stage = ""
+    __noninteractive = ""
+}
+
+// =====================================================================
+// stage_dir_init
+// =====================================================================
+
+// mkdir_or_die <path> — dir_create (mkdir -p semantics: no error if it already
+// exists) but failable; on a genuinely un-creatable path, die with a clear
+// message. This keeps stage_dir_init NON-failable for callers while preserving
+// the bash `set -e` behavior (abort the program on a real mkdir failure).
+fun mkdir_or_die(path: Text): Null {
+    dir_create(path) failed {
+        die("could not create directory: {path}")
+    }
+}
+
+// stage_dir_init — create the stage subtree if missing. Idempotent.
+// (bash: a single `mkdir -p` with seven paths.)
+pub fun stage_dir_init(): Null {
+    let base = stage_dir()
+    mkdir_or_die(base)
+    mkdir_or_die("{base}/log")
+    mkdir_or_die("{base}/artifacts")
+    mkdir_or_die("{base}/artifacts/.cache")
+    mkdir_or_die("{base}/skills")
+    mkdir_or_die("{base}/plan")
+    mkdir_or_die("{base}/history")
+    mkdir_or_die("{base}/archive")
+}
+
+// =====================================================================
+// harden + trap install
+// =====================================================================
+
+// common_harden — apply the runtime-relevant bit of the bash `set`/`umask`
+// header. `set -e/-u/-o pipefail/extglob` govern the compiled bash script as a
+// whole and aren't meaningfully re-settable from a sourced library, so the only
+// carried-over effect is `umask 077` (private state files). One raw escape:
+// Amber has no umask builtin.
+pub fun common_harden(): Null {
+    trust $umask 077$
+}
+
+// 0 = not installed, 1 = installed. The bash trap was gated on
+// MIGRATE_OWNS_PROCESS=1 so it wouldn't hijack bats / sourced-only callers.
+let __traps_installed = 0
+
+// common_install_traps — install the INT/TERM trap chain ONCE. Gated on
+// MIGRATE_OWNS_PROCESS=1 exactly like bash (keeps the trap out of test harnesses
+// and library-only consumers). Amber has no `trap` keyword, so this is a single
+// documented raw escape. The handler prints the yellow interrupt notice, then
+// TERMs/KILLs every space-separated pid in $MIGRATE_SIG_PIDS (kept in sync by
+// on_signal_track/untrack via __export_pids — bash's __SIG_TRACKED_PIDS was a
+// process-global the trap closed over; $MIGRATE_SIG_PIDS is its Amber analogue),
+// then exits 130. The \x1b in printf is interpreted by bash at fire time
+// (locale-independent); $-sigils are backslash-escaped so Amber leaves them raw.
+pub fun common_install_traps(): Null {
+    if __traps_installed == 1 { return null }
+    let owns = env_var_get("MIGRATE_OWNS_PROCESS") failed { "0" }
+    if owns != "1" { return null }
+    __traps_installed = 1
+    // Two lowering rules drive this string:
+    //   * `\x1b`/`\x0a` HEX escapes stay literal in the `$...$` raw command and
+    //     are interpreted by `printf` at fire time (a real `\n` would be lowered
+    //     to an actual newline by Amber, splitting the trap line — verified).
+    //   * `\$__p` / `\$MIGRATE_SIG_PIDS` escape the `$` so Amber leaves the bash
+    //     var refs intact instead of treating them as Amber interpolation.
+    //   * NO `{ … }` group: a `{` is captured by Amber as interpolation, so the
+    //     hard-KILL branch uses `if … then … fi` not `&& { … }`.
+    trust $trap 'printf "\x0a\x1b[33m! interrupted — killing child processes\x1b[0m\x0a" >&2; for __p in \$MIGRATE_SIG_PIDS; do kill -TERM "-\$__p" 2>/dev/null || kill -TERM "\$__p" 2>/dev/null || true; done; sleep 1; for __p in \$MIGRATE_SIG_PIDS; do if kill -0 "\$__p" 2>/dev/null; then kill -KILL "-\$__p" 2>/dev/null || kill -KILL "\$__p" 2>/dev/null || true; fi; done; exit 130' INT TERM$
+}

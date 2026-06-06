@@ -1,0 +1,144 @@
+// test_artifacts.ab — coverage for src/artifacts.ab, mirroring test_artifacts.bats.
+//
+// Strategy (carried over from the bats version): artifacts_fetch hits HEAD then
+// GET via curl. We can't stub curl in-process — artifacts_fetch also calls
+// die()→exit on a SHA mismatch, which would kill the test runner. So we mirror
+// bats' `run` (subshell) exactly:
+//
+//   1. PATH-shadow `curl` with an executable shim written via file_write +
+//      file_chmod (the AMBER_IDIOMS recipe). The shim:
+//        - HEAD (-I) → exit 0 (every URL "reachable")
+//        - GET .sha256 → writes a chosen digest line
+//        - GET anything else → writes the bytes "hello"
+//   2. Compile a tiny driver .ab that calls artifacts_fetch and echoes the
+//      returned symlink path, then run that compiled .sh in a child shell with
+//      PATH=<stub>:$PATH and MIGRATE_HOME/STAGE pinned to a temp dir.
+//   3. Capture the child's stdout (the link path) and exit code (status()).
+//
+// No network, no real cloud: the stub answers every curl. amber + the sha
+// hasher (sha256sum/shasum) still resolve because we PREPEND the stub dir
+// rather than replacing PATH.
+
+import { assert, assert_eq } from "std/test"
+import { printf, env_var_get } from "std/env"
+import { file_write, file_chmod, file_exists, dir_create } from "std/fs"
+
+// ---- helpers (defined ABOVE the test blocks: Amber needs define-before-use,
+// and tree-shaking keeps only deps textually preceding the entry point) ------
+
+// The sha256 of the literal bytes "hello" — the GET payload the stub writes.
+// Matches the bats fixture; artifacts_fetch must accept it as a valid digest.
+const SHA_HELLO = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+// A digest that will NOT match "hello" → forces the SHA-mismatch die() branch.
+const SHA_BAD = "deadbeef00000000000000000000000000000000000000000000000000000000"
+
+// module_path — absolute path to the module under test. amber test runs with
+// cwd == project root (verified), so src/artifacts.ab resolves from $PWD; we
+// hand the driver an absolute import path so it builds regardless of where the
+// temp driver file lives.
+fun module_path(): Text {
+    let pwd = trust $pwd$
+    return "{pwd}/src/artifacts.ab"
+}
+
+// write_curl_stub <dir> <sha_hex> — write an executable curl shim into <dir>.
+// The bash body is BRACE-FREE on purpose: a `{` inside an Amber Text literal is
+// interpolation, so the stub uses positional/case logic instead of
+// ${var} / ${url%...} brace expansions. `$` is written bare (NOT \$) — backslash
+// in a Text literal would land literally in the file and break expansion.
+fun write_curl_stub(dir: Text, sha_hex: Text): Null {
+    trust dir_create(dir)
+    // -o's argument is the next arg; we track that with shift_next. HEAD (-I)
+    // exits 0; GET writes the sha line for *.sha256 URLs and "hello" otherwise.
+    let body = "#!/usr/bin/env bash
+out=\"\"
+url=\"\"
+head=0
+shift_next=0
+for arg in \"$@\"; do
+  if [ \"$shift_next\" = \"1\" ]; then out=\"$arg\"; shift_next=0; continue; fi
+  case \"$arg\" in
+    -I*) head=1 ;;
+    -o)  shift_next=1 ;;
+    -*)  ;;
+    *)   url=\"$arg\" ;;
+  esac
+done
+if [ \"$head\" = \"1\" ]; then exit 0; fi
+case \"$url\" in
+  *.sha256) printf '%s  %s\\n' '{sha_hex}' 'stub' > \"$out\" ;;
+  *)        printf 'hello' > \"$out\" ;;
+esac
+exit 0
+"
+    trust file_write("{dir}/curl", body)
+    trust file_chmod("{dir}/curl", "755")
+}
+
+// build_driver <driver_ab> <out_sh> <name> <version> — write + compile a driver
+// that calls artifacts_fetch(name, version) and echoes the returned path.
+fun build_driver(driver_ab: Text, out_sh: Text, name: Text, version: Text): Null {
+    let mp = module_path()
+    let src = "import \{ artifacts_fetch } from \"{mp}\"
+main \{
+    echo artifacts_fetch(\"{name}\", \"{version}\")
+}
+"
+    trust file_write(driver_ab, src)
+    // Compile with amber (on PATH inside the test process). trust: a build
+    // failure surfaces as a missing out_sh, asserted by the caller.
+    trust $amber build "{driver_ab}" "{out_sh}" > /dev/null 2>&1$
+}
+
+// ---- tests -----------------------------------------------------------------
+
+test "artifacts_fetch caches on second call" {
+    let tmp = trust $mktemp -d$
+    let stub = "{tmp}/stub"
+    let home = "{tmp}/home"
+    write_curl_stub(stub, SHA_HELLO)
+
+    let driver_ab = "{tmp}/driver.ab"
+    let driver_sh = "{tmp}/driver.sh"
+    build_driver(driver_ab, driver_sh, "some-artifact.tar.gz", "3.2.1")
+    assert(file_exists(driver_sh))
+
+    let path0 = env_var_get("PATH") failed { "" }
+
+    // First call: download + verify + symlink. Capture stdout (the link path).
+    let link = trust $PATH="{stub}:{path0}" MIGRATE_HOME="{home}" STAGE="testst" bash "{driver_sh}"$
+    let rc1 = status()
+    assert_eq(rc1, 0)
+    assert(link != "")
+
+    // The returned path is a symlink ([ -L ] in bats)…
+    trust $test -L "{link}"$
+    assert_eq(status(), 0)
+
+    // …and reading through it yields the canned "hello" bytes.
+    let content = trust $cat "{link}"$
+    assert_eq(content, "hello")
+
+    // Second call → served from cache, still exit 0 (no additional writes).
+    trust $PATH="{stub}:{path0}" MIGRATE_HOME="{home}" STAGE="testst" bash "{driver_sh}"$
+    assert_eq(status(), 0)
+}
+
+test "artifacts_fetch fails on SHA mismatch" {
+    let tmp = trust $mktemp -d$
+    let stub = "{tmp}/stub"
+    let home = "{tmp}/home"
+    // Stub serves a digest that does NOT match the "hello" payload.
+    write_curl_stub(stub, SHA_BAD)
+
+    let driver_ab = "{tmp}/driver.ab"
+    let driver_sh = "{tmp}/driver.sh"
+    build_driver(driver_ab, driver_sh, "some.tgz", "3.2.1")
+    assert(file_exists(driver_sh))
+
+    let path0 = env_var_get("PATH") failed { "" }
+
+    // die() on mismatch → child exits non-zero (mirrors bats `[ "$status" -ne 0 ]`).
+    trust $PATH="{stub}:{path0}" MIGRATE_HOME="{home}" STAGE="testst" bash "{driver_sh}" > /dev/null 2>&1$
+    assert(status() != 0)
+}

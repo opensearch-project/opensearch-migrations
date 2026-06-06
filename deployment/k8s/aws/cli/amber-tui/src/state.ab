@@ -1,0 +1,344 @@
+// state.ab — per-stage state I/O.
+//
+// Port of bash lib/state.sh. The public API is preserved verbatim so the rest
+// of the CLI can call it unchanged:
+//   state_load / state_set / state_get / state_has / state_unset /
+//   state_save / state_archive / state_resumable_step
+//
+// Two artifacts are written together for two readers (same as bash):
+//   state.env   ← KEY="VALUE" lines, sourceable from bash, human-greppable
+//   state.json  ← canonical for jq, the agent, and the tests
+//
+// Storage model. Bash 3.2 has no associative arrays, so the bash version used
+// the parallel-array pair STATE_KEYS[]/STATE_VALS[]. Amber forbids nested
+// arrays for the same bash reason, so we keep the EXACT same shape: two
+// module-level parallel arrays plus a logical __count. Module-level `let`
+// arrays compile to bash globals that persist across calls, which is what makes
+// load → set → save → load round-trip in one process. The seed-slot pattern is
+// mandatory (Amber `let` has no empty-typed-array literal): the arrays carry a
+// placeholder at index 0, __count is the real length, and the first append
+// reuses slot 0 rather than growing — so 0..__count never reads stale seed.
+//
+// flock. The bash version opened fd 9 on .state.lock and flock-ed it to guard
+// against two concurrent migration-assistant runs writing the same stage. The
+// migration-assistant is a single-process interactive CLI (one operator, one
+// stage at a time); Amber has no fd-op / `exec 9>` primitive and modeling it
+// would need a raw escape for zero real benefit here. We SKIP the lock and note
+// it: see state_save. (If concurrent runs ever become real, reintroduce via a
+// `trust` flock escape there.)
+
+import { env_var_get, env_var_test } from "std/env"
+import { file_read, file_write, file_append, file_exists, dir_create } from "std/fs"
+import { split_lines, slice } from "std/text"
+import { trim_quotes } from "./std.ab"
+
+// ---- in-memory store (parallel arrays + seed-slot, mirrors STATE_KEYS/VALS) -
+
+let STATE_KEYS = [""]
+let STATE_VALS = [""]
+let __count = 0
+
+// ---- stage directory resolution --------------------------------------------
+//
+// In bash, _common.sh derived STAGE_DIR="$MIGRATE_HOME/$STAGE" at source time
+// and stage_dir_init mkdir-ed the subtree. Here we resolve it lazily from the
+// environment on every state op (cheap, and avoids load-order coupling). The
+// fallbacks match _common.sh exactly: MIGRATE_HOME defaults to
+// "$PWD/migration-assistant-workspace", STAGE defaults to "default". An
+// explicit STAGE_DIR env var (set by diag.sh / agent.sh / the bats harness)
+// wins, as it does in bash.
+
+fun stage_dir(): Text {
+    let explicit = env_var_get("STAGE_DIR") failed { "" }
+    if explicit != "" { return explicit }
+    let home = env_var_get("MIGRATE_HOME") failed { "" }
+    if home == "" {
+        let pwd = trust $pwd$
+        home = "{pwd}/migration-assistant-workspace"
+    }
+    let stage = env_var_get("STAGE") failed { "" }
+    if stage == "" { stage = "default" }
+    return "{home}/{stage}"
+}
+
+// stage_dir_init — create the stage subtree if missing. Idempotent. Mirrors
+// _common.sh stage_dir_init (same subdirs) so state_save/state_archive have
+// somewhere to write. dir_create is failable; we don't want a missing-parent
+// race to abort, so each create is tolerated (the subsequent file_write will
+// surface a real problem).
+fun stage_dir_init(): Null {
+    let d = stage_dir()
+    trust dir_create(d)
+    trust dir_create("{d}/log")
+    trust dir_create("{d}/artifacts")
+    trust dir_create("{d}/artifacts/.cache")
+    trust dir_create("{d}/skills")
+    trust dir_create("{d}/plan")
+    trust dir_create("{d}/history")
+    trust dir_create("{d}/archive")
+}
+
+// ---- index helper (private; defined ABOVE its callers for the tree-shaker) --
+//
+// _state_index <key> → index in STATE_KEYS or -1. Bash returned "" / a number on
+// stdout; -1 is the Amber-idiomatic "not found" and every caller branches on it.
+fun _state_index(target: Text): Int {
+    for i in 0..__count {
+        if STATE_KEYS[i] == target { return i }
+    }
+    return -1
+}
+
+// ---- load -------------------------------------------------------------------
+//
+// NB: index_of_eq + unescape_quotes are defined ABOVE state_load. When this
+// module is imported, Amber tree-shakes per symbol and keeps only the
+// transitive deps that textually precede the entry point — a callee defined
+// after its caller is silently dropped, and state_load would then fail with
+// "Function 'index_of_eq' does not exist".
+
+// index_of_eq — first index of '=' in s, or -1. (Inlined rather than reusing
+// std.index_of so this module owns its one-char scan and stays import-light.)
+fun index_of_eq(s: Text): Int {
+    let total = len s
+    for i in 0..total {
+        if slice(s, i, 1) == "=" { return i }
+    }
+    return -1
+}
+
+// unescape_quotes — turn every \" back into ". Inverse of state_save's escape.
+// Amber has no in-place ${v//\\\"/\"}; we scan and rebuild (a literal \" is two
+// codepoints: backslash then quote).
+fun unescape_quotes(s: Text): Text {
+    let n = len s
+    let out = ""
+    let i = 0
+    while i < n {
+        let c = slice(s, i, 1)
+        if c == "\\" and i + 1 < n and slice(s, i + 1, 1) == "\"" {
+            out = "{out}\""
+            i += 2
+        } else {
+            out = "{out}{c}"
+            i += 1
+        }
+    }
+    return out
+}
+
+// state_load — reset the in-memory store and reload it from state.env. Lines
+// are KEY=VALUE; comment (#…) and blank lines are skipped, exactly as the bash
+// `[[ -z "$line" || "$line" == \#* ]] && continue` did. The bash value
+// pipeline was: v=${line#*=}; v=$(trim_quotes "$v"); v=${v//\\\"/\"}. We
+// reproduce all three steps — split on the FIRST '=', strip one matched pair of
+// wrapping quotes, then unescape any \" back to ".
+pub fun state_load(): Null {
+    stage_dir_init()
+    __count = 0
+    let env_file = "{stage_dir()}/state.env"
+    if not file_exists(env_file) { return null }
+    let body = file_read(env_file) failed { "" }
+    for line in split_lines(body) {
+        if line == "" { continue }
+        // comment line — bash matched "$line" == \#* (leading '#').
+        if slice(line, 0, 1) == "#" { continue }
+        // k=${line%%=*}; v=${line#*=}  — split on the FIRST '='.
+        let eq = index_of_eq(line)
+        if eq < 0 { continue }
+        let k = slice(line, 0, eq)
+        let raw = slice(line, eq + 1, (len line) - eq - 1)
+        // strip ONE wrapping pair of quotes (how state_save serializes), then
+        // unescape \" → " (the escaping state_save applied to inner quotes).
+        let v = unescape_quotes(trim_quotes(raw))
+        if __count < len STATE_KEYS {
+            STATE_KEYS[__count] = k
+            STATE_VALS[__count] = v
+        } else {
+            STATE_KEYS += [k]
+            STATE_VALS += [v]
+        }
+        __count += 1
+    }
+}
+
+// ---- accessors --------------------------------------------------------------
+
+// state_set <key> <value> — upsert into the in-memory store. Updating an
+// existing key MUST NOT grow the arrays (mirrors STATE_VALS[idx]="$v").
+pub fun state_set(k: Text, v: Text): Null {
+    let idx = _state_index(k)
+    if idx >= 0 {
+        STATE_VALS[idx] = v
+        return null
+    }
+    // First append reuses the seed slot 0 so physical length == logical length.
+    if __count < len STATE_KEYS {
+        STATE_KEYS[__count] = k
+        STATE_VALS[__count] = v
+    } else {
+        STATE_KEYS += [k]
+        STATE_VALS += [v]
+    }
+    __count += 1
+}
+
+// state_get <key> [default] — the stored value, or <default> when absent. Bash
+// printed to stdout (the CLI return-value channel); in Amber callers use the
+// return value directly. The two-arg bash signature with an optional default
+// ("${2:-}") becomes an explicit `def` param — callers pass "" for no default.
+pub fun state_get(k: Text, def: Text): Text {
+    let idx = _state_index(k)
+    if idx >= 0 { return STATE_VALS[idx] }
+    return def
+}
+
+// state_has <key> — Bool: is the key present? (Bash returned exit-status via
+// `[[ -n "$idx" ]]`; Amber returns a Bool the caller branches on.)
+pub fun state_has(k: Text): Bool {
+    return _state_index(k) >= 0
+}
+
+// state_unset <key> — remove a key from the in-memory store (no-op if absent).
+// Not in the bash file as a named function, but the parallel-array store needs
+// a compaction primitive and the port plan calls it out; it keeps physical ==
+// logical length so the seed-slot invariant holds.
+pub fun state_unset(k: Text): Null {
+    let idx = _state_index(k)
+    if idx < 0 { return null }
+    // shift every later element down one, then drop the logical count.
+    let i = idx
+    while i < __count - 1 {
+        STATE_KEYS[i] = STATE_KEYS[i + 1]
+        STATE_VALS[i] = STATE_VALS[i + 1]
+        i += 1
+    }
+    __count -= 1
+}
+
+// state_count — logical entry count. Test seam (no bash equivalent; the bash
+// tests inspected ${#STATE_KEYS[@]} directly).
+pub fun state_count(): Int { return __count }
+
+// ---- persistence ------------------------------------------------------------
+
+// esc_for_env — escape inner " as \" for the KEY="VALUE" env serialization.
+// Mirrors bash v=${v//\"/\\\"}.
+fun esc_for_env(v: Text): Text {
+    let n = len v
+    let out = ""
+    for i in 0..n {
+        let c = slice(v, i, 1)
+        if c == "\"" { out = "{out}\\\"" } else { out = "{out}{c}" }
+    }
+    return out
+}
+
+// esc_for_json — escape \ then " for the JSON string value. Mirrors the bash
+// no-jq fallback: v=${v//\\/\\\\}; v=${v//\"/\\\"}. Order matters — backslashes
+// first, so the backslashes we ADD for quotes are not themselves doubled.
+fun esc_for_json(v: Text): Text {
+    let n = len v
+    let out = ""
+    for i in 0..n {
+        let c = slice(v, i, 1)
+        if {
+            c == "\\" { out = "{out}\\\\" }
+            c == "\"" { out = "{out}\\\"" }
+            else      { out = "{out}{c}" }
+        }
+    }
+    return out
+}
+
+// state_save — write state.env + state.json from the in-memory store.
+//
+// flock: the bash version `exec 9>"$lock"; flock -x 9` to serialize concurrent
+// runs. Skipped here on purpose — single-process CLI, and Amber has no fd-op
+// primitive (see the module header). Reintroduce with a `trust` flock escape
+// here if concurrent stage runs ever become a thing.
+//
+// Atomicity: bash wrote to "$file.tmp.$$" then mv -f'd into place. We replicate
+// the tmp-then-rename so a reader never sees a half-written file. $$ (the PID)
+// is not exposed by Amber, so we tag the tmp with date_now()-derived
+// uniqueness via a raw `printf` of the epoch is overkill — a fixed ".tmp"
+// suffix is safe because the lock-free single writer can't collide with itself.
+//
+// jq is NOT required: we always emit the JSON ourselves (the bash no-jq
+// fallback path) so the artifact is identical regardless of host tooling, and
+// the test that greps state.json doesn't depend on jq being installed.
+pub fun state_save(): Null {
+    stage_dir_init()
+    let dir = stage_dir()
+    let env_file = "{dir}/state.env"
+    let json_file = "{dir}/state.json"
+    let env_tmp = "{env_file}.tmp"
+    let json_tmp = "{json_file}.tmp"
+
+    // --- state.env: a comment header, then KEY="VALUE" lines. The bash header
+    // embedded $(date); we keep a static marker so the file is reproducible and
+    // the round-trip tests (which re-read it) aren't time-sensitive. The leading
+    // '#' makes state_load skip it.
+    let env_body = "# written by migration-assistant; do not edit while it is running.\n"
+    for i in 0..__count {
+        env_body = "{env_body}{STATE_KEYS[i]}=\"{esc_for_env(STATE_VALS[i])}\"\n"
+    }
+    trust file_write(env_tmp, env_body)
+
+    // --- state.json: object of "key": "value". Always self-emitted (no jq
+    // dependency). Empty store → "{}".
+    // NB: a literal '{' in an Amber Text starts interpolation, so it is escaped
+    // as \{ ; '}' is literal and needs no escape.
+    let json_body = ""
+    if __count == 0 {
+        json_body = "\{}\n"
+    } else {
+        json_body = "\{\n"
+        for i in 0..__count {
+            let sep = i < __count - 1 then ",\n" else "\n"
+            json_body = "{json_body}  \"{STATE_KEYS[i]}\": \"{esc_for_json(STATE_VALS[i])}\"{sep}"
+        }
+        json_body = "{json_body}}\n"
+    }
+    trust file_write(json_tmp, json_body)
+
+    // atomic publish — rename tmp over the live file (bash mv -f).
+    trust $mv -f "{env_tmp}" "{env_file}"$
+    trust $mv -f "{json_tmp}" "{json_file}"$
+}
+
+// ---- archive ----------------------------------------------------------------
+
+// state_archive — move state.env + state.json into archive/<ts>/ and clear the
+// in-memory store. <ts> is a sortable timestamp (date '+%Y%m%dT%H%M%S' in bash).
+//
+// The timestamp uses a raw `date` escape: Amber's std/date has date_now() (epoch
+// seconds) but no strftime-style formatter, so there is no pure-Amber way to
+// build the %Y%m%dT%H%M%S string. This is the one place a `trust $date$` escape
+// is unavoidable. mkdir + the conditional moves likewise shell out (dir_create
+// is fine, but the "move only if present" + the wildcard-free two-file loop read
+// cleanest as direct mv calls guarded by file_exists).
+pub fun state_archive(): Null {
+    stage_dir_init()
+    let dir = stage_dir()
+    let ts = trust $date '+%Y%m%dT%H%M%S'$
+    let dest = "{dir}/archive/{ts}"
+    trust dir_create(dest)
+    let env_file = "{dir}/state.env"
+    let json_file = "{dir}/state.json"
+    if file_exists(env_file) {
+        trust $mv -f "{env_file}" "{dest}/"$
+    }
+    if file_exists(json_file) {
+        trust $mv -f "{json_file}" "{dest}/"$
+    }
+    __count = 0
+}
+
+// ---- resume -----------------------------------------------------------------
+
+// state_resumable_step — the value of `last_step`, or "" if never set. The
+// resume logic reads this to decide where to pick a migration back up.
+pub fun state_resumable_step(): Text {
+    return state_get("last_step", "")
+}

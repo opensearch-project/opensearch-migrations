@@ -1,0 +1,202 @@
+// test_cfn_outputs.ab — coverage for src/cfn_outputs.ab, mirroring
+// test_cfn_outputs.bats (cfn_outputs / cfn_output_value / _cfn_extract_exports
+// / _cfn_pick).
+//
+// Bug history this guards (caught in production): helm.sh did
+// `cfn_outputs … | awk '/EKSClusterName/'`, but the real opensearch-migrations
+// stack publishes a single output named MigrationsExportString — a long bash
+// `export VAR=…; export …;` blob. No EKSClusterName key ever existed → the helm
+// step died with "could not read EKSClusterName from CFN outputs". These tests
+// feed the EXACT real-world payload (sanitized) and assert the parsers expand
+// it correctly.
+//
+// The describe-stacks call is the only external command, so the cfn_outputs
+// tests stub `aws` via a PATH-shadow temp dir (write an executable shim with
+// file_write+file_chmod, prepend its dir to PATH) — no network, no real cloud.
+// _cfn_extract_exports / _cfn_pick are pure, so they need no stub.
+
+import { assert, assert_eq } from "std/test"
+import { file_write, file_chmod, dir_create } from "std/fs"
+import { env_var_set, env_var_get } from "std/env"
+import { text_contains } from "std/text"
+import { array_contains } from "../src/std.ab"
+import {
+    cfn_outputs, cfn_output_value, _cfn_extract_exports, _cfn_pick
+} from "../src/cfn_outputs.ab"
+
+// ---- helpers (define-before-use: must precede the test blocks) -------------
+
+// Sanitized copy of the user's real stack output. The real
+// `aws … --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' --output text`
+// emits one TAB-separated <OutputKey>\t<OutputValue> row; the OutputValue is
+// one big string of bash `export VAR=…; export …;` clauses. Mirrors the
+// __REAL_PAYLOAD fixture in test_cfn_outputs.bats verbatim.
+const REAL_PAYLOAD = "MigrationsExportString\texport MIGRATIONS_APP_REGISTRY_ARN=arn:aws:servicecatalog:us-east-1:629003556176:/applications/0152ij6laz8tjhttvf5rg0jrql; export MIGRATIONS_USER_AGENT=AwsSolution/SO0290/Unknown; export MIGRATIONS_EKS_CLUSTER_NAME=migration-eks-cluster-default-us-east-1; export MIGRATIONS_ECR_REGISTRY=629003556176.dkr.ecr.us-east-1.amazonaws.com/migration-ecr-default-us-east-1; export AWS_ACCOUNT=629003556176; export AWS_CFN_REGION=us-east-1; export VPC_ID=vpc-0bc345db0dee70e9e; export EKS_CLUSTER_SECURITY_GROUP=sg-07cc74efd34551fb1; export SNAPSHOT_ROLE=arn:aws:iam::629003556176:role/migration-eks-cluster-default-us-east-1-snapshot-role; export STAGE=default"
+
+// stub_dir — temp dir we prepend to PATH so our `aws` shim shadows the real one.
+const STUB_DIR = "/tmp/amber_cfn_outputs_stub"
+
+// install_aws_stub — write ONE content-stable `aws` shim and prepend STUB_DIR to
+// PATH. CRITICAL: amber test runs every `test` block in the SAME process tree in
+// parallel, sharing one PATH and one STUB_DIR. The original port had separate
+// helpers that each REWROTE STUB_DIR/aws with different bodies (real payload vs
+// `exit 0`); under parallel execution the empty shim clobbered the real-payload
+// shim mid-read → the real-payload tests intermittently saw empty output and
+// failed (flaky: 11/0 one run, 10/1 the next). bats avoided this because each
+// @test is its own isolated subshell+HOME+STUB_DIR.
+//
+// Fix mirrors the bats stub's `case "$*"` design: a SINGLE shim whose output is
+// decided by the args (the --stack-name it's invoked with), so every test
+// installs byte-identical content and no write can corrupt another reader:
+//   * stack "MigrationAssistant-default" → the real OutputKey/OutputValue row
+//   * anything else (the empty-regression test uses "Stack") → nothing, exit 0
+// `printf '%b\n'` interprets the \t / \n escapes into real bytes — exactly what
+// `aws … --output text` emits and what the bats stub produced.
+fun install_aws_stub(): Null {
+    trust dir_create(STUB_DIR)
+    let script = "#!/usr/bin/env bash\n"
+    script += "case \"$*\" in\n"
+    script += "  *MigrationAssistant-default*) printf '%b\\n' '{REAL_PAYLOAD}' ;;\n"
+    script += "  *) exit 0 ;;\n"
+    script += "esac\n"
+    trust file_write("{STUB_DIR}/aws", script)
+    trust file_chmod("{STUB_DIR}/aws", "755")
+    const oldpath = env_var_get("PATH") failed { "" }
+    // Only prepend once; STUB_DIR is already first after any prior call.
+    if not text_contains(oldpath, "{STUB_DIR}:") {
+        trust env_var_set("PATH", "{STUB_DIR}:{oldpath}")
+    }
+}
+
+// stub_aws_real_payload — install the shared shim; real-payload tests then call
+// cfn_outputs with the "MigrationAssistant-default" stack to get the payload.
+fun stub_aws_real_payload(): Null {
+    install_aws_stub()
+}
+
+// stub_aws_empty — install the same shared shim; the empty-regression test calls
+// cfn_outputs with a stack the shim doesn't recognize ("Stack") → empty, exit 0.
+fun stub_aws_empty(): Null {
+    install_aws_stub()
+}
+
+// has_exact — is <needle> present as an exact element of <rows>? Mirrors the
+// bats `grep -qx` checks (whole-line match), which is stricter than substring.
+// (Param is `rows`, not `lines`: `lines` is a reserved Amber keyword.)
+fun has_exact(rows: [Text], needle: Text): Bool {
+    return array_contains(needle, rows)
+}
+
+// has_sub — does any element of <rows> CONTAIN <needle>? Mirrors `grep -q`.
+fun has_sub(rows: [Text], needle: Text): Bool {
+    for row in rows {
+        if text_contains(row, needle) { return true }
+    }
+    return false
+}
+
+// ---- _cfn_extract_exports ----------------------------------------------------
+
+test "_cfn_extract_exports parses semicolon-joined exports into KEY=VALUE" {
+    const out = _cfn_extract_exports("export A=one; export B=two; export C=three")
+    assert(has_exact(out, "A=one"))
+    assert(has_exact(out, "B=two"))
+    assert(has_exact(out, "C=three"))
+}
+
+test "_cfn_extract_exports preserves '=' inside values (URLs, ARNs)" {
+    const out = _cfn_extract_exports("export ARN=arn:aws:iam::1:role/x=y; export URL=https://h/p?q=r")
+    // grep -qx → whole-line exact match: the embedded '=' must NOT split.
+    assert(has_exact(out, "ARN=arn:aws:iam::1:role/x=y"))
+    assert(has_exact(out, "URL=https://h/p?q=r"))
+}
+
+test "_cfn_extract_exports tolerates leading whitespace and missing 'export '" {
+    const out = _cfn_extract_exports("   export A=1;   B=2; export C=3")
+    assert(has_exact(out, "A=1"))
+    assert(has_exact(out, "B=2"))
+    assert(has_exact(out, "C=3"))
+}
+
+test "_cfn_extract_exports drops malformed entries silently" {
+    const out = _cfn_extract_exports("   ; ; bogus line; export OK=yes; ")
+    assert(has_exact(out, "OK=yes"))
+    // "bogus line" has no '=' → must NOT survive as any KEY=VALUE line.
+    assert(not has_sub(out, "bogus"))
+}
+
+// ---- cfn_outputs full-cycle with the real payload ----------------------------
+
+test "cfn_outputs emits the raw OutputKey AND every embedded export" {
+    stub_aws_real_payload()
+    const out = cfn_outputs("MigrationAssistant-default", "us-east-1")
+
+    // Raw OutputKey/Value still emitted (so older callers don't regress). The
+    // bats test uses `grep -q '^MigrationsExportString='`; the raw line starts
+    // with that key followed by '='.
+    assert(has_sub(out, "MigrationsExportString="))
+
+    // Every important export resolved into a flat KEY=VALUE line (grep -qx).
+    assert(has_exact(out, "MIGRATIONS_EKS_CLUSTER_NAME=migration-eks-cluster-default-us-east-1"))
+    assert(has_exact(out, "MIGRATIONS_ECR_REGISTRY=629003556176.dkr.ecr.us-east-1.amazonaws.com/migration-ecr-default-us-east-1"))
+    assert(has_exact(out, "AWS_ACCOUNT=629003556176"))
+    assert(has_exact(out, "AWS_CFN_REGION=us-east-1"))
+    assert(has_exact(out, "VPC_ID=vpc-0bc345db0dee70e9e"))
+    assert(has_exact(out, "STAGE=default"))
+}
+
+test "cfn_output_value retrieves a single named export" {
+    stub_aws_real_payload()
+    assert_eq(
+        cfn_output_value("MigrationAssistant-default", "us-east-1", "MIGRATIONS_EKS_CLUSTER_NAME"),
+        "migration-eks-cluster-default-us-east-1")
+    assert_eq(
+        cfn_output_value("MigrationAssistant-default", "us-east-1", "MIGRATIONS_ECR_REGISTRY"),
+        "629003556176.dkr.ecr.us-east-1.amazonaws.com/migration-ecr-default-us-east-1")
+    // Missing key → empty.
+    assert_eq(
+        cfn_output_value("MigrationAssistant-default", "us-east-1", "DOES_NOT_EXIST"), "")
+}
+
+// ---- _cfn_pick fallback chain ------------------------------------------------
+
+test "_cfn_pick picks the first key that resolves" {
+    const outputs = ["MIGRATIONS_EKS_CLUSTER_NAME=cluster-A", "EKSClusterName=cluster-B"]
+    assert_eq(_cfn_pick(outputs, ["MIGRATIONS_EKS_CLUSTER_NAME", "EKSClusterName"]), "cluster-A")
+
+    // Reverse: first key absent → second wins.
+    const outputs2 = ["EKSClusterName=cluster-B"]
+    assert_eq(_cfn_pick(outputs2, ["MIGRATIONS_EKS_CLUSTER_NAME", "EKSClusterName"]), "cluster-B")
+}
+
+test "_cfn_pick returns nothing when no key matches" {
+    assert_eq(_cfn_pick(["OTHER=foo"], ["A", "B", "C"]), "")
+}
+
+// ---- end-to-end: helm/crane lookup chains against the real shape -------------
+
+test "helm lookup chain finds the cluster name in real CFN payload" {
+    stub_aws_real_payload()
+    const outputs = cfn_outputs("MigrationAssistant-default", "us-east-1")
+    // The exact fallback chain helm.sh uses.
+    assert_eq(
+        _cfn_pick(outputs, ["MIGRATIONS_EKS_CLUSTER_NAME", "EKSClusterName"]),
+        "migration-eks-cluster-default-us-east-1")
+}
+
+test "crane lookup chain finds the ECR registry in real CFN payload" {
+    stub_aws_real_payload()
+    const outputs = cfn_outputs("MigrationAssistant-default", "us-east-1")
+    assert_eq(
+        _cfn_pick(outputs, ["MIGRATIONS_ECR_REGISTRY", "ECRRegistry"]),
+        "629003556176.dkr.ecr.us-east-1.amazonaws.com/migration-ecr-default-us-east-1")
+}
+
+// ---- regression: empty payload doesn't crash --------------------------------
+
+test "cfn_outputs handles empty AWS response without error" {
+    stub_aws_empty()
+    const out = cfn_outputs("Stack", "region")
+    // Empty AWS response → empty result, no crash (bash `[[ -z ]] && return 0`).
+    assert_eq(len out, 0)
+}

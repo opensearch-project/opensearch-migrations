@@ -1,0 +1,208 @@
+// cfn_outputs.ab — read CloudFormation stack outputs and flatten them into
+// KEY=VALUE lines for the downstream tools (helm.ab, crane.ab, build.ab).
+//
+// Port of the OUTPUT-PARSING half of bash lib/cfn.sh: cfn_outputs,
+// cfn_output_value, _cfn_extract_exports, _cfn_pick. The deploy/dashboard half
+// (cfn_deploy_or_skip, _cfn_tail_events, the background `aws cloudformation
+// deploy` + live event tail) is a SEPARATE later module — the CFN status
+// classifier it needs (cfn_status_class) already lives in dashboard.ab, so we
+// do NOT duplicate it here.
+//
+// Why this exists: the real opensearch-migrations CFN stacks publish a single
+// output named MigrationsExportString — a long string of bash
+// `export VAR=VALUE; export …;` clauses. Callers that naively grepped for a
+// flat output key (e.g. EKSClusterName) died because that key never existed.
+// We expand that blob here so callers see flat KEY=VALUE pairs PLUS every raw
+// OutputKey=OutputValue (backwards compat if a future template adds a flat
+// output again).
+//
+// Discipline carried over from cfn.sh: the parsed VALUE lines are the
+// function's return — they go to stdout via the returned [Text]. Any chrome
+// would go to stderr (none here; these are pure parsers). The ONLY external
+// command is `aws cloudformation describe-stacks`; everything else is pure
+// in-Amber string work (the bash awk/tac pipelines are replaced by split +
+// slice + regex, NO tac/awk fork).
+
+import { printf } from "std/env"
+import { split, slice, trim_left, match_regex } from "std/text"
+
+// ---- tiny private helpers (defined FIRST: Amber tree-shakes per imported
+// symbol and only keeps transitive deps that textually PRECEDE the public
+// entry point across an import boundary — a callee defined after its caller is
+// silently dropped) ----------------------------------------------------------
+
+// starts_with_local — single-prefix predicate. Native (own the name; std's
+// starts_with arg order + import aliasing are both things we avoid here).
+fun starts_with_local(prefix: Text, s: Text): Bool {
+    const pl = len prefix
+    if pl > len s { return false }
+    return slice(s, 0, pl) == prefix
+}
+
+// first_eq_index — index of the FIRST '=' in s, or -1. Used to split a
+// KEY=VALUE line at the first '=' only, so values that themselves contain '='
+// (URLs with ?q=r, ARNs like role/x=y) survive intact. Mirrors the bash
+// `awk -F= … sub(/^[^=]+=/, "")` trick which strips only up to the first '='.
+fun first_eq_index(s: Text): Int {
+    const n = len s
+    for i in 0..n {
+        if slice(s, i, 1) == "=" { return i }
+    }
+    return -1
+}
+
+// kv_key — the KEY part of a "KEY=VALUE" line (everything before the first '=').
+// Empty if the line has no '='.
+fun kv_key(line: Text): Text {
+    const eq = first_eq_index(line)
+    if eq < 0 { return "" }
+    return slice(line, 0, eq)
+}
+
+// kv_value — the VALUE part of a "KEY=VALUE" line (everything after the first
+// '='). Empty if the line has no '='.
+fun kv_value(line: Text): Text {
+    const eq = first_eq_index(line)
+    if eq < 0 { return "" }
+    const n = len line
+    return slice(line, eq + 1, n - eq - 1)
+}
+
+// is_export_kv — does <s> look like a shell assignment "NAME=…"? NAME must be a
+// valid identifier ([A-Za-z_][A-Za-z0-9_]*) immediately followed by '='. This
+// is the exact gate the bash `_cfn_extract_exports` awk used
+// (`$0 ~ /^[A-Za-z_][A-Za-z0-9_]*=/`) to drop bogus fragments ("bogus line",
+// empty entries) while keeping real exports.
+fun is_export_kv(s: Text): Bool {
+    return match_regex(s, "^[A-Za-z_][A-Za-z0-9_]*=", true)
+}
+
+// ---- _cfn_extract_exports --------------------------------------------------
+
+// _cfn_extract_exports <blob> → one KEY=VALUE per matched export.
+//
+// Reads the bash-export blob (a string of `export VAR=VALUE; export …;`
+// clauses) and emits flat KEY=VALUE lines. Tolerates `;` separators, leading
+// whitespace, a missing `export ` prefix, and values that contain `=`
+// (URLs, ARNs) or `:` (ARNs).
+//
+// Port note: the bash version set awk's RS=";" to record-split on semicolons,
+// then per record trimmed leading whitespace, stripped a leading "export ",
+// and kept records matching the identifier= pattern. Amber has no awk RS, so
+// we split on ";" ourselves (no fork) and apply the same three transforms.
+pub fun _cfn_extract_exports(blob: Text): [Text] {
+    let out = [""]
+    let oc = 0
+    // Split on ';' — each clause is one (possibly-exported) assignment.
+    for clause_raw in split(blob, ";") {
+        // Trim leading whitespace (the bash `sub(/^[[:space:]]+/, "")`).
+        let clause = trim_left(clause_raw)
+        // Strip a leading "export " (the bash `sub(/^export[[:space:]]+/, "")`).
+        // Only a single space follows `export` in the real payload; the regex
+        // gate below tolerates any residual prefix by simply rejecting it.
+        if starts_with_local("export ", clause) {
+            clause = trim_left(slice(clause, 7, (len clause) - 7))
+        }
+        // Keep only well-formed NAME=… assignments; drop bogus fragments.
+        if is_export_kv(clause) {
+            if oc == 0 { out[0] = clause } else { out += [clause] }
+            oc += 1
+        }
+    }
+    if oc == 0 { return [] }
+    return out
+}
+
+// ---- cfn_outputs -----------------------------------------------------------
+
+// cfn_outputs <stack> <region> → [Text] of KEY=VALUE lines (stdout contract).
+//
+// Runs `aws cloudformation describe-stacks … --query
+// 'Stacks[0].Outputs[].[OutputKey,OutputValue]' --output text`, which emits one
+// TAB-separated <OutputKey>\t<OutputValue> row per output.
+//
+//   Pass A: every raw OutputKey=OutputValue (so a future flat output like
+//           EKSClusterName still surfaces — preserves backwards compat).
+//   Pass B: expand the MigrationsExportString blob into its embedded exports.
+//
+// An empty/failed AWS response yields [] (the bash `[[ -z "$raw" ]] && return 0`
+// — no error, no output).
+pub fun cfn_outputs(stack: Text, region: Text): [Text] {
+    // `trust` + `2>/dev/null || true`: describe-stacks legitimately fails when
+    // the stack doesn't exist yet; the bash version swallowed that to an empty
+    // string and returned 0. We mirror that — a missing stack is "no outputs",
+    // not an error to handle.
+    const raw = trust $aws cloudformation describe-stacks --region "{region}" --stack-name "{stack}" --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' --output text 2>/dev/null || true$
+
+    let out = [""]
+    let oc = 0
+    if trim_left(raw) == "" { return [] }
+
+    // One row per output. `aws … --output text` joins the [OutputKey,
+    // OutputValue] tuple with a TAB; a value never contains a TAB, so the first
+    // TAB cleanly separates key from value (matches `awk -F'\t' '{print $1=$2}'`
+    // which takes field 1 as key and field 2 as the value).
+    for row in split(raw, "\n") {
+        if row == "" { continue }
+        const cols = split(row, "\t")
+        const key = cols[0]
+        if key == "" { continue }
+        const value = len cols > 1 then cols[1] else ""
+
+        // Pass A: raw OutputKey=OutputValue.
+        if oc == 0 { out[0] = "{key}={value}" } else { out += ["{key}={value}"] }
+        oc += 1
+
+        // Pass B: when this output is the MigrationsExportString blob, expand
+        // its embedded exports into additional flat KEY=VALUE lines.
+        if key == "MigrationsExportString" {
+            for kv in _cfn_extract_exports(value) {
+                if oc == 0 { out[0] = kv } else { out += [kv] }
+                oc += 1
+            }
+        }
+    }
+    if oc == 0 { return [] }
+    return out
+}
+
+// ---- cfn_output_value ------------------------------------------------------
+
+// cfn_output_value <stack> <region> <key> → the value of <key>, or "".
+//
+// Convenience for callers wanting a single named field. Mirrors the bash
+// `cfn_outputs … | awk -F= -v k=key '$1==k { sub(/^[^=]+=/,""); print; exit }'`
+// — first KEY=VALUE line whose key matches exactly wins; split on the first '='
+// so values with embedded '=' survive.
+pub fun cfn_output_value(stack: Text, region: Text, key: Text): Text {
+    for line in cfn_outputs(stack, region) {
+        if kv_key(line) == key {
+            return kv_value(line)
+        }
+    }
+    return ""
+}
+
+// ---- _cfn_pick -------------------------------------------------------------
+
+// _cfn_pick <outputs> <keys> → first key that resolves to a NON-EMPTY value.
+//
+// <outputs> is the [Text] of KEY=VALUE lines produced by cfn_outputs; <keys> is
+// the fallback chain. The first key present with a non-empty value wins; absent
+// or empty keys silently advance. Returns "" when none match.
+//
+// Used by helm.ab / crane.ab / build.ab to tolerate template renames between
+// MA releases (e.g. MIGRATIONS_EKS_CLUSTER_NAME → EKSClusterName). Port note:
+// bash took the keys as positional `"$@"` and the outputs as a single newline
+// string; Amber takes them as [Text] arrays directly — cleaner, no re-split.
+pub fun _cfn_pick(outputs: [Text], keys: [Text]): Text {
+    for key in keys {
+        for line in outputs {
+            if kv_key(line) == key {
+                const v = kv_value(line)
+                if v != "" { return v }
+            }
+        }
+    }
+    return ""
+}

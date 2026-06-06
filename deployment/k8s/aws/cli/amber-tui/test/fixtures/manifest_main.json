@@ -1,0 +1,1 @@
+{"schemaVersion":1,"branding":{"appName":"Acme Migrate","binaryName":"acme-migrate"},"build":{"version":"3.2.1","packs":[{"name":"acme","version":"1.0"}]},"mcpServers":{"aws":{"command":"uvx","args":["aws-mcp"],"agents":["claude","codex"],"permissionsAllow":["s3:Get*","ec2:Describe*"]},"k8s":{"command":"npx","args":["k8s-mcp"],"agents":["claude"],"permissionsAllow":["s3:Get*"]}}}

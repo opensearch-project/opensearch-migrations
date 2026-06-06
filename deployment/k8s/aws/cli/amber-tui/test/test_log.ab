@@ -1,0 +1,153 @@
+// test_log.ab — coverage for src/log.ab, mirroring test_log.bats (the
+// log_announce family + log_stream tee/exit-code, items 1-3 and 9).
+//
+// Strategy. The bats tests capture STDOUT/STDERR via run_split and grep the log
+// FILE. Amber's stderr-emitting fns return Null, so we can't capture their
+// stderr inside a `test` block; per AMBER_IDIOMS we instead:
+//   * assert on the PURE fmt_* formatters (the byte-exact line shapes the bats
+//     greps depend on) — fmt_stream_line carries the STREAM[bucket] token, etc.;
+//   * drive log_init/log_stream against an ISOLATED stage dir (STAGE_DIR env →
+//     a mktemp dir, so no real workspace is touched, no network/cloud) and
+//     assert on the FILE contents we read back — the same thing the bats
+//     `grep -q 'STREAM[test] hello world' "$LOG_FILE"` assertions check;
+//   * assert log_stream RETURNS the child's exit code (bash recovered it via $?;
+//     here it's the function's return value), covering test 9 / "propagates
+//     non-zero exit code";
+//   * call log_announce / log_announce_exit to prove they don't error (test 3).
+//
+// log_stream is exercised with `sh -c '…'` — a local shell, no cloud — exactly
+// like the bats `log_stream "test" sh -c 'printf "hello world\n"'`. No PATH-
+// shadow stub is needed because nothing here shells out to aws/helm/crane.
+
+import { assert, assert_eq } from "std/test"
+import { env_var_set, env_var_unset } from "std/env"
+import { file_read, file_exists } from "std/fs"
+import { text_contains } from "std/text"
+import {
+    fmt_log_line, fmt_stream_line, fmt_stream_chrome,
+    log_init, log_file, log_stream,
+    log_info, log_announce, log_announce_exit
+} from "../src/log.ab"
+
+// new_stage_dir — a fresh, isolated stage dir under the OS temp area, pinned via
+// STAGE_DIR so log_init writes migrate.log there and nowhere near a real
+// workspace. Returns the dir path. (Defined above the test blocks — Amber needs
+// helpers to precede their callers.)
+fun new_stage_dir(): Text {
+    let d = trust $mktemp -d 2>/dev/null$
+    env_var_set("STAGE_DIR", d) failed {}
+    return d
+}
+
+// ---- pure formatters (the byte-exact contract the bats greps depend on) ----
+
+test "fmt_log_line builds [ts] LEVEL msg" {
+    assert_eq(fmt_log_line("2026-05-26T22:00:00+0000", "INFO", "hello"),
+              "[2026-05-26T22:00:00+0000] INFO hello")
+}
+
+test "fmt_stream_line carries the STREAM[bucket] token" {
+    // bats greps 'STREAM\[test\] hello world' — the literal token must be exact.
+    let line = fmt_stream_line("2026-05-26T22:00:00+0000", "test", "hello world")
+    assert(text_contains(line, "STREAM[test] hello world"))
+    assert(text_contains(line, "[2026-05-26T22:00:00+0000]"))
+}
+
+test "fmt_stream_chrome prefixes the bucket name with a bar" {
+    // bats: STDERR == *"myop"*"line-1"* — the prefix and content both present,
+    // separated by the │ bar.
+    let c = fmt_stream_chrome("myop", "line-1")
+    assert(text_contains(c, "myop"))
+    assert(text_contains(c, "line-1"))
+    assert(text_contains(c, "│"))
+}
+
+// ---- log_init --------------------------------------------------------------
+
+test "log_init points LOG_FILE at <stage>/log/migrate.log and creates it" {
+    let dir = new_stage_dir()
+    log_init()
+    assert_eq(log_file(), "{dir}/log/migrate.log")
+    assert(file_exists(log_file()))
+    // The session header is appended — the file is non-empty and carries the marker.
+    let body = file_read(log_file()) failed { "" }
+    assert(text_contains(body, "migration-assistant session"))
+    env_var_unset("STAGE_DIR")
+}
+
+// ---- log_stream (mirrors bats: tees to file, propagates exit code) ---------
+
+test "log_stream tees stdout into the log file" {
+    new_stage_dir()
+    log_init()
+    let rc = log_stream("test", "printf 'hello world\\n'")
+    assert_eq(rc, 0)                                  // no failure
+    let body = file_read(log_file()) failed { "" }
+    // bats: grep -q 'STREAM\[test\] hello world' "$LOG_FILE"
+    assert(text_contains(body, "STREAM[test] hello world"))
+    env_var_unset("STAGE_DIR")
+}
+
+test "log_stream tees stderr into the log file too" {
+    new_stage_dir()
+    log_init()
+    // bats ran `sh -c 'printf "boom\n" >&2'`; 2>&1 capture sends it to the file.
+    let rc = log_stream("errchan", "printf 'boom\\n' >&2")
+    assert_eq(rc, 0)
+    let body = file_read(log_file()) failed { "" }
+    assert(text_contains(body, "STREAM[errchan] boom"))
+    env_var_unset("STAGE_DIR")
+}
+
+test "log_stream propagates non-zero exit code" {
+    new_stage_dir()
+    log_init()
+    // bats: run log_stream "bad" sh -c 'echo nope; exit 7'; [ "$status" -eq 7 ]
+    let rc = log_stream("bad", "echo nope; exit 7")
+    assert_eq(rc, 7)
+    let body = file_read(log_file()) failed { "" }
+    assert(text_contains(body, "STREAM[bad] nope"))
+    // bats: grep -q 'stream\[bad\] exit=7' — the final marker INFO line.
+    assert(text_contains(body, "stream[bad] exit=7"))
+    env_var_unset("STAGE_DIR")
+}
+
+test "log_stream prefixes each line with the bucket name in the file" {
+    new_stage_dir()
+    log_init()
+    let rc = log_stream("myop", "for i in 1 2 3; do printf 'line-%d\\n' \"$i\"; done")
+    assert_eq(rc, 0)
+    let body = file_read(log_file()) failed { "" }
+    assert(text_contains(body, "STREAM[myop] line-1"))
+    assert(text_contains(body, "STREAM[myop] line-2"))
+    assert(text_contains(body, "STREAM[myop] line-3"))
+    env_var_unset("STAGE_DIR")
+}
+
+// ---- log_announce family (proves they don't error — bats test 3) -----------
+
+test "log_announce startup + exit forms do not error" {
+    new_stage_dir()
+    log_init()
+    // No assertion target other than "runs without aborting" — these emit chrome
+    // to stderr (return Null). Mirrors `run log_announce_exit 0; [ status -eq 0 ]`.
+    log_announce("")
+    log_announce("--exit")
+    log_announce_exit(0)
+    // A successful exit dump path: rc != 0 but interactive (FORCE_TTY=1 in the
+    // runner) → no tail dump, just the path line. Still must not error.
+    log_announce_exit(1)
+    assert(true)
+    env_var_unset("STAGE_DIR")
+}
+
+// ---- log_info writes a level-prefixed line to the file --------------------
+
+test "log_info appends an INFO line to the file" {
+    new_stage_dir()
+    log_init()
+    log_info("a probe message")
+    let body = file_read(log_file()) failed { "" }
+    assert(text_contains(body, "INFO a probe message"))
+    env_var_unset("STAGE_DIR")
+}

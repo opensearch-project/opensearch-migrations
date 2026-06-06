@@ -1,0 +1,369 @@
+// log.ab — append-only log to <stage>/log/migrate.log + a synchronous stream tee.
+//
+// Port of bash lib/log.sh. The invariants carry over verbatim:
+//   * Logs to file always; mirrors to stderr only when --verbose (MIGRATE_VERBOSE=1).
+//   * Single rotation when the log exceeds 5 MiB → migrate.log.1 (overwrites prior .1).
+//   * Safe to call before the stage dir exists (LOG_FILE stays /dev/null until log_init).
+//   * The log path is announced on startup and on exit so the operator can
+//     `tail -f` it from a second terminal.
+//
+// Public API (names preserved so other modules call these unchanged):
+//   log_init                  Initialise the log file (rotates if needed).
+//   log_announce / log_announce_exit
+//   log_info / log_warn / log_error / log_debug
+//   log_stream <prefix> <cmd> Run cmd; tee its combined output live to the log
+//                             file AND the operator's stderr, returning cmd's
+//                             exit code (an Int — Amber funcs return values, not $?).
+//
+// THE BIG REDESIGN — log_stream. The bash version drove a background FIFO reader
+// (`mkfifo`; `( … ) &`; `wait "$reader_pid"`) so a file logger and a stderr
+// printer could both consume the child's byte stream and the parent could still
+// recover the child's exit code. Amber 0.6 has NO background jobs, no `&`, no
+// `wait`. We rewrite it SYNCHRONOUSLY: run the command once with 2>&1 captured to
+// a temp file, recover the exit code from `status()`, then walk the captured
+// output line-by-line teeing each line to BOTH file_append(LOG_FILE) and stderr.
+// Same observable contract (file gets every line, operator sees every line,
+// exit code propagated), minus the concurrency the single-process CLI never
+// needed. The lost property is true live streaming — output now appears after
+// the command finishes rather than as-it-runs — which is acceptable: this CLI
+// is a one-operator interactive tool, not a log shipper.
+//
+// Colors: the bash file interpolated $__UI_C_DIM / $__UI_C_RESET (ui.sh globals).
+// We mint them from core.esc(), gated on term_interactive() exactly like ui.sh's
+// sgr() — chrome de-colors to "" in CI logs and the file never gets ESC bytes.
+
+import { printf, env_var_get } from "std/env"
+import { file_append, file_exists, dir_create } from "std/fs"
+import { split_lines } from "std/text"
+import { esc, eprint, eprintln, term_interactive } from "./core.ab"
+import { is_macos } from "./std.ab"
+
+// ---- module state ----------------------------------------------------------
+//
+// Module-level `let` compiles to a bash global that persists across calls, so
+// LOG_FILE set by log_init is visible to every later log_* call in the process
+// — exactly the lifetime the bash global had. Seeded to /dev/null so calls made
+// before log_init no-op to the bit bucket (the "safe before stage_dir_init"
+// invariant). An explicit LOG_FILE env var (set by the bats harness / diag.sh)
+// wins, mirroring bash `LOG_FILE="${LOG_FILE:-/dev/null}"`.
+let LOG_FILE = "/dev/null"
+
+// ---- stage directory resolution (mirrors state.ab) -------------------------
+//
+// bash log_init called stage_dir_init (from state.sh) and then read $STAGE_DIR.
+// To stay decoupled from state.ab's load order we resolve the path lazily from
+// the environment, byte-for-byte matching state.ab's stage_dir(): an explicit
+// STAGE_DIR wins; else MIGRATE_HOME (default "$PWD/migration-assistant-workspace")
+// joined with STAGE (default "default").
+fun stage_dir(): Text {
+    let explicit = env_var_get("STAGE_DIR") failed { "" }
+    if explicit != "" { return explicit }
+    let home = env_var_get("MIGRATE_HOME") failed { "" }
+    if home == "" {
+        let pwd = trust $pwd$
+        home = "{pwd}/migration-assistant-workspace"
+    }
+    let stage = env_var_get("STAGE") failed { "" }
+    if stage == "" { stage = "default" }
+    return "{home}/{stage}"
+}
+
+// ---- colors (gated, mirror ui.sh sgr discipline) ---------------------------
+
+// dim_c / reset_c — ESC SGR, "" when stderr isn't a TTY so chrome stays out of
+// CI logs and the log FILE never receives ESC bytes (file lines are built from
+// the level/prefix only, never these).
+fun dim_c(): Text {
+    if not term_interactive() { return "" }
+    return "{esc()}[2m"
+}
+fun reset_c(): Text {
+    if not term_interactive() { return "" }
+    return "{esc()}[0m"
+}
+
+// is_verbose — MIGRATE_VERBOSE=1 toggles stderr mirroring. Bash defaulted it to
+// 0 via `: "${MIGRATE_VERBOSE:=0}"`; an unset/empty var is treated as off.
+fun is_verbose(): Bool {
+    let v = env_var_get("MIGRATE_VERBOSE") failed { "0" }
+    return v == "1"
+}
+
+// ---- pure formatters (return Text — the tested seam) -----------------------
+//
+// These build the exact byte string the bash printf produced, with NO I/O, so
+// tests assert the formatting contract (prefix, level, STREAM[bucket] shape)
+// without a TTY or a real log file. The impure log_* / log_stream wrappers below
+// just route these to file_append + stderr.
+
+// fmt_log_line <ts> <lvl> <msg> → "[<ts>] <lvl> <msg>". Mirrors bash
+// `printf '[%s] %s %s\n'` (no trailing newline here; callers add it).
+pub fun fmt_log_line(ts: Text, lvl: Text, msg: Text): Text {
+    return "[{ts}] {lvl} {msg}"
+}
+
+// fmt_stream_line <ts> <prefix> <line> → the log-FILE form of one streamed line.
+// Mirrors bash `printf '[%s] STREAM[%s] %s\n'`. The literal "STREAM[<prefix>]"
+// token is what test_log.bats greps for, so it must stay byte-exact.
+pub fun fmt_stream_line(ts: Text, prefix: Text, line: Text): Text {
+    return "[{ts}] STREAM[{prefix}] {line}"
+}
+
+// fmt_stream_chrome <prefix> <line> → the STDERR (operator) form of one streamed
+// line: "  <prefix>│ <line>", wrapped in dim/reset. Mirrors bash
+// `printf '%s  %s│%s %s\n' "$__UI_C_DIM" "$prefix" "$__UI_C_RESET" "$line"`.
+pub fun fmt_stream_chrome(prefix: Text, line: Text): Text {
+    return "{dim_c()}  {prefix}│{reset_c()} {line}"
+}
+
+// ---- timestamps ------------------------------------------------------------
+//
+// Two raw `date` escapes. Amber's std/date exposes date_now() (epoch seconds)
+// but NO strftime-style formatter, so there is no pure-Amber way to build the
+// human ('%Y-%m-%d %H:%M:%S %Z') or ISO-8601 ('%Y-%m-%dT%H:%M:%S%z') strings the
+// log lines require. state.ab hit the same wall in state_archive and resolved it
+// the same way. The format strings are constants, never user data.
+
+// log_ts — ISO-8601 with timezone offset, the per-line timestamp.
+fun log_ts(): Text {
+    return trust $date '+%Y-%m-%dT%H:%M:%S%z'$
+}
+
+// header_ts — human-readable session-header timestamp.
+fun header_ts(): Text {
+    return trust $date '+%Y-%m-%d %H:%M:%S %Z'$
+}
+
+// ---- log_init --------------------------------------------------------------
+
+// file_size_bytes <path> → size in bytes, or 0 on any error. The bash version
+// forked `stat -f %z` on macOS vs `stat -c %s` on Linux (the BSD/GNU split),
+// with `|| echo 0` so a missing file or stat error degraded to 0 rather than
+// aborting the rotation check. is_macos() (from std.ab) picks the branch.
+fun file_size_bytes(path: Text): Int {
+    let raw = ""
+    if is_macos() {
+        raw = trust $stat -f %z "{path}" 2>/dev/null$
+    } else {
+        raw = trust $stat -c %s "{path}" 2>/dev/null$
+    }
+    if raw == "" { return 0 }
+    // Defensive numeric parse: a non-numeric stat output degrades to 0, matching
+    // the bash `|| echo 0` fallback semantics.
+    let n = trust $printf '%d' "{raw}" 2>/dev/null$
+    let rc = status()
+    if rc != 0 { return 0 }
+    return n as Int
+}
+
+// log_init — point LOG_FILE at <stage>/log/migrate.log, rotate it once if it has
+// grown past 5 MiB, then append the session-separator header. Idempotent enough
+// to call once per invocation. The 5_242_880 threshold is 5 * 1024 * 1024.
+pub fun log_init(): Null {
+    let dir = stage_dir()
+    // bash called stage_dir_init (state.sh) for the whole subtree; here we only
+    // need the log/ dir to exist. dir_create is failable; a pre-existing dir or a
+    // benign race shouldn't abort init, so the failure is tolerated.
+    dir_create(dir) failed {}
+    dir_create("{dir}/log") failed {}
+
+    LOG_FILE = "{dir}/log/migrate.log"
+
+    if file_exists(LOG_FILE) {
+        let sz = file_size_bytes(LOG_FILE)
+        if sz > 5242880 {
+            // mv -f overwrites any prior .1 — single-generation rotation, same as
+            // bash. Raw escape: there is no std/fs rename; cp/mv is a builtin but
+            // -f isn't exposed, so we shell out (matches state.ab's mv usage).
+            trust $mv -f "{LOG_FILE}" "{LOG_FILE}.1"$
+        }
+    }
+    // Ensure the file exists (bash `: >>"$LOG_FILE"`). file_append of "" creates
+    // it without truncating an existing file.
+    file_append(LOG_FILE, "") failed {}
+
+    // Session-separator header. Multiple invocations glue runs end-to-end in one
+    // file; without a visual break, "what happened on the last run" means
+    // tail-grepping for timestamps. The banner makes `less +G` / `grep -A`
+    // tractable. Env fallbacks mirror bash: CLI_VERSION→"?", STAGE→"default",
+    // MIGRATE_INVOCATION→"migration-assistant".
+    let ts = header_ts()
+    let cmd = env_var_get("MIGRATE_INVOCATION") failed { "" }
+    if cmd == "" { cmd = "migration-assistant" }
+    let stage = env_var_get("STAGE") failed { "" }
+    if stage == "" { stage = "default" }
+    let cli = env_var_get("CLI_VERSION") failed { "" }
+    if cli == "" { cli = "?" }
+    // $$ (the PID) isn't exposed by Amber; a raw `$$` echo via the shell recovers
+    // it. The header is operator-facing context only, never parsed.
+    let bar = "════════════════════════════════════════════════════════════════════"
+    let header = "\n{bar}\n  migration-assistant session @ {ts}\n  cli={cli}  stage={stage}\n  cmd: {cmd}\n{bar}\n"
+    file_append(LOG_FILE, header) failed {}
+}
+
+// ---- log_announce ----------------------------------------------------------
+
+// log_announce_startup — the startup form: "  log: <path>  (tail -f to follow…)".
+// Stderr-only (never pollutes stdout, the return-value channel). No-ops when the
+// log is /dev/null or unset, mirroring bash's guard. Split from the --exit form
+// (vs bash's positional `$1 == --exit`) so each shape is a plain, testable fn.
+pub fun log_announce_startup(): Null {
+    if LOG_FILE == "/dev/null" or LOG_FILE == "" { return null }
+    eprintln("{dim_c()}  log: {LOG_FILE}  (tail -f to follow in another terminal){reset_c()}")
+}
+
+// log_announce_exit_line — the --exit form: a blank line then "Log: <path>", plus
+// a "re-run with --verbose" hint UNLESS already verbose. Mirrors the bash
+// `log_announce --exit` branch.
+pub fun log_announce_exit_line(): Null {
+    if LOG_FILE == "/dev/null" or LOG_FILE == "" { return null }
+    eprintln("\n{dim_c()}Log: {LOG_FILE}{reset_c()}")
+    if not is_verbose() {
+        eprintln("{dim_c()}  Re-run with --verbose for live log mirroring.{reset_c()}")
+    }
+}
+
+// log_announce [--exit] — preserves the bash positional contract for callers
+// that pass the flag through. Bare → startup form; "--exit" → exit form.
+pub fun log_announce(flag: Text): Null {
+    if flag == "--exit" {
+        log_announce_exit_line()
+    } else {
+        log_announce_startup()
+    }
+}
+
+// ---- log_<level> -----------------------------------------------------------
+
+// log <lvl> <msg> — append a level-prefixed, timestamped line to the file, and
+// mirror it to stderr when verbose. The single private workhorse the four public
+// wrappers delegate to (bash `log()` + log_info/warn/error/debug).
+fun log_emit(lvl: Text, msg: Text): Null {
+    let line = fmt_log_line(log_ts(), lvl, msg)
+    file_append(LOG_FILE, "{line}\n") failed {}
+    if is_verbose() {
+        eprintln(line)
+    }
+}
+
+pub fun log_info(msg: Text): Null  { log_emit("INFO",  msg) }
+pub fun log_warn(msg: Text): Null  { log_emit("WARN",  msg) }
+pub fun log_error(msg: Text): Null { log_emit("ERROR", msg) }
+
+// log_debug — DEBUG lines exist only in verbose mode (bash gated the whole call
+// on `[[ "$MIGRATE_VERBOSE" -eq 1 ]]`, so they never even hit the file otherwise).
+pub fun log_debug(msg: Text): Null {
+    if is_verbose() {
+        log_emit("DEBUG", msg)
+    }
+}
+
+// ---- log_announce_exit (on-exit hook) --------------------------------------
+
+// log_announce_exit <rc> — the on_exit hook. Prints the log path one last time;
+// and when the run FAILED (rc != 0) AND we're non-interactive (MIGRATE_NONINTERACTIVE=1
+// OR fd 2 is not a TTY), dumps a focused ERROR/WARN excerpt plus a full tail of
+// migrate.log to stderr — a CI operator staring at a Jenkins console needs to see
+// WHY it failed without rerunning.
+//
+// Raw escapes: the dump uses grep -E (the balanced-paren ERROR|WARN|STREAM[…]
+// regex carried over verbatim — its missing inner paren was the bash bug that
+// turned the failure dump into "grep: Unmatched ( or \(" noise) piped through
+// tail, and a flat `tail -n`. These are line-extraction shells with no pure-Amber
+// equivalent worth reimplementing; `|| true` keeps them best-effort like bash.
+pub fun log_announce_exit(rc: Int): Null {
+    let is_devnull = LOG_FILE == "/dev/null" or LOG_FILE == ""
+    if rc != 0 and not is_devnull and file_exists(LOG_FILE) {
+        // non-interactive = MIGRATE_NONINTERACTIVE=1 OR fd 2 not a TTY. Use a bare
+        // `test -t 2` (NOT silent — silent rewrites it to `test -t 2>/dev/null`,
+        // eating the `2` operand; see AMBER_IDIOMS gotcha 7) and read status().
+        let noninter_env = env_var_get("MIGRATE_NONINTERACTIVE") failed { "0" }
+        trust $test -t 2$
+        let tty_rc = status()
+        let noninteractive = noninter_env == "1" or tty_rc != 0
+        if noninteractive {
+            let err_n_s = env_var_get("MIGRATE_FAIL_LOG_ERR_LINES") failed { "30" }
+            if err_n_s == "" { err_n_s = "30" }
+            let n_s = env_var_get("MIGRATE_FAIL_LOG_TAIL_LINES") failed { "100" }
+            if n_s == "" { n_s = "100" }
+            let dim = dim_c()
+            let reset = reset_c()
+
+            eprintln("\n{dim}== migrate.log: last {err_n_s} ERROR/WARN lines =={reset}")
+            // ERE carried over byte-exact from the (fixed) bash: outer group is the
+            // ERROR|WARN|STREAM[…] alternation, inner group is the bucket list. The
+            // grep|tail pipeline can legitimately find nothing → `|| true`.
+            trust $grep -E '(ERROR|WARN|STREAM\[(crane|helm|kubectl-wait|installer|diag-[a-z-]+)\])' "{LOG_FILE}" | tail -n "{err_n_s}" >&2 || true$
+            eprintln("\n{dim}== migrate.log: last {n_s} lines (full tail) =={reset}")
+            trust $tail -n "{n_s}" "{LOG_FILE}" >&2 || true$
+            eprintln("{dim}== end migrate.log =={reset}")
+        }
+    }
+    log_announce_exit_line()
+}
+
+// ---- log_stream (SYNCHRONOUS rewrite of the background FIFO tee) ------------
+
+// log_stream <prefix> <cmd> — run <cmd> (a single Text run via the shell), tee
+// its combined stdout+stderr to the log file AND the operator's stderr one
+// prefixed line at a time, and RETURN the command's exit code as an Int.
+//
+// Contract vs bash: bash took `<prefix> CMD ARGS…` as separate argv and returned
+// the rc via $?. Amber can't take a varargs command or a function pointer, so the
+// command arrives as one Text (the caller composes it, e.g. "aws cloudformation
+// deploy …") and the rc is the function's return value. Every other observable
+// is identical: the file gets one `[ts] STREAM[prefix] <line>` per output line,
+// the operator's stderr gets the dim-prefixed mirror, and a final
+// `stream[prefix] exit=<rc>` INFO line lands in the file (the bash log_info call).
+//
+// Implementation: capture combined output to a temp file (2>&1 redirect — there
+// is no FIFO + background reader in Amber), recover the rc, then walk the lines.
+pub fun log_stream(prefix: Text, cmd: Text): Int {
+    // A temp file under the log dir collects the child's combined output. mktemp
+    // is a raw escape (no std/fs tempfile); $$ uniquifies it as in bash. The
+    // redirect `> tmp 2>&1` merges both streams the way the bash FIFO fed both
+    // readers off one byte stream.
+    let tmp = trust $mktemp 2>/dev/null$
+    if tmp == "" {
+        // No tempfile available — degrade to running the command with no capture
+        // rather than aborting. Rare (mktemp essentially always works). Subshell
+        // so the command's own `exit` can't terminate us (see below).
+        trust $( eval "{cmd}" )$
+        return status()
+    }
+
+    // Run the command in a SUBSHELL, merging stdout+stderr into the temp file.
+    // The subshell is load-bearing: bash log_stream ran the child as `"$@"` (a
+    // separate process), so a command that ends in `exit N` set N as its status
+    // WITHOUT killing the parent. We run via `eval` (the command is one Text, not
+    // argv), and a bare `eval "…; exit 7"` runs in the CURRENT shell — its `exit`
+    // would terminate the whole CLI/test process. Wrapping in `( … )` confines the
+    // exit to the subshell, whose status `status()` then recovers — faithfully
+    // reproducing bash's `"$@" >fifo 2>&1; rc=$?`. `trust` because a non-zero exit
+    // is the DATA we propagate, not an error to handle.
+    trust $( eval "{cmd}" ) > "{tmp}" 2>&1$
+    let rc = status()
+
+    // Read the whole capture, then tee each line: file form via file_append, and
+    // operator form via stderr. split_lines gives the bash-equivalent line set
+    // (trailing-newline-less final fragment still counts; no phantom empty line).
+    let captured = trust $cat "{tmp}" 2>/dev/null$
+    for line in split_lines(captured) {
+        let ts = log_ts()
+        file_append(LOG_FILE, "{fmt_stream_line(ts, prefix, line)}\n") failed {}
+        eprintln(fmt_stream_chrome(prefix, line))
+    }
+
+    // Clean up the temp capture (rm is a builtin; failure is harmless).
+    trust $rm -f "{tmp}"$
+
+    // Final marker line — identical to the bash `log_info "stream[$prefix] exit=$rc"`.
+    log_info("stream[{prefix}] exit={rc}")
+    return rc
+}
+
+// log_file — accessor for the current LOG_FILE (test seam; the bats tests read
+// $LOG_FILE directly, which Amber's module-private global doesn't expose).
+pub fun log_file(): Text {
+    return LOG_FILE
+}

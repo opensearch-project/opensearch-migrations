@@ -1,0 +1,248 @@
+// discover.ab — read-only environment discovery.
+//
+// Port of bash lib/discover.sh. EVERY function here is NON-DESTRUCTIVE: it only
+// reads (uname, /proc/version, PATH probes, `aws sts get-caller-identity`,
+// `aws eks list-clusters`, `aws cloudformation list-stacks`). Nothing is ever
+// created, modified, or deleted — same contract as the bash source.
+//
+// Discovered facts (the bash module wrote these via state_set into the shared
+// state store):
+//   OS_NAME        linux|darwin|wsl|other
+//   PKG_MGR        brew|apt|dnf|yum|none
+//   AWS_ACCOUNT    12-digit account number
+//   AWS_REGION     e.g. us-east-1
+//   AWS_USER_ARN   caller identity ARN
+//   EKS_CLUSTERS   space-separated cluster names
+//   CFN_MA_STACKS  space-separated stack names containing "MigrationAssistant"
+//
+// PORTING NOTES
+// -------------
+// * No state.ab module exists yet, but discover's whole job is to PUBLISH these
+//   facts for later stages to read. The bash version leaned on lib/state.sh's
+//   parallel-array store (it too avoided `declare -A` for bash-3.2). We mirror
+//   that here with a module-local parallel-array store (disc_state_set /
+//   disc_state_get) — module-level `let` arrays persist across calls in the
+//   compiled Bash, exactly the dashboard.ab pattern. The public getter contract
+//   (disc_state_get KEY -> Text on STDOUT) is what other modules call.
+// * Chrome/log discipline (inherited verbatim from the bash source): the
+//   discover_* functions RETURN an Int exit code (0 ok, 1 unauthenticated), and
+//   any human-facing message (log_info / log_warn / ui_warn) goes to STDERR.
+//   The discovered VALUES travel through the state store, never stdout — so a
+//   caller capturing a getter's stdout gets a clean value, never a log line.
+// * JSON parse: bash piped `aws sts get-caller-identity --output json` into
+//   json_get '.Account' / '.Arn' (jq with a regex fallback). Amber has no jq
+//   dependency in this layer, so we extract both fields with std.ab's
+//   regex_capture — the same coarse "key": "value" capture json_get falls back
+//   to, which is exactly right for the tame sts:GetCallerIdentity shape.
+// * `command -v aws` -> std env is_command (optional_cmd in std.ab). The
+//   capture+exit-code pattern `out=$(aws ... 2>/dev/null); rc=$?` becomes
+//   `trust $aws ... 2>/dev/null$` then `status()` — trust swallows the
+//   compiler's can-fail error while status() still reports the real rc, the
+//   direct analog of bash's `$?`.
+
+import { printf, env_var_get, is_command } from "std/env"
+import { file_read, file_exists } from "std/fs"
+import { lowercase, replace_regex } from "std/text"
+import { is_macos, is_linux, optional_cmd, regex_capture, contains } from "./std.ab"
+import { eprintln } from "./core.ab"
+import { ui_warn } from "./ui.ab"
+
+// ---- logging (stderr; mirrors lib/log.sh's log_info/log_warn discipline) ----
+//
+// The bash module called log_info/log_warn from lib/log.sh. That module isn't
+// ported yet; the only contract discover relies on is "informational lines go
+// to STDERR, never stdout". So we emit minimal INFO/WARN lines to stderr via
+// core.eprintln — keeping stdout clean for getter return values. Defined FIRST:
+// Amber tree-shakes per imported symbol and only keeps transitive deps that
+// textually precede the public entry point, so private helpers live up top.
+fun log_info(msg: Text): Null {
+    eprintln("[INFO] {msg}")
+}
+fun log_warn(msg: Text): Null {
+    eprintln("[WARN] {msg}")
+}
+
+// ---- in-memory state store (parallel arrays — the dashboard.ab pattern) -----
+//
+// Replaces lib/state.sh's STATE_KEYS/STATE_VALS for the keys discover owns.
+// Nested arrays are forbidden in Amber, so keys[] and vals[] run in parallel;
+// __sc is the logical length and every path honors it. Seeded with one
+// placeholder element because `let` has no empty-typed-array literal (and the
+// first real write reuses slot 0 so physical length == logical length).
+
+let __keys = [""]
+let __vals = [""]
+let __sc = 0
+
+fun disc_idx(key: Text): Int {
+    for i in 0..__sc {
+        if __keys[i] == key { return i }
+    }
+    return -1
+}
+
+// disc_state_set <key> <value> — insert or update. (bash: state_set.)
+pub fun disc_state_set(key: Text, val: Text): Null {
+    let i = disc_idx(key)
+    if i >= 0 {
+        __vals[i] = val
+        return null
+    }
+    // First row reuses the seed slot; later rows grow the arrays — keeps
+    // physical length == logical length so the 0..__sc loops read real data.
+    if __sc < len __keys {
+        __keys[__sc] = key
+        __vals[__sc] = val
+    } else {
+        __keys += [key]
+        __vals += [val]
+    }
+    __sc += 1
+}
+
+// disc_state_get <key> — value for <key>, or "" if unset. The VALUE is the
+// return (stdout-clean); chrome never rides along. (bash: state_get, default "".)
+pub fun disc_state_get(key: Text): Text {
+    let i = disc_idx(key)
+    if i >= 0 { return __vals[i] }
+    return ""
+}
+
+// disc_state_has <key> — Bool membership. (bash: state_has.)
+pub fun disc_state_has(key: Text): Bool {
+    return disc_idx(key) >= 0
+}
+
+// disc_state_reset — clear the store (test seam; bash had no public equivalent
+// but state_load reset the arrays — same effect).
+pub fun disc_state_reset(): Null {
+    __sc = 0
+}
+
+// ---- OS + package manager --------------------------------------------------
+
+// detect_os — linux|darwin|wsl|other. WSL is Linux whose /proc/version mentions
+// "microsoft" (case-insensitive), matching the bash `grep -qi microsoft`.
+fun detect_os(): Text {
+    if is_linux() {
+        // /proc/version only exists on Linux; guard the read so a missing file
+        // (or a non-Linux host that somehow reports Linux) degrades to "linux"
+        // rather than erroring.
+        if file_exists("/proc/version") {
+            let v = file_read("/proc/version") failed { "" }
+            if contains("microsoft", lowercase(v)) {
+                return "wsl"
+            }
+        }
+        return "linux"
+    }
+    if is_macos() {
+        return "darwin"
+    }
+    return "other"
+}
+
+// detect_pkg_mgr <os> — brew|apt|dnf|yum|none. Order matches the bash cascade:
+// on darwin prefer brew; else apt-get -> dnf -> yum -> brew -> none.
+fun detect_pkg_mgr(os: Text): Text {
+    if os == "darwin" and optional_cmd("brew") {
+        return "brew"
+    }
+    if optional_cmd("apt-get") { return "apt" }
+    if optional_cmd("dnf")     { return "dnf" }
+    if optional_cmd("yum")     { return "yum" }
+    if optional_cmd("brew")    { return "brew" }
+    return "none"
+}
+
+// discover_os — set OS_NAME, PKG_MGR. Always succeeds (returns 0).
+pub fun discover_os(): Int {
+    let os = detect_os()
+    let pm = detect_pkg_mgr(os)
+    disc_state_set("OS_NAME", os)
+    disc_state_set("PKG_MGR", pm)
+    log_info("discover_os: os={os} pkg={pm}")
+    return 0
+}
+
+// ---- AWS identity ----------------------------------------------------------
+
+// aws_region — resolve the active region the same way the bash version did:
+// AWS_REGION, then AWS_DEFAULT_REGION, then `aws configure get region`, else "".
+fun aws_region(): Text {
+    let r = env_var_get("AWS_REGION") failed { "" }
+    if r != "" { return r }
+    let d = env_var_get("AWS_DEFAULT_REGION") failed { "" }
+    if d != "" { return d }
+    // `aws configure get region` exits non-zero when no profile/region — trust
+    // swallows that, leaving "" (the bash `|| echo ""`).
+    let cfg = trust $aws configure get region 2>/dev/null$
+    return cfg
+}
+
+// discover_aws — set AWS_ACCOUNT, AWS_REGION, AWS_USER_ARN. Returns 1 (and
+// warns to stderr) when the aws CLI is absent or credentials aren't configured;
+// 0 on success. Mirrors discover_aws()'s two early `return 1` paths exactly.
+pub fun discover_aws(): Int {
+    if not is_command("aws") {
+        log_warn("aws CLI not on PATH; skipping aws discovery")
+        return 1
+    }
+
+    // bash: `out=$(aws sts get-caller-identity --output json 2>/dev/null)` then
+    // tests `$?`. trust captures stdout while letting status() report the rc, so
+    // a non-zero exit (no creds) routes to the same ui_warn + return 1.
+    let out = trust $aws sts get-caller-identity --output json 2>/dev/null$
+    let rc = status()
+    if rc != 0 {
+        ui_warn("AWS credentials not configured. Run `aws configure` or set AWS_PROFILE.")
+        return 1
+    }
+
+    // Extract .Account and .Arn. The coarse "key": "value" capture is the same
+    // fallback json_get used; sts output is flat JSON so it's exact here.
+    let account = regex_capture(out, "\"Account\"[[:space:]]*:[[:space:]]*\"([^\"]*)\"", 1)
+    let arn = regex_capture(out, "\"Arn\"[[:space:]]*:[[:space:]]*\"([^\"]*)\"", 1)
+    let region = aws_region()
+
+    disc_state_set("AWS_ACCOUNT", account)
+    disc_state_set("AWS_USER_ARN", arn)
+    disc_state_set("AWS_REGION", region)
+    log_info("discover_aws: account={account} region={region} arn={arn}")
+    return 0
+}
+
+// ---- AWS resources (EKS clusters + MA CloudFormation stacks) ---------------
+
+// tabs_to_spaces — `aws --output text` separates list items with TABs; the bash
+// version normalized `${var//$'\t'/ }` so the stored value is space-separated.
+fun tabs_to_spaces(s: Text): Text {
+    return replace_regex(s, "\t", " ", true)
+}
+
+// discover_resources — list EKS clusters and MigrationAssistant CFN stacks for
+// the discovered region. Returns 0 always (a missing region or absent aws CLI
+// is a skip, not an error — same as the bash `return 0`).
+pub fun discover_resources(): Int {
+    let region = disc_state_get("AWS_REGION")
+    if region == "" {
+        log_warn("no region set; skipping resources discovery")
+        return 0
+    }
+
+    if not is_command("aws") {
+        // bash guarded the whole body on `command -v aws` and otherwise fell
+        // through to an implicit return 0.
+        return 0
+    }
+
+    // Both queries are read-only list calls. `|| echo ""` in bash becomes trust:
+    // a failed list (perms, throttling) yields "" rather than aborting.
+    let clusters = trust $aws eks list-clusters --region "{region}" --query 'clusters[]' --output text 2>/dev/null$
+    let stacks = trust $aws cloudformation list-stacks --region "{region}" --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE UPDATE_ROLLBACK_COMPLETE ROLLBACK_COMPLETE --query 'StackSummaries[?contains(StackName,`MigrationAssistant`)].StackName' --output text 2>/dev/null$
+
+    disc_state_set("EKS_CLUSTERS", tabs_to_spaces(clusters))
+    disc_state_set("CFN_MA_STACKS", tabs_to_spaces(stacks))
+    log_info("discover_resources: clusters='{clusters}' stacks='{stacks}'")
+    return 0
+}

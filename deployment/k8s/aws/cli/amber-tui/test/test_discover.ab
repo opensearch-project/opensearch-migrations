@@ -1,0 +1,153 @@
+// test_discover.ab — coverage for src/discover.ab, mirroring test_discover.bats.
+//
+// External commands (`aws`) are faked via a PATH-shadow temp dir: we write an
+// executable shim with file_write + file_chmod, then prepend its directory to
+// PATH (env_var_set). This is the Amber analog of the bats helpers/stub.sh
+// mkstub + STUB_DIR-on-PATH pattern — no network, no real cloud. The discover
+// functions resolve `aws` through PATH like any other process, so the shim wins.
+//
+// The bats tests could only assert `$status` because discover_aws set in-memory
+// state in a subshell (the `run` wrapper). In Amber the module-level parallel
+// arrays persist in-process, so we additionally assert the STORED values
+// (account/arn/region) — strictly stronger than the bats contract.
+
+import { assert, assert_eq } from "std/test"
+import { file_write, file_chmod } from "std/fs"
+import { env_var_set, env_var_get } from "std/env"
+import {
+    discover_os, discover_aws, discover_resources,
+    disc_state_set, disc_state_get, disc_state_has, disc_state_reset
+} from "../src/discover.ab"
+
+// ---- helpers (defined ABOVE the test blocks: Amber requires define-before-use,
+// and tree-shakes test-file helpers the same way it does module helpers) -------
+
+// fresh_path_dir — a brand-new temp dir prepended to PATH so a shim written into
+// it shadows any real binary of the same name. Returns the dir path.
+fun fresh_path_dir(): Text {
+    let dir = trust $mktemp -d$
+    let old = env_var_get("PATH") failed { "" }
+    env_var_set("PATH", "{dir}:{old}") failed { }
+    return dir
+}
+
+// mkstub_aws <dir> <json> <rc> — write a fake `aws` into <dir> that prints
+// <json> on stdout and exits <rc>. (Amber analog of bats mkstub.) The closing
+// brace of inline JSON is written bare — Amber's "\}" leaves a literal
+// backslash, but a bare "}" in a Text literal is fine; only "{" needs escaping.
+fun mkstub_aws(dir: Text, json: Text, rc: Int): Null {
+    let shim = "{dir}/aws"
+    let body = "#!/usr/bin/env bash\nprintf '%s' '{json}'\nexit {rc}\n"
+    file_write(shim, body) failed { }
+    file_chmod(shim, "755") failed { }
+}
+
+// host_os — the OS this test is running on, computed independently of the module
+// under test (so the assertion is a real cross-check, mirroring the bats
+// `case "$(uname -s)"`).
+fun host_os(): Text {
+    let k = trust $uname -s 2>/dev/null$
+    if k == "Darwin" { return "darwin" }
+    if k == "Linux" { return "linux" }
+    return "other"
+}
+
+// ---- (0) state store round-trip --------------------------------------------
+
+test "disc_state set/get/has round-trips and updates in place" {
+    disc_state_reset()
+    assert(not disc_state_has("K"))
+    disc_state_set("K", "v1")
+    assert(disc_state_has("K"))
+    assert_eq(disc_state_get("K"), "v1")
+    // update must not break lookup
+    disc_state_set("K", "v2")
+    assert_eq(disc_state_get("K"), "v2")
+    // unknown key → ""
+    assert_eq(disc_state_get("NOPE"), "")
+}
+
+// ---- (1) discover_aws sets account/region/arn from sts output --------------
+
+test "discover_aws sets account/region/arn from sts output" {
+    let dir = fresh_path_dir()
+    mkstub_aws(dir, "\{\"UserId\":\"ABC\",\"Account\":\"123456789012\",\"Arn\":\"arn:aws:iam::123456789012:user/alice\"}", 0)
+    env_var_set("AWS_REGION", "us-east-1") failed { }
+    disc_state_reset()
+
+    let rc = discover_aws()
+    assert_eq(rc, 0)
+    // Stronger than the bats test: assert the parsed + stored values.
+    assert_eq(disc_state_get("AWS_ACCOUNT"), "123456789012")
+    assert_eq(disc_state_get("AWS_USER_ARN"), "arn:aws:iam::123456789012:user/alice")
+    assert_eq(disc_state_get("AWS_REGION"), "us-east-1")
+}
+
+// ---- (2) discover_aws fails gracefully when aws is missing -----------------
+
+test "discover_aws fails gracefully when aws is missing" {
+    // Point PATH at a fresh empty dir ONLY, so `aws` cannot be found anywhere.
+    let dir = trust $mktemp -d$
+    env_var_set("PATH", dir) failed { }
+    disc_state_reset()
+
+    let rc = discover_aws()
+    assert(rc != 0)
+}
+
+// ---- (2b) discover_aws returns 1 when creds are bad (aws exits non-zero) ----
+
+test "discover_aws returns 1 when credentials are not configured" {
+    let dir = fresh_path_dir()
+    // stub aws that prints nothing and exits non-zero (bad/missing creds)
+    mkstub_aws(dir, "", 255)
+    disc_state_reset()
+
+    let rc = discover_aws()
+    assert(rc != 0)
+}
+
+// ---- (3) discover_os identifies the host OS correctly ----------------------
+
+test "discover_os identifies the host OS correctly" {
+    disc_state_reset()
+    let rc = discover_os()
+    assert_eq(rc, 0)
+    let os = disc_state_get("OS_NAME")
+    let host = host_os()
+    if {
+        host == "darwin" { assert_eq(os, "darwin") }
+        // On Linux the host may be plain linux or WSL — both acceptable.
+        host == "linux" { assert(os == "linux" or os == "wsl") }
+        else { assert(false) }
+    }
+    // PKG_MGR is always set to one of the known values (never empty).
+    let pm = disc_state_get("PKG_MGR")
+    assert(pm == "brew" or pm == "apt" or pm == "dnf" or pm == "yum" or pm == "none")
+}
+
+// ---- (4) discover_resources: skip when no region, store space-separated -----
+
+test "discover_resources skips (returns 0) when no region is set" {
+    disc_state_reset()
+    // No AWS_REGION key in the store → skip path.
+    let rc = discover_resources()
+    assert_eq(rc, 0)
+    // Nothing stored for clusters/stacks on the skip path.
+    assert(not disc_state_has("EKS_CLUSTERS"))
+}
+
+test "discover_resources stores tab-normalized lists from stubbed aws" {
+    let dir = fresh_path_dir()
+    // aws --output text uses TABs between list items; the stub emits two
+    // tab-separated cluster names so we can assert the tab→space normalization.
+    mkstub_aws(dir, "alpha\tbeta", 0)
+    disc_state_reset()
+    disc_state_set("AWS_REGION", "us-west-2")
+
+    let rc = discover_resources()
+    assert_eq(rc, 0)
+    assert_eq(disc_state_get("EKS_CLUSTERS"), "alpha beta")
+    // Same stub answers the cloudformation call too → same normalized value.
+    assert_eq(disc_state_get("CFN_MA_STACKS"), "alpha beta")
+}

@@ -1,0 +1,249 @@
+// artifacts.ab — SHA-256-pinned download + content-addressable cache.
+//
+// Port of bash lib/artifacts.sh. Mirrors the marelease.go protocol from PR 3008.
+// Resolution order per artifact:
+//   1. GitHub release asset:
+//        https://github.com/opensearch-project/opensearch-migrations/releases/download/<tag>/<name>
+//   2. Raw repo fallback (logged as WARN):
+//        https://raw.githubusercontent.com/opensearch-project/opensearch-migrations/<tag>/<name>
+//   3. Hard fail. No silent fallback to main/latest.
+//
+// Cache layout (unchanged):
+//   $STAGE_DIR/artifacts/.cache/<sha256-of-resolved-url>/<name>
+//   $STAGE_DIR/artifacts/<name>  → symlink into the cache dir
+//
+// Each artifact is verified against a companion <name>.sha256 file when one is
+// published; many opensearch-migrations assets ship without one, so we WARN and
+// proceed rather than refuse to deploy.
+//
+// Porting notes vs the bash original:
+//   * The bash if/elif chains become Amber if-chains (no elif keyword).
+//   * `command -v sha256sum` → `is_command("sha256sum")` from std/env, kept as an
+//     if-chain so the shasum fallback is identical to bash.
+//   * `[[ -f X ]]` → file_exists() from std/fs. `: >file` (.verified marker) →
+//     file_write(path, ""). `mkdir -p` → dir_create. `ln -sfn` → symlink_create
+//     (lowers to `ln -fs`, equivalent for our file-target symlinks).
+//   * curl HEAD/GET stay raw `trust $...$` commands — they're the external network
+//     calls and have no stdlib equivalent. The URL→cache-key hash also stays a
+//     `trust $...$` pipe (printf | sha256sum | awk) exactly as the bash helper.
+//   * log_warn/log_info/die have no Amber module yet, so this module carries
+//     thin local equivalents that honor the same stderr-only / exit-1 contract
+//     (chrome to stderr; the symlink path is the only thing on stdout). When
+//     log.ab/common.ab land, these collapse to imports.
+
+import { printf, env_var_get, is_command } from "std/env"
+import { file_exists, file_write, dir_create, symlink_create } from "std/fs"
+import { esc, eprintln } from "./core.ab"
+
+// ---- repo constants (mirrors ART_REPO / ART_TAG_PREFIX) --------------------
+
+const ART_REPO = "opensearch-project/opensearch-migrations"
+// opensearch-migrations tags as "3.2.1", not "v3.2.1". The prefix hook lets us
+// flip if upstream ever changes their mind; empty today.
+const ART_TAG_PREFIX = ""
+
+// ---- private helpers (defined FIRST: Amber tree-shakes per imported symbol
+// and keeps only transitive deps that textually precede the public entry point,
+// so every callee MUST appear above its caller) -----------------------------
+
+// stage_dir — resolve $STAGE_DIR the way _common.sh does:
+//   MIGRATE_HOME defaults to "$PWD/migration-assistant-workspace", STAGE to
+//   "default", and STAGE_DIR = "$MIGRATE_HOME/$STAGE". We read the same env vars
+//   so an already-exported STAGE_DIR-equivalent environment Just Works, and tests
+//   can pin MIGRATE_HOME to a temp dir. (Reading STAGE_DIR directly first lets a
+//   caller that exported it verbatim win, matching the bash global.)
+fun stage_dir(): Text {
+    let direct = env_var_get("STAGE_DIR") failed { "" }
+    if direct != "" { return direct }
+    let home = env_var_get("MIGRATE_HOME") failed { "" }
+    if home == "" {
+        // $PWD fallback, same default as _common.sh.
+        let pwd = trust $pwd$
+        home = "{pwd}/migration-assistant-workspace"
+    }
+    let stage = env_var_get("STAGE") failed { "" }
+    if stage == "" { stage = "default" }
+    return "{home}/{stage}"
+}
+
+// current_stage — STAGE name for the cache-reset WARN line (bash: stage=$STAGE).
+fun current_stage(): Text {
+    let stage = env_var_get("STAGE") failed { "" }
+    if stage == "" { stage = "default" }
+    return stage
+}
+
+// log_info / log_warn — level-prefixed lines to stderr. The bash log.sh appended
+// to $STAGE_DIR/log/migrate.log and mirrored to stderr only under --verbose; here
+// we keep the operator-visible stderr line (the contract other modules rely on)
+// and leave the file sink to the eventual log.ab. Stdout stays clean for the
+// returned symlink path.
+fun log_info(msg: Text): Null {
+    eprintln("INFO  {msg}")
+}
+fun log_warn(msg: Text): Null {
+    eprintln("WARN  {msg}")
+}
+
+// die <msg> — red "error:" to stderr, then exit 1. Mirrors _common.sh die().
+// (No return type that callers depend on — it never returns.)
+fun die(msg: Text): Null {
+    let e = esc()
+    eprintln("{e}[31merror:{e}[0m {msg}")
+    exit(1)
+}
+
+// http_head <url> — Bool: is <url> reachable? Follows redirects (-L) so the
+// FINAL target's HTTP code is what we test (GitHub release assets 302 to an
+// Azure-signed blob whose 200/4xx is the real answer). `-f` makes 4xx a non-zero
+// exit; we suppress curl's stderr because a 404 here is a normal "asset doesn't
+// exist; try fallback" branch, not an error. Raw trust: external network call.
+fun http_head(url: Text): Bool {
+    trust $curl -fsSIL --max-time 10 -o /dev/null "{url}" 2>/dev/null$
+    return status() == 0
+}
+
+// sha256_of_string <s> — hex sha256 of a literal string. is_command if-chain
+// picks sha256sum (Linux) vs shasum -a 256 (macOS default), matching the bash
+// helper byte-for-byte. The printf|hasher|awk pipe stays a raw trust command
+// (per the port plan: URL→cache-key hashing remains a $...$ escape).
+fun sha256_of_string(s: Text): Text {
+    // The awk brace MUST be escaped (`\{`) so Amber doesn't read it as a `{expr}`
+    // interpolation; `\$1` keeps the field ref literal to the shell, not Amber.
+    if is_command("sha256sum") {
+        return trust $printf '%s' "{s}" | sha256sum | awk '\{print \$1}'$
+    }
+    return trust $printf '%s' "{s}" | shasum -a 256 | awk '\{print \$1}'$
+}
+
+// sha256_of_file <path> — hex sha256 of a file's contents. Same hasher if-chain.
+fun sha256_of_file(path: Text): Text {
+    if is_command("sha256sum") {
+        return trust $sha256sum "{path}" | awk '\{print \$1}'$
+    }
+    return trust $shasum -a 256 "{path}" | awk '\{print \$1}'$
+}
+
+// verify_sha256 <file> <sha_file> — Bool: does <file>'s digest match the first
+// whitespace field of <sha_file> (sha256sum's "<hex>  <name>" format)? awk pulls
+// field 1 of the .sha256 file; we compare to the recomputed digest.
+fun verify_sha256(file: Text, sha_file: Text): Bool {
+    let expected = trust $awk '\{print \$1}' < "{sha_file}"$
+    let actual = sha256_of_file(file)
+    return expected == actual
+}
+
+// ---- public API ------------------------------------------------------------
+
+// artifacts_fetch <name> <version> — resolve, download, verify, cache, symlink.
+// Returns the local symlink path on STDOUT (the bash `printf '%s\n' "$link"`
+// contract — chrome went to stderr, the path is the captured value).
+pub fun artifacts_fetch(name: Text, version: Text): Text {
+    let tag = "{ART_TAG_PREFIX}{version}"
+    let primary = "https://github.com/{ART_REPO}/releases/download/{tag}/{name}"
+    let fallback = "https://raw.githubusercontent.com/{ART_REPO}/{tag}/{name}"
+
+    // Resolution order: releases → raw fallback (WARN) → die. if/elif → if-chain.
+    let url = ""
+    if {
+        http_head(primary) {
+            url = primary
+        }
+        http_head(fallback) {
+            log_warn("artifact {name} not in releases; using raw repo fallback")
+            url = fallback
+        }
+        else {
+            die("could not resolve artifact {name} @ v{version} (tried releases + raw)")
+        }
+    }
+
+    let key = sha256_of_string(url)
+    let sdir = stage_dir()
+    let cache_dir = "{sdir}/artifacts/.cache/{key}"
+    let cached_file = "{cache_dir}/{name}"
+    let verified_marker = "{cache_dir}/.verified"
+
+    // Cache hit requires BOTH the payload AND the .verified marker (a half-written
+    // cache from an interrupted download must not be trusted).
+    if file_exists(cached_file) and file_exists(verified_marker) {
+        log_info("artifacts: cache hit for {name}@{version}")
+    } else {
+        dir_create(cache_dir) failed {
+            die("could not create cache dir {cache_dir}")
+        }
+        log_info("artifacts: downloading {url}")
+        // curl GET → cached_file. Raw trust: external network call; a non-zero
+        // exit on a genuine network failure surfaces as a SHA/file failure below.
+        trust $curl -fsSL --max-time 120 -o "{cached_file}" "{url}"$
+        // Companion .sha256? Verify when present, WARN-and-proceed when not.
+        let sha_url = "{url}.sha256"
+        if http_head(sha_url) {
+            let sha_file = "{cache_dir}/{name}.sha256"
+            trust $curl -fsSL --max-time 30 -o "{sha_file}" "{sha_url}"$
+            if not verify_sha256(cached_file, sha_file) {
+                die("SHA mismatch for {name}@{version} (cache: {cached_file})")
+            }
+        } else {
+            log_warn("artifacts: no .sha256 published for {name}@{version}; skipping verification")
+        }
+        // `: >"$cache_dir/.verified"` — touch an empty marker.
+        file_write(verified_marker, "") failed {
+            die("could not write verified marker {verified_marker}")
+        }
+    }
+
+    // `ln -sfn "$cached_file" "$link"` → symlink_create (lowers to `ln -fs`,
+    // which force-repoints; -n is moot for a file-target symlink).
+    let link = "{sdir}/artifacts/{name}"
+    symlink_create(cached_file, link) failed {
+        die("could not link {link} → {cached_file}")
+    }
+    return link
+}
+
+// artifacts_fetch_raw <name> <version> <repo_path> — direct fetch from
+// raw.githubusercontent.com for in-repo files NOT published as standalone release
+// assets (e.g. the chart's privateEcrManifest.sh image list). Bypasses the
+// release-asset probe AND the SHA step (raw repo files ship no .sha256). Returns
+// the local symlink path on stdout.
+pub fun artifacts_fetch_raw(name: Text, version: Text, repo_path: Text): Text {
+    let tag = "{ART_TAG_PREFIX}{version}"
+    let url = "https://raw.githubusercontent.com/{ART_REPO}/{tag}/{repo_path}"
+
+    let key = sha256_of_string(url)
+    let sdir = stage_dir()
+    let cache_dir = "{sdir}/artifacts/.cache/{key}"
+    let cached_file = "{cache_dir}/{name}"
+
+    // No .verified marker here — there's nothing to verify, so a present file IS
+    // the cache (matching the bash `[[ ! -f "$cached_file" ]]` guard).
+    if not file_exists(cached_file) {
+        dir_create(cache_dir) failed {
+            die("could not create cache dir {cache_dir}")
+        }
+        log_info("artifacts: downloading {url}")
+        trust $curl -fsSL --max-time 60 -o "{cached_file}" "{url}"$
+        let rc = status()
+        if rc != 0 {
+            die("could not download {url}")
+        }
+    }
+    let link = "{sdir}/artifacts/{name}"
+    symlink_create(cached_file, link) failed {
+        die("could not link {link} → {cached_file}")
+    }
+    return link
+}
+
+// artifacts_reset_cache — wipe the entire artifact cache for this stage.
+// `rm -rf .cache` + `rm -f artifacts/*` stays a raw trust command (glob removal
+// has no stdlib wrapper); the trailing WARN mirrors the bash log_warn.
+pub fun artifacts_reset_cache(): Null {
+    let sdir = stage_dir()
+    // Two trusts: the .cache subtree, then the loose symlinks. Globbing `*` is a
+    // shell feature with no Amber stdlib equivalent, so this is a surgical escape.
+    trust $rm -rf "{sdir}/artifacts/.cache"$
+    trust $rm -f "{sdir}/artifacts/"*$
+    log_warn("artifacts: cache reset for stage={current_stage()}")
+}
