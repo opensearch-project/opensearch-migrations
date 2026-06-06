@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - 'deployment/k8s/**'
+      - '!deployment/k8s/aws/cli/**'
       - 'packages/schemas/**'
       - 'packages/config-processor/**'
       - 'migrationConsole/**'
@@ -15,6 +16,7 @@ on:
   pull_request:
     paths:
       - 'deployment/k8s/**'
+      - '!deployment/k8s/aws/cli/**'
       - 'packages/schemas/**'
       - 'packages/config-processor/**'
       - 'migrationConsole/**'
