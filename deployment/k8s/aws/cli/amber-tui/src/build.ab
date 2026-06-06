@@ -1,0 +1,424 @@
+// build.ab — build Migration Assistant images from source via gradle.
+//
+// Port of bash lib/build.sh. Triggered by `--build`: builds the MA images from
+// source via gradle and pushes them to the per-stage ECR.
+//
+//   1. Resolve $base_dir (the opensearch-migrations repo root). Default walks up
+//      from the CLI install ($LIB_DIR/../../../../..). Override with --base-dir.
+//   2. Resolve $IMAGE_TAG. Default "latest"; override with --image-tag.
+//   3. ECR login: aws ecr get-login-password | docker login.
+//   4. Set up the Kubernetes-hosted buildx builder (one per cluster context,
+//      name "builder-<context>"), sourced from the repo's
+//      buildImages/backends/eksKubernetesBuildkit.sh.
+//   5. Run ./gradlew :buildImages:buildImagesToRegistry with -PregistryEndpoint,
+//      -Pbuilder, -PimageVersion, optionally -PskipTestImages=true, and -x test.
+//      One automatic retry after a 10-second sleep on first failure.
+//   6. Tear down the buildx builder so the buildkit pods get reaped.
+//
+// After build_images_or_skip returns, MIRROR_IMAGES is forced to Y (we already
+// pushed to the private ECR) and BUILD_IMAGE_TAG is in state so the helm path
+// can use the per-build tag instead of $MA_VERSION.
+//
+// PUBLIC CONTRACT preserved verbatim for callers/entrypoint:
+//   build_images_or_skip → Int (0 no-op/success, non-zero failure)
+//   plus the helpers _build_resolve_base_dir / _build_builder_name /
+//   _build_ecr_login / _build_setup_buildkit / _build_gradle_invoke, kept pub so
+//   the tests can exercise them in isolation (bash had them as file-private
+//   functions exercised via the bats `run` harness).
+//
+// Amber-port notes vs the bash original:
+//   * Bash returned status via `return N`; Amber funcs return an Int the caller
+//     branches on. `die()` (common.ab) still exits the process directly.
+//   * `(cd "$x" && pwd)` → the `cd` builtin then a `trust $pwd$` (no subshell
+//     needed — we cd back implicitly is NOT a concern here because each resolve
+//     path returns immediately after capturing pwd; but to avoid leaking the cwd
+//     we capture-and-restore around the cd).
+//   * Conditional gradle flags (`${skip_test_arg[@]+…}`) → a [Text] built
+//     conditionally with += and joined into the command Text.
+//   * `source backend_script && setup_build_backend` (runtime-sourced repo
+//     script) → a single raw `trust $bash -c '…'$` escape: there is no Amber way
+//     to source a foreign shell file and invoke one of its functions.
+//   * `set +e/-e` around log_stream → not needed: log_stream returns the exit
+//     code as an Int (see log.ab), so we never rely on `$?`/`set -e` semantics.
+//   * docker login pipe (`printf %s pw | docker login --password-stdin`) → raw
+//     trust (a pipe with two external commands has no stdlib equivalent).
+//   * No raw `${VAR}` in `$...$`: KUBE_CONTEXT etc. resolved via env_var_get.
+
+import { env_var_get, env_var_set } from "std/env"
+import { slice, match_regex } from "std/text"
+import { state_get, state_set, state_save } from "./state.ab"
+import { ui_step, ui_dim, ui_info, ui_ok, ui_warn, ui_err } from "./ui.ab"
+import { die, require_cmd } from "./common.ab"
+import { cfn_outputs, _cfn_pick } from "./cfn_outputs.ab"
+import { log_stream, log_file } from "./log.ab"
+
+// =====================================================================
+// Private helpers FIRST. Amber tree-shakes per imported symbol and keeps only
+// the transitive deps that textually PRECEDE the public entry point across an
+// import boundary, so every helper a `pub fn` calls must be defined above it or
+// it is silently dropped (→ "Function 'x' does not exist" when imported).
+// =====================================================================
+
+// sanitize_builder — strip every character docker buildx rejects in a builder
+// name (anything not [A-Za-z0-9_-]) to '-'. Mirrors the bash
+// `${ctx//[^a-zA-Z0-9_-]/-}` parameter expansion. Pure Amber scan so there is no
+// sed/tr fork and the test can assert it without a shell.
+fun sanitize_builder(ctx: Text): Text {
+    let n = len ctx
+    let out = ""
+    for i in 0..n {
+        let c = slice_one(ctx, i)
+        if is_builder_char(c) {
+            out = "{out}{c}"
+        } else {
+            out = "{out}-"
+        }
+    }
+    return out
+}
+
+// slice_one <s> <i> — the single codepoint at index i. (std/text slice with a
+// length of 1; pulled out so sanitize_builder reads cleanly and the helper is
+// defined-before-use.)
+fun slice_one(s: Text, i: Int): Text {
+    return slice(s, i, 1)
+}
+
+// is_builder_char — is <c> one of the docker-buildx-safe characters
+// [A-Za-z0-9_-]? One-codepoint test via match_regex against the same class the
+// bash expansion negated.
+fun is_builder_char(c: Text): Bool {
+    return match_regex(c, "^[A-Za-z0-9_-]$", true)
+}
+
+// registry_domain — strip any "/repo/path" from <registry>, leaving the bare ECR
+// domain `docker login` needs. Mirrors the bash `${registry%%/*}` (everything up
+// to the FIRST '/'). Pure scan, no fork.
+fun registry_domain(registry: Text): Text {
+    let n = len registry
+    for i in 0..n {
+        if slice_one(registry, i) == "/" {
+            return slice(registry, 0, i)
+        }
+    }
+    return registry
+}
+
+// lib_dir — the CLI's lib directory, used to walk up to the repo root in the
+// default base-dir resolution. bash carried $LIB_DIR (set by the entrypoint when
+// it sourced the libs); here it comes from the environment with the same name so
+// the entrypoint can export it once. Empty when unset (the cli-install branch
+// then simply won't match, falling through to $PWD / die — the documented
+// standalone-install behavior).
+fun lib_dir(): Text {
+    return env_var_get("LIB_DIR") failed { "" }
+}
+
+// path_is_dir <p> — `[[ -d p ]]`. Bare test, read status() (NOT silent — silent
+// rewrites fd 2 and is unsafe near test; here it's harmless but we keep the
+// idiom consistent with the codebase).
+fun path_is_dir(p: Text): Bool {
+    trust $test -d "{p}"$
+    return status() == 0
+}
+
+// path_is_exec <p> — `[[ -x p ]]`.
+fun path_is_exec(p: Text): Bool {
+    trust $test -x "{p}"$
+    return status() == 0
+}
+
+// path_is_file <p> — `[[ -f p ]]`.
+fun path_is_file(p: Text): Bool {
+    trust $test -f "{p}"$
+    return status() == 0
+}
+
+// abspath <p> — `(cd "$p" && pwd)`: the absolute, symlink-resolved path. We cd
+// in (builtin), capture pwd, then cd back to where we started so the process cwd
+// is not left mutated (bash used a subshell `( … )` for exactly this isolation;
+// Amber has no cheap subshell-with-builtin, so we restore explicitly). Returns ""
+// if the cd fails (caller already guarded with path_is_dir, but be defensive).
+fun abspath(p: Text): Text {
+    let here = trust $pwd$
+    let ok = true
+    cd(p) failed { ok = false }
+    if not ok { return "" }
+    let resolved = trust $pwd$
+    trust cd(here)
+    return resolved
+}
+
+// =====================================================================
+// _build_resolve_base_dir — print the repo root.
+// =====================================================================
+//
+// Order of resolution (verbatim from bash):
+//   1. state.env BASE_DIR (set by --base-dir). Must exist or die.
+//   2. The CLI-install layout: $LIB_DIR/../../../../.. is the repo root from
+//      deployment/k8s/aws/cli/lib/ — accepted only if it has gradlew +
+//      buildImages/.
+//   3. $PWD if it has gradlew + buildImages/.
+//   4. die.
+pub fun _build_resolve_base_dir(): Text {
+    let explicit = state_get("BASE_DIR", "")
+    if explicit != "" {
+        if not path_is_dir(explicit) {
+            die("--base-dir does not exist: {explicit}")
+        }
+        return abspath(explicit)
+    }
+
+    // CLI install layout (5 hops): cli/lib → cli → aws → k8s → deployment → repo.
+    let ld = lib_dir()
+    if ld != "" {
+        let cli_repo_root = "{ld}/../../../../.."
+        if path_is_exec("{cli_repo_root}/gradlew") and path_is_dir("{cli_repo_root}/buildImages") {
+            return abspath(cli_repo_root)
+        }
+    }
+
+    let cwd = trust $pwd$
+    if path_is_exec("{cwd}/gradlew") and path_is_dir("{cwd}/buildImages") {
+        return cwd
+    }
+
+    die("--build: could not locate opensearch-migrations repo root (no gradlew + buildImages/ found). Pass --base-dir <repo-root>.")
+    return ""
+}
+
+// =====================================================================
+// _build_builder_name <kube-context> → docker buildx builder name.
+// =====================================================================
+//
+// "builder-<sanitized-context>". Strips characters docker buildx rejects.
+pub fun _build_builder_name(ctx: Text): Text {
+    return "builder-{sanitize_builder(ctx)}"
+}
+
+// =====================================================================
+// _build_ecr_login <registry> <region> → Int (0 ok, 1 fail).
+// =====================================================================
+//
+// `docker login` against the ECR domain (the /repo path stripped). bash piped
+// `aws ecr get-login-password | docker login --password-stdin`; both halves can
+// fail independently, so we run get-login-password first (capturing the
+// password + exit code), then pipe it into docker login. Both error paths emit
+// the bash error chrome and append detail to $LOG_FILE. Returning Int (not Null)
+// preserves the bash `return 1` contract for the caller's `|| return 1`.
+pub fun _build_ecr_login(registry: Text, region: Text): Int {
+    let domain = registry_domain(registry)
+    ui_step("Logging into ECR: {domain}")
+    let lf = log_file()
+
+    // aws ecr get-login-password — capture stdout (the token) and the exit code.
+    // The bash redirect `2>>"$LOG_FILE"` appends stderr to the log; we mirror it.
+    let pw = trust $aws ecr get-login-password --region "{region}" 2>>"{lf}"$
+    let pw_rc = status()
+    if pw_rc != 0 {
+        ui_err("aws ecr get-login-password failed; see {lf}")
+        return 1
+    }
+
+    // printf '%s' pw | docker login --username AWS --password-stdin domain. Raw
+    // escape: a pipe between two external commands has no stdlib equivalent. The
+    // `>>"$LOG_FILE" 2>&1` appends combined output to the log, as in bash.
+    trust $printf '%s' "{pw}" | docker login --username AWS --password-stdin "{domain}" >>"{lf}" 2>&1$
+    let login_rc = status()
+    if login_rc != 0 {
+        ui_err("docker login --username AWS failed; see {lf}")
+        return 1
+    }
+    return 0
+}
+
+// =====================================================================
+// _build_setup_buildkit <builder-name> <base-dir> → Int (0 ok, 1 fail).
+// =====================================================================
+//
+// Reuses an already-healthy builder; otherwise removes any stale entry and runs
+// the repo's eksKubernetesBuildkit.sh `setup_build_backend` function so buildx
+// pod placement / tolerations stay consistent.
+pub fun _build_setup_buildkit(builder: Text, base_dir: Text): Int {
+    let lf = log_file()
+
+    // Already-healthy builder → reuse. `docker buildx inspect --bootstrap` exits
+    // 0 when the builder exists and bootstraps cleanly. Combined output to log.
+    trust $docker buildx inspect "{builder}" --bootstrap >>"{lf}" 2>&1$
+    if status() == 0 {
+        ui_dim("  buildkit builder '{builder}' already healthy")
+        return 0
+    }
+
+    ui_dim("  setting up Kubernetes-hosted buildkit builder: {builder}")
+    // Remove any stale entry first (bash `|| true`: a missing builder is fine).
+    trust $docker buildx rm "{builder}" >>"{lf}" 2>&1 || true$
+
+    let backend_script = "{base_dir}/buildImages/backends/eksKubernetesBuildkit.sh"
+    if not path_is_file(backend_script) {
+        ui_err("missing {backend_script} (in-repo buildkit backend)")
+        return 1
+    }
+
+    // The backend script defines `setup_build_backend` and depends on
+    // KUBE_CONTEXT + BUILDER_NAME being exported. bash:
+    //   export KUBE_CONTEXT="${KUBE_CONTEXT:-$(state_get KUBECTL_CONTEXT)}"
+    //   export BUILDER_NAME="$builder"
+    //   ( source "$backend_script" && setup_build_backend )
+    // Amber can't source a foreign shell file and call one of its functions, so
+    // the source-and-invoke is ONE raw `trust $bash -c '…'$` escape. We resolve
+    // KUBE_CONTEXT in Amber (env wins, else KUBECTL_CONTEXT from state) and pass
+    // both vars to the subshell's environment inline so the sourced script sees
+    // them. Combined output appended to the log, exactly like bash.
+    let kube_ctx = env_var_get("KUBE_CONTEXT") failed { "" }
+    if kube_ctx == "" { kube_ctx = state_get("KUBECTL_CONTEXT", "") }
+
+    trust $KUBE_CONTEXT="{kube_ctx}" BUILDER_NAME="{builder}" bash -c 'source "\$0" && setup_build_backend' "{backend_script}" >>"{lf}" 2>&1$
+    if status() != 0 {
+        ui_err("setup_build_backend failed; see {lf}")
+        return 1
+    }
+    return 0
+}
+
+// =====================================================================
+// _build_gradle_invoke — one gradle invocation. → Int (gradle's exit code).
+// =====================================================================
+//
+// Streamed through log_stream so the operator gets the build log inline and the
+// file captures it. bash took the optional -PskipTestImages flag via varargs and
+// wrapped the call in `set +e … rc=$? … set -e`; Amber passes the conditional
+// flag as a Text (already-composed, "" when absent) and log_stream RETURNS the
+// exit code as an Int — no `set -e` dance needed.
+//
+// MULTI_ARCH_NATIVE toggles per-arch builds in :buildImages; bash exported it, we
+// set it in the environment before composing the streamed command (env_var_set
+// persists into the child shell log_stream eval-spawns).
+pub fun _build_gradle_invoke(base_dir: Text, registry: Text, builder: Text, image_tag: Text, skip_flag: Text): Int {
+    trust env_var_set("MULTI_ARCH_NATIVE", "true")
+
+    // Compose the single command Text log_stream will eval. The skip flag is "" or
+    // "-PskipTestImages=true"; an empty segment collapses to nothing once joined.
+    // Quote every path/arg to survive spaces (bash quoted each "$base_dir" etc.).
+    let extra = skip_flag != "" then " {skip_flag}" else ""
+    let cmd = "MULTI_ARCH_NATIVE=true \"{base_dir}/gradlew\" -p \"{base_dir}\" :buildImages:buildImagesToRegistry -PregistryEndpoint=\"{registry}\" -Pbuilder=\"{builder}\" -PimageVersion=\"{image_tag}\"{extra} -x test"
+    return log_stream("gradle-build", cmd)
+}
+
+// =====================================================================
+// build_images_or_skip — entry point. → Int (0 no-op/success, non-zero failure).
+// =====================================================================
+//
+// Returns 0 (no-op) when --build was not passed; otherwise builds + pushes images
+// to the private ECR and returns 0 on success or non-zero on failure.
+//
+// Idempotent: re-running after a successful build re-pushes the images (gradle's
+// own up-to-date checks decide whether to skip layers).
+pub fun build_images_or_skip(): Int {
+    let build = state_get("BUILD_FROM_SOURCE", "N")
+    if build != "Y" {
+        return 0
+    }
+
+    // When --ma-images-source is set, the operator wants images mirrored from
+    // another ECR — that's crane.ab's job, not ours.
+    let ma_src = state_get("MA_IMAGES_SOURCE", "")
+    if ma_src != "" {
+        ui_info("--build + --ma-images-source: skipping local build, crane will mirror from {ma_src}")
+        return 0
+    }
+
+    let stack_name = state_get("CFN_STACK_NAME", "")
+    let region = state_get("AWS_REGION", "")
+    if stack_name == "" { die("--build: CFN_STACK_NAME not in state (CFN deploy must run first)") }
+    if region == "" { die("--build: AWS_REGION not in state") }
+
+    // Resolve the destination ECR registry from CFN outputs.
+    let outputs = cfn_outputs(stack_name, region)
+    let registry = _cfn_pick(outputs, ["MIGRATIONS_ECR_REGISTRY", "ECRRegistry"])
+    if registry == "" { die("--build: could not resolve MIGRATIONS_ECR_REGISTRY from CFN outputs") }
+    state_set("CRANE_REGISTRY", registry)
+
+    let base_dir = _build_resolve_base_dir()
+    let image_tag = state_get("IMAGE_TAG", "latest")
+
+    // Validate the repo root has the gradle bits we need before doing any
+    // AWS-side work.
+    if not path_is_exec("{base_dir}/gradlew") {
+        die("--build: {base_dir}/gradlew not found or not executable. Pass --base-dir <repo-root>.")
+    }
+    if not path_is_dir("{base_dir}/buildImages") {
+        die("--build: {base_dir}/buildImages/ not found (this CLI was installed standalone). Pass --base-dir <repo-root>.")
+    }
+
+    // Need docker for buildx and the ECR login.
+    require_cmd("docker", "install Docker Desktop / Docker Engine; --build needs docker buildx")
+
+    // Need a kube context for the Kubernetes-hosted buildkit builder.
+    let kube_ctx = env_var_get("KUBE_CONTEXT") failed { "" }
+    if kube_ctx == "" { kube_ctx = state_get("KUBECTL_CONTEXT", "") }
+    if kube_ctx == "" { die("--build: kube context not set; helm_kctx_init must run first") }
+
+    ui_step("Building MA images from source ({base_dir}, tag={image_tag})")
+    ui_dim("  registry: {registry}")
+    ui_dim("  kube context: {kube_ctx}")
+
+    if _build_ecr_login(registry, region) != 0 { return 1 }
+
+    let builder = _build_builder_name(kube_ctx)
+    if _build_setup_buildkit(builder, base_dir) != 0 {
+        ui_err("buildkit setup failed; see {log_file()}")
+        return 1
+    }
+
+    let skip_test_images = state_get("SKIP_TEST_IMAGES", "N")
+    let skip_flag = skip_test_images == "Y" then "-PskipTestImages=true" else ""
+
+    ui_step("Running gradle :buildImages:buildImagesToRegistry")
+    ui_dim("  this is the long part — push to ECR for ~5 images, ~5-15 min on a cold builder")
+
+    let rc = 0
+    if _build_gradle_invoke(base_dir, registry, builder, image_tag, skip_flag) != 0 {
+        ui_warn("gradle build failed; sleeping 10s and retrying once")
+        trust sleep(10)
+        if _build_gradle_invoke(base_dir, registry, builder, image_tag, skip_flag) != 0 {
+            rc = 1
+        }
+    }
+
+    // Always tear down the builder, even on failure — leaving it behind leaks
+    // buildkit pods on the cluster. bash `|| true`: a missing builder is fine.
+    ui_dim("  cleaning up buildkit builder ({builder}) to free buildkit pods")
+    trust $docker buildx rm "{builder}" >>"{log_file()}" 2>&1 || true$
+
+    if rc != 0 {
+        ui_err("image build failed after retry; see {log_file()}")
+        return 1
+    }
+
+    // Now we have the images at $registry tagged migrations_<name>_<image_tag>.
+    // Force MIRROR_IMAGES=Y (the helm path that uses CRANE_REGISTRY + per-image
+    // tags) and pin the tag for that path.
+    state_set("MIRROR_IMAGES", "Y")
+    state_set("BUILD_IMAGE_TAG", image_tag)
+
+    // When the operator builds images from source, the chart's CRDs MUST come
+    // from the same source tree — otherwise the locally-built console submits
+    // CRDs with fields the released chart's CRDs don't recognize (e.g.
+    // spec.compressionEnabled on DataSnapshot). --build implies use the in-repo
+    // chart unless the operator explicitly passed --ma-chart-dir.
+    if state_get("MA_CHART_DIR", "") == "" {
+        let chart_dir = "{base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
+        if path_is_dir(chart_dir) and path_is_file("{chart_dir}/Chart.yaml") {
+            state_set("MA_CHART_DIR", chart_dir)
+            ui_dim("  --build: using in-repo chart at {chart_dir}")
+        } else {
+            ui_warn("--build: in-repo chart not found at {chart_dir}; falling back to release tarball (CRD/code skew possible)")
+        }
+    }
+
+    state_set("last_step", "build_done")
+    state_save()
+    ui_ok("MA images built and pushed to {registry} (tag={image_tag})")
+    return 0
+}

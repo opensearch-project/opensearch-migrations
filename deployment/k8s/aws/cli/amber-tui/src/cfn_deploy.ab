@@ -1,0 +1,497 @@
+// cfn_deploy.ab — deploy the Migration-Assistant Create-VPC / Import-VPC EKS
+// CloudFormation template with a live event-tail dashboard.
+//
+// Port of the DEPLOY half of bash lib/cfn.sh:
+//   cfn_deploy_or_skip / _cfn_stack_healthy / _cfn_tail_events /
+//   _cfn_import_vpc_endpoint_params / _cfn_subnet_route_table_ids
+//
+// The OUTPUT-PARSING half (cfn_outputs / cfn_output_value / _cfn_extract_exports
+// / _cfn_pick) already lives in cfn_outputs.ab — imported, NOT re-ported. The
+// CFN status classifier the dashboard needs already lives in dashboard.ab as
+// cfn_status_class (selected via dash_set_mode("cfn")) — used, NOT duplicated.
+//
+// Idempotent: a stack already in CREATE_COMPLETE / UPDATE_COMPLETE returns
+// immediately. Otherwise it runs `aws cloudformation deploy` and tails the
+// events into a sticky dashboard (interactive) or a per-event line printer
+// (non-interactive / CI).
+//
+// PORTING NOTES vs the bash original:
+//   * The bash deploy ran `aws cloudformation deploy … & deploy_pid=$!`, then
+//     `_cfn_tail_events` polled describe-stack-events while `kill -0 $pid` held.
+//     Amber 0.6 DOES support background jobs (`$ cmd & $` + pid() + await),
+//     which is what we use: kick the deploy into the background, capture its
+//     pid, FOREGROUND-poll describe-stack-events every 4s feeding the dashboard,
+//     and await() the pid for the final rc. This is the cleanest mapping of the
+//     bash wait-loop and keeps the live dashboard intact.
+//   * The bash event loop forked `… | tac` to reverse rows so a lexical
+//     "seen" check on `ts|logical|status` keys de-duped; Amber reverses the row
+//     list in-Amber (no tac fork) and de-dupes via a module-level seen-set
+//     (array_contains), exactly the bash `cfn_seen` array shape.
+//   * `IFS=$'\t' read -r ts logical status reason` → split(line, "\t") with
+//     array destructuring. (Param/var name `status` is a RESERVED keyword in
+//     Amber — every "ResourceStatus" field is named `st` here.)
+//   * _cfn_import_vpc_endpoint_params appended to the CALLER's `params` array via
+//     `eval "$out_name+=(…)"`. Amber has no name-indirect array append, so it
+//     RETURNS a [Text] of the extra Create*Endpoint=true params and the caller
+//     concatenates with `+=`.
+//   * The classifier-set-via-eval (`_dash_set_cls`) collapses to
+//     dash_set_mode("cfn") once at dashboard init; cfn_status_class is reused
+//     from dashboard.ab for the non-TTY per-event color choice too.
+//   * Every `aws …` invocation stays a raw `trust $aws …$` command — external
+//     cloud calls with no stdlib equivalent. describe-stacks / describe-stack-
+//     events / describe-route-tables all suppress stderr + `|| true`-fallback
+//     exactly as bash did (a not-yet-existing stack is a normal "unhealthy"
+//     branch, not an error to handle).
+
+import { split, slice, trim_left } from "std/text"
+import { date_now } from "std/date"
+import { env_var_get } from "std/env"
+import {
+    state_load, state_get, state_set, state_save
+} from "./state.ab"
+import { die } from "./common.ab"
+import {
+    ui_info, ui_ok, ui_warn, ui_err, ui_step, ui_dim,
+    ui_red, ui_green, ui_dim_c, ui_reset
+} from "./ui.ab"
+import { split_csv, join_by, array_contains } from "./std.ab"
+import { artifacts_fetch } from "./artifacts.ab"
+import {
+    dash_init, dash_set_mode, cfn_status_class,
+    dash_upsert, dash_render_simple, dash_finish
+} from "./dashboard.ab"
+import { log_info } from "./log.ab"
+import { term_interactive, eprintln } from "./core.ab"
+
+// ---- template filenames (mirror CFN_TEMPLATE_CREATE_VPC / _IMPORT_VPC) ------
+
+const CFN_TEMPLATE_CREATE_VPC = "Migration-Assistant-Infra-Create-VPC-eks.template.json"
+const CFN_TEMPLATE_IMPORT_VPC = "Migration-Assistant-Infra-Import-VPC-eks.template.json"
+
+// ============================================================================
+// Private helpers FIRST. Amber tree-shakes per imported symbol and keeps only
+// transitive deps that textually PRECEDE the public entry point across an import
+// boundary, so every callee MUST appear above its caller or it is silently
+// dropped (→ "Function 'x' does not exist" when this module is imported).
+// ============================================================================
+
+// _cfn_stack_healthy <stack> <region> → Bool: is the stack in a healthy
+// CREATE_COMPLETE / UPDATE_COMPLETE state? (bash returned exit 0 for healthy.)
+// describe-stacks legitimately fails when the stack doesn't exist yet; the bash
+// version swallowed that to "DOES_NOT_EXIST" via `2>/dev/null || echo …`, which
+// falls through to unhealthy. We mirror that with trust + `|| echo`.
+pub fun _cfn_stack_healthy(stack: Text, region: Text): Bool {
+    let st = trust $aws cloudformation describe-stacks --region "{region}" --stack-name "{stack}" --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "DOES_NOT_EXIST"$
+    let trimmed = trim_left(st)
+    if trimmed == "CREATE_COMPLETE" { return true }
+    if trimmed == "UPDATE_COMPLETE" { return true }
+    return false
+}
+
+// _cfn_subnet_route_table_ids <vpc-id> <subnet-ids-csv> <region> → a
+// comma-separated list of route-table IDs for the given subnets, falling back to
+// the VPC's main route table when a subnet has no explicit association. CFN
+// expects one route-table per subnet in S3EndpointRouteTableIds. De-duped + joined.
+//
+// Port note: the bash version built `${region:+--region "$region"}` to omit the
+// flag when region is empty. Amber can't write that brace form in a `$…$`, so we
+// branch in-Amber on region != "" and run one of two whole commands.
+pub fun _cfn_subnet_route_table_ids(vpc_id: Text, subnets_csv: Text, region: Text): Text {
+    let sids = split_csv(subnets_csv)
+    // Typed seed ([""]) → reset to []: anchors the [Text] type and declares a
+    // real empty bash array, so a no-subnet-resolved run leaves `out` iterable
+    // (a bare `let out = []` left it undeclared → bash-3.2 "bad array subscript").
+    let out = [""]
+    out = []
+    let main_rt = ""
+    for sid in sids {
+        if sid == "" { continue }
+        let rt = ""
+        if region != "" {
+            rt = trust $aws ec2 describe-route-tables --region "{region}" --filters "Name=association.subnet-id,Values={sid}" --query 'RouteTables[0].RouteTableId' --output text 2>/dev/null || echo "None"$
+        } else {
+            rt = trust $aws ec2 describe-route-tables --filters "Name=association.subnet-id,Values={sid}" --query 'RouteTables[0].RouteTableId' --output text 2>/dev/null || echo "None"$
+        }
+        rt = trim_left(rt)
+        // No explicit association → fall back to the VPC's main route table
+        // (resolved once, then reused for every other association-less subnet).
+        if rt == "" or rt == "None" {
+            if main_rt == "" {
+                if region != "" {
+                    main_rt = trust $aws ec2 describe-route-tables --region "{region}" --filters "Name=vpc-id,Values={vpc_id}" "Name=association.main,Values=true" --query 'RouteTables[0].RouteTableId' --output text 2>/dev/null || echo "None"$
+                } else {
+                    main_rt = trust $aws ec2 describe-route-tables --filters "Name=vpc-id,Values={vpc_id}" "Name=association.main,Values=true" --query 'RouteTables[0].RouteTableId' --output text 2>/dev/null || echo "None"$
+                }
+                main_rt = trim_left(main_rt)
+            }
+            rt = main_rt
+        }
+        if rt != "" and rt != "None" {
+            out += [rt]
+        }
+    }
+    // Dedup (linear) + join with commas — bash `seen[]`/`unique[]` then join_by ,.
+    // Typed seed ([""]) anchors the element type so array_contains(x: Text, …)
+    // type-checks BEFORE the first append; reset to [] to start empty.
+    let unique = [""]
+    unique = []
+    for x in out {
+        if not array_contains(x, unique) {
+            unique += [x]
+        }
+    }
+    return join_by(",", unique)
+}
+
+// _cfn_import_vpc_endpoint_params <vpc-id> <subnet-ids-csv> <region> <endpoints-csv>
+// → [Text] of the per-endpoint Create*Endpoint=true CFN parameters derived from
+// the comma-separated <endpoints-csv> (the CREATE_VPC_ENDPOINTS state value).
+// Empty list → []. The bash version appended to the caller's `params` array via
+// eval AND read CREATE_VPC_ENDPOINTS from the shared global internally; here we
+// RETURN the extras (cfn_deploy_or_skip concats them with `+=`) and take the
+// list as a PARAMETER. The param-not-state design is deliberate: in Amber each
+// module owns a private copy of state.ab's store, so a state_get here would read
+// THIS module's copy (only populated by cfn_deploy_or_skip's state_load); lifting
+// the read up to the caller keeps the helper pure + directly unit-testable while
+// preserving the contract that cfn_deploy_or_skip drives off CREATE_VPC_ENDPOINTS.
+//
+//   s3              → CreateS3Endpoint=true (+ S3EndpointRouteTableIds=<csv>)
+//   ecr             → CreateECREndpoint=true
+//   ecrDocker       → CreateECRDockerEndpoint=true
+//   cloudwatchLogs  → CreateCloudWatchLogsEndpoint=true
+//   efs             → CreateEFSEndpoint=true
+//   sts             → CreateSTSEndpoint=true
+//   eksAuth         → CreateEKSAuthEndpoint=true
+//
+// S3 is special: it's a Gateway endpoint, which needs the route-table IDs for
+// every subnet it associates with.
+pub fun _cfn_import_vpc_endpoint_params(vpc_id: Text, subnets_csv: Text, region: Text, endpoints_csv: Text): [Text] {
+    // Typed seed ([""]) anchors the [Text] element type, then reset to [] so the
+    // array is a real (empty) declared bash array. Without the seed, a path that
+    // takes the warn-only `else` branch BEFORE the first real append left the
+    // compiled bash array undeclared, so a later `len extras` read tripped a
+    // bash-3.2 "bad array subscript" on the never-assigned variable.
+    let extras = [""]
+    extras = []
+    let list = endpoints_csv
+    if list == "" { return extras }
+
+    for ep in split_csv(list) {
+        if {
+            ep == "s3" {
+                extras += ["CreateS3Endpoint=true"]
+                let rt_ids = _cfn_subnet_route_table_ids(vpc_id, subnets_csv, region)
+                if rt_ids != "" {
+                    extras += ["S3EndpointRouteTableIds={rt_ids}"]
+                } else {
+                    ui_warn("no route-table IDs resolved for S3 gateway endpoint; CFN may reject the deploy")
+                }
+            }
+            ep == "ecr"            { extras += ["CreateECREndpoint=true"] }
+            ep == "ecrDocker"      { extras += ["CreateECRDockerEndpoint=true"] }
+            ep == "cloudwatchLogs" { extras += ["CreateCloudWatchLogsEndpoint=true"] }
+            ep == "efs"            { extras += ["CreateEFSEndpoint=true"] }
+            ep == "sts"            { extras += ["CreateSTSEndpoint=true"] }
+            ep == "eksAuth"        { extras += ["CreateEKSAuthEndpoint=true"] }
+            else {
+                ui_warn("ignoring unknown --create-vpc-endpoints entry: '{ep}' (expected: s3, ecr, ecrDocker, cloudwatchLogs, efs, sts, eksAuth)")
+            }
+        }
+    }
+    return extras
+}
+
+// ---- event-tail seen-set (module-level, mirrors bash `cfn_seen`) -----------
+//
+// Typed seed ([""]) anchors the element type across function boundaries; reset
+// to [] at the start of each tail. A `ts|logical|status` key per event de-dupes
+// the same way the bash array_contains check over cfn_seen did — no on-disk
+// seen-log, no per-event grep fork (the worst fork hotspot in the bash CLI).
+let __cfn_seen = [""]
+
+// _cfn_log_event — write the event to the main log only (no terminal). Mirrors
+// the bash _cfn_log_event: a reason of "" or "None" is omitted.
+fun _cfn_log_event(logical: Text, st: Text, reason: Text): Null {
+    if reason != "" and reason != "None" {
+        log_info("cfn-event: {logical} {st} — {reason}")
+    } else {
+        log_info("cfn-event: {logical} {st}")
+    }
+}
+
+// _cfn_print_event — the non-TTY per-event line printer. UI chrome → stderr; a
+// plain copy → the log file (so `tail -f` shows it too). Color is chosen from
+// the SAME classifier the dashboard uses (cfn_status_class), so the TTY and
+// non-TTY paths agree on fail/done/prog. Bash used a per-status `case` with
+// __UI_C_RED/GREEN/DIM/RESET; ui_red/ui_green/ui_dim_c/ui_reset are the Amber
+// equivalents (already "" when not interactive).
+fun _cfn_print_event(logical: Text, st: Text, reason: Text): Null {
+    let cls = cfn_status_class(st)
+    let color = ui_reset()
+    if {
+        cls == "fail" { color = ui_red() }
+        cls == "done" { color = ui_green() }
+        cls == "prog" { color = ui_dim_c() }
+        else          { color = ui_reset() }
+    }
+    let reset = ui_reset()
+    if reason != "" and reason != "None" {
+        eprintln("  {color}{logical} {st}{reset}  {reason}")
+        log_info("cfn-event: {logical} {st}  {reason}")
+    } else {
+        eprintln("  {color}{logical} {st}{reset}")
+        log_info("cfn-event: {logical} {st}")
+    }
+}
+
+// _cfn_poll_once <stack> <region> <first_iter> <dashboard_mode> — one poll of
+// describe-stack-events. Reverses the rows (oldest→newest), de-dupes against
+// __cfn_seen, logs every NEW event, and (unless this is the very first poll —
+// history before our start) either upserts into the dashboard (TTY) or prints
+// the per-event line (non-TTY). Pure-ish: mutates __cfn_seen + the dashboard.
+//
+// Port note: bash piped describe-stack-events through `tac` to reverse newest-
+// first rows into oldest-first for stable seen-ordering. We split + reverse the
+// row list in-Amber (no tac fork). The `--query …[Timestamp,LogicalResourceId,
+// ResourceStatus,ResourceStatusReason]` join is TAB-separated, so split(row,
+// "\t") recovers the four fields; a missing reason column yields fewer than 4
+// fields, handled by the len guard.
+fun _cfn_poll_once(stack: Text, region: Text, first_iter: Bool, dashboard_mode: Bool): Null {
+    let out = trust $aws cloudformation describe-stack-events --region "{region}" --stack-name "{stack}" --query 'StackEvents[].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]' --output text 2>/dev/null || echo ""$
+    if trim_left(out) == "" { return null }
+
+    // Rows arrive newest-first (StackEvents order); reverse to oldest-first so
+    // the seen-set + dashboard see them in chronological order (bash `| tac`).
+    let rows = split(out, "\n")
+    let ordered = []
+    let total = len rows
+    for i in 0..total {
+        ordered += [rows[total - 1 - i]]
+    }
+
+    for row in ordered {
+        if row == "" { continue }
+        let cols = split(row, "\t")
+        // Fields: 0=ts 1=logical 2=status 3=reason. A row with no logical id is
+        // skipped (bash `[[ -z "$logical" ]] && continue`).
+        let ts = len cols > 0 then cols[0] else ""
+        let logical = len cols > 1 then cols[1] else ""
+        let st = len cols > 2 then cols[2] else ""
+        let reason = len cols > 3 then cols[3] else ""
+        if logical == "" { continue }
+
+        let key = "{ts}|{logical}|{st}"
+        if array_contains(key, __cfn_seen) { continue }
+        __cfn_seen += [key]
+
+        // Always log every event regardless of render mode.
+        _cfn_log_event(logical, st, reason)
+
+        // Skip events from the very first poll (history before our start).
+        if first_iter { continue }
+
+        if dashboard_mode {
+            dash_upsert(logical, st, reason, ts)
+        } else {
+            _cfn_print_event(logical, st, reason)
+        }
+    }
+}
+
+// _cfn_tail_events <stack> <region> <deploy_pid> — poll describe-stack-events
+// while the deploy subprocess (pid) runs, rendering a sticky live dashboard on a
+// TTY or a per-event line printer otherwise. Each new event is appended to the
+// log file unconditionally. Returns the deploy's exit code (the await rc).
+//
+// Two render modes match the bash version:
+//   * TTY: dash_init/dash_set_mode("cfn") then dash_upsert + dash_render_simple
+//     per 4s poll, dash_finish at the end.
+//   * Non-TTY: per-event line printer (CI / capture / less-friendly).
+//
+// Background-job model: the deploy is already running in the background (pid
+// passed in); we foreground-poll every 4s checking liveness via `kill -0`, then
+// `await` the pid for the rc. This is the cleanest mapping of the bash
+// `while kill -0 $pid; do sleep 1; done; wait $pid` wait-loop — a foreground
+// poll feeding a live dashboard, exactly as the port plan prefers.
+pub fun _cfn_tail_events(stack: Text, region: Text, deploy_pid: Text): Int {
+    __cfn_seen = []
+    let started = date_now()
+    let dashboard_mode = term_interactive()
+    if dashboard_mode {
+        let dim = ui_dim_c()
+        let reset = ui_reset()
+        dash_init("{dim}CFN{reset} {stack}/{region}")
+        dash_set_mode("cfn")
+    }
+
+    let first_iter = true
+    // Poll while the deploy pid is still alive. `kill -0` is a liveness probe
+    // (no signal sent); a dead pid exits non-zero → loop ends. A `loop`+`break`
+    // is used rather than `while <bool flag>`: in 0.6 a mutable Bool reassigned
+    // inside its own `while` condition mis-infers as Null. trust: a non-zero
+    // `kill -0` exit is the data we branch on, not an error.
+    loop {
+        trust $kill -0 "{deploy_pid}" 2>/dev/null$
+        if status() != 0 { break }
+        _cfn_poll_once(stack, region, first_iter, dashboard_mode)
+        first_iter = false
+        if dashboard_mode {
+            dash_render_simple(started)
+        }
+        trust sleep(4)
+    }
+
+    if dashboard_mode {
+        dash_finish(started)
+    }
+
+    // Reap the deploy and recover its exit code (bash `wait $pid; rc=$?`). The
+    // deploy already exited (the kill -0 loop ended), so `wait` returns
+    // immediately; status() then carries the deploy's exit code. trust: a
+    // non-zero exit is the rc we propagate, not an error to handle.
+    trust $wait "{deploy_pid}" 2>/dev/null$
+    return status()
+}
+
+// ============================================================================
+// cfn_deploy_or_skip — public entry point.
+// ============================================================================
+
+// cfn_deploy_or_skip — deploy (or skip) the MA EKS CFN stack. Idempotent:
+//   * --skip-cfn-deploy (SKIP_CFN_DEPLOY=Y) → skip entirely.
+//   * stack already CREATE/UPDATE_COMPLETE → skip with an OK.
+// Otherwise resolve the template + parameter overrides for the chosen variant
+// (create-vpc default, or import-vpc which requires VPC_ID + SUBNET_IDS and
+// expands the requested VPC endpoints), download the template, kick the deploy
+// into the background, tail its events into the dashboard, and persist state.
+//
+// Returns the deploy's exit code (0 on success / skip). Contract preserved so
+// the entrypoint + resume logic call it unchanged.
+pub fun cfn_deploy_or_skip(): Int {
+    // Populate THIS module's in-memory state from the persisted state.env. In
+    // bash, state was a single shared global so cfn_deploy_or_skip just read it;
+    // in Amber each module instance owns a private copy of state.ab's store, so
+    // the orchestrator's state_save() is picked up here via an explicit load
+    // (idempotent — the "simulate a fresh process: re-load from disk" pattern the
+    // state.ab tests rely on). Subsequent state_set/state_save below persist back.
+    state_load()
+
+    // State holds the chosen stack name (set by --stack-name); default is
+    // "MigrationAssistant-<stage>".
+    let stage_name = state_get("STAGE_NAME", "ma")
+    let stack_name = state_get("CFN_STACK_NAME", "MigrationAssistant-{stage_name}")
+    state_set("CFN_STACK_NAME", stack_name)
+    let region = state_get("AWS_REGION", "")
+    let ma_ver = state_get("MA_VERSION", "")
+    if region == "" { die("AWS_REGION not set") }
+
+    if state_get("SKIP_CFN_DEPLOY", "N") == "Y" {
+        ui_info("--skip-cfn-deploy → skipping CFN entirely")
+        state_save()
+        return 0
+    }
+
+    if _cfn_stack_healthy(stack_name, region) {
+        ui_ok("CFN stack {stack_name} already healthy; skipping deploy")
+        state_set("CFN_STACK_NAME", stack_name)
+        state_save()
+        return 0
+    }
+
+    // Template + parameter overrides depend on the deploy mode. Default:
+    // Create-VPC. import-vpc flips the template and requires VPC_ID + SUBNET_IDS
+    // (validated up front so the operator gets a clear error before AWS runs).
+    let variant = state_get("CFN_TEMPLATE_VARIANT", "create-vpc")
+    let template_name = ""
+    // params seed: the always-present Stage override. Element type anchored here.
+    let params = ["Stage={state_get("STAGE_NAME", "")}"]
+    if {
+        variant == "create-vpc" {
+            template_name = CFN_TEMPLATE_CREATE_VPC
+        }
+        variant == "import-vpc" {
+            template_name = CFN_TEMPLATE_IMPORT_VPC
+            let vpc_id = state_get("IMPORT_VPC_ID", "")
+            let subnets = state_get("IMPORT_SUBNET_IDS", "")
+            if vpc_id == "" { die("--deploy-import-vpc-cfn requires --vpc-id") }
+            if subnets == "" { die("--deploy-import-vpc-cfn requires --subnet-ids") }
+            params += ["VPCId={vpc_id}"]
+            params += ["VPCSubnetIds={subnets}"]
+            // eval-array-append → returned [Text] concatenated with +=. The
+            // endpoints list is read from state HERE (this module's state was
+            // loaded at the top of cfn_deploy_or_skip) and passed down, keeping
+            // the helper pure.
+            let endpoints = state_get("CREATE_VPC_ENDPOINTS", "")
+            let extras = _cfn_import_vpc_endpoint_params(vpc_id, subnets, region, endpoints)
+            for e in extras {
+                params += [e]
+            }
+        }
+        else {
+            die("unknown CFN_TEMPLATE_VARIANT: {variant}")
+        }
+    }
+
+    ui_step("Downloading CFN template (MA v{ma_ver}, variant={variant})")
+    let tmpl = artifacts_fetch(template_name, ma_ver)
+    ui_dim("  template: {tmpl}")
+
+    ui_step("Deploying CFN stack: {stack_name} (region={region})")
+    let stage_dir = "{state_get("STAGE_DIR", "")}"
+    if stage_dir == "" {
+        // Fall back to the env-derived stage dir (matches state.ab/log.ab).
+        let home = env_var_get("MIGRATE_HOME") failed { "" }
+        if home == "" {
+            let pwd = trust $pwd$
+            home = "{pwd}/migration-assistant-workspace"
+        }
+        let st = env_var_get("STAGE") failed { "" }
+        if st == "" { st = "default" }
+        stage_dir = "{home}/{st}"
+    }
+    let deploy_log = "{stage_dir}/log/cfn-deploy.log"
+    trust $mkdir -p "{stage_dir}/log"$
+
+    ui_dim("  events tailed live below; full deploy output: {deploy_log}")
+    log_info("cfn: aws cloudformation deploy stack={stack_name} region={region} variant={variant}")
+
+    // The CFN parameter-overrides flag takes a space-separated list of
+    // Key=Value tokens. Amber has no array-splat into a `$…$` command, so we
+    // join the params into one Text and pass it UNQUOTED so the shell word-
+    // splits it back into individual --parameter-overrides args. Our param
+    // values never contain spaces (Stage names, vpc-/subnet-/rtb- ids, the
+    // Create*Endpoint=true literals), so word-splitting is safe — the same
+    // assumption the bash `"${params[@]}"` expansion relied on for value safety.
+    let params_str = join_by(" ", params)
+
+    // Kick the deploy off in the BACKGROUND (0.6 supports `$ cmd & $` + pid()).
+    // stdout+stderr stream into cfn-deploy.log. trust: a non-zero deploy exit is
+    // the rc we recover + propagate, not an error to handle here. We capture the
+    // pid via $! (Amber's pid() reads the most-recent background job's pid).
+    trust $aws cloudformation deploy --region "{region}" --stack-name "{stack_name}" --template-file "{tmpl}" --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND --parameter-overrides {params_str} --no-fail-on-empty-changeset > "{deploy_log}" 2>&1 &$
+    let deploy_pid = "{pid()}"
+
+    // Live-tail CFN events while the deploy runs; returns the deploy rc.
+    let rc = _cfn_tail_events(stack_name, region, deploy_pid)
+
+    // Tee the final deploy output into the main log so it's all in one place
+    // (bash read_lines + per-line log_info). Each captured line → an INFO line.
+    let cfn_body = trust $cat "{deploy_log}" 2>/dev/null || true$
+    if cfn_body != "" {
+        for line in split(cfn_body, "\n") {
+            if line != "" {
+                log_info("cfn-deploy: {line}")
+            }
+        }
+    }
+
+    if rc != 0 {
+        ui_err("CFN deploy failed (rc={rc}); see {deploy_log}")
+        return rc
+    }
+    ui_ok("CFN stack {stack_name} deployed")
+    state_set("CFN_STACK_NAME", stack_name)
+    state_set("last_step", "cfn_done")
+    state_save()
+    return 0
+}

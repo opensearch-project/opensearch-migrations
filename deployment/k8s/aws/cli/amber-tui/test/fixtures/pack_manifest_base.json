@@ -1,0 +1,1 @@
+{"schemaVersion":1,"branding":{"appName":"MA","binaryName":"migration-assistant","modes":[{"id":"Manual","label":"Manual","default":true},{"id":"Agent","label":"Agent"}]},"build":{"version":"3.2.1","packs":[]},"mcpServers":{"aws":{"command":"uvx","args":["aws-mcp"],"agents":["claude"]}}}

@@ -1,0 +1,215 @@
+// test_cfn_deploy.ab — coverage for src/cfn_deploy.ab (the DEPLOY half of the
+// bash cfn.sh port).
+//
+// What's covered + how:
+//   * _cfn_stack_healthy        — stub `aws cloudformation describe-stacks` via a
+//     PATH-shadow shim that echoes a chosen StackStatus; assert Bool by status.
+//   * _cfn_subnet_route_table_ids — stub `aws ec2 describe-route-tables` to return
+//     per-subnet route-table ids (with a None→main-route-table fallback); assert
+//     the comma-joined, de-duped result.
+//   * _cfn_import_vpc_endpoint_params — drive via in-process state_set
+//     (CREATE_VPC_ENDPOINTS) + the aws stub for the s3 route-table lookup; assert
+//     the returned [Text] of Create*Endpoint=true params (the eval-array-append
+//     the bash version did is now a returned array).
+//   * cfn_deploy_or_skip SKIP paths — the --skip-cfn-deploy branch and the
+//     already-healthy branch return 0 without deploying. These call state_save
+//     (writes files) so they pin MIGRATE_HOME/STAGE to a temp dir.
+//
+// Stubbing model (mirrors test_cfn_outputs.ab / test_artifacts.ab): write ONE
+// content-stable `aws` shim into a temp dir whose OUTPUT is decided by its args
+// (a `case "$*"`), then PREPEND that dir to PATH via env_var_set so every
+// in-process `trust $aws …$` resolves to the shim. amber test runs all `test`
+// blocks in one parallel process tree sharing PATH, so a single byte-identical
+// shim (never rewritten with conflicting bodies) avoids the clobber-mid-read
+// flakiness the cfn_outputs port hit. JSON/template artifact fetches are NOT
+// exercised here (the skip paths return before artifacts_fetch; the deploy
+// itself needs a live `aws cloudformation deploy` + background job we don't
+// drive in CI).
+//
+// NB: no `return` inside `test` blocks — the AMBER_IDIOMS rule. Branch with `if`.
+
+import { assert, assert_eq } from "std/test"
+import { file_write, file_chmod, dir_create } from "std/fs"
+import { env_var_set, env_var_get } from "std/env"
+import { text_contains } from "std/text"
+import { array_contains } from "../src/std.ab"
+import { state_load, state_set, state_get, state_save } from "../src/state.ab"
+import {
+    _cfn_stack_healthy, _cfn_subnet_route_table_ids,
+    _cfn_import_vpc_endpoint_params, cfn_deploy_or_skip
+} from "../src/cfn_deploy.ab"
+
+// IMPORTANT module-instance note. In Amber 0.6 each importer gets its OWN copy
+// of an imported module's globals — the `state.ab` store this test mutates via
+// state_set is a DIFFERENT instance from the one cfn_deploy.ab's
+// cfn_deploy_or_skip reads. The two instances reconcile ONLY through the shared
+// on-disk state.env: the test does state_set + state_save (writes the file),
+// and cfn_deploy_or_skip calls state_load at its start (reads the file). Both
+// resolve the same stage dir from the pinned MIGRATE_HOME/STAGE/STAGE_DIR env,
+// so the round-trip works. (This is also why _cfn_import_vpc_endpoint_params now
+// takes the endpoints list as a PARAMETER instead of reading state internally —
+// a state_get there would hit cfn_deploy.ab's un-seeded copy.)
+
+// ---- helpers (define-before-use: MUST precede the test blocks; the tree-shaker
+// keeps only deps textually preceding the entry point) -----------------------
+
+// stub_dir — temp dir prepended to PATH so our `aws` shim shadows the real one.
+const STUB_DIR = "/tmp/amber_cfn_deploy_stub"
+
+// install_aws_stub — write ONE content-stable `aws` shim + prepend STUB_DIR to
+// PATH. Output is decided ENTIRELY by the args (a `case "$*"`), so every test
+// installs byte-identical content and no write can corrupt another reader under
+// amber test's parallel execution:
+//
+//   describe-stacks + MigrationAssistant-healthy   → "CREATE_COMPLETE"
+//   describe-stacks (any other stack)              → "DOES_NOT_EXIST" (exit 0)
+//   ec2 describe-route-tables + subnet-A           → "rtb-aaa"
+//   ec2 describe-route-tables + subnet-B           → "rtb-bbb"
+//   ec2 describe-route-tables + subnet-DUP         → "rtb-aaa" (dedup target)
+//   ec2 describe-route-tables + subnet-NONE        → "None"    (→ main-rt fallback)
+//   ec2 describe-route-tables + association.main   → "rtb-main"
+//
+// The shim is BRACE-FREE on purpose (a `{` in an Amber Text literal is
+// interpolation). `$` is written bare (NOT \$) — a backslash in a Text literal
+// would land literally in the file and break expansion. printf '%s\n' emits the
+// exact single-line `--output text` shape the real aws CLI produces.
+fun install_aws_stub(): Null {
+    trust dir_create(STUB_DIR)
+    let body = "#!/usr/bin/env bash
+args=\"$*\"
+case \"$args\" in
+  *describe-stacks*MigrationAssistant-healthy*) printf '%s\\n' 'CREATE_COMPLETE' ;;
+  *describe-stacks*) printf '%s\\n' 'DOES_NOT_EXIST' ;;
+  *describe-route-tables*association.main*) printf '%s\\n' 'rtb-main' ;;
+  *describe-route-tables*subnet-A*) printf '%s\\n' 'rtb-aaa' ;;
+  *describe-route-tables*subnet-B*) printf '%s\\n' 'rtb-bbb' ;;
+  *describe-route-tables*subnet-DUP*) printf '%s\\n' 'rtb-aaa' ;;
+  *describe-route-tables*subnet-NONE*) printf '%s\\n' 'None' ;;
+  *) exit 0 ;;
+esac
+exit 0
+"
+    trust file_write("{STUB_DIR}/aws", body)
+    trust file_chmod("{STUB_DIR}/aws", "755")
+    const oldpath = env_var_get("PATH") failed { "" }
+    // Prepend once; STUB_DIR is already first after any prior call.
+    if not text_contains(oldpath, "{STUB_DIR}:") {
+        trust env_var_set("PATH", "{STUB_DIR}:{oldpath}")
+    }
+}
+
+// ---- _cfn_stack_healthy ----------------------------------------------------
+
+test "_cfn_stack_healthy is true for a CREATE_COMPLETE stack" {
+    install_aws_stub()
+    assert(_cfn_stack_healthy("MigrationAssistant-healthy", "us-east-1"))
+}
+
+test "_cfn_stack_healthy is false for a non-existent stack" {
+    install_aws_stub()
+    assert(not _cfn_stack_healthy("MigrationAssistant-missing", "us-east-1"))
+}
+
+// ---- _cfn_subnet_route_table_ids -------------------------------------------
+
+test "_cfn_subnet_route_table_ids joins distinct route-table ids with commas" {
+    install_aws_stub()
+    let rt = _cfn_subnet_route_table_ids("vpc-1", "subnet-A,subnet-B", "us-east-1")
+    assert_eq(rt, "rtb-aaa,rtb-bbb")
+}
+
+test "_cfn_subnet_route_table_ids de-dupes repeated route-table ids" {
+    install_aws_stub()
+    // subnet-A and subnet-DUP both resolve to rtb-aaa → one entry after dedup.
+    let rt = _cfn_subnet_route_table_ids("vpc-1", "subnet-A,subnet-DUP", "us-east-1")
+    assert_eq(rt, "rtb-aaa")
+}
+
+test "_cfn_subnet_route_table_ids falls back to the VPC main route table" {
+    install_aws_stub()
+    // subnet-NONE has no explicit association ("None") → main route table.
+    let rt = _cfn_subnet_route_table_ids("vpc-1", "subnet-NONE", "us-east-1")
+    assert_eq(rt, "rtb-main")
+}
+
+// ---- _cfn_import_vpc_endpoint_params ---------------------------------------
+
+test "_cfn_import_vpc_endpoint_params returns [] when no endpoints requested" {
+    install_aws_stub()
+    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-A", "us-east-1", "")
+    // Bind `len` to a local before asserting: in 0.6 a `len arr` expression passed
+    // DIRECTLY as a call argument (assert_eq(len arr, n)) mis-resolves the array's
+    // length variable in a `test` block ("bad array subscript"); a `let` binding
+    // first compiles correctly.
+    let n = len extras
+    assert_eq(n, 0)
+}
+
+test "_cfn_import_vpc_endpoint_params maps named endpoints to Create*Endpoint=true" {
+    install_aws_stub()
+    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-A", "us-east-1", "ecr,ecrDocker,cloudwatchLogs,efs,sts,eksAuth")
+    assert(array_contains("CreateECREndpoint=true", extras))
+    assert(array_contains("CreateECRDockerEndpoint=true", extras))
+    assert(array_contains("CreateCloudWatchLogsEndpoint=true", extras))
+    assert(array_contains("CreateEFSEndpoint=true", extras))
+    assert(array_contains("CreateSTSEndpoint=true", extras))
+    assert(array_contains("CreateEKSAuthEndpoint=true", extras))
+    // No s3 requested → no gateway/route-table params.
+    assert(not array_contains("CreateS3Endpoint=true", extras))
+}
+
+test "_cfn_import_vpc_endpoint_params s3 adds the gateway + route-table ids" {
+    install_aws_stub()
+    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-A,subnet-B", "us-east-1", "s3")
+    assert(array_contains("CreateS3Endpoint=true", extras))
+    // The route-table ids for subnet-A,subnet-B resolved + joined by the helper.
+    assert(array_contains("S3EndpointRouteTableIds=rtb-aaa,rtb-bbb", extras))
+}
+
+test "_cfn_import_vpc_endpoint_params ignores unknown entries" {
+    install_aws_stub()
+    let extras = _cfn_import_vpc_endpoint_params("vpc-1", "subnet-A", "us-east-1", "bogus,ecr")
+    // The known one survives; the bogus one is dropped (only a warning emitted).
+    assert(array_contains("CreateECREndpoint=true", extras))
+    // `let`-bind len (see the no-endpoints test for the 0.6 direct-arg quirk).
+    let n = len extras
+    assert_eq(n, 1)
+}
+
+// ---- cfn_deploy_or_skip skip paths -----------------------------------------
+
+test "cfn_deploy_or_skip skips when SKIP_CFN_DEPLOY=Y" {
+    install_aws_stub()
+    // Pin a unique stage dir and seed state ON DISK (the only channel
+    // cfn_deploy_or_skip's separate state instance can read — see the header).
+    let tmp = trust $mktemp -d$
+    trust env_var_set("STAGE_DIR", "{tmp}/skiptest")
+    trust env_var_set("MIGRATE_HOME", tmp)
+    trust env_var_set("STAGE", "skiptest")
+    state_load()
+    state_set("AWS_REGION", "us-east-1")
+    state_set("SKIP_CFN_DEPLOY", "Y")
+    state_save()
+    let rc = cfn_deploy_or_skip()
+    assert_eq(rc, 0)
+}
+
+test "cfn_deploy_or_skip skips when the stack is already healthy" {
+    install_aws_stub()
+    let tmp = trust $mktemp -d$
+    trust env_var_set("STAGE_DIR", "{tmp}/healthytest")
+    trust env_var_set("MIGRATE_HOME", tmp)
+    trust env_var_set("STAGE", "healthytest")
+    state_load()
+    state_set("AWS_REGION", "us-east-1")
+    // Not skipping by flag; the aws stub reports this stack CREATE_COMPLETE.
+    state_set("SKIP_CFN_DEPLOY", "N")
+    state_set("CFN_STACK_NAME", "MigrationAssistant-healthy")
+    state_save()
+    let rc = cfn_deploy_or_skip()
+    assert_eq(rc, 0)
+    // cfn_deploy_or_skip persists the chosen stack name back to disk; re-load
+    // this test's instance to observe it (the function's instance wrote the file).
+    state_load()
+    assert_eq(state_get("CFN_STACK_NAME", ""), "MigrationAssistant-healthy")
+}

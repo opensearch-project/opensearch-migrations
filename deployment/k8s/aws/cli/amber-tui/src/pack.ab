@@ -1,0 +1,657 @@
+// pack.ab — repack a CLI tarball with new skills, MCPs, and branding.
+//
+// Port of bash lib/pack.sh. The operator-facing contract is preserved verbatim
+// so the entry point dispatches `migration-assistant pack` here unchanged:
+//
+//   cmd_pack <argv[]>            The `pack` subcommand entry point.
+//   _pack_resolve_root <stage>   Return the unique tarball-root subdir under stage.
+//   _pack_add_skill <root> <dir> Validate + copy a skill dir under skills/.
+//   _pack_add_mcp <manifest> <f> Deep-merge an MCP fragment into mcpServers.
+//   _pack_apply_branding <m> <f> Deep-merge a branding fragment.
+//   _pack_apply_brand_flags …    Apply the convenience --brand-*/--mode-* flags.
+//   _pack_validate <m> <strict>  Sanity-check the post-merge manifest.
+//   _pack_append_entry …         Append a build.packs[] record.
+//   _pack_print_help             The --help text.
+//
+// Port shape notes (the cheat-sheet translations this port leans on):
+//   * trap "rm -rf $stage" RETURN — Amber 0.6 has NO defer/trap-return. We call
+//     a private cleanup_stage(stage) explicitly before EVERY normal return from
+//     cmd_pack. die() (common.ab) exits the process, so the die-then-trap was a
+//     no-op in bash too — only the validation-fail return and the happy path
+//     leak a stage in bash, and both clean up here.
+//   * <<<"$existing" and `done < <(jq …)` → split_lines(trust $jq …$): read the
+//     whole jq output, then iterate.
+//   * `[[ "$bin_name" =~ ^[a-z][a-z0-9-]*$ ]]` → regex_match (std.ab wrapper).
+//   * add_skills=() / add_mcps=() bash arrays → real [Text] built with += and
+//     space-joined with join_by, exactly as bash `"${add_skills[*]}"` did.
+//   * Heavy jq filters (deep-merge, validation extractors, the brand-flag
+//     reorder, the record constructor) have NO stdlib equivalent and stay raw
+//     `trust $… jq …$`. Inside `$...$` a literal `{` is Amber interpolation, so
+//     the one jq object constructor (the build.packs record) is escaped `\{`,
+//     and every jq `$param` ref is escaped `\$param`.
+//
+// pack is read-only against the operator's deployed environment — no AWS calls,
+// no state writes. Runs anywhere with bash + jq + tar.
+
+import { split_lines, slice } from "std/text"
+import { file_exists, dir_exists } from "std/fs"
+import { ui_step, ui_dim, ui_ok } from "./ui.ab"
+import { log_warn } from "./log.ab"
+import { die } from "./common.ab"
+import {
+    optional_cmd, regex_match, join_by, starts_with, trim
+} from "./std.ab"
+
+// =====================================================================
+// Private helpers FIRST. Amber tree-shakes per imported symbol and keeps only
+// transitive deps that textually PRECEDE the public entry point across an import
+// boundary — a callee defined below its caller is silently dropped (→ "Function
+// 'x' does not exist" when imported). So every private helper a `pub fn` calls
+// is defined above it.
+// =====================================================================
+
+// basename_of <path> — the final path component (bash `basename`). Trailing
+// slashes are stripped first so "/a/b/" → "b". Pure string work, no fork (the
+// bash version shelled to `basename` per skill dir).
+fun basename_of(path: Text): Text {
+    let p = path
+    // Drop ALL trailing slashes (basename collapses "a///" → "a"), but keep a
+    // bare "/" as "/".
+    let end = len p
+    while end > 1 {
+        if slice(p, end - 1, 1) == "/" { end -= 1 } else { break }
+    }
+    p = slice(p, 0, end)
+    // Find the last '/' in the trimmed string; the basename is what follows it.
+    let cut = -1
+    let m = len p
+    for i in 0..m {
+        if slice(p, i, 1) == "/" { cut = i }
+    }
+    if cut < 0 { return p }
+    return slice(p, cut + 1, (len p) - cut - 1)
+}
+
+// count_nonempty_lines <s> — number of non-empty lines in s. Mirrors the bash
+// `find … -name SKILL.md | wc -l | tr -d ' '` (a SKILL.md path per line). Each
+// path is one line, so this is the skill count.
+fun count_nonempty_lines(s: Text): Int {
+    let c = 0
+    for line in split_lines(s) {
+        if line != "" { c += 1 }
+    }
+    return c
+}
+
+// split_csv_ws <s> — split a whitespace-joined list into a [Text] of non-empty
+// fields. The bash callers passed `"${add_skills[*]}"` (space-joined) and relied
+// on word-splitting; we replicate by splitting on " " and dropping empties.
+// (Paths with embedded spaces were already broken by the bash word-split, so
+// matching that limitation is faithful.) Used by _pack_append_entry below.
+fun split_csv_ws(s: Text): [Text] {
+    let out = [""]
+    out = []
+    for tok in split_lines(replace_spaces_with_nl(s)) {
+        if tok != "" { out += [tok] }
+    }
+    if len out == 0 { return [] }
+    return out
+}
+
+// replace_spaces_with_nl <s> — turn every run of whitespace into a single '\n'
+// so split_lines can field-split. A tiny scan (no regex dep): space/tab → '\n',
+// collapsing consecutive separators so empty fields don't appear.
+fun replace_spaces_with_nl(s: Text): Text {
+    let out = ""
+    let n = len s
+    let prev_sep = true   // start true so a leading separator doesn't emit ""
+    for i in 0..n {
+        let c = slice(s, i, 1)
+        let is_sep = c == " " or c == "\t" or c == "\n" or c == "\r"
+        if is_sep {
+            if not prev_sep { out = "{out}\n" }
+            prev_sep = true
+        } else {
+            out = "{out}{c}"
+            prev_sep = false
+        }
+    }
+    return out
+}
+
+// json_string_array <items[]> — build a JSON array of strings ["a","b"] from a
+// [Text], via the bash `printf '%s\n' "${names[@]}" | jq -R . | jq -sc .`
+// pipeline. Each item prints on its own line so jq -R reads it as one raw string
+// (embedded quotes/specials get JSON-escaped by jq). Empty input → "[]".
+fun json_string_array(items: [Text]): Text {
+    if len items == 0 { return "[]" }
+    let body = ""
+    for it in items {
+        body = "{body}{it}\n"
+    }
+    // printf the joined body, then jq -R (raw line → JSON string) | jq -sc
+    // (slurp the strings into one compact array). Matches the bash two-stage jq.
+    return trust $printf '%s' "{body}" | jq -R . | jq -sc .$
+}
+
+// print_help_text — emit the --help body to stderr (chrome discipline). The bash
+// heredoc becomes one eprintln-equivalent. We shell printf the whole block so a
+// literal '{'/'}' in the usage text needs no Amber escaping inside the raw cmd —
+// only the bash specials matter, and there are none here.
+fun print_help_text(): Null {
+    trust $cat >&2 <<'PACK_HELP_EOF'
+migration-assistant pack — repack a CLI tarball with new skills + MCPs + branding.
+
+Usage:
+  migration-assistant pack [flags]
+
+Required:
+  --input <path>          Source tarball (an existing CLI release).
+  --output <path>         Target tarball.
+  --pack-name <name>      Identifier recorded in build.packs[].
+  --pack-version <ver>    Version recorded with the pack.
+
+Optional content:
+  --add-skill <dir>       Add a skill directory (must contain SKILL.md).
+                          Repeatable.
+  --add-mcp <file.json>   Add MCP definitions from a JSON object whose
+                          keys become mcpServers entries. Repeatable.
+  --branding <file.json>  Deep-merge a branding fragment into manifest.
+
+Optional convenience flags:
+  --brand-name <name>     Set branding.appName.
+  --brand-binary <name>   Set branding.binaryName.
+  --brand-tagline <text>  Set branding.tagline.
+  --mode-default <id>     Pick a single mode id (Manual|Agent) as default.
+  --mode-order id1,id2    Reorder branding.modes[].
+
+Behavior:
+  --strict                Treat validation warnings as errors.
+
+Output tarball naming:
+  When branding.binaryName changes from migration-assistant, the
+  top-level tar dir is renamed (myorg-migrate-cli-3.2.1).
+PACK_HELP_EOF$
+}
+
+// cleanup_stage <stage> — the bash `trap "rm -rf '$stage'" RETURN` body, called
+// explicitly. Amber 0.6 has no defer/RETURN trap, so cmd_pack invokes this on
+// every path that returns normally. A die() exits the process, so those paths
+// never reach a cleanup — just like the bash trap never fired after `exit`.
+// Guarded: an empty/missing stage is a no-op; rm -rf of a temp dir is trusted.
+fun cleanup_stage(stage: Text): Null {
+    if stage == "" { return null }
+    if not dir_exists(stage) { return null }
+    trust $rm -rf "{stage}"$
+}
+
+// ---- flag-parsing helpers (used by cmd_pack) -------------------------------
+
+// flag_has_eq <arg> — does <arg> contain a '='? (true for "--flag=value").
+fun flag_has_eq(arg: Text): Bool {
+    let n = len arg
+    for i in 0..n {
+        if slice(arg, i, 1) == "=" { return true }
+    }
+    return false
+}
+
+// flag_key <arg> — the "--flag" part of "--flag=value" (everything before the
+// first '='), or the whole arg when there's no '='.
+fun flag_key(arg: Text): Text {
+    let n = len arg
+    for i in 0..n {
+        if slice(arg, i, 1) == "=" { return slice(arg, 0, i) }
+    }
+    return arg
+}
+
+// flag_value <arg> — the "value" part of "--flag=value" (everything after the
+// first '='), or "" when there's no '='. Values containing '=' survive (we split
+// on the FIRST '=' only).
+fun flag_value(arg: Text): Text {
+    let n = len arg
+    for i in 0..n {
+        if slice(arg, i, 1) == "=" {
+            return slice(arg, i + 1, n - i - 1)
+        }
+    }
+    return ""
+}
+
+// next_arg <argv> <i> — argv[i+1], or "" if i is the last index. The space-form
+// flags (`--flag value`) consume the next argv element.
+fun next_arg(argv: [Text], i: Int): Text {
+    if i + 1 < len argv { return argv[i + 1] }
+    return ""
+}
+
+// =====================================================================
+// _pack_resolve_root
+// =====================================================================
+
+// _pack_resolve_root <stage_dir> → the unique tarball-root subdirectory under
+// stage, or "" if there isn't EXACTLY one. Tarballs ship with a single
+// top-level dir (migration-assistant-cli-<ver> or a rebranded variant). A
+// candidate dir qualifies if it holds manifest.json, skills/manifest.json, or a
+// lib/ subtree — the same three markers the bash version checked.
+//
+// Bash echoed the path + returned non-zero when count != 1; the Amber idiom is
+// "" for not-found. find lists the immediate child dirs (the bash glob); each
+// gets the three-marker probe via file_exists/dir_exists.
+pub fun _pack_resolve_root(stage: Text): Text {
+    let raw = trust $find "{stage}" -maxdepth 1 -mindepth 1 -type d 2>/dev/null$
+    let candidates = [""]
+    candidates = []
+    for d in split_lines(raw) {
+        if d == "" { continue }
+        let has_manifest = file_exists("{d}/manifest.json")
+        let has_skills_manifest = file_exists("{d}/skills/manifest.json")
+        let has_lib = dir_exists("{d}/lib")
+        if has_manifest or has_skills_manifest or has_lib {
+            candidates += [d]
+        }
+    }
+    if len candidates == 1 { return candidates[0] }
+    return ""
+}
+
+// =====================================================================
+// _pack_add_skill
+// =====================================================================
+
+// _pack_add_skill <root> <skill_dir> — validate the skill dir has SKILL.md and
+// copy it under <root>/skills/. Overwriting an existing skill warns. Dies on a
+// missing dir / missing SKILL.md, matching the bash guards exactly.
+pub fun _pack_add_skill(root: Text, skill_dir: Text): Null {
+    if not dir_exists(skill_dir) {
+        die("pack: --add-skill not a directory: {skill_dir}")
+    }
+    if not file_exists("{skill_dir}/SKILL.md") {
+        die("pack: --add-skill has no SKILL.md: {skill_dir}")
+    }
+    let name = basename_of(skill_dir)
+    if dir_exists("{root}/skills/{name}") {
+        log_warn("pack: skill '{name}' already in bundle — overwriting")
+    }
+    trust $cp -R "{skill_dir}" "{root}/skills/"$
+    ui_dim("  +skill: {name}")
+}
+
+// =====================================================================
+// _pack_add_mcp
+// =====================================================================
+
+// _pack_add_mcp <manifest> <fragment_json> — the fragment is an object whose
+// keys become mcpServers entries; deep-merge (`+=`) it into mcpServers.
+// Last-write-wins on name collisions, each logged as a WARN so the operator sees
+// the override. jq stays the engine (deep-merge + collision detection have no
+// stdlib equivalent). The bash `done <<<"$existing"` becomes split_lines over
+// the captured jq result. A mktemp + jq-to-tmp + mv is the in-place edit.
+pub fun _pack_add_mcp(manifest: Text, frag: Text): Null {
+    if not file_exists(frag) {
+        die("pack: --add-mcp file not found: {frag}")
+    }
+    // Validate JSON (bash `jq -e . "$frag"`).
+    trust $jq -e . "{frag}" >/dev/null 2>&1$
+    if status() != 0 {
+        die("pack: --add-mcp file is not valid JSON: {frag}")
+    }
+    // Names already present that the fragment will replace (bash filter verbatim;
+    // `\$frag`/`\$cur`/`\$k` escape the jq param refs from Amber interpolation).
+    let existing = trust $jq -r --slurpfile frag "{frag}" '.mcpServers as \$cur | [\$frag[0] | keys[]] | map(select(. as \$k | \$cur | has(\$k))) | .[]' "{manifest}" 2>/dev/null$
+    for nm in split_lines(existing) {
+        if nm == "" { continue }
+        log_warn("pack: MCP '{nm}' already in bundle — replacing")
+    }
+    // Deep-merge fragment into .mcpServers (bash `.mcpServers += $frag[0]`).
+    let tmp = trust $mktemp$
+    trust $jq --slurpfile frag "{frag}" '.mcpServers += \$frag[0]' "{manifest}" > "{tmp}"$
+    trust $mv -f "{tmp}" "{manifest}"$
+    let added = trust $jq -r 'keys|join(", ")' "{frag}"$
+    ui_dim("  +mcp:   {added}")
+}
+
+// =====================================================================
+// _pack_apply_branding
+// =====================================================================
+
+// _pack_apply_branding <manifest> <branding_json> — deep-merge the file into
+// manifest.branding. modes[] is REPLACED (not merged) when the input declares it
+// (array order matters for the picker). Dies on invalid JSON. The deep-merge
+// (`.branding * $frag[0]`) + conditional modes-replace is pure jq (no stdlib
+// equivalent) → the filter is the bash one verbatim. No `{` object constructor
+// here, so only the `\$frag` param refs need escaping.
+pub fun _pack_apply_branding(manifest: Text, frag: Text): Null {
+    trust $jq -e . "{frag}" >/dev/null 2>&1$
+    if status() != 0 {
+        die("pack: --branding file is not valid JSON: {frag}")
+    }
+    let tmp = trust $mktemp$
+    trust $jq --slurpfile frag "{frag}" '.branding = (.branding * \$frag[0]) | if (\$frag[0].modes // null) != null then .branding.modes = \$frag[0].modes else . end' "{manifest}" > "{tmp}"$
+    trust $mv -f "{tmp}" "{manifest}"$
+    let keys = trust $jq -r 'keys|join(", ")' "{frag}"$
+    ui_dim("  +branding: {keys}")
+}
+
+// =====================================================================
+// _pack_apply_brand_flags
+// =====================================================================
+
+// _pack_apply_brand_flags <manifest> <name> <binary> <tagline> <mode_default>
+// <mode_order> — apply the convenience --brand-*/--mode-* flags. Each is
+// optional ("" → skip that clause). mode_order is comma-separated; the
+// manifest's existing modes are reordered to match. The whole transform is one
+// jq program (the bash filter verbatim), using `--arg` params (escaped `\$…`)
+// and jq `if … then … else . end` conditionals. `(` is not Amber-special so the
+// jq groups pass through; there are no `{` object constructors here.
+pub fun _pack_apply_brand_flags(manifest: Text, name: Text, binary: Text, tagline: Text, mode_default: Text, mode_order: Text): Null {
+    let tmp = trust $mktemp$
+    trust $jq --arg name "{name}" --arg binary "{binary}" --arg tagline "{tagline}" --arg default_id "{mode_default}" --arg order "{mode_order}" 'if \$name != "" then .branding.appName = \$name else . end | if \$binary != "" then .branding.binaryName = \$binary else . end | if \$tagline != "" then .branding.tagline = \$tagline else . end | if \$default_id != "" then .branding.modes = (.branding.modes // [] | map(.default = (.id == \$default_id))) else . end | if \$order != "" then (\$order | split(",")) as \$ord | (.branding.modes // []) as \$cur_modes | .branding.modes = (\$ord | map(. as \$id | \$cur_modes[] | select(.id == \$id))) else . end' "{manifest}" > "{tmp}"$
+    trust $mv -f "{tmp}" "{manifest}"$
+    ui_dim("  +brand-flags applied")
+}
+
+// =====================================================================
+// _pack_validate
+// =====================================================================
+
+// _pack_validate <manifest> <strict> → Bool ok. Sanity-check the post-merge
+// manifest. With --strict (strict != 0) the soft warnings escalate to errors.
+// Returns false when errs > 0 (→ cmd_pack cleans the stage + returns 1); the
+// err-count path also die()s with the count (the bash `die "pack: validation
+// failed …"`). die() exits the process, so the false return is unreachable in
+// that case — faithful to bash, where the trap also didn't fire after die.
+//
+// The validation extractors are heavy jq (default-count, dup-id group_by,
+// unknown-id allow-set, malformed-MCP type checks) → raw trust. The binaryName
+// shape check is `=~ ^[a-z][a-z0-9-]*$` → regex_match.
+pub fun _pack_validate(manifest: Text, strict: Int): Bool {
+    let errs = 0
+
+    // Exactly one mode is default (bash `default_count != "1"`). Soft unless strict.
+    let default_count = trust $jq -r '[.branding.modes[]? | select(.default == true)] | length' "{manifest}"$
+    if trim(default_count) != "1" {
+        log_warn("pack: {default_count} modes have default:true (expected exactly 1)")
+        if strict != 0 { errs += 1 }
+    }
+
+    // No duplicate mode ids. Hard error (bash incremented errs unconditionally).
+    let dups = trust $jq -r '[.branding.modes[]?.id] | group_by(.) | map(select(length > 1) | .[0]) | .[]' "{manifest}"$
+    if trim(dups) != "" {
+        log_warn("pack: duplicate mode id(s): {dups}")
+        errs += 1
+    }
+
+    // Each visible mode id is a known dispatch target (Manual|Agent). Soft unless
+    // strict.
+    let unknown = trust $jq -r '[.branding.modes[]? | select(.available != false) | .id] | map(select(. != "Manual" and . != "Agent")) | .[]?' "{manifest}"$
+    if trim(unknown) != "" {
+        log_warn("pack: unknown mode id(s) [{unknown}] — resume.sh has no handler; runtime will die")
+        if strict != 0 { errs += 1 }
+    }
+
+    // binaryName is a sane DNS-ish name. Soft unless strict. `=~` → regex_match.
+    let bin_name = trust $jq -r '.branding.binaryName // "migration-assistant"' "{manifest}"$
+    if not regex_match(bin_name, "^[a-z][a-z0-9-]*\$") {
+        log_warn("pack: binaryName='{bin_name}' should match [a-z][a-z0-9-]*")
+        if strict != 0 { errs += 1 }
+    }
+
+    // Every MCP entry has the required fields (command:string, args:array,
+    // agents:array). Hard error. jq type checks are the bash filter verbatim.
+    let malformed = trust $jq -r '.mcpServers | to_entries | map(select((.value.command | type) != "string" or (.value.args | type) != "array" or (.value.agents | type) != "array")) | .[].key' "{manifest}"$
+    if trim(malformed) != "" {
+        log_warn("pack: malformed MCP entries (need command, args, agents): {malformed}")
+        errs += 1
+    }
+
+    if errs > 0 {
+        die("pack: validation failed with {errs} error(s) (rerun without --strict for warnings only)")
+        return false
+    }
+    return true
+}
+
+// =====================================================================
+// _pack_append_entry
+// =====================================================================
+
+// _pack_append_entry <manifest> <name> <ver> <skills_csv> <mcps_csv>
+// <branding_changed> — append a build.packs[] record. skills_csv / mcps_csv are
+// the SPACE-joined input lists (the bash `"${add_skills[*]}"` form). We compute
+//   addedSkills:     basename of each --add-skill path
+//   addedMcpServers: top-level keys of each --add-mcp file
+// then assemble the two JSON arrays (json_string_array), and jq-merge the record
+// into build.packs[].
+//
+// The record constructor `{ name: $n, … }` is the one jq object constructor in
+// this module, so its `{` is escaped `\{` (the closing `}` is literal). `date -u
+// +%FT%TZ` has no std/date strftime equivalent → raw trust.
+pub fun _pack_append_entry(manifest: Text, name: Text, ver: Text, skills_csv: Text, mcps_csv: Text, branding_changed: Int): Null {
+    // addedSkills: basename of each whitespace-separated path → JSON string array.
+    let skills_json = "[]"
+    if trim(skills_csv) != "" {
+        let s_names = [""]
+        s_names = []
+        for p in split_csv_ws(skills_csv) {
+            if p == "" { continue }
+            s_names += [basename_of(p)]
+        }
+        if len s_names > 0 {
+            skills_json = json_string_array(s_names)
+        }
+    }
+
+    // addedMcpServers: top-level keys of each existing --add-mcp file → JSON array.
+    let mcps_json = "[]"
+    if trim(mcps_csv) != "" {
+        let m_names = [""]
+        m_names = []
+        for f in split_csv_ws(mcps_csv) {
+            if f == "" { continue }
+            if not file_exists(f) { continue }
+            // bash: `while read n; do names+=("$n"); done < <(jq -r 'keys[]' "$f")`.
+            let keys = trust $jq -r 'keys[]' "{f}"$
+            for k in split_lines(keys) {
+                if k == "" { continue }
+                m_names += [k]
+            }
+        }
+        if len m_names > 0 {
+            mcps_json = json_string_array(m_names)
+        }
+    }
+
+    // ISO-8601 UTC timestamp (bash `date -u +%FT%TZ`). No std/date strftime.
+    let ts = trust $date -u +%FT%TZ$
+
+    // Build the record. The `\{` escapes the object-constructor brace so Amber
+    // doesn't read it as interpolation; `$n`/`$v`/`$ts`/`$skills`/`$mcps`/`$bc`
+    // are jq --arg/--argjson params (escaped `\$…`). brandingChanged derives from
+    // the int flag, matching bash `($bc == 1)`.
+    let tmp = trust $mktemp$
+    trust $jq --arg n "{name}" --arg v "{ver}" --arg ts "{ts}" --argjson skills '{skills_json}' --argjson mcps '{mcps_json}' --argjson bc "{branding_changed}" '.build.packs += [\{name: \$n, version: \$v, appliedAt: \$ts, addedSkills: \$skills, addedMcpServers: \$mcps, brandingChanged: (\$bc == 1)}]' "{manifest}" > "{tmp}"$
+    trust $mv -f "{tmp}" "{manifest}"$
+}
+
+// =====================================================================
+// _pack_print_help
+// =====================================================================
+
+// _pack_print_help — the --help text (delegates to print_help_text, defined
+// above so the tree-shaker keeps it).
+pub fun _pack_print_help(): Null {
+    print_help_text()
+}
+
+// =====================================================================
+// cmd_pack — the `migration-assistant pack` entry point.
+// =====================================================================
+
+// cmd_pack <argv[]> → Int rc. Parses the flag set, extracts the input tarball
+// into a tempdir, applies skills/MCPs/branding, validates, appends the pack
+// entry, re-tars to --output, and prints a summary. Returns 0 on success, 1 on
+// the validation-fail path. die() (exit 1) handles the hard errors.
+//
+// Bash took flags as `"$@"` and looped a `case`; Amber takes argv as [Text] and
+// walks an index, handling both `--flag value` and `--flag=value` forms. The
+// add_skills/add_mcps bash arrays become real [Text]. The RETURN trap → explicit
+// cleanup_stage() before each normal return.
+pub fun cmd_pack(argv: [Text]): Int {
+    let input = ""
+    let output = ""
+    let pack_name = ""
+    let pack_version = ""
+    let branding_file = ""
+    let add_skills = [""]
+    add_skills = []
+    let add_mcps = [""]
+    add_mcps = []
+    let brand_name = ""
+    let brand_binary = ""
+    let brand_tagline = ""
+    let mode_default = ""
+    let mode_order = ""
+    let strict = 0
+
+    let i = 0
+    let n = len argv
+    while i < n {
+        let a = argv[i]
+        let val = flag_value(a)
+        let has_eq = flag_has_eq(a)
+        let key = flag_key(a)
+        if {
+            key == "--input"         { if has_eq { input = val }         else { input = next_arg(argv, i)         i += 1 } }
+            key == "--output"        { if has_eq { output = val }        else { output = next_arg(argv, i)        i += 1 } }
+            key == "--pack-name"     { if has_eq { pack_name = val }     else { pack_name = next_arg(argv, i)     i += 1 } }
+            key == "--pack-version"  { if has_eq { pack_version = val }  else { pack_version = next_arg(argv, i)  i += 1 } }
+            key == "--add-skill"     { if has_eq { add_skills += [val] }    else { add_skills += [next_arg(argv, i)]    i += 1 } }
+            key == "--add-mcp"       { if has_eq { add_mcps += [val] }      else { add_mcps += [next_arg(argv, i)]      i += 1 } }
+            key == "--branding"      { if has_eq { branding_file = val }  else { branding_file = next_arg(argv, i)  i += 1 } }
+            key == "--brand-name"    { if has_eq { brand_name = val }     else { brand_name = next_arg(argv, i)     i += 1 } }
+            key == "--brand-binary"  { if has_eq { brand_binary = val }   else { brand_binary = next_arg(argv, i)   i += 1 } }
+            key == "--brand-tagline" { if has_eq { brand_tagline = val }  else { brand_tagline = next_arg(argv, i)  i += 1 } }
+            key == "--mode-default"  { if has_eq { mode_default = val }   else { mode_default = next_arg(argv, i)   i += 1 } }
+            key == "--mode-order"    { if has_eq { mode_order = val }     else { mode_order = next_arg(argv, i)     i += 1 } }
+            key == "--strict"        { strict = 1 }
+            a == "-h"                { _pack_print_help() return 0 }
+            a == "--help"            { _pack_print_help() return 0 }
+            else { die("pack: unknown flag: {a} (try --help)") }
+        }
+        i += 1
+    }
+
+    // Required-flag gates (bash `[[ -z … ]] && die`).
+    if input == ""        { die("pack: --input <tarball> is required") }
+    if output == ""       { die("pack: --output <path> is required") }
+    if not file_exists(input) { die("pack: --input not found: {input}") }
+    if pack_name == ""    { die("pack: --pack-name <name> is required") }
+    if pack_version == "" { die("pack: --pack-version <ver> is required") }
+
+    if not optional_cmd("jq")  { die("pack: jq required on PATH") }
+    if not optional_cmd("tar") { die("pack: tar required on PATH") }
+
+    ui_step("Repacking: {input} → {output}")
+    ui_dim("  pack: {pack_name}-{pack_version}")
+
+    // 0. Stage tempdir. The bash RETURN trap → explicit cleanup_stage() below.
+    let stage = trust $mktemp -d$
+
+    // 1. Extract. A failed extraction die()s (process exits → no stage cleanup,
+    // same as bash whose trap didn't run after die's exit).
+    trust $tar -xzf "{input}" -C "{stage}" 2>/dev/null$
+    if status() != 0 {
+        die("pack: could not extract {input}")
+    }
+    let root = _pack_resolve_root(stage)
+    if root == "" {
+        die("pack: input tarball does not look like a CLI bundle (no manifest.json found)")
+    }
+    ui_dim("  staged: {root}")
+
+    let manifest = "{root}/manifest.json"
+    if not file_exists(manifest) {
+        die("pack: input has no manifest.json — is this a v1 bundle?")
+    }
+
+    // 2. Add skills.
+    for skill_dir in add_skills {
+        if skill_dir != "" { _pack_add_skill(root, skill_dir) }
+    }
+
+    // 3. Add MCPs.
+    for mcp_file in add_mcps {
+        if mcp_file != "" { _pack_add_mcp(manifest, mcp_file) }
+    }
+
+    // 4. Branding.
+    let branding_changed = 0
+    if branding_file != "" {
+        if not file_exists(branding_file) {
+            die("pack: --branding file not found: {branding_file}")
+        }
+        _pack_apply_branding(manifest, branding_file)
+        branding_changed = 1
+    }
+    if "{brand_name}{brand_binary}{brand_tagline}{mode_default}{mode_order}" != "" {
+        _pack_apply_brand_flags(manifest, brand_name, brand_binary, brand_tagline, mode_default, mode_order)
+        branding_changed = 1
+    }
+
+    // 5. Validate. On failure clean up the stage and return 1 (the bash
+    // `|| return 1` path — the only normal return that leaks a stage in bash).
+    if not _pack_validate(manifest, strict) {
+        cleanup_stage(stage)
+        return 1
+    }
+
+    // 6. Append the pack entry. The bash passed the space-joined arrays
+    // (`"${add_skills[*]}"`); join_by reproduces that join exactly.
+    _pack_append_entry(manifest, pack_name, pack_version,
+        join_by(" ", add_skills), join_by(" ", add_mcps), branding_changed)
+
+    // 7. Re-tar. If branding.binaryName changed from the default, rename the
+    // top-level dir so the tarball self-describes.
+    let bin_name = trust $jq -r '.branding.binaryName // "migration-assistant"' "{manifest}"$
+    let old_basename = basename_of(root)
+    let new_root_basename = old_basename
+    if starts_with("migration-assistant-cli-", old_basename) {
+        if bin_name != "migration-assistant" {
+            let pref = "migration-assistant-cli-"
+            let suffix = slice(old_basename, len pref, (len old_basename) - (len pref))
+            new_root_basename = "{bin_name}-cli-{suffix}"
+        }
+    }
+
+    // Snapshot the summary numbers BEFORE the rename (the pre-rename $manifest
+    // path is still valid here). n_skills counts SKILL.md files under skills/.
+    let skills_found = trust $find "{root}/skills" -name SKILL.md 2>/dev/null$
+    let n_skills = count_nonempty_lines(skills_found)
+    let n_mcps = trust $jq -r '.mcpServers | length' "{manifest}"$
+    let n_packs = trust $jq -r '.build.packs | length' "{manifest}"$
+
+    // Perform the rename if the basename changed.
+    if new_root_basename != old_basename {
+        trust $mv "{root}" "{stage}/{new_root_basename}"$
+    }
+
+    // mkdir -p $(dirname output); tar -czf output -C stage new_root_basename.
+    trust $mkdir -p "\$(dirname "{output}")"$
+    trust $tar -czf "{output}" -C "{stage}" "{new_root_basename}" 2>/dev/null$
+    if status() != 0 {
+        die("pack: tar -czf {output} failed")
+    }
+
+    // 8. Summary.
+    ui_ok("wrote {output}")
+    ui_dim("  skills: {n_skills}")
+    ui_dim("  MCPs:   {n_mcps}")
+    ui_dim("  binary: {bin_name}")
+    ui_dim("  packs:  {n_packs}")
+
+    // Normal success return — clean up the stage (the bash RETURN trap).
+    cleanup_stage(stage)
+    return 0
+}

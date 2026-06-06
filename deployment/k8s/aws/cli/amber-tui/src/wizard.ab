@@ -1,0 +1,244 @@
+// wizard.ab — collect deploy-time inputs.
+//
+// Port of bash lib/wizard.sh. Four inputs are gathered (and persisted to state
+// so a resumed run skips the prompts):
+//   AWS_REGION     — region the CFN stack + EKS cluster + ECR live in. Defaulted
+//                    from the AWS creds, but the operator confirms / changes it
+//                    (creds-default is wrong often enough — many operators have
+//                    us-west-2 in ~/.aws/config but want to deploy us-east-1).
+//   STAGE_NAME     — CFN stack suffix + ECR repo path + state dir. The chart
+//                    hardcodes the helm release name and k8s namespace as "ma";
+//                    STAGE_NAME does NOT flow through to either of those.
+//   MIRROR_IMAGES  — Y/N (N = use the public.ecr.aws images directly).
+//   MA_VERSION     — pinned Migration Assistant artifact version.
+//
+// Discovery-aware: if discover_resources found existing MigrationAssistant-*
+// CFN stack(s) (written to state as CFN_MA_STACKS, a space-separated list), the
+// wizard offers to adopt one rather than ask for a stage name from scratch.
+// This handles the terraform / external-CFN / already-deployed cases.
+//
+// PUBLIC CONTRACT (callable from the entrypoint + sibling modules — names and
+// behavior preserved verbatim from the bash source):
+//   wizard_collect()                       -> Null
+//   _wizard_offer_existing_stack(list)     -> Text  (chosen stack, or "" if the
+//                                                    operator declined / opted out)
+//
+// PORTING NOTES
+// -------------
+// * The `__MIGRATE_WIZARD_LOADED` source-guard at the top of wizard.sh is GONE —
+//   Amber modules are imported, not `source`d, so there is no re-source hazard.
+// * Chrome discipline (inherited from the bash source AND ui.ab): every prompt /
+//   info / dim / ok line goes through ui.ab, which writes to STDERR only.
+//   _wizard_offer_existing_stack RETURNS its choice on the VALUE channel (the
+//   return Text) — never stdout chrome — so a caller capturing it gets a clean
+//   stack name (mirrors the bash `printf '%s\n' "$choice"` to stdout while UI
+//   went to `>&2`).
+// * `export AWS_REGION="$region"` → env_var_set (downstream aws calls read it).
+// * `ma_default_version` took NO arg in bash (it probed `declare -F state_get`);
+//   the refactored Amber signature takes the cached value as a PARAM, so we pass
+//   state_get("MA_VERSION", "") explicitly (version.ab stays decoupled from
+//   state.ab — see its header).
+// * `local arr=($list)` word-split → split(list, " ") + drop empties (extra
+//   whitespace between stack names would otherwise yield empty tokens).
+// * `${#arr[@]}` → `len`. `[[ "$pick" =~ ^[0-9]+$ ]]` → regex_match.
+// * `_wizard_offer_existing_stack` uses a manual numbered prompt (NOT ui_select)
+//   because the bash version appends a synthetic "none — deploy a new stack"
+//   choice past the real entries and treats out-of-range / non-adopt picks as
+//   "decline" (empty return). ui_select returns "" on out-of-range too, but
+//   would not render the extra "none" row; the manual prompt preserves the exact
+//   operator-facing menu the bash printed.
+
+import { env_var_get, env_var_set } from "std/env"
+import { split, slice } from "std/text"
+import { ui_step, ui_prompt, ui_confirm, ui_dim, ui_ok, ui_info } from "./ui.ab"
+import { state_get, state_set, state_save } from "./state.ab"
+import { ma_default_version } from "./version.ab"
+import { regex_match } from "./std.ab"
+
+// ---- private helpers (defined FIRST: Amber tree-shakes per imported symbol and
+// keeps only transitive deps that textually precede the entry point across an
+// import boundary — a callee defined after its caller is silently dropped) -----
+
+// split_nonempty — split <s> on spaces and drop empty tokens. The bash
+// `local arr=($list)` word-split collapsed runs of whitespace and ignored
+// leading/trailing spaces; a naive split(s, " ") keeps empty strings for those
+// runs, so we filter them out to reproduce the word-split count + contents.
+fun split_nonempty(s: Text): [Text] {
+    let out = []
+    for tok in split(s, " ") {
+        if tok != "" { out += [tok] }
+    }
+    return out
+}
+
+// strip_ma_prefix — drop a leading "MigrationAssistant-" (the bash
+// `${adopted#MigrationAssistant-}` parameter expansion). The stack name is
+// "MigrationAssistant-<stage>"; STAGE_NAME is the bare <stage>.
+fun strip_ma_prefix(s: Text): Text {
+    const pfx = "MigrationAssistant-"
+    const pn = len pfx
+    if len s >= pn and slice(s, 0, pn) == pfx {
+        return slice(s, pn, (len s) - pn)
+    }
+    return s
+}
+
+// creds_default_region — the AWS creds-derived default region label, mirroring
+// the bash `${AWS_REGION:-${AWS_DEFAULT_REGION:-(unset)}}` cascade used in the
+// "AWS creds default:" dim line. Returns "(unset)" when neither env var is set.
+fun creds_default_region(): Text {
+    let r = env_var_get("AWS_REGION") failed { "" }
+    if r != "" { return r }
+    let d = env_var_get("AWS_DEFAULT_REGION") failed { "" }
+    if d != "" { return d }
+    return "(unset)"
+}
+
+// resolve_region_default — the value the region prompt pre-fills with. Prefer a
+// previously-saved STAGE state value; else fall back to the creds cascade
+// (AWS_REGION → AWS_DEFAULT_REGION → "us-east-1"), matching the bash
+// `region_default` block.
+fun resolve_region_default(): Text {
+    let saved = state_get("AWS_REGION", "")
+    if saved != "" { return saved }
+    let r = env_var_get("AWS_REGION") failed { "" }
+    if r != "" { return r }
+    let d = env_var_get("AWS_DEFAULT_REGION") failed { "" }
+    if d != "" { return d }
+    return "us-east-1"
+}
+
+// ---- _wizard_offer_existing_stack ------------------------------------------
+
+// _wizard_offer_existing_stack <space-separated stack list> → the chosen stack
+// name on the VALUE channel (the return Text), or "" if the operator opted out
+// / declined / made an out-of-range pick. UI chrome (ui_info / the numbered
+// menu) goes to STDERR per discipline.
+//
+// One stack  → a single yes/no adopt prompt (default Y).
+// Many stacks → a numbered menu plus a synthetic final "none — deploy a new
+//               stack" row; the operator picks an index. A pick of 1..n adopts
+//               that stack; the "none" row (or any out-of-range / non-numeric
+//               input) declines (empty return).
+pub fun _wizard_offer_existing_stack(list: Text): Text {
+    let arr = split_nonempty(list)
+    let n = len arr
+
+    if n == 0 {
+        return ""
+    }
+
+    if n == 1 {
+        ui_info("found existing Migration Assistant stack: {arr[0]}")
+        if ui_confirm("Adopt this stack (skip CFN deploy)?", "Y") {
+            return arr[0]
+        }
+        return ""
+    }
+
+    // Multiple stacks: render the numbered menu to stderr (ui_info + the rows),
+    // then prompt for an index. The bash version printed the rows with a raw
+    // `printf '  [%d] %s\n' ... >&2`; ui_dim keeps that on stderr in Amber.
+    ui_info("found multiple Migration Assistant stacks:")
+    let i = 1
+    for s in arr {
+        ui_dim("  [{i}] {s}")
+        i += 1
+    }
+    // Synthetic trailing "none" row (index n+1) — the bash `[%d] none` line.
+    ui_dim("  [{n + 1}] none — deploy a new stack")
+
+    let pick = ui_prompt("Pick", "1")
+    // bash: `[[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= n ))`.
+    if regex_match(pick, "^[0-9]+$") {
+        let num = pick as Int
+        if num >= 1 and num <= n {
+            return arr[num - 1]
+        }
+    }
+    return ""
+}
+
+// ---- wizard_collect --------------------------------------------------------
+
+// wizard_collect — gather (or resume) the four deploy inputs and persist them.
+//
+// Resume fast-path: if MIGRATE_RESUMING=1 AND all four inputs are already in
+// state, echo the saved config (dim, stderr) and return without prompting.
+pub fun wizard_collect(): Null {
+    ui_step("Configure deployment")
+
+    // Resume fast-path — mirrors the bash `if [[ "${MIGRATE_RESUMING:-0}" -eq 1 ]]
+    // && [[ -n "$(state_get …)" ]] …` guard chain.
+    let resuming = env_var_get("MIGRATE_RESUMING") failed { "0" }
+    if resuming == "1"
+        and state_get("AWS_REGION", "") != ""
+        and state_get("STAGE_NAME", "") != ""
+        and state_get("MIRROR_IMAGES", "") != ""
+        and state_get("MA_VERSION", "") != "" {
+        // Pull each value into a local first — a nested escaped quote inside the
+        // interpolation braces ({state_get("…")}) is a parse error in 0.6.
+        let saved_region = state_get("AWS_REGION", "")
+        let saved_stage = state_get("STAGE_NAME", "")
+        let saved_mirror = state_get("MIRROR_IMAGES", "")
+        let saved_ver = state_get("MA_VERSION", "")
+        ui_dim("  resuming — using saved deploy config:")
+        ui_dim("    aws_region    = {saved_region}")
+        ui_dim("    stage_name    = {saved_stage}")
+        ui_dim("    mirror_images = {saved_mirror}")
+        ui_dim("    ma_version    = {saved_ver}")
+        return null
+    }
+
+    // 1. AWS region. The creds default is surfaced so a mismatch is obvious; the
+    // operator confirms or overrides the pre-filled default.
+    ui_dim("  AWS creds default: {creds_default_region()}")
+    let region = ui_prompt("AWS region (deploy target)", resolve_region_default())
+    state_set("AWS_REGION", region)
+    trust env_var_set("AWS_REGION", region)
+
+    // 2. Adopt-existing path. discover_resources writes CFN_MA_STACKS into state
+    // (a space-separated list of MigrationAssistant-* stacks already present). If
+    // any exist AND no STAGE_NAME is set yet, offer to adopt one before prompting
+    // for a fresh stage name.
+    let existing = state_get("CFN_MA_STACKS", "")
+    if existing != "" and state_get("STAGE_NAME", "") == "" {
+        let adopted = _wizard_offer_existing_stack(existing)
+        if adopted != "" {
+            let stage_name = strip_ma_prefix(adopted)
+            state_set("STAGE_NAME", stage_name)
+            state_set("CFN_STACK_NAME", adopted)
+            state_set("SKIP_CFN_DEPLOY", "Y")
+            ui_ok("adopting existing stack: {adopted} (stage_name={stage_name})")
+        }
+    }
+
+    // 3. Stage name — only ask if still unset after the adopt path. The default
+    // pre-fill is the saved STAGE_NAME (or "ma").
+    if state_get("STAGE_NAME", "") == "" {
+        let stage_name = ui_prompt("Stage name (used for the CFN stack + ECR repos; the helm release and namespace are always 'ma')", state_get("STAGE_NAME", "ma"))
+        state_set("STAGE_NAME", stage_name)
+    }
+
+    // 4. Mirror images — Y/N. The default is the saved value (or Y).
+    let mirror = "N"
+    if ui_confirm("Mirror images from public.ecr.aws to your private ECR?", state_get("MIRROR_IMAGES", "Y")) {
+        mirror = "Y"
+    }
+    state_set("MIRROR_IMAGES", mirror)
+
+    // 5. Migration Assistant version. The default pre-fill is the saved
+    // MA_VERSION, else ma_default_version() resolves it (env → cached → network).
+    // The refactored ma_default_version takes the cached value as a param.
+    let ma_ver = ui_prompt("Migration Assistant version", ma_default_version(state_get("MA_VERSION", "")))
+    state_set("MA_VERSION", ma_ver)
+
+    state_set("last_step", "wizard_done")
+    state_save()
+
+    // The bash echoed "$STAGE_DIR/state.env"; state.ab resolves the stage dir
+    // from the env on every op (no exported STAGE_DIR global here), so report the
+    // saved STAGE_NAME instead — same intent (confirm the write landed).
+    let final_stage = state_get("STAGE_NAME", "")
+    ui_ok("wizard saved → state for stage '{final_stage}'")
+}

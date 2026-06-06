@@ -1,0 +1,620 @@
+// crane.ab — mirror images from public registries to a private ECR registry.
+//
+// Port of bash lib/crane.sh. Public API names preserved verbatim so the
+// orchestration entrypoint + helm.ab call them unchanged:
+//   crane_mirror_or_skip / _crane_mirror_ma_images / _crane_load_manifest /
+//   _dst_for / _crane_copy_retry / _ecr_repo_for / _ecr_login
+//
+// The canonical image list lives in privateEcrManifest.sh inside the
+// opensearch-migrations repo. It's a tiny pinned manifest:
+//     IMAGES="
+//       quay.io/jetstack/cert-manager-controller:v1.17.2
+//       …
+//     "
+// We resolve a copy (vendored / in-repo / fetched), source it, and iterate
+// `crane copy` over each entry. Skipped entirely when MIRROR_IMAGES != Y
+// (operator chose --use-public-images).
+//
+// Porting notes vs the bash original:
+//   * The (src,dst) image PAIRS for the 5 MA-team images become TWO parallel
+//     arrays srcs[]/dsts[] (Amber forbids nested arrays; this is the same
+//     parallel-array shape state.ab uses). Built from the pinned build_name|
+//     suffix pair list, then iterated in lockstep with `len`.
+//   * The retry loop's case-based error classification (NAME_UNKNOWN / DENIED /
+//     MANIFEST_UNKNOWN → bail early, no retry) becomes an if-chain over the
+//     captured stderr using contains() / text_contains_any() (gotcha: NO match
+//     keyword). Backoff is an explicit attempt counter + sleep doubling.
+//   * `crane copy` is run as `let out = $crane copy …$ failed { "" }` then the
+//     exit code recovered via status() — the out IS the data we classify.
+//   * The `printf '%s' "$pw" | crane auth login …` pipe stays a raw trust escape
+//     (no stdlib equivalent for a stdin-fed login pipe).
+//   * Colors come from ui.ab (ui_green/ui_red/ui_reset) — the bash file used the
+//     $__UI_C_* globals directly.
+//   * STAGE_DIR is resolved env-first (matching artifacts.ab/log.ab) so an
+//     exported STAGE_DIR — set by the bats harness / diag.sh — wins; the bash
+//     file read $STAGE_DIR directly.
+//   * cfn_outputs/_cfn_pick come from cfn_outputs.ab; artifacts_fetch_raw from
+//     artifacts.ab; state_* from state.ab; die from common.ab; log_* from
+//     log.ab; ui_* from ui.ab — none re-implemented.
+
+import { env_var_get, is_command } from "std/env"
+import { file_exists, file_read } from "std/fs"
+import { split_lines, slice, trim, text_contains_any } from "std/text"
+import { state_get, state_set, state_save } from "./state.ab"
+import { cfn_outputs, _cfn_pick } from "./cfn_outputs.ab"
+import { artifacts_fetch_raw } from "./artifacts.ab"
+import { die } from "./common.ab"
+import { log_info, log_warn, log_error } from "./log.ab"
+import { ui_info, ui_ok, ui_warn, ui_err, ui_step, ui_dim, ui_green, ui_red, ui_reset } from "./ui.ab"
+import { contains } from "./std.ab"
+
+// Path of privateEcrManifest.sh inside the opensearch-migrations repo. Pulled
+// from the tag matching MA_VERSION via raw.githubusercontent.com (so we match
+// the exact image versions the chart expects).
+const CRANE_MANIFEST_REL_PATH = "deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh"
+
+// ============================================================================
+// Private helpers FIRST. Amber tree-shakes per imported symbol and keeps only
+// transitive deps that textually PRECEDE the public entry point across an
+// import boundary, so every callee MUST be defined above its caller or it is
+// silently dropped (→ "Function 'x' does not exist" when this module is
+// imported).
+// ============================================================================
+
+// stage_dir — resolve $STAGE_DIR the way the other ported modules do: an
+// explicit STAGE_DIR env var wins (bash read $STAGE_DIR directly), else
+// MIGRATE_HOME (default "$PWD/migration-assistant-workspace") joined with STAGE
+// (default "default"). Lazy + env-first so the bats harness / diag.sh can pin a
+// temp dir.
+fun stage_dir(): Text {
+    let explicit = env_var_get("STAGE_DIR") failed { "" }
+    if explicit != "" { return explicit }
+    let home = env_var_get("MIGRATE_HOME") failed { "" }
+    if home == "" {
+        let pwd = trust $pwd$
+        home = "{pwd}/migration-assistant-workspace"
+    }
+    let st = env_var_get("STAGE") failed { "" }
+    if st == "" { st = "default" }
+    return "{home}/{st}"
+}
+
+// crane_log — the per-image crane.log path under the stage dir. Created lazily
+// by the callers' append redirects (mkdir already done by stage_dir_init via
+// state_load). Centralised so every escape uses the same path.
+fun crane_log(): Text {
+    return "{stage_dir()}/log/crane.log"
+}
+
+// first_slash_index <s> — index of the FIRST '/' in s, or -1. Used to strip a
+// `/repo` path off a registry to get the bare host (bash `${registry%%/*}`).
+fun first_slash_index(s: Text): Int {
+    let n = len s
+    for i in 0..n {
+        if slice(s, i, 1) == "/" { return i }
+    }
+    return -1
+}
+
+// ---- _dst_for --------------------------------------------------------------
+
+// _dst_for <src> <ecr-host> → destination URL for crane copy.
+//
+//   src = quay.io/strimzi/kafka:0.50.1-kafka-4.0.0
+//   dst = <ecr-host>/mirrored/quay.io/strimzi/kafka:0.50.1-kafka-4.0.0
+//
+// ECR repo names allow `/`. Each unique pre-tag path becomes its own ECR
+// repository (created on demand by crane_mirror_or_skip). Mirrors the bash
+// `printf '%s/mirrored/%s\n'`.
+pub fun _dst_for(src: Text, ecr_host: Text): Text {
+    return "{ecr_host}/mirrored/{src}"
+}
+
+// ---- _ecr_repo_for ---------------------------------------------------------
+
+// last_colon_index <s> — index of the LAST ':' in s, or -1. Used to strip the
+// ":tag" suffix (the bash `${src%:*}` = strip the shortest trailing ":…").
+fun last_colon_index(s: Text): Int {
+    let n = len s
+    let found = -1
+    for i in 0..n {
+        if slice(s, i, 1) == ":" { found = i }
+    }
+    return found
+}
+
+// _ecr_repo_for <src> → ECR repository name (no host, no tag). Strips the
+// ":tag" suffix and prepends `mirrored/` to match the layout above. Used to
+// pre-create the target repo via aws ecr create-repository.
+//
+//   src      = quay.io/strimzi/kafka:0.50.1-kafka-4.0.0
+//   ecr_repo = mirrored/quay.io/strimzi/kafka
+//
+// Bash guarded URLs without a tag (`${src%:*}` is a no-op when there's no ':').
+// We mirror that: no ':' → use src whole.
+pub fun _ecr_repo_for(src: Text): Text {
+    let colon = last_colon_index(src)
+    let no_tag = src
+    if colon >= 0 {
+        no_tag = slice(src, 0, colon)
+    }
+    return "mirrored/{no_tag}"
+}
+
+// ---- _crane_copy_retry -----------------------------------------------------
+
+// _crane_copy_retry <src> <dst> → Int exit code (0 = success).
+//
+// Runs `crane copy` with exponential backoff. Retry policy: up to
+// CRANE_RETRY_ATTEMPTS (default 5) attempts, sleeping CRANE_RETRY_INITIAL_S
+// (default 5) seconds then doubling (5/10/20/40s). Total worst-case wait:
+// ~75 seconds before giving up on one image.
+//
+// Some failures are unambiguously fatal — retrying changes nothing — so we
+// short-circuit the loop:
+//   * NAME_UNKNOWN / repository does not exist  (we should have created it)
+//   * UNAUTHORIZED / DENIED / token expired      (re-login needed, not retry)
+//   * NotFound / manifest unknown                (image doesn't exist upstream)
+//
+// Tunable via env: CRANE_RETRY_ATTEMPTS, CRANE_RETRY_INITIAL_S — tests lower
+// these to keep the suite fast. The bash version used a `case "$out"` over the
+// captured stderr; Amber has no match/case keyword, so this is an if-chain over
+// contains() / text_contains_any() of the same substrings.
+pub fun _crane_copy_retry(src: Text, dst: Text): Int {
+    let max_s = env_var_get("CRANE_RETRY_ATTEMPTS") failed { "5" }
+    if max_s == "" { max_s = "5" }
+    let initial_s = env_var_get("CRANE_RETRY_INITIAL_S") failed { "5" }
+    if initial_s == "" { initial_s = "5" }
+    let max = max_s as Int
+    // `backoff` (not `sleep_s`): a `sleep`-prefixed identifier collides with the
+    // `sleep` builtin keyword in the tokenizer ("'sleep' is a reserved keyword").
+    let backoff = initial_s as Int
+
+    let log = crane_log()
+    let attempt = 0
+    while attempt < max {
+        attempt += 1
+        // `crane copy … 2>&1` — capture combined output; the out IS the data we
+        // classify, so a non-zero exit is expected (handled), not an error to
+        // crash on. `failed { "" }` keeps the rc recoverable via status() next.
+        let out = $crane copy "{src}" "{dst}" 2>&1$ failed { "" }
+        let rc = status()
+        // Always tee the attempt's output into the log file (bash `>>`).
+        trust $printf '%s\n' "{out}" >> "{log}"$
+        if rc == 0 {
+            if attempt > 1 {
+                log_info("crane copy: {src} succeeded on attempt {attempt}")
+            }
+            return 0
+        }
+
+        // Fatal-but-no-retry classes. Bail early so the operator gets the real
+        // error sooner. text_contains_any tests the OR-group in one call.
+        if {
+            text_contains_any(out, ["NAME_UNKNOWN", "repository does not exist"]) {
+                log_error("crane copy: {src} → {dst} — ECR repo missing (giving up, not retrying)")
+                return rc
+            }
+            text_contains_any(out, ["UNAUTHORIZED", "DENIED", "authorization token has expired"]) {
+                log_error("crane copy: {src} → {dst} — auth failure (giving up, not retrying)")
+                return rc
+            }
+            text_contains_any(out, ["MANIFEST_UNKNOWN", "manifest unknown"]) {
+                log_error("crane copy: {src} → {dst} — source manifest does not exist (giving up)")
+                return rc
+            }
+        }
+
+        if attempt < max {
+            log_warn("crane copy: {src} attempt {attempt}/{max} failed (rc={rc}); sleeping {backoff}s before retry")
+            // `sleep <var>` is rejected ("'sleep' is a reserved keyword" — the
+            // builtin only takes a literal); the raw `trust $sleep "{n}"$` is the
+            // codebase idiom (std.ab retry_cmd does the same) for a dynamic delay.
+            trust $sleep "{backoff}"$
+            backoff = backoff * 2
+        } else {
+            log_error("crane copy: {src} exhausted {max} attempts; giving up")
+            return rc
+        }
+    }
+    return 1
+}
+
+// ---- _crane_load_manifest --------------------------------------------------
+
+// cli_root — "$(dirname BASH_SOURCE)/.." in bash: the CLI install root, one dir
+// above lib/. Amber has no $BASH_SOURCE; the manifest-resolution preference
+// order is dominated by the vendored skills/ copy and the in-repo dev path,
+// both relative to where the CLI is invoked. We anchor on $PWD (the operator's
+// invocation dir / the bats $BATS_TEST_DIRNAME), matching how the bats harness
+// staged the vendored copy. An explicit CLI_ROOT env var overrides for tests.
+fun cli_root(): Text {
+    let explicit = env_var_get("CLI_ROOT") failed { "" }
+    if explicit != "" { return explicit }
+    let pwd = trust $pwd$
+    return pwd
+}
+
+// source_images <manifest_path> → the $IMAGES var, one image:tag per non-blank,
+// non-comment line. Bash sourced the manifest in a SUBSHELL (so $IMAGES doesn't
+// leak into our state) then `printf '%s\n' "$IMAGES" | awk 'NF>0 && $1 !~ /^#/
+// {print $1}'`. We reproduce the subshell-source + first-field-of-non-comment
+// in one raw escape (sourcing arbitrary bash + reading a dynamic var name has no
+// stdlib equivalent), then filter/first-field in pure Amber below.
+fun source_images(manifest_path: Text): Text {
+    return trust $( . "{manifest_path}"; printf '%s\n' "\$IMAGES" )$
+}
+
+// first_field <line> — the first whitespace-delimited token, or "". Replaces the
+// awk `{print $1}` field-extraction (gotcha 8: stdlib over pipes). split on any
+// run of spaces/tabs is approximated by trimming then splitting on the first
+// space — manifest entries are a single bare image ref per line, no embedded
+// whitespace, so the whole trimmed line is field 1.
+fun first_field(line: Text): Text {
+    let t = trim(line)
+    if t == "" { return "" }
+    // Split on the first space OR tab; the token before it is field 1.
+    let n = len t
+    for i in 0..n {
+        let c = slice(t, i, 1)
+        if c == " " or c == "\t" {
+            return slice(t, 0, i)
+        }
+    }
+    return t
+}
+
+// _crane_load_manifest <ma_version> → newline-joined image:tag list (one per
+// line), or "" if it can't resolve. Resolution preference order (unchanged):
+//   1. <cli_root>/skills/privateEcrManifest.sh (vendored alongside the tarball)
+//   2. <cli_root>/../../charts/.../privateEcrManifest.sh (in-repo dev mode)
+//   3. raw.githubusercontent.com tag <ver> via artifacts_fetch_raw
+// Then sources it, keeps non-blank non-`#` lines, emits field 1 of each.
+pub fun _crane_load_manifest(ma_ver: Text): Text {
+    let root = cli_root()
+    let manifest = ""
+    if {
+        file_exists("{root}/skills/privateEcrManifest.sh") {
+            manifest = "{root}/skills/privateEcrManifest.sh"
+        }
+        file_exists("{root}/../../charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh") {
+            manifest = "{root}/../../charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh"
+        }
+        else {
+            // artifacts_fetch_raw die()s on a genuine download failure (bash
+            // `|| return 1`); the returned symlink path is the local manifest.
+            manifest = artifacts_fetch_raw("privateEcrManifest.sh", ma_ver, CRANE_MANIFEST_REL_PATH)
+        }
+    }
+    if manifest == "" { return "" }
+
+    let images = source_images(manifest)
+    let out = ""
+    for line in split_lines(images) {
+        let t = trim(line)
+        if t == "" { continue }
+        // Drop comment lines (bash `$1 !~ /^#/`).
+        if slice(t, 0, 1) == "#" { continue }
+        let f = first_field(t)
+        if f == "" { continue }
+        if out == "" {
+            out = f
+        } else {
+            out = "{out}\n{f}"
+        }
+    }
+    return out
+}
+
+// ---- _ecr_login ------------------------------------------------------------
+
+// dump_err_lines <err_file> <log_prefix> — print each line of <err_file> as a
+// dim-prefixed stderr chrome line AND mirror it to the log via log_error. The
+// bash `while IFS= read -r line; do printf '    %sDIM%sRESET' …; log_error …`
+// loop over a captured stderr file. ui_dim writes the dim chrome to stderr.
+fun dump_err_lines(err_file: Text, log_prefix: Text): Null {
+    let body = file_read(err_file) failed { "" }
+    for line in split_lines(body) {
+        ui_dim("    {line}")
+        log_error("{log_prefix}: {line}")
+    }
+}
+
+// _ecr_login <registry> <region> → Int (0 = OK, non-zero = failure).
+//
+// Authenticates `crane` against the operator's private ECR. Surfaces the exact
+// aws/crane error (rather than a generic "ECR login failed") so the operator can
+// fix it. Three steps, mirroring bash:
+//   1. aws ecr get-login-password → the registry password (surface aws errors).
+//   2. printf pw | crane auth login → log crane in to the private ECR.
+//   3. ALSO log in to public.ecr.aws (tolerated failure — many sub-charts pull
+//      from there and crane reuses a stale ~/.docker/config.json otherwise).
+pub fun _ecr_login(registry: Text, region: Text): Int {
+    // strip any /repo path → bare host (bash `${registry%%/*}`).
+    let registry_host = registry
+    let slash = first_slash_index(registry)
+    if slash >= 0 {
+        registry_host = slice(registry, 0, slash)
+    }
+
+    log_info("ecr-login: registry={registry_host} region={region}")
+
+    if not is_command("crane") {
+        ui_err("crane not on PATH; run `brew install crane` or rerun with --use-public-images")
+        return 1
+    }
+    if not is_command("aws") {
+        ui_err("aws CLI not on PATH")
+        return 1
+    }
+
+    let dir = stage_dir()
+    let log = "{dir}/log/crane.log"
+
+    // Step 1: get the password. Surface the exact aws CLI error if this fails.
+    // $$ (the PID) isn't exposed by Amber; a mktemp-derived path uniquifies the
+    // stderr capture the same way bash's `.$$` suffix did.
+    let aws_err = trust $mktemp 2>/dev/null$
+    let pw = $aws ecr get-login-password --region "{region}" 2> "{aws_err}"$ failed { "" }
+    let aws_rc = status()
+    if aws_rc != 0 or pw == "" {
+        ui_err("aws ecr get-login-password failed (rc={aws_rc}):")
+        dump_err_lines(aws_err, "aws-ecr")
+        trust $rm -f "{aws_err}"$
+        ui_dim("  hint: verify `aws sts get-caller-identity` works and your region matches your registry")
+        ui_dim("        registry: {registry_host} (expects region: {region})")
+        return 1
+    }
+    trust $rm -f "{aws_err}"$
+
+    // Step 2: log crane in to the operator's private ECR. Capture rc + stderr.
+    // The `printf pw | crane auth login --password-stdin` pipe is a raw escape
+    // (stdin-fed login has no stdlib equivalent). >> tees crane's stdout to the
+    // log; 2> captures stderr for the operator dump.
+    let crane_err = trust $mktemp 2>/dev/null$
+    let login_ok = $printf '%s' "{pw}" | crane auth login --username AWS --password-stdin "{registry_host}" >> "{log}" 2> "{crane_err}"$ failed { "FAIL" }
+    let login_rc = status()
+    if login_rc != 0 {
+        ui_err("crane auth login failed:")
+        dump_err_lines(crane_err, "crane-login")
+        trust $rm -f "{crane_err}"$
+        ui_dim("  hint: confirm registry hostname is reachable: {registry_host}")
+        let home = env_var_get("HOME") failed { "" }
+        ui_dim("        and that crane writes to \$HOME/.docker/config.json (HOME={home})")
+        return 1
+    }
+    trust $rm -f "{crane_err}"$
+
+    // Step 3: ALSO log in to public.ecr.aws. Many sub-charts pull from
+    // public.ecr.aws (ack-controllers, aws-privateca-issuer, …) and crane will
+    // reuse a stale ~/.docker/config.json entry, producing
+    //   DENIED: Your authorization token has expired.
+    // Refresh with a fresh ecr-public token. ecr-public is us-east-1-only.
+    // Tolerated failure: restricted accounts may block ecr-public; we carry on
+    // with the existing config.json (often fine for unauthenticated reads).
+    let pubpw = $aws ecr-public get-login-password --region us-east-1 2>/dev/null$ failed { "" }
+    if pubpw != "" {
+        let pub_ok = $printf '%s' "{pubpw}" | crane auth login --username AWS --password-stdin public.ecr.aws >> "{log}" 2>&1$ failed { "FAIL" }
+        let pubrc = status()
+        if pubrc == 0 {
+            log_info("ecr-login: also authenticated against public.ecr.aws")
+        } else {
+            log_warn("ecr-login: public.ecr.aws auth failed; will rely on unauthenticated reads")
+        }
+    } else {
+        log_warn("ecr-login: aws ecr-public get-login-password returned empty; skipping public.ecr.aws auth")
+    }
+
+    log_info("ecr-login: OK")
+    return 0
+}
+
+// ---- _crane_mirror_ma_images -----------------------------------------------
+
+// _crane_mirror_ma_images <registry> <ma_version> <region> → Int (0 = OK).
+//
+// Mirrors the 5 MA-team images. Source: public.ecr.aws/opensearchproject/
+// opensearch-migrations-<suffix>:<version> (or --ma-images-source:<…>_latest).
+// Destination: $registry as a SINGLE repo with disambiguating tags
+// (migrations_<build_name>_<ver>) so the chart's per-component image overrides
+// resolve to a real pull URL.
+//
+// The bash `pairs=("capture_proxy|traffic-capture-proxy" …)` build_name|suffix
+// list becomes TWO parallel arrays here (Amber forbids nested arrays): the
+// build_names[] keying the disambiguating tag, and the suffixes[] keying the
+// public source repo. From those we compute the parallel srcs[]/dsts[] the
+// copy loop iterates in lockstep — the PR PORT NOTE's "image PAIRS → parallel
+// arrays" requirement.
+pub fun _crane_mirror_ma_images(registry: Text, ma_ver: Text, region: Text): Int {
+    // Source registry: --ma-images-source overrides public.ecr.aws so restricted
+    // accounts can copy from another ECR. With --ma-images-source the source tag
+    // is `latest` (images already tagged, no per-version suffix).
+    let ma_src = state_get("MA_IMAGES_SOURCE", "")
+    ui_step("Mirroring 5 MA-team images to {registry} (single-repo, disambiguating tags)")
+    if ma_src != "" {
+        ui_dim("  source: --ma-images-source={ma_src}")
+    }
+
+    // build_name|public_suffix — match the chart's image-overrides keys. Modeled
+    // as parallel arrays (typed-seed [""], reset to [], += , len) so the (src,dst)
+    // PAIRS the loop needs are derived in lockstep.
+    let build_names = [""]
+    let suffixes = [""]
+    build_names = []
+    suffixes = []
+    build_names += ["capture_proxy"];        suffixes += ["traffic-capture-proxy"]
+    build_names += ["traffic_replayer"];     suffixes += ["traffic-replayer"]
+    build_names += ["reindex_from_snapshot"]; suffixes += ["reindex-from-snapshot"]
+    build_names += ["migration_console"];     suffixes += ["console"]
+
+    // Compute the parallel src/dst pairs.
+    let srcs = [""]
+    let dsts = [""]
+    srcs = []
+    dsts = []
+    let pn = len build_names
+    for i in 0..pn {
+        let build_name = build_names[i]
+        let suffix = suffixes[i]
+        let src = ""
+        if ma_src != "" {
+            src = "{ma_src}:migrations_{build_name}_latest"
+        } else {
+            src = "public.ecr.aws/opensearchproject/opensearch-migrations-{suffix}:{ma_ver}"
+        }
+        let dst = "{registry}:migrations_{build_name}_{ma_ver}"
+        srcs += [src]
+        dsts += [dst]
+    }
+
+    let total = len srcs
+    let n_ok = 0
+    let n_failed = 0
+    for i in 0..total {
+        let src = srcs[i]
+        let dst = dsts[i]
+        let idx = i + 1
+        trust $printf '  [%d/%d] %s → %s ' "{idx}" "{total}" "{src}" "{dst}"$
+        if _crane_copy_retry(src, dst) == 0 {
+            trust $printf '%s✓%s\n' "{ui_green()}" "{ui_reset()}"$
+            n_ok += 1
+        } else {
+            trust $printf '%s✗%s\n' "{ui_red()}" "{ui_reset()}"$
+            n_failed += 1
+            log_error("MA-image mirror failed: {src} → {dst}")
+        }
+    }
+
+    if n_failed > 0 {
+        ui_err("{n_failed}/{total} MA images failed to mirror; see {stage_dir()}/log/crane.log")
+        return 1
+    }
+    ui_ok("mirrored {n_ok}/{total} MA-team images")
+    return 0
+}
+
+// ---- crane_mirror_or_skip --------------------------------------------------
+
+// crane_mirror_or_skip → Int (0 = done/skipped, 1 = a mirror failed).
+//
+// The top-level orchestration entry. Skips entirely when MIRROR_IMAGES != Y
+// (operator chose --use-public-images), is idempotent (CRANE_MIRRORED=1 short-
+// circuits), looks up the published ECR registry from CFN outputs, loads the
+// pinned image manifest, mirrors each public image under a `mirrored/` prefix
+// (pre-creating each ECR repo idempotently), then mirrors the 5 MA-team images
+// unless --build already pushed them.
+pub fun crane_mirror_or_skip(): Int {
+    let mirror = state_get("MIRROR_IMAGES", "Y")
+    if mirror != "Y" {
+        ui_info("MIRROR_IMAGES=N → skipping crane mirror")
+        state_set("last_step", "crane_skipped")
+        state_save()
+        return 0
+    }
+
+    if state_get("CRANE_MIRRORED", "0") == "1" {
+        ui_ok("images already mirrored (per state); skipping")
+        return 0
+    }
+
+    // When --build ran successfully it already pushed the MA images to the
+    // private ECR (with per-build tags). The third-party images still need
+    // mirroring, but we route those through a path that doesn't re-pull MA images.
+    if state_get("BUILD_IMAGE_TAG", "") != "" {
+        ui_info("--build pushed MA images already; mirroring third-party images only")
+        state_set("MA_IMAGES_PREMIRRORED", "Y")
+    }
+
+    let ma_ver = state_get("MA_VERSION", "")
+    let region = state_get("AWS_REGION", "")
+    let account = state_get("AWS_ACCOUNT", "")
+    let stack_name = state_get("CFN_STACK_NAME", "")
+
+    // Look up the registry CFN published. opensearch-migrations stacks call it
+    // MIGRATIONS_ECR_REGISTRY; older/forked templates may use ECRRegistry. If
+    // neither is present, synthesize the default account-level registry.
+    let outputs = cfn_outputs(stack_name, region)
+    let registry = _cfn_pick(outputs, ["MIGRATIONS_ECR_REGISTRY", "ECRRegistry"])
+    if registry == "" {
+        registry = "{account}.dkr.ecr.{region}.amazonaws.com"
+    }
+
+    ui_step("Loading image manifest (MA v{ma_ver})")
+    let image_list = _crane_load_manifest(ma_ver)
+    if image_list == "" {
+        die("could not load image manifest for MA {ma_ver}")
+    }
+
+    // The CFN-published `registry` is `<host>/<single-repo>`. We mirror under a
+    // `mirrored/` prefix INSIDE that account's ECR. Each unique image-path becomes
+    // its own ECR repository. ecr_host = bash `${registry%%/*}`.
+    let ecr_host = registry
+    let slash = first_slash_index(registry)
+    if slash >= 0 {
+        ecr_host = slice(registry, 0, slash)
+    }
+
+    // Count the manifest lines for the progress display.
+    let images = [""]
+    images = []
+    for line in split_lines(image_list) {
+        if line == "" { continue }
+        images += [line]
+    }
+    let total = len images
+    ui_info("found {total} images to mirror")
+
+    ui_step("Mirroring images to {ecr_host} (under mirrored/)")
+    if _ecr_login(registry, region) != 0 {
+        return 1
+    }
+
+    let log = "{stage_dir()}/log/crane.log"
+    let n_ok = 0
+    let n_failed = 0
+    for i in 0..total {
+        let src = images[i]
+        let idx = i + 1
+        let dst = _dst_for(src, ecr_host)
+        let ecr_repo = _ecr_repo_for(src)
+        trust $printf '  [%d/%d] %s → %s ' "{idx}" "{total}" "{src}" "{dst}"$
+
+        // Pre-create the ECR repo idempotently. RepositoryAlreadyExists is
+        // tolerated; any other failure surfaces below as a crane copy failure.
+        // (bash `aws ecr create-repository … >>log 2>&1 || true`.)
+        trust $aws ecr create-repository --repository-name "{ecr_repo}" --region "{region}" --image-scanning-configuration scanOnPush=false >> "{log}" 2>&1 || true$
+
+        if _crane_copy_retry(src, dst) == 0 {
+            trust $printf '%s✓%s\n' "{ui_green()}" "{ui_reset()}"$
+            n_ok += 1
+        } else {
+            trust $printf '%s✗%s\n' "{ui_red()}" "{ui_reset()}"$
+            n_failed += 1
+            log_error("crane copy failed (after retries): {src} → {dst} (ecr_repo={ecr_repo})")
+        }
+    }
+
+    if n_failed > 0 {
+        ui_err("{n_failed}/{total} images failed to mirror; see {log}")
+        return 1
+    }
+    ui_ok("mirrored {n_ok}/{total} public images to {ecr_host} (under mirrored/)")
+
+    // Now mirror the 5 MA-team images into the SINGLE ECR repo with name-
+    // disambiguating tags. Skip when --build already pushed them.
+    if {
+        state_get("MA_IMAGES_PREMIRRORED", "N") == "Y" {
+            ui_dim("  skipping MA-image mirror — --build already pushed them")
+        }
+        _crane_mirror_ma_images(registry, ma_ver, region) != 0 {
+            return 1
+        }
+    }
+
+    state_set("CRANE_REGISTRY", registry)   // full <host>/<repo>, for helm
+    state_set("CRANE_ECR_HOST", ecr_host)   // bare host, for diagnostics
+    state_set("CRANE_MIRRORED", "1")
+    state_set("last_step", "crane_done")
+    state_save()
+    return 0
+}
