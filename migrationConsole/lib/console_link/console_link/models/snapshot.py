@@ -346,51 +346,14 @@ class FileSystemSnapshot(Snapshot):
         return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
 
 
-class GcsPluginNotInstalledError(Exception):
-    GCS_PLUGIN_DOCS = {
-        "elasticsearch": "https://www.elastic.co/docs/deploy-manage/tools/snapshot-and-restore/google-cloud-storage-repository",
-        "opensearch": "https://docs.opensearch.org/latest/tuning-your-cluster/availability-and-recovery/snapshots/snapshot-restore/#google-cloud-storage",
-    }
-
-    def __init__(self, cluster_type="elasticsearch"):
-        docs_url = self.GCS_PLUGIN_DOCS.get(cluster_type, self.GCS_PLUGIN_DOCS["elasticsearch"])
-        if cluster_type == "opensearch":
-            msg = (
-                "The repository-gcs plugin is not installed on the source cluster. "
-                "Install it on all nodes and perform a rolling restart. "
-            )
-        else:
-            msg = (
-                "The repository-gcs module is not available on the source cluster. "
-                "Ensure GCS credentials are added to the keystore and secure settings are reloaded. "
-            )
-        super().__init__(f"{msg}See: {docs_url}")
-
-
 class GcsSnapshot(Snapshot):
     def __init__(self, config: Dict, source_cluster: Optional[Cluster]) -> None:
         super().__init__(config, source_cluster)
         self.gcs_repo_uri = config['gcs']['repo_uri']
 
-    def _verify_gcs_plugin_installed(self):
-        try:
-            r = self.source_cluster.call_api("/_cat/plugins?format=json", timeout=5)
-            if r.status_code == 200:
-                plugins = r.json()
-                if not any(p.get("component") == "repository-gcs" for p in plugins):
-                    cluster_type = "opensearch" if any(
-                        p.get("component", "").startswith("opensearch") for p in plugins
-                    ) else "elasticsearch"
-                    raise GcsPluginNotInstalledError(cluster_type)
-        except GcsPluginNotInstalledError:
-            raise
-        except Exception as e:
-            logger.warning(f"Unable to verify repository-gcs plugin: {e}")
-
     def create(self, *args, **kwargs) -> str:
         if not self.source_cluster:
             raise NoSourceClusterDefinedError
-        self._verify_gcs_plugin_installed()
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
 
         command_args = self._collect_universal_command_args()

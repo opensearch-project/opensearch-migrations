@@ -12,7 +12,7 @@ from console_link.models.command_result import CommandResult
 from console_link.models.factories import (UnsupportedSnapshotError,
                                            get_snapshot)
 from console_link.models.snapshot import (FailedToCreateSnapshot, FileSystemSnapshot, GcsSnapshot,
-                                          GcsPluginNotInstalledError, S3Snapshot, Snapshot)
+                                          S3Snapshot, Snapshot)
 from tests.utils import create_valid_cluster
 
 mock_snapshot_api_response = {
@@ -342,31 +342,7 @@ def test_get_snapshot_for_gcs_config():
     assert isinstance(snapshot, GcsSnapshot)
 
 
-def test_gcs_snapshot_create_fails_when_plugin_not_installed(mocker):
-    config = {
-        "snapshot_name": "test_snapshot",
-        "gcs": {
-            "repo_uri": "gs://my-bucket",
-            "region": "us-central1"
-        }
-    }
-    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
-    snapshot = GcsSnapshot(config, source)
-
-    mock_response = mock.Mock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = [
-        {"name": "node1", "component": "analysis-icu", "version": "7.10.2"}
-    ]
-    source.call_api = mock.Mock(return_value=mock_response)
-
-    with pytest.raises(GcsPluginNotInstalledError) as excinfo:
-        snapshot.create()
-    assert "repository-gcs" in str(excinfo.value)
-    assert "elastic.co" in str(excinfo.value)
-
-
-def test_gcs_snapshot_create_succeeds_when_plugin_installed(mocker):
+def test_gcs_snapshot_create_calls_subprocess_run(mocker):
     config = {
         "snapshot": {
             "otel_endpoint": "http://otel:1111",
@@ -379,14 +355,6 @@ def test_gcs_snapshot_create_succeeds_when_plugin_installed(mocker):
     }
     source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     snapshot = GcsSnapshot(config["snapshot"], source)
-
-    mock_response = mock.Mock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = [
-        {"name": "node1", "component": "repository-gcs", "version": "7.10.2"},
-        {"name": "node1", "component": "analysis-icu", "version": "7.10.2"}
-    ]
-    source.call_api = mock.Mock(return_value=mock_response)
 
     mocker.patch("sys.stdout.write")
     mocker.patch("sys.stderr.write")
@@ -409,7 +377,6 @@ def test_gcs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
     source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     snapshot = GcsSnapshot(config["snapshot"], source)
 
-    mocker.patch.object(snapshot, "_verify_gcs_plugin_installed")
     mocker.patch("sys.stdout.write")
     mocker.patch("sys.stderr.write")
     mock = mocker.patch("subprocess.run")
