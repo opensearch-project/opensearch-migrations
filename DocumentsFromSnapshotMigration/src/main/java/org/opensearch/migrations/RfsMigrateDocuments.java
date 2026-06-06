@@ -31,6 +31,7 @@ import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.GcsRepo;
 import org.opensearch.migrations.bulkload.common.GcsUri;
+import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3Repo;
@@ -160,30 +161,19 @@ public class RfsMigrateDocuments {
         public String snapshotName;
 
         @Parameter(required = false,
-            names = { "--snapshot-local-dir", "--snapshotLocalDir" },
-            description = ("The absolute path to the directory on local disk where the snapshot exists.  " +
-                "Use this parameter if there is a reachable copy of the snapshot on disk.  Mutually exclusive with " +
-                "--s3-local-dir, --s3-repo-uri, and --s3-region."))
-        public String snapshotLocalDir = null;
+            names = { "--repo-uri", "--s3-repo-uri", "--s3RepoUri", "--gcs-repo-uri", "--gcsRepoUri", "--snapshot-local-dir", "--snapshotLocalDir", "--file-system-repo-path" },
+            description = ("Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)"))
+        public String repoUri = null;
 
         @Parameter(required = false,
-            names = { "--s3-local-dir", "--s3LocalDir" },
-            description = ("The absolute path to the directory on local disk to download S3 files to.  " +
-                "If you supply this, you must also supply --s3-repo-uri and --s3-region.  " +
-                "Mutually exclusive with --snapshot-local-dir."))
-        public String s3LocalDir = null;
-
-        @Parameter(required = false,
-            names = {"--s3-repo-uri", "--s3RepoUri" },
-            description = ("The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2.  " +
-                "If you supply this, you must also supply --s3-local-dir and --s3-region.  " +
-                "Mutually exclusive with --snapshot-local-dir."))
-        public String s3RepoUri = null;
+            names = { "--local-dir", "--s3-local-dir", "--s3LocalDir", "--gcs-local-dir", "--gcsLocalDir" },
+            description = ("The absolute path to the directory on local disk to download remote repo files to.  " +
+                "Required for s3:// and gs:// repos."))
+        public String localDir = null;
 
         @Parameter(required = false,
             names = { "--s3-region", "--s3Region" },
-            description = ("The AWS Region the S3 bucket is in, like: us-east-2.  If you supply this, you must"
-                + " also supply --s3-local-dir and --s3-repo-uri.  Mutually exclusive with --snapshot-local-dir."))
+            description = ("The AWS Region the S3 bucket is in, like: us-east-2.  Required for s3:// repos."))
         public String s3Region = null;
 
         @Parameter(required = false,
@@ -193,27 +183,13 @@ public class RfsMigrateDocuments {
         public String s3Endpoint = null;
 
         @Parameter(required = false,
-            names = { "--gcs-repo-uri", "--gcsRepoUri" },
-            description = ("The GCS URI of the snapshot repo, like: gs://my-bucket/dir1/dir2.  " +
-                "If you supply this, you must also supply --gcs-local-dir.  " +
-                "Mutually exclusive with --snapshot-local-dir and S3 args."))
-        public String gcsRepoUri = null;
-
-        @Parameter(required = false,
-            names = { "--gcs-local-dir", "--gcsLocalDir" },
-            description = ("The absolute path to the directory on local disk to download GCS files to.  " +
-                "If you supply this, you must also supply --gcs-repo-uri.  " +
-                "Mutually exclusive with --snapshot-local-dir and S3 args."))
-        public String gcsLocalDir = null;
-
-        @Parameter(required = false,
             names = { "--lucene-dir", "--luceneDir" },
             description = "The absolute path to the directory where we'll put the Lucene docs. Required when --source-type is SNAPSHOT.")
         public String luceneDir;
 
         @Parameter(required = false,
             names = { "--clean-local-dirs", "--cleanLocalDirs" },
-            description = "Optional. If enabled, deletes s3LocalDir and luceneDir before running. Default: false")
+            description = "Optional. If enabled, deletes localDir and luceneDir before running. Default: false")
         public boolean cleanLocalDirs = false;
 
         @ParametersDelegate
@@ -449,19 +425,17 @@ public class RfsMigrateDocuments {
     }
 
     public static void validateArgs(Args args) {
-        boolean isSnapshotLocalDirProvided = args.snapshotLocalDir != null;
-        boolean areAllS3ArgsProvided = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
-        boolean areAnyS3ArgsProvided = args.s3LocalDir != null || args.s3RepoUri != null || args.s3Region != null;
-        boolean areAllGcsArgsProvided = args.gcsRepoUri != null && args.gcsLocalDir != null;
-        boolean areAnyGcsArgsProvided = args.gcsRepoUri != null || args.gcsLocalDir != null;
-
-        // Solr backup path requires either local dir or S3 args
+        // Solr backup path
         if (args.sourceVersion != null && args.sourceVersion.getFlavor() == Flavor.SOLR) {
-            boolean hasLocal = args.snapshotLocalDir != null;
-            boolean hasS3 = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
-            if (!hasLocal && !hasS3) {
+            if (args.repoUri == null) {
                 throw new ParameterException(
-                    "For Solr backup migration, provide either --snapshot-local-dir or S3 args (--s3-local-dir, --s3-repo-uri, --s3-region)."
+                    "For Solr backup migration, provide --repo-uri with a file:// or s3:// scheme."
+                );
+            }
+            var parsedUri = RepoUri.parse(args.repoUri);
+            if (parsedUri instanceof RepoUri.S3RepoUri && (args.localDir == null || args.s3Region == null)) {
+                throw new ParameterException(
+                    "For Solr backup migration with S3, --local-dir and --s3-region are required."
                 );
             }
             if (args.coordinatorArgs.host == null) {
@@ -482,29 +456,19 @@ public class RfsMigrateDocuments {
             throw new ParameterException("--source-version is required when --source-type is SNAPSHOT.");
         }
 
-        // Count how many source types are provided
-        int sourceCount = (isSnapshotLocalDirProvided ? 1 : 0) + (areAnyS3ArgsProvided ? 1 : 0) + (areAnyGcsArgsProvided ? 1 : 0);
-        if (sourceCount > 1) {
-            throw new ParameterException(
-                "You must provide only one of: --snapshot-local-dir, S3 args (--s3-local-dir, --s3-repo-uri, --s3-region), or GCS args (--gcs-repo-uri, --gcs-local-dir)."
-            );
+        if (args.repoUri == null) {
+            throw new ParameterException("--repo-uri is required.");
         }
 
-        if (areAnyS3ArgsProvided && !areAllS3ArgsProvided) {
+        var parsedUri = RepoUri.parse(args.repoUri);
+        if (parsedUri instanceof RepoUri.S3RepoUri && (args.localDir == null || args.s3Region == null)) {
             throw new ParameterException(
-                "If provide the S3 Snapshot args, you must provide all of them (--s3-local-dir, --s3-repo-uri and --s3-region)."
+                "If an s3 repo is being used, --s3-region and --local-dir must be set."
             );
         }
-
-        if (areAnyGcsArgsProvided && !areAllGcsArgsProvided) {
+        if (parsedUri instanceof RepoUri.GcsRepoUri && args.localDir == null) {
             throw new ParameterException(
-                "If providing GCS args, you must provide both --gcs-repo-uri and --gcs-local-dir."
-            );
-        }
-
-        if (!isSnapshotLocalDirProvided && !areAllS3ArgsProvided && !areAllGcsArgsProvided) {
-            throw new ParameterException(
-                "You must provide either --snapshot-local-dir, S3 args (--s3-local-dir, --s3-repo-uri, --s3-region), or GCS args (--gcs-repo-uri, --gcs-local-dir)."
+                "If a GCS repo is being used, --local-dir must be set."
             );
         }
         
@@ -575,7 +539,7 @@ public class RfsMigrateDocuments {
         }
 
         if (arguments.cleanLocalDirs) {
-            FileSystemUtils.deleteDirectories(arguments.s3LocalDir, arguments.luceneDir);
+            FileSystemUtils.deleteDirectories(arguments.localDir, arguments.luceneDir);
         }
 
         var context = makeRootContext(arguments, workerId);
@@ -742,28 +706,25 @@ public class RfsMigrateDocuments {
             DocumentExceptionAllowlist allowlist = buildDocumentExceptionAllowlist(arguments);
 
             var luceneDirPath = Paths.get(arguments.luceneDir);
-            var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
             var finder = SnapshotReaderRegistry.getSnapshotFileFinder(
                     arguments.sourceVersion,
                     arguments.versionStrictness.allowLooseVersionMatches);
 
-            SourceRepo sourceRepo;
-            if (snapshotLocalDirPath != null) {
-                sourceRepo = new FileSystemRepo(snapshotLocalDirPath, finder);
-            } else if (arguments.gcsRepoUri != null) {
-                sourceRepo = GcsRepo.create(
-                    Paths.get(arguments.gcsLocalDir),
-                    new GcsUri(arguments.gcsRepoUri),
+            var parsedUri = RepoUri.parse(arguments.repoUri);
+            SourceRepo sourceRepo = switch (parsedUri) {
+                case RepoUri.FileRepoUri f -> new FileSystemRepo(Paths.get(f.path()), finder);
+                case RepoUri.GcsRepoUri g -> GcsRepo.create(
+                    Paths.get(arguments.localDir),
+                    new GcsUri(g.rawUri()),
                     finder);
-            } else {
-                sourceRepo = S3Repo.create(
-                    Paths.get(arguments.s3LocalDir),
-                    new S3Uri(arguments.s3RepoUri),
+                case RepoUri.S3RepoUri s -> S3Repo.create(
+                    Paths.get(arguments.localDir),
+                    s.s3Uri(),
                     arguments.s3Region,
                     Optional.ofNullable(arguments.s3Endpoint).map(URI::create).orElse(null),
                     finder);
-            }
+            };
 
             var sourceResourceProvider = SnapshotReaderRegistry.getSnapshotReader(
                 arguments.sourceVersion, sourceRepo, arguments.versionStrictness.allowLooseVersionMatches);
@@ -1174,23 +1135,25 @@ public class RfsMigrateDocuments {
 
             Path backupDir;
             S3Repo s3Repo = null;
-            if (arguments.snapshotLocalDir != null) {
-                backupDir = Paths.get(arguments.snapshotLocalDir);
-                log.atInfo().setMessage("Starting Solr backup document migration from local dir: {}").addArgument(backupDir).log();
-            } else if (arguments.s3RepoUri != null && arguments.s3Region != null && arguments.s3LocalDir != null) {
-                var backupS3Uri = SolrBackupLayout.buildBackupS3Uri(
-                    new S3Uri(arguments.s3RepoUri), arguments.snapshotName);
-                log.atInfo().setMessage("Downloading Solr backup metadata from S3: {}").addArgument(backupS3Uri).log();
-                s3Repo = S3Repo.createRaw(
-                    Paths.get(arguments.s3LocalDir),
-                    new S3Uri(backupS3Uri),
-                    arguments.s3Region,
-                    arguments.s3Endpoint != null ? URI.create(arguments.s3Endpoint) : null
-                );
-                backupDir = s3Repo.getRepoRootDir();
-            } else {
-                throw new ParameterException(
-                    "When source version is SOLR, provide either --snapshot-local-dir or S3 args (--s3-local-dir, --s3-repo-uri, --s3-region)."
+            var parsedUri = RepoUri.parse(arguments.repoUri);
+            switch (parsedUri) {
+                case RepoUri.FileRepoUri f -> {
+                    backupDir = Paths.get(f.path());
+                    log.atInfo().setMessage("Starting Solr backup document migration from local dir: {}").addArgument(backupDir).log();
+                }
+                case RepoUri.S3RepoUri s -> {
+                    var backupS3Uri = SolrBackupLayout.buildBackupS3Uri(s.s3Uri(), arguments.snapshotName);
+                    log.atInfo().setMessage("Downloading Solr backup metadata from S3: {}").addArgument(backupS3Uri).log();
+                    s3Repo = S3Repo.createRaw(
+                        Paths.get(arguments.localDir),
+                        new S3Uri(backupS3Uri),
+                        arguments.s3Region,
+                        arguments.s3Endpoint != null ? URI.create(arguments.s3Endpoint) : null
+                    );
+                    backupDir = s3Repo.getRepoRootDir();
+                }
+                default -> throw new ParameterException(
+                    "When source version is SOLR, provide --repo-uri with a file:// or s3:// scheme."
                 );
             }
 

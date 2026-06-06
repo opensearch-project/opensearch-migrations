@@ -2415,7 +2415,7 @@ public class NoStoredSourceMigrationTest extends SourceTestBase {
             // Step 1: METADATA MIGRATION. This is where the analysis-component-removal
             // transform strips the deprecated "standard" filter so OS 2 accepts the index.
             var metaArgs = new MigrateOrEvaluateArgs();
-            metaArgs.fileSystemRepoPath = localDirectory.getAbsolutePath();
+            metaArgs.repoUri = localDirectory.getAbsolutePath();
             metaArgs.snapshotName = "custom_snap";
             metaArgs.sourceVersion = sourceCluster.getContainerVersion().getVersion();
             metaArgs.targetArgs.host = targetCluster.getUrl();
