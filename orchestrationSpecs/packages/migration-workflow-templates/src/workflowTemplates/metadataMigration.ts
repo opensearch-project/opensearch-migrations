@@ -95,7 +95,7 @@ const COMMON_METADATA_PARAMETERS = {
 
 export function makeRepoParamDict(
     repoConfig: BaseExpression<z.infer<typeof S3_REPO_CONFIG>>,
-    includes3LocalDir: boolean) {
+    includeLocalDir: boolean) {
     return expr.mergeDicts(
         expr.mergeDicts(
             expr.ternary(
@@ -108,9 +108,9 @@ export function makeRepoParamDict(
                 expr.makeDict({"s3RoleArn": expr.getLoose(repoConfig, "s3RoleArn")}))
         ),
         expr.makeDict({
-            "s3RepoUri": expr.get(repoConfig, "s3RepoPathUri"),
+            "repoUri": expr.get(repoConfig, "s3RepoPathUri"),
             "s3Region": expr.get(repoConfig, "awsRegion"),
-            ...(includes3LocalDir ? {"s3LocalDir": expr.literal("/tmp")} : {})
+            ...(includeLocalDir ? {"localDir": expr.literal("/tmp")} : {})
         })
     );
 }
@@ -118,15 +118,15 @@ export function makeRepoParamDict(
 export function makeGcsCreateSnapshotRepoParamDict(
     repoConfig: BaseExpression<z.infer<typeof GCS_REPO_CONFIG>>) {
     return expr.makeDict({
-        "gcsRepoUri": expr.get(repoConfig, "gcsRepoPathUri")
+        "repoUri": expr.get(repoConfig, "gcsRepoPathUri")
     });
 }
 
 export function makeGcsRepoParamDict(
     repoConfig: BaseExpression<z.infer<typeof GCS_REPO_CONFIG>>) {
     return expr.makeDict({
-        "gcsRepoUri": expr.get(repoConfig, "gcsRepoPathUri"),
-        "gcsLocalDir": expr.literal("/tmp")
+        "repoUri": expr.get(repoConfig, "gcsRepoPathUri"),
+        "localDir": expr.literal("/tmp")
     });
 }
 
