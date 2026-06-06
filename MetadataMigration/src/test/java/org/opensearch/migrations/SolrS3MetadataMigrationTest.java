@@ -184,7 +184,7 @@ class SolrS3MetadataMigrationTest {
         createArgs.sourceType = "solr";
         createArgs.snapshotName = snapshotName;
         createArgs.snapshotRepoName = "s3";
-        createArgs.s3RepoUri = s3RepoUri;
+        createArgs.repoUri = s3RepoUri;
         createArgs.s3Region = REGION;
         createArgs.s3Endpoint = localStackEndpoint();
         createArgs.solrCollections = List.of(collName);
@@ -206,10 +206,10 @@ class SolrS3MetadataMigrationTest {
             var metaArgs = new MigrateOrEvaluateArgs();
             metaArgs.sourceVersion = Version.fromString("SOLR 8.11.4");
             metaArgs.snapshotName = snapshotName;
-            metaArgs.s3RepoUri = s3RepoUri;
+            metaArgs.repoUri = s3RepoUri;
             metaArgs.s3Region = REGION;
             metaArgs.s3Endpoint = localStackEndpoint();
-            metaArgs.s3LocalDirPath = s3LocalDir.toString();
+            metaArgs.localDir = s3LocalDir.toString();
             metaArgs.targetArgs.host = target.getUrl();
 
             var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();

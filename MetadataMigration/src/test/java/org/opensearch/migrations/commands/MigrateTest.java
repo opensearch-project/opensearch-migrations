@@ -31,7 +31,7 @@ class MigrateTest {
     void migrate_failsUnexpectedException() {
         var args = new MigrateArgs();
         args.sourceVersion = Version.fromString("ES 7.10");
-        args.fileSystemRepoPath = "";
+        args.repoUri = "/tmp";
         var context = mock(RootMetadataMigrationContext.class);
         var meta = new MetadataMigration();
 
