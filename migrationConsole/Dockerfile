@@ -90,6 +90,19 @@ RUN MOUNT_S3_VERSION="1.22.2" && \
     dnf install -y /tmp/mount-s3.rpm && \
     rm -f /tmp/mount-s3.rpm
 
+# Install gcsfuse for direct GCS bucket mounting (requires SYS_ADMIN capability at runtime)
+RUN GCSFUSE_VERSION="3.9.2" && \
+    ARCH=$(uname -m) && \
+    dnf install -y \
+        --setopt=install_weak_deps=False \
+        --setopt=tsflags=nodocs \
+        fuse && \
+    curl --retry 5 --retry-delay 5 --retry-connrefused -fSL \
+        "https://github.com/GoogleCloudPlatform/gcsfuse/releases/download/v${GCSFUSE_VERSION}/gcsfuse-${GCSFUSE_VERSION}-1.${ARCH}.rpm" \
+        -o /tmp/gcsfuse.rpm && \
+    dnf install -y /tmp/gcsfuse.rpm && \
+    rm -f /tmp/gcsfuse.rpm
+
 COPY setupVimSchemaChecker.sh /tmp/setupVimSchemaChecker.sh
 RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
     /tmp/setupVimSchemaChecker.sh && \
@@ -127,6 +140,11 @@ WORKDIR /root
 RUN mkdir -p /usr/share/bash-completion/completions && \
     _CONSOLE_COMPLETE=bash_source console > /usr/share/bash-completion/completions/console && \
     test -s /usr/share/bash-completion/completions/console
+
+# Copy Java tools (built from source, overrides base image versions)
+COPY javaTools/createSnapshot /root/createSnapshot
+COPY javaTools/metadataMigration /root/metadataMigration
+COPY javaTools/documentMigration /root/documentMigration
 
 COPY nodeStaging/configProcessor /root/configProcessor
 

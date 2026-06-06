@@ -10,6 +10,17 @@ steps:
       - ':DocumentsFromSnapshotMigration:syncVersionFile_reindexFromSnapshot'
       - '--no-daemon'
 
+  # Stage Java tools and Node artifacts into migrationConsole Docker context
+  - name: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        mkdir -p /workspace/migrationConsole/javaTools
+        cp -r /workspace/CreateSnapshot/build/install/CreateSnapshot /workspace/migrationConsole/javaTools/createSnapshot
+        cp -r /workspace/MetadataMigration/build/install/MetadataMigration /workspace/migrationConsole/javaTools/metadataMigration
+        cp -r /workspace/DocumentsFromSnapshotMigration/build/install/DocumentsFromSnapshotMigration /workspace/migrationConsole/javaTools/documentMigration
+
   # Build config processor and workflow templates
   - name: 'node:22'
     entrypoint: 'bash'
@@ -21,19 +32,19 @@ steps:
         npm ci
         echo "=== Building config processor ==="
         cd packages/config-processor
-        npm run check-and-bundle -- /workspace/migrationConsole/build/dockerContext/nodeStaging/configProcessor
+        npm run check-and-bundle -- /workspace/migrationConsole/nodeStaging/configProcessor
         echo "=== Building workflow templates ==="
         cd ../migration-workflow-templates
-        mkdir -p /workspace/migrationConsole/build/dockerContext/nodeStaging/workflowTemplates
-        npm run make-templates -- --outputDirectory /workspace/migrationConsole/build/dockerContext/nodeStaging/workflowTemplates
+        mkdir -p /workspace/migrationConsole/nodeStaging/workflowTemplates
+        npm run make-templates -- --outputDirectory /workspace/migrationConsole/nodeStaging/workflowTemplates
         echo "=== Workflow templates built ==="
-        ls /workspace/migrationConsole/build/dockerContext/nodeStaging/workflowTemplates/
+        ls /workspace/migrationConsole/nodeStaging/workflowTemplates/
         echo "=== Generating migration resources (CRDs + admission policies) ==="
         cd /workspace/orchestrationSpecs
-        mkdir -p /workspace/migrationConsole/build/dockerContext/nodeStaging/migrationResources
-        npm run stage-migration-resources -- --outputDirectory /workspace/migrationConsole/build/dockerContext/nodeStaging/migrationResources
+        mkdir -p /workspace/migrationConsole/nodeStaging/migrationResources
+        npm run stage-migration-resources -- --outputDirectory /workspace/migrationConsole/nodeStaging/migrationResources
         echo "=== Migration resources generated ==="
-        ls /workspace/migrationConsole/build/dockerContext/nodeStaging/migrationResources/
+        ls /workspace/migrationConsole/nodeStaging/migrationResources/
 
   # Build reindex-from-snapshot image
   - name: 'gcr.io/cloud-builders/docker'
@@ -44,16 +55,18 @@ steps:
       - 'us-central1-docker.pkg.dev/$PROJECT_ID/migrations/reindex-from-snapshot:latest'
       - 'DocumentsFromSnapshotMigration/docker'
 
-  # Build the migration console overlay image
+  # Build the migration console image
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
       - '--no-cache'
+      - '--build-arg'
+      - 'BASE_IMAGE=opensearchstaging/opensearch-migrations-console:latest'
       - '-f'
-      - 'Dockerfile.gcs-overlay'
+      - 'migrationConsole/Dockerfile'
       - '-t'
       - 'us-central1-docker.pkg.dev/$PROJECT_ID/migrations/migration-console:latest'
-      - '.'
+      - 'migrationConsole'
 
 images:
   - 'us-central1-docker.pkg.dev/$PROJECT_ID/migrations/migration-console:latest'
