@@ -1,0 +1,136 @@
+// test/support/mock.ab — a reusable mock fleet for the external tools the CLI
+// shells out to (aws / kubectl / helm / crane / jq passthrough / docker / curl).
+//
+// Design goals:
+//   * ONE place to install fakes — replaces the ~70-line install_stubs() copied
+//     into 20 test files.
+//   * RACE-SAFE under amber's parallel runner — the shims carry NO behavior in
+//     their body; they read everything at runtime from <MIGRATE_HOME>/mock/,
+//     which is unique per test world (support/world.ab). Two parallel blocks
+//     never share a control file.
+//   * SCENARIO-DRIVEN — a test declares the world it wants ("the helm release is
+//     stuck", "describe-stacks returns CREATE_COMPLETE") by dropping response
+//     fixtures; it does not hand-write a bash case per tool.
+//   * CALL-RECORDING — every invocation is appended to <mock>/calls/<tool>.log so
+//     a test can assert WHICH commands the CLI issued (e.g. "helm uninstall ran").
+//
+// The shim contract (one generic bash program, parameterized by tool name):
+//   <mock>/calls/<tool>.log         every arg line the CLI passed, one per call
+//   <mock>/resp/<tool>/<key>.out    stdout to emit when the args match <key>
+//   <mock>/resp/<tool>/<key>.rc     exit code for that match (default 0)
+//   <mock>/resp/<tool>/default.out  fallback stdout when no key matches
+//   <mock>/resp/<tool>/default.rc   fallback exit code (default 0)
+// <key> is the first arg token that has a matching fixture (longest-first), so a
+// test sets responses per subcommand ("get", "status", "deploy", …).
+
+import { dir_create, file_write, file_append, file_chmod, file_exists } from "std/fs"
+import { env_var_set, env_var_get } from "std/env"
+
+// ---- the generic shim body (brace-free Amber Text) -------------------------
+//
+// A `{` inside an Amber Text literal is interpolation, so this bash is written
+// brace-free: no `${...}` (use word-splitting + positional vars), no `case {`.
+// The tool name is interpolated once as {tool}. Everything else is literal bash
+// the shim runs at call time.
+fun shim_body(tool: Text): Text {
+    // Resolve the per-test control dir from MIGRATE_HOME (inherited from the CLI).
+    // Record the call, then emit the best-matching response + rc.
+    let b = "#!/usr/bin/env bash\n"
+    b = "{b}mock_root=\"$MIGRATE_HOME/mock\"\n"
+    b = "{b}tool={tool}\n"
+    b = "{b}mkdir -p \"$mock_root/calls\" \"$mock_root/resp/$tool\"\n"
+    b = "{b}printf '%s\\n' \"$*\" >> \"$mock_root/calls/$tool.log\"\n"
+    // Find the first arg token that has a <key>.out fixture; fall back to default.
+    b = "{b}sel=\"\"\n"
+    b = "{b}for tok in \"$@\"; do\n"
+    b = "{b}  if [ -f \"$mock_root/resp/$tool/$tok.out\" ] || [ -f \"$mock_root/resp/$tool/$tok.rc\" ]; then sel=\"$tok\"; break; fi\n"
+    b = "{b}done\n"
+    b = "{b}[ -z \"$sel\" ] && sel=default\n"
+    b = "{b}outf=\"$mock_root/resp/$tool/$sel.out\"\n"
+    b = "{b}rcf=\"$mock_root/resp/$tool/$sel.rc\"\n"
+    b = "{b}[ -f \"$outf\" ] && cat \"$outf\"\n"
+    b = "{b}rc=0\n"
+    b = "{b}[ -f \"$rcf\" ] && rc=\"$(cat \"$rcf\")\"\n"
+    b = "{b}exit \"$rc\"\n"
+    return b
+}
+
+// ---- installation ----------------------------------------------------------
+
+// __stub_dir — the single PATH-shadow dir for this process. Module-level; reset
+// per test block, so each block installs into its own dir. Empty until installed.
+let __stub_dir = ""
+
+// mock_install <tools[]> — write a shim for each named tool into a PATH-shadow
+// dir and prepend it to PATH. Idempotent within a block. The shims are
+// content-stable (behavior lives in the world's mock/ dir), so installing the
+// same set twice is harmless.
+pub fun mock_install(tools: [Text]): Null {
+    if __stub_dir == "" {
+        __stub_dir = trust $mktemp -d$
+    }
+    for tool in tools {
+        let p = "{__stub_dir}/{tool}"
+        trust file_write(p, shim_body(tool))
+        trust file_chmod(p, "755")
+    }
+    let old = env_var_get("PATH") failed { "" }
+    trust env_var_set("PATH", "{__stub_dir}:{old}")
+}
+
+// mock_install_default — the common fleet (aws/kubectl/helm). Most e2e tests
+// want at least these three.
+pub fun mock_install_default(): Null {
+    mock_install(["aws", "kubectl", "helm"])
+}
+
+// ---- programming responses --------------------------------------------------
+
+// mock_respond <world> <tool> <key> <stdout> — when <tool> is called with an arg
+// token == <key>, emit <stdout> (exit 0). <key>="default" sets the fallback.
+pub fun mock_respond(world: Text, tool: Text, key: Text, out: Text): Null {
+    trust dir_create("{world}/mock/resp/{tool}")
+    trust file_write("{world}/mock/resp/{tool}/{key}.out", out)
+}
+
+// mock_respond_rc <world> <tool> <key> <rc> — set the exit code for a match.
+pub fun mock_respond_rc(world: Text, tool: Text, key: Text, rc: Text): Null {
+    trust dir_create("{world}/mock/resp/{tool}")
+    trust file_write("{world}/mock/resp/{tool}/{key}.rc", rc)
+}
+
+// mock_fail <world> <tool> <key> <rc> <stderr-ish stdout> — convenience: a
+// non-zero exit with an explanatory line (written to stdout, which is where the
+// CLI's `failed { }` capture + log tee read it).
+pub fun mock_fail(world: Text, tool: Text, key: Text, rc: Text, msg: Text): Null {
+    mock_respond(world, tool, key, msg)
+    mock_respond_rc(world, tool, key, rc)
+}
+
+// ---- inspecting calls -------------------------------------------------------
+
+// mock_calls <world> <tool> — the recorded call log for <tool> (every arg line,
+// newline-joined), or "" if the tool was never called.
+pub fun mock_calls(world: Text, tool: Text): Text {
+    let f = "{world}/mock/calls/{tool}.log"
+    if not file_exists(f) { return "" }
+    let c = trust $cat "{f}"$ failed { "" }
+    return c
+}
+
+// mock_called <world> <tool> <needle> — Bool: did any <tool> call contain
+// <needle> in its args? The primary e2e assertion ("the CLI ran helm uninstall").
+pub fun mock_called(world: Text, tool: Text, needle: Text): Bool {
+    let f = "{world}/mock/calls/{tool}.log"
+    if not file_exists(f) { return false }
+    silent trust $grep -q -- "{needle}" "{f}"$
+    return status() == 0
+}
+
+// mock_call_count <world> <tool> — number of times <tool> was invoked.
+pub fun mock_call_count(world: Text, tool: Text): Int {
+    let f = "{world}/mock/calls/{tool}.log"
+    if not file_exists(f) { return 0 }
+    let n = trust $grep -c '' "{f}" 2>/dev/null$ failed { "0" }
+    return n as Int
+}

@@ -1,0 +1,60 @@
+// test/support/world.ab — per-test "world" isolation for the migration-assistant
+// CLI test suite.
+//
+// Why a shared module: amber runs each `test` block as its own unit (module-level
+// `let` resets per block), but env vars LEAK across blocks (they share the
+// process environment). So every test must mint its OWN isolated world up front
+// and never rely on another block's setup. This module is the single, reusable
+// way to do that — import it instead of re-deriving the mktemp/env dance in
+// every file (the old suite did exactly that, ~70 duplicated lines x 20 files).
+//
+// A "world" is a unique temp directory that doubles as:
+//   * the CLI's per-stage workspace — MIGRATE_HOME / STAGE_DIR / STAGE all point
+//     into it, so state.env + logs land in an isolated sandbox; AND
+//   * the mock fleet's control plane — <world>/mock/ holds the recorded calls and
+//     the per-tool response fixtures (see support/mock.ab). The mocks find it by
+//     reading $MIGRATE_HOME at runtime, which the CLI passes to every child
+//     process it shells out to — a per-test-unique channel that needs no shared
+//     mutable env var (which would race under the parallel runner).
+//
+// Usage:
+//   let w = fresh_world()              // unique sandbox; env pinned to it
+//   world_seed(w, "STAGE_NAME", "ma")  // pre-load a state.env value
+//   ... drive the CLI ...
+
+import { dir_create, file_write, file_append } from "std/fs"
+import { env_var_set } from "std/env"
+
+// Monotonic counter so two worlds minted in the same second (same process) still
+// differ. Module-level — resets per test block, which is fine: each block makes
+// its own world(s).
+let __wseq = 0
+
+// fresh_world — mint a unique sandbox dir, point the CLI's stage env at it, and
+// create its mock/ control-plane + log/ dir. Returns the world's absolute path.
+pub fun fresh_world(): Text {
+    __wseq += 1
+    let base = trust $mktemp -d$
+    let dir = "{base}/w{__wseq}"
+    trust dir_create(dir)
+    trust dir_create("{dir}/log")
+    trust dir_create("{dir}/mock")
+    // The CLI reads these; children (aws/kubectl/…) inherit them.
+    trust env_var_set("MIGRATE_HOME", dir)
+    trust env_var_set("STAGE_DIR", dir)
+    trust env_var_set("STAGE", "w{__wseq}")
+    return dir
+}
+
+// world_seed — write a KEY=VALUE line into the world's state.env so the CLI's
+// state_load() picks it up at entry. Values are written raw (no quoting) — fine
+// for the simple identifiers the tests seed (stage names, regions, Y/N flags).
+pub fun world_seed(world: Text, key: Text, val: Text): Null {
+    trust file_append("{world}/state.env", "{key}={val}\n")
+}
+
+// world_noninteractive — flip the CLI into non-interactive mode (prompts return
+// their defaults; no /dev/tty reads). Most e2e flows want this.
+pub fun world_noninteractive(): Null {
+    trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
+}
