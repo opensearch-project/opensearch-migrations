@@ -100,6 +100,7 @@ jobs:
           BASH_32: /tmp/bash32/bin/bash
         run: |
           set -e
+          mkdir -p build
           for f in src/*.ab; do
             base=$(basename "$f" .ab)
             amber build --target bash-3.2 "$f" "build/$base.sh"
