@@ -1,0 +1,296 @@
+// install.ab — curl-pipe installer for migration-assistant.
+//
+// Port of bash install.sh. STANDALONE: it runs before any lib is available
+// (it's what fetches them), so it carries its own die/require/colour helpers and
+// imports nothing from the CLI — only std. Compiles to a self-contained bash
+// script shipped as the release `install.sh`.
+//
+// Two modes (MIGRATE_INSTALL, default `path`):
+//   path       install the binary onto PATH (~/.local/bin), nothing in CWD,
+//              no auto-launch. The user cd's into a project dir and runs it.
+//   workspace  project-local install under ./migration-assistant-workspace/,
+//              writes an `activate` script, and auto-launches the CLI.
+//
+// Amber-port notes vs the bash original:
+//   * Colour helpers + die/require are local (no core.ab — install runs before
+//     the lib tree exists). esc() is minted once via printf, like core.ab.
+//   * ${VAR:-default} → env_var_get("VAR") failed { "default" } (raw ${} can't
+//     appear inside $...$, where { is Amber interpolation).
+//   * The release-API version lookup uses fetch() (std/http) instead of the
+//     curl|grep|head|sed pipeline.
+//   * The `activate` heredoc → a multi-line Text built with \n + file_write.
+//   * `exec "$bin" "$@" </dev/tty` (process handoff) + the `exec 3<>/dev/tty`
+//     tty probe have NO Amber equivalent → raw `trust $...$` escape hatch, used
+//     only at the terminal step of workspace mode.
+
+import { printf, env_var_get, env_var_test, is_command } from "std/env"
+import { file_write, file_read, file_exists, dir_create } from "std/fs"
+import { fetch } from "std/http"
+import { slice, starts_with, replace_regex, trim } from "std/text"
+
+const DEFAULT_REPO = "opensearch-project/opensearch-migrations"
+
+// ---- colour + diagnostics (local; install runs before the lib tree) --------
+
+let __esc = ""
+fun esc(): Text {
+    if __esc == "" { __esc = trust $printf '\x1b'$ }
+    return __esc
+}
+fun paint(code: Text, s: Text): Text {
+    // Only colourise when stderr is a TTY (CI logs stay clean).
+    trust $test -t 2$
+    if status() != 0 { return s }
+    return "{esc()}[{code}m{s}{esc()}[0m"
+}
+fun eprintln(s: Text): Null { trust $printf '%s\n' "{s}" >&2$ }
+
+// die — red error to stderr + exit 1.
+fun die(msg: Text): Null {
+    eprintln("{paint("31", "error:")} {msg}")
+    exit(1)
+}
+
+// require — die unless <cmd> is on PATH.
+fun require(cmd: Text): Null {
+    if not is_command(cmd) { die("required command not on PATH: {cmd}") }
+}
+
+// envd — env var with a default (the ${VAR:-default} idiom).
+fun envd(name: Text, dflt: Text): Text {
+    if not env_var_test(name) { return dflt }
+    let v = env_var_get(name) failed { "" }
+    if v == "" { return dflt }
+    return v
+}
+
+// ---- pretty paths -----------------------------------------------------------
+
+// pretty — display a path relative to PWD (./x), else HOME (~/x), else raw.
+fun pretty(p: Text): Text {
+    let pwd = trust $pwd$
+    let home = env_var_get("HOME") failed { "" }
+    if p == pwd { return "." }
+    if starts_with("{pwd}/", p) {
+        return "./{slice(p, (len pwd) + 1, (len p) - (len pwd) - 1)}"
+    }
+    if home != "" and starts_with("{home}/", p) {
+        return "~/{slice(p, (len home) + 1, (len p) - (len home) - 1)}"
+    }
+    return p
+}
+
+// ---- version resolution -----------------------------------------------------
+
+// resolve_version — the version string to install. "latest" → releases API via
+// fetch(); anything else is taken as-is (a tag, minus any leading "v").
+fun resolve_version(repo: Text, version: Text): Text {
+    if version != "latest" {
+        if starts_with("v", version) { return slice(version, 1, (len version) - 1) }
+        return version
+    }
+    let url = "https://api.github.com/repos/{repo}/releases/latest"
+    let body = trust fetch(url) failed { "" }
+    if body == "" { die("could not resolve latest version from {url}") }
+    // Pull "tag_name": "vX.Y.Z" → X.Y.Z. (jq if present for robustness, else regex.)
+    let tag = ""
+    if is_command("jq") {
+        tag = trust $printf '%s' "{body}" | jq -r '.tag_name // empty'$
+    } else {
+        tag = trust $printf '%s' "{body}" | grep -o '"tag_name":[ ]*"[^"]*"' | head -1 | sed -E 's/.*"([^"]+)"\$/\1/'$
+    }
+    tag = trim(tag)
+    if tag == "" { die("could not resolve latest version from {url}") }
+    if starts_with("v", tag) { return slice(tag, 1, (len tag) - 1) }
+    return tag
+}
+
+// resolve_install_version — local-dev build stamps a timestamped pseudo-version;
+// otherwise require curl+tar and resolve from the API.
+fun resolve_install_version(repo: Text, version: Text, from_local: Text): Text {
+    if from_local != "" {
+        let ts = trust $date +%Y%m%d%H%M%S$
+        return "local-{ts}"
+    }
+    require("tar")
+    return resolve_version(repo, version)
+}
+
+// ---- fetch the tree ---------------------------------------------------------
+
+// fetch_into — populate <install_dir> with bin/ lib/ skills/ from a local tree
+// (INSTALL_FROM_LOCAL) or the released tarball.
+pub fun fetch_into(install_dir: Text, version: Text, repo: Text, from_local: Text): Null {
+    if from_local != "" {
+        trust $cp -R "{from_local}/bin" "{install_dir}/"$
+        trust $cp -R "{from_local}/lib" "{install_dir}/"$
+        trust $cp -R "{from_local}/skills" "{install_dir}/"$
+        if file_exists("{from_local}/manifest.json") {
+            trust $cp "{from_local}/manifest.json" "{install_dir}/"$
+        }
+    } else {
+        let tarball = "migration-assistant-cli-{version}.tar.gz"
+        let url = "https://github.com/{repo}/releases/download/{version}/{tarball}"
+        let tmp = trust $mktemp -d$
+        let ok = trust $curl -fsSL --max-time 60 -o "{tmp}/{tarball}" "{url}"$ failed { "FAIL" }
+        if ok == "FAIL" {
+            trust $rm -rf "{tmp}"$
+            die("could not download {url}")
+        }
+        trust $tar -xzf "{tmp}/{tarball}" -C "{install_dir}" --strip-components=1$
+        trust $rm -rf "{tmp}"$
+    }
+    trust $chmod +x "{install_dir}/bin/migration-assistant"$
+}
+
+// read_binary_name — branding.binaryName from manifest.json (root or skills/),
+// default "migration-assistant". install runs before manifest.ab, so read JSON
+// directly (jq if present, else regex).
+pub fun read_binary_name(install_dir: Text): Text {
+    let manifest = ""
+    if file_exists("{install_dir}/manifest.json") {
+        manifest = "{install_dir}/manifest.json"
+    } else {
+        if file_exists("{install_dir}/skills/manifest.json") {
+            manifest = "{install_dir}/skills/manifest.json"
+        }
+    }
+    if manifest == "" { return "migration-assistant" }
+    let v = ""
+    if is_command("jq") {
+        v = trust $jq -r '.branding.binaryName // "migration-assistant"' "{manifest}"$
+    } else {
+        v = trust $grep -oE '"binaryName"[ ]*:[ ]*"[^"]+"' "{manifest}" | head -1 | sed -E 's/.*"([^"]+)"\$/\1/'$
+    }
+    v = trim(v)
+    if v == "" or v == "null" { return "migration-assistant" }
+    return v
+}
+
+// ---- mode: path -------------------------------------------------------------
+
+fun install_path_mode(repo: Text, version: Text, from_local: Text): Null {
+    eprintln("Installing Migration Assistant CLI...\n")
+    require("uname")
+
+    let ver = resolve_install_version(repo, version, from_local)
+    let home = env_var_get("HOME") failed { "" }
+    let prefix = envd("MIGRATE_PREFIX", "{home}/.opensearch-migrate/cli/{ver}")
+    let bin_dir = envd("BIN_DIR", "{home}/.local/bin")
+    dir_create(prefix) failed { }
+    dir_create(bin_dir) failed { }
+
+    fetch_into(prefix, ver, repo, from_local)
+
+    let bin_name = read_binary_name(prefix)
+    trust $ln -sfn "{prefix}/bin/migration-assistant" "{bin_dir}/{bin_name}"$
+
+    eprintln("{paint("32", "✔")} {bin_name} {ver} installed\n")
+    eprintln("  Binary: {pretty(bin_dir)}/{bin_name}\n")
+
+    // PATH hint when bin_dir isn't already on PATH.
+    let path = env_var_get("PATH") failed { "" }
+    if not contains_path(path, bin_dir) {
+        eprintln("{paint("33", "!")} {pretty(bin_dir)} is not on your PATH. Add it to your shell rc:")
+        eprintln("    export PATH=\"{pretty(bin_dir)}:$PATH\"\n")
+    }
+
+    eprintln(paint("1", "Next: cd into the directory you want to use as your migration project, then run:"))
+    eprintln("    {paint("1", bin_name)}\n")
+    eprintln("  That directory becomes the project — state, logs, and plan land in")
+    eprintln("  {paint("2", "./migration-assistant-workspace/")} there. Use {paint("2", "--stage <name>")} for a named project.")
+    eprintln("{paint("32", "✓")} Installation complete!")
+}
+
+// contains_path — is <dir> a ':'-delimited element of PATH?
+pub fun contains_path(path: Text, dir: Text): Bool {
+    if path == "{dir}" { return true }
+    if starts_with("{dir}:", path) { return true }
+    // ":dir:" anywhere, or ":dir" at the end.
+    let mid = ":{dir}:"
+    let i = 0
+    let nl = len mid
+    let limit = (len path) - nl
+    while i <= limit {
+        if slice(path, i, nl) == mid { return true }
+        i += 1
+    }
+    let suf = ":{dir}"
+    let sl = len suf
+    if sl <= len path {
+        if slice(path, (len path) - sl, sl) == suf { return true }
+    }
+    return false
+}
+
+// ---- mode: workspace --------------------------------------------------------
+
+fun install_workspace_mode(repo: Text, version: Text, from_local: Text, args: [Text]): Null {
+    eprintln("Setting up Migration Assistant workspace...\n")
+    require("uname")
+
+    let ver = resolve_install_version(repo, version, from_local)
+    let pwd = trust $pwd$
+    let workspace = envd("MIGRATE_WORKSPACE", "{pwd}/migration-assistant-workspace")
+    // Resolve to absolute if relative.
+    if not starts_with("/", workspace) { workspace = "{pwd}/{workspace}" }
+    let prefix = envd("MIGRATE_PREFIX", "{workspace}/cli")
+    let bin_dir = envd("BIN_DIR", "{workspace}/bin")
+    let install_dir = "{prefix}/{ver}"
+    dir_create(install_dir) failed { }
+    dir_create(bin_dir) failed { }
+
+    fetch_into(install_dir, ver, repo, from_local)
+    let bin_name = read_binary_name(install_dir)
+    trust $ln -sfn "{install_dir}/bin/migration-assistant" "{bin_dir}/{bin_name}"$
+
+    // activate script (heredoc → Text + file_write). \$ keeps a literal $ in the
+    // generated bash; { is escaped in the case-glob as needed.
+    let activate = "# Source this file: source {pretty(workspace)}/activate\n"
+    activate = "{activate}# Sets MIGRATE_HOME so per-stage state lands here, and prepends bin/ to PATH.\n"
+    activate = "{activate}export MIGRATE_HOME=\"{workspace}\"\n"
+    activate = "{activate}case \":$PATH:\" in\n"
+    activate = "{activate}  *\":{bin_dir}:\"*) ;;\n"
+    activate = "{activate}  *) export PATH=\"{bin_dir}:$PATH\" ;;\n"
+    activate = "{activate}esac\n"
+    file_write("{workspace}/activate", activate) failed { }
+
+    eprintln("{paint("32", "✔")} Migration Assistant workspace ready\n")
+    eprintln("  Version:    {ver}")
+    eprintln("  Workspace:  {pretty(workspace)}")
+    eprintln("  Binary:     {pretty(bin_dir)}/{bin_name}\n")
+    eprintln("  In a new shell: source {pretty(workspace)}/activate to wire PATH + MIGRATE_HOME")
+    eprintln("  State for each stage lives at {pretty(workspace)}/<stage>/\n")
+    eprintln("{paint("32", "✓")} Installation complete!")
+
+    if envd("MIGRATE_NO_LAUNCH", "0") == "1" { return null }
+
+    // Auto-launch only when an interactive /dev/tty is genuinely reachable.
+    // The probe + exec handoff have no Amber equivalent → raw escape hatch.
+    let tty_ok = trust $sh -c 'exec 3<>/dev/tty' 2>/dev/null && echo ok$ failed { "" }
+    if tty_ok == "ok" {
+        eprintln("\n{paint("2", "↳")} Launching {paint("1", bin_name)} now…\n")
+        trust $export MIGRATE_HOME="{workspace}"$
+        // exec replaces this process; </dev/tty reattaches a controlling terminal.
+        trust $exec "{bin_dir}/{bin_name}" </dev/tty$
+    } else {
+        eprintln("\n{paint("33", "!")} no interactive terminal detected — not auto-launching.")
+        eprintln("  Run it yourself from a real terminal:")
+        eprintln("    source {pretty(workspace)}/activate && {bin_name}")
+    }
+}
+
+// ---- entry ------------------------------------------------------------------
+
+main (args) {
+    let repo = envd("MIGRATE_REPO", DEFAULT_REPO)
+    let version = envd("MIGRATE_VERSION", "latest")
+    let mode = envd("MIGRATE_INSTALL", "path")
+    let from_local = envd("INSTALL_FROM_LOCAL", "")
+
+    if {
+        mode == "path"      { install_path_mode(repo, version, from_local) }
+        mode == "workspace" { install_workspace_mode(repo, version, from_local, args) }
+        else { die("unknown MIGRATE_INSTALL='{mode}' (expected 'path' or 'workspace')") }
+    }
+}

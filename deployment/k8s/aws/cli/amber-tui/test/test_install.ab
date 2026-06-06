@@ -1,0 +1,58 @@
+// test_install.ab — coverage for src/install.ab pure helpers + an end-to-end
+// local (INSTALL_FROM_LOCAL) path-mode install under the host shell.
+//
+// install.ab is a `main`-bearing entrypoint; importing it does NOT run main, so
+// its pub/internal funcs are unit-testable. The functions under test here are
+// the pure ones (contains_path, read_binary_name) plus a real fetch_into via a
+// fake source tree. Network paths (resolve_version "latest") are not exercised —
+// no network in tests.
+
+import { assert, assert_eq } from "std/test"
+import { contains_path, read_binary_name, fetch_into } from "../src/install.ab"
+import { file_write, file_read, dir_create, file_exists } from "std/fs"
+import { env_var_set } from "std/env"
+
+test "contains_path matches PATH elements exactly" {
+    // exact, prefix, middle, suffix, and non-member
+    assert(contains_path("/usr/bin", "/usr/bin"))
+    assert(contains_path("/a:/b:/c", "/a"))
+    assert(contains_path("/a:/b:/c", "/b"))
+    assert(contains_path("/a:/b:/c", "/c"))
+    assert(not contains_path("/a:/bb:/c", "/b"))
+    assert(not contains_path("/usr/bin", "/usr/local/bin"))
+}
+
+test "read_binary_name defaults when no manifest present" {
+    dir_create("/tmp/amber_inst_a") failed { }
+    assert_eq(read_binary_name("/tmp/amber_inst_a"), "migration-assistant")
+}
+
+test "read_binary_name reads branding.binaryName from skills/manifest.json" {
+    dir_create("/tmp/amber_inst_b/skills") failed { }
+    file_write("/tmp/amber_inst_b/skills/manifest.json", "\{\"branding\":\{\"binaryName\":\"acme-migrate\"}}") failed { }
+    assert_eq(read_binary_name("/tmp/amber_inst_b"), "acme-migrate")
+}
+
+test "read_binary_name prefers root manifest.json over skills/" {
+    dir_create("/tmp/amber_inst_c/skills") failed { }
+    file_write("/tmp/amber_inst_c/manifest.json", "\{\"branding\":\{\"binaryName\":\"root-name\"}}") failed { }
+    file_write("/tmp/amber_inst_c/skills/manifest.json", "\{\"branding\":\{\"binaryName\":\"skills-name\"}}") failed { }
+    assert_eq(read_binary_name("/tmp/amber_inst_c"), "root-name")
+}
+
+test "fetch_into copies a local tree + chmods the binary" {
+    // Build a fake source tree.
+    dir_create("/tmp/amber_inst_src/bin") failed { }
+    dir_create("/tmp/amber_inst_src/lib") failed { }
+    dir_create("/tmp/amber_inst_src/skills") failed { }
+    file_write("/tmp/amber_inst_src/bin/migration-assistant", "#!/usr/bin/env bash\necho hi\n") failed { }
+    dir_create("/tmp/amber_inst_dst") failed { }
+
+    fetch_into("/tmp/amber_inst_dst", "local-test", "owner/repo", "/tmp/amber_inst_src")
+
+    assert(file_exists("/tmp/amber_inst_dst/bin/migration-assistant"))
+    assert(file_exists("/tmp/amber_inst_dst/lib"))
+    // binary is executable
+    let x = trust $test -x /tmp/amber_inst_dst/bin/migration-assistant && echo yes$
+    assert_eq(x, "yes")
+}
