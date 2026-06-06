@@ -421,7 +421,7 @@ def test_gcs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
                                   "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
-                                  "--gcs-repo-uri", config["snapshot"]["gcs"]["repo_uri"],
+                                  "--repo-uri", config["snapshot"]["gcs"]["repo_uri"],
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
@@ -430,8 +430,7 @@ def test_gcs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
 def test_fs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
     config = {
         "snapshot": {
-            "otel_trace_endpoint": "http://otel-traces:1111",
-            "otel_metrics_endpoint": "http://otel-metrics:2222",
+            "otel_endpoint": "http://otel:1111",
             "snapshot_name": "reindex_from_snapshot",
             "fs": {
                 "repo_path": "/path/for/snapshot/repo"
@@ -451,17 +450,15 @@ def test_fs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   '--snapshot-repo-name', snapshot.snapshot_repo_name,
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
-                                  "--otel-trace-collector-endpoint", config["snapshot"]["otel_trace_endpoint"],
-                                  "--otel-metrics-collector-endpoint", config["snapshot"]["otel_metrics_endpoint"],
-                                  "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
+                                  "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
+                                  "--repo-uri", "file://" + config["snapshot"]["fs"]["repo_path"],
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 
 def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
     config = {
         "snapshot": {
-            "otel_trace_endpoint": "http://otel-traces:1111",
-            "otel_metrics_endpoint": "http://otel-metrics:2222",
+            "otel_endpoint": "http://otel:1111",
             "snapshot_name": "reindex_from_snapshot",
             "s3": {
                 "repo_uri": "s3://my-bucket",
@@ -483,9 +480,8 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   '--snapshot-repo-name', snapshot.snapshot_repo_name,
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
-                                  "--otel-trace-collector-endpoint", config["snapshot"]["otel_trace_endpoint"],
-                                  "--otel-metrics-collector-endpoint", config["snapshot"]["otel_metrics_endpoint"],
-                                  "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
+                                  "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
+                                  "--repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
@@ -496,8 +492,7 @@ def test_s3_snapshot_create_with_custom_snapshot_repo_name_calls_subprocess_run_
     custom_repo_name = "my-repo"
     config = {
         "snapshot": {
-            "otel_trace_endpoint": "http://otel-traces:1111",
-            "otel_metrics_endpoint": "http://otel-metrics:2222",
+            "otel_endpoint": "http://otel:1111",
             "snapshot_name": "reindex_from_snapshot",
             "snapshot_repo_name": custom_repo_name,
             "s3": {
@@ -520,9 +515,8 @@ def test_s3_snapshot_create_with_custom_snapshot_repo_name_calls_subprocess_run_
                                   '--snapshot-repo-name', custom_repo_name,
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
-                                  "--otel-trace-collector-endpoint", config["snapshot"]["otel_trace_endpoint"],
-                                  "--otel-metrics-collector-endpoint", config["snapshot"]["otel_metrics_endpoint"],
-                                  "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
+                                  "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
+                                  "--repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
@@ -555,7 +549,7 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_s3_role(mocker):
                                   '--snapshot-repo-name', snapshot.snapshot_repo_name,
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
-                                  "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
+                                  "--repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
@@ -586,7 +580,7 @@ def test_s3_snapshot_create_fails_for_clusters_with_auth(mocker):
                                   "--source-username", auth_details.username,
                                   "--source-password", auth_details.password,
                                   "--source-insecure",
-                                  "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
+                                  "--repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait"
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
@@ -615,7 +609,7 @@ def test_fs_snapshot_create_works_for_clusters_with_basic_auth(mocker):
                                   "--source-username", auth_details.username,
                                   "--source-password", auth_details.password,
                                   "--source-insecure",
-                                  "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
+                                  "--repo-uri", "file://" + config["snapshot"]["fs"]["repo_path"],
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
@@ -646,7 +640,7 @@ def test_fs_snapshot_create_works_for_clusters_with_sigv4(mocker):
                                   "--source-aws-service-signing-name", service_name,
                                   "--source-aws-region", signing_region,
                                   "--source-insecure",
-                                  "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
+                                  "--repo-uri", "file://" + config["snapshot"]["fs"]["repo_path"],
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
 

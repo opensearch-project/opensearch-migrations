@@ -261,8 +261,8 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--cluster-awareness-attributes", '0',
-        "--s3-local-dir", config["from_snapshot"]["local_dir"],
-        "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
+        "--local-dir", config["from_snapshot"]["local_dir"],
+        "--repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
         "--target-insecure",
         "--source-version", MOCK_SOURCE_VERSION,
@@ -297,7 +297,7 @@ def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--cluster-awareness-attributes", '0',
-        "--file-system-repo-path", config["from_snapshot"]["fs"]["repo_path"],
+        "--repo-uri", "file://" + config["from_snapshot"]["fs"]["repo_path"],
         "--target-insecure",
         "--source-version", MOCK_SOURCE_VERSION,
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
@@ -327,7 +327,7 @@ def test_metadata_with_cluster_awareness_attributes_makes_correct_subprocess_cal
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--cluster-awareness-attributes", "2",
-        "--file-system-repo-path", config["from_snapshot"]["fs"]["repo_path"],
+        "--repo-uri", "file://" + config["from_snapshot"]["fs"]["repo_path"],
         "--target-insecure",
         "--source-version", MOCK_SOURCE_VERSION,
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
@@ -364,7 +364,7 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--cluster-awareness-attributes", '0',
-        "--file-system-repo-path", config["from_snapshot"]["fs"]["repo_path"],
+        "--repo-uri", "file://" + config["from_snapshot"]["fs"]["repo_path"],
         "--target-insecure",
         "--index-allowlist", "index1,index2",
         "--index-template-allowlist", "index_template1,index_template2",
@@ -400,8 +400,8 @@ def test_metadata_with_target_config_auth_makes_correct_subprocess_call(mocker):
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--cluster-awareness-attributes", '0',
-        "--s3-local-dir", config["from_snapshot"]["local_dir"],
-        "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
+        "--local-dir", config["from_snapshot"]["local_dir"],
+        "--repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
         "--target-username", auth_details.username,
         "--target-password", auth_details.password,
@@ -439,8 +439,8 @@ def test_metadata_with_target_sigv4_makes_correct_subprocess_call(mocker):
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--cluster-awareness-attributes", '0',
-        "--s3-local-dir", config["from_snapshot"]["local_dir"],
-        "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
+        "--local-dir", config["from_snapshot"]["local_dir"],
+        "--repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
         "--target-aws-service-signing-name", service_name,
         "--target-aws-region", signing_region,
@@ -478,8 +478,8 @@ def test_metadata_init_with_minimal_config_and_extra_args(mocker):
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         '--target-host', 'https://opensearchtarget:9200',
         '--cluster-awareness-attributes', '0',
-        "--s3-local-dir", mocker.ANY,
-        "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
+        "--local-dir", mocker.ANY,
+        "--repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
         '--target-username', 'admin',
         '--target-password', 'myStrongPassword123!',
@@ -572,8 +572,8 @@ def test_metadata_with_gcs_snapshot_makes_correct_subprocess_call(mocker):
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--cluster-awareness-attributes", '0',
-        "--gcs-local-dir", config["from_snapshot"]["local_dir"],
-        "--gcs-repo-uri", config["from_snapshot"]["gcs"]["repo_uri"],
+        "--local-dir", config["from_snapshot"]["local_dir"],
+        "--repo-uri", config["from_snapshot"]["gcs"]["repo_uri"],
         "--target-insecure",
         "--source-version", MOCK_SOURCE_VERSION,
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True
@@ -599,7 +599,7 @@ def test_metadata_with_minimal_gcs_snapshot_omits_optional_flags(mocker):
 
     mock.assert_called_once()
     actual_args = mock.call_args.args[0]
-    assert "--gcs-repo-uri" in actual_args
+    assert "--repo-uri" in actual_args
     assert "gs://my-bucket/path" in actual_args
     assert "--gcs-region" not in actual_args
     assert "--gcs-endpoint" not in actual_args
