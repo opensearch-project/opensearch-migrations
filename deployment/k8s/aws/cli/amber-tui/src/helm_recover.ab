@@ -1,0 +1,511 @@
+// helm_recover.ab — stuck-release recovery for the migration-assistant helm chart.
+//
+// Port of the RECOVERY slice of bash lib/helm.sh. helm.sh is split into four
+// Amber modules (helm_ctx / helm_recover / helm_diag / helm_install); this file
+// owns the recovery + namespace-settle path:
+//   helm_recover_if_stuck / helm_recover_orphan_jobs / _helm_release_status /
+//   _helm_clear_stuck_revision / _helm_uninstall_quiet / helm_ensure_namespace /
+//   _helm_wait_namespace_settled
+//
+// The context-flag binding (the HELM=()/KUBECTL=() command-array replacement)
+// is OWNED by the sibling module helm_ctx.ab — it stores the context as state
+// and exposes a Text PREFIX every call interpolates:
+//   helm_ctx_flags()    → "--kube-context X" (or "" when no context).
+//   kubectl_ctx_flags() → "--context X"      (or "").
+// Every external call here is `trust $helm {helm_ctx_flags()} status …$`; the
+// flags word-split into the two tokens (or nothing). helm_ctx_init / helm_kctx_
+// init seed that binding (the latter loads state from disk first). We IMPORT
+// these — NOT redefine them — so the whole helm tree (helm_diag / helm_install /
+// recovery) shares ONE binding. HELM_RELEASE_NAME / HELM_NAMESPACE (pinned to
+// "ma") are likewise re-used from helm_ctx.ab, not re-declared.
+//
+// Port notes vs the bash original (see escapeHatches for the deeper ones):
+//   * HELM=()/KUBECTL=() command arrays → helm_ctx.ab's Text flag prefixes.
+//   * `eval "$out=(…)"` indirect array returns → plain [Text] / Int returns.
+//   * `<<<"$x"` here-strings + `while read` loops → split_lines(trust $…$) + for.
+//   * awk multi-pass tallies (orphan-job filter) → split_lines + split + if-chain.
+//   * heredoc / `case "$status"` → if_chain (no match/switch keyword in 0.6).
+//   * set +e / set -e fences → per-command `failed {}` / `trust` + status().
+//   * `status` is a RESERVED keyword — the helm release status Text is named `st`.
+//   * jq-or-regex status parse → optional jq path + a regex_capture fallback,
+//     same tolerance the bash _helm_release_status had.
+//
+// Imports: helm_ctx (the binding + pinned names), ui (recovery prompts + chrome),
+// log (log_stream / log_warn), common (die), std (regex_capture / optional_cmd /
+// trim), core (eprintln for the bold-numbered menu).
+
+import { split_lines, slice, replace } from "std/text"
+import { env_var_get } from "std/env"
+import { date_now } from "std/date"
+import { helm_ctx_flags, kubectl_ctx_flags } from "./helm_ctx.ab"
+import {
+    ui_info, ui_ok, ui_warn, ui_err, ui_step, ui_dim,
+    ui_confirm, ui_prompt, ui_bold, ui_reset
+} from "./ui.ab"
+import { log_info, log_warn, log_stream } from "./log.ab"
+import { die } from "./common.ab"
+import { trim, regex_capture, optional_cmd } from "./std.ab"
+import { eprintln } from "./core.ab"
+
+// ============================================================================
+// Private helpers FIRST. Amber tree-shakes per imported symbol and keeps only
+// transitive deps that textually PRECEDE the public entry point across an import
+// boundary, so every callee MUST be defined above its caller or it is silently
+// dropped (→ "Function 'x' does not exist" when this module is imported).
+// ============================================================================
+
+// log_file_path — the migrate.log path under the stage dir, resolved env-first
+// the way log.ab / state.ab do (STAGE_DIR wins; else MIGRATE_HOME/STAGE). Used
+// only for the operator-facing "see $LOG_FILE" hints + the >>LOG_FILE appends
+// that mirror the bash `>>"$LOG_FILE"` redirects (kubectl create / label output).
+fun log_file_path(): Text {
+    let explicit = env_var_get("STAGE_DIR") failed { "" }
+    let dir = explicit
+    if dir == "" {
+        let home = env_var_get("MIGRATE_HOME") failed { "" }
+        if home == "" {
+            let pwd = trust $pwd$
+            home = "{pwd}/migration-assistant-workspace"
+        }
+        let stage = env_var_get("STAGE") failed { "" }
+        if stage == "" { stage = "default" }
+        dir = "{home}/{stage}"
+    }
+    return "{dir}/log/migrate.log"
+}
+
+// ---- _helm_release_status --------------------------------------------------
+
+// _helm_release_status <release> <ns> → the helm status Text (deployed,
+// pending-install, pending-upgrade, failed, uninstalling, …) or "" if the
+// release does not exist. Uses jq when available; falls back to a tolerant
+// regex_capture over the flattened JSON for pure compat — exactly the bash
+// two-path parser.
+//
+// `helm status … -o json` legitimately fails when the release is absent; the
+// bash version swallowed that to "" via `2>/dev/null || return 0`. We mirror it
+// with `failed { "" }`: an empty/failed lookup is the "absent" signal, not an
+// error to crash on. The status field is named `st` (`status` is reserved).
+pub fun _helm_release_status(release: Text, ns: Text): Text {
+    let json = $helm {helm_ctx_flags()} status "{release}" --namespace "{ns}" -o json 2>/dev/null$ failed { "" }
+    if trim(json) == "" { return "" }
+
+    if optional_cmd("jq") {
+        let st = trust $printf '%s' "{json}" | jq -r '.info.status // empty'$
+        return trim(st)
+    }
+    // Fallback: flatten newlines to one line, then capture the .info.status
+    // field. The bash version used the same ERE with BASH_REMATCH; regex_capture
+    // shells to sed -nE for the group extraction. Pattern is fixed, never user data.
+    let flat = replace(json, "\n", "")
+    let st = regex_capture(flat, "\"info\"[[:space:]]*:[[:space:]]*\\\{[^}]*\"status\"[[:space:]]*:[[:space:]]*\"([^\"]+)\"", 1)
+    return trim(st)
+}
+
+// ---- _helm_uninstall_quiet -------------------------------------------------
+
+// _helm_uninstall_quiet <release> <ns> — uninstall the release with --wait, and
+// if that's blocked by a stuck pre/post hook, retry once with --no-hooks so a
+// wedged hook Job can't block forever. Both invocations stream via log_stream.
+pub fun _helm_uninstall_quiet(release: Text, ns: Text): Null {
+    ui_dim("  uninstalling release: {release}")
+    let rc = log_stream("helm-uninstall", "helm {helm_ctx_flags()} uninstall \"{release}\" --namespace \"{ns}\" --wait --timeout 5m")
+    if rc == 0 {
+        ui_ok("release {release} uninstalled")
+    } else {
+        // Last-ditch: --no-hooks so a stuck pre/post hook doesn't block forever.
+        ui_warn("uninstall blocked; retrying with --no-hooks")
+        log_stream("helm-uninstall-force", "helm {helm_ctx_flags()} uninstall \"{release}\" --namespace \"{ns}\" --no-hooks")
+    }
+}
+
+// ---- _helm_explain_failure (self-contained recovery context) ---------------
+//
+// Surfaces the WHY behind a failed / pending-upgrade release so the operator can
+// pick rollback / uninstall / reconcile without opening a second terminal. The
+// bash original lived in the diag slice and also dumped the failed Job's events
+// + pod logs (that deeper dump is helm_diag's helm_dump_diagnostics territory);
+// here we keep the recovery-path essentials so helm_recover_if_stuck is
+// self-contained + testable: helm's own description line, the named failed Job
+// (the canonical "name: <job>, kind: Job" shape), and migration-console-0's
+// phase + container-readiness. Stderr only, dim — informational, not an error.
+fun _helm_explain_failure(release: Text, ns: Text): Null {
+    let desc = ""
+    let json = $helm {helm_ctx_flags()} status "{release}" --namespace "{ns}" -o json 2>/dev/null$ failed { "" }
+    if trim(json) != "" {
+        if optional_cmd("jq") {
+            desc = trust $printf '%s' "{json}" | jq -r '.info.description // empty'$
+            desc = trim(desc)
+        } else {
+            let flat = replace(json, "\n", "")
+            desc = regex_capture(flat, "\"description\"[[:space:]]*:[[:space:]]*\"([^\"]+)\"", 1)
+            desc = trim(desc)
+        }
+    }
+    if desc != "" {
+        ui_dim("  why: {desc}")
+        // "name: <job-name>, kind: Job" is the canonical helm failure shape.
+        let job = regex_capture(desc, "name: ([A-Za-z0-9_.-]+), kind: Job", 1)
+        if job != "" {
+            ui_dim("  failed job: {job} (run `migration-assistant diag` for its events + pod logs)")
+        }
+    }
+    // The pod-phase jsonpath has a literal open-brace, which Amber treats as
+    // interpolation inside a Text or command, so it is built as a separate Text
+    // with the brace escaped, then interpolated whole.
+    let jp = "jsonpath=\{.status.phase}"
+    let console = $kubectl {kubectl_ctx_flags()} get pod migration-console-0 --namespace "{ns}" -o "{jp}" 2>/dev/null$ failed { "" }
+    if trim(console) != "" {
+        ui_dim("  migration-console-0: {trim(console)}")
+    }
+    ui_dim("  full diagnostics: migration-assistant diag")
+}
+
+// ---- _helm_clear_stuck_revision --------------------------------------------
+
+// _helm_clear_stuck_revision <release> <ns> → Bool (true = cleared, false =
+// no prior deployed revision to fall back to → caller rolls back / uninstalls).
+//
+// When helm's bookkeeping says pending-upgrade/failed but the cluster is mostly
+// healthy, marking the stuck latest revision's Secret as `superseded` lets the
+// next `helm upgrade --install` reconcile in place instead of forcing a full
+// rollback/uninstall (which deletes + recreates workloads). Mechanism mirrors
+// bash exactly:
+//   1. read the latest revision number (helm history --max 1).
+//   2. rev <= 1 → fresh install, nothing to fall back to → false (use uninstall).
+//   3. the prior revision must be deployed/superseded, else → false.
+//   4. label sh.helm.release.v1.<release>.v<latest> status=superseded; if the
+//      prior was superseded, promote it back to deployed.
+//
+// Port notes: bash `(( latest_rev <= 1 ))` arithmetic → `as Int` + comparison;
+// the jq reads stay jq escapes (multi-filter selects with no stdlib equivalent —
+// AMBER_IDIOMS keeps complex jq raw); the `>>"$LOG_FILE" 2>&1` kubectl-label
+// redirect is reproduced verbatim. `--argjson` is fed via a built Text so the
+// jq filter's open-brace isn't captured by Amber interpolation. (Comments must
+// keep braces balanced — a lone open-brace in a comment opens an interpolation
+// the Amber lexer never closes, erroring at EOF; so brace pairs only here.)
+pub fun _helm_clear_stuck_revision(release: Text, ns: Text): Bool {
+    ui_step("Clearing stuck helm revision so upgrade can reconcile in place")
+    let log = log_file_path()
+
+    // Latest revision number from helm itself.
+    let latest_raw = $helm {helm_ctx_flags()} history "{release}" --namespace "{ns}" --max 1 -o json 2>/dev/null | jq -r '.[0].revision // empty' 2>/dev/null$ failed { "" }
+    let latest = trim(latest_raw)
+    if latest == "" {
+        log_warn("helm-clear: could not read latest revision for {release}")
+        return false
+    }
+    let latest_rev = latest as Int
+
+    // Need at least one prior `deployed` revision; a stuck rev=1 is a fresh
+    // install where in-place reconcile == uninstall, so recommend [2] instead.
+    if latest_rev <= 1 {
+        log_warn("helm-clear: only revision {latest_rev} exists; nothing to fall back to. Use [2] uninstall.")
+        return false
+    }
+
+    let prior_rev = latest_rev - 1
+    // The jq select reads the prior revision's status, passing prior_rev via
+    // --argjson r. The jq variable reference must be escaped as \$r — a bare $r
+    // inside an Amber `$…$` command closes the command literal early (crane.ab /
+    // ui.ab escape their bash `$` refs the same way).
+    let prior_status_raw = $helm {helm_ctx_flags()} history "{release}" --namespace "{ns}" -o json 2>/dev/null | jq -r --argjson r "{prior_rev}" '.[] | select(.revision == \$r) | .status' 2>/dev/null$ failed { "" }
+    let prior_status = trim(prior_status_raw)
+    if prior_status != "deployed" and prior_status != "superseded" {
+        log_warn("helm-clear: prior revision {prior_rev} has status '{prior_status}' (not 'deployed'); cannot reconcile in place")
+        return false
+    }
+
+    // Patch the stuck Secret's status label to 'superseded'.
+    let secret = "sh.helm.release.v1.{release}.v{latest_rev}"
+    ui_dim("  marking {secret} as superseded (was the stuck revision)")
+    let label_ok = $kubectl {kubectl_ctx_flags()} label secret "{secret}" --namespace "{ns}" --overwrite "status=superseded" >> "{log}" 2>&1$ failed { "FAIL" }
+    if status() != 0 {
+        log_warn("helm-clear: kubectl label failed; release secret may have a different name")
+        return false
+    }
+
+    // Promote the prior deployed revision to current head if it isn't already
+    // (helm reads the highest-numbered Secret with status=deployed).
+    if prior_status == "superseded" {
+        let prior_secret = "sh.helm.release.v1.{release}.v{prior_rev}"
+        trust $kubectl {kubectl_ctx_flags()} label secret "{prior_secret}" --namespace "{ns}" --overwrite "status=deployed" >> "{log}" 2>&1 || true$
+    }
+
+    ui_ok("stuck revision cleared; helm upgrade will create a new revision on top of v{prior_rev}")
+    return true
+}
+
+// ---- orphan-job filter helpers (above their caller for the tree-shaker) ----
+
+// _first_token <s> — the first whitespace-delimited token of s, or "". Replaces
+// the awk `$1` field extraction over the custom-columns rows.
+fun _first_token(s: Text): Text {
+    let n = len s
+    for i in 0..n {
+        let c = slice(s, i, 1)
+        if c == " " or c == "\t" {
+            return slice(s, 0, i)
+        }
+    }
+    return s
+}
+
+// _starts_with_prefix <s> <prefix> — Bool: does s begin with prefix? (std.ab's
+// starts_with takes (prefix, s) and isn't imported here to avoid the name clash;
+// this local keeps the orphan-job filter self-contained. Mirrors awk `$1 ~ "^…"`.)
+fun _starts_with_prefix(s: Text, prefix: Text): Bool {
+    let pl = len prefix
+    if pl > len s { return false }
+    return slice(s, 0, pl) == prefix
+}
+
+// ---- helm_recover_orphan_jobs ----------------------------------------------
+
+// helm_recover_orphan_jobs <release> <ns> — find Kubernetes Jobs in <ns> that
+// look like leftover helm hooks for <release> (name starts with "<release>-helm-")
+// and that have NOT completed successfully, then (after operator confirm) delete
+// them so the next helm install/upgrade isn't blocked by "resource not ready,
+// name: <release>-helm-installer, kind: Job, status: InProgress".
+//
+// Conservative: only Jobs whose name starts with "<release>-helm-" AND with no
+// successful completion. Never touches Pods or anything outside the namespace.
+//
+// Port notes: the bash awk filter
+//   $1 ~ "^" r "-helm-"  &&  ($2=="" || $2=="0" || $2=="<none>")
+// over `kubectl get jobs … -o custom-columns=NAME,COMPLETIONS` becomes a
+// split_lines + per-row split-on-whitespace + if-chain. The `<<<"$stuck_jobs"`
+// here-string read loops become for-loops over the collected names.
+pub fun helm_recover_orphan_jobs(release: Text, ns: Text): Null {
+    let raw = $kubectl {kubectl_ctx_flags()} get jobs --namespace "{ns}" --no-headers -o custom-columns=NAME:.metadata.name,COMPLETIONS:.status.succeeded 2>/dev/null$ failed { "" }
+
+    // Collect the stuck job names (typed seed → reset to [] so the array is a
+    // real declared bash array even on the no-jobs path; len is the count).
+    let stuck = [""]
+    stuck = []
+    for line in split_lines(raw) {
+        let t = trim(line)
+        if t == "" { continue }
+        // custom-columns rows are whitespace-padded "NAME   COMPLETIONS". Split on
+        // the run of spaces between the two columns: name = first token, the
+        // remainder (trimmed) = the COMPLETIONS field ("", "0", or "<none>" when
+        // the Job has no successful completion; a number when it succeeded).
+        let name = _first_token(t)
+        let comp = trim(slice(t, len name, (len t) - (len name)))
+        // bash: $1 ~ "^<release>-helm-"
+        let prefix = "{release}-helm-"
+        if not _starts_with_prefix(name, prefix) { continue }
+        // bash: ($2=="" || $2=="0" || $2=="<none>")
+        if comp == "" or comp == "0" or comp == "<none>" {
+            stuck += [name]
+        }
+    }
+
+    if len stuck == 0 { return null }
+
+    ui_warn("found orphan helm-hook Jobs in namespace {ns}:")
+    for job in stuck {
+        ui_dim("    - {job}")
+    }
+
+    if not ui_confirm("Delete these stuck Jobs so the install can proceed?", "Y") {
+        ui_warn("leaving orphan Jobs in place; helm install will likely fail")
+        return null
+    }
+
+    for job in stuck {
+        if job == "" { continue }
+        log_stream("kubectl-del-job-{job}", "kubectl {kubectl_ctx_flags()} delete job \"{job}\" --namespace \"{ns}\" --wait=true --timeout=60s")
+    }
+    ui_ok("orphan Jobs cleared")
+}
+
+// ---- _helm_wait_namespace_settled ------------------------------------------
+
+// _helm_wait_namespace_settled <ns> [<timeout_s>] → Bool (true = settled, false
+// = still Terminating past the timeout). Waits until the namespace is either
+// fully gone OR back in Active phase — while it sits in Terminating, both helm
+// and `kubectl create` 403 with "unable to create new content in namespace X
+// because it is being terminated". Default timeout 180s (NAMESPACE_SETTLE_TIMEOUT_S).
+//
+// Port notes: the bash `case "$phase"` over the jsonpath status → if-chain;
+// `date +%s` clock math → date_now() Int subtraction; the `while :; … sleep 5`
+// poll → a `loop { … trust sleep(5) }`. The status jsonpath has an open-brace
+// that Amber would treat as interpolation inside a command, so the jsonpath is
+// built as a SEPARATE Text (brace escaped) and interpolated whole.
+pub fun _helm_wait_namespace_settled(ns: Text, timeout_s: Int): Bool {
+    let started = date_now()
+    let printed_warning = false
+    // The status jsonpath has a literal open-brace which Amber captures as
+    // interpolation even in a plain Text literal, so it is escaped (state.ab does
+    // the same for its JSON braces). Built as a separate token, interpolated whole.
+    let jp = "jsonpath=\{.status.phase}"
+    loop {
+        let phase = trim($kubectl {kubectl_ctx_flags()} get namespace "{ns}" -o "{jp}" 2>/dev/null$ failed { "" })
+        if {
+            // Namespace doesn't exist (uninstall + finalizers finished / never
+            // existed) OR it's Active — settled either way.
+            phase == "" { return true }
+            phase == "Active" { return true }
+            phase == "Terminating" {
+                if not printed_warning {
+                    ui_dim("  namespace {ns} is Terminating; waiting up to {timeout_s}s for finalizers")
+                    printed_warning = true
+                }
+            }
+        }
+        let now = date_now()
+        if now - started >= timeout_s {
+            ui_err("namespace {ns} still in '{phase}' after {timeout_s}s")
+            ui_dim("  hint: kubectl get namespace {ns} -o yaml  (look for stuck finalizers)")
+            return false
+        }
+        trust sleep(5)
+    }
+}
+
+// ---- helm_ensure_namespace -------------------------------------------------
+
+// helm_ensure_namespace <ns> — idempotent namespace ensure. If the namespace is
+// Active, nothing is printed; if absent, create it. First waits out any post-
+// uninstall Terminating window (where create would 403). die()s on a settle
+// timeout or a create failure (bash `|| die`).
+//
+// Port note: `_helm_wait_namespace_settled "$ns" || die …` → branch on the Bool.
+// The settle timeout comes from NAMESPACE_SETTLE_TIMEOUT_S (default 180), read
+// here so the bash default semantics survive.
+pub fun helm_ensure_namespace(ns: Text): Null {
+    let to_s = env_var_get("NAMESPACE_SETTLE_TIMEOUT_S") failed { "180" }
+    if to_s == "" { to_s = "180" }
+    if not _helm_wait_namespace_settled(ns, to_s as Int) {
+        die("namespace {ns} did not settle; see {log_file_path()}")
+    }
+
+    // Namespace already exists? `kubectl get namespace` exits 0 → skip create.
+    trust $kubectl {kubectl_ctx_flags()} get namespace "{ns}" >/dev/null 2>&1$
+    if status() == 0 {
+        log_info("namespace {ns} already exists; skipping create")
+        return null
+    }
+
+    ui_dim("  creating namespace: {ns}")
+    let log = log_file_path()
+    trust $kubectl {kubectl_ctx_flags()} create namespace "{ns}" >> "{log}" 2>&1$
+    if status() != 0 {
+        die("could not create namespace {ns}; see {log}")
+    }
+    log_info("namespace {ns} created")
+}
+
+// ---- helm_recover_if_stuck (public entry) ----------------------------------
+
+// helm_recover_if_stuck <release> <ns> → Int (0 = clean to proceed, non-zero =
+// operator declined recovery and the release is still stuck).
+//
+// Detects releases stuck in pending-* / failed / uninstalling states AND orphan
+// helm-hook Jobs from a previous run, and offers a recovery path:
+//   pending-install → uninstall (the install never finished)
+//   pending-upgrade → rollback / uninstall / abort / reconcile-in-place (menu)
+//   failed          → same menu as pending-upgrade
+//   pending-rollback→ uninstall (rollback itself got stuck)
+//   uninstalling    → wait up to 60s, then force uninstall
+//
+// Port notes: the `case "$status"` → if-chain (named `st`); the bash
+// `printf '    %s[1]%s …' "$__UI_C_BOLD" …` menu lines → eprintln with ui_bold()/
+// ui_reset(); the interactive `ui_prompt "Choose" "1" pick` → ui_prompt return
+// value; the nested `if log_stream …; then` rollback success branch → branch on
+// the Int rc; the `_helm_clear_stuck_revision … || { fallback }` brace group →
+// if-not on the returned Bool.
+pub fun helm_recover_if_stuck(release: Text, ns: Text): Int {
+    // Always check for orphan hook Jobs first — they can be stuck even when the
+    // helm release itself is "absent" (a failed uninstall that left the pre-
+    // install Job behind).
+    helm_recover_orphan_jobs(release, ns)
+
+    let st = _helm_release_status(release, ns)
+    if {
+        st == "" or st == "deployed" or st == "superseded" {
+            // Healthy or absent — nothing more to recover.
+            return 0
+        }
+        st == "pending-install" {
+            ui_warn("previous helm install for '{release}' never finished (status={st})")
+            if ui_confirm("Uninstall the stuck release and start fresh?", "Y") {
+                _helm_uninstall_quiet(release, ns)
+            } else {
+                return 1
+            }
+        }
+        st == "pending-upgrade" or st == "failed" {
+            ui_warn("previous helm operation for '{release}' is stuck (status={st})")
+            _helm_explain_failure(release, ns)
+            ui_info("Recovery options:")
+            let bold = ui_bold()
+            let reset = ui_reset()
+            eprintln("    {bold}[1]{reset} rollback to the last successful revision")
+            eprintln("    {bold}[2]{reset} uninstall the release entirely (then helm will reinstall)")
+            eprintln("    {bold}[3]{reset} abort and let me investigate manually")
+            eprintln("    {bold}[4]{reset} reconcile in place — clear the stuck status and let helm upgrade run again")
+            let pick = ui_prompt("Choose", "1")
+            if {
+                pick == "1" {
+                    ui_dim("  rolling back {release}…")
+                    let rc = log_stream("helm-rollback", "helm {helm_ctx_flags()} rollback \"{release}\" --namespace \"{ns}\" --wait --timeout 5m")
+                    if rc == 0 {
+                        ui_ok("rollback complete")
+                    } else {
+                        ui_warn("rollback failed; falling back to uninstall")
+                        _helm_uninstall_quiet(release, ns)
+                    }
+                }
+                pick == "2" {
+                    _helm_uninstall_quiet(release, ns)
+                }
+                pick == "4" {
+                    // Clear the stuck status so the upcoming upgrade reconciles
+                    // in place rather than fighting the prior revision's lock.
+                    if not _helm_clear_stuck_revision(release, ns) {
+                        ui_warn("in-place reconcile not possible; falling back to rollback")
+                        let rc = log_stream("helm-rollback", "helm {helm_ctx_flags()} rollback \"{release}\" --namespace \"{ns}\" --wait --timeout 5m")
+                        if rc == 0 {
+                            ui_ok("rollback complete")
+                        } else {
+                            ui_warn("rollback failed; falling back to uninstall")
+                            _helm_uninstall_quiet(release, ns)
+                        }
+                    }
+                }
+                else {
+                    ui_warn("aborting; release {release} is still in '{st}' state")
+                    return 1
+                }
+            }
+        }
+        st == "pending-rollback" {
+            ui_warn("rollback for '{release}' got stuck; uninstalling")
+            _helm_uninstall_quiet(release, ns)
+        }
+        st == "uninstalling" {
+            ui_dim("  release {release} is mid-uninstall; waiting up to 60s for it to finish…")
+            let i = 0
+            let cleared = false
+            while i < 12 {
+                trust sleep(5)
+                let again = _helm_release_status(release, ns)
+                if again == "" {
+                    cleared = true
+                    break
+                }
+                i += 1
+            }
+            if not cleared {
+                ui_warn("release still uninstalling after 60s; forcing")
+                _helm_uninstall_quiet(release, ns)
+            }
+        }
+        else {
+            log_warn("unknown helm status '{st}' for {release}; proceeding anyway")
+        }
+    }
+    return 0
+}

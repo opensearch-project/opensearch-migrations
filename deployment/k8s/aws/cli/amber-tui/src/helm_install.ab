@@ -1,0 +1,547 @@
+// helm_install.ab — install/upgrade the migration-assistant chart and wait for
+// migration-console-0 readiness.
+//
+// This is the INSTALL-ORCHESTRATION quarter of bash lib/helm.sh, split four ways:
+//   helm_ctx      — context binding (HELM=()/KUBECTL=() → stored flag prefix).
+//   helm_recover  — stuck-release recovery + namespace ensure.
+//   helm_diag     — failure diagnostics + the synchronous pod/installer dumps.
+//   helm_install  — THIS file: helm_install_or_upgrade + the values file + the
+//                   image/tls/nodepool --set flag builders + the post-install
+//                   disable-general-purpose-pool toggle + the helm_watch_*
+//                   compatibility wrappers.
+//
+// Functions ported here (public fn names preserved verbatim so the other helm_*
+// files + console/cleanup/resume call them unchanged):
+//   helm_install_or_upgrade
+//   _write_helm_values
+//   _helm_extract_chart_values
+//   _helm_build_public_image_flags     (eval-array-append → returns [Text])
+//   _helm_build_mirrored_image_flags   (eval-array-append → returns [Text])
+//   _helm_tls_flags                    (eval-array-append → returns [Text])
+//   _helm_apply_disable_general_purpose_pool
+//   helm_watch_pods                    (synchronous post-hoc pod-status dump)
+//   helm_watch_installer_logs          (synchronous post-hoc installer-notes dump)
+//
+// The context binding (helm_ctx_flags / kubectl_ctx_flags / helm_ctx_init), the
+// pinned names (HELM_RELEASE_NAME / HELM_NAMESPACE / HELM_CHART_NAME), the recovery
+// gate (helm_recover_if_stuck / helm_ensure_namespace) and the diagnostics +
+// pod/install-notes dumps (helm_dump_diagnostics / helm_dump_pods /
+// helm_pods_summary / _helm_dump_install_notes / _helm_pods_log) are IMPORTED from
+// their owning sibling modules — used, not re-implemented.
+//
+// KEY DESIGN — command arrays → a stored Text flag prefix (owned by helm_ctx.ab):
+//   Bash bound context with command ARRAYS: HELM=(helm --kube-context X) /
+//   KUBECTL=(kubectl --context X). Amber 0.6 cannot splat an array as a command
+//   head, so the context lives as a stored Text FLAG PREFIX. helm_ctx_init() reads
+//   KUBECTL_CONTEXT from state; helm_ctx_flags()/kubectl_ctx_flags() return
+//   "--kube-context X" / "--context X" (or "" → bare helm/kubectl). Every command
+//   interpolates the prefix UNQUOTED so the shell word-splits it back into argv:
+//       trust $ helm {helm_ctx_flags()} upgrade --install … $
+//   Context names are k8s identifiers (no spaces), so the word-split is safe.
+//
+// BACKGROUND WATCHERS → SYNCHRONOUS (port-plan decision):
+//   Bash spawned helm_watch_pods & helm_watch_installer_logs & alongside `helm
+//   --wait`, then killed them. The port instead runs `helm upgrade --install
+//   --wait` to COMPLETION via log_stream (combined output → log + stderr), THEN
+//   does a single post-hoc pod-status dump + installation-notes dump. The
+//   operator-visible CONTENT (pod counts, per-sub-chart install NOTES) is
+//   preserved; only the real-time interleave changes. Tests assert on returned
+//   Text/status, not on live interleave.
+//
+// Other port notes vs the bash original:
+//   * eval "$out_name=(…)" indirect array → return [Text]; the caller concatenates
+//     with `+=` / a join into the one command Text (log_stream takes one Text).
+//   * heredoc values file → Text + file_write.
+//   * set +e/-e → log_stream returns the rc as an Int (no early-abort to guard).
+//   * No raw ${} inside $…$ → env_var_get / state_get.
+//   * The EKS update-cluster-config JSON blobs contain `{` (Amber interpolation),
+//     so they're written to on-disk fixture files and passed by `file://` path —
+//     no braces embedded in a `$…$` command (AMBER_IDIOMS on-disk-fixture trick).
+
+import { trim } from "std/text"
+import { env_var_get } from "std/env"
+import { file_write, file_exists, dir_create } from "std/fs"
+import {
+    state_load, state_get, state_set, state_save
+} from "./state.ab"
+import { die } from "./common.ab"
+import {
+    ui_ok, ui_warn, ui_err, ui_step, ui_dim
+} from "./ui.ab"
+import { artifacts_fetch } from "./artifacts.ab"
+import { cfn_outputs, _cfn_pick } from "./cfn_outputs.ab"
+import { log_info, log_stream, log_file } from "./log.ab"
+import { term_link } from "./term.ab"
+// Context binding — helm_ctx.ab is the canonical owner of the flag prefix + the
+// pinned release/namespace/chart names.
+import {
+    helm_ctx_init, helm_ctx_flags, kubectl_ctx_flags,
+    HELM_RELEASE_NAME, HELM_NAMESPACE, HELM_CHART_NAME
+} from "./helm_ctx.ab"
+// Recovery gate + namespace ensure.
+import { helm_recover_if_stuck, helm_ensure_namespace } from "./helm_recover.ab"
+// Diagnostics + the synchronous pod/installer dumps (the watcher bodies).
+import {
+    helm_dump_diagnostics, helm_pods_summary, _helm_pods_log,
+    _helm_dump_install_notes
+} from "./helm_diag.ab"
+
+// ============================================================================
+// Private helpers FIRST. Amber tree-shakes per imported symbol and keeps only
+// transitive deps that textually PRECEDE the public entry point across an import
+// boundary, so every callee MUST appear above its caller or it is silently
+// dropped (→ "Function 'x' does not exist" when this module is imported).
+// ============================================================================
+
+// stage_dir — resolve $STAGE_DIR the way the other ported modules do (crane.ab /
+// state.ab): an explicit STAGE_DIR env var wins (the bats harness / diag.sh pin
+// one; bash read $STAGE_DIR directly), else MIGRATE_HOME (default
+// "$PWD/migration-assistant-workspace") joined with STAGE (default "default").
+fun stage_dir(): Text {
+    let explicit = env_var_get("STAGE_DIR") failed { "" }
+    if explicit != "" { return explicit }
+    let home = env_var_get("MIGRATE_HOME") failed { "" }
+    if home == "" {
+        let pwd = trust $pwd$
+        home = "{pwd}/migration-assistant-workspace"
+    }
+    let st = env_var_get("STAGE") failed { "" }
+    if st == "" { st = "default" }
+    return "{home}/{st}"
+}
+
+// ============================================================================
+// _helm_extract_chart_values — extract values.yaml + valuesEks.yaml from the
+// chart (tarball or --ma-chart-dir directory) into <stage>/chart-values.
+// ============================================================================
+
+// _helm_extract_chart_values <chart> → the directory containing the extracted
+// values.yaml + valuesEks.yaml. Helm cannot reference value files inside an
+// archive, so we extract them alongside the install. Idempotent (re-extract is
+// fine). A --ma-chart-dir directory has the files on disk already (cp them); a
+// tarball's top-level is `migration-assistant/`, stripped to land the files at
+// the bottom of <dir>.
+pub fun _helm_extract_chart_values(chart: Text): Text {
+    let dir = "{stage_dir()}/chart-values"
+    dir_create(dir) failed {}
+    // A chart DIRECTORY (--ma-chart-dir) has the value files on disk already.
+    trust $test -d "{chart}"$
+    if status() == 0 {
+        if not file_exists("{chart}/values.yaml") { die("chart dir missing values.yaml: {chart}") }
+        if not file_exists("{chart}/valuesEks.yaml") { die("chart dir missing valuesEks.yaml: {chart}") }
+        trust $cp -f "{chart}/values.yaml" "{dir}/values.yaml"$
+        trust $cp -f "{chart}/valuesEks.yaml" "{dir}/valuesEks.yaml"$
+    } else {
+        // Tarball: strip the leading `migration-assistant/` path component.
+        trust $tar -xzf "{chart}" -C "{dir}" --strip-components=1 migration-assistant/values.yaml migration-assistant/valuesEks.yaml 2>/dev/null$
+        if status() != 0 {
+            die("could not extract values from chart: {chart}")
+        }
+    }
+    return dir
+}
+
+// ============================================================================
+// _write_helm_values — write the (currently boilerplate) per-stage overrides
+// file. A hook for future per-stage overrides; chart values.yaml + valuesEks.yaml
+// + the --set flags cover everything today.
+// ============================================================================
+
+// _write_helm_values <out> — write the per-stage helm values file. The bash
+// heredoc becomes a Text + file_write. The file at <out> is the product (the
+// caller passes it with --values).
+pub fun _write_helm_values(out: Text): Null {
+    let body = "# Generated by migration-assistant — edit at your own risk; overwritten on rerun.\n# Per-stage overrides go here. Chart's values.yaml + valuesEks.yaml are\n# applied first; this file applies last.\n"
+    file_write(out, body) failed { die("could not write helm values file: {out}") }
+}
+
+// ============================================================================
+// IMAGE-FLAG BUILDERS. bash populated a caller array via `eval "$out_name=(…)"`;
+// in Amber each RETURNS the [Text] of --set flags the caller folds into the one
+// helm command Text. Modeled with parallel name[]/suffix[] arrays (Amber forbids
+// nested arrays — the same parallel-array shape crane.ab / state.ab use).
+// ============================================================================
+
+// _helm_build_public_image_flags <ma_version> → [Text] of the --set flags that
+// point all five migration images at
+// public.ecr.aws/opensearchproject/opensearch-migrations-* at <ma_version>. Used
+// when MIRROR_IMAGES=N OR no private registry was found. Each flag is a separate
+// element ("--set", "images.X.repository=…", "--set", "images.X.tag=…").
+pub fun _helm_build_public_image_flags(ver: Text): [Text] {
+    let pub_reg = "public.ecr.aws/opensearchproject"
+    let names = [""]
+    let suffixes = [""]
+    names = []
+    suffixes = []
+    names += ["captureProxy"];        suffixes += ["opensearch-migrations-traffic-capture-proxy"]
+    names += ["trafficReplayer"];     suffixes += ["opensearch-migrations-traffic-replayer"]
+    names += ["reindexFromSnapshot"]; suffixes += ["opensearch-migrations-reindex-from-snapshot"]
+    names += ["migrationConsole"];    suffixes += ["opensearch-migrations-console"]
+    names += ["installer"];           suffixes += ["opensearch-migrations-console"]
+
+    let flags = [""]
+    flags = []
+    let n = len names
+    for i in 0..n {
+        let name = names[i]
+        let suffix = suffixes[i]
+        flags += ["--set"]
+        flags += ["images.{name}.repository={pub_reg}/{suffix}"]
+        flags += ["--set"]
+        flags += ["images.{name}.tag={ver}"]
+    }
+    return flags
+}
+
+// _helm_build_mirrored_image_flags <registry> <ma_version> → [Text] of the --set
+// flags pointing all five images at the operator's private ECR. Mirrored layout
+// uses tags like "migrations_capture_proxy_<ver>" within a single repo — matched
+// exactly.
+pub fun _helm_build_mirrored_image_flags(registry: Text, ver: Text): [Text] {
+    let names = [""]
+    let prefixes = [""]
+    names = []
+    prefixes = []
+    names += ["captureProxy"];        prefixes += ["migrations_capture_proxy"]
+    names += ["trafficReplayer"];     prefixes += ["migrations_traffic_replayer"]
+    names += ["reindexFromSnapshot"]; prefixes += ["migrations_reindex_from_snapshot"]
+    names += ["migrationConsole"];    prefixes += ["migrations_migration_console"]
+    names += ["installer"];           prefixes += ["migrations_migration_console"]
+
+    let flags = [""]
+    flags = []
+    let n = len names
+    for i in 0..n {
+        let name = names[i]
+        let tag_prefix = prefixes[i]
+        flags += ["--set"]
+        flags += ["images.{name}.repository={registry}"]
+        flags += ["--set"]
+        flags += ["images.{name}.tag={tag_prefix}_{ver}"]
+    }
+    return flags
+}
+
+// ============================================================================
+// _helm_tls_flags — TLS --set flags derived from state's TLS_MODE / PCA_ARN.
+// bash populated a caller array via eval + die'd on validation failure; here we
+// RETURN the [Text] and die() directly on an invalid mode / missing --pca-arn
+// (the bash version die'd via the caller — same net effect).
+// ============================================================================
+
+// _helm_tls_flags → [Text] of the helm --set args for the chosen TLS mode.
+//   "" / none / self-signed → no flags (chart defaults handle these)
+//   pca-existing            → aws-privateca-issuer on + awsPrivateCA.arn/.region
+//                             (requires PCA_ARN, else die)
+//   pca-create              → aws-privateca-issuer + ack-acmpca-controller on,
+//                             awsPrivateCA.create=true + .region
+//   anything else           → die (unknown mode)
+pub fun _helm_tls_flags(): [Text] {
+    // Re-load from disk so a standalone caller (and the unit test) sees the
+    // orchestrator-persisted TLS_MODE / PCA_ARN even though each module owns a
+    // private copy of state.ab's store. Idempotent inside helm_install_or_upgrade
+    // (which already state_load()ed this module's instance). Same pattern
+    // helm_recover/helm_ctx use to bridge the per-importer state instances.
+    state_load()
+    let mode = state_get("TLS_MODE", "")
+    let pca = state_get("PCA_ARN", "")
+    let region = state_get("AWS_REGION", "")
+    let flags = [""]
+    flags = []
+    if {
+        mode == "" or mode == "none" or mode == "self-signed" {
+            // no extra flags
+        }
+        mode == "pca-existing" {
+            if pca == "" { die("--tls-mode pca-existing requires --pca-arn") }
+            flags += ["--set"]; flags += ["conditionalPackageInstalls.aws-privateca-issuer=true"]
+            flags += ["--set"]; flags += ["awsPrivateCA.arn={pca}"]
+            flags += ["--set"]; flags += ["awsPrivateCA.region={region}"]
+        }
+        mode == "pca-create" {
+            flags += ["--set"]; flags += ["conditionalPackageInstalls.aws-privateca-issuer=true"]
+            flags += ["--set"]; flags += ["conditionalPackageInstalls.ack-acmpca-controller=true"]
+            flags += ["--set"]; flags += ["awsPrivateCA.create=true"]
+            flags += ["--set"]; flags += ["awsPrivateCA.region={region}"]
+        }
+        else {
+            die("unknown --tls-mode: {mode} (expected: none, self-signed, pca-existing, pca-create)")
+        }
+    }
+    return flags
+}
+
+// ============================================================================
+// _helm_apply_disable_general_purpose_pool — post-install EKS Auto Mode toggle.
+// ============================================================================
+
+// _helm_apply_disable_general_purpose_pool <cluster> <region> → Int (0 = OK).
+// Ask EKS Auto Mode to drop "general-purpose" from the cluster's compute config.
+// Run AFTER helm install so the chart's pre-install Job had somewhere to schedule.
+// We need the existing nodeRoleArn (aws requires the whole compute-config blob).
+//
+// The three JSON config blobs contain `{` which would start Amber interpolation
+// inside a `$…$` command. We write them to on-disk fixture files under the stage
+// dir and pass them by `file://` path, avoiding any brace-in-command (the
+// AMBER_IDIOMS on-disk-fixture trick).
+pub fun _helm_apply_disable_general_purpose_pool(cluster: Text, region: Text): Int {
+    ui_step("Disabling EKS Auto Mode general-purpose pool (cluster={cluster})")
+    let node_role_arn = $aws eks describe-cluster --name "{cluster}" --region "{region}" --query 'cluster.computeConfig.nodeRoleArn' --output text 2>/dev/null$ failed { "" }
+    if status() != 0 {
+        ui_err("could not describe-cluster {cluster}")
+        return 1
+    }
+    let arn = trim(node_role_arn)
+    if arn == "" or arn == "None" {
+        ui_warn("cluster {cluster} has no Auto Mode compute config; nothing to disable")
+        return 0
+    }
+
+    // Write the three JSON blobs to fixture files. The braces are escaped `\{` so
+    // Amber keeps them literal in the Text (gotcha: `{` is interpolation even in a
+    // plain Text literal); `}` is literal and needs no escape.
+    let dir = "{stage_dir()}/eks-config"
+    dir_create(dir) failed {}
+    let compute_file = "{dir}/compute-config.json"
+    let net_file = "{dir}/network-config.json"
+    let storage_file = "{dir}/storage-config.json"
+    let compute_json = "\{\"enabled\":true,\"nodePools\":[\"system\"],\"nodeRoleArn\":\"{arn}\"}"
+    let net_json = "\{\"elasticLoadBalancing\":\{\"enabled\":true}}"
+    let storage_json = "\{\"blockStorage\":\{\"enabled\":true}}"
+    file_write(compute_file, compute_json) failed { die("could not write {compute_file}") }
+    file_write(net_file, net_json) failed { die("could not write {net_file}") }
+    file_write(storage_file, storage_json) failed { die("could not write {storage_file}") }
+
+    let rc = log_stream("eks-update", "aws eks update-cluster-config --name \"{cluster}\" --region \"{region}\" --compute-config file://{compute_file} --kubernetes-network-config file://{net_file} --storage-config file://{storage_file}")
+    if rc != 0 {
+        ui_err("aws eks update-cluster-config failed; see {log_file()}")
+        return rc
+    }
+    ui_ok("general-purpose pool disabled on {cluster}")
+    return 0
+}
+
+// ============================================================================
+// helm_watch_pods / helm_watch_installer_logs — bash-name compatibility wrappers
+// over the SYNCHRONOUS post-hoc dumps (the watcher bodies live in helm_diag). The
+// bash names are preserved so any caller (console / cleanup / resume) that grew up
+// against helm.sh keeps working; the install flow calls them after `helm --wait`.
+// ============================================================================
+
+// helm_watch_pods <ns> → emit ONE pod-status summary line for the namespace and
+// RETURN the summary Text. SYNCHRONOUS post-hoc dump (the bash background watcher
+// folded into a single after-the-fact snapshot). Takes one `kubectl get pods`
+// snapshot, builds the summary via helm_diag's pure helm_pods_summary, and emits
+// it through the "pods│" channel (helm_diag's _helm_pods_log). Returns the
+// summary so tests can assert on counts/names without a live cluster.
+pub fun helm_watch_pods(ns: Text): Text {
+    let snapshot = $kubectl {kubectl_ctx_flags()} get pods -n "{ns}" --no-headers -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[*].ready 2>/dev/null$ failed { "" }
+    if trim(snapshot) == "" {
+        _helm_pods_log("waiting for pods in namespace {ns} to appear…")
+        return ""
+    }
+    let summary = helm_pods_summary(snapshot)
+    _helm_pods_log(summary)
+    return summary
+}
+
+// helm_watch_installer_logs <release> <ns> — the SYNCHRONOUS post-hoc installer
+// dump (the bash background `kubectl logs -f` follow folded into the durable
+// artifact). After `helm --wait` returns, the installer Job's pod is gone, so we
+// go straight to the <release>-installation-notes ConfigMap the chart writes at
+// the end of the Job — its all-notes.txt key carries the per-sub-chart success
+// NOTES that helm normally prints (buried inside the Job pod's stdout). Delegates
+// to helm_diag's _helm_dump_install_notes (poll-for-ConfigMap → stream notes).
+pub fun helm_watch_installer_logs(release: Text, ns: Text): Null {
+    _helm_dump_install_notes(release, ns)
+}
+
+// ============================================================================
+// helm_install_or_upgrade — public entry point.
+// ============================================================================
+
+// helm_install_or_upgrade → Int (0 on success). Install (or idempotently upgrade)
+// the migration-assistant chart and wait for migration-console-0 readiness.
+//
+// Flow (port of the bash function, watchers folded into a synchronous post-hoc
+// dump per the port plan):
+//   1. Load state; bind context flags (helm_ctx_init).
+//   2. Read CFN outputs for the registry + snapshot role.
+//   3. Resolve the chart (--ma-chart-dir, else download the tarball).
+//   4. Extract the chart's bundled values + write the per-stage values file.
+//   5. Build the image / snapshot / nodepool / tls / extra-values --set flags.
+//   6. Ensure the namespace; gate on recovery (helm_recover_if_stuck).
+//   7. Run `helm upgrade --install … --wait` via log_stream (combined output →
+//      log + stderr); on failure dump diagnostics + return rc.
+//   8. Post-hoc: emit the pod-status summary + the installation-notes dump.
+//   9. Wait for migration-console-0 Ready; persist state; optional
+//      disable-general-purpose-pool.
+pub fun helm_install_or_upgrade(): Int {
+    state_load()
+    helm_ctx_init()
+
+    let stack_name = state_get("CFN_STACK_NAME", "")
+    let region = state_get("AWS_REGION", "")
+    let ma_ver = state_get("MA_VERSION", "")
+    if region == "" { die("AWS_REGION not set") }
+
+    // CFN outputs: registry + snapshot role for the --set flags.
+    let outputs = cfn_outputs(stack_name, region)
+    let registry_from_cfn = _cfn_pick(outputs, ["MIGRATIONS_ECR_REGISTRY", "ECRRegistry"])
+
+    // Chart resolution. --ma-chart-dir points at a local chart directory and skips
+    // the release fetch entirely.
+    let chart = ""
+    let chart_dir = state_get("MA_CHART_DIR", "")
+    if chart_dir != "" {
+        trust $test -d "{chart_dir}"$
+        if status() != 0 { die("--ma-chart-dir not found or not a directory: {chart_dir}") }
+        if not file_exists("{chart_dir}/Chart.yaml") {
+            die("--ma-chart-dir is not a helm chart (no Chart.yaml): {chart_dir}")
+        }
+        ui_step("Using local helm chart: {chart_dir}")
+        chart = chart_dir
+    } else {
+        ui_step("Downloading helm chart (MA v{ma_ver})")
+        chart = artifacts_fetch("{HELM_CHART_NAME}-{ma_ver}.tgz", ma_ver)
+    }
+
+    // Extract the chart's bundled valuesEks.yaml + values.yaml.
+    let chart_extract = _helm_extract_chart_values(chart)
+
+    // Registry preference: operator-mirrored (CRANE_REGISTRY) → CFN-provisioned →
+    // empty (use the public images path).
+    let registry = state_get("CRANE_REGISTRY", registry_from_cfn)
+    let stage = state_get("STAGE_NAME", "default")
+    let mirror_chosen = state_get("MIRROR_IMAGES", "Y")
+
+    let release = HELM_RELEASE_NAME
+    let helm_ns = HELM_NAMESPACE
+
+    ui_step("Installing/upgrading helm release: {release} (stage={stage}, namespace={helm_ns})")
+
+    helm_ensure_namespace(helm_ns)
+
+    let rec_rc = helm_recover_if_stuck(release, helm_ns)
+    if rec_rc != 0 { return rec_rc }
+
+    let values_file = "{stage_dir()}/helm-values.yaml"
+    _write_helm_values(values_file)
+
+    // Image-override --set flags. MIRROR_IMAGES=Y + a registry → mirrored ECR;
+    // else public.ecr.aws/opensearchproject. When --build pushed images, the tag
+    // suffix is the build's --image-tag (BUILD_IMAGE_TAG), not the MA version.
+    let mirror_tag = state_get("BUILD_IMAGE_TAG", ma_ver)
+    let image_flags = [""]
+    image_flags = []
+    if mirror_chosen == "Y" and registry != "" {
+        image_flags = _helm_build_mirrored_image_flags(registry, mirror_tag)
+        log_info("helm: using mirrored images at {registry} (tag={mirror_tag})")
+    } else {
+        image_flags = _helm_build_public_image_flags(ma_ver)
+        log_info("helm: using public.ecr.aws/opensearchproject images @ {ma_ver}")
+    }
+
+    let account = state_get("AWS_ACCOUNT", "")
+
+    // Snapshot role for S3 IRSA (tolerate older templates without it).
+    let snapshot_role = _cfn_pick(outputs, ["SNAPSHOT_ROLE", "SnapshotRole"])
+    let snapshot_args = [""]
+    snapshot_args = []
+    if snapshot_role != "" {
+        snapshot_args += ["--set"]
+        snapshot_args += ["defaultBucketConfiguration.snapshotRoleArn={snapshot_role}"]
+    }
+
+    // Operator-supplied --helm-values FILE. Appended LAST so it overrides
+    // everything (chart values.yaml + valuesEks.yaml + ours).
+    let extra_values_file = state_get("HELM_EXTRA_VALUES_FILE", "")
+    let extra_values_args = [""]
+    extra_values_args = []
+    if extra_values_file != "" {
+        if not file_exists(extra_values_file) {
+            die("--helm-values file not found: {extra_values_file}")
+        }
+        extra_values_args += ["--values"]
+        extra_values_args += [extra_values_file]
+    }
+
+    // NodePool flags. --use-general-node-pool flips the custom Karpenter NodePool
+    // OFF so workloads schedule on the EKS Auto Mode general-purpose pool.
+    let nodepool_args = [""]
+    nodepool_args = []
+    if state_get("USE_GENERAL_NODE_POOL", "N") == "Y" {
+        nodepool_args += ["--set"]
+        nodepool_args += ["cluster.useCustomKarpenterNodePool=false"]
+    }
+
+    // TLS flags from --tls-mode / --pca-arn (_helm_tls_flags die()s on a bad mode).
+    let tls_args = _helm_tls_flags()
+
+    ui_dim("  helm output streamed below; full log: {log_file()}")
+    if mirror_chosen == "Y" and registry != "" {
+        ui_dim("  image source: mirrored ({registry})")
+    } else {
+        ui_dim("  image source: public.ecr.aws/opensearchproject")
+    }
+
+    // Assemble the full `helm upgrade --install … --wait` command as ONE Text
+    // (log_stream takes a single Text, not argv). Amber can't splat the flag
+    // arrays into a $…$, so each array is joined into the command Text. Our --set
+    // values never contain spaces (image refs, ARNs, region/account/stage are all
+    // space-free), so the shell word-splits them back into individual args — the
+    // same assumption bash's `"${arr[@]}"` expansion relied on for value safety.
+    let cmd = "helm {helm_ctx_flags()} upgrade --install \"{release}\" \"{chart}\""
+    cmd = "{cmd} --namespace \"{helm_ns}\""
+    cmd = "{cmd} --values \"{chart_extract}/values.yaml\""
+    cmd = "{cmd} --values \"{chart_extract}/valuesEks.yaml\""
+    cmd = "{cmd} --values \"{values_file}\""
+    for a in extra_values_args { cmd = "{cmd} {a}" }
+    cmd = "{cmd} --set \"stageName={stage}\""
+    cmd = "{cmd} --set \"aws.region={region}\""
+    cmd = "{cmd} --set \"aws.account={account}\""
+    for a in snapshot_args { cmd = "{cmd} {a}" }
+    for a in nodepool_args { cmd = "{cmd} {a}" }
+    for a in tls_args { cmd = "{cmd} {a}" }
+    for a in image_flags { cmd = "{cmd} {a}" }
+    cmd = "{cmd} --timeout 25m --wait"
+
+    let helm_rc = log_stream("helm", cmd)
+
+    // Post-hoc dumps (the bash background watchers, folded synchronous): a single
+    // pod-status summary + the installation-notes ConfigMap.
+    helm_watch_pods(helm_ns)
+    helm_watch_installer_logs(release, helm_ns)
+
+    if helm_rc != 0 {
+        helm_dump_diagnostics(release, helm_ns)
+        let link = term_link("file://{log_file()}", log_file())
+        ui_err("helm install/upgrade failed (rc={helm_rc}); diagnostics in {link}")
+        ui_dim("  retry hint: rerun migration-assistant; recovery will clean up stuck releases AND orphan helm-hook Jobs")
+        return helm_rc
+    }
+
+    ui_step("Waiting for migration-console-0 to become Ready")
+    let wait_rc = log_stream("kubectl-wait", "kubectl {kubectl_ctx_flags()} wait --namespace \"{helm_ns}\" --for=condition=ready pod/migration-console-0 --timeout=10m")
+    if wait_rc != 0 {
+        helm_dump_diagnostics(release, helm_ns)
+        let link = term_link("file://{log_file()}", log_file())
+        ui_err("migration-console-0 did not become Ready (rc={wait_rc}); diagnostics in {link}")
+        return wait_rc
+    }
+
+    ui_ok("migration-console-0 is Ready")
+    state_set("HELM_RELEASE", release)
+    state_set("last_step", "helm_done")
+    state_save()
+
+    // Post-install: --disable-general-purpose-pool removes "general-purpose" from
+    // EKS Auto Mode compute config. AFTER helm install so workloads are scheduled.
+    if state_get("DISABLE_GENERAL_NODE_POOL", "N") == "Y" {
+        let cluster_name = _cfn_pick(outputs, ["MIGRATIONS_EKS_CLUSTER_NAME", "EKSClusterName"])
+        let dp_rc = _helm_apply_disable_general_purpose_pool(cluster_name, region)
+        if dp_rc != 0 { return 1 }
+    }
+
+    return 0
+}

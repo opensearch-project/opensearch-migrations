@@ -1,0 +1,259 @@
+// console.ab — exec into the migration-console-0 pod + the `diag` subcommand.
+//
+// Port of bash lib/console.sh (cmd_console / console_exec / _console_exec_into_pod)
+// AND the tiny lib/diag.sh (cmd_diag), merged here because diag.sh shares the
+// same shape (parse --stage → log_init → state_load → STAGE_NAME guard →
+// helm_kctx_init → a helm_* dump) and is too small to warrant its own module.
+//
+// Public fn names are preserved VERBATIM (cmd_console / console_exec / cmd_diag /
+// _console_exec_into_pod) so the entrypoint dispatch + the post-deploy handoff
+// call them unchanged.
+//
+// ============================================================================
+// THE HANDOFF — process replacement vs. a returned exit code.
+// ============================================================================
+// bash console.sh ran `kubectl exec --stdin --tty … -- /bin/bash` as a CHILD
+// (set +e around it), captured rc=$?, then `exit 0` for the operator-driven
+// signals (Ctrl-C→130, Ctrl-\→131, SIGTERM→143) and `exit $rc` otherwise — so
+// the user's outer shell never saw a misleading "command terminated with exit
+// code 130" every time they Ctrl-C inside the console.
+//
+// The port preserves that EXACTLY but returns the mapped rc as an Int UP the
+// stack rather than calling exit() mid-function: a library fn that exit()s mid-
+// stack can't be unit-tested and fights the entrypoint's own exit handling. The
+// 130/131/143→0 mapping lives in _console_exec_into_pod via a `let rc =
+// status()` + an if-chain (no `case`/`match` in 0.6). The entrypoint dispatches
+// to cmd_console / console_exec and exit()s on the returned rc (the single
+// process-exit site), matching the bash net behavior.
+//
+// The kubectl exec itself stays a raw `trust $kubectl … exec --stdin --tty …$`:
+// it inherits the operator's TTY (stdin/stdout/stderr) and blocks until the
+// in-pod shell exits — there is no stdlib equivalent for a TTY-attached child,
+// and we must NOT `silent`/capture it (that would steal the interactive
+// session). trust: a non-zero exit is the rc we map + propagate, not an error
+// to crash on.
+//
+// ============================================================================
+// CONTEXT BINDING + STATE INSTANCE notes (carried over from the helm_* ports).
+// ============================================================================
+// helm_kctx_init() (helm_ctx.ab) is the bash helm_kctx_init alias: it state_
+// load()s from disk, then binds THIS module's own copy of the helm/kubectl
+// context flag prefix (each Amber importer owns a private copy of an imported
+// module's globals, so the binding must be refreshed here from the shared
+// on-disk state.env KUBECTL_CONTEXT). After it, kubectl_ctx_flags() returns the
+// "--context X" prefix (or "" → bare kubectl) every exec interpolates UNQUOTED.
+//
+// HELM_RELEASE_NAME / HELM_NAMESPACE (both pinned "ma") + the *_ctx_flags
+// accessors are IMPORTED from helm_ctx.ab — not re-declared. helm_dump_
+// diagnostics comes from helm_diag.ab. state_* from state.ab, log_init from
+// log.ab, ui_* from ui.ab, die from common.ab, cli_version from version.ab.
+//
+// PORTING NOTES vs the bash originals:
+//   * The `--stage` arg parse (`for ((i…)); case --stage|--stage=*`) → one
+//     parse_flag_value(std.ab) call (handles BOTH `--stage X` and `--stage=X`).
+//     bash set STAGE + STAGE_DIR shell vars (read by state_load/log_init); the
+//     Amber state.ab/log.ab resolve those env-first, so we env_var_set STAGE +
+//     STAGE_DIR (= MIGRATE_HOME/STAGE) so this module's later state_load/log_init
+//     pick up the operator-chosen stage exactly as the bash shell vars did.
+//   * `"${KUBECTL[@]}" exec …` array splat → `kubectl {kubectl_ctx_flags()} exec
+//     …` (the helm_* command-array→flag-prefix model; the context name is a k8s
+//     identifier, so the unquoted word-split into argv is safe).
+//   * `aws sts get-caller-identity … || ui_warn` → a `trust $aws …$` with a
+//     status() check (the table goes to the operator's stdout exactly as bash).
+//   * CLI_VERSION → cli_version() (version.ab). LOG_FILE hint → log_file()
+//     (log.ab); the bash $LOG_FILE global is module-private in the Amber port.
+
+import { env_var_get, env_var_set } from "std/env"
+import {
+    state_load, state_get, state_set, state_save
+} from "./state.ab"
+import { parse_flag_value } from "./std.ab"
+import { die } from "./common.ab"
+import { ui_ok, ui_info, ui_warn, ui_err, ui_step, ui_dim, ui_banner } from "./ui.ab"
+import { log_init, log_file } from "./log.ab"
+import { cli_version } from "./version.ab"
+import {
+    helm_kctx_init, kubectl_ctx_flags,
+    HELM_RELEASE_NAME, HELM_NAMESPACE
+} from "./helm_ctx.ab"
+import { helm_dump_diagnostics } from "./helm_diag.ab"
+
+// ============================================================================
+// Private helpers FIRST. Amber tree-shakes per imported symbol and keeps only
+// transitive deps that textually PRECEDE the public entry point across an import
+// boundary, so every callee MUST appear above its caller or it is silently
+// dropped (→ "Function 'x' does not exist" when this module is imported).
+// ============================================================================
+
+// _apply_stage_arg <argv[]> — honor `--stage <name>` / `--stage=<name>`. bash
+// set the STAGE shell var + STAGE_DIR="$MIGRATE_HOME/$STAGE"; the Amber state.ab
+// / log.ab resolve the stage env-first (STAGE / STAGE_DIR / MIGRATE_HOME), so we
+// env_var_set STAGE and the derived STAGE_DIR here. No-op when --stage is absent
+// (the existing STAGE / state's STAGE_NAME governs). parse_flag_value handles
+// both flag forms in one call.
+fun _apply_stage_arg(argv: [Text]): Null {
+    let st = parse_flag_value("--stage", argv)
+    if st == "" { return null }
+    trust env_var_set("STAGE", st)
+    // STAGE_DIR = "$MIGRATE_HOME/$STAGE" (bash). MIGRATE_HOME default mirrors
+    // common.ab/state.ab: an explicit env wins, else "$PWD/migration-assistant-
+    // workspace".
+    let home = env_var_get("MIGRATE_HOME") failed { "" }
+    if home == "" {
+        let pwd = trust $pwd$
+        home = "{pwd}/migration-assistant-workspace"
+    }
+    trust env_var_set("STAGE_DIR", "{home}/{st}")
+}
+
+// _console_exec_into_pod <ns> → Int (the mapped exit code).
+//
+// Run the migration-console-0 shell as a CHILD (TTY-attached) rather than
+// exec-ing/replacing this process. Translate the operator's natural exit signals
+// (Ctrl-C → 130, Ctrl-\ → 131, SIGTERM → 143) into a clean rc 0 so the user's
+// outer shell doesn't see a misleading "command terminated with exit code 130"
+// every time they Ctrl-C inside the console. Any other non-zero rc is returned
+// verbatim (bash `exit "$rc"`). The mapping is a `let rc = status()` + if-chain
+// (no `case`/`match` keyword in 0.6).
+pub fun _console_exec_into_pod(ns: Text): Int {
+    ui_step("Handing off to migration-console-0 (kubectl exec)")
+    ui_dim("  Press Ctrl-D or 'exit' to leave the console.")
+
+    // The interactive, TTY-attached child. NOT captured / silenced — it must
+    // inherit the operator's stdin/stdout/stderr to be a usable shell. The
+    // context flags word-split into argv (or nothing when unbound). trust: a
+    // non-zero exit is the rc we map below, not an error to handle.
+    trust $kubectl {kubectl_ctx_flags()} exec --stdin --tty --namespace "{ns}" migration-console-0 -- /bin/bash$
+    let rc = status()
+
+    // Operator-driven exits are NOT a CLI failure:
+    //   0   = clean exit / Ctrl-D
+    //   130 = SIGINT  (Ctrl-C inside the pod's shell)
+    //   131 = SIGQUIT (Ctrl-\)
+    //   143 = SIGTERM
+    if {
+        rc == 0   { return 0 }
+        rc == 130 { return 0 }
+        rc == 131 { return 0 }
+        rc == 143 { return 0 }
+        else {
+            ui_warn("kubectl exec exited with rc={rc}")
+            return rc
+        }
+    }
+}
+
+// ============================================================================
+// cmd_console — `migration-assistant console [--stage <name>]`.
+// ============================================================================
+
+// cmd_console <argv[]> → Int. Skip the whole resume/discover/wizard/CFN/helm
+// flow and jump straight into the migration-console pod. Errors clearly when the
+// stage isn't deployed (no STAGE_NAME in state). Returns the mapped exec rc; the
+// entrypoint exit()s on it (the single process-exit site).
+//
+// Flow (port of bash cmd_console):
+//   1. honor --stage (env STAGE + STAGE_DIR so log_init/state_load pick it up).
+//   2. log_init; state_load.
+//   3. STAGE_NAME guard → die if no deployed stage in state.
+//   4. helm_kctx_init (refresh this module's context binding from disk).
+//   5. _console_exec_into_pod(HELM_NAMESPACE).
+pub fun cmd_console(argv: [Text]): Int {
+    _apply_stage_arg(argv)
+    log_init()
+    state_load()
+    if state_get("STAGE_NAME", "") == "" {
+        die("no deployed stage found in state. Run `migration-assistant` first or pass --stage <name>.")
+    }
+    helm_kctx_init()
+    return _console_exec_into_pod(HELM_NAMESPACE)
+}
+
+// ============================================================================
+// console_exec — the post-deploy handoff (called at the end of a full install).
+// ============================================================================
+
+// console_exec → Int. Announce a complete deployment, print the AWS identity at
+// handoff, persist last_step, honor --skip-console-exec, then hand off to the
+// console pod. Returns 0 when --skip-console-exec is set (a successful deploy
+// that ends here), else the mapped exec rc.
+//
+// Flow (port of bash console_exec):
+//   1. ui_ok "deployment complete"; ui_info "AWS identity at handoff".
+//   2. aws sts get-caller-identity --output table (warn on failure).
+//   3. state_set last_step=console_handoff; state_save.
+//   4. SKIP_CONSOLE_EXEC=Y → ui_ok + return 0 (CI / Jenkins path).
+//   5. helm_kctx_init; _console_exec_into_pod(HELM_NAMESPACE).
+pub fun console_exec(): Int {
+    ui_ok("Migration Assistant deployment complete.")
+    ui_info("AWS identity at handoff:")
+    // The identity TABLE goes to the operator's stdout exactly as bash. A failed
+    // sts call is tolerated with a warning (bash `… 2>/dev/null || ui_warn`).
+    trust $aws sts get-caller-identity --output table 2>/dev/null$
+    if status() != 0 {
+        ui_warn("could not call sts:GetCallerIdentity")
+    }
+
+    state_load()
+    state_set("last_step", "console_handoff")
+    state_save()
+
+    // --skip-console-exec (used by Jenkins / CI): the run ends here as a
+    // successful deployment; the caller can attach via `kubectl exec` later.
+    if state_get("SKIP_CONSOLE_EXEC", "N") == "Y" {
+        ui_ok("deployment complete; skipping console exec (--skip-console-exec)")
+        return 0
+    }
+
+    helm_kctx_init()
+    return _console_exec_into_pod(HELM_NAMESPACE)
+}
+
+// ============================================================================
+// cmd_diag — `migration-assistant diag [--stage <name>]` (merged from diag.sh).
+// ============================================================================
+
+// cmd_diag <argv[]> → Int (0 on success). On-demand diagnostics dump for the
+// deployed stage: reads state, resolves the kube context, and runs the SAME diag
+// bundle helm_dump_diagnostics emits on a failed install — but standalone, so the
+// operator can pull it any time without re-running install/upgrade.
+//
+// Flow (port of bash cmd_diag):
+//   1. honor --stage.
+//   2. log_init; ui_banner; ui_dim the cli/stage/workdir line; state_load.
+//   3. STAGE_NAME guard → die if no deployed stage.
+//   4. helm_kctx_init; helm_dump_diagnostics(HELM_RELEASE_NAME, HELM_NAMESPACE).
+//   5. ui_ok with the log path.
+pub fun cmd_diag(argv: [Text]): Int {
+    _apply_stage_arg(argv)
+    log_init()
+    ui_banner("OpenSearch Migration Assistant — diag")
+    // cli=…  stage=…  workdir=…  — resolve the stage / workdir the way state.ab /
+    // log.ab do (env-first), matching the bash `$STAGE` / `$STAGE_DIR` reads.
+    let st = env_var_get("STAGE") failed { "" }
+    if st == "" { st = "default" }
+    let workdir = env_var_get("STAGE_DIR") failed { "" }
+    if workdir == "" {
+        let home = env_var_get("MIGRATE_HOME") failed { "" }
+        if home == "" {
+            let pwd = trust $pwd$
+            home = "{pwd}/migration-assistant-workspace"
+        }
+        workdir = "{home}/{st}"
+    }
+    ui_dim("  cli={cli_version()}  stage={st}  workdir={workdir}")
+    state_load()
+
+    if state_get("STAGE_NAME", "") == "" {
+        die("no deployed stage found in state. Run `migration-assistant` first or pass --stage <name>.")
+    }
+
+    let release = HELM_RELEASE_NAME
+    let ns = HELM_NAMESPACE
+
+    helm_kctx_init()
+    ui_info("stage={st}  release={release}  namespace={ns}")
+    helm_dump_diagnostics(release, ns)
+    ui_ok("diag complete; full output: {log_file()}")
+    return 0
+}

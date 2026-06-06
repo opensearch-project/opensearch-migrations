@@ -91,6 +91,9 @@ Authoritative for this port. The published docs LAG the alpha — every rule her
 9. **Building sed/regex backrefs:** construct `let backref = "\\{n as Text}"` as a SEPARATE Text, then interpolate `{backref}` — inline `"\\{n}"` in a `$...$` mis-lowers the `\\` + var ref.
 10. **`status` builtin: call as `status()`** to avoid the deprecation warning.
 
+## Test-runner flake (don't chase ghosts)
+`amber 0.6.0-alpha`'s parallel `amber test test/` is **nondeterministic on a COLD cache** — racing on temp-compiled binaries it can misreport counts and even attribute phantom test names to the wrong file. It converges to stable green on warm runs. AUTHORITATIVE check = run each file individually (`amber test test/test_<m>.ab`) or run the full suite 2–3× and take the warm result. Don't "fix" a failure that only appears on the first cold run and names a test that exists in no file.
+
 ## Project layout
 ```
 amber-tui/

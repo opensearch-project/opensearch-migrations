@@ -1,0 +1,336 @@
+// test_helm_install.ab — coverage for src/helm_install.ab (the install-
+// orchestration quarter of the bash helm.sh port).
+//
+// What's covered + how:
+//   * _helm_build_public_image_flags / _helm_build_mirrored_image_flags — pure
+//     [Text] builders; assert the --set repository/tag flags for all five images
+//     (captureProxy … installer), including installer→console reuse + the
+//     mirrored disambiguating-tag layout. No stub needed.
+//   * _helm_tls_flags — driven via in-process + on-disk state (TLS_MODE / PCA_ARN);
+//     assert the returned [Text]: none/self-signed → empty; pca-existing → arn +
+//     region flags; pca-create → the two conditionalPackageInstalls + create.
+//   * _write_helm_values — write to a temp path; assert the generated header text.
+//   * _helm_extract_chart_values — a --ma-chart-dir DIRECTORY fixture (values.yaml
+//     + valuesEks.yaml on disk) is copied into <stage>/chart-values; assert the
+//     returned dir + that both files landed. Uses real test/cp (no stub).
+//   * helm_watch_pods — stub `kubectl get pods` (PATH-shadow) returning a custom-
+//     columns snapshot; assert the returned one-line pod summary's counts/names.
+//   * helm_watch_installer_logs — stub `kubectl get configmap` (probe → exit 0,
+//     jsonpath → print notes); assert it streams without error (returns Null).
+//   * _helm_apply_disable_general_purpose_pool — stub `aws eks describe-cluster`
+//     (nodeRoleArn) + `aws eks update-cluster-config` (exit 0); assert rc 0, and
+//     the no-Auto-Mode (arn=None) → rc 0 short-circuit.
+//   * HELM_RELEASE_NAME / HELM_NAMESPACE — the pinned "ma" constants.
+//
+// Stubbing model (mirrors test_crane.ab / test_cfn_deploy.ab): write ONE content-
+// stable shim per command into a shared temp dir whose OUTPUT is decided by its
+// args (a `case "$*"`), then PREPEND that dir to PATH via env_var_set so every
+// in-process `trust $kubectl …$` / `$aws …$` resolves to the shim. amber test
+// runs every block in one parallel process tree sharing PATH, so byte-identical
+// shims (never rewritten with conflicting bodies) avoid clobber-mid-read races.
+//
+// NB: NO `return` inside a `test` block (AMBER_IDIOMS rule) — branch with `if`.
+// Helpers + imports go ABOVE the test blocks (define-before-use; the test-file
+// tree-shaker keeps only deps textually preceding their use).
+
+import { assert, assert_eq } from "std/test"
+import { file_write, file_chmod, file_read, dir_create } from "std/fs"
+import { env_var_set, env_var_get } from "std/env"
+import { text_contains } from "std/text"
+import { array_contains } from "../src/std.ab"
+import { state_load, state_set, state_save } from "../src/state.ab"
+// The pinned release/namespace constants are owned by helm_ctx.ab (the install
+// flow imports them from there); the test asserts the same source of truth.
+import { HELM_RELEASE_NAME, HELM_NAMESPACE } from "../src/helm_ctx.ab"
+import {
+    _helm_build_public_image_flags, _helm_build_mirrored_image_flags,
+    _helm_tls_flags, _write_helm_values, _helm_extract_chart_values,
+    helm_watch_pods, helm_watch_installer_logs,
+    _helm_apply_disable_general_purpose_pool
+} from "../src/helm_install.ab"
+
+// ---- helpers (ABOVE the test blocks: define-before-use) --------------------
+
+// __seq — monotonic counter so each test gets a distinct STAGE_DIR even within
+// the same second.
+let __seq = 0
+
+// STUB_DIR — the single PATH-shadow dir. Shared across tests (one process, one
+// PATH); the shims are content-stable and steered by their args, so re-installing
+// is idempotent and race-free.
+const STUB_DIR = "/tmp/amber_helm_install_stub"
+
+// install_stubs — write the kubectl + aws shims into STUB_DIR and prepend it to
+// PATH (once). The shims are BRACE-FREE bash (a `{` in an Amber Text literal is
+// interpolation) and steer behavior off their args (a `case "$*"`).
+//
+// kubectl shim:
+//   * `get pods … -o custom-columns…` → a 3-pod snapshot:
+//        migration-console-0  Running   true
+//        ma-helm-installer-x   Pending   <none>
+//        broken-pod            Failed    false
+//     (one Running+ready, one Pending, one Failed → exercises every counter +
+//      name list; the Failed pod's READY "false" is NOT counted as not_ready
+//      because not_ready only tracks Running pods with a false container.)
+//   * `get configmap … -o jsonpath…` → print the install notes text.
+//   * `get configmap …` (probe, no -o)  → exit 0 (the CM exists).
+//   * anything else                      → exit 0.
+// aws shim:
+//   * `eks describe-cluster … good-cluster`  → print a nodeRoleArn.
+//   * `eks describe-cluster … none-cluster`  → print "None".
+//   * `eks update-cluster-config`            → exit 0.
+//   * anything else                          → exit 0.
+fun install_stubs(): Null {
+    trust dir_create(STUB_DIR)
+
+    let kubectl = "#!/usr/bin/env bash
+args=\"$*\"
+case \"$args\" in
+  *get*pods*custom-columns*)
+    printf '%s\\n' 'migration-console-0 Running true'
+    printf '%s\\n' 'ma-helm-installer-xyz Pending <none>'
+    printf '%s\\n' 'broken-pod Failed false'
+    exit 0 ;;
+  *get*configmap*jsonpath*)
+    printf '%s\\n' 'NOTES: cert-manager installed'
+    printf '%s\\n' 'NOTES: opensearch ready'
+    exit 0 ;;
+  *get*configmap*)
+    exit 0 ;;
+  *)
+    exit 0 ;;
+esac
+exit 0
+"
+    trust file_write("{STUB_DIR}/kubectl", kubectl)
+    trust file_chmod("{STUB_DIR}/kubectl", "755")
+
+    let aws = "#!/usr/bin/env bash
+args=\"$*\"
+case \"$args\" in
+  *describe-cluster*none-cluster*) printf '%s\\n' 'None' ; exit 0 ;;
+  *describe-cluster*) printf '%s\\n' 'arn:aws:iam::111:role/node-role' ; exit 0 ;;
+  *update-cluster-config*) exit 0 ;;
+  *) exit 0 ;;
+esac
+exit 0
+"
+    trust file_write("{STUB_DIR}/aws", aws)
+    trust file_chmod("{STUB_DIR}/aws", "755")
+
+    let oldpath = env_var_get("PATH") failed { "" }
+    if not text_contains(oldpath, "{STUB_DIR}:") {
+        trust env_var_set("PATH", "{STUB_DIR}:{oldpath}")
+    }
+}
+
+// fresh_stage — mint + export a unique STAGE_DIR with a log/ subdir, and reset the
+// state instance. Returns the dir.
+fun fresh_stage(): Text {
+    __seq += 1
+    let base = trust $mktemp -d$
+    let dir = "{base}/stage-{__seq}"
+    trust dir_create(dir)
+    trust dir_create("{dir}/log")
+    trust env_var_set("STAGE_DIR", dir)
+    return dir
+}
+
+// ---- HELM_RELEASE_NAME / HELM_NAMESPACE constants --------------------------
+
+test "release name + namespace are pinned to ma" {
+    assert_eq(HELM_RELEASE_NAME, "ma")
+    assert_eq(HELM_NAMESPACE, "ma")
+}
+
+// ---- _helm_build_public_image_flags ----------------------------------------
+
+test "_helm_build_public_image_flags points all five images at public.ecr.aws" {
+    let flags = _helm_build_public_image_flags("3.2.1")
+    // 5 images × (2 --set + 2 values) = 20 elements.
+    let n = len flags
+    assert_eq(n, 20)
+    assert(array_contains("images.captureProxy.repository=public.ecr.aws/opensearchproject/opensearch-migrations-traffic-capture-proxy", flags))
+    assert(array_contains("images.captureProxy.tag=3.2.1", flags))
+    assert(array_contains("images.trafficReplayer.repository=public.ecr.aws/opensearchproject/opensearch-migrations-traffic-replayer", flags))
+    assert(array_contains("images.reindexFromSnapshot.repository=public.ecr.aws/opensearchproject/opensearch-migrations-reindex-from-snapshot", flags))
+    assert(array_contains("images.migrationConsole.repository=public.ecr.aws/opensearchproject/opensearch-migrations-console", flags))
+    // installer reuses the console image (bash pairs map installer→console).
+    assert(array_contains("images.installer.repository=public.ecr.aws/opensearchproject/opensearch-migrations-console", flags))
+    assert(array_contains("images.installer.tag=3.2.1", flags))
+}
+
+// ---- _helm_build_mirrored_image_flags --------------------------------------
+
+test "_helm_build_mirrored_image_flags uses the single repo + disambiguating tags" {
+    let reg = "111.dkr.ecr.us-east-1.amazonaws.com/migration-ecr-default-us-east-1"
+    let flags = _helm_build_mirrored_image_flags(reg, "3.2.1")
+    let n = len flags
+    assert_eq(n, 20)
+    // Every image's repository is the SAME single registry.
+    assert(array_contains("images.captureProxy.repository={reg}", flags))
+    assert(array_contains("images.migrationConsole.repository={reg}", flags))
+    // The disambiguating tag layout: migrations_<build_name>_<ver>.
+    assert(array_contains("images.captureProxy.tag=migrations_capture_proxy_3.2.1", flags))
+    assert(array_contains("images.trafficReplayer.tag=migrations_traffic_replayer_3.2.1", flags))
+    assert(array_contains("images.reindexFromSnapshot.tag=migrations_reindex_from_snapshot_3.2.1", flags))
+    assert(array_contains("images.migrationConsole.tag=migrations_migration_console_3.2.1", flags))
+    // installer reuses the console build-name tag.
+    assert(array_contains("images.installer.tag=migrations_migration_console_3.2.1", flags))
+}
+
+// ---- _helm_tls_flags -------------------------------------------------------
+//
+// _helm_tls_flags reads TLS_MODE / PCA_ARN / AWS_REGION via state.ab. In Amber
+// 0.6 each importer gets its OWN copy of state.ab's store, so helm_install's
+// instance is DIFFERENT from this test's — they reconcile only through the shared
+// on-disk state.env. The test does state_set + state_save (writes the file) and
+// _helm_tls_flags does state_load (reads the file) at its start; both resolve the
+// same stage dir from the pinned STAGE_DIR env, so the round-trip works. (Same
+// channel test_cfn_deploy.ab uses for cfn_deploy_or_skip's separate instance.)
+
+test "_helm_tls_flags is empty for unset/none/self-signed" {
+    fresh_stage()
+    state_load()
+    // UNSET: TLS_MODE absent (the real CLI only state_sets it when --tls-mode is
+    // passed; an absent key → state_get default "" → the no-flags branch). We do
+    // NOT persist TLS_MODE="" here on purpose — state.ab's serializer round-trips
+    // an empty quoted value back as a stray `"` (a pre-existing state.ab quirk,
+    // out of scope for this module), which the unknown-mode branch would reject.
+    state_set("AWS_REGION", "us-east-1")
+    state_save()
+    let f0 = _helm_tls_flags()
+    let n0 = len f0
+    assert_eq(n0, 0)
+
+    state_set("TLS_MODE", "none")
+    state_save()
+    let f1 = _helm_tls_flags()
+    let n1 = len f1
+    assert_eq(n1, 0)
+
+    state_set("TLS_MODE", "self-signed")
+    state_save()
+    let f2 = _helm_tls_flags()
+    let n2 = len f2
+    assert_eq(n2, 0)
+}
+
+test "_helm_tls_flags pca-existing sets the issuer + arn + region" {
+    fresh_stage()
+    state_load()
+    state_set("TLS_MODE", "pca-existing")
+    state_set("PCA_ARN", "arn:aws:acm-pca:us-east-1:111:ca/abc")
+    state_set("AWS_REGION", "us-east-1")
+    state_save()
+    let flags = _helm_tls_flags()
+    assert(array_contains("conditionalPackageInstalls.aws-privateca-issuer=true", flags))
+    assert(array_contains("awsPrivateCA.arn=arn:aws:acm-pca:us-east-1:111:ca/abc", flags))
+    assert(array_contains("awsPrivateCA.region=us-east-1", flags))
+}
+
+test "_helm_tls_flags pca-create enables both controllers + create" {
+    fresh_stage()
+    state_load()
+    state_set("TLS_MODE", "pca-create")
+    state_set("AWS_REGION", "us-west-2")
+    state_save()
+    let flags = _helm_tls_flags()
+    assert(array_contains("conditionalPackageInstalls.aws-privateca-issuer=true", flags))
+    assert(array_contains("conditionalPackageInstalls.ack-acmpca-controller=true", flags))
+    assert(array_contains("awsPrivateCA.create=true", flags))
+    assert(array_contains("awsPrivateCA.region=us-west-2", flags))
+}
+
+// ---- _write_helm_values ----------------------------------------------------
+
+test "_write_helm_values writes the per-stage overrides header" {
+    let dir = fresh_stage()
+    let out = "{dir}/helm-values.yaml"
+    _write_helm_values(out)
+    let body = file_read(out) failed { "" }
+    assert(text_contains(body, "Generated by migration-assistant"))
+    assert(text_contains(body, "Per-stage overrides go here"))
+}
+
+// ---- _helm_extract_chart_values (directory path) ---------------------------
+
+test "_helm_extract_chart_values copies a --ma-chart-dir's value files" {
+    let dir = fresh_stage()
+    // Build a fake chart DIRECTORY with the two value files on disk.
+    __seq += 1
+    let chart = trust $mktemp -d$
+    trust file_write("{chart}/values.yaml", "# base values\nfoo: bar\n")
+    trust file_write("{chart}/valuesEks.yaml", "# eks values\nbaz: qux\n")
+
+    let extracted = _helm_extract_chart_values(chart)
+    // Returns the <stage>/chart-values dir.
+    assert_eq(extracted, "{dir}/chart-values")
+    // Both value files landed.
+    let v = file_read("{extracted}/values.yaml") failed { "" }
+    let ve = file_read("{extracted}/valuesEks.yaml") failed { "" }
+    assert(text_contains(v, "foo: bar"))
+    assert(text_contains(ve, "baz: qux"))
+}
+
+// ---- helm_watch_pods -------------------------------------------------------
+
+test "helm_watch_pods summarizes the pod snapshot counts + names" {
+    install_stubs()
+    fresh_stage()
+    let summary = helm_watch_pods("ma")
+    // 3 pods total: 1 Running, 1 Pending, 1 Failed.
+    assert(text_contains(summary, "pods total=3"))
+    assert(text_contains(summary, "running=1"))
+    assert(text_contains(summary, "pending=1"))
+    assert(text_contains(summary, "failed=1"))
+    // The Pending + Failed pods are named in their lists.
+    assert(text_contains(summary, "pending=[ma-helm-installer-xyz]"))
+    assert(text_contains(summary, "failed=[broken-pod]"))
+}
+
+test "helm_watch_pods returns the waiting line when no pods exist" {
+    // Point PATH at an empty dir so `kubectl get pods` resolves to nothing →
+    // empty snapshot → the waiting branch (returns "").
+    fresh_stage()
+    __seq += 1
+    let empty = trust $mktemp -d$
+    let old = env_var_get("PATH") failed { "" }
+    trust env_var_set("PATH", empty)
+    let summary = helm_watch_pods("ma")
+    trust env_var_set("PATH", old)
+    assert_eq(summary, "")
+}
+
+// ---- helm_watch_installer_logs ---------------------------------------------
+
+test "helm_watch_installer_logs streams the installation notes" {
+    install_stubs()
+    fresh_stage()
+    // The configmap probe exits 0 (CM present) so the dump proceeds immediately;
+    // pin the notes poll/timeout to 0 so the (already-satisfied) loop never sleeps.
+    trust env_var_set("INSTALLER_NOTES_POLL_S", "0")
+    trust env_var_set("INSTALLER_NOTES_TIMEOUT_S", "0")
+    // Returns Null; the assertion is that it runs to completion without aborting
+    // (the notes land in the log via the diag channel). A trivial post-call assert
+    // confirms control returned.
+    helm_watch_installer_logs("ma", "ma")
+    assert(true)
+}
+
+// ---- _helm_apply_disable_general_purpose_pool ------------------------------
+
+test "_helm_apply_disable_general_purpose_pool succeeds with a node role arn" {
+    install_stubs()
+    fresh_stage()
+    let rc = _helm_apply_disable_general_purpose_pool("good-cluster", "us-east-1")
+    assert_eq(rc, 0)
+}
+
+test "_helm_apply_disable_general_purpose_pool short-circuits when no Auto Mode config" {
+    install_stubs()
+    fresh_stage()
+    // describe-cluster returns "None" → nothing to disable → rc 0 (no update call).
+    let rc = _helm_apply_disable_general_purpose_pool("none-cluster", "us-east-1")
+    assert_eq(rc, 0)
+}

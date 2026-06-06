@@ -1,0 +1,582 @@
+// helm_diag.ab — the diagnostics-dump half of bash lib/helm.sh.
+//
+// helm.sh is split into helm_ctx / helm_recover / helm_diag / helm_install.
+// This module owns helm_diag — everything that, on a failed (or slow) helm
+// install/upgrade, gathers the evidence an operator (or an agent reading the
+// log) would otherwise collect by hand:
+//
+//   helm_dump_diagnostics        helm status + pods + per-unhealthy-pod describe
+//                                + recent events + stuck-hook-Job describe
+//   _helm_explain_failure        the WHY behind a failed/pending release
+//   _helm_dump_failed_job        a failed Job's events + (best-effort) pod logs
+//   _helm_dump_install_notes     stream the installation-notes ConfigMap
+//   _helm_inst_log               the "installer│" channel line (file + stderr)
+//   _helm_inst_dump_pending_pod  a Pending pod's container statuses + events
+//   _helm_pods_log               the "pods│" channel line (file + stderr)
+//
+// Public fn names are preserved verbatim so the other helm_* files +
+// console/cleanup/resume that call them keep working unchanged.
+//
+// ============================================================================
+// KEY DESIGN — context-bound helm/kubectl WITHOUT array splat
+// ============================================================================
+// The bash file used command-ARRAYS: HELM=(helm --kube-context X) and
+// KUBECTL=(kubectl --context X), then splatted `"${HELM[@]}" status …`. Amber
+// cannot splat an array as a command, so the binding is modeled as a stored
+// Text flag PREFIX, owned by sibling module helm_ctx.ab:
+//
+//   helm_ctx_flags()    → "--kube-context X" (or "" when no context).
+//   kubectl_ctx_flags() → "--context X"      (or "" when no context).
+//
+// Every external call here is `trust $helm {helm_ctx_flags()} status …$`, the
+// flags interpolated UNQUOTED so the shell word-splits "--kube-context X" back
+// into two argv tokens — the same expansion the bash `"${HELM[@]}"` relied on.
+// "helm" / "kubectl" are the bare binary words.
+//
+// helm_ctx.ab owns the binding (helm_ctx_init / helm_kctx_init / the *_ctx_flags
+// accessors + the HELM_RELEASE_NAME / HELM_NAMESPACE constants); helm_diag
+// IMPORTS the accessors — it does NOT re-define them (a duplicate would split the
+// symbol across two module instances). MODULE-INSTANCE caveat (verified against 0.6):
+// each importer gets its OWN copy of an imported module's globals, so
+// helm_ctx.ab's binding set by the install flow's instance is NOT visible to
+// helm_diag's instance. The public dump entry points therefore call helm_ctx's
+// helm_kctx_init() ONCE at entry to refresh THEIR copy from the shared on-disk
+// state.env (KUBECTL_CONTEXT) — exactly the "refresh my HELM/KUBECTL from the
+// saved context" contract bash's helm_kctx_init existed for. After that refresh,
+// helm_ctx_flags()/kubectl_ctx_flags() read the right binding within this
+// instance.
+//
+// ============================================================================
+// BACKGROUND WATCHERS — replaced by post-hoc dumps
+// ============================================================================
+// The bash file spawned helm_watch_pods + helm_watch_installer_logs as
+// BACKGROUND processes that polled the cluster while `helm --wait` blocked, so
+// the operator saw live movement. Amber 0.6 DOES support background jobs
+// (`$ cmd & $` + pid()/await()), but for the install flow we prefer the simpler
+// model the port plan calls for: run `helm upgrade --install --wait` to
+// completion, then do ONE post-hoc pod-status + install-notes dump. This module
+// therefore implements the SYNCHRONOUS dump primitives (helm_dump_diagnostics,
+// _helm_dump_install_notes, the pending-pod dump) that the install flow invokes
+// AFTER helm returns. The operator-visible contract is preserved (the tests
+// assert on the dumped CONTENT, not real-time interleave); only the live-tail
+// concurrency — which a single-operator interactive CLI never strictly needed —
+// is dropped. (Documented in escapeHatches.)
+//
+// ============================================================================
+// Other porting notes
+// ============================================================================
+//   * eval "$out_name=(…)" indirect arrays → not needed here (diag dumps return
+//     Text / Null and stream via log_stream).
+//   * <<< here-strings (while read … <<<"$x") → split_lines(x) + loop.
+//   * awk multi-pass tallies (helm_watch_pods' one-awk-pass counter) → an
+//     in-Amber split_lines + per-row if-chain that tallies total/running/
+//     pending/failed + collects the name lists — no awk fork, no eval.
+//   * heredoc → not in this module (the values file lives in helm_install).
+//   * set +e / set -e guards → per-command `trust`/`failed{}` + status(); every
+//     diag command is best-effort (bash `|| true`), so each is `trust`-ed.
+//   * `${HELM[@]} status … -o json | jq` → raw `trust $…$` (jq has no stdlib
+//     equivalent); the helm failure-description Job name is pulled with
+//     regex_capture (std.ab), matching the bash `name: (…), kind: Job` shape.
+//   * STREAM[installer]/STREAM[pods] file lines + dim "installer│"/"pods│"
+//     chrome are rebuilt via log.ab's fmt_stream_line/fmt_stream_chrome so they
+//     stay byte-identical to log_stream's output (and log_announce_exit's
+//     failure-tail grep still matches them). The file path comes from
+//     log.ab's log_file() accessor (its LOG_FILE global is module-private).
+//
+// Imports: helm_ctx (the binding + pinned names), log, ui, std (+ std/text,
+// std/fs, std/env for primitives).
+
+import { env_var_get } from "std/env"
+import { file_append } from "std/fs"
+import { split_lines, slice, trim_left } from "std/text"
+import { regex_capture, contains, trim } from "./std.ab"
+import {
+    helm_ctx_flags, kubectl_ctx_flags, helm_kctx_init
+} from "./helm_ctx.ab"
+import {
+    log_stream, log_file, fmt_stream_line, fmt_stream_chrome
+} from "./log.ab"
+import { ui_ok, ui_step, ui_dim_c, ui_reset } from "./ui.ab"
+
+// ============================================================================
+// Channel log lines (file + operator stderr), byte-identical to log_stream's
+// per-line shape. Reused by the installer / pods watchers' synchronous dumps.
+// ============================================================================
+
+// log_ts — ISO-8601 with timezone offset, the per-line timestamp. Raw `date`
+// escape: Amber's std/date has date_now() (epoch) but no strftime formatter, so
+// there is no pure-Amber way to build '%Y-%m-%dT%H:%M:%S%z' — the same wall
+// log.ab/state.ab hit. The format string is a constant, never user data.
+fun log_ts(): Text {
+    return trust $date '+%Y-%m-%dT%H:%M:%S%z'$
+}
+
+// _helm_channel_log <bucket> <msg> — write ONE "[ts] STREAM[<bucket>] <msg>"
+// line to the log file AND the dim "  <bucket>│ <msg>" chrome to stderr, exactly
+// as log_stream tees each line. The file form uses fmt_stream_line so it stays
+// byte-identical (and log_announce_exit's failure-tail grep for STREAM[installer]
+// / STREAM[pods] still matches). log_file() supplies the path (log.ab's LOG_FILE
+// global is module-private). The shared workhorse for _helm_inst_log /
+// _helm_pods_log (bash had two near-identical printf pairs).
+fun _helm_channel_log(bucket: Text, msg: Text): Null {
+    file_append(log_file(), "{fmt_stream_line(log_ts(), bucket, msg)}\n") failed {}
+    trust $printf '%s\n' "{fmt_stream_chrome(bucket, msg)}" >&2$
+}
+
+// _helm_inst_log <msg> — the "installer" channel line. Lets the operator
+// visually distinguish helm-output from helm-installer-pod-output from
+// pod-summary lines. (bash _helm_inst_log.)
+pub fun _helm_inst_log(msg: Text): Null {
+    _helm_channel_log("installer", msg)
+}
+
+// _helm_pods_log <msg> — the "pods" channel line. (bash _helm_pods_log.)
+pub fun _helm_pods_log(msg: Text): Null {
+    _helm_channel_log("pods", msg)
+}
+
+// ============================================================================
+// _helm_dump_failed_job — a failed Job's events + (best-effort) pod logs.
+// ============================================================================
+
+// _helm_dump_failed_job <job> <ns> — when a post-install Job fails, its pod is
+// often already deleted (job-controller GC, the chart's hook-delete-policy, or
+// Karpenter consolidation), so `kubectl logs <pod>` 404s. This prints what's
+// still discoverable AND tells the operator how to capture logs by re-running
+// the Job. Stderr-only dim chrome (informational, not an error). (bash
+// _helm_dump_failed_job.)
+pub fun _helm_dump_failed_job(job: Text, ns: Text): Null {
+    // Refresh THIS instance's context binding from the saved KUBECTL_CONTEXT
+    // (per-importer globals aren't shared; see the KEY DESIGN header). Idempotent.
+    helm_kctx_init()
+    let dim = ui_dim_c()
+    let reset = ui_reset()
+    trust $printf '%s  failed job: %s%s\n' "{dim}" "{job}" "{reset}" >&2$
+
+    let kf = kubectl_ctx_flags()
+
+    // Job events (deadline / backoff / image-pull failures). tail -8 keeps the
+    // most-recent few (the bash `| tail -8`).
+    let events = trust $kubectl {kf} get events --namespace "{ns}" --field-selector "involvedObject.kind=Job,involvedObject.name={job}" --sort-by=.lastTimestamp -o custom-columns='LAST:.lastTimestamp,REASON:.reason,MESSAGE:.message' --no-headers 2>/dev/null | tail -8$
+    if trim(events) != "" {
+        trust $printf '%s    job events:%s\n' "{dim}" "{reset}" >&2$
+        for line in split_lines(events) {
+            trust $printf '      %s\n' "{line}" >&2$
+        }
+    }
+
+    // Pod logs (best-effort — pod is often GC'd). Resolve the Job's pods by
+    // label, then tail each one's logs. The jsonpath braces are LITERAL k8s
+    // syntax, not Amber interpolation — built as a separate Text with escaped
+    // `\{` so the braces survive (gotcha: `{` in `$…$` starts interpolation).
+    let pods_jp = "jsonpath=\{range .items[*]}\{.metadata.name}\{\"\\n\"}\{end}"
+    let pods = trust $kubectl {kf} get pods --namespace "{ns}" --selector "job-name={job}" -o "{pods_jp}" 2>/dev/null$
+    if trim(pods) != "" {
+        for pod in split_lines(pods) {
+            if trim(pod) == "" { continue }
+            trust $printf '%s    pod %s logs:%s\n' "{dim}" "{pod}" "{reset}" >&2$
+            // --all-containers --tail=50; combined stdout+stderr (2>&1) so a
+            // logs-unavailable error surfaces inline, each line indented.
+            let plog = trust $kubectl {kf} logs "{pod}" --namespace "{ns}" --all-containers --tail=50 2>&1$
+            for line in split_lines(plog) {
+                trust $printf '      %s\n' "{line}" >&2$
+            }
+        }
+    } else {
+        // Pod was GC'd — tell the operator how to re-run the Job to capture logs.
+        trust $printf "%s    pod logs unavailable (pod was GC'd after failure)%s\n" "{dim}" "{reset}" >&2$
+        trust $printf '%s    re-run the job to capture logs:%s\n' "{dim}" "{reset}" >&2$
+        trust $printf '%s      kubectl get job %s -n %s -o yaml > /tmp/%s.yaml%s\n' "{dim}" "{job}" "{ns}" "{job}" "{reset}" >&2$
+        trust $printf '%s      kubectl delete job %s -n %s%s\n' "{dim}" "{job}" "{ns}" "{reset}" >&2$
+        trust $printf '%s      kubectl create -f /tmp/%s.yaml%s\n' "{dim}" "{job}" "{reset}" >&2$
+        trust $printf '%s      kubectl logs -f -l job-name=%s -n %s --all-containers%s\n' "{dim}" "{job}" "{ns}" "{reset}" >&2$
+    }
+}
+
+// ============================================================================
+// _helm_explain_failure — the WHY behind a failed / pending-upgrade release.
+// ============================================================================
+
+// _helm_explain_failure <release> <ns> — print the WHY behind a failed /
+// pending-upgrade release so the operator can decide between rollback,
+// uninstall, and "leave it alone" without a second terminal. Surfaces:
+//   * helm's own DESCRIPTION line (often names the failed hook resource)
+//   * the failed Job named in the description (via _helm_dump_failed_job)
+//   * migration-console-0's pod phase + container readiness
+// Stderr only, dim color — informational, not an error. (bash _helm_explain_failure.)
+pub fun _helm_explain_failure(release: Text, ns: Text): Null {
+    // Refresh this instance's context binding from saved KUBECTL_CONTEXT.
+    helm_kctx_init()
+    let dim = ui_dim_c()
+    let reset = ui_reset()
+    let hf = helm_ctx_flags()
+    let kf = kubectl_ctx_flags()
+
+    // helm status -o json | jq .info.description. jq has no stdlib equivalent;
+    // both helm + jq legitimately fail (no release / no jq) → trust with an ""
+    // fallback so a missing description is just an empty desc.
+    let desc = trust $helm {hf} status "{release}" --namespace "{ns}" -o json 2>/dev/null | jq -r '.info.description // empty' 2>/dev/null$
+    if trim(desc) != "" {
+        trust $printf '%s  why: %s%s\n' "{dim}" "{desc}" "{reset}" >&2$
+        // "name: <job>, kind: Job" is the canonical helm failure shape — pull the
+        // Job name out and dump it. regex_capture group 1 = the job name.
+        let job = regex_capture(desc, "name: ([A-Za-z0-9_.-]+), kind: Job", 1)
+        if job != "" {
+            _helm_dump_failed_job(job, ns)
+        }
+    }
+
+    // migration-console-0 phase + per-container readiness, so a "release failed
+    // but pod is Running/Ready" case is visible up front. The jsonpath braces are
+    // literal k8s syntax (escaped `\{`), not Amber interpolation.
+    let console_jp = "jsonpath=\{.status.phase}|\{range .status.containerStatuses[*]}\{.ready},\{end}"
+    let console = trust $kubectl {kf} get pod migration-console-0 --namespace "{ns}" -o "{console_jp}" 2>/dev/null$
+    if trim(console) != "" {
+        trust $printf '%s  migration-console-0: %s%s\n' "{dim}" "{console}" "{reset}" >&2$
+    }
+    trust $printf '%s  full diagnostics: migration-assistant diag%s\n' "{dim}" "{reset}" >&2$
+}
+
+// ============================================================================
+// helm_dump_diagnostics — the big on-failure capture.
+// ============================================================================
+
+// ---- whitespace field extractors (defined ABOVE their first users: the
+// _dump_unhealthy_pods / _dump_stuck_hook_jobs phase/completion checks and
+// helm_pods_summary's tally — the tree-shaker keeps only deps textually
+// preceding their use across an import boundary). These replace awk's $1/$2/$3
+// field extraction over kubectl custom-columns rows (runs of spaces between
+// columns). -------------------------------------------------------------------
+
+// _first_field <row> — the first whitespace-delimited token of a row, or "".
+// Replaces awk `{print $1}`.
+fun _first_field(row: Text): Text {
+    let t = trim_left(row)
+    let n = len t
+    for i in 0..n {
+        let c = slice(t, i, 1)
+        if c == " " or c == "\t" {
+            return slice(t, 0, i)
+        }
+    }
+    return t
+}
+
+// _second_field <row> — the second whitespace-delimited token, or "". Skip the
+// first token, skip the inter-field whitespace, then take up to the next run of
+// whitespace. Replaces awk `{print $2}`.
+fun _second_field(row: Text): Text {
+    let t = trim_left(row)
+    let n = len t
+    // Skip field 1.
+    let i = 0
+    while i < n {
+        let c = slice(t, i, 1)
+        if c == " " or c == "\t" { break }
+        i += 1
+    }
+    // Skip the whitespace between field 1 and field 2.
+    while i < n {
+        let c = slice(t, i, 1)
+        if c != " " and c != "\t" { break }
+        i += 1
+    }
+    if i >= n { return "" }
+    // Take field 2 up to the next whitespace.
+    let start = i
+    while i < n {
+        let c = slice(t, i, 1)
+        if c == " " or c == "\t" { break }
+        i += 1
+    }
+    return slice(t, start, i - start)
+}
+
+// _third_field <row> — the third whitespace-delimited token (the READY column in
+// the pods snapshot), or "". Same scan, advanced past two fields. awk `{print $3}`.
+fun _third_field(row: Text): Text {
+    let f2 = _second_field(row)
+    if f2 == "" { return "" }
+    let t = trim_left(row)
+    let n = len t
+    let i = 0
+    // skip field 1
+    while i < n {
+        let c = slice(t, i, 1)
+        if c == " " or c == "\t" { break }
+        i += 1
+    }
+    while i < n {
+        let c = slice(t, i, 1)
+        if c != " " and c != "\t" { break }
+        i += 1
+    }
+    // skip field 2
+    while i < n {
+        let c = slice(t, i, 1)
+        if c == " " or c == "\t" { break }
+        i += 1
+    }
+    while i < n {
+        let c = slice(t, i, 1)
+        if c != " " and c != "\t" { break }
+        i += 1
+    }
+    if i >= n { return "" }
+    let start = i
+    while i < n {
+        let c = slice(t, i, 1)
+        if c == " " or c == "\t" { break }
+        i += 1
+    }
+    return slice(t, start, i - start)
+}
+
+// _dump_unhealthy_pods <ns> — per-pod `describe` for every pod NOT in
+// Running/Succeeded. Resolves the name/phase columns, then describes each
+// unhealthy one through log_stream (brief on-screen + full content in the log).
+// Replaces the bash awk `$2!="Running" && $2!="Succeeded" {print $1}` + the
+// `while read … <<<` loop with split_lines + an in-Amber phase check.
+fun _dump_unhealthy_pods(ns: Text): Null {
+    let kf = kubectl_ctx_flags()
+    let snapshot = trust $kubectl {kf} get pods --namespace "{ns}" --no-headers -o custom-columns=NAME:.metadata.name,PHASE:.status.phase 2>/dev/null$
+    if trim(snapshot) == "" { return null }
+    for row in split_lines(snapshot) {
+        if trim(row) == "" { continue }
+        // Columns are whitespace-separated: NAME then PHASE. _two_fields splits
+        // on the run of spaces between them.
+        let name = _first_field(row)
+        let phase = _second_field(row)
+        if name == "" { continue }
+        if phase != "Running" and phase != "Succeeded" {
+            let cmd = "kubectl {kf} describe pod {name} --namespace {ns}"
+            log_stream("diag-pod-{name}", cmd)
+        }
+    }
+}
+
+// _dump_stuck_hook_jobs <ns> — `describe` any helm-hook Job that has not
+// completed (no successful completion). Common culprits: default-helm-installer,
+// default-helm-uninstaller. Mirrors the bash awk `$2=="" || $2=="0" {print $1}`
+// over NAME,COMPLETIONS.
+fun _dump_stuck_hook_jobs(ns: Text): Null {
+    let kf = kubectl_ctx_flags()
+    let snapshot = trust $kubectl {kf} get jobs --namespace "{ns}" --no-headers -o custom-columns=NAME:.metadata.name,COMPLETIONS:.status.succeeded 2>/dev/null$
+    if trim(snapshot) == "" { return null }
+    for row in split_lines(snapshot) {
+        if trim(row) == "" { continue }
+        let name = _first_field(row)
+        // `n_done` (not `succeeded`): `succeeded` is a reserved keyword (the
+        // `succeeded { }` command handler) and parses as Int → type error.
+        let n_done = _second_field(row)
+        if name == "" { continue }
+        // Stuck = no successful completion. kubectl renders a null .succeeded as
+        // "<none>"; an unstarted Job shows "" or "0".
+        if n_done == "" or n_done == "0" or n_done == "<none>" {
+            let cmd = "kubectl {kf} describe job {name} --namespace {ns}"
+            log_stream("diag-job-{name}", cmd)
+        }
+    }
+}
+
+// helm_dump_diagnostics <release> <ns> — called on helm failure. Captures
+// everything the operator (or a log-reading agent) would normally gather by
+// hand, each section through log_stream (brief on-screen render + full content
+// in the log file):
+//   * helm status
+//   * kubectl get pods -o wide
+//   * kubectl describe of any pod NOT in Running/Succeeded
+//   * recent events (last 30, by lastTimestamp)
+//   * kubectl describe of any stuck helm-hook Job
+// Every command is best-effort (bash `|| true`); the cmd Texts are composed
+// here and run via log_stream (which itself swallows the command's rc). (bash
+// helm_dump_diagnostics.)
+pub fun helm_dump_diagnostics(release: Text, ns: Text): Null {
+    // Refresh this instance's context binding from saved KUBECTL_CONTEXT.
+    helm_kctx_init()
+    ui_step("Collecting diagnostics for failed helm operation")
+    let hf = helm_ctx_flags()
+    let kf = kubectl_ctx_flags()
+
+    log_stream("diag-helm", "helm {hf} status {release} --namespace {ns}")
+    log_stream("diag-pods", "kubectl {kf} get pods --namespace {ns} -o wide")
+
+    _dump_unhealthy_pods(ns)
+
+    // Recent events (most recent 30, ordered). The `| tail -30` is part of the
+    // streamed command (bash piped describe-stack-events identically).
+    log_stream("diag-events", "kubectl {kf} get events --namespace {ns} --sort-by=.lastTimestamp 2>/dev/null | tail -30")
+
+    _dump_stuck_hook_jobs(ns)
+
+    ui_ok("diagnostics written to {log_file()}")
+}
+
+// ============================================================================
+// _helm_inst_dump_pending_pod — a Pending pod's container statuses + events.
+// ============================================================================
+
+// _helm_inst_dump_pending_pod <pod> <ns> — when a Job's Pod has been Pending
+// past the warn threshold, surface the actual reason. Two streams of evidence:
+//   * the pod's container statuses (waiting reason — ImagePullBackOff,
+//     CrashLoopBackOff, ErrImageNeverPull, …)
+//   * the pod's recent Events (e.g. "Failed to pull image …")
+// Both go through log_stream so the operator sees them live AND they land in the
+// main log for post-mortem. (bash _helm_inst_dump_pending_pod.)
+pub fun _helm_inst_dump_pending_pod(pod: Text, ns: Text): Null {
+    // Refresh this instance's context binding from saved KUBECTL_CONTEXT.
+    helm_kctx_init()
+    let kf = kubectl_ctx_flags()
+    _helm_inst_log("container statuses for {pod}:")
+    // The custom-columns string is a single arg in the bash; keep it intact here.
+    let cols = "custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[*].image,STATUS:.status.containerStatuses[*].state,REASON:.status.containerStatuses[*].state.waiting.reason,MESSAGE:.status.containerStatuses[*].state.waiting.message"
+    log_stream("diag-pod-status", "kubectl {kf} get pod {pod} --namespace {ns} -o '{cols}'")
+    _helm_inst_log("recent events for {pod}:")
+    log_stream("diag-pod-events", "kubectl {kf} get events --namespace {ns} --field-selector involvedObject.name={pod} --sort-by=.lastTimestamp")
+}
+
+// ============================================================================
+// _helm_dump_install_notes — stream the installation-notes ConfigMap.
+// ============================================================================
+
+// _helm_dump_install_notes <release> <ns> — poll for the <release>-installation-
+// notes ConfigMap (written by the chart's pre-install Job at the end of its run)
+// and stream its all-notes.txt key into the operator log. Bounded by
+// INSTALLER_NOTES_TIMEOUT_S (default 60) / INSTALLER_NOTES_POLL_S (default 2).
+//
+// Port note: the bash version took an optional parent_pid and bailed when the
+// parent went away (it ran inside the backgrounded watcher). In the synchronous
+// post-hoc model this runs in the foreground after helm returns, so there is no
+// parent to watch — the parent_pid liveness guard is dropped (documented). The
+// ConfigMap survives after the Job's pod is GC'd, so this is the durable way to
+// recover the per-sub-chart success NOTES. (bash _helm_dump_install_notes.)
+pub fun _helm_dump_install_notes(release: Text, ns: Text): Null {
+    // Refresh this instance's context binding from saved KUBECTL_CONTEXT.
+    helm_kctx_init()
+    let cm = "{release}-installation-notes"
+    let kf = kubectl_ctx_flags()
+
+    let timeout_s = env_var_get("INSTALLER_NOTES_TIMEOUT_S") failed { "60" }
+    if timeout_s == "" { timeout_s = "60" }
+    let poll_s = env_var_get("INSTALLER_NOTES_POLL_S") failed { "2" }
+    if poll_s == "" { poll_s = "2" }
+    let timeout = timeout_s as Int
+    let poll = poll_s as Int
+
+    // Poll for the ConfigMap to exist. Track time by wall clock so we don't have
+    // to do float arithmetic on sub-second poll intervals (bash used `date +%s`).
+    let started = trust $date +%s$
+    let found = false
+    loop {
+        trust $kubectl {kf} get configmap "{cm}" --namespace "{ns}" >/dev/null 2>&1$
+        if status() == 0 {
+            found = true
+            break
+        }
+        trust $sleep "{poll}"$
+        let now = trust $date +%s$
+        if (now as Int) - (started as Int) >= timeout {
+            break
+        }
+    }
+    if not found {
+        _helm_inst_log("no ConfigMap/{cm} appeared within {timeout}s; skipping notes dump")
+        return null
+    }
+
+    _helm_inst_log("streaming installation notes from ConfigMap/{cm}")
+    // Pull the all-notes.txt key. The jsonpath escapes the '.' in the key name
+    // (data.all-notes\.txt). Falls back to dumping the whole CM if the key is
+    // missing. The braces are literal k8s jsonpath syntax (escaped `\{`) and the
+    // `\.` survives as a separate Text so both pass through interpolation intact
+    // (gotchas 6 + 9).
+    let jp = "jsonpath=\{.data.all-notes\\.txt}"
+    let notes = trust $kubectl {kf} get configmap "{cm}" --namespace "{ns}" -o "{jp}" 2>/dev/null$
+    if notes == "" {
+        _helm_inst_log("ConfigMap/{cm} has no all-notes.txt key; falling back to describe")
+        log_stream("install-notes", "kubectl {kf} describe configmap {cm} --namespace {ns}")
+        return null
+    }
+
+    // Stream each line through the same install-notes channel so the file log
+    // gets per-line timestamps and the operator gets per-line dim chrome — the
+    // bash `while read … <<<"$notes"` loop, now split_lines + _helm_channel_log.
+    for line in split_lines(notes) {
+        _helm_channel_log("install-notes", line)
+    }
+}
+
+// ============================================================================
+// pods-watch summary formatter (the one-awk-pass tally, now pure Amber).
+// The whitespace field extractors (_first/_second/_third_field) live ABOVE,
+// near _dump_unhealthy_pods — their first user — so the tree-shaker keeps them.
+// ============================================================================
+
+// helm_pods_summary <snapshot> — build the one-line pods summary the bash
+// helm_watch_pods emitted per cycle, from a `kubectl get pods` custom-columns
+// snapshot (NAME, PHASE, READY). Replaces the seven-fork awk-+-tr-+-sed tally
+// with one pure pass: tallies total/running/pending/failed and collects the
+// pending/failed/not-ready name lists. An empty snapshot → "" (caller emits the
+// "waiting for pods…" line instead). Pure (returns Text) — directly testable.
+//
+// Shape (byte-matched to bash):
+//   "pods total=N running=R pending=P failed=F [pending=[a,b]] [failed=[c]] [not_ready=[d]]"
+pub fun helm_pods_summary(snapshot: Text): Text {
+    if trim(snapshot) == "" { return "" }
+    let total = 0
+    let running = 0
+    let pending = 0
+    let n_failed = 0
+    let pending_names = ""
+    let failed_names = ""
+    let not_ready = ""
+
+    for row in split_lines(snapshot) {
+        if trim(row) == "" { continue }
+        total += 1
+        let phase = _second_field(row)
+        let name = _first_field(row)
+        let ready = _third_field(row)
+        if {
+            phase == "Running" {
+                running += 1
+                // READY column is a comma-joined list of container .ready bools;
+                // any "false" → the pod is not ready.
+                if contains("false", ready) {
+                    if not_ready == "" { not_ready = name } else { not_ready = "{not_ready},{name}" }
+                }
+            }
+            phase == "Pending" {
+                pending += 1
+                if pending_names == "" { pending_names = name } else { pending_names = "{pending_names},{name}" }
+            }
+            phase == "Failed" {
+                n_failed += 1
+                if failed_names == "" { failed_names = name } else { failed_names = "{failed_names},{name}" }
+            }
+        }
+    }
+
+    let summary = "pods total={total} running={running} pending={pending} failed={n_failed}"
+    if pending_names != "" { summary = "{summary} pending=[{pending_names}]" }
+    if failed_names != "" { summary = "{summary} failed=[{failed_names}]" }
+    if not_ready != "" { summary = "{summary} not_ready=[{not_ready}]" }
+    return summary
+}
+
+// helm_dump_pods <ns> — the SYNCHRONOUS post-hoc pod-status dump that replaces
+// the backgrounded helm_watch_pods. Takes one `kubectl get pods` snapshot and
+// emits the summary line through the "pods" channel (file + operator stderr),
+// or the "waiting for pods…" line when the namespace has no pods yet. Used by
+// the install flow after helm returns to give the operator the final pod state.
+pub fun helm_dump_pods(ns: Text): Null {
+    // Refresh this instance's context binding from saved KUBECTL_CONTEXT.
+    helm_kctx_init()
+    let kf = kubectl_ctx_flags()
+    let snapshot = trust $kubectl {kf} get pods -n "{ns}" --no-headers -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[*].ready 2>/dev/null$
+    if trim(snapshot) == "" {
+        _helm_pods_log("waiting for pods in namespace {ns} to appear…")
+        return null
+    }
+    _helm_pods_log(helm_pods_summary(snapshot))
+}

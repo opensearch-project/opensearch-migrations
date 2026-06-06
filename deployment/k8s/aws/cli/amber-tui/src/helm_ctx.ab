@@ -1,0 +1,190 @@
+// helm_ctx.ab — kubeconfig + context binding for the helm install flow.
+//
+// Port of the CONTEXT-BINDING slice of bash lib/helm.sh:
+//   HELM=()/KUBECTL=() command arrays, helm_kctx_init, helm_kubeconfig_setup,
+//   HELM_CHART_NAME / HELM_RELEASE_NAME / HELM_NAMESPACE constants.
+//
+// The rest of helm.sh is split across sibling modules (helm_recover /
+// helm_diag / helm_install own recovery, diagnostics, and the install/upgrade
+// flow). This file owns ONLY the context plumbing those modules build on.
+//
+// ============================================================================
+// KEY DESIGN — command arrays → a stored Text flag prefix.
+// ============================================================================
+//
+// Bash bound context with COMMAND ARRAYS:
+//     HELM=(helm --kube-context X)
+//     KUBECTL=(kubectl --context X)
+// then splatted them: `"${HELM[@]}" upgrade --install …`. Amber 0.6 cannot
+// splat an array as the head of a `$ … $` command, so we model the SAME binding
+// as a stored Text FLAG PREFIX:
+//   * helm_ctx_init() reads KUBECTL_CONTEXT from state and, when set, stores
+//     "--kube-context {ctx}" (helm) and "--context {ctx}" (kubectl) in
+//     module-level globals.
+//   * Every later call interpolates the prefix UNQUOTED so the shell word-splits
+//     it back into the two flag tokens (or into NOTHING when the context is
+//     unset — the bare `HELM=(helm)` / `KUBECTL=(kubectl)` default):
+//         trust $ helm {helm_ctx_flags()} upgrade --install … $
+//         trust $ kubectl {kubectl_ctx_flags()} wait … $
+//   * Context values are k8s context names ([A-Za-z0-9_.-], no spaces), so the
+//     unquoted word-split is safe — exactly the assumption the bash `"${HELM[@]}"`
+//     expansion relied on for its element safety.
+//
+// helm_ctx_flags() / kubectl_ctx_flags() are PUBLIC so helm_recover / helm_diag /
+// helm_install (and cleanup / console / resume) build their commands off the
+// same single binding site — the bash one-definition-site contract.
+//
+// ============================================================================
+// MODULE-INSTANCE / STATE note (carried over from cfn_deploy.ab + crane.ab).
+// ============================================================================
+//
+// In Amber 0.6 each importer gets its OWN copy of an imported module's globals,
+// so helm_ctx.ab's state.ab store is a DIFFERENT instance from helm_install's.
+// The stored CTX flags therefore live in THIS module's own module-level globals
+// (set by helm_ctx_init / helm_kubeconfig_setup, read by helm_ctx_flags /
+// kubectl_ctx_flags) — every module that needs the binding calls helm_ctx_init()
+// to populate its own copy from the shared on-disk state.env (KUBECTL_CONTEXT),
+// exactly the way bash's helm_kctx_init refreshed each sourcing module's
+// HELM=()/KUBECTL=() from the saved KUBECTL_CONTEXT.
+
+import { env_var_get, env_var_set } from "std/env"
+import {
+    state_load, state_get, state_set, state_save
+} from "./state.ab"
+import { die } from "./common.ab"
+import { ui_step } from "./ui.ab"
+import { log_info } from "./log.ab"
+import { cfn_outputs, _cfn_pick } from "./cfn_outputs.ab"
+
+// ---- pinned names (mirror the bash constants verbatim) ---------------------
+//
+// The Migration Assistant chart hardcodes namespace=ma in its rendered
+// resources AND uses .Release.Name to write the namespace env var into its
+// post-install argo-templates Job. To keep things consistent we pin BOTH the
+// helm release name AND the kubernetes namespace to "ma" regardless of the
+// operator's chosen stage. The stage name is the CFN-stack / ECR-repo /
+// state-directory namer; it does NOT flow through to k8s.
+pub const HELM_CHART_NAME = "migration-assistant"
+pub const HELM_RELEASE_NAME = "ma"
+pub const HELM_NAMESPACE = "ma"
+
+// ---- context binding (module-level — the HELM=()/KUBECTL=() globals) -------
+//
+// Module-level `let` compiles to a bash global that persists across calls, so a
+// binding set by helm_ctx_init / helm_kubeconfig_setup is visible to every later
+// helm_ctx_flags / kubectl_ctx_flags call in the process — the lifetime the bash
+// HELM=()/KUBECTL=() arrays had. Seeded empty (bare `helm` / `kubectl`, no
+// context) so pre-context callers and tests still resolve a sane command.
+let __helm_ctx_flags_v = ""
+let __kubectl_ctx_flags_v = ""
+
+// ---- helm_ctx_init ---------------------------------------------------------
+
+// helm_ctx_init — populate THIS module's stored CTX flags from the saved
+// KUBECTL_CONTEXT. The Amber re-expression of bash helm_kctx_init's
+// `HELM=(helm --kube-context X) / KUBECTL=(kubectl --context X)` rebind:
+// instead of rebuilding command arrays we store the two flag-prefix Texts (and
+// mirror them into state HELM_CTX / KUBECTL_CTX so a sibling module can read
+// them off disk too). When KUBECTL_CONTEXT is unset we clear the flags →
+// bare `helm` / `kubectl` (the bash default arrays).
+//
+// Idempotent + safe to call from cleanup / console / resume (the bash
+// helm_kctx_init contract: "refresh my HELM/KUBECTL from the saved context").
+pub fun helm_ctx_init(): Null {
+    let ctx = state_get("KUBECTL_CONTEXT", "")
+    if ctx != "" {
+        __helm_ctx_flags_v = "--kube-context {ctx}"
+        __kubectl_ctx_flags_v = "--context {ctx}"
+        state_set("HELM_CTX", __helm_ctx_flags_v)
+        state_set("KUBECTL_CTX", __kubectl_ctx_flags_v)
+    } else {
+        __helm_ctx_flags_v = ""
+        __kubectl_ctx_flags_v = ""
+    }
+}
+
+// helm_kctx_init — bash compatibility alias. The bash file exported this exact
+// name for cleanup.sh / console.sh to refresh their HELM/KUBECTL copies; keep
+// it so those callers (and any resume fast-path) bind unchanged. It first loads
+// state from disk (so a sibling module's separate state instance picks up the
+// orchestrator's saved KUBECTL_CONTEXT), then delegates to helm_ctx_init.
+pub fun helm_kctx_init(): Null {
+    state_load()
+    helm_ctx_init()
+}
+
+// ---- flag accessors (the binding read-site for every helm/kubectl call) ----
+
+// helm_ctx_flags — the helm context flag prefix ("--kube-context X" or "").
+// Interpolate UNQUOTED into a `$ helm {helm_ctx_flags()} … $` so the shell
+// word-splits it into the two flag tokens (or nothing when unbound).
+pub fun helm_ctx_flags(): Text {
+    return __helm_ctx_flags_v
+}
+
+// kubectl_ctx_flags — the kubectl context flag prefix ("--context X" or "").
+pub fun kubectl_ctx_flags(): Text {
+    return __kubectl_ctx_flags_v
+}
+
+// ---- helm_kubeconfig_setup -------------------------------------------------
+
+// helm_kubeconfig_setup — read the EKS cluster name from CFN outputs, run
+// `aws eks update-kubeconfig` on it, bind the context, and persist. Idempotent.
+// Must run after CFN deploy, before anything that touches the cluster (build,
+// crane, helm). Split out of the install flow so the build path (`--build`) and
+// any resume fast-path reuse it.
+//
+// Port notes vs bash:
+//   * The `HELM=(…) / KUBECTL=(…)` rebind at the end becomes a helm_ctx_init()
+//     call after KUBECTL_CONTEXT is persisted — the one definition site.
+//   * `aws eks update-kubeconfig … >/dev/null` and `kubectl config use-context …
+//     >/dev/null 2>&1 || true` stay raw `trust $…$` escapes (external cloud /
+//     cluster calls, no stdlib equivalent). The use-context failure is tolerated
+//     exactly as the bash `|| true`.
+//   * `export KUBE_CONTEXT="$kube_ctx"` → env_var_set so the `--build` path
+//     (build.ab reads KUBE_CONTEXT) sees it in-process, matching bash.
+//   * state is loaded at entry so this module's own state instance carries the
+//     orchestrator's CFN_STACK_NAME / AWS_REGION / KUBECTL_CONTEXT.
+pub fun helm_kubeconfig_setup(): Null {
+    state_load()
+    let stack_name = state_get("CFN_STACK_NAME", "")
+    let region = state_get("AWS_REGION", "")
+
+    ui_step("Updating kubeconfig for EKS cluster")
+
+    // Read all outputs once. Look up MIGRATIONS_EKS_CLUSTER_NAME (the canonical
+    // key) and tolerate EKSClusterName as a fallback.
+    let outputs = cfn_outputs(stack_name, region)
+    let cluster_name = _cfn_pick(outputs, ["MIGRATIONS_EKS_CLUSTER_NAME", "EKSClusterName"])
+    if cluster_name == "" {
+        die("could not read EKS cluster name from CFN outputs of '{stack_name}' (looked for MIGRATIONS_EKS_CLUSTER_NAME, EKSClusterName)")
+    }
+    let registry_from_cfn = _cfn_pick(outputs, ["MIGRATIONS_ECR_REGISTRY", "ECRRegistry"])
+    if registry_from_cfn != "" {
+        state_set("CRANE_REGISTRY", registry_from_cfn)
+    }
+
+    // Always create the kubeconfig entry (with --alias so multi-cluster hosts
+    // get a stable context name), and only skip the *active context switch* when
+    // --skip-setting-k8s-context is set. Default alias is the cluster name;
+    // --kubectl-context overrides (carried in KUBECTL_CONTEXT).
+    let kube_ctx = state_get("KUBECTL_CONTEXT", cluster_name)
+    trust $aws eks update-kubeconfig --region "{region}" --name "{cluster_name}" --alias "{kube_ctx}" >/dev/null$
+    if state_get("SKIP_KUBECONFIG_UPDATE", "N") == "Y" {
+        log_info("kubeconfig entry created (alias={kube_ctx}); active context unchanged")
+    } else {
+        // `|| true` — switching the active context is best-effort (bash tolerated
+        // a failure here; the --alias entry already exists for explicit --context).
+        trust $kubectl config use-context "{kube_ctx}" >/dev/null 2>&1 || true$
+    }
+    state_set("EKS_CLUSTER", cluster_name)
+    state_set("KUBECTL_CONTEXT", kube_ctx)
+    state_save()
+    trust env_var_set("KUBE_CONTEXT", kube_ctx)
+
+    // Bind context-bound helm/kubectl flag prefixes so every later call routes
+    // through the operator-selected context. The single binding site (replaces
+    // the bash `HELM=(helm --kube-context X) / KUBECTL=(kubectl --context X)`).
+    helm_ctx_init()
+}
