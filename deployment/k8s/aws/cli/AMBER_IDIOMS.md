@@ -91,8 +91,23 @@ Authoritative for this port. The published docs LAG the alpha — every rule her
 9. **Building sed/regex backrefs:** construct `let backref = "\\{n as Text}"` as a SEPARATE Text, then interpolate `{backref}` — inline `"\\{n}"` in a `$...$` mis-lowers the `\\` + var ref.
 10. **`status` builtin: call as `status()`** to avoid the deprecation warning.
 
-## Test-runner flake (don't chase ghosts)
-`amber 0.6.0-alpha`'s parallel `amber test test/` is **nondeterministic on a COLD cache** — racing on temp-compiled binaries it can misreport counts and even attribute phantom test names to the wrong file. It converges to stable green on warm runs. AUTHORITATIVE check = run each file individually (`amber test test/test_<m>.ab`) or run the full suite 2–3× and take the warm result. Don't "fix" a failure that only appears on the first cold run and names a test that exists in no file.
+## Test-runner parallelism — RUN ONE FILE PER INVOCATION
+`amber 0.6.0-alpha` runs every `test` block passed in ONE invocation as a single
+shared-process PARALLEL pool. Verified: blocks run concurrently AND `env_var_set`
+LEAKS between them (shared process env). Our tests isolate each block via a
+per-world `MIGRATE_HOME` env var (test/support/world.ab) + a mock control-plane
+keyed on it — so `amber test test/` (all files at once) lets blocks from DIFFERENT
+files clobber each other's MIGRATE_HOME and race (observed on cold CI: ~114
+spurious failures + `bash: …/driver.sh: No such file`). **FIX: run ONE `amber
+test` invocation PER FILE.** The gradle `testMigrationAssistantCli` task,
+`.github/workflows/migrate-cli.yml`, and this loop all do that:
+```
+fail=0; for f in test/test_*.ab; do amber test "$f" || fail=1; done; exit $fail
+```
+Per-file, each file's blocks only race against their own siblings, which the
+world's `mktemp -d` uniqueness handles → deterministic, even cold. Never use
+`amber test test/` as the gate. (Blocks within one file are still parallel — keep
+each block's world independent; never depend on another block's setup.)
 
 ## Project layout
 ```

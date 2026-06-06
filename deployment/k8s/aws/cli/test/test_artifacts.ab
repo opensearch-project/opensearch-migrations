@@ -136,7 +136,13 @@ main \{
 }
 "
     trust file_write(driver_ab, src)
-    trust $amber build "{driver_ab}" "{out_sh}" > /dev/null 2>&1$
+    // Use the SAME amber that's running these tests: the gradle task / CI set
+    // AMBER to the (provisioned) toolchain path; fall back to `amber` on PATH for
+    // a local interactive run. Hardcoding `amber` broke under the Gradle-
+    // provisioned toolchain (no host amber → 127 → driver.sh never built).
+    let amber_bin = env_var_get("AMBER") failed { "amber" }
+    if amber_bin == "" { amber_bin = "amber" }
+    trust $"{amber_bin}" build "{driver_ab}" "{out_sh}" > /dev/null 2>&1$
 }
 
 // ---- cache hits: the steady state served without a fresh download -----------

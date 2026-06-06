@@ -340,10 +340,40 @@ tasks.register('testMigrationAssistantCli') {
     group = 'verification'
     dependsOn 'provisionAmber'
     doLast {
-        project.exec {
-            workingDir file('cli')
-            environment 'MIGRATE_FORCE_TTY', '1'
-            commandLine resolveAmber(), 'test', 'test/'
+        def amber = resolveAmber()
+        def cliDir = file('cli')
+        // Run each test FILE in its own `amber test` invocation, sequentially.
+        // amber 0.6's parallel runner shares the process environment across test
+        // blocks, and the suite isolates each test via MIGRATE_HOME (per-world
+        // sandbox + mock control-plane). Running all files in one parallel
+        // invocation races on that env on a cold cache (observed: ~114 spurious
+        // failures + 'driver.sh: No such file' on fresh CI agents). One
+        // invocation per file keeps each file's blocks from cross-contaminating
+        // another file's, and is deterministic on cold caches.
+        def testFiles = fileTree(dir: new File(cliDir, 'test'), include: '*.ab').files.sort()
+        def failed = []
+        testFiles.each { tf ->
+            // Up to 2 attempts: amber 0.6-alpha occasionally flakes a single file
+            // on a cold compile cache (the first run warms it). Per-file isolation
+            // already removes the cross-file env race; this absorbs the residual
+            // single-file cold-compile flake deterministically.
+            def ok = false
+            for (int attempt = 1; attempt <= 2 && !ok; attempt++) {
+                def r = project.exec {
+                    workingDir cliDir
+                    environment 'MIGRATE_FORCE_TTY', '1'
+                    // Expose the resolved amber to tests that compile a sub-driver
+                    // (e.g. test_artifacts) so they don't assume `amber` on PATH.
+                    environment 'AMBER', amber
+                    commandLine amber, 'test', "test/${tf.name}"
+                    setIgnoreExitValue(true)
+                }
+                ok = (r.exitValue == 0)
+            }
+            if (!ok) { failed << tf.name }
+        }
+        if (!failed.isEmpty()) {
+            throw new GradleException("Amber tests failed in: ${failed.join(', ')}")
         }
     }
 }

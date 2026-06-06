@@ -68,15 +68,28 @@ jobs:
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: amber test (full suite; FORCE_TTY exercises interactive paths)
+      - name: amber test (one invocation per file; FORCE_TTY exercises TUI paths)
         working-directory: deployment/k8s/aws/cli
         env:
           MIGRATE_FORCE_TTY: '1'
         run: |
-          # amber test's parallel runner can flake on a COLD cache; run twice and
-          # require the (warm) second run green. See cli/AMBER_IDIOMS.md.
-          amber test test/ || true
-          amber test test/
+          # amber 0.6 runs every `test` block in ONE shared-process parallel pool,
+          # and these tests isolate each block via a per-world MIGRATE_HOME env var.
+          # Running ALL files in a single `amber test test/` invocation lets blocks
+          # from different files race on that shared env (observed on cold CI:
+          # ~114 spurious failures). One invocation PER FILE keeps each file's
+          # blocks from cross-contaminating another's, and is deterministic.
+          # See cli/AMBER_IDIOMS.md + cli/test/TEST_GUIDE.md.
+          fail=0
+          for f in test/test_*.ab; do
+            echo "::group::$f"
+            # Up to 2 attempts — absorbs amber 0.6-alpha's residual single-file
+            # cold-compile-cache flake (the first run warms it). Per-file already
+            # removes the cross-file env race.
+            amber test "$f" || amber test "$f" || fail=1
+            echo "::endgroup::"
+          done
+          exit $fail
 
   # ---- bash-3.2: compile + run the compiled output under real bash 3.2 -------
   bash32:
