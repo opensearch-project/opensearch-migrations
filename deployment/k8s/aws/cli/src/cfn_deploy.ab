@@ -407,10 +407,15 @@ pub fun cfn_deploy_or_skip(): Int {
     let params = ["Stage={state_get("STAGE_NAME", "")}"]
     if {
         variant == "create-vpc" {
-            template_name = CFN_TEMPLATE_CREATE_VPC
+            // Inline the literal (not the module const): a top-level `const`
+            // assigned into a `let` inside an if-chain is tree-shaken away when
+            // this module is IMPORTED (amber 0.6 bug) → template_name came back
+            // empty on CI ("could not resolve artifact  @ v…"). Inlining the
+            // string keeps it in the compiled output.
+            template_name = "Migration-Assistant-Infra-Create-VPC-eks.template.json"
         }
         variant == "import-vpc" {
-            template_name = CFN_TEMPLATE_IMPORT_VPC
+            template_name = "Migration-Assistant-Infra-Import-VPC-eks.template.json"
             let vpc_id = state_get("IMPORT_VPC_ID", "")
             let subnets = state_get("IMPORT_SUBNET_IDS", "")
             if vpc_id == "" { die("--deploy-import-vpc-cfn requires --vpc-id") }
