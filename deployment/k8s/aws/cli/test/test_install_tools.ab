@@ -27,7 +27,7 @@ fun write_fake_curl(dir: Text): Null {
     s = "{s}  if [ \"\$1\" = \"-o\" ]; then out=\"\$2\"; shift 2; continue; fi\n"
     s = "{s}  shift\n"
     s = "{s}done\n"
-    s = "{s}if [ -n \"\$out\" ]; then printf '#!/usr/bin/env bash\\necho stub\\n' > \"\$out\"; chmod +x \"\$out\"; fi\n"
+    s = "{s}if [ -n \"\$out\" ]; then mkdir -p \"\$(dirname \"\$out\")\"; printf '#!/usr/bin/env bash\\necho stub\\n' > \"\$out\"; chmod +x \"\$out\"; fi\n"
     s = "{s}exit 0\n"
     trust dir_create(dir)
     trust file_write("{dir}/curl", s)
