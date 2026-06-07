@@ -21,10 +21,10 @@
 // brace-heavy, so canned manifests live in test/fixtures/*.json, never inline.
 
 import { assert } from "std/test"
-import { file_exists, file_read, file_write, dir_create } from "std/fs"
+import { file_exists, file_read } from "std/fs"
 import { env_var_set, env_var_unset } from "std/env"
 import { text_contains } from "std/text"
-import { fresh_world, world_noninteractive } from "./support/world.ab"
+import { fresh_world, world_noninteractive, seed_skills } from "./support/world.ab"
 import {
     _mcp_write_codex, mcp_install_from_manifest, agent_setup
 } from "../src/agent.ab"
@@ -32,40 +32,8 @@ import {
 // Pointed at by the tests that need a manifest (mcpServers + branding).
 const AGENT_MANIFEST = "test/fixtures/agent_manifest.json"
 
-// ---- file-local helpers (ABOVE the test blocks: define-before-use across the
-// import boundary; the test-file tree-shaker keeps only deps textually preceding
-// their use). ----
-
-// seed_skills — lay down a Startup.md + skill tree the agent setup copies from,
-// and point _agent_skills_src() at it (MIGRATE_SKILLS_SRC override, with an empty
-// LIB_DIR so the release/dev candidates miss). Mirrors the bundle's skills/ shape:
-// Startup.md at the root, per-skill <name>/SKILL.md subdirs (the auto-discovered
-// tree), the operator skill's steering docs, and a kiro/ config subtree.
-fun seed_skills(): Text {
-    let base = trust $mktemp -d$
-    let skills = "{base}/skills"
-    trust dir_create(skills)
-    trust file_write("{skills}/Startup.md", "# Startup runbook\nhello\n")
-
-    trust dir_create("{skills}/migration-assistant-operator")
-    trust file_write("{skills}/migration-assistant-operator/SKILL.md", "# operator skill\n")
-    trust file_write("{skills}/migration-assistant-operator/workflow.md", "# workflow\n")
-    trust file_write("{skills}/migration-assistant-operator/deployment.md", "# deployment\n")
-    trust file_write("{skills}/migration-assistant-operator/product.md", "# product\n")
-
-    trust dir_create("{skills}/another-skill")
-    trust file_write("{skills}/another-skill/SKILL.md", "# another skill\n")
-
-    // Upstream kiro config tree (agent_setup kiro copies skills/kiro/. into .kiro/).
-    trust dir_create("{skills}/kiro/agents")
-    trust file_write("{skills}/kiro/agents/opensearch.json", "agent-config\n")
-
-    let emptylib = "{base}/emptylib"
-    trust dir_create(emptylib)
-    trust env_var_set("LIB_DIR", emptylib)
-    trust env_var_set("MIGRATE_SKILLS_SRC", skills)
-    return skills
-}
+// seed_skills() (the Startup.md + skill-tree fixture builder) now lives in
+// ./support/world.ab — imported above and shared with the handoff suite.
 
 // ---- agent_setup: skills + config without the handoff -----------------------
 

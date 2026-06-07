@@ -97,19 +97,25 @@ test "dash_clear empties the table but keeps mode" {
 // ---- classification: cfn_status_class table + mode dispatch -----------------
 
 test "cfn_status_class maps CFN states, with ROLLBACK ranked before COMPLETE" {
-    // in-progress
-    assert_eq(cfn_status_class("CREATE_IN_PROGRESS"), "prog")
-    assert_eq(cfn_status_class("UPDATE_IN_PROGRESS"), "prog")
-    // complete
-    assert_eq(cfn_status_class("CREATE_COMPLETE"), "done")
-    assert_eq(cfn_status_class("UPDATE_COMPLETE"), "done")
-    // failures — a plain FAILED and any ROLLBACK, including the tricky
-    // UPDATE_ROLLBACK_COMPLETE that ENDS in COMPLETE but is still a failure.
-    assert_eq(cfn_status_class("CREATE_FAILED"), "fail")
-    assert_eq(cfn_status_class("ROLLBACK_IN_PROGRESS"), "fail")
-    assert_eq(cfn_status_class("UPDATE_ROLLBACK_COMPLETE"), "fail")
-    // unknown
-    assert_eq(cfn_status_class("SOMETHING_NEW"), "other")
+    // Parallel-array case table (state -> expected class), looped once. Covers:
+    //   in-progress, complete, failures — incl. the tricky UPDATE_ROLLBACK_COMPLETE
+    //   that ENDS in COMPLETE but is a failure (ROLLBACK tested before COMPLETE) —
+    //   and an unknown state.
+    let states = [
+        "CREATE_IN_PROGRESS", "UPDATE_IN_PROGRESS",
+        "CREATE_COMPLETE", "UPDATE_COMPLETE",
+        "CREATE_FAILED", "ROLLBACK_IN_PROGRESS", "UPDATE_ROLLBACK_COMPLETE",
+        "SOMETHING_NEW"
+    ]
+    let want = [
+        "prog", "prog",
+        "done", "done",
+        "fail", "fail", "fail",
+        "other"
+    ]
+    for i, st in states {
+        assert_eq(cfn_status_class(st), want[i])
+    }
 }
 
 test "dash_classify dispatches on mode: default classes everything as other" {

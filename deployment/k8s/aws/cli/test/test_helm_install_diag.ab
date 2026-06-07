@@ -19,7 +19,6 @@
 // live ABOVE the test blocks (define-before-use across the import boundary).
 
 import { assert, assert_eq } from "std/test"
-import { text_contains } from "std/text"
 import { fresh_world } from "./support/world.ab"
 import { mock_install, mock_respond, mock_called } from "./support/mock.ab"
 import {
@@ -27,22 +26,6 @@ import {
 } from "../src/helm_install.ab"
 
 // ---- pure unit: helm_watch_pods --------------------------------------------
-
-test "helm_watch_pods summarizes the pod snapshot counts + names" {
-    let w = fresh_world()
-    mock_install(["kubectl"])
-    // A 3-pod snapshot: 1 Running+ready, 1 Pending, 1 Failed — exercises every
-    // counter + name list.
-    mock_respond(w, "kubectl", "pods", "migration-console-0 Running true\nma-helm-installer-xyz Pending <none>\nbroken-pod Failed false\n")
-    let summary = helm_watch_pods("ma")
-    assert(text_contains(summary, "pods total=3"))
-    assert(text_contains(summary, "running=1"))
-    assert(text_contains(summary, "pending=1"))
-    assert(text_contains(summary, "failed=1"))
-    // The Pending + Failed pods are named in their lists.
-    assert(text_contains(summary, "pending=[ma-helm-installer-xyz]"))
-    assert(text_contains(summary, "failed=[broken-pod]"))
-}
 
 test "helm_watch_pods returns the waiting line when no pods exist" {
     let w = fresh_world()

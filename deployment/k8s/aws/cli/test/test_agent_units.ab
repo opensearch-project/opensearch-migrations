@@ -82,7 +82,7 @@ test "_agent_has_session is optimistically true for non-claude agents" {
     let w = fresh_world()
     world_noninteractive()
     // Only claude has an inspectable per-cwd session dir; every other agent
-    // returns true (its resume is harmless on no history).
+    // returns true (its resume is harmless on no history). codex and kiro hit
+    // the identical `agent != "claude"` branch, so one non-claude agent covers it.
     assert(_agent_has_session("codex"))
-    assert(_agent_has_session("kiro"))
 }

@@ -8,33 +8,26 @@
 import { assert, assert_eq } from "std/test"
 import { fresh_world, world_seed, world_noninteractive } from "./support/world.ab"
 import {
-    mock_install_default, mock_respond, mock_respond_rc, mock_called
+    mock_install_default, mock_respond_rc, mock_called
 } from "./support/mock.ab"
 import { _console_exec_into_pod } from "../src/console.ab"
 
 // helpers ABOVE the test blocks (define-before-use across the import boundary).
 
-// deployed_world — a deployed stage on disk (STAGE_NAME=ma) + the fleet faked to
-// succeed (kubectl exec exits clean, helm reports deployed, aws sts an identity).
-// `ctx` binds an optional KUBECTL_CONTEXT (seed "" for the bare case). Returns WORLD.
-fun deployed_world(ctx: Text): Text {
+// deployed_world — a deployed stage on disk (STAGE_NAME=ma). Each test sets its
+// own kubectl exec rc after calling this. Returns WORLD.
+fun deployed_world(): Text {
     let w = fresh_world()
     world_noninteractive()
     world_seed(w, "STAGE_NAME", "ma")
-    if ctx != "" {
-        world_seed(w, "KUBECTL_CONTEXT", ctx)
-    }
     mock_install_default()
-    mock_respond_rc(w, "kubectl", "exec", "0")
-    mock_respond(w, "helm", "status", "NAME: ma\nSTATUS: deployed\n")
-    mock_respond(w, "aws", "get-caller-identity", "arn:aws:iam::123456789012:user/test\n")
     return w
 }
 
 // ---- _console_exec_into_pod: the operator-signal exit-code mapping ----------
 
 test "console exec maps a clean exit (0) to rc 0" {
-    let w = deployed_world("")
+    let w = deployed_world()
     mock_respond_rc(w, "kubectl", "exec", "0")
     let rc = _console_exec_into_pod("ma")
     assert_eq(rc, 0)
@@ -42,28 +35,28 @@ test "console exec maps a clean exit (0) to rc 0" {
 }
 
 test "console exec maps SIGINT (130) to rc 0" {
-    let w = deployed_world("")
+    let w = deployed_world()
     mock_respond_rc(w, "kubectl", "exec", "130")
     let rc = _console_exec_into_pod("ma")
     assert_eq(rc, 0)
 }
 
 test "console exec maps SIGQUIT (131) to rc 0" {
-    let w = deployed_world("")
+    let w = deployed_world()
     mock_respond_rc(w, "kubectl", "exec", "131")
     let rc = _console_exec_into_pod("ma")
     assert_eq(rc, 0)
 }
 
 test "console exec maps SIGTERM (143) to rc 0" {
-    let w = deployed_world("")
+    let w = deployed_world()
     mock_respond_rc(w, "kubectl", "exec", "143")
     let rc = _console_exec_into_pod("ma")
     assert_eq(rc, 0)
 }
 
 test "console exec passes through a genuine non-zero rc verbatim" {
-    let w = deployed_world("")
+    let w = deployed_world()
     // 7 is not an operator-driven signal → returned verbatim (bash exit "$rc").
     mock_respond_rc(w, "kubectl", "exec", "7")
     let rc = _console_exec_into_pod("ma")
@@ -71,7 +64,7 @@ test "console exec passes through a genuine non-zero rc verbatim" {
 }
 
 test "console exec issues a TTY-attached kubectl exec into migration-console-0" {
-    let w = deployed_world("")
+    let w = deployed_world()
     mock_respond_rc(w, "kubectl", "exec", "0")
     _console_exec_into_pod("ma")
     assert(mock_called(w, "kubectl", "exec"))

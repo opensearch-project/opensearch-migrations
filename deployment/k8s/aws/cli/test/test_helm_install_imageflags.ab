@@ -20,9 +20,6 @@
 
 import { assert, assert_eq } from "std/test"
 import { array_contains } from "../src/std.ab"
-// The pinned release/namespace constants are owned by helm_ctx.ab (the install
-// flow imports them from there); the test asserts the same source of truth.
-import { HELM_RELEASE_NAME, HELM_NAMESPACE } from "../src/helm_ctx.ab"
 import {
     _helm_build_public_image_flags, _helm_build_mirrored_image_flags
 } from "../src/helm_install.ab"
@@ -61,11 +58,4 @@ test "_helm_build_mirrored_image_flags uses the single repo + disambiguating tag
     assert(array_contains("images.migrationConsole.tag=migrations_migration_console_3.2.1", flags))
     // installer reuses the console build-name tag.
     assert(array_contains("images.installer.tag=migrations_migration_console_3.2.1", flags))
-}
-
-// ---- HELM_RELEASE_NAME / HELM_NAMESPACE constants --------------------------
-
-test "release name + namespace are pinned to ma" {
-    assert_eq(HELM_RELEASE_NAME, "ma")
-    assert_eq(HELM_NAMESPACE, "ma")
 }

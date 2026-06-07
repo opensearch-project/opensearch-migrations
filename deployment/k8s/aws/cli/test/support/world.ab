@@ -72,3 +72,34 @@ pub fun world_seed(world: Text, key: Text, val: Text): Null {
 pub fun world_noninteractive(): Null {
     trust env_var_set("MIGRATE_NONINTERACTIVE", "1")
 }
+
+// seed_skills — lay down a Startup.md + skill tree the agent setup copies from,
+// and point _agent_skills_src() at it (MIGRATE_SKILLS_SRC override, with an empty
+// LIB_DIR so the release/dev candidates miss). Mirrors the bundle's skills/ shape:
+// Startup.md at the root, per-skill <name>/SKILL.md subdirs (the auto-discovered
+// tree), the operator skill's steering docs, and a kiro/ config subtree.
+pub fun seed_skills(): Text {
+    let base = trust $mktemp -d$
+    let skills = "{base}/skills"
+    trust dir_create(skills)
+    trust file_write("{skills}/Startup.md", "# Startup runbook\nhello\n")
+
+    trust dir_create("{skills}/migration-assistant-operator")
+    trust file_write("{skills}/migration-assistant-operator/SKILL.md", "# operator skill\n")
+    trust file_write("{skills}/migration-assistant-operator/workflow.md", "# workflow\n")
+    trust file_write("{skills}/migration-assistant-operator/deployment.md", "# deployment\n")
+    trust file_write("{skills}/migration-assistant-operator/product.md", "# product\n")
+
+    trust dir_create("{skills}/another-skill")
+    trust file_write("{skills}/another-skill/SKILL.md", "# another skill\n")
+
+    // Upstream kiro config tree (agent_setup kiro copies skills/kiro/. into .kiro/).
+    trust dir_create("{skills}/kiro/agents")
+    trust file_write("{skills}/kiro/agents/opensearch.json", "agent-config\n")
+
+    let emptylib = "{base}/emptylib"
+    trust dir_create(emptylib)
+    trust env_var_set("LIB_DIR", emptylib)
+    trust env_var_set("MIGRATE_SKILLS_SRC", skills)
+    return skills
+}
