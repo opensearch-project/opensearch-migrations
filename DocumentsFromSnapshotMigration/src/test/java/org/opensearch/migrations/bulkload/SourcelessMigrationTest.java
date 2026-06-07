@@ -13,7 +13,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
-import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
+import org.opensearch.migrations.bulkload.common.RepoUri;
+import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
@@ -215,11 +216,11 @@ public class SourcelessMigrationTest extends SourceTestBase {
                 .build()
                 .toConnectionContext());
             var sourceClient = sourceClientFactory.determineVersionAndCreate();
-            var snapshotCreator = new FileSystemSnapshotCreator(
+            var snapshotCreator = new SnapshotCreator(
                 SNAPSHOT_NAME,
                 SNAPSHOT_REPO,
                 sourceClient,
-                SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR),
                 List.of(),
                 snapshotContext.createSnapshotCreateContext()
             );
@@ -487,9 +488,9 @@ public class SourcelessMigrationTest extends SourceTestBase {
             var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
             var sourceClientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
                 .host(sourceCluster.getUrl()).insecure(true).build().toConnectionContext());
-            var snapshotCreator = new FileSystemSnapshotCreator(SNAPSHOT_NAME, SNAPSHOT_REPO,
+            var snapshotCreator = new SnapshotCreator(SNAPSHOT_NAME, SNAPSHOT_REPO,
                 sourceClientFactory.determineVersionAndCreate(),
-                SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, List.of(),
+                RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR), List.of(),
                 snapshotContext.createSnapshotCreateContext());
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
             sourceCluster.copySnapshotData(localDirectory.toString());

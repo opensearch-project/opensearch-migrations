@@ -11,54 +11,48 @@ import static org.mockito.Mockito.mock;
 
 public class GcsSnapshotCreatorTest {
 
-    @Test
-    void GetBucketName_ExtractsBucketFromUri() {
-        var creator = new GcsSnapshotCreator(
+    private SnapshotCreator createGcsCreator(String gcsUri, Integer maxRate, boolean compress) {
+        return new SnapshotCreator(
             "snap", "repo", mock(OpenSearchClient.class),
-            "gs://my-bucket/base/path",
-            List.of(), null
+            RepoUri.parse(gcsUri),
+            List.of(), null, compress, true,
+            null, null, maxRate, null
         );
-        assertEquals("my-bucket", creator.getBucketName());
     }
 
     @Test
-    void GetBasePath_ExtractsNestedPath() {
-        var creator = new GcsSnapshotCreator(
-            "snap", "repo", mock(OpenSearchClient.class),
-            "gs://my-bucket/base/path",
-            List.of(), null
-        );
-        assertEquals("base/path", creator.getBasePath());
+    void GetRequestBodyForRegisterRepo_ExtractsBucketAndPath() {
+        var creator = createGcsCreator("gs://my-bucket/base/path", null, false);
+        ObjectNode body = creator.getRequestBodyForRegisterRepo();
+        ObjectNode settings = (ObjectNode) body.get("settings");
+
+        assertEquals("gcs", body.get("type").asText());
+        assertEquals("my-bucket", settings.get("bucket").asText());
+        assertEquals("base/path", settings.get("base_path").asText());
     }
 
     @Test
-    void GetBasePath_ReturnsNullForBucketOnly() {
-        var creator = new GcsSnapshotCreator(
-            "snap", "repo", mock(OpenSearchClient.class),
-            "gs://my-bucket",
-            List.of(), null
-        );
-        assertNull(creator.getBasePath());
+    void GetRequestBodyForRegisterRepo_BucketOnlyNoBasePath() {
+        var creator = createGcsCreator("gs://my-bucket", null, false);
+        ObjectNode body = creator.getRequestBodyForRegisterRepo();
+        ObjectNode settings = (ObjectNode) body.get("settings");
+
+        assertEquals("my-bucket", settings.get("bucket").asText());
+        assertNull(settings.get("base_path"));
     }
 
     @Test
-    void GetBasePath_StripsTrailingSlash() {
-        var creator = new GcsSnapshotCreator(
-            "snap", "repo", mock(OpenSearchClient.class),
-            "gs://my-bucket/path/",
-            List.of(), null
-        );
-        assertEquals("path", creator.getBasePath());
+    void GetRequestBodyForRegisterRepo_StripsTrailingSlash() {
+        var creator = createGcsCreator("gs://my-bucket/path/", null, false);
+        ObjectNode body = creator.getRequestBodyForRegisterRepo();
+        ObjectNode settings = (ObjectNode) body.get("settings");
+
+        assertEquals("path", settings.get("base_path").asText());
     }
 
     @Test
     void GetRequestBodyForRegisterRepo_ProducesCorrectJson() {
-        var creator = new GcsSnapshotCreator(
-            "snap", "repo", mock(OpenSearchClient.class),
-            "gs://my-bucket/snapshots",
-            List.of(), null, null, true, true
-        );
-
+        var creator = createGcsCreator("gs://my-bucket/snapshots", null, true);
         ObjectNode body = creator.getRequestBodyForRegisterRepo();
 
         assertEquals("gcs", body.get("type").asText());
@@ -71,12 +65,7 @@ public class GcsSnapshotCreatorTest {
 
     @Test
     void GetRequestBodyForRegisterRepo_IncludesSnapshotRate() {
-        var creator = new GcsSnapshotCreator(
-            "snap", "repo", mock(OpenSearchClient.class),
-            "gs://my-bucket/path",
-            List.of(), 40, null, false, true
-        );
-
+        var creator = createGcsCreator("gs://my-bucket/path", 40, false);
         ObjectNode body = creator.getRequestBodyForRegisterRepo();
         ObjectNode settings = (ObjectNode) body.get("settings");
 

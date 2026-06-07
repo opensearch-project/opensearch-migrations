@@ -25,7 +25,7 @@ public class MigrateOrEvaluateArgs {
     @Parameter(names = { "--snapshot-name" }, description = "The name of the snapshot to migrate")
     public String snapshotName;
 
-    @Parameter(names = {"--repo-uri", "--s3-repo-uri", "--file-system-repo-path", "--gcs-repo-uri"},
+    @Parameter(names = {"--repo-uri", "--s3-repo-uri", "--file-system-repo-path"},
         description = "Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)")
     public String repoUri;
 

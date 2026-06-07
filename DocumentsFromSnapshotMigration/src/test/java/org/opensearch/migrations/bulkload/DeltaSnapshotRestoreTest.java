@@ -8,7 +8,8 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
-import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
+import org.opensearch.migrations.bulkload.common.RepoUri;
+import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
@@ -187,11 +188,11 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
                     .toConnectionContext());
             var sourceClient = sourceClientFactory.determineVersionAndCreate();
             
-            var snapshotCreator1 = new FileSystemSnapshotCreator(
+            var snapshotCreator1 = new SnapshotCreator(
                 snapshot1Name,
                 snapshotRepoName,
                 sourceClient,
-                SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR),
                 List.of(),
                 snapshotContext.createSnapshotCreateContext()
             );
@@ -205,11 +206,11 @@ public class DeltaSnapshotRestoreTest extends SourceTestBase {
 
             // === ACTION: Take second snapshot ===
             var snapshot2Name = "snapshot2";
-            var snapshotCreator2 = new FileSystemSnapshotCreator(
+            var snapshotCreator2 = new SnapshotCreator(
                 snapshot2Name,
                 snapshotRepoName,
                 sourceClient,
-                SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR),
                 List.of(),
                 snapshotContext.createSnapshotCreateContext()
             );
