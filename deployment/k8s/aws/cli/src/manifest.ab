@@ -138,14 +138,13 @@ pub fun manifest_init(): Null {
     if __parsed { return null }
     __parsed = true
 
-    // Candidate list in priority order; first existing file wins. Typed seed
-    // ([""]) anchors the element type, reset to [] to empty, += to append (the
-    // canonical module-array pattern). MIGRATE_MANIFEST (operator override) is
+    // Candidate list in priority order; first existing file wins. A local empty
+    // array infers its [Text] element type from the first += (works for LOCALS,
+    // unlike module-level cross-fn arrays). MIGRATE_MANIFEST (operator override) is
     // appended first when set, exactly like the bash `candidates+=("$MIGRATE_MANIFEST")`
     // prepend; the three release/dev paths follow unconditionally.
     let lib = env_var_get("LIB_DIR") failed { "" }
-    let candidates = [""]
-    candidates = []
+    let candidates = []
     let override = env_var_get("MIGRATE_MANIFEST") failed { "" }
     if override != "" { candidates += [override] }
     candidates += ["{lib}/../manifest.json"]
@@ -316,8 +315,7 @@ pub fun manifest_skills(): Text {
     // each line is `.../<skill>/SKILL.md`, so split on "/" and take the parent of
     // SKILL.md (the second-to-last segment), then sort ascending like `| sort`.
     let raw = trust $find "{sdir}" -mindepth 2 -maxdepth 2 -name SKILL.md 2>/dev/null$
-    let names = [""]
-    names = []
+    let names = []
     for line in split_lines(raw) {
         if line == "" { continue }
         let segs = split(line, "/")

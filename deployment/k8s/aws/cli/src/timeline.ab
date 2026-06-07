@@ -11,22 +11,12 @@
 //
 // The bash version stored phases as "key|label" strings in one array and split
 // on '|'. Amber forbids nested arrays, so we keep that exact packed-string
-// convention (split with index_of + slice) — and additionally the render
+// convention (split the packed "key|label" on '|') — and additionally the render
 // returns its Text so it's testable without a TTY.
 
 import { printf } from "std/env"
-import { slice } from "std/text"
+import { split } from "std/text"
 import { esc, eprint, term_interactive } from "./core.ab"
-
-// index_of — first index of a single-char needle, or -1. (Local copy: keeping
-// each module self-contained avoids cross-module private-symbol ordering traps.)
-fun index_of(s: Text, needle: Text): Int {
-    let total = len s
-    for i in 0..total {
-        if slice(s, i, 1) == needle { return i }
-    }
-    return -1
-}
 
 // The canonical phase list — "last_step_key|operator-visible label", in deploy
 // order. Keys match the state.last_step values written across cfn/helm/agent.
@@ -43,16 +33,16 @@ let __phases = [
     "agent_handoff|Agent handoff (AI mode)"
 ]
 
-// phase_key / phase_label — split one packed "key|label" entry.
+// phase_key / phase_label — split one packed "key|label" entry. Every __phases
+// entry is a fixed 2-field "key|label" record and no field contains "|", so a
+// split-destructure recovers both fields directly.
 fun phase_key(entry: Text): Text {
-    let bar = index_of(entry, "|")
-    if bar < 0 { return entry }
-    return slice(entry, 0, bar)
+    let [k, lbl] = split(entry, "|")
+    return k
 }
 fun phase_label_of(entry: Text): Text {
-    let bar = index_of(entry, "|")
-    if bar < 0 { return entry }
-    return slice(entry, bar + 1, (len entry) - bar - 1)
+    let [k, lbl] = split(entry, "|")
+    return lbl
 }
 
 // timeline_phase_label <key> — operator-visible label for a last_step value,

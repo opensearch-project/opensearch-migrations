@@ -48,7 +48,7 @@ import { lowercase, replace_regex, match_regex } from "std/text"
 import { optional_cmd, regex_capture } from "./std.ab"
 import { log_info, log_warn } from "./log.ab"
 import { ui_warn } from "./ui.ab"
-import { state_set, state_save } from "./state.ab"
+import { state_set, state_save, state_get, state_has, state_reset } from "./state.ab"
 
 // ---- logging --------------------------------------------------------------
 //
@@ -59,72 +59,41 @@ import { state_set, state_save } from "./state.ab"
 // (and stderr only when --verbose), never to stdout — so getter return values
 // stay clean. (See the imports above.)
 
-// ---- in-memory state store (parallel arrays — the dashboard.ab pattern) -----
+// ---- state store (delegates to the shared state.ab store) -------------------
 //
-// Replaces lib/state.sh's STATE_KEYS/STATE_VALS for the keys discover owns.
-// Nested arrays are forbidden in Amber, so keys[] and vals[] run in parallel;
-// __sc is the logical length and every path honors it. Seeded with one
-// placeholder element because `let` has no empty-typed-array literal (and the
-// first real write reuses slot 0 so physical length == logical length).
+// discover's job is to PUBLISH facts (AWS_ACCOUNT, AWS_REGION, EKS_CLUSTERS, …)
+// for later stages (helm_install, wizard, cfn_deploy) to read. Those run as
+// separate compiled module instances, so the facts MUST reach the shared,
+// on-disk state.ab store — a discover-local copy left AWS_ACCOUNT empty at helm
+// time ('Missing required value: .Values.aws.account'). disc_state_set therefore
+// writes through state_set + state_save. The getters then delegate straight to
+// the SAME store rather than maintaining a second parallel-array mirror: the old
+// module-local __keys/__vals copy was never read by any other module and only
+// duplicated what state.ab already holds, so it's gone. These thin wrappers keep
+// the disc_state_* call sites (and tests) reading as discover's own API.
 
-let __keys = [""]
-let __vals = [""]
-let __sc = 0
-
-fun disc_idx(key: Text): Int {
-    for i in 0..__sc {
-        if __keys[i] == key { return i }
-    }
-    return -1
-}
-
-// disc_state_set <key> <value> — insert or update. (bash: state_set.)
-//
-// Writes BOTH the module-local store (so discover_* + its tests can read facts
-// back without a disk round-trip) AND the shared on-disk state.ab store, then
-// persists. The bash module used the real state_set — discovered facts
-// (AWS_ACCOUNT, AWS_REGION, EKS_CLUSTERS, …) MUST reach state.env so downstream
-// modules (helm_install, wizard, cfn_deploy), which are separate Amber module
-// instances reading via state_get, see them. (A local-only store left
-// AWS_ACCOUNT empty at helm time → chart error 'Missing required value:
-// .Values.aws.account' on the EKS deploy.)
+// disc_state_set <key> <value> — publish a discovered fact to the shared store
+// and persist it to state.env. (bash: state_set + save.)
 pub fun disc_state_set(key: Text, val: Text): Null {
     state_set(key, val)
     state_save()
-    let i = disc_idx(key)
-    if i >= 0 {
-        __vals[i] = val
-        return null
-    }
-    // First row reuses the seed slot; later rows grow the arrays — keeps
-    // physical length == logical length so the 0..__sc loops read real data.
-    if __sc < len __keys {
-        __keys[__sc] = key
-        __vals[__sc] = val
-    } else {
-        __keys += [key]
-        __vals += [val]
-    }
-    __sc += 1
 }
 
 // disc_state_get <key> — value for <key>, or "" if unset. The VALUE is the
 // return (stdout-clean); chrome never rides along. (bash: state_get, default "".)
 pub fun disc_state_get(key: Text): Text {
-    let i = disc_idx(key)
-    if i >= 0 { return __vals[i] }
-    return ""
+    return state_get(key, "")
 }
 
 // disc_state_has <key> — Bool membership. (bash: state_has.)
 pub fun disc_state_has(key: Text): Bool {
-    return disc_idx(key) >= 0
+    return state_has(key)
 }
 
-// disc_state_reset — clear the store (test seam; bash had no public equivalent
-// but state_load reset the arrays — same effect).
+// disc_state_reset — clear the in-memory store (test seam; the shared store's
+// in-memory reset, no disk reload).
 pub fun disc_state_reset(): Null {
-    __sc = 0
+    state_reset()
 }
 
 // ---- OS + package manager --------------------------------------------------

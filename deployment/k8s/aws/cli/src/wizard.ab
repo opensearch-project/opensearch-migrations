@@ -54,6 +54,8 @@ import { ui_step, ui_prompt, ui_confirm, ui_dim, ui_ok, ui_info } from "./ui.ab"
 import { state_get, state_set, state_save } from "./state.ab"
 import { ma_default_version } from "./version.ab"
 import { regex_match } from "./std.ab"
+import { term_panel } from "./term.ab"
+import { migrate_noninteractive } from "./common.ab"
 
 // ---- private helpers (defined FIRST: Amber tree-shakes per imported symbol and
 // keeps only transitive deps that textually precede the entry point across an
@@ -157,6 +159,72 @@ pub fun _wizard_offer_existing_stack(list: Text): Text {
         }
     }
     return ""
+}
+
+// ---- deploy plan / confirm gate --------------------------------------------
+
+// fmt_deploy_plan — the consolidated "here is what I'm about to do" summary as a
+// [Text] of panel lines. PURE FUNCTION OF ITS ARGUMENTS — takes the already-
+// collected values rather than reaching into the state store, so it is trivially
+// unit-testable (no TTY, no shared global store to race on) and has one obvious
+// contract. This is the first-run operator's one chance to see — before a
+// ~30-minute, resource-CREATING run — exactly which AWS account/region is
+// targeted, the CFN stack + variant, whether images get mirrored, the MA version,
+// and a time hint. adopting=true (SKIP_CFN_DEPLOY=Y) is called out so the operator
+// knows CFN creation is skipped. wizard_show_plan() reads state and passes it in.
+pub fun fmt_deploy_plan(account: Text, region: Text, stage_name: Text, stack: Text, variant: Text, mirror: Text, ma_ver: Text, adopting: Bool): [Text] {
+    let rows = []
+    rows += ["AWS account   : {account}"]
+    rows += ["Region        : {region}"]
+    rows += ["Stage         : {stage_name}"]
+    if adopting {
+        rows += ["CFN stack     : {stack}  (adopting existing — CFN deploy skipped)"]
+    } else {
+        rows += ["CFN stack     : {stack}  (variant: {variant})"]
+        // Name the resources a create-vpc run provisions so "what gets created"
+        // is explicit, not a surprise on the AWS bill.
+        if variant == "create-vpc" {
+            rows += ["Creates       : VPC, EKS cluster, ECR repos, IAM roles"]
+        } else {
+            rows += ["Creates       : EKS cluster, ECR repos, IAM roles (into your VPC)"]
+        }
+    }
+    if mirror == "Y" {
+        rows += ["Images        : mirrored to your private ECR"]
+    } else {
+        rows += ["Images        : pulled directly from public.ecr.aws"]
+    }
+    rows += ["MA version    : {ma_ver}"]
+    rows += [""]
+    rows += ["Est. time     : ~20-30 min (CFN/EKS ~17 min, then images + helm)"]
+    return rows
+}
+
+// wizard_show_plan → Bool: true = proceed, false = operator declined. Renders
+// the plan panel (stderr, via term_panel) and asks one Proceed? gate. In
+// non-interactive / -y mode it logs the plan and auto-proceeds (CI + scripted
+// runs are UNCHANGED — they never block). The deploy that runs after a Y is
+// byte-identical to before; this gate is purely an additive pre-flight. Public
+// so the resume spine calls it right after wizard_collect (keeping wizard_collect
+// itself a pure input-gatherer with an unchanged Null signature).
+pub fun wizard_show_plan(): Bool {
+    let stage_name = state_get("STAGE_NAME", "ma")
+    let plan = fmt_deploy_plan(
+        state_get("AWS_ACCOUNT", "(unknown)"),
+        state_get("AWS_REGION", "(unset)"),
+        stage_name,
+        state_get("CFN_STACK_NAME", "MigrationAssistant-{stage_name}"),
+        state_get("CFN_TEMPLATE_VARIANT", "create-vpc"),
+        state_get("MIRROR_IMAGES", "Y"),
+        state_get("MA_VERSION", "(default)"),
+        state_get("SKIP_CFN_DEPLOY", "N") == "Y"
+    )
+    term_panel("Deploy plan", plan)
+    if migrate_noninteractive() {
+        ui_dim("  non-interactive — proceeding with the plan above")
+        return true
+    }
+    return ui_confirm("Proceed with deploy?", "Y")
 }
 
 // ---- wizard_collect --------------------------------------------------------

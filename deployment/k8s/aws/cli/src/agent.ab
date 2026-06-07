@@ -61,7 +61,7 @@ import {
     ui_select, ui_confirm, ui_bold, ui_reset
 } from "./ui.ab"
 import { log_init, log_info, log_warn, log_file } from "./log.ab"
-import { optional_cmd, array_contains } from "./std.ab"
+import { optional_cmd, array_contains, env_stage_dir } from "./std.ab"
 import {
     manifest_have, manifest_brand, manifest_mcp_names,
     manifest_mcp_command, manifest_mcp_args, manifest_mcp_requires,
@@ -513,22 +513,14 @@ fun _agent_ensure_uvx(): Bool {
 
 // ---- stage dir resolution (shared) ------------------------------------------
 
-// _agent_stage_dir — resolve <stage> the way the other ported modules do
-// (crane.ab / helm_install.ab): explicit STAGE_DIR env wins, else MIGRATE_HOME
-// (default "$PWD/migration-assistant-workspace") joined with STAGE (default
-// "default"). cmd_agent persists STAGE_DIR into the env after parsing --stage, so
-// the writers below resolve it consistently.
+// _agent_stage_dir — resolve <stage> via std.ab's shared env_stage_dir() (the
+// single resolver the other ported modules use): explicit STAGE_DIR env wins,
+// else MIGRATE_HOME (default "$PWD/migration-assistant-workspace") joined with
+// STAGE (default "default"). cmd_agent persists STAGE_DIR into the env after
+// parsing --stage, so the writers below resolve it consistently. Kept as a thin
+// wrapper so the seven call sites read unchanged.
 fun _agent_stage_dir(): Text {
-    let explicit = env_var_get("STAGE_DIR") failed { "" }
-    if explicit != "" { return explicit }
-    let home = env_var_get("MIGRATE_HOME") failed { "" }
-    if home == "" {
-        let pwd = trust $pwd$
-        home = "{pwd}/migration-assistant-workspace"
-    }
-    let st = env_var_get("STAGE") failed { "" }
-    if st == "" { st = "default" }
-    return "{home}/{st}"
+    return env_stage_dir()
 }
 
 // ---- install hints ----------------------------------------------------------

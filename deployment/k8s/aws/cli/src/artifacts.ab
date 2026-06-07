@@ -45,6 +45,7 @@ import { file_exists, file_read, file_write, dir_create, symlink_create } from "
 import { split_words } from "std/text"
 import { eprintln } from "./core.ab"
 import { die } from "./common.ab"
+import { env_stage_dir } from "./std.ab"
 
 // ---- repo constants (mirrors ART_REPO / ART_TAG_PREFIX) --------------------
 
@@ -57,25 +58,11 @@ const ART_TAG_PREFIX = ""
 // and keeps only transitive deps that textually precede the public entry point,
 // so every callee MUST appear above its caller) -----------------------------
 
-// stage_dir — resolve $STAGE_DIR the way _common.sh does:
-//   MIGRATE_HOME defaults to "$PWD/migration-assistant-workspace", STAGE to
-//   "default", and STAGE_DIR = "$MIGRATE_HOME/$STAGE". We read the same env vars
-//   so an already-exported STAGE_DIR-equivalent environment Just Works, and tests
-//   can pin MIGRATE_HOME to a temp dir. (Reading STAGE_DIR directly first lets a
-//   caller that exported it verbatim win, matching the bash global.)
-fun stage_dir(): Text {
-    let direct = env_var_get("STAGE_DIR") failed { "" }
-    if direct != "" { return direct }
-    let home = env_var_get("MIGRATE_HOME") failed { "" }
-    if home == "" {
-        // $PWD fallback, same default as _common.sh.
-        let pwd = trust $pwd$
-        home = "{pwd}/migration-assistant-workspace"
-    }
-    let stage = env_var_get("STAGE") failed { "" }
-    if stage == "" { stage = "default" }
-    return "{home}/{stage}"
-}
+// stage_dir resolution — std.ab's env_stage_dir() is the single shared resolver
+// of $STAGE_DIR the way _common.sh does: MIGRATE_HOME defaults to
+// "$PWD/migration-assistant-workspace", STAGE to "default", and STAGE_DIR =
+// "$MIGRATE_HOME/$STAGE". An already-exported STAGE_DIR wins (matching the bash
+// global), and tests can pin MIGRATE_HOME to a temp dir.
 
 // current_stage — STAGE name for the cache-reset WARN line (bash: stage=$STAGE).
 fun current_stage(): Text {
@@ -175,7 +162,7 @@ pub fun artifacts_fetch(name: Text, version: Text): Text {
     }
 
     let key = sha256_of_string(url)
-    let sdir = stage_dir()
+    let sdir = env_stage_dir()
     let cache_dir = "{sdir}/artifacts/.cache/{key}"
     let cached_file = "{cache_dir}/{name}"
     let verified_marker = "{cache_dir}/.verified"
@@ -228,7 +215,7 @@ pub fun artifacts_fetch_raw(name: Text, version: Text, repo_path: Text): Text {
     let url = "https://raw.githubusercontent.com/{ART_REPO}/{tag}/{repo_path}"
 
     let key = sha256_of_string(url)
-    let sdir = stage_dir()
+    let sdir = env_stage_dir()
     let cache_dir = "{sdir}/artifacts/.cache/{key}"
     let cached_file = "{cache_dir}/{name}"
 
@@ -256,7 +243,7 @@ pub fun artifacts_fetch_raw(name: Text, version: Text, repo_path: Text): Text {
 // `rm -rf .cache` + `rm -f artifacts/*` stays a raw trust command (glob removal
 // has no stdlib wrapper); the trailing WARN mirrors the bash log_warn.
 pub fun artifacts_reset_cache(): Null {
-    let sdir = stage_dir()
+    let sdir = env_stage_dir()
     // Two trusts: the .cache subtree, then the loose symlinks. Globbing `*` is a
     // shell feature with no Amber stdlib equivalent, so this is a surgical escape.
     trust $rm -rf "{sdir}/artifacts/.cache"$

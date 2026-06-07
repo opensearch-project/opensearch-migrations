@@ -30,7 +30,7 @@
 
 import { env_var_get, env_var_test } from "std/env"
 import { file_read, file_write, file_append, file_exists, dir_create } from "std/fs"
-import { split_lines, slice } from "std/text"
+import { split_lines, slice, replace } from "std/text"
 import { trim_quotes } from "./std.ab"
 
 // ---- in-memory store (parallel arrays, mirrors STATE_KEYS/VALS) ------------
@@ -110,23 +110,10 @@ fun index_of_eq(s: Text): Int {
 }
 
 // unescape_quotes — turn every \" back into ". Inverse of state_save's escape.
-// Amber has no in-place ${v//\\\"/\"}; we scan and rebuild (a literal \" is two
-// codepoints: backslash then quote).
+// A single literal substring replacement (backslash-quote → quote), mirroring
+// bash ${v//\\\"/\"}.
 fun unescape_quotes(s: Text): Text {
-    let n = len s
-    let out = ""
-    let i = 0
-    while i < n {
-        let c = slice(s, i, 1)
-        if c == "\\" and i + 1 < n and slice(s, i + 1, 1) == "\"" {
-            out = "{out}\""
-            i += 2
-        } else {
-            out = "{out}{c}"
-            i += 1
-        }
-    }
-    return out
+    return replace(s, "\\\"", "\"")
 }
 
 // state_load — reset the in-memory store and reload it from state.env. Lines
@@ -217,18 +204,22 @@ pub fun state_unset(k: Text): Null {
 // tests inspected ${#STATE_KEYS[@]} directly).
 pub fun state_count(): Int { return len STATE_KEYS }
 
+// state_reset — clear the in-memory store WITHOUT reloading from disk (unlike
+// state_load, which resets then reads state.env). The in-memory analog of a
+// fresh store; used as a test seam and by discover's reset, which delegates here
+// now that discover shares this single store rather than its own parallel arrays.
+pub fun state_reset(): Null {
+    STATE_KEYS = []
+    STATE_VALS = []
+}
+
 // ---- persistence ------------------------------------------------------------
 
 // esc_for_env — escape inner " as \" for the KEY="VALUE" env serialization.
-// Mirrors bash v=${v//\"/\\\"}.
+// A single literal substring replacement (quote → backslash-quote), mirroring
+// bash v=${v//\"/\\\"}. Exact inverse of unescape_quotes above.
 fun esc_for_env(v: Text): Text {
-    let n = len v
-    let out = ""
-    for i in 0..n {
-        let c = slice(v, i, 1)
-        if c == "\"" { out = "{out}\\\"" } else { out = "{out}{c}" }
-    }
-    return out
+    return replace(v, "\"", "\\\"")
 }
 
 // esc_for_json — escape \ then " for the JSON string value. Mirrors the bash

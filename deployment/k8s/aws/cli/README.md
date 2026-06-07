@@ -36,7 +36,7 @@ brew install amber-lang/amber/amber-lang
 #   or: bash <(curl -sL https://github.com/amber-lang/amber/releases/download/0.6.0-alpha/install.sh)
 
 make check     # parse + type-check every module (amber check)
-make test      # run the amber test suite (MIGRATE_FORCE_TTY=1 amber test test/)
+make test      # run the amber test suite (one `amber test` per file — the race-safe gate)
 make build     # compile every module to bash-3.2 under build/
 make verify    # compile to bash-3.2 AND run the compiled output under bash 3.2.57
 make all       # check + build + test + verify

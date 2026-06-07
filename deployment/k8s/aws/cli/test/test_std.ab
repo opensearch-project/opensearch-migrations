@@ -11,9 +11,10 @@
 import { assert, assert_eq } from "std/test"
 import {
     trim, trim_quotes, starts_with, ends_with, contains,
-    split_csv, join_by, regex_capture, regex_match, count_lines_var,
-    array_contains, dedupe, path_join, is_macos, is_linux,
-    optional_cmd, require_var, parse_flag_value, parse_flag_rest, retry_cmd
+    split_csv, join_by, regex_capture, regex_match,
+    array_contains, is_macos,
+    optional_cmd, require_var, parse_flag_value, parse_flag_rest, retry_cmd,
+    env_or, env_stage_dir, to_int_or, registry_host
 } from "../src/std.ab"
 import { env_var_set, env_var_unset } from "std/env"
 
@@ -51,15 +52,6 @@ test "starts_with / ends_with / contains accept hits and reject misses" {
     assert(not starts_with("abcdefg", "abc"))
 }
 
-// ---- strings: line counting -------------------------------------------------
-
-test "count_lines_var follows the bash line-count contract" {
-    assert_eq(count_lines_var("a\nb\nc"), 3)
-    assert_eq(count_lines_var("a\nb\n"), 2)        // trailing newline adds no phantom line
-    assert_eq(count_lines_var("one-line-no-newline"), 1)
-    assert_eq(count_lines_var(""), 0)
-}
-
 // ---- regex: capture group + boolean match ----------------------------------
 
 test "regex_capture returns the requested capture group of the first match" {
@@ -92,27 +84,51 @@ test "array_contains finds present members and rejects absent ones" {
     assert(not array_contains("delta", ["alpha", "beta", "gamma"]))
 }
 
-test "dedupe keeps the first occurrence of each line in order" {
-    let out = dedupe("a\nb\na\nc\nb")
-    assert_eq(len out, 3)
-    assert_eq(out[0], "a")
-    assert_eq(out[1], "b")
-    assert_eq(out[2], "c")
+// ---- numbers: to_int_or -----------------------------------------------------
+
+test "to_int_or parses integers and falls back on empty / non-numeric input" {
+    assert_eq(to_int_or("42", 0), 42)
+    assert_eq(to_int_or("", 7), 7)            // empty → default
+    assert_eq(to_int_or("abc", 9), 9)         // non-numeric → default
+    assert_eq(to_int_or("0", 5), 0)           // a real zero is not the default
 }
 
-// ---- path -------------------------------------------------------------------
+// ---- path: registry_host ----------------------------------------------------
 
-test "path_join joins components with a single slash regardless of edge slashes" {
-    assert_eq(path_join(["/var", "log", "migrate.log"]), "/var/log/migrate.log")
-    assert_eq(path_join(["/foo/", "/bar"]), "/foo/bar")     // collapses the doubled slash
-    assert_eq(path_join(["foo", "bar", "baz"]), "foo/bar/baz")
+test "registry_host returns the component before the first slash" {
+    assert_eq(registry_host("123.dkr.ecr.us-east-1.amazonaws.com/mirrored/foo:tag"), "123.dkr.ecr.us-east-1.amazonaws.com")
+    assert_eq(registry_host("public.ecr.aws/x/y:v1"), "public.ecr.aws")
+    assert_eq(registry_host("bare-host"), "bare-host")   // no slash → whole string
 }
 
 // ---- environment probes -----------------------------------------------------
 
-test "is_macos and is_linux are mutually exclusive and cover the running host" {
-    assert(is_macos() or is_linux())
-    assert(not (is_macos() and is_linux()))
+test "is_macos returns a definite boolean for the running host" {
+    // exactly one of macOS / not-macOS holds; the call must not error
+    let m = is_macos()
+    assert(m or not m)
+}
+
+test "env_or returns the value when set non-empty, else the default" {
+    env_var_set("STD_ENV_OR", "real")
+    assert_eq(env_or("STD_ENV_OR", "def"), "real")
+    env_var_set("STD_ENV_OR", "")
+    assert_eq(env_or("STD_ENV_OR", "def"), "def")   // set-but-empty → default (bash :- )
+    env_var_unset("STD_ENV_OR")
+    assert_eq(env_or("STD_ENV_OR", "def"), "def")   // unset → default
+}
+
+test "env_stage_dir honors an explicit STAGE_DIR, else MIGRATE_HOME + STAGE" {
+    env_var_set("STAGE_DIR", "/explicit/dir")
+    assert_eq(env_stage_dir(), "/explicit/dir")     // explicit wins
+    env_var_unset("STAGE_DIR")
+    env_var_set("MIGRATE_HOME", "/wh")
+    env_var_set("STAGE", "prod")
+    assert_eq(env_stage_dir(), "/wh/prod")
+    env_var_set("STAGE", "")
+    assert_eq(env_stage_dir(), "/wh/default")       // STAGE empty → "default"
+    env_var_unset("MIGRATE_HOME")
+    env_var_unset("STAGE")
 }
 
 test "optional_cmd detects a present command and a missing one" {

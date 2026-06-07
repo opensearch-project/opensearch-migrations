@@ -59,12 +59,12 @@
 //     no braces embedded in a `$…$` command (AMBER_IDIOMS on-disk-fixture trick).
 
 import { trim } from "std/text"
-import { env_var_get } from "std/env"
 import { file_write, file_exists, dir_create } from "std/fs"
 import {
     state_load, state_get, state_set, state_save
 } from "./state.ab"
 import { die } from "./common.ab"
+import { env_stage_dir } from "./std.ab"
 import {
     ui_ok, ui_warn, ui_err, ui_step, ui_dim
 } from "./ui.ab"
@@ -93,22 +93,11 @@ import {
 // dropped (→ "Function 'x' does not exist" when this module is imported).
 // ============================================================================
 
-// stage_dir — resolve $STAGE_DIR the way the other ported modules do (crane.ab /
-// state.ab): an explicit STAGE_DIR env var wins (the bats harness / diag.sh pin
-// one; bash read $STAGE_DIR directly), else MIGRATE_HOME (default
-// "$PWD/migration-assistant-workspace") joined with STAGE (default "default").
-fun stage_dir(): Text {
-    let explicit = env_var_get("STAGE_DIR") failed { "" }
-    if explicit != "" { return explicit }
-    let home = env_var_get("MIGRATE_HOME") failed { "" }
-    if home == "" {
-        let pwd = trust $pwd$
-        home = "{pwd}/migration-assistant-workspace"
-    }
-    let st = env_var_get("STAGE") failed { "" }
-    if st == "" { st = "default" }
-    return "{home}/{st}"
-}
+// stage_dir resolution — std.ab's env_stage_dir() is the single shared resolver
+// the other ported modules use (crane.ab / state.ab): an explicit STAGE_DIR env
+// var wins (the bats harness / diag.sh pin one; bash read $STAGE_DIR directly),
+// else MIGRATE_HOME (default "$PWD/migration-assistant-workspace") joined with
+// STAGE (default "default").
 
 // ============================================================================
 // _helm_extract_chart_values — extract values.yaml + valuesEks.yaml from the
@@ -122,7 +111,7 @@ fun stage_dir(): Text {
 // tarball's top-level is `migration-assistant/`, stripped to land the files at
 // the bottom of <dir>.
 pub fun _helm_extract_chart_values(chart: Text): Text {
-    let dir = "{stage_dir()}/chart-values"
+    let dir = "{env_stage_dir()}/chart-values"
     dir_create(dir) failed {}
     // A chart DIRECTORY (--ma-chart-dir) has the value files on disk already.
     trust $test -d "{chart}"$
@@ -300,7 +289,7 @@ pub fun _helm_apply_disable_general_purpose_pool(cluster: Text, region: Text): I
     // Write the three JSON blobs to fixture files. The braces are escaped `\{` so
     // Amber keeps them literal in the Text (gotcha: `{` is interpolation even in a
     // plain Text literal); `}` is literal and needs no escape.
-    let dir = "{stage_dir()}/eks-config"
+    let dir = "{env_stage_dir()}/eks-config"
     dir_create(dir) failed {}
     let compute_file = "{dir}/compute-config.json"
     let net_file = "{dir}/network-config.json"
@@ -425,7 +414,7 @@ pub fun helm_install_or_upgrade(): Int {
     let rec_rc = helm_recover_if_stuck(release, helm_ns)
     if rec_rc != 0 { return rec_rc }
 
-    let values_file = "{stage_dir()}/helm-values.yaml"
+    let values_file = "{env_stage_dir()}/helm-values.yaml"
     _write_helm_values(values_file)
 
     // Image-override --set flags. MIRROR_IMAGES=Y + a registry → mirrored ECR;

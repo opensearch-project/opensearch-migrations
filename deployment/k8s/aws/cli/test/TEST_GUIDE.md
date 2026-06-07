@@ -85,8 +85,16 @@ Rules (see `../AMBER_IDIOMS.md` for the full list):
 
 ## Running
 
+Run **one file per `amber test` invocation** — never `amber test test/` (all files in
+one process). 0.6 runs every block in a single shared-process parallel pool where
+`env_var_set` leaks, so our per-world `MIGRATE_HOME` isolation races across files
+(~114 spurious cold failures). One invocation per file keeps each file's blocks
+racing only against their own `mktemp`-unique siblings → deterministic. (See
+AMBER_IDIOMS.md "Test-runner parallelism".)
+
 ```bash
-MIGRATE_FORCE_TTY=1 amber test test/            # full suite (run 2× — cold-cache flake)
+# Full suite — the race-safe gate (this is what `make test` + CI run):
+fail=0; for f in test/test_*.ab; do MIGRATE_FORCE_TTY=1 amber test "$f" || fail=1; done; exit $fail
 MIGRATE_FORCE_TTY=1 amber test test/test_cleanup.ab   # one file
-make test                                       # the gradle/CI entrypoint
+make test                                       # the gradle/CI entrypoint (per-file loop)
 ```

@@ -22,7 +22,7 @@
 
 import { assert, assert_eq } from "std/test"
 import { text_contains } from "std/text"
-import { helm_pods_summary } from "../src/helm_diag.ab"
+import { helm_pods_summary, fmt_diag_triage } from "../src/helm_diag.ab"
 
 // ============================================================================
 // helm_pods_summary — the awk-tally replacement (pure formatter; no world/mock).
@@ -51,4 +51,21 @@ test "helm_pods_summary all-healthy omits the name lists" {
 test "helm_pods_summary returns empty for an empty snapshot" {
     assert_eq(helm_pods_summary(""), "")
     assert_eq(helm_pods_summary("   \n  "), "")
+}
+
+// ============================================================================
+// fmt_diag_triage — the one-line SUMMARY verdict shown atop the diag dump (pure).
+// ============================================================================
+
+test "fmt_diag_triage combines release status and the pods summary into one verdict" {
+    let line = fmt_diag_triage("failed", "pods total=3 running=1 pending=2 failed=0")
+    assert(text_contains(line, "SUMMARY"))
+    assert(text_contains(line, "release=failed"))
+    assert(text_contains(line, "pods total=3 running=1 pending=2 failed=0"))
+}
+
+test "fmt_diag_triage degrades gracefully when status or pods are unknown" {
+    let line = fmt_diag_triage("", "")
+    assert(text_contains(line, "release=(unknown)"))
+    assert(text_contains(line, "no pods found yet"))
 }

@@ -34,8 +34,7 @@
 // log (log_stream / log_warn), common (die), std (regex_capture / optional_cmd /
 // trim), core (eprintln for the bold-numbered menu).
 
-import { split_lines, slice, replace } from "std/text"
-import { env_var_get } from "std/env"
+import { split_lines, split_words, replace } from "std/text"
 import { date_now } from "std/date"
 import { helm_ctx_flags, kubectl_ctx_flags } from "./helm_ctx.ab"
 import {
@@ -44,7 +43,7 @@ import {
 } from "./ui.ab"
 import { log_info, log_warn, log_stream } from "./log.ab"
 import { die } from "./common.ab"
-import { trim, regex_capture, optional_cmd } from "./std.ab"
+import { trim, regex_capture, optional_cmd, starts_with, env_or, env_stage_dir } from "./std.ab"
 import { eprintln } from "./core.ab"
 
 // ============================================================================
@@ -59,19 +58,7 @@ import { eprintln } from "./core.ab"
 // only for the operator-facing "see $LOG_FILE" hints + the >>LOG_FILE appends
 // that mirror the bash `>>"$LOG_FILE"` redirects (kubectl create / label output).
 fun log_file_path(): Text {
-    let explicit = env_var_get("STAGE_DIR") failed { "" }
-    let dir = explicit
-    if dir == "" {
-        let home = env_var_get("MIGRATE_HOME") failed { "" }
-        if home == "" {
-            let pwd = trust $pwd$
-            home = "{pwd}/migration-assistant-workspace"
-        }
-        let stage = env_var_get("STAGE") failed { "" }
-        if stage == "" { stage = "default" }
-        dir = "{home}/{stage}"
-    }
-    return "{dir}/log/migrate.log"
+    return "{env_stage_dir()}/log/migrate.log"
 }
 
 // ---- _helm_release_status --------------------------------------------------
@@ -236,30 +223,6 @@ pub fun _helm_clear_stuck_revision(release: Text, ns: Text): Bool {
     return true
 }
 
-// ---- orphan-job filter helpers (above their caller for the tree-shaker) ----
-
-// _first_token <s> — the first whitespace-delimited token of s, or "". Replaces
-// the awk `$1` field extraction over the custom-columns rows.
-fun _first_token(s: Text): Text {
-    let n = len s
-    for i in 0..n {
-        let c = slice(s, i, 1)
-        if c == " " or c == "\t" {
-            return slice(s, 0, i)
-        }
-    }
-    return s
-}
-
-// _starts_with_prefix <s> <prefix> — Bool: does s begin with prefix? (std.ab's
-// starts_with takes (prefix, s) and isn't imported here to avoid the name clash;
-// this local keeps the orphan-job filter self-contained. Mirrors awk `$1 ~ "^…"`.)
-fun _starts_with_prefix(s: Text, prefix: Text): Bool {
-    let pl = len prefix
-    if pl > len s { return false }
-    return slice(s, 0, pl) == prefix
-}
-
 // ---- helm_recover_orphan_jobs ----------------------------------------------
 
 // helm_recover_orphan_jobs <release> <ns> — find Kubernetes Jobs in <ns> that
@@ -286,15 +249,19 @@ pub fun helm_recover_orphan_jobs(release: Text, ns: Text): Null {
     for line in split_lines(raw) {
         let t = trim(line)
         if t == "" { continue }
-        // custom-columns rows are whitespace-padded "NAME   COMPLETIONS". Split on
-        // the run of spaces between the two columns: name = first token, the
-        // remainder (trimmed) = the COMPLETIONS field ("", "0", or "<none>" when
-        // the Job has no successful completion; a number when it succeeded).
-        let name = _first_token(t)
-        let comp = trim(slice(t, len name, (len t) - (len name)))
+        // custom-columns rows are whitespace-padded "NAME   COMPLETIONS".
+        // split_words collapses the run of spaces between the columns: name =
+        // first token, COMPLETIONS = second token ("", "0", or "<none>" when the
+        // Job has no successful completion; a number when it succeeded — a missing
+        // column yields "", matching the old trimmed-remainder extraction).
+        let f = split_words(t)
+        let name = ""
+        if len f > 0 { name = f[0] }
+        let comp = ""
+        if len f > 1 { comp = f[1] }
         // bash: $1 ~ "^<release>-helm-"
         let prefix = "{release}-helm-"
-        if not _starts_with_prefix(name, prefix) { continue }
+        if not starts_with(prefix, name) { continue }
         // bash: ($2=="" || $2=="0" || $2=="<none>")
         if comp == "" or comp == "0" or comp == "<none>" {
             stuck += [name]
@@ -375,8 +342,7 @@ pub fun _helm_wait_namespace_settled(ns: Text, timeout_s: Int): Bool {
 // The settle timeout comes from NAMESPACE_SETTLE_TIMEOUT_S (default 180), read
 // here so the bash default semantics survive.
 pub fun helm_ensure_namespace(ns: Text): Null {
-    let to_s = env_var_get("NAMESPACE_SETTLE_TIMEOUT_S") failed { "180" }
-    if to_s == "" { to_s = "180" }
+    let to_s = env_or("NAMESPACE_SETTLE_TIMEOUT_S", "180")
     if not _helm_wait_namespace_settled(ns, to_s as Int) {
         die("namespace {ns} did not settle; see {log_file_path()}")
     }

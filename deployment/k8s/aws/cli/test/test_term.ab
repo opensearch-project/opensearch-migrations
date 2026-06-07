@@ -25,7 +25,8 @@ import { assert, assert_eq } from "std/test"
 import { esc, term_detect } from "../src/core.ab"
 import {
     repeat_char, clip, term_spinner_frame, term_panel, term_progress,
-    term_link, term_set_geometry, term_lines, term_columns
+    term_link, term_set_geometry, term_lines, term_columns,
+    fmt_wrap_off, fmt_wrap_on
 } from "../src/term.ab"
 import { text_contains } from "std/text"
 
@@ -177,4 +178,17 @@ test "term_progress caps fill at 100% when cur exceeds total" {
     let out = term_progress(12, 10, "overrun")
     assert(text_contains(out, "█"))
     assert(not text_contains(out, "░"))
+}
+
+// ---- line-wrap control: the DECAWM sequences (pure formatters) --------------
+//
+// dash_init/dash_finish wire term_wrap_off/on to make one logical line == one
+// physical row (the dashboard redraw-math invariant). The fmt_* formatters are
+// the pure, testable core: assert they carry the exact DECAWM private-mode bytes.
+
+test "fmt_wrap_off / fmt_wrap_on emit the DECAWM disable / enable sequences" {
+    let e = interactive()
+    // \e[?7l disables autowrap; \e[?7h re-enables it — exact inverses.
+    assert_eq(fmt_wrap_off(), "{e}[?7l")
+    assert_eq(fmt_wrap_on(), "{e}[?7h")
 }

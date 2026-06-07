@@ -44,12 +44,13 @@ import { regex_match, parse_flag_value } from "./std.ab"
 import {
     state_load, state_set, state_get, state_save, state_resumable_step
 } from "./state.ab"
-import { die } from "./common.ab"
+import { die, die_hint } from "./common.ab"
+import { term_set_title } from "./term.ab"
 import {
     ui_banner, ui_info, ui_ok, ui_warn, ui_err, ui_step, ui_dim,
     ui_prompt, ui_confirm, ui_bold, ui_reset
 } from "./ui.ab"
-import { log_init, log_announce, log_announce_exit } from "./log.ab"
+import { log_init, log_announce, log_announce_exit, log_file } from "./log.ab"
 import { cli_version, upgrade_notice_for_cli } from "./version.ab"
 import {
     manifest_init, manifest_have, manifest_brand, manifest_pack_summary,
@@ -63,7 +64,7 @@ import { split_lines } from "std/text"
 
 // Discover / wizard / deploy spine modules.
 import { discover_os, discover_aws, discover_resources } from "./discover.ab"
-import { wizard_collect } from "./wizard.ab"
+import { wizard_collect, wizard_show_plan } from "./wizard.ab"
 import { cfn_deploy_or_skip } from "./cfn_deploy.ab"
 import { ensure_tools_basic, ensure_tools_extended } from "./install_tools.ab"
 import {
@@ -214,7 +215,7 @@ pub fun _select_mode(current: Text): Text {
         labels += ["Manual"]
         labels += ["AI"]
         descs += ["you in control. CLI deploys the chart, then drops you into migration-console-0 to run the migration commands yourself."]
-        descs += ["an LLM coding agent (claude/codex/q/kiro) drives the migration. CLI deploys the chart, then hands control to the agent with a pre-loaded skill set (preview — refine your invocation as needed)."]
+        descs += ["an LLM coding agent (claude/codex/kiro) drives the migration. CLI deploys the chart, then hands control to the agent with a pre-loaded skill set (preview — refine your invocation as needed)."]
         if current == "Agent" { default_idx = 2 }
     }
 
@@ -333,10 +334,15 @@ pub fun manual_path(): Int {
         return console_exec()
     }
 
+    // term_set_title writes the terminal's window/tab title at each phase
+    // boundary (OSC 0, no-op when non-interactive) so a backgrounded deploy tab
+    // reads "migration-assistant: <phase>" instead of staying opaque through the
+    // ~30-minute run. Purely additive chrome on stderr's control channel.
+    term_set_title("migration-assistant: discover")
     ui_step("Discover environment")
     discover_os()
     if discover_aws() != 0 {
-        die("AWS credentials are required. Set up 'aws configure' and rerun.")
+        die_hint("AWS credentials are required.", "run `aws configure` (or set AWS_PROFILE / AWS_ACCESS_KEY_ID), then rerun")
     }
     state_save()
 
@@ -355,8 +361,18 @@ pub fun manual_path(): Int {
 
     wizard_collect()
 
+    // Plan/confirm gate: show the consolidated deploy plan (account/region/stack/
+    // what-gets-created/~time) and ask one Proceed? before anything is created.
+    // Non-interactive / -y auto-proceeds (CI unaffected); a decline returns
+    // cleanly (exit 0) with nothing provisioned.
+    if not wizard_show_plan() {
+        ui_warn("deploy cancelled — no AWS resources were created")
+        return 0
+    }
+
+    term_set_title("migration-assistant: CFN deploy")
     if cfn_deploy_or_skip() != 0 {
-        die("CFN deploy failed")
+        die_hint("CloudFormation deploy failed.", "see {log_file()} for the failing resource, fix it (or delete a ROLLBACK_COMPLETE stack), then rerun")
     }
 
     // Kubeconfig must be set up before --build (which talks to the EKS-hosted
@@ -364,19 +380,23 @@ pub fun manual_path(): Int {
     // context). Idempotent: helm_install_or_upgrade no-ops the setup if done here.
     helm_kubeconfig_setup()
 
+    term_set_title("migration-assistant: build images")
     if build_images_or_skip() != 0 {
-        die("image build failed")
+        die_hint("Image build failed.", "see {log_file()}; confirm the EKS buildkit builder is reachable, then rerun")
     }
+    term_set_title("migration-assistant: mirror images")
     if crane_mirror_or_skip() != 0 {
-        die("image mirror failed")
+        die_hint("Image mirror failed.", "see {log_file()}; confirm ECR login + registry reachability, then rerun")
     }
+    term_set_title("migration-assistant: helm install")
     if helm_install_or_upgrade() != 0 {
-        die("helm install/upgrade failed")
+        die_hint("Helm install/upgrade failed.", "run `migration-assistant diag` for a release/pod summary, then rerun")
     }
 
     state_set("last_step", "ready")
     state_save()
 
+    term_set_title("migration-assistant: ready")
     return console_exec()
 }
 
@@ -658,7 +678,7 @@ pub fun _help_body(): Text {
   migration-assistant console  [--stage NAME]    kubectl exec migration-console-0
   migration-assistant agent    [--stage NAME] [<agent>]
                                                  Open an LLM coding agent
-                                                 (claude / codex / q / kiro)
+                                                 (claude / codex / kiro)
   migration-assistant diag     [--stage NAME]    Dump diagnostics to migrate.log
   migration-assistant clear    [--stage NAME]    Wipe local state/history (no AWS changes)
   migration-assistant cleanup  [--stage NAME]    Tear down deploy + archive state

@@ -36,7 +36,7 @@ import { printf, env_var_get } from "std/env"
 import { file_append, file_read, file_exists, dir_create } from "std/fs"
 import { split_lines, match_regex } from "std/text"
 import { esc, eprint, eprintln, term_interactive } from "./core.ab"
-import { is_macos } from "./std.ab"
+import { is_macos, env_stage_dir } from "./std.ab"
 
 // ---- module state ----------------------------------------------------------
 //
@@ -52,20 +52,9 @@ let LOG_FILE = "/dev/null"
 //
 // bash log_init called stage_dir_init (from state.sh) and then read $STAGE_DIR.
 // To stay decoupled from state.ab's load order we resolve the path lazily from
-// the environment, byte-for-byte matching state.ab's stage_dir(): an explicit
-// STAGE_DIR wins; else MIGRATE_HOME (default "$PWD/migration-assistant-workspace")
-// joined with STAGE (default "default").
-fun stage_dir(): Text {
-    let explicit = env_var_get("STAGE_DIR") failed { "" }
-    if explicit != "" { return explicit }
-    let home = env_var_get("MIGRATE_HOME") failed { "" }
-    if home == "" {
-        home = "{pwd()}/migration-assistant-workspace"
-    }
-    let stage = env_var_get("STAGE") failed { "" }
-    if stage == "" { stage = "default" }
-    return "{home}/{stage}"
-}
+// the environment via std.ab's env_stage_dir() (the single shared resolver):
+// an explicit STAGE_DIR wins; else MIGRATE_HOME (default
+// "$PWD/migration-assistant-workspace") joined with STAGE (default "default").
 
 // ---- colors (gated, mirror ui.sh sgr discipline) ---------------------------
 
@@ -159,7 +148,7 @@ fun file_size_bytes(path: Text): Int {
 // grown past 5 MiB, then append the session-separator header. Idempotent enough
 // to call once per invocation. The 5_242_880 threshold is 5 * 1024 * 1024.
 pub fun log_init(): Null {
-    let dir = stage_dir()
+    let dir = env_stage_dir()
     // bash called stage_dir_init (state.sh) for the whole subtree; here we only
     // need the log/ dir to exist. dir_create is failable; a pre-existing dir or a
     // benign race shouldn't abort init, so the failure is tolerated.

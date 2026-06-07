@@ -46,6 +46,8 @@
 
 import { env_var_get, env_var_set } from "std/env"
 import { slice, match_regex } from "std/text"
+import { dir_exists, file_exists } from "std/fs"
+import { registry_host } from "./std.ab"
 import { state_get, state_set, state_save } from "./state.ab"
 import { ui_step, ui_dim, ui_info, ui_ok, ui_warn, ui_err } from "./ui.ab"
 import { die, require_cmd } from "./common.ab"
@@ -91,19 +93,6 @@ fun is_builder_char(c: Text): Bool {
     return match_regex(c, "^[A-Za-z0-9_-]$", true)
 }
 
-// registry_domain — strip any "/repo/path" from <registry>, leaving the bare ECR
-// domain `docker login` needs. Mirrors the bash `${registry%%/*}` (everything up
-// to the FIRST '/'). Pure scan, no fork.
-fun registry_domain(registry: Text): Text {
-    let n = len registry
-    for i in 0..n {
-        if slice_one(registry, i) == "/" {
-            return slice(registry, 0, i)
-        }
-    }
-    return registry
-}
-
 // lib_dir — the CLI's lib directory, used to walk up to the repo root in the
 // default base-dir resolution. bash carried $LIB_DIR (set by the entrypoint when
 // it sourced the libs); here it comes from the environment with the same name so
@@ -114,23 +103,10 @@ fun lib_dir(): Text {
     return env_var_get("LIB_DIR") failed { "" }
 }
 
-// path_is_dir <p> — `[[ -d p ]]`. Bare test, read status() (NOT silent — silent
-// rewrites fd 2 and is unsafe near test; here it's harmless but we keep the
-// idiom consistent with the codebase).
-fun path_is_dir(p: Text): Bool {
-    trust $test -d "{p}"$
-    return status() == 0
-}
-
-// path_is_exec <p> — `[[ -x p ]]`.
+// path_is_exec <p> — `[[ -x p ]]`. (No stdlib equivalent for an executable-bit
+// test; dir/file existence checks come from std/fs dir_exists/file_exists.)
 fun path_is_exec(p: Text): Bool {
     trust $test -x "{p}"$
-    return status() == 0
-}
-
-// path_is_file <p> — `[[ -f p ]]`.
-fun path_is_file(p: Text): Bool {
-    trust $test -f "{p}"$
     return status() == 0
 }
 
@@ -138,7 +114,7 @@ fun path_is_file(p: Text): Bool {
 // in (builtin), capture pwd, then cd back to where we started so the process cwd
 // is not left mutated (bash used a subshell `( … )` for exactly this isolation;
 // Amber has no cheap subshell-with-builtin, so we restore explicitly). Returns ""
-// if the cd fails (caller already guarded with path_is_dir, but be defensive).
+// if the cd fails (caller already guarded with dir_exists, but be defensive).
 fun abspath(p: Text): Text {
     let here = trust $pwd$
     let ok = true
@@ -163,7 +139,7 @@ fun abspath(p: Text): Text {
 pub fun _build_resolve_base_dir(): Text {
     let explicit = state_get("BASE_DIR", "")
     if explicit != "" {
-        if not path_is_dir(explicit) {
+        if not dir_exists(explicit) {
             die("--base-dir does not exist: {explicit}")
         }
         return abspath(explicit)
@@ -173,13 +149,13 @@ pub fun _build_resolve_base_dir(): Text {
     let ld = lib_dir()
     if ld != "" {
         let cli_repo_root = "{ld}/../../../../.."
-        if path_is_exec("{cli_repo_root}/gradlew") and path_is_dir("{cli_repo_root}/buildImages") {
+        if path_is_exec("{cli_repo_root}/gradlew") and dir_exists("{cli_repo_root}/buildImages") {
             return abspath(cli_repo_root)
         }
     }
 
     let cwd = trust $pwd$
-    if path_is_exec("{cwd}/gradlew") and path_is_dir("{cwd}/buildImages") {
+    if path_is_exec("{cwd}/gradlew") and dir_exists("{cwd}/buildImages") {
         return cwd
     }
 
@@ -207,7 +183,7 @@ pub fun _build_builder_name(ctx: Text): Text {
 // the bash error chrome and append detail to $LOG_FILE. Returning Int (not Null)
 // preserves the bash `return 1` contract for the caller's `|| return 1`.
 pub fun _build_ecr_login(registry: Text, region: Text): Int {
-    let domain = registry_domain(registry)
+    let domain = registry_host(registry)
     ui_step("Logging into ECR: {domain}")
     let lf = log_file()
 
@@ -255,7 +231,7 @@ pub fun _build_setup_buildkit(builder: Text, base_dir: Text): Int {
     trust $docker buildx rm "{builder}" >>"{lf}" 2>&1 || true$
 
     let backend_script = "{base_dir}/buildImages/backends/eksKubernetesBuildkit.sh"
-    if not path_is_file(backend_script) {
+    if not file_exists(backend_script) {
         ui_err("missing {backend_script} (in-repo buildkit backend)")
         return 1
     }
@@ -347,7 +323,7 @@ pub fun build_images_or_skip(): Int {
     if not path_is_exec("{base_dir}/gradlew") {
         die("--build: {base_dir}/gradlew not found or not executable. Pass --base-dir <repo-root>.")
     }
-    if not path_is_dir("{base_dir}/buildImages") {
+    if not dir_exists("{base_dir}/buildImages") {
         die("--build: {base_dir}/buildImages/ not found (this CLI was installed standalone). Pass --base-dir <repo-root>.")
     }
 
@@ -409,7 +385,7 @@ pub fun build_images_or_skip(): Int {
     // chart unless the operator explicitly passed --ma-chart-dir.
     if state_get("MA_CHART_DIR", "") == "" {
         let chart_dir = "{base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo"
-        if path_is_dir(chart_dir) and path_is_file("{chart_dir}/Chart.yaml") {
+        if dir_exists(chart_dir) and file_exists("{chart_dir}/Chart.yaml") {
             state_set("MA_CHART_DIR", chart_dir)
             ui_dim("  --build: using in-repo chart at {chart_dir}")
         } else {

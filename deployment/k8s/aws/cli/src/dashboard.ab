@@ -17,12 +17,13 @@
 
 import { printf } from "std/env"
 import { date_now } from "std/date"
-import { slice, zfill, rpad } from "std/text"
+import { split, zfill, rpad, text_contains } from "std/text"
 import { sort } from "std/array"
+import { ends_with, to_int_or } from "./std.ab"
 import { esc, eprint, term_interactive } from "./core.ab"
 import {
     term_columns, term_hide_cursor, term_show_cursor,
-    term_spinner_frame, repeat_char, clip
+    term_spinner_frame, repeat_char, clip, term_wrap_off, term_wrap_on
 } from "./term.ab"
 
 // ---- tunables --------------------------------------------------------------
@@ -49,7 +50,14 @@ let __reasons = [""]
 let __tss = [""]
 let __epochs = [0]
 
-// dash_init <header> — reset the instance + hide the cursor.
+// dash_init <header> — reset the instance + hide the cursor + DISABLE AUTOWRAP.
+// term_wrap_off makes one logical line occupy exactly one physical row, which is
+// the invariant dash_render's cursor-up repaint math assumes (see dash_render's
+// header). Without it, a long CloudFormation ResourceStatusReason wraps onto
+// extra physical rows the logical line count never sees → the dashboard re-prints
+// its whole frame every poll (the exact bash bug this port set out to kill; the
+// e2e only passed because its reasons were short). dash_finish restores wrap, and
+// the EXIT reset trap (installed from main) restores it unconditionally on Ctrl-C.
 pub fun dash_init(header: Text): Null {
     __header = header
     __mode = "default"
@@ -61,6 +69,7 @@ pub fun dash_init(header: Text): Null {
     __tss = []
     __epochs = []
     term_hide_cursor()
+    term_wrap_off()
 }
 
 // dash_set_mode <mode> — choose the status classifier ("cfn" | "default").
@@ -72,29 +81,6 @@ pub fun dash_set_mode(mode: Text): Null {
 // symbol and only pulls transitive deps that textually precede the entry point,
 // so private helpers MUST appear above their public callers) -----------------
 
-fun text_has(s: Text, needle: Text): Bool {
-    let n = len needle
-    if n == 0 { return true }
-    let limit = (len s) - n
-    if limit < 0 { return false }
-    for i in 0..=limit {
-        if slice(s, i, n) == needle { return true }
-    }
-    return false
-}
-fun ends(s: Text, suffix: Text): Bool {
-    let sl = len suffix
-    let total = len s
-    if sl > total { return false }
-    return slice(s, total - sl, sl) == suffix
-}
-fun index_of(s: Text, needle: Text): Int {
-    let total = len s
-    for i in 0..total {
-        if slice(s, i, 1) == needle { return i }
-    }
-    return -1
-}
 fun clampi(v: Int, lo: Int, hi: Int): Int {
     if v < lo { return lo }
     if v > hi { return hi }
@@ -114,11 +100,11 @@ fun clampi(v: Int, lo: Int, hi: Int): Int {
 // dropped, making dash_classify return "other" for everything.
 pub fun cfn_status_class(st: Text): Text {
     if {
-        text_has(st, "ROLLBACK") { return "fail" }
-        text_has(st, "FAILED")   { return "fail" }
-        ends(st, "IN_PROGRESS")  { return "prog" }
-        ends(st, "COMPLETE")     { return "done" }
-        else                     { return "other" }
+        text_contains(st, "ROLLBACK")  { return "fail" }
+        text_contains(st, "FAILED")    { return "fail" }
+        ends_with("IN_PROGRESS", st)   { return "prog" }
+        ends_with("COMPLETE", st)      { return "done" }
+        else                           { return "other" }
     }
 }
 
@@ -220,8 +206,10 @@ fun build_class_rows(cls: Text, max: Int, color: Text, glyph: Text): Text {
     for entry in packed {
         if __emitted >= max { break }
         if entry == "" { continue }
-        let bar = index_of(entry, "|")
-        let idx = (slice(entry, bar + 1, (len entry) - bar - 1)) as Int
+        // Each packed entry is a fixed 2-field "zero-padded-epoch|index" record;
+        // neither field can contain "|", so split-destructure to recover the index.
+        let [ep, idxs] = split(entry, "|")
+        let idx = to_int_or(idxs, 0)
         let logical = rpad(clip(__keys[idx], 38), " ", 38)
         let stcol = rpad(__statuses[idx], " ", 22)
         let reason = __reasons[idx]
@@ -325,10 +313,15 @@ pub fun dash_render_simple(started: Int): Text {
     return dash_render(started, "")
 }
 
-// dash_finish <started_epoch> — final repaint with the cursor restored.
+// dash_finish <started_epoch> — final repaint with the cursor + autowrap restored
+// (the inverses of dash_init's term_hide_cursor + term_wrap_off). Re-enabling
+// autowrap here keeps the operator's terminal normal for everything that prints
+// after the dashboard; the EXIT reset trap is the unconditional backstop for the
+// Ctrl-C / errexit paths that never reach dash_finish.
 pub fun dash_finish(started: Int): Text {
     __tick = 0
     let out = dash_render(started, "")
     term_show_cursor()
+    term_wrap_on()
     return out
 }

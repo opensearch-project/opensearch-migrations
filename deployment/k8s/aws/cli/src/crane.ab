@@ -46,7 +46,7 @@ import { artifacts_fetch_raw } from "./artifacts.ab"
 import { die } from "./common.ab"
 import { log_info, log_warn, log_error } from "./log.ab"
 import { ui_info, ui_ok, ui_warn, ui_err, ui_step, ui_dim, ui_green, ui_red, ui_reset } from "./ui.ab"
-import { contains } from "./std.ab"
+import { contains, registry_host, env_stage_dir } from "./std.ab"
 
 // Path of privateEcrManifest.sh inside the opensearch-migrations repo. Pulled
 // from the tag matching MA_VERSION via raw.githubusercontent.com (so we match
@@ -61,39 +61,11 @@ const CRANE_MANIFEST_REL_PATH = "deployment/k8s/charts/aggregates/migrationAssis
 // imported).
 // ============================================================================
 
-// stage_dir — resolve $STAGE_DIR the way the other ported modules do: an
-// explicit STAGE_DIR env var wins (bash read $STAGE_DIR directly), else
-// MIGRATE_HOME (default "$PWD/migration-assistant-workspace") joined with STAGE
-// (default "default"). Lazy + env-first so the bats harness / diag.sh can pin a
-// temp dir.
-fun stage_dir(): Text {
-    let explicit = env_var_get("STAGE_DIR") failed { "" }
-    if explicit != "" { return explicit }
-    let home = env_var_get("MIGRATE_HOME") failed { "" }
-    if home == "" {
-        let pwd = trust $pwd$
-        home = "{pwd}/migration-assistant-workspace"
-    }
-    let st = env_var_get("STAGE") failed { "" }
-    if st == "" { st = "default" }
-    return "{home}/{st}"
-}
-
 // crane_log — the per-image crane.log path under the stage dir. Created lazily
 // by the callers' append redirects (mkdir already done by stage_dir_init via
 // state_load). Centralised so every escape uses the same path.
 fun crane_log(): Text {
-    return "{stage_dir()}/log/crane.log"
-}
-
-// first_slash_index <s> — index of the FIRST '/' in s, or -1. Used to strip a
-// `/repo` path off a registry to get the bare host (bash `${registry%%/*}`).
-fun first_slash_index(s: Text): Int {
-    let n = len s
-    for i in 0..n {
-        if slice(s, i, 1) == "/" { return i }
-    }
-    return -1
+    return "{env_stage_dir()}/log/crane.log"
 }
 
 // ---- _dst_for --------------------------------------------------------------
@@ -337,13 +309,9 @@ fun dump_err_lines(err_file: Text, log_prefix: Text): Null {
 //      from there and crane reuses a stale ~/.docker/config.json otherwise).
 pub fun _ecr_login(registry: Text, region: Text): Int {
     // strip any /repo path → bare host (bash `${registry%%/*}`).
-    let registry_host = registry
-    let slash = first_slash_index(registry)
-    if slash >= 0 {
-        registry_host = slice(registry, 0, slash)
-    }
+    let reg_host = registry_host(registry)
 
-    log_info("ecr-login: registry={registry_host} region={region}")
+    log_info("ecr-login: registry={reg_host} region={region}")
 
     if not is_command("crane") {
         ui_err("crane not on PATH; run `brew install crane` or rerun with --use-public-images")
@@ -354,7 +322,7 @@ pub fun _ecr_login(registry: Text, region: Text): Int {
         return 1
     }
 
-    let dir = stage_dir()
+    let dir = env_stage_dir()
     let log = "{dir}/log/crane.log"
 
     // Step 1: get the password. Surface the exact aws CLI error if this fails.
@@ -368,7 +336,7 @@ pub fun _ecr_login(registry: Text, region: Text): Int {
         dump_err_lines(aws_err, "aws-ecr")
         trust $rm -f "{aws_err}"$
         ui_dim("  hint: verify `aws sts get-caller-identity` works and your region matches your registry")
-        ui_dim("        registry: {registry_host} (expects region: {region})")
+        ui_dim("        registry: {reg_host} (expects region: {region})")
         return 1
     }
     trust $rm -f "{aws_err}"$
@@ -378,13 +346,13 @@ pub fun _ecr_login(registry: Text, region: Text): Int {
     // (stdin-fed login has no stdlib equivalent). >> tees crane's stdout to the
     // log; 2> captures stderr for the operator dump.
     let crane_err = trust $mktemp 2>/dev/null$
-    let login_ok = $printf '%s' "{pw}" | crane auth login --username AWS --password-stdin "{registry_host}" >> "{log}" 2> "{crane_err}"$ failed { "FAIL" }
+    let login_ok = $printf '%s' "{pw}" | crane auth login --username AWS --password-stdin "{reg_host}" >> "{log}" 2> "{crane_err}"$ failed { "FAIL" }
     let login_rc = status()
     if login_rc != 0 {
         ui_err("crane auth login failed:")
         dump_err_lines(crane_err, "crane-login")
         trust $rm -f "{crane_err}"$
-        ui_dim("  hint: confirm registry hostname is reachable: {registry_host}")
+        ui_dim("  hint: confirm registry hostname is reachable: {reg_host}")
         let home = env_var_get("HOME") failed { "" }
         ui_dim("        and that crane writes to \$HOME/.docker/config.json (HOME={home})")
         return 1
@@ -492,7 +460,7 @@ pub fun _crane_mirror_ma_images(registry: Text, ma_ver: Text, region: Text): Int
     }
 
     if n_failed > 0 {
-        ui_err("{n_failed}/{total} MA images failed to mirror; see {stage_dir()}/log/crane.log")
+        ui_err("{n_failed}/{total} MA images failed to mirror; see {env_stage_dir()}/log/crane.log")
         return 1
     }
     ui_ok("mirrored {n_ok}/{total} MA-team images")
@@ -554,11 +522,7 @@ pub fun crane_mirror_or_skip(): Int {
     // The CFN-published `registry` is `<host>/<single-repo>`. We mirror under a
     // `mirrored/` prefix INSIDE that account's ECR. Each unique image-path becomes
     // its own ECR repository. ecr_host = bash `${registry%%/*}`.
-    let ecr_host = registry
-    let slash = first_slash_index(registry)
-    if slash >= 0 {
-        ecr_host = slice(registry, 0, slash)
-    }
+    let ecr_host = registry_host(registry)
 
     // Count the manifest lines for the progress display.
     let images = [""]
@@ -575,7 +539,7 @@ pub fun crane_mirror_or_skip(): Int {
         return 1
     }
 
-    let log = "{stage_dir()}/log/crane.log"
+    let log = "{env_stage_dir()}/log/crane.log"
     let n_ok = 0
     let n_failed = 0
     for i in 0..total {

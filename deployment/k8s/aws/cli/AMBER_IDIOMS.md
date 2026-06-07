@@ -90,6 +90,11 @@ Authoritative for this port. The published docs LAG the alpha — every rule her
 8. **Splitting a Text on newlines:** `split_lines(s)` from std/text (NOT the `lines` builtin, which only works on a command). `split_lines` gives the bash count_lines contract: "a\nb\nc"→3, "a\nb\n"→2, ""→0, "x"→1.
 9. **Building sed/regex backrefs:** construct `let backref = "\\{n as Text}"` as a SEPARATE Text, then interpolate `{backref}` — inline `"\\{n}"` in a `$...$` mis-lowers the `\\` + var ref.
 10. **`status` builtin: call as `status()`** to avoid the deprecation warning.
+11. **`amber check` is NOT the gate — `amber test` is.** Two error classes pass `amber check` (exit 0) but FAIL at transpile/test time, so always run the per-file `amber test` after editing:
+    - **`let x = if cond { a } else { b }`** (if-as-expression) → `check` OK, but test-time `Identifier 'if' is a reserved keyword` (if is statement-only in 0.6). Use the ternary `let x = cond then a else b`, or a statement: `let x = b` then `if cond { x = a }`.
+    - **A reserved word as a `let` name** (e.g. `let lines = []`, `let ref = …`) → `check` OK, but test-time `Identifier 'lines' is a reserved keyword`. The reserved set bites `let` bindings too, not just params (gotcha 1). Rename (`rows`, `image_ref`, …).
+12. **You cannot index a call inline.** `split(s, "/")[0]` is a PARSE ERROR. Bind first: `let parts = split(s, "/")` then `parts[0]`.
+13. **Moving a fn that a new caller uses must respect gotcha 2.** When you wire an EXISTING `pub fun` into a NEW earlier caller in the same module, the callee may now sit BELOW its caller → `Function 'x' does not exist` when imported. Move the callee above the new caller (define-before-use is per-symbol-textual, not per-file).
 
 ## Test-runner parallelism — RUN ONE FILE PER INVOCATION
 `amber 0.6.0-alpha` runs every `test` block passed in ONE invocation as a single

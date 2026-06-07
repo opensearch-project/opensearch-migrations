@@ -18,19 +18,8 @@
 // consumers get one consistent API + the bash std.sh arg order.
 import { printf, env_var_get, env_var_test, is_command, uname_kernel_name } from "std/env"
 import {
-    split, join, match_regex, replace_regex, slice, lowercase, split_lines
+    split, join, match_regex, slice
 } from "std/text"
-
-// ---- tiny shared helper ----------------------------------------------------
-
-// index_of — first index of a single-char needle, or -1.
-fun index_of(s: Text, needle: Text): Int {
-    let total = len s
-    for i in 0..total {
-        if slice(s, i, 1) == needle { return i }
-    }
-    return -1
-}
 
 // ---- strings ---------------------------------------------------------------
 
@@ -130,15 +119,6 @@ pub fun regex_match(s: Text, pat: Text): Bool {
     return match_regex(s, pat, true)
 }
 
-// count_lines_var — number of lines in a Text. A trailing-newline-less last
-// fragment still counts as a line; empty string is 0.
-pub fun count_lines_var(s: Text): Int {
-    // std split_lines already gives the bash contract: "a\nb\nc"→3, "a\nb\n"→2,
-    // ""→0, "oneline"→1 (trailing-newline-less fragment counts; final newline
-    // does not add a phantom line).
-    return len split_lines(s)
-}
-
 // ---- collections -----------------------------------------------------------
 
 // array_contains — Bool membership (arg order matches bash: needle, array).
@@ -149,63 +129,13 @@ pub fun array_contains(needle: Text, arr: [Text]): Bool {
     return false
 }
 
-// dedupe — keep first occurrence of each non-empty line in a Text, in order.
-pub fun dedupe(s: Text): [Text] {
-    let seen = [""]
-    let sc = 0
-    let out = [""]
-    let oc = 0
-    for line in split_lines(s) {
-        if line == "" { continue }
-        let dup = false
-        for k in 0..sc {
-            if seen[k] == line { dup = true }
-        }
-        if dup { continue }
-        if sc == 0 { seen[0] = line } else { seen += [line] }
-        sc += 1
-        if oc == 0 { out[0] = line } else { out += [line] }
-        oc += 1
-    }
-    if oc == 0 { return [] }
-    return out
-}
-
-// ---- path ------------------------------------------------------------------
-
-// path_join — join components with '/', collapsing duplicate slashes.
-pub fun path_join(parts: [Text]): Text {
-    let out = ""
-    for arg in parts {
-        if out == "" {
-            out = arg
-        } else {
-            // strip trailing slash from out, leading from arg
-            let a = out
-            if len a > 0 {
-                if slice(a, (len a) - 1, 1) == "/" { a = slice(a, 0, (len a) - 1) }
-            }
-            let b = arg
-            if len b > 0 {
-                if slice(b, 0, 1) == "/" { b = slice(b, 1, (len b) - 1) }
-            }
-            out = "{a}/{b}"
-        }
-    }
-    // collapse any surviving // runs
-    return replace_regex(out, "/+", "/", true)
-}
-
 // ---- environment -----------------------------------------------------------
 
-// is_macos / is_linux — OS branch via std/env uname_kernel_name() == `uname -s`
-// (Darwin / Linux). NB: uname_os() is `uname -o` = "GNU/Linux" on Linux, so
-// is_linux() would be false there — use the kernel name, not the OS name.
+// is_macos — OS branch via std/env uname_kernel_name() == `uname -s` (Darwin).
+// NB: uname_os() is `uname -o` = "GNU/Linux" on Linux, so a kernel-name test is
+// the portable one — use the kernel name, not the OS name.
 pub fun is_macos(): Bool {
     return uname_kernel_name() == "Darwin"
-}
-pub fun is_linux(): Bool {
-    return uname_kernel_name() == "Linux"
 }
 
 // optional_cmd — is <name> on PATH? Never fails.
@@ -219,6 +149,61 @@ pub fun require_var(name: Text): Bool {
     if not env_var_test(name) { return false }
     let v = env_var_get(name) failed { "" }
     return v != ""
+}
+
+// env_or — value of env var <name>, or <def> when unset OR empty. Collapses the
+// `let v = env_var_get(N) failed { "" }; if v == "" { v = def }` dance that the
+// CLI repeated dozens of times (the bash `${N:-def}`). Treats empty as unset to
+// match bash `:-` (an exported-but-blank var falls through to the default).
+pub fun env_or(name: Text, def: Text): Text {
+    let v = env_var_get(name) failed { "" }
+    if v == "" { return def }
+    return v
+}
+
+// env_stage_dir — the per-stage working directory, resolved fresh from the
+// environment (NON-memoizing). Single source of the resolver that was copy-pasted
+// verbatim across ~10 modules (state/log/crane/artifacts/helm_install/
+// helm_recover/agent/console/resume + an inline copy in cfn_deploy). Contract,
+// identical to every copy + _common.sh: an explicit STAGE_DIR wins; else
+// MIGRATE_HOME (default "$PWD/migration-assistant-workspace") + "/" + STAGE
+// (default "default"). NB: this is DISTINCT from common.ab's memoizing stage_dir()
+// which intentionally ignores STAGE_DIR — do not conflate the two.
+pub fun env_stage_dir(): Text {
+    let explicit = env_var_get("STAGE_DIR") failed { "" }
+    if explicit != "" { return explicit }
+    let home = env_var_get("MIGRATE_HOME") failed { "" }
+    if home == "" {
+        let pwd = trust $pwd$
+        home = "{pwd}/migration-assistant-workspace"
+    }
+    let stage = env_var_get("STAGE") failed { "" }
+    if stage == "" { stage = "default" }
+    return "{home}/{stage}"
+}
+
+// ---- numbers ---------------------------------------------------------------
+
+// to_int_or — parse <s> as an integer, or <dflt> if it is empty or non-numeric.
+// Replaces the printf-%d-then-`status` dance hand-copied in term.parse_dim,
+// ui.parse_choice and log. `printf '%d'` is the portable validate-and-coerce
+// (rejects "abc" → rc!=0 → dflt; accepts "  12" / "012" the way bash arithmetic
+// does). Pure: no output, never fails the caller.
+pub fun to_int_or(s: Text, dflt: Int): Int {
+    if s == "" { return dflt }
+    let n = trust $printf '%d' "{s}" 2>/dev/null$
+    if status() != 0 { return dflt }
+    return n as Int
+}
+
+// ---- path ------------------------------------------------------------------
+
+// registry_host — the registry/host component of an image reference: everything
+// before the first "/" (bash `${ref%%/*}`). "host/repo:tag" → "host",
+// "host" → "host". Replaces the hand-rolled first-slash scanners in crane/build.
+pub fun registry_host(image_ref: Text): Text {
+    let parts = split(image_ref, "/")
+    return parts[0]
 }
 
 // ---- flag parsing ----------------------------------------------------------

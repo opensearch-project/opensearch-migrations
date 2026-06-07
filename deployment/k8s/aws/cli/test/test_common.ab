@@ -26,7 +26,7 @@
 
 import { assert, assert_eq } from "std/test"
 import {
-    require_cmd, arch_os,
+    require_cmd, arch_os, fmt_next_hint,
     on_signal_track_pid, on_signal_untrack_pid, on_signal_tracked_count,
     on_exit_register, on_exit_registered_count,
     migrate_home, stage, stage_dir, migrate_noninteractive, common_reset_cache,
@@ -133,6 +133,17 @@ test "require_cmd returns without exiting for a command on PATH" {
     assert(is_command("migrate_stub_tool_xyz"))
     require_cmd("migrate_stub_tool_xyz", "should not need a hint")
     assert(true)
+}
+
+// ---- die_hint's pure next-action formatter ---------------------------------
+
+test "fmt_next_hint renders a next-action line for a hint and nothing for none" {
+    // empty hint → empty line (die() delegates with "" → a plain error, no arrow)
+    assert_eq(fmt_next_hint(""), "")
+    // a real hint → a "→ next: …" line carrying the operator's instruction; the
+    // dim SGR brackets it but the actionable text is always present (CI-readable).
+    let line = fmt_next_hint("run `aws configure`")
+    assert(text_contains(line, "→ next: run `aws configure`"))
 }
 
 // ---- env-resolved globals (cached) -----------------------------------------

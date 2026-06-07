@@ -20,6 +20,7 @@
 import { printf, env_var_get } from "std/env"
 import { split, trim, slice, rpad } from "std/text"
 import { esc, eprint, eprintln, term_interactive } from "./core.ab"
+import { to_int_or } from "./std.ab"
 
 // ---- geometry (refreshed from stty; defaults when no tty) ------------------
 
@@ -36,21 +37,11 @@ pub fun term_winch(): Null {
     if rc != 0 { return null }
     let parts = split(trim(size), " ")
     if len parts == 2 {
-        let l = parse_dim(parts[0])
-        let c = parse_dim(parts[1])
+        let l = to_int_or(parts[0], 0)
+        let c = to_int_or(parts[1], 0)
         if l > 0 { __lines = l }
         if c > 0 { __columns = c }
     }
-}
-
-// parse_dim — a tiny digits-only parser. Returns 0 on anything non-numeric so
-// callers can guard. (std parse_int is failable; this keeps the call sites flat.)
-fun parse_dim(s: Text): Int {
-    if s == "" { return 0 }
-    let n = trust $printf '%d' "{s}" 2>/dev/null$
-    let rc = status()
-    if rc != 0 { return 0 }
-    return n as Int
 }
 
 pub fun term_lines(): Int { return __lines }
@@ -135,11 +126,17 @@ pub fun term_install_winch_trap(): Null {
 // PR's whole "dashboard re-prints every poll" bug was wrap math: long lines
 // wrapped onto extra physical rows that the logical line count didn't see.
 
+// fmt_wrap_off / fmt_wrap_on — the DECAWM control sequences as Text (pure, so the
+// wrap contract is unit-testable without a TTY, the term_panel/term_progress
+// pattern). \e[?7l disables autowrap, \e[?7h re-enables it.
+pub fun fmt_wrap_off(): Text { return "{esc()}[?7l" }
+pub fun fmt_wrap_on(): Text { return "{esc()}[?7h" }
+
 pub fun term_wrap_off(): Null {
-    if term_interactive() { eprint("{esc()}[?7l") }
+    if term_interactive() { eprint(fmt_wrap_off()) }
 }
 pub fun term_wrap_on(): Null {
-    if term_interactive() { eprint("{esc()}[?7h") }
+    if term_interactive() { eprint(fmt_wrap_on()) }
 }
 
 // ---- presentation: hyperlinks ----------------------------------------------

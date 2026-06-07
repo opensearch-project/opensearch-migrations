@@ -36,10 +36,11 @@
 import { assert, assert_eq } from "std/test"
 import { env_var_set, env_var_unset } from "std/env"
 import { file_read } from "std/fs"
-import { text_contains } from "std/text"
+import { text_contains, join } from "std/text"
 import { regex_match } from "../src/std.ab"
 import { fresh_world, world_noninteractive } from "./support/world.ab"
-import { wizard_collect, _wizard_offer_existing_stack } from "../src/wizard.ab"
+import { wizard_collect, _wizard_offer_existing_stack, fmt_deploy_plan, wizard_show_plan } from "../src/wizard.ab"
+import { state_set } from "../src/state.ab"
 
 // ---- file-local helpers (ABOVE the test blocks: define-before-use; the
 // test-file tree shaker keeps only deps that textually precede each block) ----
@@ -181,4 +182,43 @@ test "menu-pick regex matches only bare digit runs" {
     assert(not regex_match("", "^[0-9]+$"))
     assert(not regex_match("1a", "^[0-9]+$"))
     assert(not regex_match("none", "^[0-9]+$"))
+}
+
+// ---- deploy plan / confirm gate --------------------------------------------
+//
+// fmt_deploy_plan() is the pure pre-flight summary (reads the state store, returns
+// the panel lines). Seed the store with a create-vpc deploy and assert the plan
+// surfaces account/region/stack/what-gets-created/images/version + the time hint
+// — the first-run operator's one consolidated view before a resource-creating run.
+
+test "deploy plan summarizes account/region/stack/creates for a fresh create-vpc deploy" {
+    // fmt_deploy_plan is a pure function of its args (no store) → no world needed.
+    let plan = fmt_deploy_plan("123456789012", "us-east-1", "prod", "MigrationAssistant-prod", "create-vpc", "Y", "2.4.0", false)
+    let blob = join(plan, "\n")
+    assert(text_contains(blob, "123456789012"))
+    assert(text_contains(blob, "us-east-1"))
+    assert(text_contains(blob, "MigrationAssistant-prod"))
+    // create-vpc names the VPC + EKS + ECR + IAM resources it will create.
+    assert(text_contains(blob, "VPC, EKS cluster, ECR repos, IAM roles"))
+    assert(text_contains(blob, "mirrored to your private ECR"))
+    assert(text_contains(blob, "2.4.0"))
+    assert(text_contains(blob, "~20-30 min"))
+}
+
+test "deploy plan calls out an adopted stack (CFN deploy skipped)" {
+    // adopting=true → the plan names the adopt and advertises NO resource creation.
+    let blob = join(fmt_deploy_plan("123456789012", "us-west-2", "qa", "MigrationAssistant-qa", "create-vpc", "N", "2.4.0", true), "\n")
+    assert(text_contains(blob, "adopting existing"))
+    assert(not text_contains(blob, "Creates       :"))
+    // mirror=N surfaces the public-pull path
+    assert(text_contains(blob, "public.ecr.aws"))
+}
+
+test "wizard_show_plan auto-proceeds in non-interactive mode" {
+    wizard_world()   // world_noninteractive() flips MIGRATE_NONINTERACTIVE=1
+    state_set("AWS_REGION", "us-east-1")
+    state_set("STAGE_NAME", "ma")
+    // No TTY + non-interactive → the gate renders the plan and returns true
+    // (CI / scripted runs never block).
+    assert(wizard_show_plan())
 }

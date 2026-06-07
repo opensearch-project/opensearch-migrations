@@ -86,17 +86,16 @@
 // Imports: helm_ctx (the binding + pinned names), log, ui, std (+ std/text,
 // std/fs, std/env for primitives).
 
-import { env_var_get } from "std/env"
 import { file_append } from "std/fs"
-import { split_lines, slice, trim_left } from "std/text"
-import { regex_capture, contains, trim } from "./std.ab"
+import { split_lines, split_words } from "std/text"
+import { regex_capture, contains, trim, env_or } from "./std.ab"
 import {
     helm_ctx_flags, kubectl_ctx_flags, helm_kctx_init
 } from "./helm_ctx.ab"
 import {
     log_stream, log_file, fmt_stream_line, fmt_stream_chrome
 } from "./log.ab"
-import { ui_ok, ui_step, ui_dim_c, ui_reset } from "./ui.ab"
+import { ui_ok, ui_step, ui_dim_c, ui_reset, ui_info } from "./ui.ab"
 
 // ============================================================================
 // Channel log lines (file + operator stderr), byte-identical to log_stream's
@@ -241,97 +240,6 @@ pub fun _helm_explain_failure(release: Text, ns: Text): Null {
 // helm_dump_diagnostics — the big on-failure capture.
 // ============================================================================
 
-// ---- whitespace field extractors (defined ABOVE their first users: the
-// _dump_unhealthy_pods / _dump_stuck_hook_jobs phase/completion checks and
-// helm_pods_summary's tally — the tree-shaker keeps only deps textually
-// preceding their use across an import boundary). These replace awk's $1/$2/$3
-// field extraction over kubectl custom-columns rows (runs of spaces between
-// columns). -------------------------------------------------------------------
-
-// _first_field <row> — the first whitespace-delimited token of a row, or "".
-// Replaces awk `{print $1}`.
-fun _first_field(row: Text): Text {
-    let t = trim_left(row)
-    let n = len t
-    for i in 0..n {
-        let c = slice(t, i, 1)
-        if c == " " or c == "\t" {
-            return slice(t, 0, i)
-        }
-    }
-    return t
-}
-
-// _second_field <row> — the second whitespace-delimited token, or "". Skip the
-// first token, skip the inter-field whitespace, then take up to the next run of
-// whitespace. Replaces awk `{print $2}`.
-fun _second_field(row: Text): Text {
-    let t = trim_left(row)
-    let n = len t
-    // Skip field 1.
-    let i = 0
-    while i < n {
-        let c = slice(t, i, 1)
-        if c == " " or c == "\t" { break }
-        i += 1
-    }
-    // Skip the whitespace between field 1 and field 2.
-    while i < n {
-        let c = slice(t, i, 1)
-        if c != " " and c != "\t" { break }
-        i += 1
-    }
-    if i >= n { return "" }
-    // Take field 2 up to the next whitespace.
-    let start = i
-    while i < n {
-        let c = slice(t, i, 1)
-        if c == " " or c == "\t" { break }
-        i += 1
-    }
-    return slice(t, start, i - start)
-}
-
-// _third_field <row> — the third whitespace-delimited token (the READY column in
-// the pods snapshot), or "". Same scan, advanced past two fields. awk `{print $3}`.
-fun _third_field(row: Text): Text {
-    let f2 = _second_field(row)
-    if f2 == "" { return "" }
-    let t = trim_left(row)
-    let n = len t
-    let i = 0
-    // skip field 1
-    while i < n {
-        let c = slice(t, i, 1)
-        if c == " " or c == "\t" { break }
-        i += 1
-    }
-    while i < n {
-        let c = slice(t, i, 1)
-        if c != " " and c != "\t" { break }
-        i += 1
-    }
-    // skip field 2
-    while i < n {
-        let c = slice(t, i, 1)
-        if c == " " or c == "\t" { break }
-        i += 1
-    }
-    while i < n {
-        let c = slice(t, i, 1)
-        if c != " " and c != "\t" { break }
-        i += 1
-    }
-    if i >= n { return "" }
-    let start = i
-    while i < n {
-        let c = slice(t, i, 1)
-        if c == " " or c == "\t" { break }
-        i += 1
-    }
-    return slice(t, start, i - start)
-}
-
 // _dump_unhealthy_pods <ns> — per-pod `describe` for every pod NOT in
 // Running/Succeeded. Resolves the name/phase columns, then describes each
 // unhealthy one through log_stream (brief on-screen + full content in the log).
@@ -343,10 +251,14 @@ fun _dump_unhealthy_pods(ns: Text): Null {
     if trim(snapshot) == "" { return null }
     for row in split_lines(snapshot) {
         if trim(row) == "" { continue }
-        // Columns are whitespace-separated: NAME then PHASE. _two_fields splits
-        // on the run of spaces between them.
-        let name = _first_field(row)
-        let phase = _second_field(row)
+        // Columns are whitespace-separated: NAME then PHASE. split_words collapses
+        // the run of spaces between them; guard the indices for short rows ("" was
+        // the old field-extractor's fallback for a missing column).
+        let f = split_words(row)
+        let name = ""
+        if len f > 0 { name = f[0] }
+        let phase = ""
+        if len f > 1 { phase = f[1] }
         if name == "" { continue }
         if phase != "Running" and phase != "Succeeded" {
             let cmd = "kubectl {kf} describe pod {name} --namespace {ns}"
@@ -365,10 +277,15 @@ fun _dump_stuck_hook_jobs(ns: Text): Null {
     if trim(snapshot) == "" { return null }
     for row in split_lines(snapshot) {
         if trim(row) == "" { continue }
-        let name = _first_field(row)
+        // NAME then COMPLETIONS, whitespace-separated; split_words + guarded index
+        // ("" for a missing column, as the old _first/_second_field returned).
+        let f = split_words(row)
+        let name = ""
+        if len f > 0 { name = f[0] }
         // `n_done` (not `succeeded`): `succeeded` is a reserved keyword (the
         // `succeeded { }` command handler) and parses as Int → type error.
-        let n_done = _second_field(row)
+        let n_done = ""
+        if len f > 1 { n_done = f[1] }
         if name == "" { continue }
         // Stuck = no successful completion. kubectl renders a null .succeeded as
         // "<none>"; an unstarted Job shows "" or "0".
@@ -391,12 +308,96 @@ fun _dump_stuck_hook_jobs(ns: Text): Null {
 // Every command is best-effort (bash `|| true`); the cmd Texts are composed
 // here and run via log_stream (which itself swallows the command's rc). (bash
 // helm_dump_diagnostics.)
+// helm_pods_summary <snapshot> → a one-line pod-state tally. Defined ABOVE
+// helm_dump_diagnostics (which calls it for the triage banner) so the per-symbol
+// tree-shaker keeps it across the import boundary — a callee defined after its
+// caller is silently dropped ("Function does not exist" when imported).
+//
+// <snapshot> is the `kubectl get pods` custom-columns dump (NAME, PHASE, READY)
+// helm_watch_pods emits per cycle. One pure pass tallies total/running/pending/
+// failed and collects the pending/failed/not-ready name lists. Empty snapshot →
+// "" (caller emits the "waiting for pods…" line instead). Pure → directly testable.
+//
+// Shape (byte-matched to bash):
+//   "pods total=N running=R pending=P failed=F [pending=[a,b]] [failed=[c]] [not_ready=[d]]"
+pub fun helm_pods_summary(snapshot: Text): Text {
+    if trim(snapshot) == "" { return "" }
+    let total = 0
+    let running = 0
+    let pending = 0
+    let n_failed = 0
+    let pending_names = ""
+    let failed_names = ""
+    let not_ready = ""
+
+    for row in split_lines(snapshot) {
+        if trim(row) == "" { continue }
+        total += 1
+        // NAME PHASE READY, whitespace-separated; split_words + guarded indices
+        // (a short row yields "" for the missing columns, as the old
+        // _first/_second/_third_field extractors returned).
+        let f = split_words(row)
+        let name = ""
+        if len f > 0 { name = f[0] }
+        let phase = ""
+        if len f > 1 { phase = f[1] }
+        let ready = ""
+        if len f > 2 { ready = f[2] }
+        if {
+            phase == "Running" {
+                running += 1
+                // READY column is a comma-joined list of container .ready bools;
+                // any "false" → the pod is not ready.
+                if contains("false", ready) {
+                    if not_ready == "" { not_ready = name } else { not_ready = "{not_ready},{name}" }
+                }
+            }
+            phase == "Pending" {
+                pending += 1
+                if pending_names == "" { pending_names = name } else { pending_names = "{pending_names},{name}" }
+            }
+            phase == "Failed" {
+                n_failed += 1
+                if failed_names == "" { failed_names = name } else { failed_names = "{failed_names},{name}" }
+            }
+        }
+    }
+
+    let summary = "pods total={total} running={running} pending={pending} failed={n_failed}"
+    if pending_names != "" { summary = "{summary} pending=[{pending_names}]" }
+    if failed_names != "" { summary = "{summary} failed=[{failed_names}]" }
+    if not_ready != "" { summary = "{summary} not_ready=[{not_ready}]" }
+    return summary
+}
+
+// fmt_diag_triage <release-status> <pods-summary> → the one-line SUMMARY verdict
+// shown ABOVE the detail dump so a stuck operator reads the conclusion first
+// instead of scrolling a wall of kubectl output. PURE function of its inputs
+// (no cluster, no store) → unit-testable. <pods-summary> is helm_pods_summary's
+// "total=N running=N pending=N failed=N …" line (or "" when no pods yet).
+pub fun fmt_diag_triage(release_status: Text, pods_summary: Text): Text {
+    let st = release_status
+    if st == "" { st = "(unknown)" }
+    let pods = pods_summary
+    if trim(pods) == "" { pods = "no pods found yet" }
+    return "SUMMARY  release={st}  |  {pods}"
+}
+
 pub fun helm_dump_diagnostics(release: Text, ns: Text): Null {
     // Refresh this instance's context binding from saved KUBECTL_CONTEXT.
     helm_kctx_init()
     ui_step("Collecting diagnostics for failed helm operation")
     let hf = helm_ctx_flags()
     let kf = kubectl_ctx_flags()
+
+    // Triage banner FIRST: a one-line verdict (release status + pod tallies) so
+    // the operator sees the conclusion before the detail dump. Both inputs come
+    // from one cheap snapshot each; everything best-effort (a missing cluster
+    // degrades to "(unknown)" / "no pods found yet"). Reuses the pure
+    // helm_pods_summary so the verdict matches the watch line.
+    let rel_status = trust $helm {hf} status "{release}" --namespace "{ns}" -o json 2>/dev/null | jq -r '.info.status // empty' 2>/dev/null$
+    let snapshot = $kubectl {kf} get pods --namespace "{ns}" --no-headers -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[*].ready 2>/dev/null$ failed { "" }
+    ui_info(fmt_diag_triage(trim(rel_status), helm_pods_summary(snapshot)))
 
     log_stream("diag-helm", "helm {hf} status {release} --namespace {ns}")
     log_stream("diag-pods", "kubectl {kf} get pods --namespace {ns} -o wide")
@@ -409,7 +410,9 @@ pub fun helm_dump_diagnostics(release: Text, ns: Text): Null {
 
     _dump_stuck_hook_jobs(ns)
 
+    // Footer: point at the full log + the recovery command (next action).
     ui_ok("diagnostics written to {log_file()}")
+    ui_info("→ next: review {log_file()}, then rerun `migration-assistant resume` once fixed")
 }
 
 // ============================================================================
@@ -456,12 +459,8 @@ pub fun _helm_dump_install_notes(release: Text, ns: Text): Null {
     let cm = "{release}-installation-notes"
     let kf = kubectl_ctx_flags()
 
-    let timeout_s = env_var_get("INSTALLER_NOTES_TIMEOUT_S") failed { "60" }
-    if timeout_s == "" { timeout_s = "60" }
-    let poll_s = env_var_get("INSTALLER_NOTES_POLL_S") failed { "2" }
-    if poll_s == "" { poll_s = "2" }
-    let timeout = timeout_s as Int
-    let poll = poll_s as Int
+    let timeout = env_or("INSTALLER_NOTES_TIMEOUT_S", "60") as Int
+    let poll = env_or("INSTALLER_NOTES_POLL_S", "2") as Int
 
     // Poll for the ConfigMap to exist. Track time by wall clock so we don't have
     // to do float arithmetic on sub-second poll intervals (bash used `date +%s`).
@@ -507,62 +506,9 @@ pub fun _helm_dump_install_notes(release: Text, ns: Text): Null {
 }
 
 // ============================================================================
-// pods-watch summary formatter (the one-awk-pass tally, now pure Amber).
-// The whitespace field extractors (_first/_second/_third_field) live ABOVE,
-// near _dump_unhealthy_pods — their first user — so the tree-shaker keeps them.
+// pods-watch dump (synchronous post-hoc). Builds its line via the pure
+// helm_pods_summary defined above (moved up so the triage banner can reuse it).
 // ============================================================================
-
-// helm_pods_summary <snapshot> — build the one-line pods summary the bash
-// helm_watch_pods emitted per cycle, from a `kubectl get pods` custom-columns
-// snapshot (NAME, PHASE, READY). Replaces the seven-fork awk-+-tr-+-sed tally
-// with one pure pass: tallies total/running/pending/failed and collects the
-// pending/failed/not-ready name lists. An empty snapshot → "" (caller emits the
-// "waiting for pods…" line instead). Pure (returns Text) — directly testable.
-//
-// Shape (byte-matched to bash):
-//   "pods total=N running=R pending=P failed=F [pending=[a,b]] [failed=[c]] [not_ready=[d]]"
-pub fun helm_pods_summary(snapshot: Text): Text {
-    if trim(snapshot) == "" { return "" }
-    let total = 0
-    let running = 0
-    let pending = 0
-    let n_failed = 0
-    let pending_names = ""
-    let failed_names = ""
-    let not_ready = ""
-
-    for row in split_lines(snapshot) {
-        if trim(row) == "" { continue }
-        total += 1
-        let phase = _second_field(row)
-        let name = _first_field(row)
-        let ready = _third_field(row)
-        if {
-            phase == "Running" {
-                running += 1
-                // READY column is a comma-joined list of container .ready bools;
-                // any "false" → the pod is not ready.
-                if contains("false", ready) {
-                    if not_ready == "" { not_ready = name } else { not_ready = "{not_ready},{name}" }
-                }
-            }
-            phase == "Pending" {
-                pending += 1
-                if pending_names == "" { pending_names = name } else { pending_names = "{pending_names},{name}" }
-            }
-            phase == "Failed" {
-                n_failed += 1
-                if failed_names == "" { failed_names = name } else { failed_names = "{failed_names},{name}" }
-            }
-        }
-    }
-
-    let summary = "pods total={total} running={running} pending={pending} failed={n_failed}"
-    if pending_names != "" { summary = "{summary} pending=[{pending_names}]" }
-    if failed_names != "" { summary = "{summary} failed=[{failed_names}]" }
-    if not_ready != "" { summary = "{summary} not_ready=[{not_ready}]" }
-    return summary
-}
 
 // helm_dump_pods <ns> — the SYNCHRONOUS post-hoc pod-status dump that replaces
 // the backgrounded helm_watch_pods. Takes one `kubectl get pods` snapshot and

@@ -77,11 +77,33 @@ fun pkill_group(pid: Text, sig: Text): Bool {
 // die / require_cmd
 // =====================================================================
 
-// die <msg> — print a red error to STDERR and exit 1. (bash: printf red >&2;
-// exit 1.)
-pub fun die(msg: Text): Null {
+// fmt_next_hint <hint> — the dim "→ next: …" action line (or "" for no hint).
+// Pure (returns Text, no exit) so it is unit-testable without killing the runner
+// the way die_hint's exit(1) would. dim SGR (\e[2m … \e[0m) via esc(); a non-tty
+// drops the color but keeps the text, so CI logs still read the next-action line.
+pub fun fmt_next_hint(hint: Text): Text {
+    if hint == "" { return "" }
+    return "{esc()}[2m  → next: {hint}{esc()}[0m"
+}
+
+// die_hint <msg> <hint> — print a red error to STDERR, then a dim "→ next:"
+// action line telling the operator what to DO about it, and exit 1. The hint is
+// the difference between a wall of red and a recoverable failure: it names the
+// command to run next (e.g. `migration-assistant diag`, `aws configure`) or the
+// log to read. Pass "" for hint to get a plain die (see die() below). Everything
+// goes to STDERR — stdout stays the value channel.
+pub fun die_hint(msg: Text, hint: Text): Null {
     eprintln("{red_error_prefix()} {msg}")
+    let next = fmt_next_hint(hint)
+    if next != "" { eprintln(next) }
     exit(1)
+}
+
+// die <msg> — print a red error to STDERR and exit 1, with no next-action hint.
+// (bash: printf red >&2; exit 1.) Thin wrapper over die_hint so the two share
+// one exit site.
+pub fun die(msg: Text): Null {
+    die_hint(msg, "")
 }
 
 // require_cmd <name> <hint> — abort with an actionable message (exit 127) if
@@ -200,24 +222,42 @@ pub fun on_signal_cleanup(): Null {
 // ultimately did (kill a backgrounded child). Callers that registered a custom
 // hook should instead call on_signal_track_pid for the PIDs they own.
 
+// The registry is append-only (no untrack), so `len __exit_fns` IS the logical
+// count once anything is registered — no parallel counter needed. The one wrinkle
+// is the [""] seed (a module-level cross-fn array needs the placeholder to declare
+// a real bash array + anchor the [Text] element type): an untouched registry has
+// len 1 but must report 0. The first real append reuses that seed slot so physical
+// length stays equal to the count; the count accessor special-cases the untouched
+// seed. Names are never "" (on_exit_register rejects the empty name), so a sole ""
+// element uniquely identifies the never-appended seed.
 let __exit_fns = [""]
-let __exit_count = 0
+
+// _exit_seed_untouched — true when the registry still holds only the [""] seed
+// placeholder (nothing registered yet). Used by both register + count.
+fun _exit_seed_untouched(): Bool {
+    return len __exit_fns == 1 and __exit_fns[0] == ""
+}
 
 // on_exit_register <fn_name> — record a cleanup callback name. (bash appended to
 // __ON_EXIT_FNS.) Kept for contract compatibility; see the note above on why the
 // PID sweep is the effective cleanup.
 pub fun on_exit_register(fn_name: Text): Null {
     if fn_name == "" { return null }
-    if __exit_count < len __exit_fns {
-        __exit_fns[__exit_count] = fn_name
+    // First real append overwrites the seed placeholder; thereafter append, so
+    // `len __exit_fns` equals the number of registered names.
+    if _exit_seed_untouched() {
+        __exit_fns[0] = fn_name
     } else {
         __exit_fns += [fn_name]
     }
-    __exit_count += 1
 }
 
-// on_exit_registered_count — test seam.
-pub fun on_exit_registered_count(): Int { return __exit_count }
+// on_exit_registered_count — test seam. `len __exit_fns` is the count once
+// anything is registered; the untouched [""] seed reports 0.
+pub fun on_exit_registered_count(): Int {
+    if _exit_seed_untouched() { return 0 }
+    return len __exit_fns
+}
 
 // =====================================================================
 // arch_os

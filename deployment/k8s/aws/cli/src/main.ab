@@ -22,8 +22,8 @@
 // -------------
 // * Amber `main (args)` delivers args[] WITH the program path as args[0] (exactly
 //   like bash's $0), so args[1] is the subcommand and args[2..] is the rest —
-//   the direct analogue of bash `args[1]` / `${@:2}`. _rest(args) builds the
-//   args[2..] tail; _argv_no_prog(args) builds args[1..] (the bash `"$@"`).
+//   the direct analogue of bash `args[1]` / `${@:2}`. _tail_from(args, 2) builds
+//   the args[2..] tail; _tail_from(args, 1) builds args[1..] (the bash `"$@"`).
 // * The flag-led catch-all (`-y` / any `--flag` as the first token) passes
 //   args[1..] (the whole user argv, sans the program path) to cmd_resume,
 //   matching the bash `cmd_resume "$@"` so `migration-assistant --non-interactive
@@ -46,6 +46,7 @@ import {
     manifest_init, manifest_brand, manifest_pack_summary
 } from "./manifest.ab"
 import { common_install_traps } from "./common.ab"
+import { term_install_reset_trap } from "./term.ab"
 import { cmd_resume, cmd_help } from "./resume.ab"
 import { cmd_console, cmd_diag } from "./console.ab"
 import { cmd_agent } from "./agent.ab"
@@ -54,31 +55,18 @@ import { cmd_pack } from "./pack.ab"
 
 // ---- helpers (define-before-use; the tree-shaker keeps deps preceding main) --
 
-// _rest <args> — args[2..]: the subcommand's arguments with BOTH the program
-// path (args[0]) and the subcommand (args[1]) dropped (bash `${@:2}`). Returns []
-// when there is no tail. Typed seed [""] → reset to [] anchors the [Text] element
-// type + declares a real empty bash array (a bare `let out = []` left it
-// undeclared → bash-3.2 "bad array subscript" on len).
-fun _rest(args: [Text]): [Text] {
+// _tail_from <args> <start> — args[start..]: the argv tail beginning at index
+// `start`. _tail_from(args, 2) is the subcommand's arguments with BOTH the program
+// path (args[0]) and the subcommand (args[1]) dropped (bash `${@:2}`);
+// _tail_from(args, 1) drops only the program path (the bash `"$@"`, used by the
+// flag-led catch-all). Returns [] when there is no tail. The typed seed [""] →
+// reset to [] anchors the [Text] element type + declares a real empty bash array
+// (a bare `let out = []` left it undeclared → bash-3.2 "bad array subscript" on len).
+fun _tail_from(args: [Text], start: Int): [Text] {
     let out = [""]
     out = []
     let n = len args
-    let i = 2
-    while i < n {
-        out += [args[i]]
-        i += 1
-    }
-    return out
-}
-
-// _argv_no_prog <args> — args[1..]: the user argv with only the program path
-// dropped (the bash `"$@"`). Used for the flag-led catch-all that routes to
-// cmd_resume with the whole flag set.
-fun _argv_no_prog(args: [Text]): [Text] {
-    let out = [""]
-    out = []
-    let n = len args
-    let i = 1
+    let i = start
     while i < n {
         out += [args[i]]
         i += 1
@@ -109,13 +97,19 @@ main (args) {
     // (the bash `export MIGRATE_OWNS_PROCESS=1` before sourcing _common.sh).
     trust env_var_set("MIGRATE_OWNS_PROCESS", "1")
     common_install_traps()
+    // Install the dedicated EXIT trap that restores the cursor (\e[?25h) + autowrap
+    // (\e[?7h) on ANY exit path — Ctrl-C during the CFN dashboard, errexit, or a
+    // clean finish. The dashboard hides the cursor + disables autowrap while it
+    // renders; this guarantees the operator's terminal is left normal even if the
+    // run is interrupted before dash_finish runs. No-op when stderr isn't a TTY.
+    term_install_reset_trap()
 
     let n = len args
     // args[0] is the program path (bash $0). bash `${1:-resume}` — no subcommand
     // ⇒ resume. The subcommand is args[1].
     let sub = ""
     if n > 1 { sub = args[1] }
-    let rest = _rest(args)
+    let rest = _tail_from(args, 2)
 
     if {
         sub == "resume" or sub == "" { exit(cmd_resume(rest)) }
@@ -130,7 +124,7 @@ main (args) {
         // Flag-led invocation behaves like `resume <flags>`: pass the user argv
         // sans the program path (bash `cmd_resume "$@"`), so
         // `migration-assistant --stage ma …` works with no explicit `resume`.
-        _is_flag_led(sub) { exit(cmd_resume(_argv_no_prog(args))) }
+        _is_flag_led(sub) { exit(cmd_resume(_tail_from(args, 1))) }
         else {
             cmd_help()
             exit(64)
