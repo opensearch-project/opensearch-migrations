@@ -3,5 +3,11 @@
 build/
 bin/
 lib/
+# Stray compiled-to-bash outputs (e.g. an `amber build … out.sh` left in-tree).
+# The only authored .sh that MUST stay tracked is test/verify-bash32.sh, so this
+# ignores temp/compiled names without blanket-ignoring *.sh. __cb.sh was one such
+# artifact (world.ab compiled) committed by accident during the test split.
+__cb.sh
+*.compiled.sh
 # Per-stage runtime state written by the CLI when run from this dir.
 migration-assistant-workspace/
