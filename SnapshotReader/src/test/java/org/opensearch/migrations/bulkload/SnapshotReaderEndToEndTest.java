@@ -10,7 +10,8 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
-import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
+import org.opensearch.migrations.bulkload.common.RepoUri;
+import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentChange;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
@@ -130,9 +131,9 @@ public class SnapshotReaderEndToEndTest {
             .insecure(true)
             .build()
             .toConnectionContext());
-        var snapshotCreator = new FileSystemSnapshotCreator(
+        var snapshotCreator = new SnapshotCreator(
             SNAPSHOT_NAME, REPO_NAME, clientFactory.determineVersionAndCreate(),
-            SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, List.of(),
+            RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR), List.of(),
             snapshotContext.createSnapshotCreateContext()
         );
         SnapshotRunner.runAndWaitForCompletion(snapshotCreator);

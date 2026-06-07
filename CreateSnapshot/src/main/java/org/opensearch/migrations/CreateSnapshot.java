@@ -46,7 +46,7 @@ public class CreateSnapshot {
         public String snapshotRepoName;
 
         @Parameter(
-                names = {"--repo-uri", "--s3-repo-uri", "--file-system-repo-path", "--gcs-repo-uri"},
+                names = {"--repo-uri", "--s3-repo-uri", "--file-system-repo-path"},
                 required = true,
                 description = "Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)")
         public String repoUri;

@@ -10,7 +10,8 @@ import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
-import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
+import org.opensearch.migrations.bulkload.common.RepoUri;
+import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.ObjectMapperFactory;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
@@ -163,11 +164,11 @@ public class EndToEndTest extends SourceTestBase {
                     .build()
                     .toConnectionContext());
             var sourceClient = sourceClientFactory.determineVersionAndCreate();
-            var snapshotCreator = new FileSystemSnapshotCreator(
+            var snapshotCreator = new SnapshotCreator(
                 snapshotName,
                 snapshotRepoName,
                 sourceClient,
-                SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR),
                 List.of(),
                 snapshotContext.createSnapshotCreateContext()
             );

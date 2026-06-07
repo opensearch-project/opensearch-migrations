@@ -163,6 +163,9 @@ public class SolrBackupStrategy implements SourceBackupStrategy {
                 backupLocation = backupLocation.substring(1);
             }
             log.info("Using S3 backup repository '{}' with location prefix '{}'", repositoryName, backupLocation);
+        } else if (parsedUri instanceof RepoUri.GcsRepoUri) {
+            repositoryName = args.snapshotRepoName;
+            log.info("Using GCS backup repository '{}'", repositoryName);
         }
         var creator = new SolrStandaloneBackupCreator(
             solrUrl, args.snapshotName, backupLocation,

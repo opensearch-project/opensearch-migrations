@@ -1,10 +1,7 @@
 package org.opensearch.migrations;
 
-import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
-import org.opensearch.migrations.bulkload.common.GcsSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RepoUri;
-import org.opensearch.migrations.bulkload.common.S3SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICreateSnapshotContext;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
@@ -32,43 +29,20 @@ public class ElasticsearchBackupStrategy implements SourceBackupStrategy {
         var client = clientFactory.determineVersionAndCreate();
 
         var parsedUri = RepoUri.parse(args.repoUri);
-        SnapshotCreator snapshotCreator = switch (parsedUri) {
-            case RepoUri.FileRepoUri f -> new FileSystemSnapshotCreator(
-                args.snapshotName,
-                args.snapshotRepoName,
-                client,
-                f.path(),
-                args.indexAllowlist,
-                context,
-                args.compressionEnabled,
-                args.includeGlobalState
-            );
-            case RepoUri.GcsRepoUri g -> new GcsSnapshotCreator(
-                args.snapshotName,
-                args.snapshotRepoName,
-                client,
-                g.rawUri(),
-                args.indexAllowlist,
-                args.maxSnapshotRateMBPerNode,
-                context,
-                args.compressionEnabled,
-                args.includeGlobalState
-            );
-            case RepoUri.S3RepoUri s -> new S3SnapshotCreator(
-                args.snapshotName,
-                args.snapshotRepoName,
-                client,
-                s.rawUri(),
-                args.s3Region,
-                args.endpoint,
-                args.indexAllowlist,
-                args.maxSnapshotRateMBPerNode,
-                args.s3RoleArn,
-                context,
-                args.compressionEnabled,
-                args.includeGlobalState
-            );
-        };
+        var snapshotCreator = new SnapshotCreator(
+            args.snapshotName,
+            args.snapshotRepoName,
+            client,
+            parsedUri,
+            args.indexAllowlist,
+            context,
+            args.compressionEnabled,
+            args.includeGlobalState,
+            args.s3Region,
+            args.endpoint,
+            args.maxSnapshotRateMBPerNode,
+            args.s3RoleArn
+        );
 
         try {
             if (args.noWait) {

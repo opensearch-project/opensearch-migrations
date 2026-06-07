@@ -156,7 +156,7 @@ public class RfsMigrateDocuments {
         public String snapshotName;
 
         @Parameter(required = false,
-            names = { "--repo-uri", "--s3-repo-uri", "--s3RepoUri", "--gcs-repo-uri", "--gcsRepoUri", "--snapshot-local-dir", "--snapshotLocalDir", "--file-system-repo-path" },
+            names = { "--repo-uri", "--s3-repo-uri", "--s3RepoUri", "--snapshot-local-dir", "--snapshotLocalDir", "--file-system-repo-path" },
             description = ("Repository URI. Schemes: file:///path, s3://bucket/path, gs://bucket/path (or bare absolute path)"))
         public String repoUri = null;
 
