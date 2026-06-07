@@ -309,16 +309,6 @@ spec:
                   key: GCS_ENDPOINT_URL
                   optional: true
             {{- end }}
-            {{- if .Values.kafkaExternal.enabled }}
-            - name: KAFKA_EXTERNAL_BROKERS
-              value: {{ .Values.kafkaExternal.brokers | quote }}
-            - name: KAFKA_EXTERNAL_AUTH_TYPE
-              value: {{ .Values.kafkaExternal.authType | quote }}
-            - name: KAFKA_EXTERNAL_USERNAME
-              value: {{ .Values.kafkaExternal.userName | quote }}
-            - name: KAFKA_EXTERNAL_PASSWORD
-              value: {{ .Values.kafkaExternal.password | quote }}
-            {{- end }}
             {{- if and (eq .Values.cloudProvider "aws") (index .Values.conditionalPackageInstalls "cert-manager") }}
             - name: PROXY_DEFAULT_AWS_REGION
               valueFrom:
