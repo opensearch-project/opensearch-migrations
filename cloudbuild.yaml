@@ -10,6 +10,13 @@ steps:
       - ':DocumentsFromSnapshotMigration:syncVersionFile_reindexFromSnapshot'
       - '--no-daemon'
 
+  # Run GCS integration tests (requires Docker for testcontainers)
+  - name: 'amazoncorretto:21'
+    entrypoint: './gradlew'
+    args:
+      - ':SnapshotReaderGcs:isolatedTest'
+      - '--no-daemon'
+
   # Stage Java tools and Node artifacts into migrationConsole Docker context
   - name: 'bash'
     args:
