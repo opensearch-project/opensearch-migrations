@@ -3,7 +3,9 @@
 //! Idiomatic Rust + Ratatui implementation. The design separates pure decision
 //! logic (testable in isolation) from external-process I/O (behind the
 //! [`runner::CommandRunner`] trait), so the orchestration that drives `aws` /
-//! `kubectl` / `helm` / `crane` can be exercised against a mock.
+//! `kubectl` / `helm` can be exercised against a mock. ECR auth and image
+//! mirroring use native SDK/OCI clients (`ecr`, `oci` modules) rather than
+//! shelling out to `aws ecr` or `crane`.
 //!
 //! ## Layers
 //!
@@ -29,7 +31,7 @@ mod view;
 // while the source lives in layered folders — the standard Rust facade pattern.
 pub use command::{app, cli, pack_cmd};
 pub use core::{config, error, log, runner, state, util};
-pub use domain::{agent, artifact, cfn, crane, discover, helm, manifest, pack, timeline, version};
+pub use domain::{agent, artifact, cfn, crane, discover, ecr, helm, manifest, oci, pack, timeline, version};
 pub use view::{dashboard, tui, ui};
 
 pub use error::{Error, Result};

@@ -15,6 +15,11 @@ runtime). Both are enumerated here exhaustively.
 |---|---|---|
 | `ratatui` | The interactive TUI (wizard + resume timeline). Pulls in `crossterm` as its terminal backend. | No — it's the TUI. |
 | `serde` + `serde_json` | Parse/emit `manifest.json` and `state.json` (and the `pack` manifest merge). | Not without hand-rolling a JSON parser; serde is the standard, audited choice. |
+| `oci-distribution` | Native OCI image copy (`crane copy` replacement) — pulls manifests, layers, and configs from source registries and pushes them to ECR, with per-host credential injection. | Only if we re-introduce the `crane` binary. |
+| `aws-sdk-ecr` | Native ECR auth (`ecr:GetAuthorizationToken`) and repo management (`ecr:CreateRepository`) — replaces `aws ecr get-login-password` and `aws ecr create-repository` CLI calls. | Only if we re-introduce the `aws` CLI for these operations. |
+| `aws-sdk-sts` | Native STS identity (`sts:GetCallerIdentity`) — replaces `aws sts get-caller-identity` for `discover_aws`. | Only if we re-introduce the `aws` CLI for identity. |
+| `aws-config` | SDK credential + region resolution (env vars, profiles, IMDS). Required by the three aws-sdk-* crates above. | Only if we drop all SDK crates. |
+| `tokio` | Async runtime for the SDK calls — bridged to sync via `block_on`. Only the `rt` + `macros` features are enabled (no full multi-threaded executor). | Only if we drop all async SDK crates. |
 
 Dev-only:
 
@@ -47,10 +52,10 @@ PATH for the operations that use them.
 
 | Program | Used by | Purpose |
 |---|---|---|
-| `aws` | discover, cfn, crane, helm, build, cleanup | CloudFormation deploy, EKS kubeconfig, ECR auth, STS identity. |
+| `aws` | cfn, eks (kubeconfig/nodepool/access), build, cleanup | CloudFormation deploy/describe/delete, EKS `update-kubeconfig` + `update-cluster-config`, EKS access-entry management. **ECR auth and STS identity are now handled natively by the AWS SDK — `aws` is no longer required for those.** |
 | `kubectl` | helm, console, diag, cleanup | Namespace/pod ops, `exec` into migration-console, readiness wait. |
 | `helm` | helm, diag, cleanup | Install/upgrade/status/uninstall the chart. |
-| `crane` | crane | Mirror images to the operator's private ECR (only when `MIRROR_IMAGES=Y`). |
+| `crane` | crane (fallback) | Optional fallback for image mirroring when the native OCI client fails. `crane` is no longer required when the SDK path succeeds. |
 
 ### Required only for specific subcommands
 
