@@ -856,6 +856,15 @@ export const SetupCapture = WorkflowBuilder.create({
                     managedByWorkflow
                 )}) }
             )
+            .addStep("approveProxySetup", ResourceManagement, "waitForUserApproval", c =>
+                c.register({
+                    resourceName: expr.concat(expr.literal("captureproxysetup."), b.inputs.proxyName)
+                }),
+                { when: c => ({templateExp: checksumNotDone(
+                    c.reconcileCaptureProxyResource.outputs.currentConfigChecksum,
+                    b.inputs.configChecksum
+                )}) }
+            )
             .addStep("patchCaptureProxyPending", ResourceManagement, "patchCaptureProxyPending", c =>
                 c.register({
                     resourceName: b.inputs.proxyName,

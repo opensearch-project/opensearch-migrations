@@ -24,6 +24,7 @@ import {
     configMapKey,
     defineParam,
     expr,
+    FunctionExpression,
     IMAGE_PULL_POLICY,
     InputParamDef,
     INTERNAL,
@@ -41,6 +42,7 @@ import {ResourceManagement} from "./resourceManagement";
 
 import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {ImageParameters, LogicalOciImages, makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
+import {getApprovalMap, getSourceTargetPathAndSnapshotAndMigrationIndex} from "./commonUtils/configContextPathConstructors";
 import {SetupKafka} from "./setupKafka";
 import {SetupCapture} from "./setupCapture";
 import {Replayer} from "./replayer";
@@ -403,6 +405,21 @@ export const FullMigration = WorkflowBuilder.create({
 
         .addInputsFromRecord(uniqueRunNonceParam)
         .addInputsFromRecord(ImageParameters)
+        .addInputsFromRecord(
+            getApprovalMap(t.inputs.workflowParameters.approvalConfigMapName, typeToken<{}>()))
+        .addOptionalInput("skipDocumentBackfillApproval", c =>
+            new FunctionExpression<boolean, any, any, "complicatedExpression">("sprig.dig", [
+                ...getSourceTargetPathAndSnapshotAndMigrationIndex(
+                    c.inputParameters.sourceLabel,
+                    c.inputParameters.targetConfig,
+                    expr.jsonPathStrict(c.inputParameters.snapshotConfig, "label"),
+                    c.inputParameters.migrationLabel
+                ),
+                expr.literal("documentBackfill"),
+                expr.literal(false),
+                expr.deserializeRecord(c.inputParameters.skipApprovalMap)
+            ])
+        )
 
         .addSteps(b => b
             .addStep("metadataMigrate", MetadataMigration, "migrateMetaData", c => {
@@ -414,6 +431,15 @@ export const FullMigration = WorkflowBuilder.create({
                     });
                 },
                 {when: {templateExp: expr.not(expr.isEmpty(b.inputs.metadataMigrationConfig))}}
+            )
+            .addStep("approveBackfill", DocumentBulkLoad, "approveBackfill", c =>
+                    c.register({
+                        name: expr.concat(expr.literal("documentbackfill."), b.inputs.crdName)
+                    }),
+                {when: {templateExp: expr.and(
+                    expr.not(expr.isEmpty(b.inputs.documentBackfillConfig)),
+                    expr.not(b.inputs.skipDocumentBackfillApproval)
+                )}}
             )
             .addStep("bulkLoadDocuments", DocumentBulkLoad, "setupAndRunBulkLoad", c =>
                     c.register({

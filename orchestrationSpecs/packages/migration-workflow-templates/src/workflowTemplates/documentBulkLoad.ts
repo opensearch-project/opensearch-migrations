@@ -12,6 +12,7 @@ import {
     ARGO_RFS_WORKFLOW_OPTION_KEYS,
 } from "@opensearch-migrations/schemas";
 import {MigrationConsole} from "./migrationConsole";
+import {ResourceManagement} from "./resourceManagement";
 import {CONTAINER_NAMES} from "../containerNames";
 
 import {
@@ -391,6 +392,14 @@ export const DocumentBulkLoad = documentBulkLoadBaseBuilder
         )
     )
 
+
+    .addTemplate("approveBackfill", t => t
+        .addRequiredInput("name", typeToken<string>())
+        .addSteps(b => b
+            .addStep("waitForUserApproval", ResourceManagement, "waitForUserApproval", c =>
+                c.register({resourceName: b.inputs.name}))
+        )
+    )
 
     .addTemplate("doNothing", t => t
         .addSteps(b => b.addStepGroup(c => c)))
