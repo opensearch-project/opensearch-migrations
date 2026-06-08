@@ -59,7 +59,7 @@ jobs:
           curl -sS http://docker-registry:5000/v2/ || true
 
       - name: Restore Docker Cache
-        uses: AndreKurait/docker-cache@0.6.0
+        uses: AndreKurait/docker-cache@0.7.0
         with:
           key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
           read-only: ${{ github.event_name != 'push' }}
