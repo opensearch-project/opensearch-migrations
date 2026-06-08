@@ -1,10 +1,9 @@
 //! Command-line surface + dispatcher.
 //!
-//! Port of `bin/migration-assistant` (the case dispatch) and the entry points
-//! in `resume.sh` / `console.sh` / `agent.sh` / `cleanup.sh` / `diag.sh` /
-//! `pack.sh`. clap parses the subcommands; each handler resolves the
-//! environment, loads state, and drives the orchestrator. The exit-code
-//! contract is preserved: unknown command → 64, `die` → 1, success → 0.
+//! Subcommands: resume (default) / console / agent / diag / clear / cleanup /
+//! pack / version / help. Each handler resolves the environment, loads state,
+//! and drives the orchestrator. Exit-code contract: unknown command → 64,
+//! generic failure → 1, success → 0.
 
 use crate::config::{self, Env};
 use crate::error::{Error, Result};
@@ -29,7 +28,7 @@ pub fn dispatch<R: CommandRunner>(args: &[String], runner: &R) -> i32 {
 fn run<R: CommandRunner>(args: &[String], runner: &R) -> Result<()> {
     // The first non-flag token is the subcommand; a leading flag means the
     // default `resume` (so `migration-assistant --non-interactive …` works),
-    // matching the bash dispatcher.
+    // matching the dispatcher contract.
     let (subcommand, rest) = split_subcommand(args);
     let env = Env::from_process();
 
@@ -196,7 +195,7 @@ fn resolve_resume(state: &mut State, env: &Env) -> Result<bool> {
 /// collects the wizard config, then drives the orchestrator through
 /// CFN → kubeconfig → crane → helm → console. AWS-touching steps require real
 /// credentials; without `aws` on PATH the discovery step fails cleanly with the
-/// same message the bash CLI produced.
+/// a clear error message.
 fn manual_path<R: CommandRunner>(env: Env, runner: &R, state: State, resuming: bool) -> Result<()> {
     // Init the run log under <stage>/log/migrate.log. The Jenkins helper
     // (test/awsRunEksValidation.sh) dumps this file on failure, so it must
@@ -223,7 +222,7 @@ fn manual_path<R: CommandRunner>(env: Env, runner: &R, state: State, resuming: b
 
     // Wizard: in non-interactive mode (or on resume with everything saved) we
     // take saved values + defaults; otherwise the TUI collects them. The
-    // resume fast-path mirrors `wizard_collect`'s early return.
+    // resume fast-path: skip wizard if state is already populated.
     if !(resuming
         && !app.state.get_or("AWS_REGION", "").is_empty()
         && !app.state.get_or("STAGE_NAME", "").is_empty()
@@ -251,8 +250,8 @@ fn manual_path<R: CommandRunner>(env: Env, runner: &R, state: State, resuming: b
 }
 
 /// The headless deploy spine: CFN template → CFN deploy → kubeconfig → EKS
-/// access → image build/mirror → helm. Mirrors `aws-bootstrap.sh` ordering.
-/// Each `?` aborts the run with a non-zero exit, exactly as the bash `set -e`
+/// access → image build/mirror → helm.
+/// Each `?` aborts the run with a non-zero exit.
 /// pipeline did.
 fn run_deploy<R: CommandRunner>(app: &mut crate::app::App<R>, log: &crate::log::Log) -> Result<()> {
     log.info("deploy: resolve CFN template");
@@ -337,8 +336,7 @@ fn collect_wizard<R: CommandRunner>(app: &mut crate::app::App<R>) -> Result<()> 
 }
 
 /// Resolve the effective mode: explicit `--mode` wins; else the picker fires on
-/// first run / `--switch`; else the saved mode persists. Mirrors the mode block
-/// of `cmd_resume`.
+/// first run / `--switch`; else the saved mode persists.
 fn resolve_mode(
     state: &mut State,
     flags: &config::DeployFlags,
@@ -371,7 +369,7 @@ fn resolve_mode(
 }
 
 /// Present the mode picker and return the chosen id. Agent is offered only when
-/// the gate is on (`MIGRATE_ENABLE_AGENT=1`). Mirrors `_select_mode`.
+/// the gate is on (`MIGRATE_ENABLE_AGENT=1`).
 fn pick_mode(current: &str, env: &Env) -> String {
     let mut ids = vec!["Manual"];
     let mut labels = vec!["Manual"];
@@ -715,7 +713,7 @@ fn brand(manifest: &Option<crate::manifest::Manifest>, field: &str, default: &st
 
 /// The version string the `version` subcommand prints — branding
 /// `versionString` if set, else `CLI_VERSION` + any `+pack-ver` suffix.
-/// Mirrors the bash `version` case.
+/// Output the CLI version string.
 fn resolve_version_string() -> String {
     let manifest = load_manifest();
     if let Some(m) = &manifest {
@@ -728,7 +726,7 @@ fn resolve_version_string() -> String {
     version::CLI_VERSION.to_string()
 }
 
-/// The help text. Goes to stdout (the bash `cmd_help` is intentionally stdout).
+/// The help text (goes to stdout).
 pub fn help_text() -> String {
     format!(
         "migration-assistant — OpenSearch Migration Assistant CLI\n\n\

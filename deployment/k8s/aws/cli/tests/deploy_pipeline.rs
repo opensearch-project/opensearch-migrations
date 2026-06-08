@@ -91,7 +91,7 @@ fn full_manual_pipeline_runs_each_phase_in_order_and_records_last_step() {
     // mirrored registry + snapshot role pulled from the CFN outputs. The install
     // now runs through a `bash -c <script>` wrapper (the script streams namespace
     // pods/events while `helm --wait` blocks), so the helm argv is embedded
-    // shell-quoted; assert against the bash script with quotes stripped.
+    // shell-quoted; assert against the script with quotes stripped.
     let helm_bash = runner
         .calls_to("bash")
         .into_iter()

@@ -173,7 +173,7 @@ fn headless_deploy_runs_cfn_and_helm() {
         .stub("helm", &["status"], 1, "")
         // helm install now runs via `bash -c <script>` (helm --wait + a namespace
         // pod/event watcher); the direct `helm upgrade --install` stub no longer
-        // fires, the bash wrapper does (MockRunner default-success covers it).
+        // (MockRunner default-success covers it).
         .stub("bash", &["upgrade", "--install"], 0, "");
 
     let code = dispatch_isolated(
@@ -212,7 +212,7 @@ fn headless_deploy_runs_cfn_and_helm() {
     assert!(deploy.joined().contains("STACK=\"MA-test-stack\""));
     assert!(runner.any_call_contains("eks update-kubeconfig"));
     assert!(runner.any_call_contains("associate-access-policy"));
-    // helm install ran via the bash wrapper (argv embedded shell-quoted).
+    // helm install ran via the shell wrapper (argv embedded shell-quoted).
     let helm = runner
         .calls_to("bash")
         .into_iter()

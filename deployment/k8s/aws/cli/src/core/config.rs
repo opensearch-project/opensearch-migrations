@@ -1,12 +1,10 @@
 //! Run configuration: environment resolution and the deploy-flag → state map.
 //!
-//! Ports two pieces of `lib/_common.sh` + `lib/resume.sh`:
 //!   * [`Env`] — the process-environment knobs (`MIGRATE_HOME`, `STAGE`,
-//!     `MIGRATE_NONINTERACTIVE`, `MIGRATE_ENABLE_AGENT`, …), with the same
-//!     defaults the bash globals used.
-//!   * [`apply_deploy_flags`] — the big `cmd_resume` flag table that maps CLI
-//!     flags onto `state.env` keys. Keeping it as a pure function over a
-//!     [`State`](crate::state::State) makes the whole flag surface testable.
+//!     `MIGRATE_NONINTERACTIVE`, `MIGRATE_ENABLE_AGENT`, …) with defaults.
+//!   * [`apply_deploy_flags`] — maps CLI flags onto `state.env` keys. Keeping
+//!     it as a pure function over a [`State`](crate::state::State) makes the
+//!     whole flag surface testable.
 
 use crate::state::State;
 use std::path::PathBuf;
@@ -81,12 +79,12 @@ pub struct DeployFlags {
 }
 
 /// Apply the deploy/resume flag table to `state`, returning the control flags
-/// that don't live in state. Mirrors the second-pass `while` loop in
+/// that don't live in state.
 /// `cmd_resume` (run AFTER `state.load()` so flag overrides merge into the
 /// loaded values rather than clobbering them).
 ///
-/// Each `--flag VALUE` and `--flag=VALUE` form is accepted, matching the bash
-/// parser. Unknown tokens are collected into `rest`.
+/// Each `--flag VALUE` and `--flag=VALUE` form is accepted. Unknown tokens are
+/// collected into `rest`.
 pub fn apply_deploy_flags(state: &mut State, args: &[String]) -> DeployFlags {
     let mut out = DeployFlags::default();
     let mut i = 0;
@@ -180,9 +178,8 @@ pub fn apply_deploy_flags(state: &mut State, args: &[String]) -> DeployFlags {
 
 /// Resolve the effective mode given the gate and the picker/flag inputs.
 ///
-/// Encodes the Agent preview-gate logic from `cmd_resume`: `--mode Agent`
-/// (or a stale `MODE=Agent` in state) is rejected unless `enable_agent`.
-/// Returns `Err` with the bash hint message when gated off.
+/// Encodes the Agent preview-gate logic: `--mode Agent` (or a stale
+/// `MODE=Agent` in state) is rejected unless `enable_agent`.
 pub fn check_agent_gate(
     force_mode: Option<&str>,
     state_mode: &str,

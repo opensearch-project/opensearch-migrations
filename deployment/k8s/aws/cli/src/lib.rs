@@ -31,7 +31,9 @@ mod view;
 // while the source lives in layered folders — the standard Rust facade pattern.
 pub use command::{app, cli, pack_cmd};
 pub use core::{config, error, log, runner, state, util};
-pub use domain::{agent, artifact, cfn, crane, discover, ecr, helm, manifest, oci, pack, timeline, version};
+pub use domain::{
+    agent, artifact, cfn, crane, discover, ecr, helm, manifest, oci, pack, timeline, version,
+};
 pub use view::{dashboard, tui, ui};
 
 pub use error::{Error, Result};

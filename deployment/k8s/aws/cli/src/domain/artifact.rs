@@ -1,7 +1,7 @@
 //! Deploy-artifact resolution: where the CFN template, the helm chart, and the
 //! buildkit/gradle build come from, for the headless deploy.
 //!
-//! Two lanes, mirroring `aws-bootstrap.sh`:
+//! Two lanes:
 //!   * **`--build` (source):** CFN template is synthesized by Gradle
 //!     (`:deployment:migration-assistant-solution:cdkSynthMinified`) into
 //!     `cdk.out-minified/`, the chart is the in-repo chart dir, and images are
@@ -23,7 +23,7 @@ pub fn release_base_url(repo: &str, version: &str) -> String {
 }
 
 /// The local path the Gradle CDK synth writes the chosen template to.
-/// Mirrors `cdk.out-minified/<TemplateName>` under the solution package.
+/// Under `cdk.out-minified/<TemplateName>` in the solution package.
 pub fn synthesized_template_path(base_dir: &str, variant: TemplateVariant) -> String {
     format!(
         "{base_dir}/deployment/migration-assistant-solution/cdk.out-minified/{}",
@@ -42,8 +42,7 @@ pub fn chart_tarball_name(version: &str) -> String {
 }
 
 /// The helm values files applied (in order) for the `--build` lane: the
-/// chart's base `values.yaml` then the EKS overrides `valuesEks.yaml`. Mirrors
-/// the reference's `-f $chart/values.yaml -f $chart/valuesEks.yaml`. Without
+/// chart's base `values.yaml` then the EKS overrides `valuesEks.yaml`. Without
 /// `valuesEks.yaml` the EKS-specific config (nodepool/storage/networking) is
 /// missing and pods never become ready.
 pub fn local_chart_values(chart_dir: &str) -> Vec<String> {
@@ -67,7 +66,7 @@ pub fn cdk_synth_args(base_dir: &str) -> Vec<String> {
 }
 
 /// A buildkit builder name derived from the kube context, sanitized to
-/// `[A-Za-z0-9_-]`. Mirrors `builder-${KUBE_CONTEXT//[^a-zA-Z0-9_-]/-}`.
+/// `[A-Za-z0-9_-]`. Non-matching chars become `-`.
 pub fn builder_name(kube_context: &str) -> String {
     let sanitized: String = kube_context
         .chars()
@@ -83,7 +82,7 @@ pub fn builder_name(kube_context: &str) -> String {
 }
 
 /// The full image-build shell block (run via `bash -c`), mirroring the
-/// `--build` path of `aws-bootstrap.sh`: ensure a kubernetes-driver buildkit
+/// The `--build` path: ensure a kubernetes-driver buildkit
 /// builder exists (the EKS agents have no local docker build daemon), ECR-login
 /// via docker, then `gradlew :buildImages:buildImagesToRegistry` with one retry.
 /// Kept as a pure string so it's unit-testable; the side effect is the caller's
@@ -137,7 +136,7 @@ docker buildx rm "$BUILDER_NAME" >/dev/null 2>&1 || true
 
 /// Shell block (run via `bash -c`) that mirrors the third-party images + helm
 /// charts into the private ECR and writes a private-ECR helm values override to
-/// `values_out`. Mirrors the `push_images_to_ecr` block of `aws-bootstrap.sh`:
+/// `values_out`:
 /// it sources the chart's own `privateEcrManifest.sh` (the IMAGES/CHARTS lists),
 /// `mirrorToEcr.sh` (`mirror_images_to_ecr`/`mirror_charts_to_ecr`), and
 /// `generatePrivateEcrValues.sh` (`generate_private_ecr_values`) — the proven
@@ -175,8 +174,8 @@ echo "wrote {values_out}"
 /// resource-by-resource progress (and, on failure, the failing resource's
 /// reason). `aws cloudformation deploy` ALONE prints "Waiting for stack
 /// create/update to complete" and then goes SILENT for the whole ~15-20 min
-/// VPC+EKS create — leaving the console looking hung. Mirrors the
-/// `run_cfn_deploy`/`stream_cfn_events` pair in `aws-bootstrap.sh`. Each element
+/// VPC+EKS create — leaving the console looking hung. Includes a background
+/// the deploy + event-tailer pair. Each element
 /// of `params` is one parameter-override token (`Key=Value`), shell-quoted into
 /// the deploy command.
 pub fn cfn_deploy_script(
@@ -246,7 +245,7 @@ exit $rc
 /// deadline. The background watcher surfaces that within ~10s by streaming each
 /// pod's name/ready/phase/waiting-reason and every Warning event (deduplicated
 /// the same way `cfn_deploy_script` dedups stack events). On failure it dumps the
-/// namespace pods plus recent Warnings so the cause lands in the log. Mirrors the
+/// namespace pods plus recent Warnings so the cause lands in the log. Includes a
 /// `stream_events` pattern in [`cfn_deploy_script`].
 ///
 /// `helm_args` is the COMPLETE helm argument vector (already including any

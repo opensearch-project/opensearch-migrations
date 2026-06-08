@@ -1,11 +1,10 @@
 //! CloudFormation output parsing and deploy-parameter planning.
 //!
-//! Port of the pure parts of `lib/cfn.sh`. The opensearch-migrations stacks
-//! publish a single output, `MigrationsExportString` — a long blob of bash
-//! `export VAR=VALUE; …` clauses. We expand that into flat `KEY=VALUE` pairs so
-//! the rest of the CLI sees a tidy map, exactly as `cfn_outputs` /
-//! `_cfn_extract_exports` / `_cfn_pick` did. All contracts from
-//! output parsing and the VPC-endpoint parameter mapping are unit-tested.
+//! The opensearch-migrations stacks publish a single output,
+//! `MigrationsExportString` — a long blob of `export VAR=VALUE; …` clauses. We
+//! expand that into flat `KEY=VALUE` pairs so the rest of the CLI sees a tidy
+//! map. All contracts (output parsing and the VPC-endpoint parameter mapping)
+//! are unit-tested.
 
 /// Parse the `aws cloudformation describe-stacks ... --output text` payload
 /// into flat `KEY=VALUE` lines.
@@ -45,8 +44,7 @@ pub fn parse_outputs(raw: &str) -> Vec<String> {
 /// Expand a string of `export VAR=VALUE; …` clauses into `VAR=VALUE` lines.
 ///
 /// Tolerates leading whitespace, a missing `export ` prefix, and `=` inside
-/// values (URLs, ARNs). Malformed clauses (no `KEY=`) are dropped. Mirrors
-/// `_cfn_extract_exports`.
+/// values (URLs, ARNs). Malformed clauses (no `KEY=`) are dropped.
 pub fn extract_exports(blob: &str) -> Vec<String> {
     let mut out = Vec::new();
     for clause in blob.split(';') {
@@ -103,7 +101,7 @@ pub enum TemplateVariant {
 }
 
 impl TemplateVariant {
-    /// State string used by the bash CLI (`CFN_TEMPLATE_VARIANT`).
+    /// State-persisted string for the `CFN_TEMPLATE_VARIANT` key.
     pub fn as_state(self) -> &'static str {
         match self {
             TemplateVariant::CreateVpc => "create-vpc",
@@ -133,7 +131,7 @@ impl TemplateVariant {
 /// CFN parameter. Returns `None` for the special `s3` case (handled by the
 /// caller, which also needs route-table IDs) and for unknown tokens.
 ///
-/// Mirrors the case-arm mapping in `_cfn_import_vpc_endpoint_params`.
+/// Maps endpoint tokens to their CFN parameter names.
 pub fn endpoint_param(token: &str) -> EndpointParam {
     match token {
         "s3" => EndpointParam::S3Gateway,

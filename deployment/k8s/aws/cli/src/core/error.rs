@@ -1,14 +1,13 @@
 //! Error types for the migration-assistant CLI.
 //!
-//! The bash CLI used `die <msg>` (exit 1) and a handful of specific exit codes
-//! (64 bad-usage, 127 missing-command, 130 SIGINT). We model the same surface:
-//! most failures are an [`Error`] carrying a message + an exit code, and `main`
-//! maps them onto `std::process::exit`.
+//! Most failures are an [`Error`] carrying a message + an exit code (1 generic,
+//! 64 bad-usage, 127 missing-command, 130 SIGINT); `main` maps them onto
+//! `std::process::exit`.
 
 use std::fmt;
 
-/// The canonical CLI error. Mirrors bash `die` (rc=1) plus the few special
-/// exit codes the dispatcher used.
+/// The canonical CLI error: a message + exit code (1 generic, 64 bad-usage,
+/// 127 missing-command).
 #[derive(Debug)]
 pub struct Error {
     pub message: String,
@@ -16,7 +15,7 @@ pub struct Error {
 }
 
 impl Error {
-    /// Equivalent of bash `die "<msg>"` — a generic failure with exit code 1.
+    /// A generic failure with exit code 1.
     pub fn die(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),

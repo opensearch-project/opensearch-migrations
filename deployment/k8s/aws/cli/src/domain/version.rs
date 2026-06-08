@@ -1,19 +1,16 @@
 //! CLI + Migration Assistant version resolution.
 //!
-//! Port of `lib/version.sh`. `CLI_VERSION` is baked at build time;
-//! `ma_default_version` resolves the MA artifact version with a defined
-//! priority order. We keep the resolution order as pure logic that takes the
-//! candidate inputs, so it's testable without network — the actual GitHub
-//! release fetch is layered on top via a [`CommandRunner`]/HTTP call at the
-//! call site.
+//! `CLI_VERSION` is baked at build time; `resolve_ma_version` resolves the MA
+//! artifact version with a defined priority order. Resolution is pure logic
+//! that takes the candidate inputs, so it's testable without network — the
+//! actual GitHub release fetch is layered on top at the call site.
 
 /// The CLI's own version, baked at build time.
 ///
 /// The release packaging (gradle `:deployment:k8s:aws:packageMigrationAssistantCli`)
 /// sets `CLI_VERSION=<tag>` in the build environment; `option_env!` captures it
 /// into the binary. A plain `cargo build` with no `CLI_VERSION` set falls back
-/// to `0.0.0-dev` — the same default the bash `lib/version.sh` used. This is the
-/// idiomatic replacement for the old sed-into-version.sh stamping step.
+/// to `0.0.0-dev`.
 pub const CLI_VERSION: &str = match option_env!("CLI_VERSION") {
     Some(v) => v,
     None => "0.0.0-dev",
@@ -24,15 +21,15 @@ pub const MA_RELEASES_API: &str =
     "https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest";
 
 /// Resolve the MA artifact version from the candidate inputs, in priority
-/// order — the logic of `ma_default_version` minus the network call:
+/// order:
 ///
 ///   1. explicit override (`--version` / `MA_VERSION` env)
 ///   2. cached value from this stage's state
 ///   3. value fetched from the releases API (caller supplies it, may be `None`)
 ///   4. last-resort fallback if non-empty
 ///
-/// Returns `Err` when nothing resolves (the bash `die`), so the caller can
-/// surface the "pass --version or check network" message.
+/// Returns `Err` when nothing resolves, so the caller can surface the
+/// "pass --version or check network" message.
 pub fn resolve_ma_version(
     explicit: Option<&str>,
     cached: Option<&str>,
@@ -54,8 +51,7 @@ pub fn resolve_ma_version(
 }
 
 /// Extract a `tag_name` from a GitHub releases-API JSON body, stripping a
-/// leading `v`. Mirrors the `grep '"tag_name"' | sed` parse in version.sh, but
-/// using a real JSON parse. Returns `None` if absent/unparseable.
+/// leading `v`. Returns `None` if absent or unparseable.
 pub fn parse_release_tag(body: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
     let tag = v.get("tag_name")?.as_str()?;

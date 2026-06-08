@@ -1,9 +1,8 @@
 //! Append-only run log at `<stage>/log/migrate.log`.
 //!
-//! Port of the operator-facing contract in `lib/log.sh`. The Jenkins helper
-//! (`test/awsRunEksValidation.sh`) reads `$MIGRATE_HOME/<stage>/log/migrate.log`
-//! on failure, so the path + behavior must match:
-//!   * always append to the file (created under `<stage>/log/`);
+//! The Jenkins CI helper reads `$MIGRATE_HOME/<stage>/log/migrate.log` on
+//! failure, so the path and behavior are a stable contract:
+//!   * always append (created under `<stage>/log/`);
 //!   * mirror to stderr only when verbose;
 //!   * rotate once to `migrate.log.1` when the file exceeds 5 MiB;
 //!   * write a session header on init so multiple runs are separable.
@@ -35,9 +34,8 @@ impl Log {
     }
 
     /// Initialize logging under `stage_dir/log/migrate.log`, rotating if the
-    /// existing file is over 5 MiB, and writing a session header. Mirrors
-    /// `log_init`. A failure to create the dir/file degrades to disabled
-    /// rather than aborting the run.
+    /// existing file is over 5 MiB, and writing a session header. A failure to
+    /// create the dir/file degrades to disabled rather than aborting the run.
     pub fn init(stage_dir: &Path, verbose: bool) -> Self {
         let dir = stage_dir.join("log");
         if std::fs::create_dir_all(&dir).is_err() {

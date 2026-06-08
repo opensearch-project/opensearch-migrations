@@ -1,6 +1,6 @@
 //! Terminal UI primitives + the output-discipline rule.
 //!
-//! Port of `lib/ui.sh` + `lib/term.sh`. The cardinal rule is reproduced: **all
+//! Output discipline and pure decision helpers. The cardinal rule: **all
 //! UI text goes to stderr; stdout is reserved for return values** (the chosen
 //! mode, the resolved version). The bug-prone parts — the `ui_confirm` truth
 //! table and the mode-picker selection matching — are factored into pure

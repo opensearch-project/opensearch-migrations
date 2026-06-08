@@ -1,13 +1,9 @@
 //! The deploy orchestrator — the `manual_path` pipeline as a state machine.
 //!
-//! Port of the orchestration spine in `lib/resume.sh` (`manual_path`), `cfn.sh`
-//! (`cfn_deploy_or_skip`), `helm.sh` (`helm_kubeconfig_setup`,
-//! `helm_install_or_upgrade`), and `crane.sh` (`crane_mirror_or_skip` — now
-//! using native OCI + AWS SDK rather than shelling out to `crane`/`aws ecr`),
-//! generic over a [`CommandRunner`]. Each phase advances `last_step` in
-//! [`State`] exactly as the bash CLI did, so a resumed run picks up where it
-//! left off. The runner seam means the whole pipeline is asserted against a
-//! [`MockRunner`](crate::runner::MockRunner) without touching AWS.
+//! Each phase (CFN deploy, kubeconfig, image mirror, helm install) advances
+//! `last_step` in [`State`] so a resumed run picks up where it left off. The
+//! module is generic over a [`CommandRunner`], so the whole pipeline is
+//! asserted against a [`MockRunner`](crate::runner::MockRunner) without AWS.
 //!
 //! This module deliberately contains NO terminal rendering or prompting — the
 //! interactive surface lives in [`crate::tui`] and the dispatcher in
@@ -44,7 +40,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
     /// CFN deploy or skip. Idempotent: a healthy stack or `SKIP_CFN_DEPLOY=Y`
     /// short-circuits. On a real deploy it runs `aws cloudformation deploy` and
     /// advances `last_step` to `cfn_done`. `template_file` is the already-
-    /// fetched template path. Mirrors `cfn_deploy_or_skip`.
+    /// fetched template path.
     pub fn cfn_deploy_or_skip(&mut self, template_file: &str) -> Result<()> {
         let stage_name = self.state.get_owned("STAGE_NAME", "ma");
         let stack_name = self.state.get_owned(
@@ -129,8 +125,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
     }
 
     /// Translate `CREATE_VPC_ENDPOINTS` tokens into `Create*Endpoint=true`
-    /// params, resolving route-table IDs for the S3 gateway endpoint. Mirrors
-    /// `_cfn_import_vpc_endpoint_params`.
+    /// params, resolving route-table IDs for the S3 gateway endpoint.
     fn append_endpoint_params(&self, params: &mut Vec<String>) {
         let list = self.state.get_owned("CREATE_VPC_ENDPOINTS", "");
         if list.is_empty() {
@@ -216,7 +211,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
 
     /// Read the EKS cluster name from CFN outputs and `aws eks update-kubeconfig`
     /// it, binding the kube context. Advances no `last_step` (it's a setup step
-    /// shared by build/crane/helm). Mirrors `helm_kubeconfig_setup`.
+    /// shared by build/crane/helm).
     pub fn kubeconfig_setup(&mut self) -> Result<String> {
         let stack = self.state.get_owned("CFN_STACK_NAME", "");
         let region = self.state.get_owned("AWS_REGION", "");
@@ -279,7 +274,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
     /// Mirror images to the private ECR, or skip when `MIRROR_IMAGES != Y` /
     /// already mirrored. Advances `last_step` to `crane_done` (or
     /// `crane_skipped`). `images` is the resolved image list (one ref per
-    /// line). Mirrors the core loop of `crane_mirror_or_skip`.
+    /// line).
     pub fn crane_mirror_or_skip(&mut self, images: &[String]) -> Result<()> {
         if self.state.get_or("MIRROR_IMAGES", "Y") != "Y" {
             ui::info("MIRROR_IMAGES=N → skipping crane mirror");
@@ -429,7 +424,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
     }
 
     /// Build the helm install/upgrade argument vector and run it, advancing
-    /// `last_step` to `helm_done` on success. Mirrors the install path of
+    /// `last_step` to `helm_done` on success.
     /// `helm_install_or_upgrade` (the watchers/diagnostics are side-channel and
     /// handled at the call site). `chart` is the resolved chart path;
     /// `values_files` are the extracted/written value files in apply order.
@@ -629,7 +624,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
     }
 
     // ----------------------------------------------------------------------
-    // Headless deploy spine (CI / non-interactive). Mirrors aws-bootstrap.sh.
+    // Headless deploy spine (CI / non-interactive).
     // ----------------------------------------------------------------------
 
     /// Whether this is a build-from-source run (`--build`).
@@ -640,7 +635,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
     /// Resolve the CFN template path. On `--build` it Gradle-synthesizes the
     /// minified templates (CDK synth stays in Gradle — not reimplemented) and
     /// returns the local path; otherwise it downloads the release template to a
-    /// temp file. Mirrors the template block of `aws-bootstrap.sh`.
+    /// temp file.
     pub fn resolve_cfn_template(&self) -> Result<String> {
         let variant = TemplateVariant::from_state(
             &self.state.get_owned("CFN_TEMPLATE_VARIANT", "create-vpc"),
@@ -694,7 +689,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
 
     /// Grant the EKS access principal cluster-admin, if `--eks-access-principal-arn`
     /// was passed. Idempotent (skip-create if the entry exists, always associate
-    /// the policy). Mirrors the EKS-access block of `aws-bootstrap.sh`.
+    /// the policy).
     pub fn grant_eks_access(&self) -> Result<()> {
         let arn = self.state.get_owned("EKS_ACCESS_PRINCIPAL_ARN", "");
         if arn.is_empty() {
@@ -769,11 +764,10 @@ impl<'r, R: CommandRunner> App<'r, R> {
     /// helm install, so the chart's `ma-dependency-installer` pre-install hook
     /// pods have warm capacity to schedule on. Without it the installer pods
     /// wait on a Karpenter cold-start that routinely blows the job's
-    /// `activeDeadlineSeconds` (→ helm `DeadlineExceeded`). Mirrors the
-    /// re-enable block of `aws-bootstrap.sh`, but runs unconditionally (the bash
-    /// version skipped it on `--build`, assuming buildkit pre-created capacity —
-    /// but the buildkit `build-nodepool` is tainted and can't host installer
-    /// pods). Idempotent: a no-op when `general-purpose` is already present.
+    /// `activeDeadlineSeconds` (→ helm `DeadlineExceeded`). Runs unconditionally
+    /// so that even `--build` deploys (whose buildkit `build-nodepool` is tainted
+    /// and can't host installer pods) get capacity.
+    /// Idempotent: a no-op when `general-purpose` is already present.
     pub fn ensure_general_node_pool(&self) -> Result<()> {
         let cluster = self.state.get_owned("EKS_CLUSTER", "");
         let region = self.state.get_owned("AWS_REGION", "");
@@ -870,7 +864,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
     /// On `--build` without `--ma-images-source`, build + push every image to the
     /// private ECR registry via Gradle (`:buildImages:buildImagesToRegistry`).
     /// buildkit/ECR/multi-arch orchestration stays in Gradle. No-op otherwise.
-    /// Mirrors the build block of `aws-bootstrap.sh`.
+    /// Build MA images via Gradle + buildkit.
     pub fn build_images_or_skip(&mut self) -> Result<()> {
         if !self.is_build() || !self.state.get_or("MA_IMAGES_SOURCE", "").is_empty() {
             return Ok(());
@@ -901,7 +895,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
         let skip_test = self.state.get_or("SKIP_TEST_IMAGES", "N") == "Y";
 
         // Run the whole image-build block as a single bash script mirroring
-        // aws-bootstrap.sh: set up the kubernetes-driver buildkit builder (the
+        // Set up the kubernetes-driver buildkit builder (the
         // EKS agents have no local docker build daemon — buildkit runs in the
         // cluster), ECR-login, then gradlew :buildImages:buildImagesToRegistry
         // with one retry. buildkit/gradle orchestration stays in the proven
@@ -996,8 +990,8 @@ impl<'r, R: CommandRunner> App<'r, R> {
     /// `--build`: the in-repo chart dir + its `values.yaml`/`valuesEks.yaml`.
     /// Release: download the `.tgz`, and extract its bundled `values.yaml` +
     /// `valuesEks.yaml` (helm can't read files inside an archive). A
-    /// `--helm-values` extra file is appended last. Mirrors the chart + values
-    /// source block of `aws-bootstrap.sh`. Returns `(chart, values_files)`.
+    /// `--helm-values` extra file is appended last. Returns `(chart,
+    /// values_files)`.
     pub fn resolve_chart(&self) -> Result<(String, Vec<String>)> {
         let extra = self.state.get_owned("HELM_EXTRA_VALUES_FILE", "");
         if self.is_build() {

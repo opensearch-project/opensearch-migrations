@@ -1,5 +1,5 @@
-//! Native AWS ECR + STS operations — replaces `aws ecr` and `aws sts` CLI
-//! calls with the AWS SDK so crane and the aws-cli binary are not required.
+//! AWS ECR + STS access through the AWS SDK: resolve the caller's identity,
+//! create the image-mirror repository, and fetch an ECR push/pull credential.
 
 /// AWS identity resolved from STS.
 pub struct AwsIdentity {
@@ -19,10 +19,7 @@ pub fn get_caller_identity() -> std::result::Result<AwsIdentity, String> {
         let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
             .load()
             .await;
-        let region = config
-            .region()
-            .map(|r| r.to_string())
-            .unwrap_or_default();
+        let region = config.region().map(|r| r.to_string()).unwrap_or_default();
         let client = aws_sdk_sts::Client::new(&config);
         let resp = client
             .get_caller_identity()
@@ -105,11 +102,10 @@ pub fn get_ecr_credentials(
             .first()
             .and_then(|d| d.authorization_token())
             .ok_or_else(|| "no authorization token returned".to_string())?;
-        // Token is base64("AWS:<password>").
-        let decoded = String::from_utf8(
-            base64_decode(token).map_err(|e| format!("base64 decode: {e}"))?,
-        )
-        .map_err(|e| format!("utf8: {e}"))?;
+        // The token is base64 of "AWS:<password>".
+        let decoded =
+            String::from_utf8(base64_decode(token).map_err(|e| format!("base64 decode: {e}"))?)
+                .map_err(|e| format!("utf8: {e}"))?;
         let (user, pass) = decoded
             .split_once(':')
             .ok_or_else(|| "unexpected token format".to_string())?;
@@ -117,67 +113,36 @@ pub fn get_ecr_credentials(
     })
 }
 
-/// Minimal base64 decoder (standard alphabet) so we don't need an extra crate.
+/// Map one standard-alphabet base64 character to its 6-bit value. `=` padding
+/// and line breaks return `None` (skip); anything else is an error.
+fn base64_sextet(c: u8) -> std::result::Result<Option<u8>, &'static str> {
+    match c {
+        b'A'..=b'Z' => Ok(Some(c - b'A')),
+        b'a'..=b'z' => Ok(Some(c - b'a' + 26)),
+        b'0'..=b'9' => Ok(Some(c - b'0' + 52)),
+        b'+' => Ok(Some(62)),
+        b'/' => Ok(Some(63)),
+        b'=' | b'\n' | b'\r' => Ok(None),
+        _ => Err("invalid base64 character"),
+    }
+}
+
+/// Decode standard-alphabet base64 into bytes, without pulling in a base64
+/// crate. Each character contributes 6 bits to a running buffer; whenever the
+/// buffer holds a full byte it is emitted. Padding and line breaks are skipped.
 fn base64_decode(s: &str) -> std::result::Result<Vec<u8>, &'static str> {
-    const TABLE: &[u8; 128] = b"\x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\
-                                  \x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\
-                                  \x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\x40\x3e\x40\x40\x40\x3f\
-                                  \x34\x35\x36\x37\x38\x39\x3a\x3b\x3c\x3d\x40\x40\x40\x40\x40\x40\
-                                  \x40\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\
-                                  \x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x40\x40\x40\x40\x40\
-                                  \x40\x1a\x1b\x1c\x1d\x1e\x1f\x20\x21\x22\x23\x24\x25\x26\x27\x28\
-                                  \x29\x2a\x2b\x2c\x2d\x2e\x2f\x30\x31\x32\x33\x40\x40\x40\x40\x40";
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b == b'=' || b == b'\n' || b == b'\r' {
-            i += 1;
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let mut buffer: u32 = 0; // most-significant pending bits, left-aligned
+    let mut pending_bits = 0; // how many bits in `buffer` are valid
+    for &c in s.as_bytes() {
+        let Some(sextet) = base64_sextet(c)? else {
             continue;
-        }
-        if b as usize >= 128 || TABLE[b as usize] == 0x40 {
-            return Err("invalid base64 character");
-        }
-        // Collect up to 4 valid chars.
-        let mut chunk = [0u8; 4];
-        let mut n = 0;
-        let mut j = i;
-        while j < bytes.len() && n < 4 {
-            let c = bytes[j];
-            if c == b'=' {
-                break;
-            }
-            if c == b'\n' || c == b'\r' {
-                j += 1;
-                continue;
-            }
-            if c as usize >= 128 || TABLE[c as usize] == 0x40 {
-                return Err("invalid base64 character");
-            }
-            chunk[n] = TABLE[c as usize];
-            n += 1;
-            j += 1;
-        }
-        i = j;
-        // Skip padding.
-        while i < bytes.len() && (bytes[i] == b'=' || bytes[i] == b'\n' || bytes[i] == b'\r') {
-            i += 1;
-        }
-        match n {
-            4 => {
-                out.push((chunk[0] << 2) | (chunk[1] >> 4));
-                out.push((chunk[1] << 4) | (chunk[2] >> 2));
-                out.push((chunk[2] << 6) | chunk[3]);
-            }
-            3 => {
-                out.push((chunk[0] << 2) | (chunk[1] >> 4));
-                out.push((chunk[1] << 4) | (chunk[2] >> 2));
-            }
-            2 => {
-                out.push((chunk[0] << 2) | (chunk[1] >> 4));
-            }
-            _ => {}
+        };
+        buffer = (buffer << 6) | u32::from(sextet);
+        pending_bits += 6;
+        if pending_bits >= 8 {
+            pending_bits -= 8;
+            out.push((buffer >> pending_bits) as u8);
         }
     }
     Ok(out)
@@ -200,5 +165,66 @@ mod tests {
         // "hello" = "aGVsbG8="
         let decoded = base64_decode("aGVsbG8=").unwrap();
         assert_eq!(decoded, b"hello");
+    }
+
+    #[test]
+    fn base64_decode_empty_is_empty() {
+        assert_eq!(base64_decode("").unwrap(), b"");
+    }
+
+    #[test]
+    fn base64_decode_handles_each_padding_length() {
+        // 0, 1, and 2 padding chars cover all three trailing-group widths.
+        assert_eq!(base64_decode("Zm9vYmFy").unwrap(), b"foobar"); // none
+        assert_eq!(base64_decode("Zm9vYmE=").unwrap(), b"fooba"); //  "="
+        assert_eq!(base64_decode("Zm9v").unwrap(), b"foo"); //       (exact)
+        assert_eq!(base64_decode("Zm8=").unwrap(), b"fo"); //        "="
+        assert_eq!(base64_decode("Zg==").unwrap(), b"f"); //         "=="
+    }
+
+    #[test]
+    fn base64_decode_ignores_line_breaks() {
+        // Wrapped tokens stay decodable when newlines split the payload.
+        assert_eq!(base64_decode("aGVs\nbG8=\n").unwrap(), b"hello");
+    }
+
+    #[test]
+    fn base64_decode_round_trips_all_byte_values() {
+        // Decoding must be the exact inverse of encoding for every byte value,
+        // which exercises all 64 alphabet slots (including `+`/`/`) and every
+        // 6-bit/8-bit boundary alignment.
+        let all: Vec<u8> = (0u8..=255).collect();
+        let encoded = base64_encode(&all);
+        assert_eq!(base64_decode(&encoded).unwrap(), all);
+    }
+
+    #[test]
+    fn base64_decode_rejects_invalid_characters() {
+        assert!(base64_decode("not valid!").is_err());
+    }
+
+    /// Reference encoder used only to round-trip against [`base64_decode`].
+    fn base64_encode(bytes: &[u8]) -> String {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let b0 = chunk[0] as usize;
+            let b1 = chunk.get(1).copied().unwrap_or(0) as usize;
+            let b2 = chunk.get(2).copied().unwrap_or(0) as usize;
+            out.push(ALPHABET[b0 >> 2] as char);
+            out.push(ALPHABET[((b0 & 0b11) << 4) | (b1 >> 4)] as char);
+            out.push(if chunk.len() > 1 {
+                ALPHABET[((b1 & 0b1111) << 2) | (b2 >> 6)] as char
+            } else {
+                '='
+            });
+            out.push(if chunk.len() > 2 {
+                ALPHABET[b2 & 0b111111] as char
+            } else {
+                '='
+            });
+        }
+        out
     }
 }

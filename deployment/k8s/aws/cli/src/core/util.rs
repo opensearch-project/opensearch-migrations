@@ -1,15 +1,13 @@
 //! Pure string / collection / path helpers.
 //!
-//! Idiomatic Rust replacement for the pure-bash-3.2 helpers in `lib/std.sh`.
-//! Bash needed these because it lacks a standard library; Rust has most of
-//! them built in (`str::trim`, `Vec::contains`, `slice::join`, …). We only
-//! reimplement the ones with non-obvious semantics worth pinning down with
-//! their own tests.
+//! The standard library covers most primitives (`str::trim`, `Vec::contains`,
+//! `slice::join`); this module provides the few helpers with non-obvious
+//! semantics that the rest of the crate relies on and pins down with tests.
 
 /// Strip ONE leading and ONE trailing matched `'` or `"` from `s`.
 ///
 /// Asymmetric inputs (only a leading or only a trailing quote) are returned
-/// unchanged — mirrors `trim_quotes` in std.sh, used by state.env parsing.
+/// unchanged. Used by state.env parsing.
 pub fn trim_quotes(s: &str) -> &str {
     let bytes = s.as_bytes();
     if bytes.len() >= 2 {
@@ -24,8 +22,8 @@ pub fn trim_quotes(s: &str) -> &str {
 
 /// Split a comma-separated string into owned segments.
 ///
-/// Matches `split_csv`: an empty input yields a single empty element (the
-/// documented bash 3.2 `read -a` contract), a non-empty input splits on `,`.
+/// An empty input yields a single empty element (not an empty vec), to match
+/// how callers iterate a "list that may be blank".
 pub fn split_csv(s: &str) -> Vec<String> {
     if s.is_empty() {
         return vec![String::new()];
@@ -57,8 +55,8 @@ where
     out
 }
 
-/// Keep only the first occurrence of each non-empty line — `dedupe` (awk
-/// `NF && !seen[$0]++`). Blank lines are dropped.
+/// Keep only the first occurrence of each non-empty line. Blank lines are
+/// dropped.
 pub fn dedupe<'a, I>(lines: I) -> Vec<&'a str>
 where
     I: IntoIterator<Item = &'a str>,

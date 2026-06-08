@@ -1,18 +1,17 @@
 //! Repack a CLI tarball with new skills, MCPs, and branding.
 //!
-//! Port of the manifest-mutation logic in `lib/pack.sh`. The bash version
-//! drove `jq` for each merge; here we operate on `serde_json::Value` so the
-//! merge rules (MCP add with last-write-wins, branding deep-merge with
-//! `modes[]` REPLACE, brand-flag convenience setters, validation, and the
-//! `build.packs[]` append) are pure and unit-testable. The tar extract/repack
-//! is orchestrated separately over a [`CommandRunner`](crate::runner::CommandRunner).
+//! Operates on `serde_json::Value` so the merge rules (MCP add with
+//! last-write-wins, branding deep-merge with `modes[]` REPLACE, brand-flag
+//! convenience setters, validation, and the `build.packs[]` append) are pure
+//! and unit-testable. The tar extract/repack is orchestrated separately over a
+//! [`CommandRunner`](crate::runner::CommandRunner).
 
 use crate::error::{Error, Result};
 use serde_json::{json, Value};
 
 /// Deep-merge an MCP fragment (an object whose keys become `mcpServers`
 /// entries) into the manifest. Last-write-wins on name collisions; returns the
-/// names that were overwritten so the caller can warn. Mirrors `_pack_add_mcp`.
+/// names that were overwritten so the caller can warn.
 pub fn add_mcp(manifest: &mut Value, fragment: &Value) -> Result<Vec<String>> {
     let frag_obj = fragment
         .as_object()
@@ -38,7 +37,7 @@ pub fn add_mcp(manifest: &mut Value, fragment: &Value) -> Result<Vec<String>> {
 
 /// Deep-merge a branding fragment into `manifest.branding`. `modes[]` is
 /// REPLACED (not merged) when the fragment declares it — array order matters
-/// for the picker. Mirrors `_pack_apply_branding`.
+/// for the picker.
 pub fn apply_branding(manifest: &mut Value, fragment: &Value) -> Result<()> {
     let frag = fragment
         .as_object()
@@ -62,8 +61,7 @@ pub fn apply_branding(manifest: &mut Value, fragment: &Value) -> Result<()> {
 
 /// Apply the convenience brand flags. Each is optional (empty = skip).
 /// `mode_default` flips exactly one mode's `default` flag; `mode_order` is a
-/// comma-separated id list that reorders the existing modes. Mirrors
-/// `_pack_apply_brand_flags`.
+/// comma-separated id list that reorders the existing modes.
 pub fn apply_brand_flags(
     manifest: &mut Value,
     name: &str,
@@ -135,7 +133,7 @@ pub struct Finding {
     pub always_fatal: bool,
 }
 
-/// Validate the post-merge manifest. Mirrors `_pack_validate`:
+/// Validate the post-merge manifest:
 ///   * exactly one mode is default (warn; fatal under strict)
 ///   * no duplicate mode ids (always fatal)
 ///   * every visible mode id is a known dispatch target (Manual|Agent)
@@ -251,7 +249,7 @@ fn is_valid_binary_name(name: &str) -> bool {
 
 /// Append a `build.packs[]` entry recording the pack identity + additions.
 /// `timestamp` is injected (ISO-8601 UTC) so this stays pure/testable.
-/// Mirrors `_pack_append_entry`.
+/// Append a provenance record to `build.packs[]`.
 pub fn append_pack_entry(
     manifest: &mut Value,
     name: &str,
@@ -285,8 +283,7 @@ pub fn append_pack_entry(
 
 /// Compute the renamed top-level tarball dir when `binaryName` is customized.
 /// `migration-assistant-cli-3.2.1` + binary `myorg-migrate` →
-/// `myorg-migrate-cli-3.2.1`. Returns the original when unchanged. Mirrors the
-/// rename logic at the tail of `cmd_pack`.
+/// `myorg-migrate-cli-3.2.1`. Returns the original when unchanged.
 pub fn renamed_root(original_basename: &str, binary_name: &str) -> String {
     if binary_name == "migration-assistant" {
         return original_basename.to_string();

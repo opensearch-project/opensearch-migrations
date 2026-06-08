@@ -1,7 +1,7 @@
 //! `migration-assistant pack` orchestration — the filesystem/tar side of
 //! repacking, on top of the pure merge logic in [`crate::pack`].
 //!
-//! Mirrors `cmd_pack`: parse flags, extract the input tarball (via the runner's
+//! Parse flags, extract the input tarball (via the runner's
 //! `tar`), apply skill/MCP/branding merges, validate, append the pack entry,
 //! and re-tar to the output (renaming the top dir when the binary name
 //! changed). The pure merges are unit-tested in [`crate::pack`]; this module
@@ -332,7 +332,7 @@ fn add_skill(root: &Path, skill_dir: &str) -> Result<()> {
 }
 
 /// Copy a directory tree from `src` to `dest` (creating `dest`), using only the
-/// standard library. Mirrors what `cp -R src/. dest/` would do.
+/// standard library.
 fn copy_dir_recursive(src: &Path, dest: &Path) -> Result<()> {
     std::fs::create_dir_all(dest)?;
     for entry in std::fs::read_dir(src)? {

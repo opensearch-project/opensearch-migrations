@@ -1,13 +1,11 @@
 //! The resume phase checklist.
 //!
-//! Port of `lib/timeline.sh`. The bash version printed ANSI directly; here we
-//! produce a structured `Vec<PhaseRow>` (pure data) that the TUI or a plain
-//! renderer can draw. The phase list and key→label mapping are reproduced
-//! exactly so `timeline_phase_label` and the marker logic match the contracts
-//! by the unit tests below.
+//! Produces a structured `Vec<PhaseRow>` (pure data) that the TUI or a plain
+//! renderer can draw. The phase list and key→label mapping are the canonical
+//! source of truth; unit tests pin down the mapping.
 
 /// The canonical deploy phases: `(last_step key, operator-visible label)`, in
-/// deploy order. Matches `__TIMELINE_PHASES`.
+/// deploy order.
 pub const PHASES: &[(&str, &str)] = &[
     ("discover", "Discover environment"),
     ("wizard_done", "Configure deploy"),
@@ -33,7 +31,7 @@ pub enum PhaseStatus {
 }
 
 impl PhaseStatus {
-    /// The glyph the bash timeline used for this status.
+    /// The glyph for this status.
     pub fn marker(self) -> char {
         match self {
             PhaseStatus::Done => '●',
@@ -52,7 +50,7 @@ pub struct PhaseRow {
 }
 
 /// The operator-visible label for a `last_step` key, or the key itself if
-/// unknown — `timeline_phase_label`.
+/// unknown.
 pub fn phase_label(key: &str) -> &str {
     PHASES
         .iter()
@@ -63,8 +61,7 @@ pub fn phase_label(key: &str) -> &str {
 
 /// Build the checklist for a given `last_step`. Phases before it are `Done`,
 /// the matching phase is `Last`, later phases are `Pending`. An unknown or
-/// empty `last_step` (index not found) leaves everything `Pending`. Mirrors
-/// `timeline_render`'s marker logic.
+/// empty `last_step` (index not found) leaves everything `Pending`.
 pub fn rows(last_step: &str) -> Vec<PhaseRow> {
     let last_idx = PHASES.iter().position(|(k, _)| *k == last_step);
     PHASES

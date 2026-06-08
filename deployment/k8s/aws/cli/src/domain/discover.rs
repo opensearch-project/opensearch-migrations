@@ -1,10 +1,9 @@
 //! Read-only environment discovery.
 //!
-//! Port of `lib/discover.sh`. Every function is non-destructive (read-only) and
-//! writes its findings into [`State`]. `discover_aws` uses the AWS SDK directly
-//! (no `aws` CLI binary required). `discover_resources` still uses the aws CLI
-//! for EKS/CFN list calls (routed through the [`CommandRunner`] seam so tests
-//! can stub them).
+//! Every function is non-destructive and writes its findings into [`State`].
+//! `discover_aws` uses the AWS SDK directly; `discover_resources` uses the aws
+//! CLI for EKS/CFN list calls (routed through the [`CommandRunner`] seam so
+//! tests can stub them).
 //!
 //! State keys populated: `OS_NAME`, `PKG_MGR`, `AWS_ACCOUNT`, `AWS_REGION`,
 //! `AWS_USER_ARN`, `EKS_CLUSTERS`, `CFN_MA_STACKS`.
@@ -12,9 +11,9 @@
 use crate::runner::CommandRunner;
 use crate::state::State;
 
-/// Detect OS name and package manager, writing `OS_NAME` + `PKG_MGR` —
-/// `discover_os`. The OS is detected from the host; the package manager from
-/// what's on PATH (via the runner's `has_command`).
+/// Detect OS name and package manager, writing `OS_NAME` + `PKG_MGR`.
+/// The OS is detected from the host; the package manager from what's on PATH
+/// (via the runner's `has_command`).
 pub fn discover_os<R: CommandRunner>(runner: &R, state: &mut State) {
     let os = detect_os();
     let pm = detect_pkg_mgr(runner, &os);
@@ -119,8 +118,8 @@ pub fn discover_aws<R: CommandRunner>(runner: &R, state: &mut State) -> crate::R
 }
 
 /// List EKS clusters and MigrationAssistant CFN stacks into `EKS_CLUSTERS` /
-/// `CFN_MA_STACKS` (space-separated) — `discover_resources`. Best-effort: a
-/// missing region or failing call simply leaves the keys unset.
+/// `CFN_MA_STACKS` (space-separated). Best-effort: a missing region or failing
+/// call simply leaves the keys unset.
 pub fn discover_resources<R: CommandRunner>(runner: &R, state: &mut State) {
     let region = state.get_owned("AWS_REGION", "");
     if region.is_empty() || !runner.has_command("aws") {
@@ -157,7 +156,7 @@ pub fn discover_resources<R: CommandRunner>(runner: &R, state: &mut State) {
             "text",
         ],
     );
-    // `--output text` separates with tabs; normalize to spaces like the bash.
+    // `--output text` separates with tabs; normalize to spaces.
     state.set("EKS_CLUSTERS", normalize_ws(clusters.trimmed_stdout()));
     state.set("CFN_MA_STACKS", normalize_ws(stacks.trimmed_stdout()));
 }

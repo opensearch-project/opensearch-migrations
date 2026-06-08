@@ -1,32 +1,29 @@
 //! Image-mirror destination layout and retry policy.
 //!
-//! Port of the pure logic in `lib/crane.sh`: where a mirrored image lands in
-//! the operator's ECR (`_dst_for` / `_ecr_repo_for`), the classification of
-//! crane errors into retryable vs fatal (`_crane_copy_retry`'s case-arms), and
-//! the MA-team image source/destination mapping. The actual `crane copy`
-//! invocation goes through a [`CommandRunner`] so retry behavior is testable
-//! without a real binary.
+//! Pure logic: where a mirrored image lands in the operator's ECR, the
+//! classification of crane errors into retryable vs fatal, and the MA-team
+//! image source/destination mapping. The actual `crane copy` invocation goes
+//! through a [`CommandRunner`] so retry behavior is testable without a real
+//! binary.
 
 use crate::runner::CommandRunner;
 
 /// Destination URL for a `crane copy` — `<ecr-host>/mirrored/<original-image>`.
 ///
 /// ECR repository names allow `/`, so the full source path (including its own
-/// registry host) is preserved verbatim under a `mirrored/` prefix. Mirrors
-/// `_dst_for`.
+/// registry host) is preserved verbatim under a `mirrored/` prefix.
 pub fn dst_for(src: &str, ecr_host: &str) -> String {
     format!("{ecr_host}/mirrored/{src}")
 }
 
-/// ECR repository name (no host, no tag) for a source image — `_ecr_repo_for`.
+/// ECR repository name (no host, no tag) for a source image.
 ///
 /// Strips the `:tag` suffix and prepends `mirrored/`. A source without a tag is
 /// handled gracefully (the whole string becomes the repo path).
 pub fn ecr_repo_for(src: &str) -> String {
     let no_tag = match src.rsplit_once(':') {
         // Only strip if the part after ':' looks like a tag (no '/'), so we
-        // don't mangle a port in a hypothetical `host:5000/img` (none today,
-        // but matches the bash `${src%:*}` intent on the last colon).
+        // don't mangle a port in a hypothetical `host:5000/img`.
         Some((head, tail)) if !tail.contains('/') => head,
         _ => src,
     };
@@ -34,9 +31,8 @@ pub fn ecr_repo_for(src: &str) -> String {
 }
 
 /// Whether a crane error message is unambiguously fatal — retrying it cannot
-/// help, so the retry loop should bail immediately. Mirrors the case-arms in
-/// `_crane_copy_retry`, returning the matching diagnostic phrase the bash CLI
-/// logged so callers can surface the same wording.
+/// help, so the retry loop should bail immediately. Returns the diagnostic
+/// phrase for operator-visible logging.
 pub fn fatal_reason(stderr: &str) -> Option<&'static str> {
     if stderr.contains("NAME_UNKNOWN") || stderr.contains("repository does not exist") {
         Some("ECR repo missing")
@@ -52,8 +48,8 @@ pub fn fatal_reason(stderr: &str) -> Option<&'static str> {
     }
 }
 
-/// The five MA-team images, as `(chart_build_name, public_suffix)` — the exact
-/// pairs `_crane_mirror_ma_images` mirrors into the single-repo layout.
+/// The MA-team images, as `(chart_build_name, public_suffix)` — the pairs
+/// mirrored into the single-repo layout.
 pub const MA_IMAGE_PAIRS: &[(&str, &str)] = &[
     ("capture_proxy", "traffic-capture-proxy"),
     ("traffic_replayer", "traffic-replayer"),
@@ -66,7 +62,7 @@ pub const MA_IMAGE_PAIRS: &[(&str, &str)] = &[
 /// With `ma_images_source = None`, the source is the public ECR for `ma_ver`;
 /// with `Some(src)`, the source is `<src>:migrations_<name>_latest`. The
 /// destination always uses the single-repo disambiguating-tag layout the chart
-/// expects. Mirrors the loop body of `_crane_mirror_ma_images`.
+/// expects.
 pub fn ma_image_copy(
     build_name: &str,
     public_suffix: &str,
@@ -96,10 +92,10 @@ pub enum CopyResult {
 }
 
 /// Run `crane copy <src> <dst>` with exponential backoff, classifying fatal
-/// errors as no-retry. Mirrors `_crane_copy_retry`.
+/// errors as no-retry.
 ///
 /// `sleep` is injected so tests run instantly; production passes a real sleep.
-/// `attempts` defaults to 5 in the bash CLI (`CRANE_RETRY_ATTEMPTS`).
+/// Default `attempts` is 5 (`CRANE_RETRY_ATTEMPTS`).
 pub fn copy_with_retry<R, S>(
     runner: &R,
     src: &str,

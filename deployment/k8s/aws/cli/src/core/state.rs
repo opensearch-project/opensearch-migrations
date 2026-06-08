@@ -1,13 +1,11 @@
 //! Per-stage state I/O.
 //!
-//! Idiomatic Rust port of `lib/state.sh`. The bash version kept two parallel
-//! arrays (no associative arrays on bash 3.2); here we keep an insertion-ordered
-//! key/value store so `state.env` preserves the order keys were first set —
-//! matching the bash behavior reviewers relied on when grepping the file.
+//! An insertion-ordered key/value store, so `state.env` preserves the order
+//! keys were first set (callers rely on grepping the file for diagnostics).
 //!
 //! Two artifacts are written together, for two readers:
-//!   * `state.env`  — `KEY="VALUE"` lines, sourceable from bash and greppable.
-//!   * `state.json` — canonical JSON object, for the agent and for jq.
+//!   * `state.env`  — `KEY="VALUE"` lines, sourceable from shell and greppable.
+//!   * `state.json` — canonical JSON object, for the agent and tooling.
 //!
 //! Round-trip (`save` → `load`) is lossless for values containing spaces and
 //! embedded double quotes, which the round-trip tests pin down explicitly.
@@ -49,8 +47,7 @@ impl State {
     }
 
     /// Load `state.env` from disk into memory, replacing any current contents.
-    /// A missing file is not an error — it yields an empty state, exactly like
-    /// `state_load` on a fresh stage.
+    /// A missing file is not an error — it yields an empty state.
     pub fn load(&mut self) -> Result<()> {
         self.clear();
         let path = self.env_path();
@@ -98,7 +95,7 @@ impl State {
         self.index.get(key).map(|&i| self.values[i].as_str())
     }
 
-    /// Get a key's value, or `default` if absent — mirrors `state_get k def`.
+    /// Get a key's value, or `default` if absent.
     pub fn get_or<'a>(&'a self, key: &str, default: &'a str) -> &'a str {
         self.get(key).unwrap_or(default)
     }
@@ -114,7 +111,7 @@ impl State {
         self.index.contains_key(key)
     }
 
-    /// `last_step` value, or empty string — `state_resumable_step`.
+    /// `last_step` value, or empty string.
     pub fn resumable_step(&self) -> &str {
         self.get_or("last_step", "")
     }
@@ -152,7 +149,7 @@ impl State {
     }
 
     /// Move `state.env`/`state.json` into `archive/<timestamp>/` and clear the
-    /// in-memory state — `state_archive`.
+    /// in-memory state.
     pub fn archive(&mut self) -> Result<PathBuf> {
         let ts = archive_timestamp();
         let dest = self.stage_dir.join("archive").join(&ts);
@@ -175,9 +172,8 @@ fn write_atomic(path: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
-/// A monotonic-ish archive directory name. The bash version used
-/// `date +%Y%m%dT%H%M%S`; we add sub-second precision so rapid successive
-/// archives don't collide.
+/// A monotonic-ish archive directory name with sub-second precision so rapid
+/// successive archives don't collide.
 fn archive_timestamp() -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)

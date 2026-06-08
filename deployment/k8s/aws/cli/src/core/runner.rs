@@ -41,7 +41,7 @@ pub trait CommandRunner: Send + Sync {
     ///
     /// Implementations should NOT treat a non-zero exit as an error of this
     /// method — they return [`Output`] with the real status, and callers
-    /// decide. (Mirrors the bash `set +e; cmd; rc=$?` idiom.)
+    /// decide.
     fn run(&self, program: &str, args: &[&str]) -> Output;
 
     /// Run `program` with `args` and extra environment variables set for the

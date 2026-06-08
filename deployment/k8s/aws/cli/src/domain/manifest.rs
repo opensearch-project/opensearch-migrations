@@ -1,14 +1,11 @@
 //! `manifest.json` — bundle branding, modes, MCP servers, and pack provenance.
 //!
-//! Port of `lib/manifest.sh`. The bash version shelled out to `jq` for every
-//! field; here we deserialize once with serde and answer queries in-process.
-//! The non-obvious behaviors are unit-tested:
-//! `${VAR}` substitution (state → env → literal-with-warn, and `$$` → `$`),
-//! mode visibility/ordering, MCP filtering by agent, and the `+pack-ver`
-//! version suffix.
+//! Deserialized once with serde; queries answered in-process. Non-obvious
+//! behaviors are unit-tested: `${VAR}` substitution (state → env →
+//! literal-with-warn, and `$$` → `$`), mode visibility/ordering, MCP
+//! filtering by agent, and the `+pack-ver` version suffix.
 //!
-//! Only `schemaVersion: 1` is understood; anything else is a hard error, as in
-//! the bash `manifest_init`.
+//! Only `schemaVersion: 1` is understood; anything else is a hard error.
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -150,9 +147,8 @@ where
 
 impl Manifest {
     /// Parse and validate a manifest from JSON text. Rejects any
-    /// `schemaVersion` other than 1, matching `manifest_init`. Unknown fields
-    /// (e.g. `appNameShort`) are ignored by serde, so the real bundle manifest
-    /// parses cleanly.
+    /// `schemaVersion` other than 1. Unknown fields are ignored by serde, so
+    /// the real bundle manifest parses cleanly.
     pub fn parse(json: &str) -> crate::Result<Self> {
         let m: Manifest = serde_json::from_str(json)
             .map_err(|e| crate::Error::die(format!("manifest.json parse error: {e}")))?;
@@ -165,17 +161,15 @@ impl Manifest {
         Ok(m)
     }
 
-    /// Locate `manifest.json` on disk, walking the same candidate list as the
-    /// bash `manifest_init`, relative to the directory the CLI lives in
-    /// (`cli_dir`, i.e. the crate root containing `bin/`, `src/`):
+    /// Locate `manifest.json` on disk, relative to the directory the CLI lives
+    /// in (`cli_dir`). Candidate search order:
     ///   1. `$MIGRATE_MANIFEST` (operator/test override)
     ///   2. `<cli>/manifest.json`        (release tarball — sibling of bin/)
     ///   3. `<cli>/skills/manifest.json` (release tarball — inside skills/)
-    ///   4. `<cli>/../../../../agent-skills/skills/manifest.json` (repo dev mode:
-    ///      cli → aws → k8s → deployment → repo-root → agent-skills/)
+    ///   4. `<cli>/../../../../agent-skills/skills/manifest.json` (repo dev mode)
     ///
     /// Returns `None` when no manifest is found — callers fall back to built-in
-    /// defaults, exactly like `manifest_have` returning non-zero.
+    /// defaults.
     pub fn locate(cli_dir: &std::path::Path) -> Option<std::path::PathBuf> {
         if let Some(p) = std::env::var_os("MIGRATE_MANIFEST") {
             let p = std::path::PathBuf::from(p);
@@ -206,8 +200,7 @@ impl Manifest {
     }
 
     /// Substitute `${VAR}` tokens in `s` using `src`, then collapse `$$` → `$`.
-    /// Unresolved vars are left literal (`${VAR}`) — the bash version logs a
-    /// warning; callers may do the same. Mirrors `_manifest_substitute_vars`.
+    /// Unresolved vars are left literal (`${VAR}`); callers may warn.
     pub fn substitute_vars(s: &str, src: &impl VarSource) -> String {
         // Two-pass to honor the `$$ → $` escape without it interfering with
         // `${...}` detection: first expand ${...}, then collapse $$.
@@ -236,8 +229,7 @@ impl Manifest {
         out.replace("$$", "$")
     }
 
-    /// A branding field by name, with `${VAR}` substitution applied — the
-    /// dynamic-dispatch equivalent of `manifest_brand <field>`.
+    /// A branding field by name, with `${VAR}` substitution applied.
     pub fn brand(&self, field: &str, src: &impl VarSource) -> String {
         let raw = match field {
             "appName" => &self.branding.app_name,
@@ -252,8 +244,8 @@ impl Manifest {
         Self::substitute_vars(raw, src)
     }
 
-    /// Visible modes, in array order — `manifest_modes`. Hidden modes
-    /// (`available: false`) are filtered out.
+    /// Visible modes, in array order. Hidden modes (`available: false`) are
+    /// filtered out.
     pub fn visible_modes(&self) -> Vec<&Mode> {
         self.branding
             .modes
@@ -262,8 +254,7 @@ impl Manifest {
             .collect()
     }
 
-    /// MCP server names whose `agents` list includes `agent`, in name order —
-    /// `manifest_mcp_names`.
+    /// MCP server names whose `agents` list includes `agent`, in name order.
     pub fn mcp_names_for(&self, agent: &str) -> Vec<&str> {
         self.mcp_servers
             .iter()
@@ -272,7 +263,7 @@ impl Manifest {
             .collect()
     }
 
-    /// MCP args with `${VAR}` substitution applied — `manifest_mcp_args`.
+    /// MCP args with `${VAR}` substitution applied.
     pub fn mcp_args(&self, name: &str, src: &impl VarSource) -> Vec<String> {
         self.mcp_servers
             .get(name)
@@ -285,8 +276,7 @@ impl Manifest {
             .unwrap_or_default()
     }
 
-    /// Every `permissionsAllow` entry across all MCPs, deduped + sorted —
-    /// `manifest_all_perms`.
+    /// Every `permissionsAllow` entry across all MCPs, deduped + sorted.
     pub fn all_perms(&self) -> Vec<String> {
         let mut set: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         for srv in self.mcp_servers.values() {
@@ -297,8 +287,8 @@ impl Manifest {
         set.into_iter().collect()
     }
 
-    /// `" +pack-ver +pack-ver"` for each applied pack, or empty —
-    /// `manifest_pack_summary`. Used by the banner/version line.
+    /// `" +pack-ver +pack-ver"` for each applied pack, or empty. Used by the
+    /// banner/version line.
     pub fn pack_summary(&self) -> String {
         self.build
             .packs

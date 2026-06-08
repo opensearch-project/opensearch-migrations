@@ -1,12 +1,11 @@
 //! Helm install planning: image-override flags, TLS flags, and the stuck-
 //! release recovery classifier.
 //!
-//! Port of the pure decision logic in `lib/helm.sh`. The chart's default
-//! `values.yaml` uses bare repos (`migrations/migration_console`) that resolve
-//! to docker.io and 404; the CLI must pass `--set images.<name>.repository=…`
-//! flags pointing at either the public ECR or the operator's mirror. Building
-//! those flag vectors and the `--tls-mode` flags is pure string logic, pinned
-//! by the unit tests below.
+//! The chart's default `values.yaml` uses bare repos
+//! (`migrations/migration_console`) that resolve to docker.io and 404; the CLI
+//! must pass `--set images.<name>.repository=…` flags pointing at either the
+//! public ECR or the operator's mirror. Building those flag vectors and the
+//! `--tls-mode` flags is pure string logic, pinned by the unit tests below.
 
 use crate::error::{Error, Result};
 
@@ -19,8 +18,7 @@ pub const NAMESPACE: &str = "ma";
 pub const CHART_NAME: &str = "migration-assistant";
 
 /// The five chart image keys, paired with their public-ECR suffix. Two keys
-/// (`migrationConsole`, `installer`) share the `console` image. Mirrors the
-/// `pairs` array in `_helm_build_public_image_flags`.
+/// (`migrationConsole`, `installer`) share the `console` image.
 const PUBLIC_IMAGE_PAIRS: &[(&str, &str)] = &[
     (
         "captureProxy",
@@ -36,7 +34,6 @@ const PUBLIC_IMAGE_PAIRS: &[(&str, &str)] = &[
 ];
 
 /// The five chart image keys, paired with the mirrored single-repo tag prefix.
-/// Mirrors `_helm_build_mirrored_image_flags`.
 const MIRRORED_IMAGE_PAIRS: &[(&str, &str)] = &[
     ("captureProxy", "migrations_capture_proxy"),
     ("trafficReplayer", "migrations_traffic_replayer"),
@@ -64,7 +61,6 @@ pub fn public_image_flags(version: &str) -> Vec<String> {
 
 /// Build the `--set` flags pointing every image at the operator's private
 /// `registry` with the `migrations_<name>_<version>` single-repo tag layout.
-/// Mirrors `_helm_build_mirrored_image_flags`.
 pub fn mirrored_image_flags(registry: &str, version: &str) -> Vec<String> {
     let mut flags = Vec::with_capacity(MIRRORED_IMAGE_PAIRS.len() * 4);
     for (name, tag_prefix) in MIRRORED_IMAGE_PAIRS {
@@ -76,8 +72,7 @@ pub fn mirrored_image_flags(registry: &str, version: &str) -> Vec<String> {
     flags
 }
 
-/// Build the `--set` flags for `--tls-mode` / `--pca-arn`. Mirrors
-/// `_helm_tls_flags`, including its validation errors.
+/// Build the `--set` flags for `--tls-mode` / `--pca-arn`.
 ///
 /// * `none` / `self-signed` / empty → no flags (chart defaults handle them)
 /// * `pca-existing` → requires `pca_arn`; enables the issuer + sets arn/region
@@ -133,8 +128,7 @@ pub enum Recovery {
     ProceedUnknown,
 }
 
-/// Classify a helm release status string into a [`Recovery`] action. Mirrors
-/// the `case "$status"` in `helm_recover_if_stuck`.
+/// Classify a helm release status string into a [`Recovery`] action.
 pub fn classify_recovery(status: &str) -> Recovery {
     match status {
         "" | "deployed" | "superseded" => Recovery::Proceed,

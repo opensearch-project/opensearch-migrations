@@ -1,4 +1,4 @@
-//! Native OCI image copy — replaces `crane copy <src> <dst>`.
+//! Native OCI image copy between registries.
 //!
 //! Uses `oci-distribution` to pull all layers from the source registry and
 //! push them to the destination, with per-host credential injection.
@@ -39,11 +39,7 @@ fn auth_for(host: &str, creds: &[RegistryCred]) -> RegistryAuth {
 /// Returns `Ok(())` on success or an `Err(String)` with the error message.
 /// `creds` provides per-registry credentials; anonymous auth is used for
 /// any host not listed.
-pub fn copy_image(
-    src: &str,
-    dst: &str,
-    creds: &[RegistryCred],
-) -> Result<(), String> {
+pub fn copy_image(src: &str, dst: &str, creds: &[RegistryCred]) -> Result<(), String> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -92,7 +88,13 @@ pub fn copy_image(
 
         // Push to destination.
         client
-            .push(&dst_ref, &image_data.layers, config, &dst_auth, Some(manifest))
+            .push(
+                &dst_ref,
+                &image_data.layers,
+                config,
+                &dst_auth,
+                Some(manifest),
+            )
             .await
             .map_err(|e| format!("push to {dst}: {e}"))?;
 
