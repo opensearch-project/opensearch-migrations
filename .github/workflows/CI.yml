@@ -460,7 +460,6 @@ jobs:
       - python-lint
       - gradle-extended-check
       - gradle-build-macos
-      - agent-skills-spec
       - codeql-analyze
       - sonarqube-analysis
     if: always()
