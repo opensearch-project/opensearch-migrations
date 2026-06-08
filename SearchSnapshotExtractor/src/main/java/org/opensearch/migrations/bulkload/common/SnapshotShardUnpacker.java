@@ -175,7 +175,7 @@ public class SnapshotShardUnpacker {
         }
     }
 
-    public static class CouldNotUnpackShard extends RfsException {
+    public static class CouldNotUnpackShard extends RfsException implements SnapshotReadFailure {
         public CouldNotUnpackShard(String message, Exception e) {
             super(message, e);
         }

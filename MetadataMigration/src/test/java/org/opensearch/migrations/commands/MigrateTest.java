@@ -2,6 +2,8 @@ package org.opensearch.migrations.commands;
 
 import org.opensearch.migrations.MetadataMigration;
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
+import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 
 import org.junit.jupiter.api.Test;
@@ -39,6 +41,28 @@ class MigrateTest {
 
         assertThat(result.getExitCode(), equalTo(Migrate.UNEXPECTED_FAILURE_CODE));
         assertThat(result.getErrorMessage(), containsString("Unexpected failure: No host was found"));
+    }
+
+    @Test
+    void migrate_classifiesSnapshotReadFailureWithDedicatedExitCode() {
+        var args = new MigrateArgs();
+        args.snapshotName = "snap1";
+        var context = mock(RootMetadataMigrationContext.class);
+        var meta = new MetadataMigration();
+
+        var migrate = spy(meta.migrate(args));
+        // A snapshot read failure surfacing during source/snapshot setup, wrapped the way real
+        // callers wrap it (e.g. inside a metadata-read wrapper).
+        var readFailure = new SnapshotRepo.CannotParseRepoFile("corrupt repo metadata: index-0");
+        doThrow(new RuntimeException("reading snapshot failed", readFailure))
+            .when(migrate).createClusters();
+
+        var result = migrate.execute(context);
+
+        assertThat(result.getExitCode(), equalTo(SnapshotReadFailures.EXIT_CODE));
+        assertThat(result.getErrorMessage(), containsString("Snapshot read failure"));
+        assertThat(result.getErrorMessage(), containsString("corrupt repo metadata: index-0"));
+        assertThat(result.getErrorMessage(), containsString("snap1"));
     }
 
     @Test

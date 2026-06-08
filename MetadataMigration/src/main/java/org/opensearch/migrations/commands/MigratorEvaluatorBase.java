@@ -10,6 +10,7 @@ import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
+import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
 import org.opensearch.migrations.bulkload.transformers.FanOutCompositeTransformer;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.bulkload.transformers.TransformerMapper;
@@ -161,6 +162,39 @@ public abstract class MigratorEvaluatorBase {
     protected String createUnexpectedErrorMessage(Throwable e) {
         var causeMessage = Optional.of(e).map(Throwable::getCause).map(Throwable::getMessage).orElse(null);
         return "Unexpected failure: " + e.getMessage() + (causeMessage == null ? "" : ", inner cause: " + causeMessage);
+    }
+
+    /**
+     * Classify a failure from the migrate/evaluate flow. A non-retriable snapshot read failure —
+     * the snapshot's repo/global/index metadata could not be read — is mapped to the
+     * dedicated {@link SnapshotReadFailures#EXIT_CODE} and a labeled message naming the snapshot
+     * path; anything else keeps the generic "unexpected failure" behavior. The detailed cause is
+     * logged here (to the run log); the caller surfaces the summary on stdout (see
+     * {@code MetadataMigration.run}) so it reaches the workflow log / CloudWatch before the process
+     * exits.
+     */
+    protected FailureClassification classifyFailure(Exception e) {
+        var readFailure = SnapshotReadFailures.find(e);
+        if (readFailure != null) {
+            var repo = arguments.fileSystemRepoPath != null ? arguments.fileSystemRepoPath : arguments.s3RepoUri;
+            var message = "Snapshot read failure: " + readFailure.getMessage()
+                + " | snapshot=" + arguments.snapshotName + ", repo=" + repo + ", region=" + arguments.s3Region;
+            log.atError().setCause(e).setMessage("Non-retriable snapshot read failure: {}").addArgument(message).log();
+            return new FailureClassification(SnapshotReadFailures.EXIT_CODE, message);
+        }
+        log.atError().setCause(e).setMessage("Unexpected failure").log();
+        return new FailureClassification(UNEXPECTED_FAILURE_CODE, createUnexpectedErrorMessage(e));
+    }
+
+    /** Outcome of {@link #classifyFailure(Exception)}: the process exit code and user-facing message. */
+    protected static class FailureClassification {
+        public final int exitCode;
+        public final String errorMessage;
+
+        public FailureClassification(int exitCode, String errorMessage) {
+            this.exitCode = exitCode;
+            this.errorMessage = errorMessage;
+        }
     }
 
     /**

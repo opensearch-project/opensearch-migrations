@@ -32,6 +32,7 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
+import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.lucene.FieldMappingContext;
@@ -87,6 +88,7 @@ public class RfsMigrateDocuments {
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
     public static final int NO_WORK_AVAILABLE_EXIT_CODE = 4;
+    public static final int SNAPSHOT_READ_FAILED_EXIT_CODE = SnapshotReadFailures.EXIT_CODE;
 
     // Arbitrary value, increasing from 5 to 15 seconds due to prevalence of clock skew exceptions
     // observed on production clusters during migrations
@@ -652,6 +654,24 @@ public class RfsMigrateDocuments {
             cleanShutdownCompleted.set(true);
             System.exit(NO_WORK_LEFT_EXIT_CODE);
         } catch (Exception e) {
+            var snapshotReadFailure = SnapshotReadFailures.find(e);
+            if (snapshotReadFailure != null) {
+                // A non-retriable snapshot read failure (the snapshot's repo/index/shard metadata or
+                // blob data could not be read). Surface the reason, snapshot path, and context at ERROR
+                // BEFORE exiting so it is visible in the workflow log and CloudWatch even if the pod is
+                // terminated immediately afterward. We exit explicitly (rather than rethrowing to the JVM
+                // uncaught handler) to emit a clean, labeled entry, flush the appenders, and return a
+                // deterministic exit code the workflow can branch on.
+                log.atError().setCause(e)
+                    .setMessage("Non-retriable snapshot read failure: {} | snapshot={}, repo={}, region={}")
+                    .addArgument(snapshotReadFailure.getMessage())
+                    .addArgument(arguments.snapshotName)
+                    .addArgument(arguments.snapshotLocalDir != null ? arguments.snapshotLocalDir : arguments.s3RepoUri)
+                    .addArgument(arguments.s3Region)
+                    .log();
+                LogManager.shutdown();
+                System.exit(SNAPSHOT_READ_FAILED_EXIT_CODE);
+            }
             log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
         }

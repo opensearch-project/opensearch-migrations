@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.arguments.ArgLogUtils;
 import org.opensearch.migrations.arguments.ArgNameConstants;
+import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
 import org.opensearch.migrations.cli.OutputFormat;
 import org.opensearch.migrations.commands.*;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
@@ -84,6 +85,14 @@ public class MetadataMigration {
         writeOutput(result.asJsonOutput());
         reportLogPath();
         reportTransformationPath();
+
+        if (result.getExitCode() == SnapshotReadFailures.EXIT_CODE) {
+            // Surface the snapshot read failure on stdout at ERROR. This class's logger is wired to
+            // the Console appender, unlike the command loggers, which only reach the run log file —
+            // so emitting it here makes the failure visible in the workflow log and CloudWatch
+            // before the process exits.
+            log.atError().setMessage("{}").addArgument(result.getErrorMessage()).log();
+        }
 
         exitWithCode(result.getExitCode());
     }

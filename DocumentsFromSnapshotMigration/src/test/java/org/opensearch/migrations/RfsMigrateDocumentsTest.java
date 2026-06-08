@@ -4,9 +4,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.bulkload.common.SnapshotReadFailure;
+import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.*;
 
@@ -69,5 +72,46 @@ class RfsMigrateDocumentsTest {
             Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, os3, someTransformer, false),
             Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, null, someTransformer, false)
         );
+    }
+
+    /** Minimal stand-in so the helper test doesn't couple to any specific production exception. */
+    private static class FakeSnapshotReadFailure extends RuntimeException implements SnapshotReadFailure {
+        FakeSnapshotReadFailure(String message) {
+            super(message);
+        }
+    }
+
+    @Test
+    void findSnapshotReadFailure_directMatch() {
+        var ex = new FakeSnapshotReadFailure("could not read snapshot");
+        Assertions.assertSame(ex, SnapshotReadFailures.find(ex));
+    }
+
+    @Test
+    void findSnapshotReadFailure_wrappedCauseMatch() {
+        var cause = new FakeSnapshotReadFailure("could not read snapshot");
+        var wrapper = new RuntimeException("partition migration failed", cause);
+        Assertions.assertSame(cause, SnapshotReadFailures.find(wrapper));
+    }
+
+    @Test
+    void findSnapshotReadFailure_noMatchReturnsNull() {
+        var ex = new RuntimeException("target cluster rejected the bulk request");
+        Assertions.assertNull(SnapshotReadFailures.find(ex));
+    }
+
+    @Test
+    void findSnapshotReadFailure_cyclicCauseChainDoesNotLoop() {
+        // A cyclic cause chain (a -> b -> a) with no snapshot-read failure must terminate, not hang.
+        var a = new RuntimeException("a");
+        var b = new RuntimeException("b");
+        a.initCause(b);
+        b.initCause(a);
+        Assertions.assertNull(SnapshotReadFailures.find(a));
+    }
+
+    @Test
+    void findSnapshotReadFailure_nullReturnsNull() {
+        Assertions.assertNull(SnapshotReadFailures.find(null));
     }
 }
