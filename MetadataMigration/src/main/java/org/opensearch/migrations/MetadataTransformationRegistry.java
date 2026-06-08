@@ -57,6 +57,20 @@ public class MetadataTransformationRegistry {
                 .descriptionLine("Convert field data type dense_vector to OpenSearch knn_vector")
                 .build())
             .build(),
+        // Any source whose target is OpenSearch: pre-OS index-level knn params
+        // are rejected on create-index, so lift them onto field-level method
+        // config. No-op when absent (see the js file for the full rationale).
+        TransformerConfigs.builder()
+            .filename("js/es-knn-index-to-field-level-metadata.js")
+            .isRelevantForVersions(andSourceTargetVersionPredicate(
+                    v -> true,
+                    UnboundVersionMatchers.anyOS
+            ))
+            .transformerInfo(Transformers.TransformerInfo.builder()
+                .name("Index-level knn settings to field-level method")
+                .descriptionLine("Lift index.knn.* settings onto knn_vector field method config")
+                .build())
+            .build(),
         TransformerConfigs.builder()
             .filename("js/knn-to-serverless-metadata.js")
             .isRelevantForVersions(andSourceTargetVersionPredicate(

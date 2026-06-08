@@ -57,6 +57,14 @@ rules:
   - apiGroups: ["core.strimzi.io"]
     resources: ["strimzipodsets"]
     verbs: ["get", "list", "watch", "delete", "deletecollection"]
+  # Read-only, for drain-stall diagnostics. On a replayer drain failure
+  # (assert_replay_drained in cdc_base.py) we dump the Kafka PodDisruptionBudget
+  # state — is minAvailable actually gating disruptions, or is the budget
+  # already at its floor? — alongside broker pod placement. PDBs are namespaced;
+  # nodes are cluster-scoped and granted via the ClusterRole below.
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -82,6 +90,14 @@ rules:
       - /openapi/v3
       - /openapi/v3/*
     verbs: ["get"]
+  # Read-only node access for drain-stall diagnostics: on a replayer drain
+  # failure, cdc_base.py dumps `kubectl get nodes -o wide` and broker pod
+  # placement to reveal whether all Kafka brokers are co-located on a single
+  # node (a node that Karpenter could consolidate, taking the whole cluster
+  # down at once). Nodes are cluster-scoped, so this lives on the ClusterRole.
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1

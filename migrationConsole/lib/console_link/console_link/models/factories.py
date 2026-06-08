@@ -65,13 +65,13 @@ def get_replayer(config: Dict, client_options: Optional[ClientOptions] = None):
     raise UnsupportedReplayerError(', '.join(config.keys()) if config else '<empty>')
 
 
-def get_kafka(config: Dict):
+def get_kafka(config: Dict, scram_password: Optional[str] = None):
     if 'msk' in config:
         return MSK(config)
     if 'standard' in config:
         return StandardKafka(config)
     if 'scram' in config:
-        return ScramKafka(config)
+        return ScramKafka(config, password=scram_password)
     config.pop("broker_endpoints", None)
     logger.error(f"An unsupported kafka source type was provided: {config.keys()}")
     raise UnsupportedKafkaError(', '.join(config.keys()))

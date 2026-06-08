@@ -78,9 +78,6 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
         }
 
         @Override
-        public void periodicFlush() {}
-
-        @Override
         public void close() {
             releaseAll();
         }
@@ -108,9 +105,6 @@ public class TupleWriteBlockingBehaviorTest extends InstrumentationTest {
 
         @Override
         public void flush() {}
-
-        @Override
-        public void periodicFlush() {}
 
         @Override
         public void close() {}

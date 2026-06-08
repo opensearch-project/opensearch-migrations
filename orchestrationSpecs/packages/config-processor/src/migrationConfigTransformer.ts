@@ -421,7 +421,7 @@ function prepareProxyConfig(
     const tls = config.tls;
 
     if (tls !== undefined && "clientAuth" in tls && tls.clientAuth !== undefined) {
-        const {clientAuth, ...tlsWithoutClientAuth} = tls;
+        const {clientAuth} = tls;
         const trustCertConfig = clientAuth.trustedClientCaFile !== undefined
             ? {
                 sslTrustCertFile: fileSourceRegistry.resolveFileRef(clientAuth.trustedClientCaFile)
@@ -432,7 +432,6 @@ function prepareProxyConfig(
             };
         return ARGO_PROXY_OPTIONS.parse({
             ...config,
-            tls: tlsWithoutClientAuth,
             ...trustCertConfig,
             requireClientAuth: clientAuth.required ?? true,
             ...fileSourceRegistry.resolvedFields,

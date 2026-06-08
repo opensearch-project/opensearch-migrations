@@ -438,7 +438,7 @@ def generate_data_cmd(ctx, cluster, index_name, doc_size_bytes, num_docs, target
         
         # Execute bulk data generation
         result = bulk_insert_data(cluster_obj, index_name, num_docs, doc_size_bytes, batch_size)
-        
+
         # Display results
         click.echo("\nData generation completed:")
         click.echo(f"  Documents inserted: {result['total_inserted']:,}")
@@ -446,9 +446,18 @@ def generate_data_cmd(ctx, cluster, index_name, doc_size_bytes, num_docs, target
         click.echo(f"  Time elapsed: {result['elapsed_time']:.1f}s")
         click.echo(f"  Rate: {result['docs_per_sec']:.1f} docs/sec")
         click.echo(f"  Estimated size: {result['estimated_size_mb']:.1f}MB")
-        
+
         if result['total_errors'] > 0:
             click.echo(f"Warning: {result['total_errors']} documents failed to insert")
+
+        # Exit non-zero when not all documents were inserted, so callers (integ tests)
+        # can fail fast with the actual error message instead of waiting for an outer
+        # subprocess timeout to fire.
+        if result['total_inserted'] < num_docs:
+            raise click.ClickException(
+                f"Inserted {result['total_inserted']:,} of {num_docs:,} requested documents "
+                f"({result['total_errors']:,} errors). See log output above for the failure cause."
+            )
             
     except ImportError as e:
         raise click.ClickException(f"Failed to import bulk data generation module: {e}")
@@ -928,11 +937,32 @@ def delete_topic_cmd(ctx, acknowledge_risk, topic_name):
             click.echo("Aborting command.")
 
 
+DEFAULT_LEGACY_CONSUMER_GROUP = "logging-group-default"
+
+
+def _resolve_default_consumer_group(env) -> str:
+    """Pick the consumer group `describe-consumer-group` uses when the caller
+    omits the argument.
+
+    Workflow-driven deployments (k8s/EKS) set group IDs of the form
+    `replayer-<targetLabel>` per fullMigration.ts; the legacy CDK/docker
+    deployments and the local dev environment use `logging-group-default`.
+    Prefer the workflow-resolved group when available so CDC integ tests
+    and operators don't have to memorize the deploy-specific name.
+    """
+    groups = list(getattr(env, "kafka_consumer_groups", None) or [])
+    if groups:
+        return groups[0]
+    return DEFAULT_LEGACY_CONSUMER_GROUP
+
+
 @kafka_group.command(name="describe-consumer-group")
-@click.argument('group_name', required=False, default="logging-group-default",
+@click.argument('group_name', required=False, default=None,
                 shell_complete=get_kafka_consumer_group_completions)
 @click.pass_obj
 def describe_group_command(ctx, group_name):
+    if group_name is None:
+        group_name = _resolve_default_consumer_group(ctx.env)
     result = kafka_.describe_consumer_group(ctx.env.kafka, group_name=group_name)
     click.echo(result.value)
 
@@ -950,6 +980,45 @@ def list_consumer_groups_cmd(ctx):
 @click.pass_obj
 def describe_topic_records_cmd(ctx, topic_name):
     result = kafka_.describe_topic_records(ctx.env.kafka, topic_name=topic_name)
+    click.echo(result.value)
+
+
+@kafka_group.command(name="dump-topic-records")
+@click.argument('topic_name', required=False, default="capture-proxy",
+                shell_complete=get_kafka_topic_completions)
+@click.option('--mode', type=click.Choice(['dump-both', 'dump-http', 'dump-raw']),
+              default='dump-both', show_default=True,
+              help="dump-raw: TrafficStream records as captured; dump-http: reconstructed "
+                   "HTTP transactions; dump-both: both.")
+@click.option('--start-offset', type=int, default=None,
+              help="Start reading at this offset on every partition (default: beginning).")
+@click.option('--end-offset', type=int, default=None,
+              help="Stop after passing this offset on every partition.")
+@click.option('--start-time', type=int, default=None,
+              help="Start at the earliest record at/after this epoch-seconds timestamp.")
+@click.option('--end-time', type=int, default=None,
+              help="Stop after the first record whose timestamp exceeds this epoch-seconds value.")
+@click.option('--namespace', default=None,
+              help="Kubernetes namespace to launch the dump pod in (default: current/ma).")
+@click.option('--pod-timeout', type=int, default=600, show_default=True,
+              help="Max seconds to wait for the dump pod to finish streaming.")
+@click.pass_obj
+def dump_topic_records_cmd(ctx, topic_name, mode, start_offset, end_offset,
+                           start_time, end_time, namespace, pod_timeout):
+    """Launch a one-shot traffic-replayer pod to print a topic's captured
+    records, then stop. Reads with NO consumer group, so it never disturbs
+    the replayer's offsets. Requires a k8s/EKS deployment."""
+    if namespace is None:
+        from console_link.workflow.models.utils import get_current_namespace
+        namespace = get_current_namespace()
+    result = kafka_.dump_topic_records(
+        ctx.env.kafka, namespace=namespace, topic=topic_name, mode=mode,
+        start_offset=start_offset, end_offset=end_offset,
+        start_time=start_time, end_time=end_time,
+        pod_timeout_seconds=pod_timeout, echo=click.echo,
+    )
+    if not result.success:
+        raise click.ClickException(result.value)
     click.echo(result.value)
 
 # ##################### UTILITIES ###################
