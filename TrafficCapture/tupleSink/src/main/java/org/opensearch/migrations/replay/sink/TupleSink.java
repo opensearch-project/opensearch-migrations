@@ -17,9 +17,6 @@ public interface TupleSink extends AutoCloseable {
     /** Flush any buffered data. Called when no more items are immediately available. */
     void flush();
 
-    /** Periodic callback even when no events arrive. Implementations should check time-based thresholds. */
-    void periodicFlush();
-
     /** Finalize: flush, commit, complete all outstanding futures, release resources. */
     @Override
     void close();

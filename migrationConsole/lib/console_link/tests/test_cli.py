@@ -487,6 +487,34 @@ def test_cli_cluster_generate_data_proxy(runner, mocker, proxy_enabled_yaml_path
     assert result.exit_code == 0
 
 
+def test_cli_cluster_generate_data_partial_insert_exits_nonzero(runner, mocker, proxy_enabled_yaml_path):
+    # Regression test: when bulk_insert_data bails early after persistent failures (e.g.
+    # sigv4-via-proxy 403s on the AOSS test pipeline), the CLI must exit non-zero so the
+    # integ test sees a clear error in <30s instead of waiting for an outer subprocess
+    # timeout to fire 5 minutes later.
+    mocker.patch('importlib.util.module_from_spec').return_value.bulk_insert_data = mocker.Mock(
+        return_value={
+            'total_inserted': 0,
+            'total_errors': 50,
+            'elapsed_time': 1.0,
+            'docs_per_sec': 0.0,
+            'estimated_size_mb': 0.0,
+        }
+    )
+    mocker.patch('importlib.util.spec_from_file_location').return_value.loader.exec_module = mocker.Mock()
+    mocker.patch('os.path.exists', return_value=True)
+
+    result = runner.invoke(
+        cli,
+        ['--config-file', str(proxy_enabled_yaml_path), 'clusters', 'generate-data',
+         '--cluster', 'proxy', '--index-name', 'test-index', '--num-docs', '50'],
+        catch_exceptions=True,
+    )
+
+    assert result.exit_code != 0
+    assert 'Inserted 0 of 50' in result.output
+
+
 def test_cli_cluster_clear_indices(runner, mocker):
     mock = mocker.patch('console_link.middleware.clusters.clear_indices')
     result = runner.invoke(cli,
@@ -989,6 +1017,35 @@ def test_cli_kafka_describe_consumer_group(runner, mocker):
                            catch_exceptions=True)
     model_mock.assert_called_once_with(group_name='test-group')
     middleware_mock.assert_called_once()
+    assert result.exit_code == 0
+
+
+def test_cli_kafka_describe_consumer_group_falls_back_to_legacy_default(runner, mocker):
+    # No workflow-resolved groups => use the legacy default name. This keeps
+    # CDK/docker-compose deployments and the local dev path working unchanged.
+    model_mock = mocker.patch.object(StandardKafka, 'describe_consumer_group')
+    result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'describe-consumer-group'],
+                           catch_exceptions=True)
+    model_mock.assert_called_once_with(group_name='logging-group-default')
+    assert result.exit_code == 0
+
+
+def test_cli_kafka_describe_consumer_group_uses_resolved_group_when_present(runner, mocker):
+    # When the env was built from a workflow config containing replayers, the
+    # CLI default should be the workflow-resolved group, not the legacy name.
+    model_mock = mocker.patch.object(StandardKafka, 'describe_consumer_group')
+
+    real_env = Environment(config_file=VALID_SERVICES_YAML)
+    real_env.kafka_consumer_groups = ["replayer-prod-target", "replayer-staging-target"]
+
+    class _StubContext:
+        env = real_env
+
+    mocker.patch.object(cli_module, "Context", return_value=_StubContext())
+
+    result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'describe-consumer-group'],
+                           catch_exceptions=True)
+    model_mock.assert_called_once_with(group_name='replayer-prod-target')
     assert result.exit_code == 0
 
 

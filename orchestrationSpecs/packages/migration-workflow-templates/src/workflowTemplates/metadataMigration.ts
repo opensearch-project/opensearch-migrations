@@ -23,7 +23,7 @@ import {
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
-import {makeSourceParamDict, makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
+import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
@@ -129,27 +129,11 @@ function makeSnapshotParamsDict(
     );
 }
 
-function makeSourceHostParamsDict(
-    sourceVersion: BaseExpression<string>,
-    sourceEndpoint: BaseExpression<string>,
-    sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>>
-) {
-    return expr.mergeDicts(
-        makeSourceParamDict(sourceConfig),
-        expr.makeDict({
-            "sourceHost": sourceEndpoint,
-            "sourceVersion": sourceVersion
-        })
-    );
-}
-
 function makeParamsDict(
     sourceVersion: BaseExpression<string>,
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
-    options: BaseExpression<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>,
-    sourceEndpoint?: BaseExpression<string>,
-    sourceConfig?: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>>
+    options: BaseExpression<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>
 ) {
     const targetAndOptions = expr.mergeDicts(
         makeTargetParamDict(targetConfig),
@@ -170,18 +154,6 @@ function makeParamsDict(
             "allowExistingIndexes": expr.literal(true)
         })
     );
-
-    // When sourceEndpoint is non-empty at runtime, add sourceHost param.
-    // MetadataMigration CLI prioritizes --source-host over snapshot params.
-    if (sourceEndpoint && sourceConfig) {
-        return expr.mergeDicts(base,
-            expr.ternary(
-                expr.isEmpty(sourceEndpoint),
-                expr.makeDict({}),
-                makeSourceHostParamsDict(sourceVersion, sourceEndpoint, sourceConfig)
-            )
-        );
-    }
 
     return base;
 }
@@ -289,10 +261,7 @@ function buildMetadataContainer<
             inputs.commandMode,
             expr.literal("---INLINE-JSON"),
             expr.asString(expr.serialize(
-                makeParamsDict(inputs.sourceVersion, inputs.targetConfig, inputs.snapshotConfig, inputs.metadataMigrationConfig,
-                    inputs.sourceEndpoint,
-                    inputs.sourceConfig
-                )
+                makeParamsDict(inputs.sourceVersion, inputs.targetConfig, inputs.snapshotConfig, inputs.metadataMigrationConfig)
             ))
         ])
         .addArtifactOutput("metadataOutput", METADATA_OUTPUT_PATH, {

@@ -594,8 +594,12 @@ public class TrafficReplayer {
         }
     }
 
-    private static void runReplayMode(Parameters params) throws Exception {
-        var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
+    /**
+     * Parse and validate the replay target URI and timing params. On invalid input this prints the
+     * error and calls System.exit (matching the prior inline behavior); it returns null only on the
+     * exit paths so the caller can stop without duplicating the exit handling.
+     */
+    private static URI parseAndValidateReplayTarget(Parameters params) {
         URI uri;
         try {
             uri = URIHelper.parseUriWithDefaultPort(params.targetUriString);
@@ -605,7 +609,7 @@ public class TrafficReplayer {
             System.err.println(e.getMessage());
             log.atError().setCause(e).setMessage("{}").addArgument(msg).log();
             System.exit(3);
-            return;
+            return null;
         }
         if (params.lookaheadTimeSeconds <= params.observedPacketConnectionTimeout) {
             String msg = LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME
@@ -619,6 +623,15 @@ public class TrafficReplayer {
             System.err.println(msg);
             log.error(msg);
             System.exit(4);
+            return null;
+        }
+        return uri;
+    }
+
+    private static void runReplayMode(Parameters params) throws Exception {
+        var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
+        URI uri = parseAndValidateReplayTarget(params);
+        if (uri == null) {
             return;
         }
         var globalContextTracker = new ActiveContextTracker();

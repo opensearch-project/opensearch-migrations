@@ -10,6 +10,7 @@ from kubernetes.client.rest import ApiException
 
 from console_link.workflow.cli import workflow_cli
 from console_link.workflow.models.config import WorkflowConfig
+from console_link.workflow.tree_utils import APPROVAL_TEMPLATE_NAME
 
 
 class TestWorkflowCLICommands:
@@ -524,13 +525,13 @@ class TestWorkflowCLICommands:
         nodes = {
             'approval-node': {
                 'id': 'approval-node',
-                'displayName': 'waitForApproval',
+                'displayName': 'waitForUserApproval',
                 'phase': 'Running',
                 'type': 'Pod',
                 'boundaryID': 'approve-boundary',
                 'templateRef': {
                     'name': 'resource-management',
-                    'template': 'waitforapproval',
+                    'template': APPROVAL_TEMPLATE_NAME,
                 },
                 'inputs': {
                     'parameters': [
