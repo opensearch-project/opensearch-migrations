@@ -51,7 +51,14 @@ val cargoOutputDir: Directory = layout.projectDirectory.dir(
     if (target != null) "target/$target/release" else "target/release"
 )
 
-val binaryFile: RegularFile = cargoOutputDir.file("migration-tui")
+// On Windows targets cargo emits `migration-tui.exe`; everywhere else
+// it's just `migration-tui`. The :tui:release subproject re-stamps the
+// final filename, but we have to point Gradle at the actual file cargo
+// produces or the `tuiBinary` configuration resolves to a missing path
+// and stageBinary copies nothing — silently — leaving the workflow's
+// "Stage per-target artifacts" step unable to find the binary.
+val binaryName = if (target?.contains("windows") == true) "migration-tui.exe" else "migration-tui"
+val binaryFile: RegularFile = cargoOutputDir.file(binaryName)
 
 // ─── inputs that should trigger a rebuild ─────────────────────────────
 //

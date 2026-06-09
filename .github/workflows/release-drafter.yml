@@ -82,6 +82,15 @@ jobs:
             runner: windows-2022
             shell: bash
             bin_suffix: '.exe'
+          # Windows ARM64 (aarch64-pc-windows-msvc) is intentionally
+          # excluded. Gradle 8.14.3 (the monorepo-wide pin) cannot start
+          # on Windows ARM64 — gradle/native-platform ships no
+          # aarch64-windows binaries until Gradle 9.2 (gradle/gradle#29807).
+          # Auto-detect=false doesn't help: this project's
+          # `JvmVendorSpec.AMAZON` toolchain pin is unsatisfiable on
+          # Win-ARM since Corretto publishes no JDK 21 build for that
+          # platform. Re-add this target after the monorepo bumps to
+          # Gradle 9.2+.
     runs-on: ${{ matrix.runner }}
     defaults:
       run:
