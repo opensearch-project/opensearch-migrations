@@ -136,11 +136,6 @@ WORKDIR /root/cluster_tools
 RUN pipenv install
 WORKDIR /root
 
-# Copy Java tools (built from source, overrides base image versions)
-COPY javaTools/createSnapshot /root/createSnapshot
-COPY javaTools/metadataMigration /root/metadataMigration
-COPY javaTools/documentMigration /root/documentMigration
-
 COPY nodeStaging/configProcessor /root/configProcessor
 
 RUN chmod +x /root/configProcessor/*.sh

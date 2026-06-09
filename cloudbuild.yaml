@@ -1,5 +1,5 @@
 steps:
-  # Build Java tools
+  # Build Java tools and kafka libraries
   - name: 'amazoncorretto:21'
     entrypoint: './gradlew'
     args:
@@ -8,6 +8,8 @@ steps:
       - ':DocumentsFromSnapshotMigration:installDist'
       - ':DocumentsFromSnapshotMigration:copyDockerRuntimeJars'
       - ':DocumentsFromSnapshotMigration:syncVersionFile_reindexFromSnapshot'
+      - ':libraries:kafkaUtils:installDist'
+      - ':libraries:kafkaCommandLineFormatter:assemble'
       - '--no-daemon'
 
   # Run GCS integration tests (requires Docker for testcontainers)
@@ -17,18 +19,7 @@ steps:
       - ':SnapshotReaderGcs:isolatedTest'
       - '--no-daemon'
 
-  # Stage Java tools and Node artifacts into migrationConsole Docker context
-  - name: 'bash'
-    args:
-      - '-c'
-      - |
-        set -e
-        mkdir -p /workspace/migrationConsole/javaTools
-        cp -r /workspace/CreateSnapshot/build/install/CreateSnapshot /workspace/migrationConsole/javaTools/createSnapshot
-        cp -r /workspace/MetadataMigration/build/install/MetadataMigration /workspace/migrationConsole/javaTools/metadataMigration
-        cp -r /workspace/DocumentsFromSnapshotMigration/build/install/DocumentsFromSnapshotMigration /workspace/migrationConsole/javaTools/documentMigration
-
-  # Build config processor and workflow templates
+  # Build config processor and workflow templates (staged into migrationConsole/nodeStaging)
   - name: 'node:22'
     entrypoint: 'bash'
     args:
@@ -53,7 +44,7 @@ steps:
         echo "=== Migration resources generated ==="
         ls /workspace/migrationConsole/nodeStaging/migrationResources/
 
-  # Build reindex-from-snapshot image
+  # Build reindex-from-snapshot image (independent of console chain)
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
@@ -62,18 +53,55 @@ steps:
       - 'us-central1-docker.pkg.dev/$PROJECT_ID/migrations/reindex-from-snapshot:latest'
       - 'DocumentsFromSnapshotMigration/docker'
 
-  # Build the migration console image
+  # Layer 1: Build elasticsearch_client_test_console (base linux + java + python venv)
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--no-cache'
+      - '-t'
+      - 'migrations/elasticsearch_client_test_console:latest'
+      - 'TrafficCapture/dockerSolution/src/main/docker/elasticsearchTestConsole'
+
+  # Layer 2: Build migration_console_base (extends test console with Python libs, Node, scripts)
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '--no-cache'
+      - '-f'
+      - 'migrationConsole/Dockerfile'
+      - '-t'
+      - 'migrations/migration_console_base:latest'
+      - 'migrationConsole'
+
+  # Stage Java tools for the final migration console image
+  - name: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        STAGING_DIR=/workspace/migration-console-staging
+        mkdir -p "$$STAGING_DIR/staging"
+        cp -r /workspace/CreateSnapshot/build/install/CreateSnapshot "$$STAGING_DIR/staging/CreateSnapshot"
+        cp -r /workspace/MetadataMigration/build/install/MetadataMigration "$$STAGING_DIR/staging/MetadataMigration"
+        cp -r /workspace/libraries/kafkaUtils/build/install/kafkaUtils "$$STAGING_DIR/staging/kafkaUtils"
+        mkdir -p "$$STAGING_DIR/staging/kafkaCommandLineFormatter/lib"
+        cp /workspace/libraries/kafkaCommandLineFormatter/build/libs/*.jar "$$STAGING_DIR/staging/kafkaCommandLineFormatter/lib/"
+        cp /workspace/VERSION "$$STAGING_DIR/VERSION"
+        cp /workspace/TrafficCapture/dockerSolution/src/main/docker/migrationConsoleStaging/Dockerfile "$$STAGING_DIR/Dockerfile"
+        echo "=== Staging directory contents ==="
+        ls -la "$$STAGING_DIR/"
+        ls -la "$$STAGING_DIR/staging/"
+
+  # Layer 3: Build final migration_console image (extends base, adds Java tools)
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
       - '--no-cache'
       - '--build-arg'
-      - 'BASE_IMAGE=opensearchstaging/opensearch-migrations-console:latest'
-      - '-f'
-      - 'migrationConsole/Dockerfile'
+      - 'BASE_IMAGE=migrations/migration_console_base:latest'
       - '-t'
       - 'us-central1-docker.pkg.dev/$PROJECT_ID/migrations/migration-console:latest'
-      - 'migrationConsole'
+      - 'migration-console-staging'
 
 images:
   - 'us-central1-docker.pkg.dev/$PROJECT_ID/migrations/migration-console:latest'
