@@ -1,20 +1,79 @@
 //! CLI + Migration Assistant version resolution.
 //!
-//! `CLI_VERSION` is baked at build time; `resolve_ma_version` resolves the MA
-//! artifact version with a defined priority order. Resolution is pure logic
-//! that takes the candidate inputs, so it's testable without network — the
-//! actual GitHub release fetch is layered on top at the call site.
+//! `CLI_VERSION` is baked at build time; `resolve_cli_version` resolves the
+//! effective CLI version at runtime by searching for a `VERSION.txt` near the
+//! binary. This allows CI to build the binary once and stamp VERSION.txt into
+//! the install layout later. A `cargo build` from source with no VERSION.txt
+//! still works (falls back to `CLI_VERSION` or `FALLBACK_VERSION`).
+//!
+//! `resolve_ma_version` resolves the MA artifact version with a defined
+//! priority order. Resolution is pure logic that takes the candidate inputs,
+//! so it's testable without network — the actual GitHub release fetch is
+//! layered on top at the call site.
+
+use std::path::Path;
+
+/// How many parent directories above the binary we'll search for
+/// VERSION.txt before giving up. The deployed layout puts it one level
+/// up; we tolerate 3 to handle reasonable variations (e.g. binary in
+/// libexec/, bundle/bin/, etc.) without making the search unbounded.
+const MAX_ANCESTOR_DEPTH: usize = 3;
+
+/// Fallback version used when neither VERSION.txt nor CLI_VERSION resolves.
+pub const FALLBACK_VERSION: &str = "0.0.0-dev";
 
 /// The CLI's own version, baked at build time.
 ///
 /// The release packaging (gradle `:deployment:k8s:aws:packageMigrationAssistantCli`)
 /// sets `CLI_VERSION=<tag>` in the build environment; `option_env!` captures it
 /// into the binary. A plain `cargo build` with no `CLI_VERSION` set falls back
-/// to `0.0.0-dev`.
+/// to `FALLBACK_VERSION`.
 pub const CLI_VERSION: &str = match option_env!("CLI_VERSION") {
     Some(v) => v,
-    None => "0.0.0-dev",
+    None => FALLBACK_VERSION,
 };
+
+/// Resolve the CLI version string to display in `--version` output.
+///
+/// Resolution order:
+///   1. `VERSION.txt` found within [`MAX_ANCESTOR_DEPTH`] ancestor directories
+///      above the running executable (trimmed, non-empty).
+///   2. Compile-time `CLI_VERSION` (set by the build env, or `FALLBACK_VERSION`).
+///
+/// This allows CI to build the binary once and stamp VERSION.txt into the
+/// install layout later. A `cargo run` from source with no VERSION.txt uses
+/// the compile-time constant.
+pub fn resolve_cli_version() -> String {
+    if let Some(v) = resolve_from_exe() {
+        return v;
+    }
+    CLI_VERSION.to_string()
+}
+
+/// Walk ancestors of the running executable looking for VERSION.txt.
+fn resolve_from_exe() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    // canonicalize() resolves symlinks (e.g. /usr/local/bin →
+    // /opt/migration-assistant/bin) so we walk the real layout.
+    let exe = exe.canonicalize().unwrap_or(exe);
+    resolve_from_path(&exe)
+}
+
+/// Pure version of [`resolve_cli_version`]: takes a binary path, walks its
+/// ancestors looking for VERSION.txt. Public so tests can drive it against
+/// tempdir-built layouts without mutating process state.
+pub fn resolve_from_path(exe_path: &Path) -> Option<String> {
+    exe_path
+        .ancestors()
+        .skip(1) // skip the binary itself; start at its parent dir
+        .take(MAX_ANCESTOR_DEPTH)
+        .filter_map(|dir| {
+            let candidate = dir.join("VERSION.txt");
+            std::fs::read_to_string(&candidate).ok()
+        })
+        .map(|s| s.trim().to_string())
+        .find(|s| !s.is_empty())
+}
 
 /// GitHub "latest release" API for the MA artifacts.
 pub const MA_RELEASES_API: &str =
@@ -90,7 +149,8 @@ pub fn is_newer(remote: &str, local: &str) -> bool {
 /// `~/.migration-assistant/last-update-check`). Returns `Some(version)` if a
 /// newer release exists, `None` otherwise (including on any failure).
 pub fn check_for_update() -> Option<String> {
-    if CLI_VERSION == "0.0.0-dev" {
+    let current = resolve_cli_version();
+    if current == FALLBACK_VERSION {
         return None;
     }
     if !should_check_today() {
@@ -99,7 +159,7 @@ pub fn check_for_update() -> Option<String> {
     let body = fetch_latest_release_json()?;
     let remote = parse_release_tag(&body)?;
     record_check();
-    if is_newer(&remote, CLI_VERSION) {
+    if is_newer(&remote, &current) {
         Some(remote)
     } else {
         None
@@ -108,13 +168,14 @@ pub fn check_for_update() -> Option<String> {
 
 /// Force a check regardless of the cache (used by `migration-assistant update`).
 pub fn check_for_update_now() -> Option<String> {
-    if CLI_VERSION == "0.0.0-dev" {
+    let current = resolve_cli_version();
+    if current == FALLBACK_VERSION {
         return None;
     }
     let body = fetch_latest_release_json()?;
     let remote = parse_release_tag(&body)?;
     record_check();
-    if is_newer(&remote, CLI_VERSION) {
+    if is_newer(&remote, &current) {
         Some(remote)
     } else {
         None
@@ -264,6 +325,111 @@ pub fn release_url(version: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    // -----------------------------------------------------------------------
+    // resolve_from_path / resolve_cli_version tests
+    // -----------------------------------------------------------------------
+
+    /// Layout: <tmp>/bin/migration-assistant  +  <tmp>/VERSION.txt
+    /// Mirrors the production install layout.
+    #[test]
+    fn finds_version_one_level_above_bin() {
+        let tmp = tempdir().unwrap();
+        fs::create_dir(tmp.path().join("bin")).unwrap();
+        let exe = tmp.path().join("bin").join("migration-assistant");
+        fs::write(&exe, b"").unwrap();
+        fs::write(tmp.path().join("VERSION.txt"), "1.4.2\n").unwrap();
+
+        assert_eq!(resolve_from_path(&exe), Some("1.4.2".to_string()));
+    }
+
+    /// VERSION.txt directly next to the binary.
+    #[test]
+    fn finds_version_in_same_dir() {
+        let tmp = tempdir().unwrap();
+        let exe = tmp.path().join("migration-assistant");
+        fs::write(&exe, b"").unwrap();
+        fs::write(tmp.path().join("VERSION.txt"), "2.0.0").unwrap();
+
+        assert_eq!(resolve_from_path(&exe), Some("2.0.0".to_string()));
+    }
+
+    /// No VERSION.txt anywhere in the ancestor chain → None
+    /// (the public wrapper translates this to CLI_VERSION).
+    #[test]
+    fn returns_none_when_no_version_file() {
+        let tmp = tempdir().unwrap();
+        fs::create_dir(tmp.path().join("bin")).unwrap();
+        let exe = tmp.path().join("bin").join("migration-assistant");
+        fs::write(&exe, b"").unwrap();
+
+        assert_eq!(resolve_from_path(&exe), None);
+    }
+
+    /// Empty / whitespace-only VERSION.txt → None (fall back to
+    /// compile-time constant rather than report empty string).
+    #[test]
+    fn rejects_empty_version_file() {
+        let tmp = tempdir().unwrap();
+        let exe = tmp.path().join("migration-assistant");
+        fs::write(&exe, b"").unwrap();
+        fs::write(tmp.path().join("VERSION.txt"), "   \n  \n").unwrap();
+
+        assert_eq!(resolve_from_path(&exe), None);
+    }
+
+    /// Trailing whitespace and newlines are trimmed.
+    #[test]
+    fn trims_whitespace_and_newlines() {
+        let tmp = tempdir().unwrap();
+        let exe = tmp.path().join("migration-assistant");
+        fs::write(&exe, b"").unwrap();
+        fs::write(tmp.path().join("VERSION.txt"), "  3.1.4  \n\n").unwrap();
+
+        assert_eq!(resolve_from_path(&exe), Some("3.1.4".to_string()));
+    }
+
+    /// Closer VERSION.txt wins over a more distant one.
+    #[test]
+    fn nearer_version_file_wins() {
+        let tmp = tempdir().unwrap();
+        let near = tmp.path().join("near");
+        let bin = near.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let exe = bin.join("migration-assistant");
+        fs::write(&exe, b"").unwrap();
+        fs::write(near.join("VERSION.txt"), "near-version").unwrap();
+        fs::write(tmp.path().join("VERSION.txt"), "far-version").unwrap();
+
+        assert_eq!(resolve_from_path(&exe), Some("near-version".to_string()));
+    }
+
+    /// VERSION.txt outside the search depth (4+ levels up) is NOT found.
+    #[test]
+    fn ignores_version_file_beyond_max_depth() {
+        let tmp = tempdir().unwrap();
+        let deep = tmp.path().join("a").join("b").join("c").join("d");
+        fs::create_dir_all(&deep).unwrap();
+        let exe = deep.join("migration-assistant");
+        fs::write(&exe, b"").unwrap();
+        fs::write(tmp.path().join("VERSION.txt"), "should-not-find").unwrap();
+
+        assert_eq!(resolve_from_path(&exe), None);
+    }
+
+    /// The public resolve_cli_version() always returns SOMETHING (never
+    /// panics, never returns empty).
+    #[test]
+    fn public_resolver_never_returns_empty() {
+        let v = resolve_cli_version();
+        assert!(!v.is_empty(), "resolve_cli_version() returned empty string");
+    }
+
+    // -----------------------------------------------------------------------
+    // resolve_ma_version tests
+    // -----------------------------------------------------------------------
 
     #[test]
     fn explicit_wins() {

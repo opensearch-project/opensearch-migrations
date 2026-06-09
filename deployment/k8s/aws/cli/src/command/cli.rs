@@ -823,8 +823,8 @@ fn brand(manifest: &Option<crate::manifest::Manifest>, field: &str, default: &st
 }
 
 /// The version string the `version` subcommand prints — branding
-/// `versionString` if set, else `CLI_VERSION` + any `+pack-ver` suffix.
-/// Output the CLI version string.
+/// `versionString` if set, else the resolved CLI version + any `+pack-ver`
+/// suffix. Resolution: VERSION.txt near binary → compile-time CLI_VERSION.
 fn resolve_version_string() -> String {
     let manifest = load_manifest();
     if let Some(m) = &manifest {
@@ -832,9 +832,9 @@ fn resolve_version_string() -> String {
         if !vs.is_empty() {
             return vs;
         }
-        return format!("{}{}", version::CLI_VERSION, m.pack_summary());
+        return format!("{}{}", version::resolve_cli_version(), m.pack_summary());
     }
-    version::CLI_VERSION.to_string()
+    version::resolve_cli_version()
 }
 
 /// Check for updates and print instructions. Downloads the latest release
@@ -842,7 +842,7 @@ fn resolve_version_string() -> String {
 fn cmd_update() -> Result<()> {
     ui::step(&format!(
         "Current version: {} ({})",
-        version::CLI_VERSION,
+        version::resolve_cli_version(),
         version::platform_key()
     ));
     ui::info("Fetching release manifest...");
@@ -865,7 +865,8 @@ fn cmd_update() -> Result<()> {
         }
     };
 
-    if !version::is_newer(&manifest.version, version::CLI_VERSION) {
+    let current_version = version::resolve_cli_version();
+    if !version::is_newer(&manifest.version, &current_version) {
         ui::ok("You are running the latest version.");
         return Ok(());
     }
@@ -954,7 +955,7 @@ Common flags:\n\
 \x20 --mode Manual|Agent     Bypass the mode picker. Agent mode is a PREVIEW\n\
 \x20                         and requires MIGRATE_ENABLE_AGENT=1.\n\n\
 Version: {}\n",
-        version::CLI_VERSION
+        version::resolve_cli_version()
     )
 }
 

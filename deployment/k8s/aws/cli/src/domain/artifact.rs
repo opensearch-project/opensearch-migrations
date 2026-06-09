@@ -8,18 +8,62 @@
 //!     built + pushed by `:buildImages:buildImagesToRegistry`. The heavy lifting
 //!     (CDK synth, buildkit) stays in Gradle — this module only computes the
 //!     commands + paths, it does NOT reimplement them.
-//!   * **`--version` (release):** the template + chart `.tgz` are downloaded
-//!     from the GitHub release for the resolved version.
+//!   * **Installed bundle:** the binary lives inside a self-contained install
+//!     tree (`~/.opensearch-migration-assistant/`) that already ships the helm
+//!     chart under `helm/` and the CDK solution under `cfn/`. No network calls.
 //!
 //! This module is pure (paths, URLs, command vectors); the side-effecting
 //! shell-outs live on [`crate::app::App`], so they go through the runner seam
 //! and stay testable.
 
 use crate::cfn::TemplateVariant;
+use std::path::{Path, PathBuf};
 
-/// Base URL for a release's downloadable artifacts (templates + chart tgz).
-pub fn release_base_url(repo: &str, version: &str) -> String {
-    format!("https://github.com/{repo}/releases/download/{version}")
+/// Locate the installed bundle root relative to the running binary.
+///
+/// Search order (up to 3 ancestors above the binary):
+///   1. A directory containing `helm/migrationAssistantWithArgo/Chart.yaml`
+///   2. `$MIGRATE_BUNDLE_DIR` env override
+///
+/// Returns `None` when not running from an installed layout (e.g. `cargo run`).
+pub fn bundle_dir() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("MIGRATE_BUNDLE_DIR") {
+        let p = PathBuf::from(p);
+        if is_bundle_root(&p) {
+            return Some(p);
+        }
+    }
+    let exe = std::env::current_exe().ok()?;
+    let exe = exe.canonicalize().unwrap_or(exe);
+    exe.ancestors()
+        .skip(1)
+        .take(3)
+        .find(|dir| is_bundle_root(dir))
+        .map(Path::to_path_buf)
+}
+
+fn is_bundle_root(dir: &Path) -> bool {
+    dir.join("helm/migrationAssistantWithArgo/Chart.yaml")
+        .is_file()
+}
+
+/// The helm chart directory from the installed bundle.
+pub fn bundled_chart_dir(bundle: &Path) -> PathBuf {
+    bundle.join("helm/migrationAssistantWithArgo")
+}
+
+/// The CDK/CFN solution directory from the installed bundle.
+pub fn bundled_cfn_dir(bundle: &Path) -> PathBuf {
+    bundle.join("cfn")
+}
+
+/// The helm values files from the installed bundle chart (in apply order).
+pub fn bundled_chart_values(bundle: &Path) -> Vec<String> {
+    let chart = bundled_chart_dir(bundle);
+    vec![
+        chart.join("values.yaml").to_string_lossy().to_string(),
+        chart.join("valuesEks.yaml").to_string_lossy().to_string(),
+    ]
 }
 
 /// The local path the Gradle CDK synth writes the chosen template to.
@@ -36,15 +80,8 @@ pub fn local_chart_dir(base_dir: &str) -> String {
     format!("{base_dir}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo")
 }
 
-/// The release chart tarball filename for a version.
-pub fn chart_tarball_name(version: &str) -> String {
-    format!("migration-assistant-{version}.tgz")
-}
-
-/// The helm values files applied (in order) for the `--build` lane: the
-/// chart's base `values.yaml` then the EKS overrides `valuesEks.yaml`. Without
-/// `valuesEks.yaml` the EKS-specific config (nodepool/storage/networking) is
-/// missing and pods never become ready.
+/// The helm values files applied (in order): the chart's base `values.yaml`
+/// then the EKS overrides `valuesEks.yaml`.
 pub fn local_chart_values(chart_dir: &str) -> Vec<String> {
     vec![
         format!("{chart_dir}/values.yaml"),
@@ -419,12 +456,30 @@ mod tests {
     }
 
     #[test]
-    fn release_urls() {
+    fn bundled_paths_resolve_from_bundle_root() {
+        let bundle = Path::new("/opt/migration-assistant");
         assert_eq!(
-            release_base_url("opensearch-project/opensearch-migrations", "2.8.2"),
-            "https://github.com/opensearch-project/opensearch-migrations/releases/download/2.8.2"
+            bundled_chart_dir(bundle),
+            PathBuf::from("/opt/migration-assistant/helm/migrationAssistantWithArgo")
         );
-        assert_eq!(chart_tarball_name("2.8.2"), "migration-assistant-2.8.2.tgz");
+        assert_eq!(
+            bundled_cfn_dir(bundle),
+            PathBuf::from("/opt/migration-assistant/cfn")
+        );
+        let values = bundled_chart_values(bundle);
+        assert_eq!(values.len(), 2);
+        assert!(values[0].ends_with("values.yaml"));
+        assert!(values[1].ends_with("valuesEks.yaml"));
+    }
+
+    #[test]
+    fn is_bundle_root_checks_chart_yaml() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(!is_bundle_root(tmp.path()));
+        let chart_dir = tmp.path().join("helm/migrationAssistantWithArgo");
+        std::fs::create_dir_all(&chart_dir).unwrap();
+        std::fs::write(chart_dir.join("Chart.yaml"), "name: test\n").unwrap();
+        assert!(is_bundle_root(tmp.path()));
     }
 
     #[test]

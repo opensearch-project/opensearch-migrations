@@ -24,6 +24,7 @@ fn dispatch_isolated(args: &[&str], extra_env: &[(&str, &str)], runner: &MockRun
         "MIGRATE_HOME",
         "MIGRATE_ENABLE_AGENT",
         "MIGRATE_NONINTERACTIVE",
+        "MIGRATE_BUNDLE_DIR",
         "STAGE",
         "AWS_ACCOUNT",
         "AWS_USER_ARN",
@@ -148,23 +149,25 @@ fn console_without_a_deployed_stage_errors() {
 /// wizard. This is the `--version` (download) lane so no gradle/build is needed.
 #[test]
 fn headless_deploy_runs_cfn_and_helm() {
-    // Pre-create the template the resolver downloads (curl is mocked).
-    let tmpl = std::env::temp_dir().join(format!("ma-template-{}.json", std::process::id()));
-    std::fs::write(&tmpl, "{}").unwrap();
-    // Pre-create the chart tarball the resolver downloads.
-    let chart = std::env::temp_dir().join("migration-assistant-2.9.0.tgz");
-    std::fs::write(&chart, "x").unwrap();
+    // Stage a bundle layout so the artifact resolver finds helm + cfn locally.
+    let bundle = tempfile::tempdir().unwrap();
+    let helm_dir = bundle.path().join("helm/migrationAssistantWithArgo");
+    std::fs::create_dir_all(&helm_dir).unwrap();
+    std::fs::write(helm_dir.join("Chart.yaml"), "name: ma\n").unwrap();
+    std::fs::write(helm_dir.join("values.yaml"), "{}").unwrap();
+    std::fs::write(helm_dir.join("valuesEks.yaml"), "{}").unwrap();
+    let cfn_dir = bundle.path().join("cfn/cdk.out-minified");
+    std::fs::create_dir_all(&cfn_dir).unwrap();
+    std::fs::write(
+        cfn_dir.join("Migration-Assistant-Infra-Create-VPC-eks.template.json"),
+        "{}",
+    )
+    .unwrap();
 
     let runner = MockRunner::new()
         .with_command("aws")
-        .with_command("curl")
         .with_command("helm")
         .with_command("kubectl")
-        // discovery (AWS identity now via SDK + env vars; stubs only for resources)
-        .stub("aws", &["eks", "list-clusters"], 0, "{}")
-        .stub("aws", &["cloudformation", "list-stacks"], 0, "{}")
-        // artifact downloads
-        .stub("curl", &["-o"], 0, "")
         // CFN exports query (kubeconfig/helm) — MORE SPECIFIC, registered first
         // so first-match-wins returns the export blob, not the health status.
         .stub(
@@ -212,6 +215,7 @@ fn headless_deploy_runs_cfn_and_helm() {
         &[
             ("AWS_ACCOUNT", "111122223333"),
             ("AWS_USER_ARN", "arn:aws:iam::111122223333:role/x"),
+            ("MIGRATE_BUNDLE_DIR", bundle.path().to_str().unwrap()),
         ],
         &runner,
     );
@@ -235,7 +239,4 @@ fn headless_deploy_runs_cfn_and_helm() {
         .find(|c| c.joined().contains("upgrade") && c.joined().contains("--install"))
         .expect("expected `helm upgrade --install` (via bash) to run");
     assert!(helm.joined().contains("helm"));
-
-    let _ = std::fs::remove_file(&tmpl);
-    let _ = std::fs::remove_file(&chart);
 }

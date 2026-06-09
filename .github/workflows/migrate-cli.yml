@@ -1,5 +1,9 @@
 # CI for the migration-assistant CLI (Rust) under deployment/k8s/aws/cli/.
 # Path-scoped: only runs when CLI files (or this workflow) change.
+#
+# Native runners per target — no cross-compilation. Four build jobs:
+# linux x86_64 + aarch64, macOS Intel + Apple Silicon.
+# Windows is not supported natively — Windows users use WSL2 (linux binary).
 name: migrate-cli
 
 on:
@@ -21,23 +25,17 @@ on:
 permissions:
   contents: read
 
-defaults:
-  run:
-    working-directory: deployment/k8s/aws/cli
-
-# The exact toolchain (channel + rustfmt/clippy components) is pinned in
-# cli/rust-toolchain.toml; rustup (preinstalled on the GitHub runners) fetches
-# it automatically on the first cargo/rustup call in this directory. No explicit
-# `rustup toolchain install` is needed — the pin is the single source of truth,
-# the same way the JVM build pins Corretto JDK 21.
-
 jobs:
   # Fast feedback: format + lints. Fails the PR on any rustfmt diff or clippy
   # warning (-D warnings), matching the crate's quality bar.
   lint:
     runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+        working-directory: deployment/k8s/aws/cli
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Toolchain (from rust-toolchain.toml)
         run: rustup show && cargo --version && cargo clippy --version && cargo fmt --version
       - name: rustfmt (check)
@@ -50,8 +48,12 @@ jobs:
   # No AWS, no network.
   test:
     runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+        working-directory: deployment/k8s/aws/cli
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Toolchain (from rust-toolchain.toml)
         run: rustup show
       - name: cargo test
@@ -69,48 +71,127 @@ jobs:
           rc=0; "$BIN" notacommand >/dev/null 2>&1 || rc=$?
           [ "$rc" -eq 64 ] || { echo "::error::expected exit 64, got $rc"; exit 1; }
 
-  # The release packaging path: gradle cargo-builds the binary, stages the
-  # bundle (wrapper + prebuilt binary + agent-skills + manifest), tars it, and
-  # renders install.sh. This job deliberately does NOT install Rust itself — it
-  # verifies that gradle auto-provisions the toolchain (the same way it
-  # auto-downloads Corretto JDK 21), which is the exact scenario that failed on
-  # a fresh Jenkins agent.
-  smoke:
-    runs-on: ubuntu-22.04
-    needs: [lint]
+  # Native matrix build — each target runs on its own architecture runner.
+  # No cross-compilation; the binary is built natively for highest reliability.
+  build:
+    needs: [lint, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: aarch64-apple-darwin
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-env
-      - name: gradle packages CLI tarball + install.sh (provisions Rust itself)
-        working-directory: .
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Set up Java 21
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          distribution: 'corretto'
+          java-version: '21'
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@50e97c2cd7a37755bbfafc9c5b7cafaece252f6e # v6.1.0
+        with:
+          cache-disabled: false
+          cache-read-only: false
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # master @ 2025-02-17
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+          components: clippy
+      - name: Versions
         run: |
-          # Hide any preinstalled cargo so this genuinely exercises gradle's
-          # auto-provisioning path.
-          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v cargo | grep -v rustup | paste -sd: -)"
-          ./gradlew :deployment:k8s:aws:packageMigrationAssistantCli \
-            -PcliVersion=0.0.0-ci
-          dist=deployment/k8s/aws/build/migrate-cli-dist
-          test -f "$dist/migration-assistant-cli-0.0.0-ci.tar.gz"
-          test -x "$dist/install.sh"
-          # Rendered install.sh is well-formed bash.
-          bash -n "$dist/install.sh"
-          # The tarball carries the wrapper, the prebuilt binary, and a
-          # root manifest.json.
-          tar -tzf "$dist/migration-assistant-cli-0.0.0-ci.tar.gz" \
-            | grep -q 'migration-assistant-cli-0.0.0-ci/bin/migration-assistant-bin'
-          tar -tzf "$dist/migration-assistant-cli-0.0.0-ci.tar.gz" \
-            | grep -q 'migration-assistant-cli-0.0.0-ci/manifest.json'
-      - name: install.sh from local tarball needs NO Rust toolchain
-        working-directory: .
+          rustc --version
+          cargo --version
+          java -version
+      - name: Build CLI release artifacts
+        # Retry up to 3 times to absorb transient 503s from
+        # plugins.gradle.org during cold buildSrc resolve.
         run: |
-          set -e
-          dist=deployment/k8s/aws/build/migrate-cli-dist
-          # Extract the staged bundle and install from it locally.
-          work="$(mktemp -d)"
-          tar -xzf "$dist/migration-assistant-cli-0.0.0-ci.tar.gz" -C "$work" --strip-components=1
-          INSTALL_FROM_LOCAL="$work" \
-          MIGRATE_PREFIX="$work/installed" \
-          BIN_DIR="$work/bin-link" \
-            bash "$dist/install.sh"
-          # The installed binary runs (prebuilt; no cargo invoked).
-          PATH="$work/bin-link:$PATH" migration-assistant version
+          set -euo pipefail
+          attempt=0
+          max_attempts=3
+          until ./gradlew :deployment:k8s:aws:assemble \
+              -PcliVersion=0.0.0-ci \
+              -Ptarget=${{ matrix.target }} \
+              --no-daemon; do
+            attempt=$((attempt+1))
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::gradle assemble failed after ${max_attempts} attempts"
+              exit 1
+            fi
+            echo "::warning::gradle assemble attempt ${attempt} failed; retrying in $((attempt*30))s"
+            sleep $((attempt*30))
+          done
+      - name: Stage per-target artifacts
+        run: |
+          set -euo pipefail
+          DIST="deployment/k8s/aws/build/dist/0.0.0-ci"
+          mkdir -p staged-bin staged-shared
+          cp "${DIST}/migration-assistant-${{ matrix.target }}" staged-bin/
+          # Shared artifacts (install.sh, VERSION.txt, bundle) come from
+          # the linux x86_64 leg only — single source of truth.
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            cp "${DIST}/install.sh" \
+               "${DIST}/VERSION.txt" \
+               "${DIST}/migration-assistant-bundle.tar.gz" \
+               staged-shared/
+          fi
+      - name: Upload per-target binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cli-bin-${{ matrix.target }}
+          path: staged-bin/
+          if-no-files-found: error
+      - name: Upload shared artifacts (linux x86_64 only)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cli-shared
+          path: staged-shared/
+          if-no-files-found: error
+
+  # Post-build validation: downloads all artifacts, runs the linux binary,
+  # and validates the install script.
+  smoke:
+    needs: [build]
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Download all CLI artifacts
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          path: cli-artifacts
+          pattern: cli-*
+          merge-multiple: true
+      - name: List downloaded artifacts
+        run: ls -la cli-artifacts/
+      - name: Smoke test version on linux binary
+        run: |
+          set -euo pipefail
+          chmod +x cli-artifacts/migration-assistant-x86_64-unknown-linux-gnu
+          # Place VERSION.txt next to the binary for runtime resolution
+          cp cli-artifacts/VERSION.txt "$(dirname cli-artifacts/migration-assistant-x86_64-unknown-linux-gnu)/"
+          cli-artifacts/migration-assistant-x86_64-unknown-linux-gnu version
+      - name: Validate install.sh is well-formed bash
+        run: bash -n cli-artifacts/install.sh
+      - name: Validate VERSION.txt exists and is non-empty
+        run: |
+          set -euo pipefail
+          test -s cli-artifacts/VERSION.txt
+          echo "VERSION.txt content: $(cat cli-artifacts/VERSION.txt)"
+      - name: Validate bundle tarball exists
+        run: test -f cli-artifacts/migration-assistant-bundle.tar.gz

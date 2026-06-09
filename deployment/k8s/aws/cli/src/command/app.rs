@@ -528,20 +528,24 @@ impl<'r, R: CommandRunner> App<'r, R> {
             }
             Ok(path)
         } else {
-            let ver = self.release_version()?;
-            let repo = self.repo();
-            let url = format!(
-                "{}/{}",
-                artifact::release_base_url(&repo, &ver),
-                variant.template_name()
-            );
-            let dest = std::env::temp_dir()
-                .join(format!("ma-template-{}.json", std::process::id()))
-                .to_string_lossy()
-                .to_string();
-            ui::step(&format!("Downloading CFN template {ver}"));
-            self.download_artifact(&url, &dest, "CFN template")?;
-            Ok(dest)
+            let bundle = artifact::bundle_dir().ok_or_else(|| {
+                Error::die(
+                    "cannot locate CFN templates: not running from an installed bundle \
+                     and --build was not passed. Re-run install.sh or pass --build with --base-dir.",
+                )
+            })?;
+            let cfn_dir = artifact::bundled_cfn_dir(&bundle);
+            let template = cfn_dir
+                .join("cdk.out-minified")
+                .join(variant.template_name());
+            if !template.is_file() {
+                return Err(Error::die(format!(
+                    "CFN template not found in bundle: {} (run `cdk synth` in {:?} or reinstall)",
+                    template.display(),
+                    cfn_dir
+                )));
+            }
+            Ok(template.to_string_lossy().to_string())
         }
     }
 
@@ -974,87 +978,24 @@ impl<'r, R: CommandRunner> App<'r, R> {
             }
             return Ok((chart, values));
         }
-        let ver = self.release_version()?;
-        let repo = self.repo();
-        let name = artifact::chart_tarball_name(&ver);
-        let url = format!("{}/{}", artifact::release_base_url(&repo, &ver), name);
-        let tmp = std::env::temp_dir();
-        let dest = tmp.join(&name).to_string_lossy().to_string();
-        ui::step(&format!("Downloading helm chart {ver}"));
-        self.download_artifact(&url, &dest, "helm chart")?;
-        // Extract the bundled values files (helm can't reference paths inside a
-        // tgz). The chart packs them under `migration-assistant/`.
-        let tmp_str = tmp.to_string_lossy().to_string();
-        self.runner.run(
-            "tar",
-            &[
-                "xzf",
-                &dest,
-                "-C",
-                &tmp_str,
-                "migration-assistant/values.yaml",
-                "migration-assistant/valuesEks.yaml",
-            ],
-        );
-        let mut values = vec![
-            tmp.join("migration-assistant/values.yaml")
-                .to_string_lossy()
-                .to_string(),
-            tmp.join("migration-assistant/valuesEks.yaml")
-                .to_string_lossy()
-                .to_string(),
-        ];
+        let bundle = artifact::bundle_dir().ok_or_else(|| {
+            Error::die(
+                "cannot locate helm chart: not running from an installed bundle \
+                 and --build was not passed. Re-run install.sh or pass --build with --base-dir.",
+            )
+        })?;
+        let chart = artifact::bundled_chart_dir(&bundle);
+        if !chart.join("Chart.yaml").is_file() {
+            return Err(Error::die(format!(
+                "helm chart not found in bundle: {} (reinstall the bundle)",
+                chart.display()
+            )));
+        }
+        let mut values = artifact::bundled_chart_values(&bundle);
         if !extra.is_empty() {
             values.push(extra);
         }
-        Ok((dest, values))
-    }
-
-    /// Download `url` to `dest`, streaming progress and failing FAST on a stall
-    /// instead of hanging silently forever.
-    ///
-    /// The release lane previously used a bare `curl -fsSL -o dest url`: `-s`
-    /// silences all output and there is no timeout, so if the GitHub →
-    /// object-store (S3) redirect stalls, curl waits FOREVER with zero output —
-    /// the console looks frozen on `Downloading …` (exactly the "stuck
-    /// downloading helm chart" symptom). This hardens it with:
-    ///   * `--connect-timeout`/`--max-time` — a stalled connection fails fast
-    ///     with a clear error rather than hanging,
-    ///   * `--retry` — ride out transient network blips, and
-    ///   * streamed output via [`run_streamed`](crate::runner::CommandRunner::run_streamed)
-    ///     plus `-#` (progress bar, no `-s`) so the operator SEES the download
-    ///     move — or sees the error — live.
-    fn download_artifact(&self, url: &str, dest: &str, what: &str) -> Result<()> {
-        let out = self.runner.run_streamed(
-            "curl",
-            &[
-                "-fL",
-                "--connect-timeout",
-                "30",
-                "--max-time",
-                "300",
-                "--retry",
-                "3",
-                "--retry-delay",
-                "2",
-                "--retry-connrefused",
-                "-#",
-                "-o",
-                dest,
-                url,
-            ],
-            &[],
-            "curl",
-        );
-        if !out.success() || !std::path::Path::new(dest).is_file() {
-            return Err(Error::die(format!(
-                "failed to download {what} from {url} (curl rc={}). \
-                 Check network/proxy reachability — verify manually with: \
-                 curl -fL -o /dev/null {url}",
-                out.status
-            )));
-        }
-        Ok(())
+        Ok((chart.to_string_lossy().to_string(), values))
     }
 
     /// The repo root for `--build` (`--base-dir`), error if missing on a build run.
@@ -1101,29 +1042,6 @@ impl<'r, R: CommandRunner> App<'r, R> {
             }
         }
         "latest".to_string()
-    }
-
-    /// The release version for the download lane: `local-build` under `--build`,
-    /// else the explicit `--version` / saved `MA_VERSION`.
-    fn release_version(&self) -> Result<String> {
-        if self.is_build() {
-            return Ok("local-build".to_string());
-        }
-        let v = self.state.get_owned("MA_VERSION", "");
-        if v.is_empty() {
-            return Err(Error::die(
-                "no version to deploy: pass --version <ver> or --build",
-            ));
-        }
-        Ok(v)
-    }
-
-    /// The GitHub repo slug for artifact URLs (overridable via `DEFAULT_REPO`).
-    fn repo(&self) -> String {
-        std::env::var("DEFAULT_REPO")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "opensearch-project/opensearch-migrations".to_string())
     }
 }
 
@@ -1392,24 +1310,29 @@ mod tests {
     // ---- headless-deploy artifact resolution + EKS access + build ----
 
     #[test]
-    fn resolve_template_downloads_release_when_not_build() {
+    fn resolve_template_uses_bundle_when_not_build() {
         let dir = tempfile::tempdir().unwrap();
-        // curl writes the file the resolver checks for; emulate by stubbing curl
-        // success AND pre-creating the dest the resolver computes.
-        let r = MockRunner::new().stub("curl", &["-o"], 0, "");
+        // Stage a bundle layout with cfn/cdk.out-minified/<template>.
+        let bundle = dir.path().join("bundle");
+        let helm_dir = bundle.join("helm/migrationAssistantWithArgo");
+        std::fs::create_dir_all(&helm_dir).unwrap();
+        std::fs::write(helm_dir.join("Chart.yaml"), "name: ma\n").unwrap();
+        let cfn_dir = bundle.join("cfn/cdk.out-minified");
+        std::fs::create_dir_all(&cfn_dir).unwrap();
+        std::fs::write(
+            cfn_dir.join("Migration-Assistant-Infra-Create-VPC-eks.template.json"),
+            "{}",
+        )
+        .unwrap();
+        // Point the resolver at the staged bundle via env override.
+        std::env::set_var("MIGRATE_BUNDLE_DIR", bundle.to_str().unwrap());
+        let r = MockRunner::new();
         let mut app = App::load(env_in(dir.path()), &r).unwrap();
-        app.state.set("MA_VERSION", "2.9.0");
         app.state.set("CFN_TEMPLATE_VARIANT", "create-vpc");
-        // Pre-create the temp dest so the is_file() check passes (curl is mocked).
-        let dest = std::env::temp_dir().join(format!("ma-template-{}.json", std::process::id()));
-        std::fs::write(&dest, "{}").unwrap();
         let path = app.resolve_cfn_template().unwrap();
-        assert_eq!(path, dest.to_string_lossy());
-        let call = r.calls_to("curl").into_iter().next().unwrap().joined();
-        assert!(call.contains(
-            "releases/download/2.9.0/Migration-Assistant-Infra-Create-VPC-eks.template.json"
-        ));
-        let _ = std::fs::remove_file(&dest);
+        std::env::remove_var("MIGRATE_BUNDLE_DIR");
+        assert!(path.ends_with("Migration-Assistant-Infra-Create-VPC-eks.template.json"));
+        assert!(std::path::Path::new(&path).is_file());
     }
 
     #[test]
