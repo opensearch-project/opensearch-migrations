@@ -649,6 +649,7 @@ public class TrafficReplayer {
         );
 
         ActiveContextMonitor activeContextMonitor = null;
+        ThreadLocalTupleWriter tupleWriter = null;
         try (
             var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(
                 topContext,
@@ -738,7 +739,7 @@ public class TrafficReplayer {
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
-            var tupleWriter = createS3TupleWriterIfConfigured(
+            tupleWriter = createS3TupleWriterIfConfigured(
                 params,
                 () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig)
             );
@@ -766,6 +767,9 @@ public class TrafficReplayer {
             }
             log.info("Done processing TrafficStreams");
         } finally {
+            if (tupleWriter != null) {
+                tupleWriter.close();
+            }
             scheduledExecutorService.shutdown();
             if (activeContextMonitor != null) {
                 var acmLevel = globalContextTracker.getActiveScopesByAge().findAny().isPresent()

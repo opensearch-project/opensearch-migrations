@@ -44,7 +44,7 @@ OpenSearch Migration Assistant is a comprehensive set of tools designed to facil
 
 - **User-Friendly Interface via [Migration Console](https://github.com/opensearch-project/opensearch-migrations/blob/main/docs/migration-console.md)**: Command Line Interface (CLI) that guides you through each migration step.
 
-- **AI-Assisted Migration with [Kiro](kiro-cli/README.md)**: An AI agent that can guide you through the entire migration process — from source discovery to target provisioning to data migration. See [`agent-sops/`](agent-sops/) for the standard operating procedures and [`kiro-cli/`](kiro-cli/) for configuration.
+- **AI-Assisted Migration with Kiro**: An AI agent that can guide you through the entire migration process — from source discovery to target provisioning to data migration. See [`agent-sops/`](agent-sops/) for the standard operating procedures and [`agent-skills/kiro/`](agent-skills/kiro/) for configuration.
 
 - **Flexible Deployment Options**:
   - **[AWS Deployment](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/)**: Fully automated deployment to AWS.
