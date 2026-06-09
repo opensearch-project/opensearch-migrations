@@ -118,19 +118,19 @@ val versionCheck = tasks.register("versionCheck") {
 // One helper to set up rustup-aware Exec tasks. `cargo` from rustup's
 // shim respects the toolchain in `rust-toolchain.toml` if present.
 //
-// `injectVersion` controls whether we add `--config
-// 'package.version=$tuiVersion'`. For build/test we inject so the
-// compiled binary reports the right version; for clippy we don't —
-// clippy doesn't care about version and it just adds noise.
-fun Exec.cargoSetup(action: String, vararg args: String, injectVersion: Boolean = true) {
+// Cargo.toml's package.version stays at the perma-placeholder
+// '0.0.0-dev' (enforced by versionCheck). The runtime --version output
+// comes from VERSION.txt (see src/version.rs), not CARGO_PKG_VERSION,
+// so we don't override package.version at build time. An earlier
+// version of this file passed `--config package.version=…`, which
+// (a) was silently ignored on linux/macOS — `package` is a manifest
+// key, not a --config key — and (b) failed outright on Windows
+// because Java's ProcessBuilder mangles embedded double-quotes when
+// serializing argv to a Windows command line.
+fun Exec.cargoSetup(action: String, vararg args: String) {
     workingDir = layout.projectDirectory.asFile
     executable = "cargo"
     val argv = mutableListOf<String>()
-
-    // --config flags must come BEFORE the subcommand.
-    if (injectVersion) {
-        argv += listOf("--config", "package.version=\"$tuiVersion\"")
-    }
 
     argv += action
     if (target != null && action != "clippy") {
@@ -153,7 +153,7 @@ val cargoClippy = tasks.register<Exec>("cargoClippy") {
     description = "cargo clippy --all-targets -- -D warnings"
     dependsOn(versionCheck)
     inputs.files(rustSourceTree)
-    cargoSetup("clippy", "--all-targets", "--", "-D", "warnings", injectVersion = false)
+    cargoSetup("clippy", "--all-targets", "--", "-D", "warnings")
 }
 
 val cargoBuild = tasks.register<Exec>("cargoBuild") {
