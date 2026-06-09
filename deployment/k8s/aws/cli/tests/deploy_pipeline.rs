@@ -35,16 +35,11 @@ fn happy_deploy_runner() -> MockRunner {
         .with_command("aws")
         .with_command("kubectl")
         .with_command("helm")
-        .with_command("crane")
         .with_command("bash")
         // Stack doesn't exist yet -> deploy runs.
         .stub("aws", &["describe-stacks"], 0, STACK_OUTPUTS)
         .stub("aws", &["cloudformation", "deploy"], 0, "")
         .stub("aws", &["eks", "update-kubeconfig"], 0, "")
-        .stub("aws", &["ecr", "create-repository"], 0, "{}")
-        // ECR login is now an `aws … | crane auth login …` pipe via `bash -c`.
-        .stub("bash", &["crane auth login"], 0, "")
-        .stub("crane", &["copy"], 0, "Copied")
         .stub("helm", &["status"], 1, "") // release absent
         .stub("helm", &["upgrade", "--install"], 0, "")
         .stub("kubectl", &["get", "namespace"], 0, "")
@@ -72,11 +67,9 @@ fn full_manual_pipeline_runs_each_phase_in_order_and_records_last_step() {
     let ctx = app.kubeconfig_setup().unwrap();
     assert_eq!(ctx, "migration-eks-cluster-prod-us-east-1");
 
-    // 3. Image mirror — skipped (MIRROR_IMAGES=N): real OCI copies require
-    //    live ECR credentials which aren't available in unit tests.
-    let images = vec!["quay.io/strimzi/kafka:0.50.1".to_string()];
-    app.crane_mirror_or_skip(&images).unwrap();
-    assert_eq!(app.state.resumable_step(), "crane_skipped");
+    // 3. Image mirror — skipped (MIRROR_IMAGES=N).
+    let values = app.mirror_images_and_charts().unwrap();
+    assert!(values.is_empty());
 
     // 4. helm install + readiness wait.
     app.helm_install_or_upgrade("/charts/ma.tgz", &["/values.yaml".to_string()])
@@ -140,17 +133,14 @@ fn healthy_stack_skips_cfn_deploy_but_still_advances() {
 }
 
 #[test]
-fn mirror_disabled_skips_crane_entirely() {
+fn mirror_disabled_skips_entirely() {
     let home = tempfile::tempdir().unwrap();
     let runner = MockRunner::new();
     let mut app = App::load(temp_env(home.path(), "prod"), &runner).unwrap();
     app.state.set("MIRROR_IMAGES", "N");
 
-    app.crane_mirror_or_skip(&["any:image".to_string()])
-        .unwrap();
-
-    assert_eq!(app.state.resumable_step(), "crane_skipped");
-    assert!(runner.calls_to("crane").is_empty());
+    let values = app.mirror_images_and_charts().unwrap();
+    assert!(values.is_empty());
 }
 
 #[test]

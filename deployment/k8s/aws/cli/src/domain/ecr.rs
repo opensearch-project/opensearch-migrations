@@ -26,9 +26,19 @@ pub fn get_caller_identity() -> std::result::Result<AwsIdentity, String> {
             .send()
             .await
             .map_err(|e| format!("sts:GetCallerIdentity: {e}"))?;
+        let account = resp
+            .account()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "STS returned no account".to_string())?
+            .to_string();
+        let arn = resp
+            .arn()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| "STS returned no ARN".to_string())?
+            .to_string();
         Ok(AwsIdentity {
-            account: resp.account().unwrap_or("").to_string(),
-            arn: resp.arn().unwrap_or("").to_string(),
+            account,
+            arn,
             region,
         })
     })
@@ -75,12 +85,9 @@ pub fn create_repository(repo_name: &str, region: &str) -> std::result::Result<(
     })
 }
 
-/// Get an ECR authorization token (base64 `user:password`) for the given
-/// registry host. Returns `(username, password)` decoded from the token.
-pub fn get_ecr_credentials(
-    _registry_host: &str,
-    region: &str,
-) -> std::result::Result<(String, String), String> {
+/// Get an ECR authorization token. Returns `(username, password)` decoded
+/// from the base64 token. The token is account-global (not registry-specific).
+pub fn get_ecr_credentials(region: &str) -> std::result::Result<(String, String), String> {
     let region_owned = region.to_string();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

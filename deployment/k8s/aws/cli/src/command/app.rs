@@ -12,7 +12,6 @@
 use crate::artifact;
 use crate::cfn;
 use crate::config::Env;
-use crate::crane;
 use crate::ecr as ecr_sdk;
 use crate::error::{Error, Result};
 use crate::helm;
@@ -275,98 +274,9 @@ impl<'r, R: CommandRunner> App<'r, R> {
     /// already mirrored. Advances `last_step` to `crane_done` (or
     /// `crane_skipped`). `images` is the resolved image list (one ref per
     /// line).
-    pub fn crane_mirror_or_skip(&mut self, images: &[String]) -> Result<()> {
-        if self.state.get_or("MIRROR_IMAGES", "Y") != "Y" {
-            ui::info("MIRROR_IMAGES=N → skipping crane mirror");
-            self.state.set("last_step", "crane_skipped");
-            self.state.save()?;
-            return Ok(());
-        }
-        if self.state.get_or("CRANE_MIRRORED", "0") == "1" {
-            ui::ok("images already mirrored (per state); skipping");
-            return Ok(());
-        }
-
-        let region = self.state.get_owned("AWS_REGION", "");
-        let account = self.state.get_owned("AWS_ACCOUNT", "");
-        let stack = self.state.get_owned("CFN_STACK_NAME", "");
-        let outputs = self.cfn_outputs(&stack, &region);
-        let registry = cfn::pick(&outputs, &["MIGRATIONS_ECR_REGISTRY", "ECRRegistry"])
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("{account}.dkr.ecr.{region}.amazonaws.com"));
-        let ecr_host = registry.split('/').next().unwrap_or(&registry).to_string();
-
-        let creds = self.ecr_creds(&ecr_host, &region);
-        if creds.is_empty() {
-            return Err(Error::die("ECR auth failed — could not obtain credentials"));
-        }
-
-        let retry = OciRetry::from_env();
-        self.mirror_third_party_images(images, &ecr_host, &region, &creds, retry)?;
-        if self.state.get_or("MA_IMAGES_PREMIRRORED", "N") != "Y" {
-            self.mirror_ma_images(&registry, &creds, retry)?;
-        }
-
-        self.state.set("CRANE_REGISTRY", &registry);
-        self.state.set("CRANE_ECR_HOST", &ecr_host);
-        self.state.set("CRANE_MIRRORED", "1");
-        self.state.set("last_step", "crane_done");
-        self.state.save()?;
-        ui::ok("images mirrored");
-        Ok(())
-    }
-
-    /// Mirror the third-party image list into `<ecr_host>/mirrored/...`,
-    /// pre-creating each ECR repo via the SDK and copying via oci-distribution.
-    fn mirror_third_party_images(
-        &self,
-        images: &[String],
-        ecr_host: &str,
-        region: &str,
-        creds: &[RegistryCred],
-        retry: OciRetry,
-    ) -> Result<()> {
-        let mut failed = 0usize;
-        for src in images.iter().filter(|s| !s.is_empty()) {
-            let dst = crane::dst_for(src, ecr_host);
-            let repo = crane::ecr_repo_for(src);
-            // Pre-create the ECR repo idempotently via SDK.
-            if let Err(e) = ecr_sdk::create_repository(&repo, region) {
-                ui::warn(&format!("create-repository {repo}: {e}"));
-            }
-            if !retry.copy(src, &dst, creds) {
-                failed += 1;
-            }
-        }
-        if failed > 0 {
-            return Err(Error::die(format!("{failed} images failed to mirror")));
-        }
-        Ok(())
-    }
-
-    /// Mirror the MA-team images into the single registry repo with the
-    /// disambiguating `migrations_<name>_<ver>` tags the chart expects.
-    fn mirror_ma_images(
-        &self,
-        registry: &str,
-        creds: &[RegistryCred],
-        retry: OciRetry,
-    ) -> Result<()> {
-        let ma_ver = self.state.get_owned("MA_VERSION", "");
-        let ma_src = self.state.get_owned("MA_IMAGES_SOURCE", "");
-        let source = (!ma_src.is_empty()).then_some(ma_src.as_str());
-        for (build_name, suffix) in crane::MA_IMAGE_PAIRS {
-            let (src, dst) = crane::ma_image_copy(build_name, suffix, registry, &ma_ver, source);
-            if !retry.copy(&src, &dst, creds) {
-                return Err(Error::die(format!("MA-image mirror failed: {src}")));
-            }
-        }
-        Ok(())
-    }
-
     /// Obtain ECR credentials for `registry_host` via the AWS SDK.
     fn ecr_creds(&self, registry_host: &str, region: &str) -> Vec<RegistryCred> {
-        match ecr_sdk::get_ecr_credentials(registry_host, region) {
+        match ecr_sdk::get_ecr_credentials(region) {
             Ok((user, pass)) => vec![RegistryCred {
                 registry: registry_host.to_string(),
                 username: user,
@@ -950,12 +860,30 @@ impl<'r, R: CommandRunner> App<'r, R> {
 
     fn mirror_helm_charts(&self, ecr_host: &str, region: &str) -> Result<()> {
         ui::step("Mirroring helm charts to private ECR");
-        let login_script = format!(
-            "aws ecr get-login-password --region {region} | \
-             helm registry login {ecr_host} -u AWS --password-stdin"
-        );
-        if !self.runner.run("bash", &["-c", &login_script]).success() {
-            ui::warn("helm ECR login failed — chart mirror may fail");
+        match ecr_sdk::get_ecr_credentials(region) {
+            Ok((_user, pass)) => {
+                let login = self.runner.run(
+                    "helm",
+                    &[
+                        "registry",
+                        "login",
+                        ecr_host,
+                        "-u",
+                        "AWS",
+                        "--password-stdin",
+                    ],
+                );
+                // helm registry login doesn't support --password-stdin via
+                // runner (no stdin pipe), so write a temp script.
+                if !login.success() {
+                    let script =
+                        format!("echo '{}' | helm registry login {ecr_host} -u AWS --password-stdin", pass.replace('\'', "'\\''"));
+                    if !self.runner.run("bash", &["-c", &script]).success() {
+                        ui::warn("helm ECR login failed — chart mirror may fail");
+                    }
+                }
+            }
+            Err(e) => ui::warn(&format!("ECR auth for helm: {e} — chart mirror may fail")),
         }
         let mut failed = 0usize;
         for chart in crate::mirror::CHARTS {
@@ -1378,13 +1306,13 @@ mod tests {
     }
 
     #[test]
-    fn crane_skips_when_mirror_off() {
+    fn mirror_skips_when_disabled() {
         let dir = tempfile::tempdir().unwrap();
         let r = MockRunner::new();
         let mut app = App::load(env_in(dir.path()), &r).unwrap();
         app.state.set("MIRROR_IMAGES", "N");
-        app.crane_mirror_or_skip(&[]).unwrap();
-        assert_eq!(app.state.resumable_step(), "crane_skipped");
+        let values = app.mirror_images_and_charts().unwrap();
+        assert!(values.is_empty());
     }
 
     #[test]
