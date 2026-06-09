@@ -102,11 +102,29 @@ jobs:
       - name: Build TUI release artifacts
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+        # Retry up to 3 times to absorb transient 503s from
+        # plugins.gradle.org during cold buildSrc resolve. We've seen
+        # this fail Windows runners specifically when the Gradle
+        # dependency cache is empty — buildSrc pulls jib + http-client
+        # transitive deps from the plugin portal and gets rate-limited
+        # mid-resolve. Linux runners typically have a warmer cache.
+        # The build itself is idempotent so retrying is safe.
         run: |
-          ./gradlew :tui:release:assemble \
-            -PtuiVersion=${{ needs.extract-version.outputs.version }} \
-            -Ptarget=${{ matrix.target }} \
-            --no-daemon
+          set -euo pipefail
+          attempt=0
+          max_attempts=3
+          until ./gradlew :tui:release:assemble \
+              -PtuiVersion=${{ needs.extract-version.outputs.version }} \
+              -Ptarget=${{ matrix.target }} \
+              --no-daemon; do
+            attempt=$((attempt+1))
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::gradle assemble failed after ${max_attempts} attempts"
+              exit 1
+            fi
+            echo "::warning::gradle assemble attempt ${attempt} failed; retrying in $((attempt*30))s"
+            sleep $((attempt*30))
+          done
       - name: Stage per-target artifacts
         # The dist directory for ALL matrix runs has the same name (the
         # version), so we stage into target-namespaced sub-dirs so
