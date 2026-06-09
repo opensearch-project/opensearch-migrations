@@ -1,0 +1,557 @@
+plugins {
+    id 'base'
+}
+
+// =============================================================================
+// deployment/k8s/aws/build.gradle
+//
+// One output: a release tarball of the migration-assistant CLI plus a
+// curl-pipe install.sh keyed to the same release.
+//
+//   build/migrate-cli-dist/migration-assistant-cli-<version>.tar.gz
+//   build/migrate-cli-dist/install.sh
+//
+// Operators install via:
+//   curl -fsSL https://github.com/<owner>/<repo>/releases/<ver>/download/install.sh | bash
+//
+// The CLI is a Rust crate rooted at deployment/k8s/aws/cli/. The build
+// `cargo build --release`s it with CLI_VERSION stamped into the binary, then
+// stages a self-contained bundle:
+//
+//   migration-assistant-cli-<ver>/
+//     bin/migration-assistant         the source-checkout wrapper (also runs
+//                                      the prebuilt binary when present)
+//     bin/migration-assistant-bin     the compiled release binary (so installs
+//                                      need NO Rust toolchain)
+//     skills/...                      the agent-skills bundle (Startup.md,
+//                                      manifest.json, <skill>/SKILL.md, kiro/)
+//     manifest.json                   promoted to root for fast resolution
+//     install.sh, README, LICENSE
+//
+// `assemble` (the base plugin's lifecycle) depends on
+// packageMigrationAssistantCli. The CLI is ALSO runnable directly out of the
+// source checkout (deployment/k8s/aws/cli/bin/migration-assistant builds on
+// first use); Jenkins / awsRunEksValidation.sh do exactly that.
+//
+// Gradle note: execution-time work (exec, copy) uses the injected
+// ExecOperations / FileSystemOperations services on abstract task types — NOT
+// Project.exec/Project.copy, which are deprecated and removed in Gradle 9.
+// This mirrors deployment/migration-assistant-solution.
+// =============================================================================
+
+import org.gradle.api.tasks.Internal
+import org.gradle.process.ExecOperations
+import org.gradle.api.file.FileSystemOperations
+import javax.inject.Inject
+
+configurations {
+    agentSkills {
+        canBeConsumed = false
+        canBeResolved = true
+    }
+}
+
+dependencies {
+    // Pull in agent-skills.tar.gz from the agent-skills module's declared
+    // producer artifact. A change to any skill file (Startup.md, manifest.json,
+    // any skills/<name>/SKILL.md, the kiro config) triggers a rebuild of the CLI
+    // tarball -- no copy-by-hand drift. Partner packs add new skills the same
+    // way: drop a skills/<your-skill>/SKILL.md into the producer.
+    agentSkills project(path: ':agent-skills', configuration: 'agentSkills')
+}
+
+def cliVersionProvider = providers.environmentVariable('CLI_VERSION')
+        .orElse(providers.gradleProperty('cliVersion'))
+        .orElse(provider {
+            // Fall back to "0.0.0-dev-<git-short-sha>" so each commit gets its
+            // own cache slot.
+            def execResult = providers.exec {
+                workingDir = rootDir
+                commandLine 'git', 'rev-parse', '--short=10', 'HEAD'
+                setIgnoreExitValue(true)
+            }
+            def rc = execResult.result.get().exitValue
+            def sha = rc == 0 ? execResult.standardOutput.asText.get().trim() : ''
+            sha ? "0.0.0-dev-${sha}" : '0.0.0-dev'
+        })
+
+def defaultRepoProvider = providers.environmentVariable('DEFAULT_REPO')
+        .orElse(providers.gradleProperty('defaultRepo'))
+        .orElse('opensearch-project/opensearch-migrations')
+
+def distDirProvider = layout.buildDirectory.dir('migrate-cli-dist')
+
+// Rust toolchain provisioning knobs. The repo auto-provisions its JVM toolchain
+// (gradle.properties: org.gradle.java.installations.auto-download=true + pinned
+// Corretto JDK 21). Rust has no Gradle toolchain provider, so we mirror that:
+// if `cargo` isn't on PATH (e.g. a fresh Jenkins agent), bootstrap rustup into
+// a Gradle-managed home. The exact toolchain is pinned in cli/rust-toolchain.toml.
+// Opt out with -PrustAutoProvision=false (then a missing cargo is a hard error).
+def rustAutoProvisionProvider = providers.gradleProperty('rustAutoProvision')
+        .orElse(providers.environmentVariable('MIGRATE_RUST_AUTO_PROVISION'))
+        .orElse('true')
+def rustHomeProvider = providers.gradleProperty('rustHome')
+        .orElse(providers.environmentVariable('MIGRATE_RUST_HOME'))
+        .orElse(new File(gradle.gradleUserHomeDir, 'rust').absolutePath)
+def rustupInitUrlProvider = providers.gradleProperty('rustupInitUrl')
+        .orElse(providers.environmentVariable('RUSTUP_INIT_URL'))
+        .orElse('https://sh.rustup.rs')
+
+// `cross` fallback knobs. Some agents (the Jenkins EKS hosts) can provision a
+// Rust toolchain via rustup but have NO system C linker (`cc`), so a plain
+// `cargo build` fails at link time. When that happens AND a Docker daemon is
+// present, the build downloads a prebuilt `cross` binary and compiles inside a
+// cross container (which ships the C toolchain), then copies the artifact back
+// to the canonical target/release path. No host C toolchain, no libc recompile.
+//   - crossVersion: the cross release to download (pins the container image tag).
+//   - crossTarget:  the Linux triple to build (the deployment + agent target).
+//   - forceCross:   force the cross path even when a linker is present (testing).
+def crossVersionProvider = providers.gradleProperty('crossVersion')
+        .orElse(providers.environmentVariable('MIGRATE_CROSS_VERSION'))
+        .orElse('0.2.5')
+def crossTargetProvider = providers.gradleProperty('crossTarget')
+        .orElse(providers.environmentVariable('MIGRATE_CROSS_TARGET'))
+        .orElse('x86_64-unknown-linux-gnu')
+def forceCrossProvider = providers.gradleProperty('forceCross')
+        .orElse(providers.environmentVariable('MIGRATE_FORCE_CROSS'))
+        .orElse('false')
+
+// ---------- (0) compile the Rust CLI ----------
+
+abstract class BuildCliBinaryTask extends DefaultTask {
+    @Inject abstract ExecOperations getExec()
+
+    @InputFiles abstract ConfigurableFileCollection getSources()
+    @Input abstract Property<String> getCliVersion()
+    @Input abstract Property<String> getRustAutoProvision()
+    @Input abstract Property<String> getRustHome()
+    @Input abstract Property<String> getRustupInitUrl()
+    @Input abstract Property<String> getCrossVersion()
+    @Input abstract Property<String> getCrossTarget()
+    @Input abstract Property<String> getForceCross()
+    @OutputFile abstract RegularFileProperty getOutBinary()
+    @Internal abstract DirectoryProperty getCrateDir()
+
+    private static boolean isWindows() {
+        org.gradle.internal.os.OperatingSystem.current().isWindows()
+    }
+
+    // Resolve a cargo path + env, provisioning rustup into the managed home
+    // when `cargo` isn't already on PATH.
+    private Map resolveCargo() {
+        def cargoName = isWindows() ? 'cargo.exe' : 'cargo'
+        def onPath = System.getenv('PATH')?.split(File.pathSeparator)?.collect {
+            new File(it, cargoName)
+        }?.find { it.canExecute() }
+        if (onPath != null) {
+            return [cargo: onPath.absolutePath, env: [:]]
+        }
+
+        def home = new File(rustHome.get())
+        def cargoHome = new File(home, 'cargo')
+        def rustupHome = new File(home, 'rustup')
+        def cargoBin = new File(cargoHome, "bin/${cargoName}")
+        def env = [
+                CARGO_HOME : cargoHome.absolutePath,
+                RUSTUP_HOME: rustupHome.absolutePath,
+                PATH       : "${new File(cargoHome, 'bin').absolutePath}${File.pathSeparator}${System.getenv('PATH')}".toString(),
+        ]
+        if (cargoBin.canExecute()) {
+            return [cargo: cargoBin.absolutePath, env: env]
+        }
+        if (!Boolean.parseBoolean(rustAutoProvision.get())) {
+            throw new GradleException(
+                    "cargo not found and rust auto-provisioning is disabled " +
+                    "(-PrustAutoProvision=false). Install Rust (https://rustup.rs) or re-enable it.")
+        }
+        if (isWindows()) {
+            throw new GradleException(
+                    "cargo not found on PATH. Automatic rustup provisioning is Unix-only; " +
+                    "install Rust manually on Windows (https://rustup.rs).")
+        }
+        logger.lifecycle "cargo not found; provisioning rustup into ${home} (toolchain pinned by cli/rust-toolchain.toml)"
+        cargoHome.mkdirs(); rustupHome.mkdirs()
+        def initScript = new File(home, 'rustup-init.sh')
+        def dl = exec.exec {
+            ignoreExitValue = true
+            commandLine 'bash', '-c',
+                    "curl -fsSL --proto '=https' --tlsv1.2 '${rustupInitUrl.get()}' -o '${initScript.absolutePath}' " +
+                    "|| wget -qO '${initScript.absolutePath}' '${rustupInitUrl.get()}'"
+        }
+        if (dl.exitValue != 0 || !initScript.exists()) {
+            throw new GradleException("failed to download rustup installer from ${rustupInitUrl.get()}")
+        }
+        exec.exec {
+            environment env
+            commandLine 'bash', initScript.absolutePath,
+                    '-y', '--no-modify-path', '--profile', 'minimal', '--default-toolchain', 'none'
+        }
+        if (!cargoBin.canExecute()) {
+            throw new GradleException("rustup provisioning did not produce ${cargoBin}")
+        }
+        logger.lifecycle "provisioned rust toolchain manager at ${cargoBin}"
+        return [cargo: cargoBin.absolutePath, env: env]
+    }
+
+    @TaskAction
+    void build() {
+        def rust = resolveCargo()
+        def out = outBinary.get().asFile
+
+        // Native `cargo build` needs a system linker (`cc`). Some agents have a
+        // rustup toolchain but no C toolchain; there, link fails. If so (or when
+        // forced), and Docker is available, build via `cross` instead — it
+        // compiles inside a container that ships the C toolchain.
+        if (shouldUseCross(rust)) {
+            buildWithCross(rust, out)
+        } else {
+            buildWithCargo(rust, out)
+        }
+
+        if (!out.exists()) {
+            throw new GradleException("build did not produce ${out}")
+        }
+        logger.lifecycle "built ${out} (CLI_VERSION=${cliVersion.get()})"
+    }
+
+    // Plain `cargo build --release` into target/release/.
+    private void buildWithCargo(Map rust, File out) {
+        exec.exec {
+            workingDir crateDir.get().asFile
+            rust.env.each { k, v -> environment k, v }
+            environment 'CLI_VERSION', cliVersion.get()
+            commandLine rust.cargo, 'build', '--release', '--locked'
+        }
+    }
+
+    // Decide whether to route through `cross`. Forced via -PforceCross=true;
+    // otherwise auto-trip only when there's no usable C linker on PATH (the
+    // exact condition that breaks native builds on the Jenkins EKS agents).
+    private boolean shouldUseCross(Map rust) {
+        if (Boolean.parseBoolean(forceCross.get())) {
+            logger.lifecycle 'cross: forced on (-PforceCross / MIGRATE_FORCE_CROSS)'
+            return true
+        }
+        if (isWindows() || hasLinker()) {
+            return false
+        }
+        if (!hasDocker()) {
+            // No linker AND no Docker — let the native build run and produce a
+            // clear linker error rather than a confusing "docker not found".
+            logger.warn 'cross: no C linker found and no Docker daemon — native build will likely fail to link'
+            return false
+        }
+        logger.lifecycle 'cross: no C linker (`cc`) found but Docker is available — building in a cross container'
+        return true
+    }
+
+    // Is a C linker (`cc`) on PATH? rustc shells out to it to link the binary.
+    private boolean hasLinker() {
+        ['cc', 'gcc', 'clang'].any { name ->
+            System.getenv('PATH')?.split(File.pathSeparator)?.any {
+                new File(it, name).canExecute()
+            }
+        }
+    }
+
+    // Is a Docker daemon reachable? `cross` does `docker run`, so a CLI on PATH
+    // is not enough — the daemon must answer `docker info`.
+    private boolean hasDocker() {
+        def onPath = System.getenv('PATH')?.split(File.pathSeparator)?.any {
+            new File(it, 'docker').canExecute()
+        }
+        if (!onPath) {
+            return false
+        }
+        def rc = exec.exec {
+            ignoreExitValue = true
+            commandLine 'docker', 'info'
+            standardOutput = new ByteArrayOutputStream()
+            errorOutput = new ByteArrayOutputStream()
+        }
+        return rc.exitValue == 0
+    }
+
+    // Build with `cross`: provision a prebuilt cross binary (no compile needed,
+    // so it works on a host with no linker), run it for the Linux target, then
+    // copy the artifact from target/<triple>/release/ back to target/release/
+    // so the wrapper + packaging contract (target/release/migration-assistant)
+    // is unchanged regardless of how the binary was produced.
+    private void buildWithCross(Map rust, File out) {
+        def crossBin = provisionCross(rust)
+        def target = crossTarget.get()
+
+        // Diagnostics: cross shells out to `docker run`, bind-mounting the crate
+        // dir + the rustup home into its container. The exact paths + engine
+        // version are the first things to check if a run fails, so log them.
+        logger.lifecycle "cross: target=${target} crate=${crateDir.get().asFile} rustHome=${rustHome.get()}"
+        logger.lifecycle "cross: CARGO_HOME=${rust.env['CARGO_HOME'] ?: '(host default)'} RUSTUP_HOME=${rust.env['RUSTUP_HOME'] ?: '(host default)'}"
+        exec.exec {
+            ignoreExitValue = true
+            commandLine 'docker', 'version', '--format', '{{.Server.Version}} (api {{.Server.APIVersion}})'
+        }
+
+        // Build with up to 3 attempts: the cargo registry fetch occasionally
+        // flakes on the CI agents (crates.io HTTP2 framing errors / transient
+        // download failures), which would otherwise fail the whole 100-min EKS
+        // run. Retrying the compile is cheap relative to that. A genuine compile
+        // error fails all 3 the same way; only transient network errors recover.
+        def attempts = 3
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            def res = exec.exec {
+                ignoreExitValue = true
+                workingDir crateDir.get().asFile
+                rust.env.each { k, v -> environment k, v }
+                environment 'CLI_VERSION', cliVersion.get()
+                // Verbose so the container's cargo output (and any mount/link
+                // error) lands on the Jenkins console rather than summarized away.
+                environment 'CROSS_CONTAINER_OPTS', System.getenv('CROSS_CONTAINER_OPTS') ?: ''
+                // cross reads the same rustup home; it picks its image per
+                // --target, so the host arch needs no matching cargo toolchain.
+                commandLine crossBin.absolutePath, 'build', '--release', '--locked', '--target', target, '--verbose'
+            }
+            if (res.exitValue == 0) {
+                break
+            }
+            if (attempt == attempts) {
+                throw new GradleException("cross build failed after ${attempts} attempts (rc=${res.exitValue})")
+            }
+            logger.warn "cross build attempt ${attempt}/${attempts} failed (rc=${res.exitValue}); retrying in 10s (transient crates.io/network errors recover on retry)"
+            sleep(10_000)
+        }
+        def produced = new File(crateDir.get().asFile, "target/${target}/release/${out.name}")
+        if (!produced.exists()) {
+            throw new GradleException(
+                    "cross build did not produce ${produced}. " +
+                    "Check the cross/docker output above (common causes: docker daemon " +
+                    "unreachable, or a bind-mount path not shared with the engine).")
+        }
+        out.parentFile.mkdirs()
+        java.nio.file.Files.copy(produced.toPath(), out.toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                java.nio.file.StandardCopyOption.COPY_ATTRIBUTES)
+        out.setExecutable(true)
+    }
+
+    // Download a prebuilt `cross` binary into the managed rust home's bin dir.
+    // Prefer one already on PATH; never `cargo install cross` (that would need
+    // the very linker we're missing). Returns the resolved cross executable.
+    private File provisionCross(Map rust) {
+        def onPath = System.getenv('PATH')?.split(File.pathSeparator)?.collect {
+            new File(it, 'cross')
+        }?.find { it.canExecute() }
+        if (onPath != null) {
+            logger.lifecycle "cross: using ${onPath.absolutePath} from PATH"
+            return onPath
+        }
+
+        def home = new File(rustHome.get())
+        def binDir = new File(home, 'cross/bin')
+        def crossBin = new File(binDir, 'cross')
+        def ver = crossVersion.get()
+        if (crossBin.canExecute()) {
+            logger.lifecycle "cross: reusing ${crossBin.absolutePath} (v${ver})"
+            return crossBin
+        }
+        binDir.mkdirs()
+
+        // cross publishes static musl release tarballs per host arch on GitHub.
+        def hostTriple = crossHostTriple()
+        def tarName = "cross-${hostTriple}.tar.gz"
+        def url = "https://github.com/cross-rs/cross/releases/download/v${ver}/${tarName}"
+        def tarball = new File(binDir, tarName)
+        logger.lifecycle "cross: downloading prebuilt ${url}"
+        def dl = exec.exec {
+            ignoreExitValue = true
+            commandLine 'bash', '-c',
+                    "curl -fsSL --proto '=https' --tlsv1.2 '${url}' -o '${tarball.absolutePath}' " +
+                    "|| wget -qO '${tarball.absolutePath}' '${url}'"
+        }
+        if (dl.exitValue != 0 || !tarball.exists() || tarball.length() == 0) {
+            throw new GradleException("cross: failed to download ${url}")
+        }
+        exec.exec {
+            workingDir binDir
+            commandLine 'tar', '-xzf', tarball.absolutePath
+        }
+        tarball.delete()
+        if (!crossBin.canExecute()) {
+            crossBin.setExecutable(true)
+        }
+        if (!crossBin.canExecute()) {
+            throw new GradleException("cross: extracted tarball did not yield an executable at ${crossBin}")
+        }
+        logger.lifecycle "cross: provisioned ${crossBin.absolutePath} (v${ver})"
+        return crossBin
+    }
+
+    // The host triple used to pick the prebuilt cross tarball. cross only
+    // publishes x86_64 darwin + x86_64/aarch64 linux-musl + x86_64 windows
+    // assets (no aarch64 darwin), so Apple Silicon falls back to the x86_64
+    // macOS binary, which runs under Rosetta 2. Linux uses the static musl
+    // builds (which run on any glibc/musl host).
+    private String crossHostTriple() {
+        def os = org.gradle.internal.os.OperatingSystem.current()
+        def arch = System.getProperty('os.arch')?.toLowerCase()
+        def isArm = arch in ['aarch64', 'arm64']
+        if (os.isMacOsX()) {
+            return 'x86_64-apple-darwin'
+        }
+        return isArm ? 'aarch64-unknown-linux-musl' : 'x86_64-unknown-linux-musl'
+    }
+}
+
+tasks.register('buildMigrationAssistantBinary', BuildCliBinaryTask) {
+    description = 'cargo build --release the migration-assistant Rust CLI (provisions Rust if needed)'
+    group = 'migrate-cli'
+    crateDir.set(layout.projectDirectory.dir('cli'))
+    // Track sources so the build re-runs when code changes, not on every
+    // invocation. target/ is excluded (it's the output).
+    sources.from(fileTree('cli') {
+        include 'Cargo.toml'
+        include 'Cargo.lock'
+        include 'build.rs'
+        include 'rust-toolchain.toml'
+        include 'src/**'
+    })
+    cliVersion.set(cliVersionProvider)
+    rustAutoProvision.set(rustAutoProvisionProvider)
+    rustHome.set(rustHomeProvider)
+    rustupInitUrl.set(rustupInitUrlProvider)
+    crossVersion.set(crossVersionProvider)
+    crossTarget.set(crossTargetProvider)
+    forceCross.set(forceCrossProvider)
+    outBinary.set(layout.projectDirectory.file('cli/target/release/migration-assistant'))
+}
+
+// ---------- (1) CLI tarball ----------
+
+abstract class PackageCliTarballTask extends DefaultTask {
+    @Inject abstract ExecOperations getExec()
+    @Inject abstract FileSystemOperations getFs()
+
+    @InputDirectory abstract DirectoryProperty getCliDir()
+    @InputFile abstract RegularFileProperty getCompiledBinary()
+    @InputFile abstract RegularFileProperty getLicenseFile()
+    @InputFile abstract RegularFileProperty getEcrManifestFile()
+    @InputFiles abstract ConfigurableFileCollection getAgentSkillsTar()
+    @Input abstract Property<String> getCliVersion()
+    @OutputDirectory abstract DirectoryProperty getDistDir()
+
+    @TaskAction
+    void run() {
+        def ver = cliVersion.get()
+        def out = distDir.get().asFile
+        out.mkdirs()
+        def tarball = new File(out, "migration-assistant-cli-${ver}.tar.gz")
+
+        def stage = File.createTempFile('migrate-cli-stage', '').with { delete(); mkdirs(); it }
+        try {
+            def root = new File(stage, "migration-assistant-cli-${ver}")
+            root.mkdirs()
+
+            // Wrapper + README + install.sh.
+            fs.copy {
+                from cliDir
+                into root
+                include 'bin/migration-assistant'
+                include 'install.sh'
+                include 'README.md'
+            }
+            // The compiled release binary, dropped beside the wrapper.
+            fs.copy {
+                from compiledBinary
+                into new File(root, 'bin')
+                rename '.*', 'migration-assistant-bin'
+            }
+            new File(root, 'bin/migration-assistant').setExecutable(true)
+            new File(root, 'bin/migration-assistant-bin').setExecutable(true)
+
+            // Drop the agent-skills tree under skills/. The producer emits a
+            // gzipped tar whose entries are already rooted at skills/..., so we
+            // extract straight into the bundle root with the `tar` CLI (the same
+            // tool we use to re-pack below — avoids the resources.gzip API).
+            exec.exec {
+                workingDir root
+                commandLine 'tar', '-xzf', agentSkillsTar.singleFile.absolutePath
+            }
+            // Vendor privateEcrManifest.sh next to the skills.
+            fs.copy {
+                from ecrManifestFile
+                into new File(root, 'skills')
+            }
+            fs.copy {
+                from licenseFile
+                into root
+                rename '.*', 'LICENSE'
+            }
+
+            // Promote skills/manifest.json to the tarball root + stamp the build
+            // version so `migration-assistant version` reports the assembled one.
+            def manifestJsonInner = new File(root, 'skills/manifest.json')
+            def manifestJsonRoot = new File(root, 'manifest.json')
+            if (manifestJsonInner.exists()) {
+                def text = manifestJsonInner.text.replace('"version": "0.0.0-dev"', "\"version\": \"${ver}\"")
+                manifestJsonRoot.text = text
+                manifestJsonInner.text = text
+            }
+
+            exec.exec {
+                workingDir stage
+                commandLine 'tar', '-czf', tarball.absolutePath, "migration-assistant-cli-${ver}"
+            }
+        } finally {
+            stage.deleteDir()
+        }
+        logger.lifecycle "wrote ${tarball}"
+    }
+}
+
+tasks.register('packageMigrationAssistantCliTarball', PackageCliTarballTask) {
+    description = 'Package the migration-assistant CLI into a release tarball'
+    group = 'migrate-cli'
+    dependsOn 'buildMigrationAssistantBinary'
+    cliDir.set(layout.projectDirectory.dir('cli'))
+    compiledBinary.set(layout.projectDirectory.file('cli/target/release/migration-assistant'))
+    licenseFile.set(rootProject.layout.projectDirectory.file('LICENSE'))
+    ecrManifestFile.set(rootProject.layout.projectDirectory.file(
+            'deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh'))
+    agentSkillsTar.from(configurations.agentSkills)
+    cliVersion.set(cliVersionProvider)
+    distDir.set(layout.buildDirectory.dir('migrate-cli-dist'))
+}
+
+// ---------- (2) install.sh with DEFAULT_REPO baked in ----------
+
+abstract class RenderInstallScriptTask extends DefaultTask {
+    @InputFile abstract RegularFileProperty getSource()
+    @Input abstract Property<String> getDefaultRepo()
+    @OutputFile abstract RegularFileProperty getOutFile()
+
+    @TaskAction
+    void render() {
+        def dst = outFile.get().asFile
+        dst.parentFile.mkdirs()
+        dst.text = source.get().asFile.text.replace('@DEFAULT_REPO@', defaultRepo.get())
+        dst.setExecutable(true)
+        logger.lifecycle "wrote ${dst}"
+    }
+}
+
+tasks.register('renderInstallScript', RenderInstallScriptTask) {
+    description = 'Render install.sh with DEFAULT_REPO substituted'
+    group = 'migrate-cli'
+    source.set(layout.projectDirectory.file('cli/install.sh'))
+    defaultRepo.set(defaultRepoProvider)
+    outFile.set(distDirProvider.map { it.file('install.sh') })
+}
+
+// ---------- aggregator + lifecycle ----------
+
+tasks.register('packageMigrationAssistantCli') {
+    description = 'Build the CLI tarball and the curl-pipe installer'
+    group = 'migrate-cli'
+    dependsOn 'packageMigrationAssistantCliTarball', 'renderInstallScript'
+}
+
+assemble.dependsOn 'packageMigrationAssistantCli'

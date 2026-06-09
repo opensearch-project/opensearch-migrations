@@ -71,7 +71,9 @@ include 'TrafficCapture:transformationShim'
 include 'TrafficCapture:SolrTransformations'
 include 'buildImages'
 include 'custom-es-images'
-include 'kiro-cli'
+include 'agent-skills'
+include 'deployment:k8s:aws'
+project(':deployment:k8s:aws').projectDir = file('deployment/k8s/aws')
 
 
 addSubProjects(':transformation', Paths.get(rootProject.projectDir.getPath(), 'transformation', 'transformationPlugins').toFile())

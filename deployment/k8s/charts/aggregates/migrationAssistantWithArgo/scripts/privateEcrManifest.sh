@@ -122,7 +122,8 @@ public.ecr.aws/mountpoint-s3-csi-driver/aws-mountpoint-s3-csi-driver:v2.5.0
 public.ecr.aws/csi-components/csi-node-driver-registrar:v2.16.0-eksbuild.3
 public.ecr.aws/csi-components/livenessprobe:v2.18.0-eksbuild.3
 
-# --- jib + buildkit base images (used when building from source with --build) ---
+# --- buildkit + jib base images (used when building from source with --build) ---
+docker.io/moby/buildkit:buildx-stable-1
 mirror.gcr.io/library/amazoncorretto:21-al2023-headless
 mirror.gcr.io/library/amazoncorretto:11-al2023-headless
 mirror.gcr.io/library/amazoncorretto:8-alpine
