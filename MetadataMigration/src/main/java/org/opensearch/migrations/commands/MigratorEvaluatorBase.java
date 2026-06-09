@@ -177,9 +177,9 @@ public abstract class MigratorEvaluatorBase {
         var readFailure = SnapshotReadFailures.find(e);
         if (readFailure != null) {
             var repo = arguments.fileSystemRepoPath != null ? arguments.fileSystemRepoPath : arguments.s3RepoUri;
-            var message = "Snapshot read failure: " + readFailure.getMessage()
-                + " | snapshot=" + arguments.snapshotName + ", repo=" + repo + ", region=" + arguments.s3Region;
-            log.atError().setCause(e).setMessage("Non-retriable snapshot read failure: {}").addArgument(message).log();
+            var message = SnapshotReadFailures.describe(
+                readFailure, arguments.snapshotName, repo, arguments.s3Region);
+            log.atError().setCause(e).setMessage("{}").addArgument(message).log();
             return new FailureClassification(SnapshotReadFailures.EXIT_CODE, message);
         }
         log.atError().setCause(e).setMessage("Unexpected failure").log();

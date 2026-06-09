@@ -60,9 +60,27 @@ class MigrateTest {
         var result = migrate.execute(context);
 
         assertThat(result.getExitCode(), equalTo(SnapshotReadFailures.EXIT_CODE));
-        assertThat(result.getErrorMessage(), containsString("Snapshot read failure"));
+        assertThat(result.getErrorMessage(), containsString("Non-retriable snapshot read failure"));
         assertThat(result.getErrorMessage(), containsString("corrupt repo metadata: index-0"));
         assertThat(result.getErrorMessage(), containsString("snap1"));
+    }
+
+    @Test
+    void migrate_snapshotReadFailureNamesFilesystemRepo() {
+        var args = new MigrateArgs();
+        args.snapshotName = "snap2";
+        args.fileSystemRepoPath = "/backups/repo";
+        var context = mock(RootMetadataMigrationContext.class);
+        var meta = new MetadataMigration();
+
+        var migrate = spy(meta.migrate(args));
+        doThrow(new RuntimeException("read failed",
+            new SnapshotRepo.CannotParseRepoFile("bad index-0"))).when(migrate).createClusters();
+
+        var result = migrate.execute(context);
+
+        assertThat(result.getExitCode(), equalTo(SnapshotReadFailures.EXIT_CODE));
+        assertThat(result.getErrorMessage(), containsString("repo=/backups/repo"));
     }
 
     @Test

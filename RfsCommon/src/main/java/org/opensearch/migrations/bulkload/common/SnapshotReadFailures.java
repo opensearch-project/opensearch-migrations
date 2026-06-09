@@ -37,4 +37,19 @@ public final class SnapshotReadFailures {
         }
         return null;
     }
+
+    /**
+     * Build the single-line, labeled description used to surface a non-retriable snapshot read
+     * failure in the logs: the failure reason plus the snapshot path and context. Shared so the
+     * document-migration worker and the metadata-migration command emit a consistent message.
+     *
+     * @param readFailure the throwable returned by {@link #find(Throwable)} (its message is the reason)
+     * @param snapshotName the snapshot name, or {@code null} if not set
+     * @param repo the repository location (local dir or S3 URI), or {@code null} if not set
+     * @param region the S3 region, or {@code null} for non-S3 repositories
+     */
+    public static String describe(Throwable readFailure, String snapshotName, String repo, String region) {
+        return "Non-retriable snapshot read failure: " + readFailure.getMessage()
+            + " | snapshot=" + snapshotName + ", repo=" + repo + ", region=" + region;
+    }
 }

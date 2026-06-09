@@ -662,12 +662,11 @@ public class RfsMigrateDocuments {
                 // terminated immediately afterward. We exit explicitly (rather than rethrowing to the JVM
                 // uncaught handler) to emit a clean, labeled entry, flush the appenders, and return a
                 // deterministic exit code the workflow can branch on.
+                var repo = arguments.snapshotLocalDir != null ? arguments.snapshotLocalDir : arguments.s3RepoUri;
                 log.atError().setCause(e)
-                    .setMessage("Non-retriable snapshot read failure: {} | snapshot={}, repo={}, region={}")
-                    .addArgument(snapshotReadFailure.getMessage())
-                    .addArgument(arguments.snapshotName)
-                    .addArgument(arguments.snapshotLocalDir != null ? arguments.snapshotLocalDir : arguments.s3RepoUri)
-                    .addArgument(arguments.s3Region)
+                    .setMessage("{}")
+                    .addArgument(SnapshotReadFailures.describe(
+                        snapshotReadFailure, arguments.snapshotName, repo, arguments.s3Region))
                     .log();
                 LogManager.shutdown();
                 System.exit(SNAPSHOT_READ_FAILED_EXIT_CODE);

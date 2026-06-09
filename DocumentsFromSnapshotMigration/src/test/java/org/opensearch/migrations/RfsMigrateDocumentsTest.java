@@ -114,4 +114,14 @@ class RfsMigrateDocumentsTest {
     void findSnapshotReadFailure_nullReturnsNull() {
         Assertions.assertNull(SnapshotReadFailures.find(null));
     }
+
+    @Test
+    void describe_includesReasonAndSnapshotContext() {
+        var failure = new FakeSnapshotReadFailure("could not read snapshot");
+        var msg = SnapshotReadFailures.describe(failure, "snap1", "s3://bucket/repo", "us-east-1");
+        Assertions.assertTrue(msg.contains("could not read snapshot"), msg);
+        Assertions.assertTrue(msg.contains("snapshot=snap1"), msg);
+        Assertions.assertTrue(msg.contains("repo=s3://bucket/repo"), msg);
+        Assertions.assertTrue(msg.contains("region=us-east-1"), msg);
+    }
 }
