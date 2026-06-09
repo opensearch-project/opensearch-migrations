@@ -662,3 +662,55 @@ target_cluster:
             'test-wf', 'https://argo', 'ma', False, False, True))
 
         assert 'test-wf' in output
+
+
+class TestAssignWorkflowProgress:
+    """Tests for _assign_workflow_progress in the resource view path."""
+
+    def test_assigns_steps_to_matching_resources(self):
+        from console_link.workflow.commands.status import _assign_workflow_progress
+        from console_link.workflow.resource_tree import ResourceNode, ResourceGroup, ResourceSection
+
+        resource = ResourceNode(
+            name='my-backfill', plural='snapshotmigrations', phase='Running',
+            depends_on=[], spec={}, status={})
+        group = ResourceGroup(plural='snapshotmigrations', display_name='Backfill', resources=[resource])
+        sections = [ResourceSection(name='Snapshot Migration', groups=[group])]
+
+        steps = {'my-backfill': [{'id': 'step1', 'display_name': 'waitForSnapshot', 'phase': 'Running'}]}
+        _assign_workflow_progress(sections, steps)
+
+        assert resource.workflow_progress == steps['my-backfill']
+
+    def test_assigns_steps_to_child_resources(self):
+        from console_link.workflow.commands.status import _assign_workflow_progress
+        from console_link.workflow.resource_tree import ResourceNode, ResourceGroup, ResourceSection
+
+        child = ResourceNode(
+            name='my-topic', plural='capturedtraffics', phase='Ready',
+            depends_on=[], spec={}, status={})
+        parent = ResourceNode(
+            name='default', plural='kafkaclusters', phase='Ready',
+            depends_on=[], spec={}, status={}, children=[child])
+        group = ResourceGroup(plural='kafkaclusters', display_name='Buffer', resources=[parent])
+        sections = [ResourceSection(name='Live Traffic', groups=[group])]
+
+        steps = {'my-topic': [{'id': 'step2', 'display_name': 'createTopic', 'phase': 'Succeeded'}]}
+        _assign_workflow_progress(sections, steps)
+
+        assert child.workflow_progress == steps['my-topic']
+        assert parent.workflow_progress is None
+
+    def test_no_match_leaves_progress_none(self):
+        from console_link.workflow.commands.status import _assign_workflow_progress
+        from console_link.workflow.resource_tree import ResourceNode, ResourceGroup, ResourceSection
+
+        resource = ResourceNode(
+            name='my-backfill', plural='snapshotmigrations', phase='Running',
+            depends_on=[], spec={}, status={})
+        group = ResourceGroup(plural='snapshotmigrations', display_name='Backfill', resources=[resource])
+        sections = [ResourceSection(name='Snapshot Migration', groups=[group])]
+
+        _assign_workflow_progress(sections, {'other-resource': [{'id': 'x'}]})
+
+        assert resource.workflow_progress is None

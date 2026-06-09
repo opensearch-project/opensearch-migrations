@@ -90,11 +90,20 @@ def list_migration_resources(namespace, plurals=None):
     return results
 
 
-def list_migration_resources_full(namespace, plurals=None):
-    """List CRD instances with full objects. Returns dict keyed by plural containing lists of CR dicts."""
+def list_migration_resources_full(namespace):
+    """List all migration CRD instances with full objects."""
+    return list_resources_full(namespace, RESETTABLE_PLURALS)
+
+
+def list_resources_full(namespace, resource_type_filter):
+    """List CRD instances with full objects.
+
+    Returns dict keyed by plural containing lists of CR dicts.
+    resource_type_filter is required — caller must specify which resource types to list.
+    """
     custom = client.CustomObjectsApi()
     results = {}
-    for plural in plurals or RESETTABLE_PLURALS:
+    for plural in resource_type_filter:
         try:
             items = custom.list_namespaced_custom_object(
                 group=CRD_GROUP,
