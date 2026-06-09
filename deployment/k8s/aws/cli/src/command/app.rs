@@ -385,20 +385,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
     /// handled at the call site). `chart` is the resolved chart path;
     /// `values_files` are the extracted/written value files in apply order.
     pub fn helm_install_or_upgrade(&mut self, chart: &str, values_files: &[String]) -> Result<()> {
-        let region = self.state.get_owned("AWS_REGION", "");
-        let account = self.state.get_owned("AWS_ACCOUNT", "");
-        let stage = self.state.get_owned("STAGE_NAME", "default");
-        let ma_ver = self.state.get_owned("MA_VERSION", "");
-        let stack = self.state.get_owned("CFN_STACK_NAME", "");
-        let outputs = self.cfn_outputs(&stack, &region);
-
         let kube_ctx = self.state.get_owned("KUBECTL_CONTEXT", "");
-        let mirror = self.state.get_or("MIRROR_IMAGES", "Y") == "Y";
-        let registry = self.state.get_owned("CRANE_REGISTRY", "");
-        // Same tag the images were built/pushed with (resolve_image_tag → never
-        // empty). Using BUILD_IMAGE_TAG-or-MA_VERSION directly risked an empty
-        // tag → `migrations_<name>_` → ErrImagePull (the installer timeout).
-        let mirror_tag = self.resolve_image_tag();
 
         // Recovery: classify any stuck release before installing.
         let status = self.helm_release_status(&kube_ctx);
@@ -415,20 +402,60 @@ impl<'r, R: CommandRunner> App<'r, R> {
             );
         }
 
-        // Ensure namespace.
+        self.ensure_namespace(&kube_ctx);
+        let args = self.helm_install_args(chart, values_files)?;
+
+        let mut helm_full: Vec<String> = Vec::new();
+        if !kube_ctx.is_empty() {
+            helm_full.push("--kube-context".into());
+            helm_full.push(kube_ctx.clone());
+        }
+        helm_full.extend(args);
+
+        let script = artifact::helm_install_script(&kube_ctx, helm::NAMESPACE, &helm_full);
+        let out = self
+            .runner
+            .run_streamed("bash", &["-c", &script], &[], "helm");
+        if !out.success() {
+            return Err(Error::die(format!(
+                "helm install/upgrade failed (rc={})",
+                out.status
+            )));
+        }
+
+        self.wait_for_console_pod(&kube_ctx)?;
+        self.state.set("HELM_RELEASE", helm::RELEASE_NAME);
+        self.state.set("last_step", "helm_done");
+        self.state.save()?;
+        Ok(())
+    }
+
+    fn ensure_namespace(&self, kube_ctx: &str) {
         if !self
             .runner
             .run(
                 "kubectl",
-                &kube_args(&kube_ctx, &["get", "namespace", helm::NAMESPACE]),
+                &kube_args(kube_ctx, &["get", "namespace", helm::NAMESPACE]),
             )
             .success()
         {
             self.runner.run(
                 "kubectl",
-                &kube_args(&kube_ctx, &["create", "namespace", helm::NAMESPACE]),
+                &kube_args(kube_ctx, &["create", "namespace", helm::NAMESPACE]),
             );
         }
+    }
+
+    fn helm_install_args(&self, chart: &str, values_files: &[String]) -> Result<Vec<String>> {
+        let region = self.state.get_owned("AWS_REGION", "");
+        let account = self.state.get_owned("AWS_ACCOUNT", "");
+        let stage = self.state.get_owned("STAGE_NAME", "default");
+        let ma_ver = self.state.get_owned("MA_VERSION", "");
+        let stack = self.state.get_owned("CFN_STACK_NAME", "");
+        let outputs = self.cfn_outputs(&stack, &region);
+        let mirror = self.state.get_or("MIRROR_IMAGES", "Y") == "Y";
+        let registry = self.state.get_owned("CRANE_REGISTRY", "");
+        let mirror_tag = self.resolve_image_tag();
 
         let image_flags = if mirror && !registry.is_empty() {
             helm::mirrored_image_flags(&registry, &mirror_tag)
@@ -442,7 +469,6 @@ impl<'r, R: CommandRunner> App<'r, R> {
             &region,
         )?;
 
-        // Assemble the full helm command.
         let mut args: Vec<String> = vec![
             "upgrade".into(),
             "--install".into(),
@@ -474,45 +500,15 @@ impl<'r, R: CommandRunner> App<'r, R> {
         args.push("--timeout".into());
         args.push("25m".into());
         args.push("--wait".into());
+        Ok(args)
+    }
 
-        // `--wait` blocks up to 25m while the pre-install hook + sub-chart pods
-        // converge — and helm itself is SILENT for that whole window after
-        // "Installing it now." Run it through a bash wrapper whose background
-        // watcher streams namespace pod-state transitions + Warning events, so
-        // progress (and any ErrImagePull/ImagePullBackOff) shows live instead of
-        // surfacing only at the deadline. The full helm argv (already carrying
-        // `--kube-context` when set) is passed to the script.
-        let mut helm_full: Vec<String> = Vec::new();
-        if !kube_ctx.is_empty() {
-            helm_full.push("--kube-context".into());
-            helm_full.push(kube_ctx.clone());
-        }
-        helm_full.extend(args.iter().cloned());
-
-        // Single attempt — no retry. The whole deploy runs against a
-        // short-lived EKS auth token (`aws eks get-token`); a retry after a
-        // ~20-min failed install pushes total runtime past the token lifetime,
-        // and the second attempt then dies with `Unauthorized`. The reference
-        // deploy that succeeds does not retry — it relies on the install
-        // completing within one window (which it does once the installer pulls
-        // its sub-charts from public registries rather than slow private OCI).
-        let script = artifact::helm_install_script(&kube_ctx, helm::NAMESPACE, &helm_full);
-        let full = self
-            .runner
-            .run_streamed("bash", &["-c", &script], &[], "helm");
-        if !full.success() {
-            return Err(Error::die(format!(
-                "helm install/upgrade failed (rc={})",
-                full.status
-            )));
-        }
-
-        // Wait for the console pod (stream so the wait shows live progress).
+    fn wait_for_console_pod(&self, kube_ctx: &str) -> Result<()> {
         ui::step("Waiting for migration-console-0 to become Ready");
         let wait = self.runner.run_streamed(
             "kubectl",
             &kube_args(
-                &kube_ctx,
+                kube_ctx,
                 &[
                     "wait",
                     "--namespace",
@@ -526,19 +522,15 @@ impl<'r, R: CommandRunner> App<'r, R> {
             "kubectl-wait",
         );
         if !wait.success() {
-            // Dump pod status to explain why readiness never came.
             dump_output(&wait);
             let pods = self.runner.run(
                 "kubectl",
-                &kube_args(&kube_ctx, &["get", "pods", "--namespace", helm::NAMESPACE]),
+                &kube_args(kube_ctx, &["get", "pods", "--namespace", helm::NAMESPACE]),
             );
             dump_output(&pods);
             return Err(Error::die("migration-console-0 did not become Ready"));
         }
         ui::ok("migration-console-0 is Ready");
-        self.state.set("HELM_RELEASE", helm::RELEASE_NAME);
-        self.state.set("last_step", "helm_done");
-        self.state.save()?;
         Ok(())
     }
 
