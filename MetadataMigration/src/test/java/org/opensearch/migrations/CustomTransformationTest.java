@@ -10,7 +10,6 @@ import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.transform.TransformerParams;
-import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval.MultiTypeResolutionBehavior;
 
 import lombok.Builder;
 import lombok.Data;
@@ -136,7 +135,6 @@ class CustomTransformationTest extends BaseMigrationTest {
         createSnapshot(sourceCluster, snapshotName, testSnapshotContext);
         sourceCluster.copySnapshotData(localDirectory.toString());
         var arguments = prepareSnapshotMigrationArgs(snapshotName, localDirectory.toString());
-        arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
 
         // Set up data filters
         var dataFilterArgs = new DataFilterArgs();
@@ -314,7 +312,6 @@ class CustomTransformationTest extends BaseMigrationTest {
         dataFilterArgs.indexTemplateAllowlist = List.of(templateWithNgramName);
         arguments.dataFilterArgs = dataFilterArgs;
         
-        arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
         arguments.metadataCustomTransformationParams = TestCustomTransformationParams.builder()
                 .transformerConfig(customTransformationJson)
                 .build();

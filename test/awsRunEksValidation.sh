@@ -8,7 +8,7 @@ usage() {
   echo ""
   echo "This script:"
   echo "  1. Verifies CloudFormation stack is deployed and healthy"
-  echo "  2. Installs Migration Assistant via aws-bootstrap.sh"
+  echo "  2. Installs Migration Assistant via the migration-assistant CLI"
   echo "  3. Validates migration console pod is accessible"
   echo ""
   echo "By default, mirrors public container images to private ECR."
@@ -41,7 +41,7 @@ STAGE=""
 REGION="us-east-1"
 STACK_NAME=""
 
-# Any extra args to forward to aws-bootstrap.sh
+# Any extra args to forward to migration-assistant
 BOOTSTRAP_ARGS=()
 
 # Parse command line arguments
@@ -85,9 +85,9 @@ echo "Stage: ${STAGE}"
 echo "Region: ${REGION}"
 echo "Stack Name: ${STACK_NAME}"
 if [[ ${#BOOTSTRAP_ARGS[@]} -gt 0 ]]; then
-  echo "Extra aws-bootstrap.sh args: ${BOOTSTRAP_ARGS[*]}"
+  echo "Extra migration-assistant args: ${BOOTSTRAP_ARGS[*]}"
 else
-  echo "Extra aws-bootstrap.sh args: (none)"
+  echo "Extra migration-assistant args: (none)"
 fi
 echo ""
 
@@ -136,40 +136,66 @@ verify_cfn_stack() {
   esac
 }
 
-# Function to run aws-bootstrap.sh
+# Function to run the migration-assistant CLI (replaces aws-bootstrap.sh)
 run_aws_bootstrap() {
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-  BOOTSTRAP_DIR="${REPO_ROOT}/deployment/k8s/aws"
-  BOOTSTRAP_SCRIPT="${BOOTSTRAP_DIR}/aws-bootstrap.sh"
+  CLI_DIR="${REPO_ROOT}/deployment/k8s/aws/cli"
+  CLI_BIN="${CLI_DIR}/bin/migration-assistant"
 
-  if [[ ! -x "${BOOTSTRAP_SCRIPT}" ]]; then
-    fail "aws-bootstrap.sh not found or not executable at: ${BOOTSTRAP_SCRIPT}"
+  if [[ ! -x "${CLI_BIN}" ]]; then
+    fail "migration-assistant CLI not found or not executable at: ${CLI_BIN}"
   fi
 
-  echo "Running aws-bootstrap.sh from ${BOOTSTRAP_DIR}."
+  echo "Running migration-assistant from ${CLI_DIR}."
 
-  pushd "${BOOTSTRAP_DIR}" >/dev/null
+  # Pin MIGRATE_HOME to a per-build workspace dir so each Jenkins run
+  # starts from a clean state directory (no leftover state.env / cached
+  # artifacts from previous PR builds).
+  MIGRATE_HOME="${WORKSPACE:-$PWD}/.migrate-home-${BUILD_NUMBER:-local}"
+  export MIGRATE_HOME
+  rm -rf "${MIGRATE_HOME}"
+  mkdir -p "${MIGRATE_HOME}"
+  echo "MIGRATE_HOME=${MIGRATE_HOME}"
 
+  # --verbose so all log-file content also lands on the Jenkins
+  # console live (rather than only-on-failure as a tail). Then if the
+  # CLI dies before our trap fires we still see what happened.
+  set +e
   if [[ ${#BOOTSTRAP_ARGS[@]} -gt 0 ]]; then
-    echo "Invoking aws-bootstrap.sh with extra args: ${BOOTSTRAP_ARGS[*]}"
-    ./aws-bootstrap.sh \
+    echo "Invoking migration-assistant with extra args: ${BOOTSTRAP_ARGS[*]}"
+    "${CLI_BIN}" \
+      --non-interactive \
+      --verbose \
       --skip-console-exec \
       --skip-setting-k8s-context \
       --stage "${STAGE}" \
       "${BOOTSTRAP_ARGS[@]}"
   else
-    echo "Invoking aws-bootstrap.sh with default args (public images)."
-    ./aws-bootstrap.sh \
+    echo "Invoking migration-assistant with default args (public images)."
+    "${CLI_BIN}" \
+      --non-interactive \
+      --verbose \
       --skip-console-exec \
       --skip-setting-k8s-context \
+      --use-public-images \
       --stage "${STAGE}"
   fi
+  cli_rc=$?
+  set -e
 
-  echo "aws-bootstrap.sh completed successfully."
-  popd >/dev/null
+  if [[ $cli_rc -ne 0 ]]; then
+    echo
+    echo "=== migration-assistant FAILED (rc=$cli_rc) — dumping migrate.log ==="
+    cat "${MIGRATE_HOME}/${STAGE}/log/migrate.log" 2>&1 || \
+      echo "(migrate.log not found at ${MIGRATE_HOME}/${STAGE}/log/migrate.log)"
+    echo "=== end migrate.log ==="
+    fail "migration-assistant exited rc=$cli_rc"
+  fi
 
-  # Derive the kube context name (matches the EKS cluster name / alias set by aws-bootstrap.sh)
+  echo "migration-assistant completed successfully."
+
+  # Derive the kube context name (matches the EKS cluster name / alias)
   KUBE_CONTEXT="migration-eks-cluster-${STAGE}-${REGION}"
   export KUBE_CONTEXT
   echo "Using kubectl context: ${KUBE_CONTEXT}"
