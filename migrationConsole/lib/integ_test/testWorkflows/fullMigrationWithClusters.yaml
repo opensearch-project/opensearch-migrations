@@ -33,10 +33,10 @@ spec:
       - name: replayer-config
         value: |
           {"batchSize": 1000, "concurrency": 4}
-      - name: transforms-sources
-        value: "{}"
       - name: skip-cleanup
         value: "false"
+      - name: skip-approvals
+        value: "true"
       # Registry prefix for custom ES images (e.g. "localhost:5000/" for minikube)
       - name: image-registry-prefix
         value: ""
@@ -134,8 +134,8 @@ spec:
                   value: "{{workflow.parameters.snapshot-and-migration-configs}}"
                 - name: replayer-config
                   value: "{{workflow.parameters.replayer-config}}"
-                - name: transforms-sources
-                  value: "{{workflow.parameters.transforms-sources}}"
+                - name: skip-approvals
+                  value: "{{workflow.parameters.skip-approvals}}"
                 - name: imageMigrationConsoleLocation
                   valueFrom:
                     configMapKeyRef:
@@ -220,22 +220,11 @@ spec:
         command: [sh, -c]
         args:
           - |
+            set -e
             echo "Waiting for {{inputs.parameters.cluster-type}} cluster to be ready..."
-            
-            # Try StatefulSet pod first (for helm-based clusters)
-            if kubectl wait --for=condition=ready pod/{{inputs.parameters.cluster-name}}-0 \
-              --namespace={{inputs.parameters.namespace}} \
-              --timeout=10s 2>/dev/null; then
-              echo "{{inputs.parameters.cluster-type}} cluster pod (StatefulSet) is ready!"
-            else
-              # Fallback to Deployment rollout status (for ES 1.5/2.4)
-              echo "StatefulSet pod not found, checking Deployment..."
-              kubectl rollout status deployment/{{inputs.parameters.cluster-name}} \
-                --namespace={{inputs.parameters.namespace}} \
-                --timeout=200s
-              echo "{{inputs.parameters.cluster-type}} cluster deployment is ready!"
-            fi
-            # Check if StatefulSet pod exists first
+            # Each cluster template creates exactly one of (StatefulSet pod, Deployment)
+            # under this name; the prior `--timeout=10s` short-probe block was buggy
+            # (printed success on timeout), so kubectl's own wait is the only gate.
             if kubectl get pod/{{inputs.parameters.cluster-name}}-0 \
                  --namespace={{inputs.parameters.namespace}} >/dev/null 2>&1; then
               echo "Found StatefulSet pod {{inputs.parameters.cluster-name}}-0, waiting for readiness..."
@@ -264,7 +253,8 @@ spec:
           - name: target-config
           - name: snapshot-and-migration-configs
           - name: replayer-config
-          - name: transforms-sources
+          - name: skip-approvals
+            default: "true"
           - name: imageMigrationConsoleLocation
           - name: imageMigrationConsolePullPolicy
           - name: s3Region
@@ -302,7 +292,7 @@ spec:
             SOURCE_CONFIG='{{inputs.parameters.source-config}}'
             TARGET_CONFIG='{{inputs.parameters.target-config}}'
             SNAPSHOT_MIGRATION_CONFIGS='{{inputs.parameters.snapshot-and-migration-configs}}'
-            TRANSFORMS_SOURCES='{{inputs.parameters.transforms-sources}}'
+            SKIP_APPROVALS='{{inputs.parameters.skip-approvals}}'
             S3_REGION='{{inputs.parameters.s3Region}}'
             S3_ENDPOINT='{{inputs.parameters.s3Endpoint}}'
             S3_BUCKET='{{inputs.parameters.s3BucketName}}'
@@ -348,16 +338,15 @@ spec:
               --argjson source "$SOURCE_WITH_REPO" \
               --argjson target "$TARGET_CONFIG" \
               --argjson snapshotConfigs "$SNAPSHOT_EXTRACT_CONFIGS" \
-              --argjson transformsSources "$TRANSFORMS_SOURCES" \
+              --argjson skipApprovals "$SKIP_APPROVALS" \
               '{
-                "skipApprovals": true,
+                "skipApprovals": $skipApprovals,
                 "sourceClusters": {
                   "source1": $source
                 },
                 "targetClusters": {
                   "target1": $target
                 },
-                "transformsSources": $transformsSources,
                 "snapshotMigrationConfigs": [{
                   "fromSource": "source1",
                   "toTarget": "target1",

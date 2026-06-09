@@ -22,6 +22,7 @@ public class InvalidResponse extends RfsException {
     private static final Pattern UNSUPPORTED_MAPPING_PARAM = Pattern.compile("unsupported parameters:\\s+(.+)");
     private static final Pattern MAPPING_PARAM_NAME = Pattern.compile("\\[([a-zA-Z0-9_.]+)\\s*:");
     private static final Pattern AWARENESS_ATTRIBUTE_EXCEPTION = Pattern.compile("expected total copies needs to be a multiple of total awareness attributes");
+    private static final Pattern REMOVED_TOKEN_FILTER = Pattern.compile("The \\[([a-zA-Z0-9_.-]+)\\] token filter has been removed\\.?");
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private final transient HttpResponse response;
     private static final String ERROR_STRING = "error";
@@ -77,6 +78,48 @@ public class InvalidResponse extends RfsException {
             log.warn("Error parsing error message to attempt recovery" + response.body, e);
             return Set.of();
         }
+    }
+
+    /**
+     * Looks in the error response for token filters that have been removed in newer versions
+     * (e.g. the legacy "standard" token filter, removed in ES 7+). Such filters appear in
+     * source-cluster analyzers but are rejected when applied to ES 7+/OpenSearch targets.
+     * @return The set of removed token filter names that should be stripped from analyzer
+     *         filter arrays. Empty if not a removed-token-filter error.
+     */
+    public Set<String> getRemovedTokenFilters() {
+        try {
+            var results = new ArrayList<String>();
+            var bodyNode = objectMapper.readTree(response.body);
+            var errorBody = Optional.ofNullable(bodyNode).map(node -> node.get(ERROR_STRING));
+
+            errorBody.map(InvalidResponse::getRemovedTokenFilter).ifPresent(results::add);
+            errorBody.map(node -> node.get(ROOT_CAUSE)).ifPresent(nodes ->
+                nodes.forEach(node -> Optional.ofNullable(getRemovedTokenFilter(node)).ifPresent(results::add))
+            );
+            errorBody.map(node -> node.get("suppressed")).ifPresent(nodes ->
+                nodes.forEach(node -> Optional.ofNullable(getRemovedTokenFilter(node)).ifPresent(results::add))
+            );
+            errorBody.map(node -> node.get("caused_by")).ifPresent(node ->
+                Optional.ofNullable(getRemovedTokenFilter(node)).ifPresent(results::add)
+            );
+
+            return Set.copyOf(results);
+        } catch (Exception e) {
+            log.warn("Error parsing removed token filter error response: " + response.body, e);
+            return Set.of();
+        }
+    }
+
+    private static String getRemovedTokenFilter(JsonNode json) {
+        if (json == null) return null;
+        var typeNode = json.get("type");
+        var reasonNode = json.get(REASON);
+        if (typeNode == null || reasonNode == null) return null;
+        if (!"illegal_argument_exception".equals(typeNode.asText())) return null;
+
+        var matcher = REMOVED_TOKEN_FILTER.matcher(reasonNode.asText());
+        return matcher.find() ? matcher.group(1) : null;
     }
 
     /**

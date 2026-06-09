@@ -5,7 +5,7 @@
 # Copies all required container images and helm charts from public registries
 # to a private ECR registry. Run this from a machine with internet access.
 #
-# Can be run standalone or sourced by aws-bootstrap.sh (which calls
+# Can be run standalone or sourced by the migration-assistant CLI (which calls
 # mirror_images_to_ecr and mirror_charts_to_ecr directly).
 #
 # Usage: ./mirrorToEcr.sh <ecr-host> [--region <region>]
@@ -169,13 +169,26 @@ mirror_charts_to_ecr() {
     [ -z "$name" ] && continue
 
     echo "  Pulling $name $version from $repo..."
-    # Redirect stdin from /dev/null so helm can never block on a credential
-    # prompt — if auth is missing/expired we want a fast failure, not a hang.
-    if echo "$repo" | grep -q '^oci://'; then
-      helm pull "$repo/$name" --version "$version" </dev/null 2>/dev/null
-    else
-      helm pull "$name" --repo "$repo" --version "$version" </dev/null 2>/dev/null
+    # Retry transient pull failures (DNS, github.io 5xx, OCI registry blip)
+    # the way image pulls already do. stdin from /dev/null so a credential
+    # prompt fails fast instead of hanging the whole bootstrap.
+    local _pull_err _attempt _ok=0
+    _pull_err=$(mktemp)
+    for _attempt in 1 2 3 4 5; do
+      if echo "$repo" | grep -q '^oci://'; then
+        helm pull "$repo/$name" --version "$version" </dev/null 2>"$_pull_err" && { _ok=1; break; }
+      else
+        helm pull "$name" --repo "$repo" --version "$version" </dev/null 2>"$_pull_err" && { _ok=1; break; }
+      fi
+      [ "$_attempt" -lt 5 ] && sleep $((_attempt * 5))
+    done
+    if [ "$_ok" -ne 1 ]; then
+      echo "  ❌ FAILED to pull $name $version after 5 attempts" >&2
+      sed 's/^/    /' "$_pull_err" >&2
+      rm -f "$_pull_err"
+      continue
     fi
+    rm -f "$_pull_err"
 
     local tgz
     tgz=$(ls ${name}-*.tgz 2>/dev/null | head -1)

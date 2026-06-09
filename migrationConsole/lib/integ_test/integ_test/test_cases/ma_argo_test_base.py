@@ -54,7 +54,9 @@ class MATestUserArguments:
     def __init__(self, source_version: str, target_version: str, unique_id: str, reuse_clusters: bool,
                  target_type: str = "OS", image_registry_prefix: str = "",
                  speedup_factor: int = 20, observed_packet_timeout: int = 30,
-                 transform_image_basic: str = "", transform_image_sequence: str = ""):
+                 transform_image_basic: str = "", transform_image_sequence: str = "",
+                 transform_image_context: str = "",
+                 capture_proxy_service_type: str = "LoadBalancer"):
         self.source_version = source_version
         self.target_version = target_version
         self.target_type = target_type
@@ -65,6 +67,8 @@ class MATestUserArguments:
         self.observed_packet_timeout = observed_packet_timeout
         self.transform_image_basic = transform_image_basic
         self.transform_image_sequence = transform_image_sequence
+        self.transform_image_context = transform_image_context
+        self.capture_proxy_service_type = capture_proxy_service_type
 
 
 class MATestBase:
@@ -91,7 +95,19 @@ class MATestBase:
         self.target_cluster = None
         self.imported_clusters = False
 
-        if not self.is_aoss:
+        if self.is_aoss:
+            # AOSS targets are exposed via subclasses that override
+            # import_existing_clusters to construct the AOSS target_cluster
+            # directly. Such subclasses signal opt-in by leaving
+            # allow_source_target_combinations empty. A test with a non-empty
+            # combo list is configured for typed (ES/OS) targets and would
+            # crash on `self.target_version.full_cluster_type` in the default
+            # import_existing_clusters when target_version is None.
+            if allow_source_target_combinations:
+                raise ClusterVersionCombinationUnsupported(
+                    self.source_version, "AOSS",
+                    message="Test is configured for typed targets and is not AOSS-compatible")
+        else:
             supported_combo = False
             for (allowed_source, allowed_target) in allow_source_target_combinations:
                 if (is_incoming_version_supported(allowed_source, self.source_version) and
@@ -110,6 +126,8 @@ class MATestBase:
         self.observed_packet_timeout = user_args.observed_packet_timeout
         self.transform_image_basic = user_args.transform_image_basic
         self.transform_image_sequence = user_args.transform_image_sequence
+        self.transform_image_context = user_args.transform_image_context
+        self.capture_proxy_service_type = user_args.capture_proxy_service_type
         self.workflow_template = "full-migration-with-clusters"
         self.workflow_snapshot_and_migration_config = None
         self.source_operations = get_operations_library_by_version(self.source_version)
@@ -296,10 +314,17 @@ class MATestBase:
         #    resources spawned by CDC tests keep running independently and are
         #    cleaned up by helm uninstall / workflow reset, not by the outer
         #    workflow's lifecycle.
+        #
+        # CDC outer workflows can take multiple minutes after verify_clusters
+        # because monitorWorkflow polls migration-workflow status on a 60s
+        # interval; a 300s budget here was too tight and frequently timed out
+        # the EKS pipelines (particularly Test0031, Test0033). 900s comfortably
+        # covers two monitor poll cycles plus the final evaluate/delete steps
+        # while still failing fast on truly stuck workflows.
         if not self.imported_clusters:
             self.argo_service.resume_workflow(workflow_name=self.workflow_name)
         self.argo_service.wait_for_ending_phase(
-            workflow_name=self.workflow_name, timeout_seconds=300
+            workflow_name=self.workflow_name, timeout_seconds=900
         )
 
     def test_after(self):

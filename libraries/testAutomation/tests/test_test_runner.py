@@ -118,6 +118,40 @@ class TestFailureDetection:
             runner.run()  # Should not raise
 
 
+class TestPytestCommand:
+    def test_capture_proxy_service_type_is_passed_to_pytest(self):
+        runner = _make_runner(combinations=[("ES_8.19", "OS_3.1")])
+        runner.capture_proxy_service_type = "ClusterIP"
+        runner.k8s_service.exec_background_cmd.return_value = "migration-console-0"
+        runner.k8s_service.poll_cmd_completion.return_value = 0
+        runner.k8s_service.exec_migration_console_cmd.return_value = str({
+            "summary": {
+                "passed": 1,
+                "failed": 0,
+                "source_version": "ES_8.19",
+                "target_version": "OS_3.1",
+                "expected": 1,
+            },
+            "tests": [],
+        })
+
+        runner.run_tests(source_version="ES_8.19", target_version="OS_3.1")
+
+        command_list = runner.k8s_service.exec_background_cmd.call_args.kwargs["command_list"]
+        assert "--capture_proxy_service_type=ClusterIP" in command_list
+
+    def test_skip_delete_does_not_disable_inter_case_reset(self):
+        """--skip-delete preserves the deployment but must NOT pass
+        --skip_workflow_reset to pytest. Per-case CRD reset is required for
+        every multi-case run; otherwise case N+1's setup precondition trips on
+        leftovers from case N (e.g. datasnapshot.source1-testsnapshot)."""
+        runner = _make_runner(combinations=[("ES_7.10", "OS_1.3")])
+        with patch.object(runner, "run_tests", return_value=_make_report(passed=2, failed=0)) as mock_run:
+            runner.run(skip_delete=True)
+            mock_run.assert_called_once()
+            assert mock_run.call_args.kwargs.get("skip_workflow_reset", False) is False
+
+
 from test_runner import get_version_combinations, TargetType, VALID_SOURCE_VERSIONS
 
 

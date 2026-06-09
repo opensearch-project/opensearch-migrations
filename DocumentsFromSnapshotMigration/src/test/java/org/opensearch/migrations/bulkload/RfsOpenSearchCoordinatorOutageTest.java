@@ -15,7 +15,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
@@ -275,29 +274,24 @@ public class RfsOpenSearchCoordinatorOutageTest extends SourceTestBase {
             workItemRef::set
         )) {
             var progressCursor = new AtomicReference<WorkItemCursor>();
-            RfsMigrateDocuments.runWithPipeline(
-                extractor,
-                clientFactory.determineVersionAndCreate(),
-                SNAPSHOT_NAME,
-                luceneDir,
-                () -> docTransformer,
-                false,
-                DocumentExceptionAllowlist.empty(),
-                1,              // 1 doc per bulk to slow migration (matches test timing assumptions)
-                Long.MAX_VALUE,
-                1,              // 1 batch at a time for predictable test timing
-                0,              // no shard size limit in tests
-                progressCursor,
-                workCoordinator,
-                Duration.ofMinutes(99),
-                new org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger(workItemId -> {}),
-                null,           // no WorkItemTimeProvider in tests
-                sourceResourceProvider.getIndexMetadata(),
-                List.of(INDEX_NAME),
-                testContext,
-                new AtomicReference<>(),
-                null,
-                null);
+            var documentSource = org.opensearch.migrations.bulkload.pipeline.adapter.LuceneSnapshotSource
+                .builder(extractor, SNAPSHOT_NAME, luceneDir).build();
+            var leaseExpireTrigger = new org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger(workItemId -> {});
+            var scopedWorkCoordinator = RfsMigrateDocuments.prepareWorkCoordination(
+                workCoordinator, leaseExpireTrigger, documentSource,
+                List.of(INDEX_NAME), testContext);
+            var runner = org.opensearch.migrations.bulkload.pipeline.DocumentMigrationBootstrap.builder()
+                .documentSource(documentSource)
+                .targetClient(clientFactory.determineVersionAndCreate())
+                .maxDocsPerBatch(1)
+                .maxBytesPerBatch(Long.MAX_VALUE)
+                .batchConcurrency(1)
+                .transformerSupplier(() -> docTransformer)
+                .workCoordinator(scopedWorkCoordinator)
+                .maxInitialLeaseDuration(Duration.ofMinutes(99))
+                .cursorConsumer(progressCursor::set)
+                .build();
+            runner.migrateOneShard(testContext::createReindexContext);
         }
     }
 

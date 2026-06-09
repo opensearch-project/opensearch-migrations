@@ -2,24 +2,32 @@ import {
     BaseExpression,
     expr,
     INTERNAL,
-    makeParameterLoop,
     makeDirectTypeProxy,
     makeStringTypeProxy,
+    selectInputsForRegister,
     Serialized,
     typeToken,
     WorkflowBuilder
 } from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
-import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
-import {KAFKA_CLUSTER_CREATION_CONFIG, NAMED_KAFKA_CLUSTER_CONFIG} from "@opensearch-migrations/schemas";
+import {CommonWorkflowParameters, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
+import {DEFAULT_RESOURCES, KAFKA_CLUSTER_CREATION_CONFIG} from "@opensearch-migrations/schemas";
 import {z} from "zod";
-import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {
+    KAFKA_CLUSTER_READY_TIMEOUT_SECONDS,
+    KAFKA_DIAGNOSTIC_RETRY_STRATEGY,
+    K8S_RESOURCE_RETRY_STRATEGY
+} from "./commonUtils/resourceRetryStrategy";
 import {ResourceManagement} from "./resourceManagement";
+import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
 
 type KafkaConfig = z.infer<typeof KAFKA_CLUSTER_CREATION_CONFIG>;
 const KAFKA_CLUSTER_LABEL = "migrations.opensearch.org/kafka-cluster";
 const SOURCE_LABEL = "migrations.opensearch.org/source";
 const WORKFLOW_LABEL = "workflows.argoproj.io/workflow";
+const KAFKA_READY_DIAGNOSTIC_ACTIVE_DEADLINE_SECONDS = 5 * 60;
+const KAFKA_DIAGNOSTIC_ARTIFACT_NAME = "kafkaReadinessDiagnostics";
+const KAFKA_DIAGNOSTIC_LOG_PATH = "/tmp/kafka-readiness-diagnostics.log";
 
 function makeOwnerReferences(
     ownerName: BaseExpression<string>,
@@ -188,7 +196,15 @@ function makeDeployKafkaClusterKraftManifest(args: {
         },
         spec: {
             kafka: makeDirectTypeProxy(expr.deserializeRecord(args.kafkaSpec)),
-            entityOperator: {topicOperator: {}, userOperator: {}}
+            // Reserve CPU/memory on both operator sidecars. Empty {} leaves them with no
+            // resource requests (BestEffort), which lets the scheduler pack them onto a
+            // saturated node where the JVM cold-start loses the liveness-probe race and
+            // crash-loops — wedging the migration since the user-operator owns the KafkaUser
+            // SCRAM secret. See DEFAULT_RESOURCES.ENTITY_OPERATOR.
+            entityOperator: {
+                topicOperator: {resources: DEFAULT_RESOURCES.ENTITY_OPERATOR},
+                userOperator: {resources: DEFAULT_RESOURCES.ENTITY_OPERATOR}
+            }
         }
     };
 }
@@ -240,6 +256,104 @@ export const SetupKafka = WorkflowBuilder.create({
 
     // Leaf templates defined first so deployKafkaCluster can reference them via INTERNAL
 
+    .addTemplate("diagnoseKafkaClusterNotReady", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addContainer(b => b
+            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
+            .addCommand(["/bin/bash", "-lc"])
+            .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
+            .addEnvVarsFromRecord({
+                NAMESPACE: expr.getWorkflowValue("namespace"),
+                KAFKA_CLUSTER_NAME: b.inputs.resourceName,
+                TIMEOUT_SECONDS: expr.literal(String(KAFKA_CLUSTER_READY_TIMEOUT_SECONDS)),
+                DIAGNOSTIC_LOG_PATH: expr.literal(KAFKA_DIAGNOSTIC_LOG_PATH),
+                ...workflowScriptRootEnvVars(t.inputs.workflowParameters.workflowScriptsRoot)
+            })
+            .addArgs([workflowScriptCommand("diagnoseKafkaClusterNotReady.sh")])
+            .addActiveDeadlineSeconds(() => KAFKA_READY_DIAGNOSTIC_ACTIVE_DEADLINE_SECONDS)
+            .addArtifactOutput(KAFKA_DIAGNOSTIC_ARTIFACT_NAME, KAFKA_DIAGNOSTIC_LOG_PATH, {
+                s3Key: expr.concat(
+                    expr.literal("diagnostics/"),
+                    expr.getWorkflowValue("uid"),
+                    expr.literal(`/${KAFKA_DIAGNOSTIC_ARTIFACT_NAME}`)
+                )
+            })
+        )
+        .addRetryParameters(KAFKA_DIAGNOSTIC_RETRY_STRATEGY)
+    )
+
+
+    .addTemplate("failKafkaClusterReadyWait", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addContainer(b => b
+            .addImageInfo(b.inputs.imageMigrationConsoleLocation, b.inputs.imageMigrationConsolePullPolicy)
+            .addCommand(["/bin/bash", "-lc"])
+            .addResources(DEFAULT_RESOURCES.SHELL_MIGRATION_CONSOLE_CLI)
+            .addEnvVarsFromRecord({
+                KAFKA_CLUSTER_NAME: b.inputs.resourceName,
+            })
+            // We need a failing template since we're deferring propagating the failure up 
+            // so that we can first collect diagnostics.  The `exit 1` is the critical part here.
+            .addArgs([`
+set -euo pipefail
+echo "Kafka/$KAFKA_CLUSTER_NAME did not become Ready; diagnostics were collected in the kafkaReadinessDiagnostics artifact and diagnostic pod logs" >&2
+exit 1
+`])
+        )
+    )
+
+
+    .addTemplate("waitForKafkaClusterReady", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addSteps(b => b
+            .addStep("waitForReady", ResourceManagement, "waitForKafkaClusterReadyResource", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.resourceName,
+                }),
+                {continueOn: {failed: true, error: true}}
+            )
+            .addStep("diagnoseFailure", INTERNAL, "diagnoseKafkaClusterNotReady", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.resourceName,
+                }),
+                {when: c => ({templateExp: expr.or(
+                    expr.equals(c.waitForReady.status, "Failed"),
+                    expr.equals(c.waitForReady.status, "Error")
+                )})}
+            )
+            .addStep("failAfterDiagnostics", INTERNAL, "failKafkaClusterReadyWait", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.resourceName,
+                }),
+                {when: c => ({templateExp: expr.or(
+                    expr.equals(c.waitForReady.status, "Failed"),
+                    expr.equals(c.waitForReady.status, "Error")
+                )})}
+            )
+        )
+    )
+
+
+    .addTemplate("waitForKafkaCluster", t => t
+        .addRequiredInput("resourceName", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
+        .addSteps(b => b
+            .addStep("waitForCreation", ResourceManagement, "waitForKafkaClusterCreated", c =>
+                c.register({...selectInputsForRegister(b, c), resourceName: b.inputs.resourceName})
+            )
+            .addStep("waitForReady", INTERNAL, "waitForKafkaClusterReady", c =>
+                c.register({...selectInputsForRegister(b, c), resourceName: b.inputs.resourceName})
+            )
+        )
+    )
+
+
     .addTemplate("deployKafkaNodePool", t => t
         .addRequiredInput("clusterName", typeToken<string>())
         .addRequiredInput("nodePoolSpec", typeToken<Serialized<Record<string, any>>>())
@@ -269,7 +383,6 @@ export const SetupKafka = WorkflowBuilder.create({
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
-                successCondition: "status.listeners",
                 manifest: makeDeployKafkaClusterKraftManifest({
                     clusterName: b.inputs.clusterName,
                     kafkaSpec: b.inputs.kafkaSpec,
@@ -277,8 +390,6 @@ export const SetupKafka = WorkflowBuilder.create({
                     ownerUid: b.inputs.ownerUid,
                 })
             }))
-        .addJsonPathOutput("brokers", "{.status.listeners[?(@.name=='plain')].bootstrapServers}",
-            typeToken<string>())
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
@@ -292,7 +403,6 @@ export const SetupKafka = WorkflowBuilder.create({
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
-                successCondition: "status.listeners",
                 manifest: makeDeployKafkaClusterKraftManifest({
                     clusterName: b.inputs.clusterName,
                     kafkaSpec: b.inputs.kafkaSpec,
@@ -300,8 +410,6 @@ export const SetupKafka = WorkflowBuilder.create({
                     ownerUid: b.inputs.ownerUid,
                 })
             }))
-        .addJsonPathOutput("brokers", "{.status.listeners[?(@.name=='tls')].bootstrapServers}",
-            typeToken<string>())
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
@@ -312,38 +420,40 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
         .addRequiredInput("migrationRunNumber", typeToken<string>())
         .addRequiredInput("ownerUid", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => b
             .addStep("deployNoAuthCluster", INTERNAL, "deployKafkaClusterKraftNoAuth", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    kafkaSpec: expr.recordToString(makeManagedKafkaSpecNoAuth({
-                        version: b.inputs.version,
-                        clusterConfig: b.inputs.clusterConfig,
-                    })),
-                    migrationRunNumber: b.inputs.migrationRunNumber,
-                    ownerUid: b.inputs.ownerUid,
-                }),
+                    c.register({
+                        clusterName: b.inputs.clusterName,
+                        kafkaSpec: expr.recordToString(makeManagedKafkaSpecNoAuth({
+                            version: b.inputs.version,
+                            clusterConfig: b.inputs.clusterConfig,
+                        })),
+                        migrationRunNumber: b.inputs.migrationRunNumber,
+                        ownerUid: b.inputs.ownerUid,
+                    }),
                 {when: c => ({templateExp: expr.not(shouldCreateManagedKafkaUser(b.inputs.clusterConfig))})}
             )
             .addStep("deployScramCluster", INTERNAL, "deployKafkaClusterKraftScram", c =>
-                c.register({
-                    clusterName: b.inputs.clusterName,
-                    kafkaSpec: expr.recordToString(makeManagedKafkaSpecScram({
-                        version: b.inputs.version,
-                        clusterConfig: b.inputs.clusterConfig,
-                    })),
-                    migrationRunNumber: b.inputs.migrationRunNumber,
-                    ownerUid: b.inputs.ownerUid,
-                }),
+                    c.register({
+                        clusterName: b.inputs.clusterName,
+                        kafkaSpec: expr.recordToString(makeManagedKafkaSpecScram({
+                            version: b.inputs.version,
+                            clusterConfig: b.inputs.clusterConfig,
+                        })),
+                        migrationRunNumber: b.inputs.migrationRunNumber,
+                        ownerUid: b.inputs.ownerUid,
+                    }),
                 {when: c => ({templateExp: shouldCreateManagedKafkaUser(b.inputs.clusterConfig)})}
             )
+            .addStep("waitForClusterReady", INTERNAL, "waitForKafkaClusterReady", c =>
+                c.register({
+                    ...selectInputsForRegister(b, c),
+                    resourceName: b.inputs.clusterName,
+                })
+            )
         )
-        .addExpressionOutput("bootstrapServers", c => expr.ternary(
-            shouldCreateManagedKafkaUser(c.inputs.clusterConfig),
-            c.steps.deployScramCluster.outputs.brokers,
-            c.steps.deployNoAuthCluster.outputs.brokers
-        ))
     )
 
 
@@ -361,7 +471,6 @@ export const SetupKafka = WorkflowBuilder.create({
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
-                successCondition: "status.topicName",
                 manifest: makeKafkaTopicManifest({
                     clusterName: b.inputs.clusterName,
                     topicName: b.inputs.topicName,
@@ -373,7 +482,6 @@ export const SetupKafka = WorkflowBuilder.create({
                     topicConfig: b.inputs.topicConfig,
                 })
             }))
-        .addJsonPathOutput("topicName", "{.status.topicName}", typeToken<string>())
         .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
@@ -386,7 +494,6 @@ export const SetupKafka = WorkflowBuilder.create({
             .setDefinition({
                 action: "apply",
                 setOwnerReference: false,
-                successCondition: "status.conditions",
                 manifest: makeManagedKafkaUserManifest({
                     clusterName: b.inputs.clusterName,
                     userSpec: b.inputs.userSpec,
@@ -402,6 +509,7 @@ export const SetupKafka = WorkflowBuilder.create({
         .addRequiredInput("version", typeToken<string>())
         .addRequiredInput("clusterConfig", typeToken<KafkaConfig>())
         .addRequiredInput("ownerUid", typeToken<string>())
+        .addInputsFromRecord(makeRequiredImageParametersForKeys(["MigrationConsole"]))
 
         .addSteps(b => {
             return b
@@ -419,6 +527,7 @@ export const SetupKafka = WorkflowBuilder.create({
                 )
                 .addStep("deployCluster", INTERNAL, "deployKafkaCluster", c =>
                     c.register({
+                        ...selectInputsForRegister(b, c),
                         clusterName: b.inputs.clusterName,
                         version: b.inputs.version,
                         clusterConfig: b.inputs.clusterConfig,
@@ -432,6 +541,13 @@ export const SetupKafka = WorkflowBuilder.create({
                         userSpec: expr.recordToString(makeManagedKafkaUserSpec(b.inputs.clusterConfig)),
                         migrationRunNumber: t.inputs.workflowParameters.migrationRunNumber,
                         ownerUid: b.inputs.ownerUid,
+                    }),
+                    {when: c => ({templateExp: shouldCreateManagedKafkaUser(b.inputs.clusterConfig)})}
+                )
+                .addStep("waitForKafkaUserSecret", ResourceManagement, "waitForSecretKey", c =>
+                    c.register({
+                        secretName: expr.concat(b.inputs.clusterName, expr.literal("-migration-app")),
+                        secretKey: expr.literal("password"),
                     }),
                     {when: c => ({templateExp: shouldCreateManagedKafkaUser(b.inputs.clusterConfig)})}
                 );

@@ -47,6 +47,7 @@ export const TestMigrationWithWorkflowCli = WorkflowBuilder.create({
             .addResources(DEFAULT_RESOURCES.PYTHON_MIGRATION_CONSOLE_CLI)
             .addEnvVarsFromRecord({
                 MIGRATION_CONFIG_BASE64: cb.inputs.migrationConfigBase64,
+                RUN_NONCE: expr.literal("1"), // Solr 6 / 7 tests need a known snapshot suffix.
                 ...workflowScriptRootEnvVars(cb.inputs.workflowScriptsRoot)
             })
             .addArgs([workflowScriptCommand("configureAndSubmitWorkflow.sh")])

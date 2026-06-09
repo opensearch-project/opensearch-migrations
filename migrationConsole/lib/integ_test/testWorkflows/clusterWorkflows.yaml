@@ -1132,6 +1132,7 @@ spec:
             cluster.name: {{inputs.parameters.cluster-name}}
             network.host: 0.0.0.0
             discovery.type: single-node
+            plugins.security.disabled: true
             EOF
             
             # Create OpenSearch values file
@@ -1177,20 +1178,15 @@ spec:
             # Generate cluster configuration output
             cat > /tmp/cluster-config.json << EOF
             {
-              "endpoint": "https://{{inputs.parameters.cluster-name}}:9200",
-              "allowInsecure": true,
-              "authConfig": {
-                "basic": {
-                  "secretName": "{{inputs.parameters.cluster-name}}-creds"
-                }
-              }
+              "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
+              "allowInsecure": true
             }
             EOF
 
             kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
               --from-file=cluster-config=/tmp/cluster-config.json \
               --namespace {{inputs.parameters.namespace}}
-            
+
             echo "OpenSearch 1.3 cluster created successfully"
             echo "Cluster config:"
             cat /tmp/cluster-config.json
@@ -1220,6 +1216,7 @@ spec:
             cluster.name: {{inputs.parameters.cluster-name}}
             network.host: 0.0.0.0
             discovery.type: single-node
+            plugins.security.disabled: true
             EOF
             
             # Create OpenSearch values file
@@ -1231,9 +1228,8 @@ spec:
               tag: "2.19.1"
             singleNode: true
             replicas: 1
-            extraEnvs:
-              - name: "OPENSEARCH_INITIAL_ADMIN_PASSWORD"
-                value: "myStrongPassword123!"
+            securityConfig:
+              enabled: false
             resources:
               requests:
                 cpu: "2"
@@ -1256,7 +1252,7 @@ spec:
               --values /tmp/opensearch-values.yaml \
               --set-file config."opensearch\.yml"=/tmp/opensearch.yml
             
-            # Create cluster credentials secret (OpenSearch 2.19 password set via OPENSEARCH_INITIAL_ADMIN_PASSWORD)
+            # Create cluster credentials secret for compatibility with older test helpers.
             kubectl create secret generic "{{inputs.parameters.cluster-name}}-creds" \
               --from-literal=username=admin \
               --from-literal=password="myStrongPassword123!" \
@@ -1268,13 +1264,8 @@ spec:
             # Generate cluster configuration output
             cat > /tmp/cluster-config.json << EOF
             {
-              "endpoint": "https://{{inputs.parameters.cluster-name}}:9200",
-              "allowInsecure": true,
-              "authConfig": {
-                "basic": {
-                  "secretName": "{{inputs.parameters.cluster-name}}-creds"
-                }
-              }
+              "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
+              "allowInsecure": true
             }
             EOF
 
@@ -1562,7 +1553,7 @@ spec:
 
               <solrcloud>
                 <str name="host">${host:}</str>
-                <int name="hostPort">${solr.port.advertise:0}</int>
+                <int name="hostPort">${jetty.port:8983}</int>
                 <str name="hostContext">${hostContext:solr}</str>
                 <bool name="genericCoreNodeNames">${genericCoreNodeNames:true}</bool>
                 <int name="zkClientTimeout">${zkClientTimeout:30000}</int>
@@ -1622,12 +1613,19 @@ spec:
                   containers:
                     - name: solr
                       image: mirror.gcr.io/library/solr:8.11.4
+                      imagePullPolicy: Always
                       securityContext:
                         runAsUser: 0
                       ports:
                         - containerPort: 8983
                           name: http
                       env:
+                        - name: SOLR_PORT
+                          value: "8983"                                                                                                                              
+                        - name: SOLR_HOST
+                          valueFrom:
+                            fieldRef:
+                              fieldPath: status.podIP
                         - name: SOLR_JAVA_MEM
                           value: "-Xms512m -Xmx512m"
                         - name: SOLR_SECURITY_MANAGER_ENABLED
@@ -1735,6 +1733,729 @@ spec:
               kubectl apply -f -
 
             echo "Solr 8.11 SolrCloud cluster created successfully."
+            echo "Cluster config:"
+            cat /tmp/cluster-config.json
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              path: /tmp/cluster-config.json
+
+    # Solr 6.6 Single Node Template (SolrCloud mode with embedded ZooKeeper)
+    # S3BackupRepository is not available in Solr 6.x; using LocalFileSystemRepository in solr.xml.
+    - name: solr-6-6-single-node
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+          - name: image-registry-prefix
+            default: ""
+      container:
+        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            export CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
+            export NAMESPACE='{{inputs.parameters.namespace}}'
+            export IMAGE_REGISTRY_PREFIX='{{inputs.parameters.image-registry-prefix}}'
+
+            cat > /tmp/solr.xml <<'SOLRXML'
+            <?xml version="1.0" encoding="UTF-8" ?>
+            <solr>
+              <solrcloud>
+                <str name="host">${host:}</str>
+                <int name="hostPort">${jetty.port:8983}</int>
+                <str name="hostContext">${hostContext:solr}</str>
+                <bool name="genericCoreNodeNames">${genericCoreNodeNames:true}</bool>
+                <int name="zkClientTimeout">${zkClientTimeout:30000}</int>
+                <int name="distribUpdateSoTimeout">${distribUpdateSoTimeout:600000}</int>
+                <int name="distribUpdateConnTimeout">${distribUpdateConnTimeout:60000}</int>
+                <str name="zkCredentialsProvider">${zkCredentialsProvider:org.apache.solr.common.cloud.DefaultZkCredentialsProvider}</str>
+                <str name="zkACLProvider">${zkACLProvider:org.apache.solr.common.cloud.DefaultZkACLProvider}</str>
+              </solrcloud>
+            
+              <backup>
+                <repository name="default" class="org.apache.solr.core.backup.repository.LocalFileSystemRepository" default="true"/>
+              </backup>
+
+              <shardHandlerFactory name="shardHandlerFactory" class="HttpShardHandlerFactory">
+                <int name="socketTimeout">${socketTimeout:600000}</int>
+                <int name="connTimeout">${connTimeout:60000}</int>
+              </shardHandlerFactory>
+            </solr>
+            SOLRXML
+            
+            cat > /tmp/zoo.cfg <<'ZOOCFG'                                                                                                                                               
+            # The number of milliseconds of each tick
+            tickTime=2000                                                                                                                                        
+                            
+            # The number of ticks that the initial                                                                                                               
+            # synchronization phase can take
+            initLimit=10                                                                                                                                         
+                            
+            # The number of ticks that can pass between                                                                                                          
+            # sending a request and getting an acknowledgement
+            syncLimit=5                                                                                                                                          
+                            
+            # the directory where the snapshot is stored.                                                                                                        
+            # dataDir=/opt/zookeeper/data
+            # NOTE: Solr defaults the dataDir to <solrHome>/zoo_data                                                                                             
+                                                                                                                                                                 
+            # the port at which the clients will connect                                                                                                         
+            # clientPort=2181                                                                                                                                    
+            # NOTE: Solr sets this based on zkRun / zkHost params
+            ZOOCFG
+
+            kubectl create configmap "${CLUSTER_NAME}-solr-xml" \
+              --from-file=solr.xml=/tmp/solr.xml \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
+            
+            kubectl create configmap "${CLUSTER_NAME}-zoo-cfg" \
+              --from-file=zoo.cfg=/tmp/zoo.cfg \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
+
+            cat <<'EOF' | envsubst '$CLUSTER_NAME $NAMESPACE $IMAGE_REGISTRY_PREFIX' | kubectl apply -f -
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              replicas: 1
+              selector:
+                matchLabels:
+                  app: ${CLUSTER_NAME}
+              template:
+                metadata:
+                  labels:
+                    app: ${CLUSTER_NAME}
+                    migration-test: "true"
+                    cluster-name: ${CLUSTER_NAME}
+                spec:
+                  serviceAccountName: migration-console-access-role
+                  containers:
+                    - name: solr
+                      image: ${IMAGE_REGISTRY_PREFIX}migrations/custom-solr:6.6.0
+                      imagePullPolicy: Always
+                      securityContext:
+                        runAsUser: 0
+                      ports:
+                        - containerPort: 8983
+                          name: http
+                      env:
+                        - name: SOLR_PORT
+                          value: "8983"                                                                                     
+                        - name: SOLR_HOST
+                          valueFrom:
+                            fieldRef:
+                              fieldPath: status.podIP
+                        - name: SOLR_JAVA_MEM
+                          value: "-Xms512m -Xmx512m"
+                        - name: SOLR_SECURITY_MANAGER_ENABLED
+                          value: "false"
+                        - name: ZK_CREATE_CHROOT
+                          value: "true"
+                        - name: AWS_ACCESS_KEY_ID
+                          value: "test"
+                        - name: AWS_SECRET_ACCESS_KEY
+                          value: "test"
+                        - name: S3_BUCKET_NAME
+                          valueFrom:
+                            configMapKeyRef:
+                              name: migrations-default-s3-config
+                              key: BUCKET_NAME
+                        - name: S3_REGION
+                          valueFrom:
+                            configMapKeyRef:
+                              name: migrations-default-s3-config
+                              key: AWS_REGION
+                        - name: S3_ENDPOINT
+                          valueFrom:
+                            configMapKeyRef:
+                              name: migrations-default-s3-config
+                              key: ENDPOINT_HTTP
+                              optional: true
+                      command: ["bash", "-c"]
+                      args:
+                        - |
+                          set -eo pipefail
+            
+                          # that is the id used as location when running backup command in the workflow, we need to create
+                          # symlink here to actual target folder. Note that the below is a fixed value for the 
+                          # local k8s migration tests only, thus creating folder with the given naming convention.
+                          # for other cases this needs to be reflected here / made configurable
+                          echo "Determining used suffix to create folder for backup and symlink into /var/solr/data/[suffix]"
+                          SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+                          echo "Found suffix: $SUFFIX"
+                          mkdir -p "/var/solr/data/$SUFFIX/source1_testsnapshot_1" "/$SUFFIX"
+                          ln -s "/var/solr/data/$SUFFIX/source1_testsnapshot_1" "/$SUFFIX/source1_testsnapshot_1"
+            
+                          # setting up direct sync to s3 on file system change in the backup storage.
+                          # Since Solr 6 and 7 do not bring a s3 backup implementation, we simulate this 
+                          # with file sync for now (might change later to variant without s3 involvement).
+                          AWS_LOC=$(which aws)
+                          cat > /tmp/sync_script.sh << EOF
+                          
+                          NEEDS_SYNC=0
+                          
+                          run_sync() {
+                              flock -n /tmp/s3_sync.lock bash -c "
+                                  echo 'Running backup sync job to s3'
+                                  $AWS_LOC s3 sync /var/solr/data/${SUFFIX} s3://${S3_BUCKET_NAME}/${SUFFIX} \
+                                      --endpoint-url '${S3_ENDPOINT}' \
+                                      --region '${S3_REGION:-us-east-2}' \
+                                      --no-verify-ssl
+                              " && NEEDS_SYNC=0 || NEEDS_SYNC=1
+                          }
+                        
+                          while inotifywait -r -q -e modify,create,move /var/solr/data/${SUFFIX}; do
+                              run_sync
+                              if [ \$NEEDS_SYNC -eq 1 ]; then
+                                  echo "Changes detected during sync, re-syncing..."
+                                  run_sync
+                              fi
+                          done >> /proc/1/fd/1 2>&1 &
+                          EOF
+                          echo "Backup sync script to s3 localstack"
+                          cat /tmp/sync_script.sh
+                          chmod +x /tmp/sync_script.sh
+                          /tmp/sync_script.sh &
+            
+                          echo "Starting up solr"
+                          exec solr -f -force -cloud -DzkRun &
+                          SOLR_PID=$!
+            
+                          SOLR=http://localhost:8983
+                          echo "Using solr endpoint $SOLR"
+                                                                                                                                                       
+                          echo "Wait for Solr to be reachable"
+                          until curl -fsS "$SOLR/solr/admin/info/system" >/dev/null 2>&1; do                                                                     
+                            echo "waiting for Solr..."                                                                                                           
+                            sleep 2                                                                                                                              
+                          done                                                                                                                                   
+                            
+                          echo "Get the list of configsets already in ZK"                                                                                        
+                          existing=$(curl -fsS "$SOLR/solr/admin/configs?action=LIST&wt=json" \
+                                     | sed -n 's/.*"configSets":\[\([^]]*\)\].*/\1/p' \
+                                     | tr -d '"' | tr ',' '\n')
+                          echo "Available configsets: $existing"
+                                                                                                                                                                 
+                          echo "Upload every bundled configset not yet present"                                                                                 
+                          for dir in /opt/solr/server/solr/configsets/*/; do
+                            name=$(basename "$dir")                                                                                     
+                            if echo "$existing" | grep -qx "$name"; then
+                              echo "skip $name (already in ZK)"
+                              continue
+                            fi
+                            echo "uploading $name..."
+                            tmp=$(mktemp).zip
+                            (cd "$dir/conf" && zip -qr "$tmp" .)
+                            curl -fsS -X POST \
+                              -H 'Content-Type: application/octet-stream' \
+                              --data-binary "@$tmp" \
+                              "$SOLR/solr/admin/configs?action=UPLOAD&name=$name"
+                            rm -f "$tmp"
+                          done
+                          
+                          wait "$SOLR_PID"
+                          
+                      readinessProbe:
+                        httpGet:
+                          path: /solr/admin/info/system?wt=json
+                          port: 8983
+                        initialDelaySeconds: 15
+                        periodSeconds: 5
+                        failureThreshold: 24
+                      resources:
+                        requests:
+                          cpu: 500m
+                          memory: 1Gi
+                        limits:
+                          cpu: "2"
+                          memory: 2Gi
+                      volumeMounts:
+                        - name: solr-data
+                          mountPath: /var/solr/data
+                        - name: solr-xml
+                          mountPath: /var/solr/data/solr.xml
+                          subPath: solr.xml
+                        - name: zoo-cfg
+                          mountPath: /var/solr/data/zoo.cfg
+                          subPath: zoo.cfg
+                  volumes:
+                    - name: solr-data
+                      emptyDir: {}
+                    - name: solr-xml
+                      configMap:
+                        name: ${CLUSTER_NAME}-solr-xml
+                    - name: zoo-cfg
+                      configMap:
+                        name: ${CLUSTER_NAME}-zoo-cfg
+            ---
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              selector:
+                app: ${CLUSTER_NAME}
+              ports:
+                - name: http
+                  port: 8983
+                  targetPort: 8983
+            EOF
+
+            echo "Waiting for Solr to be ready..."
+            kubectl rollout status deployment/${CLUSTER_NAME} -n ${NAMESPACE} --timeout=300s
+
+            echo "Creating 'dummy' collection...(Note that collection.configName needs setting and the respective config be uploaded to zk (see Dockerfile))"
+            SOLR_URL="http://${CLUSTER_NAME}.${NAMESPACE}.svc.cluster.local:8983"
+            for i in $(seq 1 30); do
+              RESULT=$(curl -s "${SOLR_URL}/solr/admin/collections?action=CREATE&name=dummy&collection.configName=sample_techproducts_configs&numShards=1&replicationFactor=1&wt=json" 2>&1) && echo "$RESULT" | grep -q '"status":0' && echo "Collection 'dummy' created successfully" && break
+              echo "Attempt $i/30 - response: $RESULT"
+              sleep 5
+            done
+
+            cat > /tmp/cluster-config.json <<EOF
+            {
+              "endpoint": "http://${CLUSTER_NAME}:8983",
+              "allowInsecure": true,
+              "version": "SOLR 6.6.0"
+            }
+            EOF
+
+            kubectl create configmap ${CLUSTER_NAME}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              -n ${NAMESPACE} \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
+
+            echo "Solr 6.6 SolrCloud cluster created successfully."
+            echo "Cluster config:"
+            cat /tmp/cluster-config.json
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              path: /tmp/cluster-config.json
+
+    # Solr 7.7 Single Node Template (SolrCloud mode with embedded ZooKeeper)
+    # S3BackupRepository is not available in Solr 7.x; using LocalFileSystemRepository in solr.xml.
+    - name: solr-7-7-single-node
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+          - name: image-registry-prefix
+            default: ""
+      container:
+        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
+            NAMESPACE='{{inputs.parameters.namespace}}'
+
+            cat > /tmp/solr.xml <<'SOLRXML'
+            <?xml version="1.0" encoding="UTF-8" ?>
+            <solr>
+              <solrcloud>
+                <str name="host">${host:}</str>
+                <int name="hostPort">${jetty.port:8983}</int>
+                <str name="hostContext">${hostContext:solr}</str>
+                <bool name="genericCoreNodeNames">${genericCoreNodeNames:true}</bool>
+                <int name="zkClientTimeout">${zkClientTimeout:30000}</int>
+                <int name="distribUpdateSoTimeout">${distribUpdateSoTimeout:600000}</int>
+                <int name="distribUpdateConnTimeout">${distribUpdateConnTimeout:60000}</int>
+                <str name="zkCredentialsProvider">${zkCredentialsProvider:org.apache.solr.common.cloud.DefaultZkCredentialsProvider}</str>
+                <str name="zkACLProvider">${zkACLProvider:org.apache.solr.common.cloud.DefaultZkACLProvider}</str>
+              </solrcloud>
+            
+              <backup>
+                <repository name="default" class="org.apache.solr.core.backup.repository.LocalFileSystemRepository" default="true"/>
+              </backup>
+
+              <shardHandlerFactory name="shardHandlerFactory" class="HttpShardHandlerFactory">
+                <int name="socketTimeout">${socketTimeout:600000}</int>
+                <int name="connTimeout">${connTimeout:60000}</int>
+              </shardHandlerFactory>
+
+              <metrics enabled="${metricsEnabled:true}"/>
+            </solr>
+            SOLRXML
+
+            kubectl create configmap "${CLUSTER_NAME}-solr-xml" \
+              --from-file=solr.xml=/tmp/solr.xml \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
+
+            cat <<EOF | kubectl apply -f -
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              replicas: 1
+              selector:
+                matchLabels:
+                  app: ${CLUSTER_NAME}
+              template:
+                metadata:
+                  labels:
+                    app: ${CLUSTER_NAME}
+                    migration-test: "true"
+                    cluster-name: ${CLUSTER_NAME}
+                spec:
+                  serviceAccountName: migration-console-access-role
+                  containers:
+                    - name: solr
+                      image: mirror.gcr.io/library/solr:7.7.3
+                      imagePullPolicy: Always
+                      securityContext:
+                        runAsUser: 0
+                      ports:
+                        - containerPort: 8983
+                          name: http
+                      env:
+                        - name: SOLR_PORT
+                          value: "8983"                                                                                                                              
+                        - name: SOLR_HOST
+                          valueFrom:
+                            fieldRef:
+                              fieldPath: status.podIP
+                        - name: SOLR_JAVA_MEM
+                          value: "-Xms512m -Xmx512m"
+                        - name: SOLR_SECURITY_MANAGER_ENABLED
+                          value: "false"
+                        - name: ZK_CREATE_CHROOT
+                          value: "true"
+                      command: ["bash", "-c"]
+                      args:
+                        - |
+                          /opt/docker-solr/scripts/init-var-solr
+                          exec solr -f -force -cloud -DzkRun
+                      readinessProbe:
+                        httpGet:
+                          path: /solr/admin/info/system?wt=json
+                          port: 8983
+                        initialDelaySeconds: 15
+                        periodSeconds: 5
+                        failureThreshold: 24
+                      resources:
+                        requests:
+                          cpu: 500m
+                          memory: 1Gi
+                        limits:
+                          cpu: "2"
+                          memory: 2Gi
+                      volumeMounts:
+                        - name: solr-data
+                          mountPath: /var/solr
+                        - name: solr-xml
+                          mountPath: /opt/solr/server/solr/solr.xml
+                          subPath: solr.xml
+                  volumes:
+                    - name: solr-data
+                      emptyDir: {}
+                    - name: solr-xml
+                      configMap:
+                        name: ${CLUSTER_NAME}-solr-xml
+            ---
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              selector:
+                app: ${CLUSTER_NAME}
+              ports:
+                - name: http
+                  port: 8983
+                  targetPort: 8983
+            EOF
+
+            echo "Waiting for Solr to be ready..."
+            kubectl rollout status deployment/${CLUSTER_NAME} -n ${NAMESPACE} --timeout=300s
+            
+            # that is the id used as location when running backup command in the workflow, we need to create
+            # symlink here to actual target folder. Note that the below is a fixed value for the 
+            # local k8s migration tests only, thus creating folder with the given naming convention.
+            # for other cases this needs to be reflected here / made configurable
+            echo "Determining used suffix to create folder for backup and symlink into /var/solr/data/[suffix]"
+            SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
+            echo "Found suffix: $SUFFIX"
+            mkdir -p "/var/solr/data/$SUFFIX/source1_testsnapshot_1" "/$SUFFIX"
+            ln -s "/var/solr/data/$SUFFIX/source1_testsnapshot_1" "/$SUFFIX/source1_testsnapshot_1"
+
+            echo "Creating 'dummy' collection..."
+            SOLR_URL="http://${CLUSTER_NAME}.${NAMESPACE}.svc.cluster.local:8983"
+            for i in $(seq 1 30); do
+              RESULT=$(curl -s "${SOLR_URL}/solr/admin/collections?action=CREATE&name=dummy&numShards=1&replicationFactor=1&wt=json" 2>&1) && echo "$RESULT" | grep -q '"status":0' && echo "Collection 'dummy' created successfully" && break
+              echo "Attempt $i/30 - response: $RESULT"
+              sleep 5
+            done
+
+            cat > /tmp/cluster-config.json <<EOF
+            {
+              "endpoint": "http://${CLUSTER_NAME}:8983",
+              "allowInsecure": true,
+              "version": "SOLR 7.7.3"
+            }
+            EOF
+
+            kubectl create configmap ${CLUSTER_NAME}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              -n ${NAMESPACE} \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
+
+            echo "Solr 7.7 SolrCloud cluster created successfully."
+            echo "Cluster config:"
+            cat /tmp/cluster-config.json
+      outputs:
+        parameters:
+          - name: cluster-config
+            valueFrom:
+              path: /tmp/cluster-config.json
+
+    # Solr 9.8 Single Node Template (SolrCloud mode with embedded ZooKeeper)
+    # In Solr 9.x the S3 repository moved from contrib/ to modules/.
+    - name: solr-9-8-single-node
+      inputs:
+        parameters:
+          - name: cluster-name
+          - name: namespace
+          - name: image-registry-prefix
+            default: ""
+      container:
+        image: mirror.gcr.io/dtzar/helm-kubectl:3.18.6
+        command: [sh, -c]
+        args:
+          - |
+            set -euo pipefail
+            CLUSTER_NAME='{{inputs.parameters.cluster-name}}'
+            NAMESPACE='{{inputs.parameters.namespace}}'
+
+            cat > /tmp/solr.xml <<'SOLRXML'
+            <?xml version="1.0" encoding="UTF-8" ?>
+            <solr>
+              <int name="maxBooleanClauses">${solr.max.booleanClauses:1024}</int>
+              <str name="allowPaths">${solr.allowPaths:}</str>
+              <str name="sharedLib">/opt/solr/dist,/opt/solr/modules/s3-repository/lib</str>
+
+              <solrcloud>
+                <str name="host">${host:}</str>
+                <int name="hostPort">${jetty.port:8983}</int>
+                <str name="hostContext">${hostContext:solr}</str>
+                <bool name="genericCoreNodeNames">${genericCoreNodeNames:true}</bool>
+                <int name="zkClientTimeout">${zkClientTimeout:30000}</int>
+                <int name="distribUpdateSoTimeout">${distribUpdateSoTimeout:600000}</int>
+                <int name="distribUpdateConnTimeout">${distribUpdateConnTimeout:60000}</int>
+                <str name="zkCredentialsProvider">${zkCredentialsProvider:org.apache.solr.common.cloud.DefaultZkCredentialsProvider}</str>
+                <str name="zkACLProvider">${zkACLProvider:org.apache.solr.common.cloud.DefaultZkACLProvider}</str>
+              </solrcloud>
+
+              <backup>
+                <repository name="default" class="org.apache.solr.s3.S3BackupRepository" default="true">
+                  <str name="s3.bucket.name">${S3_BUCKET_NAME:}</str>
+                  <str name="s3.region">${S3_REGION:us-east-2}</str>
+                  <str name="s3.endpoint">${S3_ENDPOINT:}</str>
+                </repository>
+              </backup>
+
+              <shardHandlerFactory name="shardHandlerFactory" class="HttpShardHandlerFactory">
+                <int name="socketTimeout">${socketTimeout:600000}</int>
+                <int name="connTimeout">${connTimeout:60000}</int>
+              </shardHandlerFactory>
+
+              <metrics enabled="${metricsEnabled:true}"/>
+            </solr>
+            SOLRXML
+
+            kubectl create configmap "${CLUSTER_NAME}-solr-xml" \
+              --from-file=solr.xml=/tmp/solr.xml \
+              -n "${NAMESPACE}" \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
+
+            cat <<EOF | kubectl apply -f -
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              replicas: 1
+              selector:
+                matchLabels:
+                  app: ${CLUSTER_NAME}
+              template:
+                metadata:
+                  labels:
+                    app: ${CLUSTER_NAME}
+                    migration-test: "true"
+                    cluster-name: ${CLUSTER_NAME}
+                spec:
+                  serviceAccountName: migration-console-access-role
+                  containers:
+                    - name: solr
+                      image: mirror.gcr.io/library/solr:9.8.1
+                      imagePullPolicy: Always
+                      securityContext:
+                        runAsUser: 0
+                      ports:
+                        - containerPort: 8983
+                          name: http
+                      env:
+                        - name: SOLR_PORT
+                          value: "8983"                                                                                                                              
+                        - name: SOLR_HOST
+                          valueFrom:
+                            fieldRef:
+                              fieldPath: status.podIP
+                        - name: SOLR_JAVA_MEM
+                          value: "-Xms512m -Xmx512m"
+                        - name: SOLR_SECURITY_MANAGER_ENABLED
+                          value: "false"
+                        - name: ZK_CREATE_CHROOT
+                          value: "true"
+                        - name: AWS_ACCESS_KEY_ID
+                          value: "test"
+                        - name: AWS_SECRET_ACCESS_KEY
+                          value: "test"
+                        - name: S3_BUCKET_NAME
+                          valueFrom:
+                            configMapKeyRef:
+                              name: migrations-default-s3-config
+                              key: BUCKET_NAME
+                        - name: S3_REGION
+                          valueFrom:
+                            configMapKeyRef:
+                              name: migrations-default-s3-config
+                              key: AWS_REGION
+                        - name: S3_ENDPOINT
+                          valueFrom:
+                            configMapKeyRef:
+                              name: migrations-default-s3-config
+                              key: ENDPOINT_HTTP
+                              optional: true
+                      command: ["bash", "-c"]
+                      args:
+                        - |
+                          # Copy S3 repository jars to dist dir and start SolrCloud with embedded ZooKeeper
+                          SOLR_MODULES=s3-repository
+                          /opt/solr/docker/scripts/init-var-solr
+                          exec solr -f -force -cloud -DzkRun
+                      readinessProbe:
+                        httpGet:
+                          path: /solr/admin/info/system?wt=json
+                          port: 8983
+                        initialDelaySeconds: 15
+                        periodSeconds: 5
+                        failureThreshold: 24
+                      resources:
+                        requests:
+                          cpu: 500m
+                          memory: 1Gi
+                        limits:
+                          cpu: "2"
+                          memory: 2Gi
+                      volumeMounts:
+                        - name: solr-data
+                          mountPath: /var/solr
+                        - name: solr-xml
+                          mountPath: /opt/solr/server/solr/solr.xml
+                          subPath: solr.xml
+                  volumes:
+                    - name: solr-data
+                      emptyDir: {}
+                    - name: solr-xml
+                      configMap:
+                        name: ${CLUSTER_NAME}-solr-xml
+            ---
+            apiVersion: v1
+            kind: Service
+            metadata:
+              name: ${CLUSTER_NAME}
+              namespace: ${NAMESPACE}
+              labels:
+                app: ${CLUSTER_NAME}
+                migration-test: "true"
+                cluster-name: ${CLUSTER_NAME}
+            spec:
+              selector:
+                app: ${CLUSTER_NAME}
+              ports:
+                - name: http
+                  port: 8983
+                  targetPort: 8983
+            EOF
+
+            # Wait for Solr to be ready
+            echo "Waiting for Solr to be ready..."
+            kubectl rollout status deployment/${CLUSTER_NAME} -n ${NAMESPACE} --timeout=300s
+
+            # Create the 'dummy' collection via Collections API (SolrCloud mode)
+            echo "Creating 'dummy' collection..."
+            SOLR_URL="http://${CLUSTER_NAME}.${NAMESPACE}.svc.cluster.local:8983"
+            for i in $(seq 1 30); do
+              RESULT=$(curl -s "${SOLR_URL}/solr/admin/collections?action=CREATE&name=dummy&numShards=1&replicationFactor=1&wt=json" 2>&1) && echo "$RESULT" | grep -q '"status":0' && echo "Collection 'dummy' created successfully" && break
+              echo "Attempt $i/30 - response: $RESULT"
+              sleep 5
+            done
+
+            cat > /tmp/cluster-config.json <<EOF
+            {
+              "endpoint": "http://${CLUSTER_NAME}:8983",
+              "allowInsecure": true,
+              "version": "SOLR 9.8.1"
+            }
+            EOF
+
+            kubectl create configmap ${CLUSTER_NAME}-migration-config \
+              --from-file=cluster-config=/tmp/cluster-config.json \
+              -n ${NAMESPACE} \
+              --dry-run=client -o yaml | \
+              kubectl label --local -f - migration-test=true cluster-name=${CLUSTER_NAME} -o yaml | \
+              kubectl apply -f -
+
+            echo "Solr 9.8 SolrCloud cluster created successfully."
             echo "Cluster config:"
             cat /tmp/cluster-config.json
       outputs:

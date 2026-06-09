@@ -9,7 +9,10 @@ import {
 } from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
-import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
+import {
+    K8S_INFRA_READY_TIMEOUT_SECONDS,
+    K8S_RESOURCE_RETRY_STRATEGY,
+} from "./commonUtils/resourceRetryStrategy";
 
 export function getRfsCoordinatorClusterName(sessionName: BaseExpression<string>): BaseExpression<string> {
     return expr.concat(sessionName, expr.literal("-rfs-coordinator"));
@@ -208,9 +211,9 @@ function createRfsCoordinatorStatefulSetManifest(
                                 periodSeconds: 15,
                                 // Must be >= the curl internal timeout (10s) to allow the API to respond
                                 timeoutSeconds: 15,
-                                // 20 failures * 15s = 300s (5m). Provides a 5min window for the
+                                // 40 failures * 15s = 600s (10m). Provides a 10min window for the
                                 // single-node cluster to reach 'yellow' status during bootstrap.
-                                failureThreshold: 20
+                                failureThreshold: 40
                             },
                             volumeMounts: [
                                 {
@@ -302,6 +305,7 @@ export const RfsCoordinatorCluster = WorkflowBuilder.create({
         .addResourceTask(b => b
             .setDefinition({
                 action: "apply",
+                activeDeadlineSeconds: K8S_INFRA_READY_TIMEOUT_SECONDS,
                 setOwnerReference: false,
                 successCondition: "status.readyReplicas > 0",
                 manifest: createRfsCoordinatorStatefulSetManifest(

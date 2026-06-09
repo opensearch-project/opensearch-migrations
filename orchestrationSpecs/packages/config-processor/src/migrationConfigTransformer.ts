@@ -12,8 +12,9 @@ import {
     FieldMeta, ChecksumDependency,
     USER_PROXY_PROCESS_OPTIONS, USER_PROXY_WORKFLOW_OPTIONS,
     USER_RFS_PROCESS_OPTIONS,
-    TRANSFORMS_SOURCE,
+    ARGO_PROXY_OPTIONS,
     TRANSFORM_PIPELINE,
+    TRANSFORM_CONTEXT_VALUE,
 } from '@opensearch-migrations/schemas';
 import {StreamSchemaTransformer} from './streamSchemaTransformer';
 import { z } from 'zod';
@@ -21,6 +22,7 @@ import {promises as dns} from "dns";
 import {createHash} from "crypto";
 import { generateSemaphoreKey, resolveSerializeSnapshotCreation } from './semaphoreUtils';
 import {validateInputAgainstUnifiedSchema} from "./unifiedSchemaValidator";
+import {FileSourceRegistry} from "./fileSourceUtils";
 
 type InputConfig = z.infer<typeof OVERALL_MIGRATION_CONFIG>;
 type OutputConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
@@ -223,114 +225,222 @@ function defaultProxyTlsConfig(proxyName: string) {
     };
 }
 
-type TransformSourceMap = Record<string, z.infer<typeof TRANSFORMS_SOURCE>>;
 type TransformPipeline = z.infer<typeof TRANSFORM_PIPELINE>;
-type TransformKind = "metadata" | "document" | "request" | "tuple";
+type TransformContextValue = z.infer<typeof TRANSFORM_CONTEXT_VALUE>;
 
-const TRANSFORMS_MOUNT_PATH = "/transforms";
 const PROVIDER_BY_LANGUAGE = {
     javascript: "JsonJSTransformerProvider",
     python: "JsonPythonTransformerProvider",
 } as const;
 
-function resolveTransformsSource(
-    sourceName: string | undefined,
-    transformSources: TransformSourceMap
-) {
-    if (!sourceName) {
-        return {};
-    }
-
-    const source = transformSources[sourceName];
-    if (!source) {
-        throw new Error(`Transforms source '${sourceName}' not found in transformsSources`);
-    }
-
-    if ("image" in source) {
-        return {
-            transformsImage: source.image,
-            transformsImagePullPolicy: source.pullPolicy ?? "IfNotPresent"
-        };
-    }
-    return {transformsConfigMap: source.configMap};
-}
-
-function defaultTransformFile(kind: TransformKind, language: TransformPipeline[number]["language"]) {
-    const extension = language === "javascript" ? "js" : "py";
-    return `${kind}.${extension}`;
-}
-
-function mountedTransformPath(relativeFile: string) {
-    return `${TRANSFORMS_MOUNT_PATH}/${relativeFile}`;
-}
+const CAPTURE_PROXY_SSL_TRUST_CERT_PEM_ENV_VAR = "CAPTURE_PROXY_SSL_TRUST_CERT_PEM";
 
 function lowerTransformPipeline(
     pipeline: TransformPipeline | undefined,
-    kind: TransformKind
+    fileSourceRegistry: FileSourceRegistry
 ) {
     if (pipeline === undefined || pipeline.length === 0) {
         return undefined;
     }
 
     return JSON.stringify(pipeline.map(transform => {
-        const providerName = PROVIDER_BY_LANGUAGE[transform.language];
-        const relativeFile = transform.file ?? defaultTransformFile(kind, transform.language);
+        const lowered = lowerTransformSpec(transform, fileSourceRegistry);
         return {
-            [providerName]: {
-                initializationScriptFile: mountedTransformPath(relativeFile),
-                bindingsObject: JSON.stringify(transform.bindingsObject ?? {}),
-            }
+            [lowered.providerName]: lowered.config
         };
     }));
 }
 
+function lowerTransformSpec(
+    transform: TransformPipeline[number],
+    fileSourceRegistry: FileSourceRegistry
+): {providerName: string; config: unknown} {
+    if (transform.transformName !== undefined) {
+        return {
+            providerName: transform.transformName,
+            config: lowerNamedTransformContext(transform.context, fileSourceRegistry)
+        };
+    }
+
+    if (transform.entryPoint === undefined) {
+        throw new Error("Transform spec is missing entryPoint or transformName after schema validation.");
+    }
+
+    const entryPoint = transform.entryPoint;
+    const scriptConfig: Record<string, unknown> =
+        "javascript" in entryPoint ? {
+            initializationScript: entryPoint.javascript
+        } :
+        "javascriptFile" in entryPoint ? {
+            initializationScriptFile: fileSourceRegistry.resolveFileRef(entryPoint.javascriptFile)
+        } :
+        "python" in entryPoint ? {
+            initializationScript: entryPoint.python
+        } : {
+            initializationScriptFile: fileSourceRegistry.resolveFileRef(entryPoint.pythonFile)
+        };
+
+    lowerScriptTransformContext(scriptConfig, transform.context, fileSourceRegistry);
+
+    return {
+        providerName: "javascript" in entryPoint || "javascriptFile" in entryPoint
+            ? PROVIDER_BY_LANGUAGE.javascript
+            : PROVIDER_BY_LANGUAGE.python,
+        config: scriptConfig
+    };
+}
+
+function lowerNamedTransformContext(
+    context: TransformPipeline[number]["context"],
+    fileSourceRegistry: FileSourceRegistry
+) {
+    if (context === undefined) {
+        return {};
+    }
+    if (typeof context === "string") {
+        return context;
+    }
+
+    const config: Record<string, unknown> = {};
+    const dirs = context.valueDirectories?.map(directory => ({
+        path: fileSourceRegistry.resolveDirectory(directory)
+    })) ?? [];
+    if (dirs.length > 0) {
+        config.providerConfigDirs = dirs;
+    }
+
+    const providerConfigFiles = lowerFileBackedContextValues(context.values ?? {}, fileSourceRegistry);
+    if (Object.keys(providerConfigFiles.files).length > 0) {
+        config.providerConfigFiles = providerConfigFiles.files;
+    }
+    Object.assign(config, providerConfigFiles.literalValues);
+    return config;
+}
+
+function lowerScriptTransformContext(
+    scriptConfig: Record<string, unknown>,
+    context: TransformPipeline[number]["context"],
+    fileSourceRegistry: FileSourceRegistry
+) {
+    if (context === undefined) {
+        return;
+    }
+    if (typeof context === "string") {
+        scriptConfig.bindingsObject = JSON.stringify(context);
+        return;
+    }
+
+    const dirs = context.valueDirectories?.map(directory => ({
+        path: fileSourceRegistry.resolveDirectory(directory)
+    })) ?? [];
+    if (dirs.length > 0) {
+        scriptConfig.bindingsObjectDirs = dirs;
+    }
+
+    const loweredValues = lowerFileBackedContextValues(context.values ?? {}, fileSourceRegistry);
+    if (Object.keys(loweredValues.files).length > 0) {
+        scriptConfig.bindingsObjectFiles = loweredValues.files;
+    }
+    if (Object.keys(loweredValues.literalValues).length > 0) {
+        scriptConfig.bindingsObject = loweredValues.literalValues;
+    }
+}
+
+function lowerFileBackedContextValues(
+    values: Record<string, TransformContextValue>,
+    fileSourceRegistry: FileSourceRegistry
+) {
+    const files: Record<string, {path: string}> = {};
+    const literalValues: Record<string, unknown> = {};
+    for (const [key, contextValue] of Object.entries(values)) {
+        if ("value" in contextValue) {
+            literalValues[key] = contextValue.value;
+        } else {
+            files[key] = {
+                path: fileSourceRegistry.resolveFileRef(contextValue.fromFile)
+            };
+        }
+    }
+    return {files, literalValues};
+}
+
 function prepareMetadataConfig(
-    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["metadataMigrationConfig"],
-    transformSources: TransformSourceMap
+    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["metadataMigrationConfig"]
 ) {
     if (config === undefined) {
         return undefined;
     }
 
-    const {transformsSource, metadataTransforms, ...rest} = config;
-    const generatedConfig = lowerTransformPipeline(metadataTransforms, "metadata");
+    const {metadataTransforms, ...rest} = config;
+    const fileSourceRegistry = new FileSourceRegistry();
+    const generatedConfig = lowerTransformPipeline(metadataTransforms, fileSourceRegistry);
     return ARGO_METADATA_OPTIONS.parse({
         ...rest,
-        ...resolveTransformsSource(transformsSource, transformSources),
+        ...fileSourceRegistry.resolvedFields,
         ...(generatedConfig === undefined ? {} : {transformerConfig: generatedConfig}),
     });
 }
 
 function prepareDocumentBackfillConfig(
-    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"],
-    transformSources: TransformSourceMap
+    config: z.infer<typeof USER_PER_INDICES_SNAPSHOT_MIGRATION_CONFIG>["documentBackfillConfig"]
 ) {
     if (config === undefined) {
         return undefined;
     }
 
-    const {transformsSource, documentTransforms, ...rest} = config;
-    const generatedConfig = lowerTransformPipeline(documentTransforms, "document");
+    const {documentTransforms, ...rest} = config;
+    const fileSourceRegistry = new FileSourceRegistry();
+    const generatedConfig = lowerTransformPipeline(documentTransforms, fileSourceRegistry);
     return ARGO_RFS_OPTIONS.parse({
         ...rest,
-        ...resolveTransformsSource(transformsSource, transformSources),
+        ...fileSourceRegistry.resolvedFields,
         ...(generatedConfig === undefined ? {} : {docTransformerConfig: generatedConfig}),
     });
 }
 
 function prepareReplayerConfig(
-    config: NonNullable<NonNullable<z.infer<typeof OVERALL_MIGRATION_CONFIG>["traffic"]>["replayers"][string]["replayerConfig"]> | undefined,
-    transformSources: TransformSourceMap
+    config: NonNullable<NonNullable<z.infer<typeof OVERALL_MIGRATION_CONFIG>["traffic"]>["replayers"][string]["replayerConfig"]> | undefined
 ) {
-    const {transformsSource, requestTransforms, tupleTransforms, ...rest} = config ?? {};
-    const generatedRequestConfig = lowerTransformPipeline(requestTransforms, "request");
-    const generatedTupleConfig = lowerTransformPipeline(tupleTransforms, "tuple");
+    const {requestTransforms, tupleTransforms, ...rest} = config ?? {};
+    const fileSourceRegistry = new FileSourceRegistry();
+    const generatedRequestConfig = lowerTransformPipeline(requestTransforms, fileSourceRegistry);
+    const generatedTupleConfig = lowerTransformPipeline(tupleTransforms, fileSourceRegistry);
 
     return ARGO_REPLAYER_OPTIONS.parse({
         ...rest,
-        ...resolveTransformsSource(transformsSource, transformSources),
+        ...fileSourceRegistry.resolvedFields,
         ...(generatedRequestConfig === undefined ? {} : {transformerConfig: generatedRequestConfig}),
         ...(generatedTupleConfig === undefined ? {} : {tupleTransformerConfig: generatedTupleConfig}),
+    });
+}
+
+function prepareProxyConfig(
+    config: z.infer<typeof CAPTURE_CONFIG>["proxyConfig"]
+) {
+    const fileSourceRegistry = new FileSourceRegistry();
+    const tls = config.tls;
+
+    if (tls !== undefined && "clientAuth" in tls && tls.clientAuth !== undefined) {
+        const {clientAuth} = tls;
+        const trustCertConfig = clientAuth.trustedClientCaFile !== undefined
+            ? {
+                sslTrustCertFile: fileSourceRegistry.resolveFileRef(clientAuth.trustedClientCaFile)
+            }
+            : {
+                sslTrustCertPem: clientAuth.trustedClientCaPem,
+                sslTrustCertPemEnvVar: CAPTURE_PROXY_SSL_TRUST_CERT_PEM_ENV_VAR
+            };
+        return ARGO_PROXY_OPTIONS.parse({
+            ...config,
+            ...trustCertConfig,
+            requireClientAuth: clientAuth.required ?? true,
+            ...fileSourceRegistry.resolvedFields,
+        });
+    }
+
+    return ARGO_PROXY_OPTIONS.parse({
+        ...config,
+        ...fileSourceRegistry.resolvedFields,
     });
 }
 
@@ -746,7 +856,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
                 name: proxyName,
                 kafkaConfig: buildKafkaClientConfig(proxy.kafka ?? "default", kafkaClusters, topic),
                 sourceConfig: { ...sourceCluster, label: proxy.source },
-                proxyConfig: proxy.proxyConfig
+                proxyConfig: prepareProxyConfig(proxy.proxyConfig)
             };
         });
     }
@@ -887,12 +997,10 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
 
                 for (const migration of autoLabelMigrations(migrations)) {
                     const metadataMigrationConfig = prepareMetadataConfig(
-                        migration.metadataMigrationConfig,
-                        userConfig.transformsSources ?? {}
+                        migration.metadataMigrationConfig
                     );
                     const documentBackfillConfig = prepareDocumentBackfillConfig(
-                        migration.documentBackfillConfig,
-                        userConfig.transformsSources ?? {}
+                        migration.documentBackfillConfig
                     );
                     results.push({
                         label: snapshotName,
@@ -953,8 +1061,7 @@ export class MigrationConfigTransformer extends StreamSchemaTransformer<
             const sourceLabel = proxy?.source ?? s3Source!.sourceLabel;
 
             const replayerConfig = prepareReplayerConfig(
-                replayer.replayerConfig,
-                userConfig.transformsSources ?? {}
+                replayer.replayerConfig
             );
 
             return {

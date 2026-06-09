@@ -90,6 +90,34 @@ def list_migration_resources(namespace, plurals=None):
     return results
 
 
+def list_migration_resources_full(namespace):
+    """List all migration CRD instances with full objects."""
+    return list_resources_full(namespace, RESETTABLE_PLURALS)
+
+
+def list_resources_full(namespace, resource_type_filter):
+    """List CRD instances with full objects.
+
+    Returns dict keyed by plural containing lists of CR dicts.
+    resource_type_filter is required — caller must specify which resource types to list.
+    """
+    custom = client.CustomObjectsApi()
+    results = {}
+    for plural in resource_type_filter:
+        try:
+            items = custom.list_namespaced_custom_object(
+                group=CRD_GROUP,
+                version=CRD_VERSION,
+                namespace=namespace,
+                plural=plural,
+            ).get('items', [])
+            if items:
+                results[plural] = items
+        except ApiException:
+            pass
+    return results
+
+
 def cached_crd_completions(namespace, cache_key, fetch_names, ttl=10):
     """Generic TTL-cached name fetcher for shell autocompletion."""
     cache_dir = Path(tempfile.gettempdir()) / "workflow_completions"

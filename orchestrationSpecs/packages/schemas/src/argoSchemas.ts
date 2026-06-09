@@ -89,10 +89,31 @@ function makeOptionalDefaultedFieldsRequired<T extends z.ZodTypeAny>(schema: T):
     return schema;
 }
 
-const TRANSFORMS_RESOLVED_FIELDS = {
-    transformsImage: z.string().default("").optional(),
-    transformsImagePullPolicy: z.enum(["Always", "Never", "IfNotPresent"]).default("IfNotPresent"),
-    transformsConfigMap: z.string().default("").optional(),
+export const ARGO_FILE_SOURCE_VOLUME = z.union([
+    z.object({
+        name: z.string().min(1),
+        configMap: z.object({
+            name: z.string().min(1)
+        }).strict()
+    }).strict(),
+    z.object({
+        name: z.string().min(1),
+        image: z.object({
+            reference: z.string().min(1),
+            pullPolicy: z.enum(["Always", "Never", "IfNotPresent"]).default("IfNotPresent").optional()
+        }).strict()
+    }).strict(),
+]);
+
+export const ARGO_FILE_SOURCE_VOLUME_MOUNT = z.object({
+    name: z.string().min(1),
+    mountPath: z.string().min(1),
+    readOnly: z.literal(true).default(true).optional()
+}).strict();
+
+const FILE_SOURCE_RESOLVED_FIELDS = {
+    fileSourceVolumes: z.array(ARGO_FILE_SOURCE_VOLUME).default([]).optional(),
+    fileSourceVolumeMounts: z.array(ARGO_FILE_SOURCE_VOLUME_MOUNT).default([]).optional(),
 } as const;
 
 export const NAMED_KAFKA_CLUSTER_CONFIG = z.object({
@@ -142,16 +163,14 @@ export const ARGO_METADATA_OPTIONS = makeOptionalDefaultedFieldsRequired(
     USER_METADATA_OPTIONS.omit({
         skipEvaluateApproval: true,
         skipMigrateApproval: true,
-        transformsSource: true,
         metadataTransforms: true,
-    }).extend(TRANSFORMS_RESOLVED_FIELDS)
+    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
 export const ARGO_METADATA_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_METADATA_OPTIONS.pick({
     jvmArgs: true,
     loggingConfigurationOverrideConfigMap: true,
-    transformsImage: true,
-    transformsImagePullPolicy: true,
-    transformsConfigMap: true,
+    fileSourceVolumes: true,
+    fileSourceVolumeMounts: true,
 }));
 
 export const ARGO_CREATE_SNAPSHOT_OPTIONS = makeOptionalDefaultedFieldsRequired(
@@ -165,9 +184,8 @@ export const ARGO_CREATE_SNAPSHOT_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_CREATE_
 export const ARGO_RFS_OPTIONS = makeOptionalDefaultedFieldsRequired(
     USER_RFS_OPTIONS.in.omit({
         skipApproval: true,
-        transformsSource: true,
         documentTransforms: true,
-    }).extend(TRANSFORMS_RESOLVED_FIELDS)
+    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
 export const ARGO_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_RFS_OPTIONS.pick({
     podReplicas: true,
@@ -175,28 +193,61 @@ export const ARGO_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_RFS_OPTIONS.pick({
     loggingConfigurationOverrideConfigMap: true,
     useTargetClusterForWorkCoordination: true,
     resources: true,
-    transformsImage: true,
-    transformsImagePullPolicy: true,
-    transformsConfigMap: true,
+    fileSourceVolumes: true,
+    fileSourceVolumeMounts: true,
 }));
 
+// Fields config lowering adds on top of the user-facing proxy schema, named as a
+// single shape so ARGO_PROXY_OPTIONS and ARGO_PROXY_RESOLVED_ONLY_KEYS share one
+// source of truth.
+const PROXY_RESOLVED_FIELDS = {
+    sslTrustCertFile: z.string().min(1).optional()
+        .describe("Resolved mount path of tls.clientAuth.trustedClientCaFile, passed to the proxy process. Stripped from the CaptureProxy CR."),
+    sslTrustCertPem: z.string().min(1).optional()
+        .describe("Inline PEM from tls.clientAuth.trustedClientCaPem, passed to the proxy process. Stripped from the CaptureProxy CR."),
+    sslTrustCertPemEnvVar: z.string().min(1).optional()
+        .describe("Name of the env var carrying the trusted-client-CA PEM into the proxy process. Stripped from the CaptureProxy CR."),
+    requireClientAuth: z.boolean().optional()
+        .describe("Flattened tls.clientAuth.required for the proxy process. Stripped from the CaptureProxy CR."),
+    ...FILE_SOURCE_RESOLVED_FIELDS,
+} as const;
+
 export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_PROXY_OPTIONS
+    USER_PROXY_OPTIONS.extend(PROXY_RESOLVED_FIELDS)
 );
 export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick({
     loggingConfigurationOverrideConfigMap: true,
+    serviceType: true,
     internetFacing: true,
     podReplicas: true,
     resources: true,
     tls: true,
+    sslTrustCertPem: true,
+    fileSourceVolumes: true,
+    fileSourceVolumeMounts: true,
 }));
+
+// Resolved-only keys are the fields PROXY_RESOLVED_FIELDS adds over the user
+// schema, i.e. keys(ARGO_PROXY_OPTIONS) - keys(USER_PROXY_OPTIONS). The CaptureProxy
+// CRD is projected from USER_PROXY_OPTIONS, so these are the top-level keys the CRD
+// does not define and that must be stripped from the CR. Derived from the shape so
+// the set stays in sync as PROXY_RESOLVED_FIELDS changes.
+export const ARGO_PROXY_RESOLVED_ONLY_KEYS =
+    Object.keys(PROXY_RESOLVED_FIELDS) as (keyof typeof PROXY_RESOLVED_FIELDS)[];
+
+// All keys stripped from the CaptureProxy custom resource: workflow-option fields,
+// which makeCaptureProxyManifest re-adds explicitly as spec fields, plus the
+// resolved-only fields above. Deduped because the two sets overlap, so the rendered
+// sprig.omit lists each key once.
+export const ARGO_PROXY_CR_OMITTED_KEYS = [
+    ...new Set([...ARGO_PROXY_WORKFLOW_OPTION_KEYS, ...ARGO_PROXY_RESOLVED_ONLY_KEYS]),
+];
 
 export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
     USER_REPLAYER_OPTIONS.omit({
-        transformsSource: true,
         requestTransforms: true,
         tupleTransforms: true,
-    }).extend(TRANSFORMS_RESOLVED_FIELDS)
+    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
 );
 export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_REPLAYER_OPTIONS.pick({
     jvmArgs: true,
@@ -204,9 +255,8 @@ export const ARGO_REPLAYER_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_REPLAYER_OPTIO
     podReplicas: true,
     useLocalStack: true,
     resources: true,
-    transformsImage: true,
-    transformsImagePullPolicy: true,
-    transformsConfigMap: true,
+    fileSourceVolumes: true,
+    fileSourceVolumeMounts: true,
 }));
 
 export const PER_INDICES_SNAPSHOT_MIGRATION_CONFIG = z.object({

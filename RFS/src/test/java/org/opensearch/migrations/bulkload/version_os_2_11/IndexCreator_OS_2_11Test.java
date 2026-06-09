@@ -127,6 +127,55 @@ class IndexCreator_OS_2_11Test {
     }
 
     @Test
+    void testCreate_withRetryToRemoveFlatKeyedKnnSettings() throws Exception {
+        // Reproduces an ES 7.x → OS 3.x retail-products migration where
+        // index-level knn settings are stored as flat keys with embedded dots
+        // (e.g. settings["index.knn.algo_param.m"]). Before the fix, the strip
+        // walked nested segments only and never removed the flat keys, causing
+        // an infinite createIndex retry loop.
+        var invalidResponse = mock(InvalidResponse.class);
+        when(invalidResponse.getIllegalArguments()).thenReturn(Set.of(
+            "index.knn.algo_param.ef_construction",
+            "index.knn.algo_param.m",
+            "index.knn.space_type"
+        ));
+
+        var client = mock(OpenSearchClient.class);
+        when(client.createIndex(any(), any(), any()))
+            .thenThrow(invalidResponse)
+            .thenReturn(INDEX_CREATE_SUCCESS);
+
+        var rawJson = "{\n" +
+            "  \"aliases\" : { },\n" +
+            "  \"mappings\" : { \"properties\": { \"v\": { \"type\": \"knn_vector\", \"dimension\": 4 } } },\n" +
+            "  \"settings\" : {\n" +
+            "    \"index.knn\": \"true\",\n" +
+            "    \"index.knn.algo_param.ef_construction\": \"128\",\n" +
+            "    \"index.knn.algo_param.m\": \"24\",\n" +
+            "    \"index.knn.space_type\": \"l2\",\n" +
+            "    \"number_of_replicas\": 1,\n" +
+            "    \"number_of_shards\": \"2\"\n" +
+            "  }\n" +
+            "}";
+
+        var result = create(client, rawJson, "indexName");
+
+        assertThat(result.wasSuccessful(), equalTo(true));
+
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        // Exactly one retry — the second call must succeed because all three
+        // illegal args were stripped on the first failure.
+        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
+
+        var finalIndexBody = requestBodyCapture.getValue().toPrettyString();
+        assertThat(finalIndexBody, not(containsString("algo_param.ef_construction")));
+        assertThat(finalIndexBody, not(containsString("algo_param.m")));
+        assertThat(finalIndexBody, not(containsString("space_type")));
+        assertThat("index.knn flag should still be sent",
+            finalIndexBody, containsString("index.knn"));
+    }
+
+    @Test
     void testCreate_withRetryToRemoveUnsupportedMappingParams() throws Exception {
         // Setup
         var invalidResponse = mock(InvalidResponse.class);
@@ -162,6 +211,61 @@ class IndexCreator_OS_2_11Test {
         assertThat(finalIndexBody, not(containsString("_parent")));
         assertThat("dynamic=false should be preserved", finalIndexBody, containsString("dynamic"));
         assertThat("properties should be preserved", finalIndexBody, containsString("field1"));
+    }
+
+    @Test
+    void testCreate_withRetryToRemoveRemovedTokenFilters() throws Exception {
+        // Setup: server complains that the legacy "standard" token filter was removed (ES 7+ / OpenSearch).
+        var invalidResponse = mock(InvalidResponse.class);
+        when(invalidResponse.getRemovedTokenFilters()).thenReturn(Set.of("standard"));
+
+        var client = mock(OpenSearchClient.class);
+        when(client.createIndex(any(), any(), any()))
+            .thenThrow(invalidResponse)
+            .thenReturn(INDEX_CREATE_SUCCESS);
+
+        var rawJson = "{\r\n" +
+            "  \"aliases\": {},\r\n" +
+            "  \"mappings\": {},\r\n" +
+            "  \"settings\": {\r\n" +
+            "    \"analysis\": {\r\n" +
+            "      \"analyzer\": {\r\n" +
+            "        \"custom_tokenized_string\": {\r\n" +
+            "          \"type\": \"custom\",\r\n" +
+            "          \"tokenizer\": \"standard\",\r\n" +
+            "          \"filter\": [\"standard\", \"lowercase\", \"asciifolding\"]\r\n" +
+            "        }\r\n" +
+            "      }\r\n" +
+            "    }\r\n" +
+            "  }\r\n" +
+            "}";
+
+        // Action
+        var result = create(client, rawJson, "indexName");
+
+        // Assertions
+        assertThat(result.wasSuccessful(), equalTo(true));
+
+        var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
+        verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
+
+        var finalBody = requestBodyCapture.getValue();
+        var filters = finalBody.get("settings")
+            .get("analysis")
+            .get("analyzer")
+            .get("custom_tokenized_string")
+            .get("filter");
+        assertThat("filter array should still exist", filters.isArray(), equalTo(true));
+        assertThat("filter array size after removal", filters.size(), equalTo(2));
+        var remaining = new java.util.ArrayList<String>();
+        filters.forEach(n -> remaining.add(n.asText()));
+        assertThat("filter array should no longer contain 'standard'",
+            remaining, not(org.hamcrest.Matchers.hasItem("standard")));
+        assertThat("other filters preserved", remaining, org.hamcrest.Matchers.hasItems("lowercase", "asciifolding"));
+        assertThat("tokenizer 'standard' is unrelated and should be preserved",
+            finalBody.get("settings").get("analysis").get("analyzer")
+                .get("custom_tokenized_string").get("tokenizer").asText(),
+            equalTo("standard"));
     }
 
     @SneakyThrows

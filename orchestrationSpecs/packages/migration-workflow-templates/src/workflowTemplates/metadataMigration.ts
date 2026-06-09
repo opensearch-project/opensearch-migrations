@@ -13,8 +13,8 @@ import {
     ContainerBuilder,
     defineParam,
     defineRequiredParam,
-    expr, FunctionExpression, InputParamDef, InputParameterSource, InputParametersRecord, InputParamsToExpressions,
-    INTERNAL, PlainObject,
+    expr, FunctionExpression, InputParamDef, InputParameterSource, InputParamsToExpressions,
+    INTERNAL,
     selectInputsForRegister,
     Serialized,
     typeToken,
@@ -23,7 +23,7 @@ import {
 
 import {CommonWorkflowParameters} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
-import {makeSourceParamDict, makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
+import {makeTargetParamDict} from "./commonUtils/clusterSettingManipulators";
 import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getSourceHttpAuthCreds, getTargetHttpAuthCreds} from "./commonUtils/basicCredsGetters";
 import {CONTAINER_TEMPLATE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
@@ -32,9 +32,25 @@ import {
     getSourceTargetPathAndSnapshotAndMigrationIndex
 } from "./commonUtils/configContextPathConstructors";
 import {ResourceManagement} from "./resourceManagement";
-import {getTransformsPresence, TRANSFORMS_MOUNT_PATH} from "./commonUtils/containerFragments";
 
 const METADATA_OUTPUT_PATH = "/tmp/outputs/metadata-output.log";
+const METADATA_TEST_CREDS_VOLUME_NAME = "test-creds";
+const METADATA_STATIC_VOLUMES = [
+    {
+        name: METADATA_TEST_CREDS_VOLUME_NAME,
+        configMap: {
+            name: "localstack-test-creds",
+            optional: true
+        }
+    }
+] as const;
+const METADATA_STATIC_VOLUME_MOUNTS = [
+    {
+        name: METADATA_TEST_CREDS_VOLUME_NAME,
+        mountPath: "/config/credentials",
+        readOnly: true
+    }
+] as const;
 
 function makeMetadataOutputS3Key(
     crdName: BaseExpression<string>,
@@ -113,27 +129,11 @@ function makeSnapshotParamsDict(
     );
 }
 
-function makeSourceHostParamsDict(
-    sourceVersion: BaseExpression<string>,
-    sourceEndpoint: BaseExpression<string>,
-    sourceConfig: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>>
-) {
-    return expr.mergeDicts(
-        makeSourceParamDict(sourceConfig),
-        expr.makeDict({
-            "sourceHost": sourceEndpoint,
-            "sourceVersion": sourceVersion
-        })
-    );
-}
-
 function makeParamsDict(
     sourceVersion: BaseExpression<string>,
     targetConfig: BaseExpression<Serialized<z.infer<typeof NAMED_TARGET_CLUSTER_CONFIG>>>,
     snapshotConfig: BaseExpression<Serialized<z.infer<typeof COMPLETE_SNAPSHOT_CONFIG>>>,
-    options: BaseExpression<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>,
-    sourceEndpoint?: BaseExpression<string>,
-    sourceConfig?: BaseExpression<Serialized<z.infer<typeof NAMED_SOURCE_CLUSTER_CONFIG_WITHOUT_SNAPSHOT_INFO>>>
+    options: BaseExpression<Serialized<z.infer<typeof ARGO_METADATA_OPTIONS>>>
 ) {
     const targetAndOptions = expr.mergeDicts(
         makeTargetParamDict(targetConfig),
@@ -154,18 +154,6 @@ function makeParamsDict(
             "allowExistingIndexes": expr.literal(true)
         })
     );
-
-    // When sourceEndpoint is non-empty at runtime, add sourceHost param.
-    // MetadataMigration CLI prioritizes --source-host over snapshot params.
-    if (sourceEndpoint && sourceConfig) {
-        return expr.mergeDicts(base,
-            expr.ternary(
-                expr.isEmpty(sourceEndpoint),
-                expr.makeDict({}),
-                makeSourceHostParamsDict(sourceVersion, sourceEndpoint, sourceConfig)
-            )
-        );
-    }
 
     return base;
 }
@@ -211,8 +199,6 @@ const runMetadataInputs = {
     workflowUid: defineParam<string>({expression: expr.getWorkflowValue("uid")})
 };
 
-type MetadataTransformsMode = "none" | "image" | "configMap";
-
 const metadataMigrationBaseBuilder = WorkflowBuilder.create({
     k8sResourceName: "metadata-migration",
     serviceAccountName: "argo-workflow-executor"
@@ -228,69 +214,36 @@ function makeMetadataTaskK8sLabel(commandMode: BaseExpression<"evaluate" | "migr
     );
 }
 
-function makeMetadataVolumes(
-    inputs: InputParamsToExpressions<typeof runMetadataInputs, InputParameterSource>,
-    transformsMode: MetadataTransformsMode
-) {
-    const baseVolumes = {
-        'test-creds': {
-            configMap: {
-                name: expr.literal("localstack-test-creds"),
-                optional: true
-            },
-            mountPath: "/config/credentials",
-            readOnly: true
-        }
-    };
-
-    if (transformsMode === "none") {
-        return baseVolumes;
-    }
-
-    if (transformsMode === "image") {
-        return {
-            ...baseVolumes,
-            'user-transforms': {
-                image: {
-                    reference: expr.dig(expr.deserializeRecord(inputs.metadataMigrationConfig), ["transformsImage"], ""),
-                    pullPolicy: expr.dig(
-                        expr.deserializeRecord(inputs.metadataMigrationConfig),
-                        ["transformsImagePullPolicy"],
-                        "IfNotPresent"
-                    )
-                },
-                mountPath: TRANSFORMS_MOUNT_PATH,
-                readOnly: true
-            }
-        };
-    }
-
-    return {
-        ...baseVolumes,
-        'user-transforms': {
-            configMap: {
-                name: expr.dig(expr.deserializeRecord(inputs.metadataMigrationConfig), ["transformsConfigMap"], "")
-            },
-            mountPath: TRANSFORMS_MOUNT_PATH,
-            readOnly: true
-        }
-    };
-}
-
 type RunMetadataTemplateInputDefs = typeof runMetadataInputs & {
     taskK8sLabel: InputParamDef<string, false>;
 };
 
+function makeMetadataPodSpecPatch(inputs: InputParamsToExpressions<RunMetadataTemplateInputDefs, InputParameterSource>) {
+    const metadataConfig = expr.deserializeRecord(inputs.metadataMigrationConfig);
+    return expr.asString(expr.serialize(expr.makeDict({
+        volumes: expr.concatArrays(
+            expr.templateValue(METADATA_STATIC_VOLUMES),
+            expr.dig(metadataConfig, ["fileSourceVolumes"], [])
+        ),
+        containers: expr.toArray(expr.makeDict({
+            name: "main",
+            volumeMounts: expr.concatArrays(
+                expr.templateValue(METADATA_STATIC_VOLUME_MOUNTS),
+                expr.dig(metadataConfig, ["fileSourceVolumeMounts"], [])
+            ),
+        }))
+    })));
+}
+
 function buildMetadataContainer<
     B extends ContainerBuilder<any, RunMetadataTemplateInputDefs, {}, {}, {}, any>
 >(
-    builder: B,
-    transformsMode: MetadataTransformsMode
+    builder: B
 ) {
     const {inputs} = builder;
     return builder
         .addImageInfo(inputs.imageMigrationConsoleLocation, inputs.imageMigrationConsolePullPolicy)
-        .addVolumesFromRecord(makeMetadataVolumes(inputs, transformsMode))
+        .addPodSpecPatch(({inputs}) => makeMetadataPodSpecPatch(inputs))
         .addEnvVar("AWS_SHARED_CREDENTIALS_FILE",
             expr.ternary(
                 expr.dig(expr.deserializeRecord(inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
@@ -308,10 +261,7 @@ function buildMetadataContainer<
             inputs.commandMode,
             expr.literal("---INLINE-JSON"),
             expr.asString(expr.serialize(
-                makeParamsDict(inputs.sourceVersion, inputs.targetConfig, inputs.snapshotConfig, inputs.metadataMigrationConfig,
-                    inputs.sourceEndpoint,
-                    inputs.sourceConfig
-                )
+                makeParamsDict(inputs.sourceVersion, inputs.targetConfig, inputs.snapshotConfig, inputs.metadataMigrationConfig)
             ))
         ])
         .addArtifactOutput("metadataOutput", METADATA_OUTPUT_PATH, {
@@ -335,87 +285,26 @@ function buildMetadataContainer<
         }));
 }
 
-function addMetadataTransformTemplates(builder: typeof metadataMigrationBaseBuilder) {
-    return builder
-        .addTemplate("runMetadataNoTransforms", t => t
-            .addInputsFromRecord(runMetadataInputs)
-            .addOptionalInput("taskK8sLabel", c => makeMetadataTaskK8sLabel(c.inputParameters.commandMode))
-            .addContainer(b => buildMetadataContainer(b, "none"))
-            .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
-        )
-        .addTemplate("runMetadataWithImageTransforms", t => t
-            .addInputsFromRecord(runMetadataInputs)
-            .addOptionalInput("taskK8sLabel", c => makeMetadataTaskK8sLabel(c.inputParameters.commandMode))
-            .addContainer(b => buildMetadataContainer(b, "image"))
-        )
-        .addTemplate("runMetadataWithConfigMapTransforms", t => t
-            .addInputsFromRecord(runMetadataInputs)
-            .addOptionalInput("taskK8sLabel", c => makeMetadataTaskK8sLabel(c.inputParameters.commandMode))
-            .addContainer(b => buildMetadataContainer(b, "configMap"))
-        );
-}
-
-export const MetadataMigration = addMetadataTransformTemplates(metadataMigrationBaseBuilder)
+export const MetadataMigration = metadataMigrationBaseBuilder
     .addTemplate("runMetadata", t => t
         .addInputsFromRecord(runMetadataInputs)
         .addOptionalInput("taskK8sLabel", c => makeMetadataTaskK8sLabel(c.inputParameters.commandMode))
-        .addSteps(b => {
-            const metadataMigrationConfig =
-                expr.cast(expr.deserializeRecord(b.inputs.metadataMigrationConfig)).to<Record<string, PlainObject>>();
-            const transformsImage = expr.dig(metadataMigrationConfig as any, ["transformsImage"], "") as BaseExpression<string>;
-            const transformsConfigMap = expr.dig(metadataMigrationConfig as any, ["transformsConfigMap"], "") as BaseExpression<string>;
-            const {hasImage, hasConfigMapOnly, hasNone} =
-                getTransformsPresence(transformsImage, transformsConfigMap);
-
-            return b
-                .addStep("withImageTransforms", INTERNAL, "runMetadataWithImageTransforms", c =>
-                    c.register({
-                        ...selectInputsForRegister(b, c),
-                        sourceEndpoint: b.inputs.sourceEndpoint,
-                        sourceConfig: b.inputs.sourceConfig,
-                        workflowCreationTimestamp: b.inputs.workflowCreationTimestamp,
-                        workflowUid: b.inputs.workflowUid,
-                        taskK8sLabel: b.inputs.taskK8sLabel
-                    }),
-                    {when: {templateExp: hasImage}}
-                )
-                .addStep("withConfigMapTransforms", INTERNAL, "runMetadataWithConfigMapTransforms", c =>
-                    c.register({
-                        ...selectInputsForRegister(b, c),
-                        sourceEndpoint: b.inputs.sourceEndpoint,
-                        sourceConfig: b.inputs.sourceConfig,
-                        workflowCreationTimestamp: b.inputs.workflowCreationTimestamp,
-                        workflowUid: b.inputs.workflowUid,
-                        taskK8sLabel: b.inputs.taskK8sLabel
-                    }),
-                    {when: {templateExp: hasConfigMapOnly}}
-                )
-                .addStep("withoutTransforms", INTERNAL, "runMetadataNoTransforms", c =>
-                    c.register({
-                        ...selectInputsForRegister(b, c),
-                        sourceEndpoint: b.inputs.sourceEndpoint,
-                        sourceConfig: b.inputs.sourceConfig,
-                        workflowCreationTimestamp: b.inputs.workflowCreationTimestamp,
-                        workflowUid: b.inputs.workflowUid,
-                        taskK8sLabel: b.inputs.taskK8sLabel
-                    }),
-                    {when: {templateExp: hasNone}}
-                );
-        })
+        .addContainer(b => buildMetadataContainer(b))
+        .addRetryParameters(CONTAINER_TEMPLATE_RETRY_STRATEGY)
     )
 
 
     .addTemplate("approveEvaluate", t => t
         .addRequiredInput("name", typeToken<string>())
         .addSteps(b => b
-            .addStep("waitForApproval", ResourceManagement, "waitForApproval", c =>
+            .addStep("waitForUserApproval", ResourceManagement, "waitForUserApproval", c =>
                 c.register({resourceName: b.inputs.name}))
         )
     )
     .addTemplate("approveMigrate", t => t
         .addRequiredInput("name", typeToken<string>())
         .addSteps(b => b
-            .addStep("waitForApproval", ResourceManagement, "waitForApproval", c =>
+            .addStep("waitForUserApproval", ResourceManagement, "waitForUserApproval", c =>
                 c.register({resourceName: b.inputs.name}))
         )
     )

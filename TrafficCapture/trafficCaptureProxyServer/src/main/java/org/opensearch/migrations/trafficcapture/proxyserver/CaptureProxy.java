@@ -3,6 +3,7 @@ package org.opensearch.migrations.trafficcapture.proxyserver;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLException;
 
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -89,10 +90,15 @@ public class CaptureProxy {
             description = "Path to PEM trusted CA certificate file for mutual TLS. Optional, used with --sslCertChainFile.")
         public String sslTrustCertFilePath;
         @Parameter(required = false,
+            names = { "--sslTrustCertPemEnvVar" },
+            arity = 1,
+            description = "Name of an environment variable containing PEM trusted CA certificates for mutual TLS.")
+        public String sslTrustCertPemEnvVar;
+        @Parameter(required = false,
             names = { "--requireClientAuth" },
             arity = 0,
             description = "Require clients to present a valid TLS certificate (mutual TLS) when connecting to the proxy. "
-                + "Must be used with --sslTrustCertFile to specify the trusted CA for client certificates.")
+                + "Must be used with --sslTrustCertFile or --sslTrustCertPemEnvVar to specify the trusted CA for client certificates.")
         public boolean requireClientAuth;
         @Parameter(required = false,
             names = { "--maxTrafficBufferSize" },
@@ -305,18 +311,47 @@ public class CaptureProxy {
     protected static Supplier<SSLEngine> loadSslEngineFromPem(
         String certChainPath, String keyPath, String trustCertPath, boolean requireClientAuth
     ) throws SSLException {
+        return loadSslEngineFromPem(certChainPath, keyPath, trustCertPath, null, requireClientAuth);
+    }
+
+    protected static Supplier<SSLEngine> loadSslEngineFromPem(
+        String certChainPath, String keyPath, String trustCertPath, String trustCertPem, boolean requireClientAuth
+    ) throws SSLException {
         var builder = SslContextBuilder.forServer(new File(certChainPath), new File(keyPath));
-        if (trustCertPath != null && !trustCertPath.isEmpty()) {
+        var hasTrustCertPath = trustCertPath != null && !trustCertPath.isEmpty();
+        var hasTrustCertPem = trustCertPem != null && !trustCertPem.isEmpty();
+        if (hasTrustCertPath && hasTrustCertPem) {
+            throw new ParameterException("Only one of --sslTrustCertFile or --sslTrustCertPemEnvVar may be specified.");
+        }
+
+        if (hasTrustCertPath) {
             builder.trustManager(new File(trustCertPath));
+            if (requireClientAuth) {
+                builder.clientAuth(io.netty.handler.ssl.ClientAuth.REQUIRE);
+            }
+        } else if (hasTrustCertPem) {
+            builder.trustManager(new ByteArrayInputStream(trustCertPem.getBytes(StandardCharsets.UTF_8)));
             if (requireClientAuth) {
                 builder.clientAuth(io.netty.handler.ssl.ClientAuth.REQUIRE);
             }
         } else if (requireClientAuth) {
             throw new ParameterException(
-                "--sslTrustCertFile is required when --requireClientAuth is specified.");
+                "--sslTrustCertFile or --sslTrustCertPemEnvVar is required when --requireClientAuth is specified.");
         }
         var sslContext = builder.build();
         return () -> sslContext.newEngine(ByteBufAllocator.DEFAULT);
+    }
+
+    private static String readTrustCertPemFromEnv(String envVarName) {
+        if (envVarName == null || envVarName.isEmpty()) {
+            return null;
+        }
+        var pem = System.getenv(envVarName);
+        if (pem == null || pem.isEmpty()) {
+            throw new ParameterException("Environment variable " + envVarName
+                + " is required by --sslTrustCertPemEnvVar but was not set or was empty.");
+        }
+        return pem;
     }
 
     protected static Map<String, String> convertPairListToMap(List<String> list) {
@@ -344,7 +379,8 @@ public class CaptureProxy {
             }
             log.info("Loading TLS from PEM files: cert={}, key={}", params.sslCertChainFilePath, params.sslKeyFilePath);
             return loadSslEngineFromPem(params.sslCertChainFilePath, params.sslKeyFilePath,
-                params.sslTrustCertFilePath, params.requireClientAuth);
+                params.sslTrustCertFilePath, readTrustCertPemFromEnv(params.sslTrustCertPemEnvVar),
+                params.requireClientAuth);
         }
 
         return null;

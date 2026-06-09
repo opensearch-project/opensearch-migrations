@@ -393,7 +393,7 @@ class LiveCheckProcessor:
                 display_name = node.get('display_name', '')
                 node_name = display_name.split('(')[0] if '(' in display_name else display_name
 
-                if node_name in ('createSnapshot', 'bulkLoadDocuments'):
+                if node_name in ('createSnapshot', 'bulkLoadDocuments', 'checkBackfillStatus'):
                     yield node
                 else:
                     yield from find_intermediate_nodes(node.get('children', []))
@@ -426,8 +426,12 @@ class LiveCheckProcessor:
     def _has_status_output(self, node: Dict[str, Any]) -> bool:
         """Check if node has statusOutput parameter and configContents."""
         has_config = get_node_input_parameter(node, 'configContents') is not None
-        outputs = node.get('outputs', {}).get('parameters', [])
-        has_status_output = any(p.get('name') == 'statusOutput' for p in outputs)
+        outputs_params = node.get('outputs', {}).get('parameters', [])
+        outputs_artifacts = node.get('outputs', {}).get('artifacts', [])
+        has_status_output = (
+            any(p.get('name') == 'statusOutput' for p in outputs_params) or
+            any(a.get('name') == 'statusOutput' for a in outputs_artifacts)
+        )
         return has_config and has_status_output and node.get('type') == 'Pod'
 
     def _run_live_checks_parallel(self, in_progress_nodes: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -480,10 +484,15 @@ class LiveCheckProcessor:
 @click.option('--token', hidden=True, envvar='ARGO_TOKEN', help='Bearer token for authentication')
 @click.option('--all', 'show_all', is_flag=True, default=False,
               help='Show all workflows including completed ones (default: only running)')
-@click.option('--live-status', is_flag=True, default=False,
+@click.option('--live-status/--no-live-status', default=True,
               help='Run a current status check for each snapshot and backfill still running')
+@click.option('--resource-view/--step-view', default=False, show_default='step-view',
+              help='Show the resource-centric view (--resource-view) or the current Argo '
+                   "Workflow's step tree (--step-view). The step tree does not show "
+                   'historical actions from prior runs.')
 @click.pass_context
-def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, insecure, token, show_all, live_status):
+def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, insecure, token, show_all, live_status,
+                   resource_view):
     """Show detailed status of workflows.
 
     Displays workflow progress, completed steps, and approval status.
@@ -493,7 +502,65 @@ def status_command(ctx, workflow_name, all_workflows, argo_server, namespace, in
     Example:
         workflow status
         workflow status --all
+        workflow status --resource-view
     """
+    if resource_view:
+        _run_resource_view(ctx, workflow_name, argo_server, namespace, insecure, token, live_status)
+    else:
+        _run_step_view(ctx, workflow_name, all_workflows, argo_server, namespace, insecure, token,
+                       show_all, live_status)
+
+
+def _run_resource_view(ctx, workflow_name, argo_server, namespace, insecure, token, live_status):
+    """Display the resource-centric status view."""
+    try:
+        from ..resource_tree import (
+            build_resource_tree, display_resource_tree,
+            extract_workflow_steps_by_resource, mark_not_configured_groups,
+        )
+        from ..models.utils import load_k8s_config
+        from ..tree_utils import build_nested_workflow_tree, filter_tree_nodes
+        load_k8s_config()
+        sections = build_resource_tree(namespace)
+
+        workflow_unavailable = False
+        try:
+            service = WorkflowService()
+            fetcher = WorkflowDataFetcher(service, token)
+            workflow_data = fetcher.get_workflow_data(
+                workflow_name, argo_server, namespace, insecure)
+            if workflow_data and workflow_data.get('status', {}).get('nodes'):
+                tree_nodes = build_nested_workflow_tree(workflow_data)
+                filtered_tree = filter_tree_nodes(tree_nodes)
+                steps = extract_workflow_steps_by_resource(filtered_tree)
+                _assign_workflow_progress(sections, steps)
+                mark_not_configured_groups(sections, filtered_tree)
+            elif not workflow_data:
+                workflow_unavailable = True
+        except Exception:
+            workflow_unavailable = True
+
+        display_resource_tree(sections, workflow_unavailable=workflow_unavailable,
+                              show_live_status=live_status)
+    except Exception as e:
+        click.echo(f"Error: {str(e)}", err=True)
+        ctx.exit(ExitCode.FAILURE.value)
+
+
+def _assign_workflow_progress(sections, steps):
+    """Attach workflow step subtrees (list of Argo step dicts) to matching resource nodes."""
+    for section in sections:
+        for group in section.groups:
+            for resource in group.resources:
+                if resource.name in steps:
+                    resource.workflow_progress = steps[resource.name]
+                for child in resource.children:
+                    if child.name in steps:
+                        child.workflow_progress = steps[child.name]
+
+
+def _run_step_view(ctx, workflow_name, all_workflows, argo_server, namespace, insecure, token, show_all, live_status):
+    """Display the Argo workflow step tree view."""
     if all_workflows and ctx.get_parameter_source('workflow_name') != click.core.ParameterSource.DEFAULT:
         click.echo("Error: --workflow-name and --all-workflows are mutually exclusive", err=True)
         ctx.exit(ExitCode.FAILURE.value)

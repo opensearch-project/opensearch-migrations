@@ -201,6 +201,15 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
+            names = {"--response-post-processor-config", "--responsePostProcessorConfig"},
+            arity = 1,
+            description = "Configuration for response post-processing. Transforms target responses before "
+                + "tuple assembly (e.g., converting OpenSearch responses to Solr format for comparison). "
+                + "Same JSON format as --transformerConfig.")
+        private String responsePostProcessorConfig;
+
+        @Parameter(
+            required = false,
             names = { "--user-agent", "--userAgent" },
             arity = 1,
             description = "For HTTP requests to the target cluster, append this string (after \"; \") to"
@@ -585,8 +594,12 @@ public class TrafficReplayer {
         }
     }
 
-    private static void runReplayMode(Parameters params) throws Exception {
-        var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
+    /**
+     * Parse and validate the replay target URI and timing params. On invalid input this prints the
+     * error and calls System.exit (matching the prior inline behavior); it returns null only on the
+     * exit paths so the caller can stop without duplicating the exit handling.
+     */
+    private static URI parseAndValidateReplayTarget(Parameters params) {
         URI uri;
         try {
             uri = URIHelper.parseUriWithDefaultPort(params.targetUriString);
@@ -596,7 +609,7 @@ public class TrafficReplayer {
             System.err.println(e.getMessage());
             log.atError().setCause(e).setMessage("{}").addArgument(msg).log();
             System.exit(3);
-            return;
+            return null;
         }
         if (params.lookaheadTimeSeconds <= params.observedPacketConnectionTimeout) {
             String msg = LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME
@@ -610,6 +623,15 @@ public class TrafficReplayer {
             System.err.println(msg);
             log.error(msg);
             System.exit(4);
+            return null;
+        }
+        return uri;
+    }
+
+    private static void runReplayMode(Parameters params) throws Exception {
+        var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
+        URI uri = parseAndValidateReplayTarget(params);
+        if (uri == null) {
             return;
         }
         var globalContextTracker = new ActiveContextTracker();
@@ -627,6 +649,7 @@ public class TrafficReplayer {
         );
 
         ActiveContextMonitor activeContextMonitor = null;
+        ThreadLocalTupleWriter tupleWriter = null;
         try (
             var blockingTrafficSource = TrafficCaptureSourceFactory.createTrafficCaptureSource(
                 topContext,
@@ -675,6 +698,7 @@ public class TrafficReplayer {
                 orderedRequestTracker,
                 errorClassifier
             );
+            configureResponsePostProcessor(tr, transformationLoader, params.responsePostProcessorConfig);
             log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
                     " serverResponseTimeout={}s observedPacketConnectionTimeout={}s" +
                     " targetUri={} numClientThreads={}")
@@ -715,7 +739,7 @@ public class TrafficReplayer {
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
-            var tupleWriter = createS3TupleWriterIfConfigured(
+            tupleWriter = createS3TupleWriterIfConfigured(
                 params,
                 () -> transformationLoader.getTransformerFactoryLoader(tupleTransformerConfig)
             );
@@ -743,6 +767,9 @@ public class TrafficReplayer {
             }
             log.info("Done processing TrafficStreams");
         } finally {
+            if (tupleWriter != null) {
+                tupleWriter.close();
+            }
             scheduledExecutorService.shutdown();
             if (activeContextMonitor != null) {
                 var acmLevel = globalContextTracker.getActiveScopesByAge().findAny().isPresent()
@@ -772,6 +799,15 @@ public class TrafficReplayer {
         return () -> new FilteringTransformerWrapper(base.get(), requestFilter);
     }
 
+    static void configureResponsePostProcessor(
+        TrafficReplayerTopLevel tr, TransformationLoader loader, String config
+    ) {
+        if (config != null && !config.isBlank()) {
+            tr.responsePostProcessor = loader.getTransformerFactoryLoader(null, null, config);
+            log.atInfo().setMessage("Response post-processor configured").log();
+        }
+    }
+
     private static ThreadLocalTupleWriter createS3TupleWriterIfConfigured(
         Parameters params,
         Supplier<IJsonTransformer> tupleTransformerSupplier
@@ -781,14 +817,14 @@ public class TrafficReplayer {
         }
         log.info("S3 tuple writing enabled — bucket={}, region={}, prefix={}",
             params.tupleS3Bucket, params.tupleS3Region, params.tupleS3Prefix);
-        var s3ClientBuilder = S3AsyncClient.crtBuilder()
+        var credentialsProvider = DefaultCredentialsProvider.builder().build();
+        var s3ClientBuilder = S3AsyncClient.builder()
             .region(Region.of(params.tupleS3Region))
-            .credentialsProvider(DefaultCredentialsProvider.builder().build())
-            .targetThroughputInGbps(2.0)
-            .minimumPartSizeInBytes(8L * 1024 * 1024);
+            .credentialsProvider(credentialsProvider);
         if (params.tupleS3Endpoint != null && !params.tupleS3Endpoint.isEmpty()) {
-            s3ClientBuilder.endpointOverride(URI.create(params.tupleS3Endpoint));
-            s3ClientBuilder.forcePathStyle(true);
+            s3ClientBuilder
+                .endpointOverride(URI.create(params.tupleS3Endpoint))
+                .forcePathStyle(true);
         }
         var s3Client = s3ClientBuilder.build();
         var replayerId = ProcessHelpers.getNodeInstanceName();

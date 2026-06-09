@@ -152,42 +152,70 @@ describe('MigrationConfigTransformer validation', () => {
         }).not.toThrow();
     });
 
-    it('should lower transform pipelines into provider configs with mounted script paths', async () => {
+    it('should lower transform pipelines into provider configs with file-source mounts', async () => {
         const config = cloneBaseConfig();
-        config.transformsSources = {
-            "my-transforms": {
-                image: "example.com/transforms@sha256:abc123"
-            }
-        };
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [
             {
                 metadataMigrationConfig: {
-                    transformsSource: "my-transforms",
                     metadataTransforms: {
-                        language: "javascript",
-                        bindingsObject: {scope: "metadata"}
+                        entryPoint: {
+                            javascriptFile: {
+                                image: "example.com/transforms@sha256:abc123",
+                                path: "metadata.js"
+                            }
+                        },
+                        context: {
+                            values: {
+                                scope: {value: {phase: "metadata"}}
+                            }
+                        }
                     }
                 },
                 documentBackfillConfig: {
-                    transformsSource: "my-transforms",
                     documentTransforms: [
                         {
-                            language: "python",
-                            file: "custom/document.py"
+                            transformName: "TypeMappingSanitizationTransformerProvider",
+                            context: {
+                                valueDirectories: [
+                                    {configMap: "type-mappings"}
+                                ],
+                                values: {
+                                    staticMappings: {
+                                        fromFile: {
+                                            configMap: "type-mappings",
+                                            path: "staticMappings.json"
+                                        }
+                                    },
+                                    sourceProperties: {
+                                        value: {version: "ES 7.10"}
+                                    }
+                                }
+                            }
                         }
                     ]
                 }
             }
         ];
         config.traffic.replayers.replay1.replayerConfig = {
-            transformsSource: "my-transforms",
             requestTransforms: {
-                language: "javascript"
+                entryPoint: {
+                    javascript: "function transformJson(value) { return value; }"
+                },
+                context: "request-context"
             },
             tupleTransforms: [
                 {
-                    language: "python",
-                    bindingsObject: {format: "tuple"}
+                    entryPoint: {
+                        pythonFile: {
+                            image: "example.com/transforms@sha256:abc123",
+                            path: "tuple.py"
+                        }
+                    },
+                    context: {
+                        values: {
+                            format: {value: "tuple"}
+                        }
+                    }
                 }
             ]
         };
@@ -195,135 +223,366 @@ describe('MigrationConfigTransformer validation', () => {
         const result = await transformer.processFromObject(config);
 
         const snapshotMigration = result.snapshotMigrations[0];
-        expect(snapshotMigration.metadataMigrationConfig).toMatchObject({
-            transformsImage: "example.com/transforms@sha256:abc123",
-            transformsImagePullPolicy: "IfNotPresent",
-            transformsConfigMap: ""
-        });
-        expect(JSON.parse(snapshotMigration.metadataMigrationConfig!.transformerConfig!)).toEqual([
+        expect(snapshotMigration.metadataMigrationConfig!.fileSourceVolumes).toEqual([
             {
-                JsonJSTransformerProvider: {
-                    initializationScriptFile: "/transforms/metadata.js",
-                    bindingsObject: JSON.stringify({scope: "metadata"})
+                name: expect.stringMatching(/^file-source-[a-f0-9]{12}$/),
+                image: {
+                    reference: "example.com/transforms@sha256:abc123",
+                    pullPolicy: "IfNotPresent"
                 }
             }
         ]);
-        expect(snapshotMigration.documentBackfillConfig).toMatchObject({
-            transformsImage: "example.com/transforms@sha256:abc123",
-            transformsImagePullPolicy: "IfNotPresent",
-            transformsConfigMap: ""
-        });
+        const metadataMountPath = snapshotMigration.metadataMigrationConfig!.fileSourceVolumeMounts![0].mountPath;
+        expect(JSON.parse(snapshotMigration.metadataMigrationConfig!.transformerConfig!)).toEqual([
+            {
+                JsonJSTransformerProvider: {
+                    initializationScriptFile: `${metadataMountPath}/metadata.js`,
+                    bindingsObject: {scope: {phase: "metadata"}}
+                }
+            }
+        ]);
+        expect(snapshotMigration.documentBackfillConfig!.fileSourceVolumes).toEqual([
+            {
+                name: expect.stringMatching(/^file-source-[a-f0-9]{12}$/),
+                configMap: {name: "type-mappings"}
+            }
+        ]);
+        const documentMountPath = snapshotMigration.documentBackfillConfig!.fileSourceVolumeMounts![0].mountPath;
         expect(JSON.parse(snapshotMigration.documentBackfillConfig!.docTransformerConfig!)).toEqual([
             {
-                JsonPythonTransformerProvider: {
-                    initializationScriptFile: "/transforms/custom/document.py",
-                    bindingsObject: JSON.stringify({})
+                TypeMappingSanitizationTransformerProvider: {
+                    providerConfigDirs: [
+                        {path: documentMountPath}
+                    ],
+                    providerConfigFiles: {
+                        staticMappings: {
+                            path: `${documentMountPath}/staticMappings.json`
+                        }
+                    },
+                    sourceProperties: {version: "ES 7.10"}
                 }
             }
         ]);
 
         const replayerConfig = result.trafficReplays[0].replayerConfig;
-        expect(replayerConfig).toMatchObject({
-            transformsImage: "example.com/transforms@sha256:abc123",
-            transformsImagePullPolicy: "IfNotPresent",
-            transformsConfigMap: ""
-        });
+        expect(replayerConfig.fileSourceVolumes).toEqual([
+            {
+                name: expect.stringMatching(/^file-source-[a-f0-9]{12}$/),
+                image: {
+                    reference: "example.com/transforms@sha256:abc123",
+                    pullPolicy: "IfNotPresent"
+                }
+            }
+        ]);
+        const replayerMountPath = replayerConfig.fileSourceVolumeMounts![0].mountPath;
         expect(JSON.parse(replayerConfig.transformerConfig!)).toEqual([
             {
                 JsonJSTransformerProvider: {
-                    initializationScriptFile: "/transforms/request.js",
-                    bindingsObject: JSON.stringify({})
+                    initializationScript: "function transformJson(value) { return value; }",
+                    bindingsObject: JSON.stringify("request-context")
                 }
             }
         ]);
         expect(JSON.parse(replayerConfig.tupleTransformerConfig!)).toEqual([
             {
                 JsonPythonTransformerProvider: {
-                    initializationScriptFile: "/transforms/tuple.py",
-                    bindingsObject: JSON.stringify({format: "tuple"})
+                    initializationScriptFile: `${replayerMountPath}/tuple.py`,
+                    bindingsObject: {format: "tuple"}
                 }
             }
         ]);
     });
 
-    it('should preserve transform image pull policy from transform sources', async () => {
+    it('should preserve image pull policy and dedupe repeated file sources', async () => {
         const config = cloneBaseConfig();
-        config.transformsSources = {
-            "my-transforms": {
-                image: "example.com/transforms:latest",
-                pullPolicy: "Always"
-            }
-        };
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [
             {
                 metadataMigrationConfig: {
-                    transformsSource: "my-transforms",
                     metadataTransforms: {
-                        language: "javascript"
-                    }
-                },
-                documentBackfillConfig: {
-                    transformsSource: "my-transforms",
-                    documentTransforms: {
-                        language: "javascript"
+                        entryPoint: {
+                            javascriptFile: {
+                                image: "example.com/transforms:latest",
+                                pullPolicy: "Always",
+                                path: "metadata.js"
+                            }
+                        },
+                        context: {
+                            values: {
+                                settings: {
+                                    fromFile: {
+                                        image: "example.com/transforms:latest",
+                                        pullPolicy: "Always",
+                                        path: "settings.json"
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         ];
-        config.traffic.replayers.replay1.replayerConfig = {
-            transformsSource: "my-transforms",
-            requestTransforms: {
-                language: "javascript"
+
+        const result = await transformer.processFromObject(config);
+
+        const metadataConfig = result.snapshotMigrations[0].metadataMigrationConfig!;
+        expect(metadataConfig.fileSourceVolumes).toEqual([
+            {
+                name: expect.stringMatching(/^file-source-[a-f0-9]{12}$/),
+                image: {
+                    reference: "example.com/transforms:latest",
+                    pullPolicy: "Always"
+                }
             }
+        ]);
+        expect(metadataConfig.fileSourceVolumeMounts).toHaveLength(1);
+    });
+
+    it('should lower every supported transform context form and dedupe shared image sources', async () => {
+        const config = cloneBaseConfig();
+        const transformImage = "example.com/transforms@sha256:abc123";
+        config.traffic.replayers.replay1.replayerConfig = {
+            requestTransforms: [
+                {
+                    entryPoint: {
+                        javascriptFile: {
+                            image: transformImage,
+                            path: "request.js"
+                        }
+                    },
+                    context: {
+                        valueDirectories: [
+                            {
+                                image: transformImage,
+                                pullPolicy: "IfNotPresent",
+                                path: "context/request"
+                            }
+                        ],
+                        values: {
+                            headerName: {value: "x-contextual-transform"},
+                            nested: {value: {enabled: true}},
+                            headerValue: {
+                                fromFile: {
+                                    image: transformImage,
+                                    path: "context/request/headerValue"
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    entryPoint: {
+                        javascript: "function transformJson(value) { return value; }"
+                    },
+                    context: "plain-string-context"
+                },
+                {
+                    transformName: "TypeMappingSanitizationTransformerProvider",
+                    context: {
+                        valueDirectories: [
+                            {
+                                image: transformImage,
+                                path: "context/type-mappings"
+                            }
+                        ],
+                        values: {
+                            staticMappings: {
+                                fromFile: {
+                                    image: transformImage,
+                                    path: "context/type-mappings/staticMappings.json"
+                                }
+                            },
+                            sourceProperties: {value: {version: "ES 7.10"}}
+                        }
+                    }
+                }
+            ],
+            tupleTransforms: [
+                {
+                    entryPoint: {
+                        pythonFile: {
+                            image: transformImage,
+                            path: "tuple.py"
+                        }
+                    },
+                    context: {
+                        values: {
+                            tupleMode: {value: "contextual"}
+                        }
+                    }
+                },
+                {
+                    transformName: "TypeMappingSanitizationTransformerProvider",
+                    context: "tuple-string-context"
+                }
+            ]
         };
 
         const result = await transformer.processFromObject(config);
 
-        expect(result.snapshotMigrations[0].metadataMigrationConfig).toMatchObject({
-            transformsImage: "example.com/transforms:latest",
-            transformsImagePullPolicy: "Always"
-        });
-        expect(result.snapshotMigrations[0].documentBackfillConfig).toMatchObject({
-            transformsImage: "example.com/transforms:latest",
-            transformsImagePullPolicy: "Always"
-        });
-        expect(result.trafficReplays[0].replayerConfig).toMatchObject({
-            transformsImage: "example.com/transforms:latest",
-            transformsImagePullPolicy: "Always"
-        });
+        const replayerConfig = result.trafficReplays[0].replayerConfig;
+        expect(replayerConfig.fileSourceVolumes).toEqual([
+            {
+                name: expect.stringMatching(/^file-source-[a-f0-9]{12}$/),
+                image: {
+                    reference: transformImage,
+                    pullPolicy: "IfNotPresent"
+                }
+            }
+        ]);
+        expect(replayerConfig.fileSourceVolumeMounts).toHaveLength(1);
+        const mountPath = replayerConfig.fileSourceVolumeMounts![0].mountPath;
+
+        expect(JSON.parse(replayerConfig.transformerConfig!)).toEqual([
+            {
+                JsonJSTransformerProvider: {
+                    initializationScriptFile: `${mountPath}/request.js`,
+                    bindingsObjectDirs: [
+                        {path: `${mountPath}/context/request`}
+                    ],
+                    bindingsObjectFiles: {
+                        headerValue: {
+                            path: `${mountPath}/context/request/headerValue`
+                        }
+                    },
+                    bindingsObject: {
+                        headerName: "x-contextual-transform",
+                        nested: {enabled: true}
+                    }
+                }
+            },
+            {
+                JsonJSTransformerProvider: {
+                    initializationScript: "function transformJson(value) { return value; }",
+                    bindingsObject: JSON.stringify("plain-string-context")
+                }
+            },
+            {
+                TypeMappingSanitizationTransformerProvider: {
+                    providerConfigDirs: [
+                        {path: `${mountPath}/context/type-mappings`}
+                    ],
+                    providerConfigFiles: {
+                        staticMappings: {
+                            path: `${mountPath}/context/type-mappings/staticMappings.json`
+                        }
+                    },
+                    sourceProperties: {version: "ES 7.10"}
+                }
+            }
+        ]);
+        expect(JSON.parse(replayerConfig.tupleTransformerConfig!)).toEqual([
+            {
+                JsonPythonTransformerProvider: {
+                    initializationScriptFile: `${mountPath}/tuple.py`,
+                    bindingsObject: {tupleMode: "contextual"}
+                }
+            },
+            {
+                TypeMappingSanitizationTransformerProvider: "tuple-string-context"
+            }
+        ]);
     });
 
-    it('should reject transform pipelines without a transformsSource', () => {
+    it('should reject transform specs without exactly one selector', () => {
         const config = cloneBaseConfig();
         config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [
             {
                 metadataMigrationConfig: {
                     metadataTransforms: {
-                        language: "javascript"
+                        entryPoint: {
+                            javascript: "function transformJson(value) { return value; }"
+                        },
+                        transformName: "TypeMappingSanitizationTransformerProvider"
                     }
                 }
             }
         ];
 
         expect(() => transformer.validateInput(config))
-            .toThrow(/'transformsSource' is required when transform pipelines are configured/);
+            .toThrow(/Exactly one of entryPoint or transformName is required/);
     });
 
-    it('should reject unknown transform source references', () => {
+    it('should reject legacy transform source fields', () => {
         const config = cloneBaseConfig();
-        config.snapshotMigrationConfigs[0].perSnapshotConfig.snap1 = [
-            {
-                metadataMigrationConfig: {
-                    transformsSource: "missing",
-                    metadataTransforms: {
-                        language: "javascript"
-                    }
-                }
-            }
-        ];
+        config.transformsSources = {};
 
         expect(() => transformer.validateInput(config))
-            .toThrow(/Unknown transformsSource 'missing'/);
+            .toThrow(/Unrecognized keys at root: transformsSources/);
+    });
+
+    it('should lower capture proxy client-auth trust material into file-source mounts', async () => {
+        const config = cloneBaseConfig();
+        config.traffic.proxies.proxy1.proxyConfig.tls = {
+            mode: "existingSecret",
+            secretName: "proxy-tls",
+            clientAuth: {
+                trustedClientCaFile: {
+                    configMap: "trusted-client-roots",
+                    path: "ca.crt"
+                }
+            }
+        };
+
+        const result = await transformer.processFromObject(config);
+        const proxyConfig = result.proxies[0].proxyConfig;
+        const mountPath = proxyConfig.fileSourceVolumeMounts![0].mountPath;
+
+        // clientAuth is retained in tls (rides into the gated CR spec.tls); the
+        // flat fields below are the Deployment/Java-process projection of it.
+        expect(proxyConfig.tls).toEqual({
+            mode: "existingSecret",
+            secretName: "proxy-tls",
+            clientAuth: {
+                required: true,
+                trustedClientCaFile: {
+                    configMap: "trusted-client-roots",
+                    path: "ca.crt"
+                }
+            }
+        });
+        expect(proxyConfig.sslTrustCertFile).toBe(`${mountPath}/ca.crt`);
+        expect(proxyConfig.requireClientAuth).toBe(true);
+        expect(proxyConfig.fileSourceVolumes).toEqual([
+            {
+                name: expect.stringMatching(/^file-source-[a-f0-9]{12}$/),
+                configMap: {name: "trusted-client-roots"}
+            }
+        ]);
+    });
+
+    it('should lower inline capture proxy client-auth trust material without mounts', async () => {
+        const config = cloneBaseConfig();
+        const pem = [
+            "-----BEGIN CERTIFICATE-----",
+            "MIIBtest",
+            "-----END CERTIFICATE-----"
+        ].join("\n");
+        config.traffic.proxies.proxy1.proxyConfig.tls = {
+            mode: "existingSecret",
+            secretName: "proxy-tls",
+            clientAuth: {
+                trustedClientCaPem: pem,
+                required: false
+            }
+        };
+
+        const result = await transformer.processFromObject(config);
+        const proxyConfig = result.proxies[0].proxyConfig;
+
+        expect(proxyConfig.tls).toEqual({
+            mode: "existingSecret",
+            secretName: "proxy-tls",
+            clientAuth: {
+                trustedClientCaPem: pem,
+                required: false
+            }
+        });
+        expect(proxyConfig.sslTrustCertPem).toBe(pem);
+        expect(proxyConfig.sslTrustCertPemEnvVar).toBe("CAPTURE_PROXY_SSL_TRUST_CERT_PEM");
+        expect(proxyConfig.sslTrustCertFile).toBeUndefined();
+        expect(proxyConfig.requireClientAuth).toBe(false);
+        expect(proxyConfig.fileSourceVolumes).toEqual([]);
+        expect(proxyConfig.fileSourceVolumeMounts).toEqual([]);
     });
 
     it('should keep workload identity stable across gated RFS changes only', async () => {
@@ -394,6 +653,18 @@ describe('MigrationConfigTransformer validation', () => {
         expect(normalized.traffic?.proxies?.proxy1).not.toHaveProperty("kafkaTopic");
     });
 
+    it('should preserve the expert proxy Service type setting', async () => {
+        const configWithClusterIpProxy = cloneBaseConfig();
+        configWithClusterIpProxy.traffic.proxies.proxy1.proxyConfig.serviceType = "ClusterIP";
+
+        const result = await transformer.processFromObject(configWithClusterIpProxy);
+
+        expect(result.proxies?.[0]?.proxyConfig).toMatchObject({
+            listenPort: 9201,
+            serviceType: "ClusterIP",
+        });
+    });
+
     it('should derive managed Kafka auth profile for auto-created SCRAM clusters', async () => {
         const configWithScramKafka = {
             ...baseConfig,
@@ -436,26 +707,21 @@ describe('MigrationConfigTransformer validation', () => {
                     },
                     template: {
                         pod: {
-                            affinity: {
-                                podAntiAffinity: {
-                                    preferredDuringSchedulingIgnoredDuringExecution: [
-                                        {
-                                            weight: 100,
-                                            podAffinityTerm: {
-                                                labelSelector: {
-                                                    matchExpressions: [
-                                                        {
-                                                            key: "strimzi.io/name",
-                                                            operator: "Exists",
-                                                        },
-                                                    ],
-                                                },
-                                                topologyKey: "kubernetes.io/hostname",
+                            topologySpreadConstraints: [
+                                {
+                                    maxSkew: 1,
+                                    topologyKey: "kubernetes.io/hostname",
+                                    whenUnsatisfiable: "ScheduleAnyway",
+                                    labelSelector: {
+                                        matchExpressions: [
+                                            {
+                                                key: "strimzi.io/name",
+                                                operator: "Exists",
                                             },
-                                        },
-                                    ],
+                                        ],
+                                    },
                                 },
-                            },
+                            ],
                         },
                     },
                 },

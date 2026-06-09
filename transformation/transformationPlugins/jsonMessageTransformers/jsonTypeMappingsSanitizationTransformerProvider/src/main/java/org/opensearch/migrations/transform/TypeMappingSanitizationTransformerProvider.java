@@ -19,6 +19,17 @@ public class TypeMappingSanitizationTransformerProvider extends JsonJSTransforme
     public static final String SOURCE_PROPERTIES_KEY = "sourceProperties";
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final Map<String, ConfigFileValueType> FILE_BACKED_CONFIG_VALUE_TYPES = Map.of(
+        STATIC_MAPPINGS, ConfigFileValueType.JSON,
+        REGEX_MAPPINGS, ConfigFileValueType.JSON,
+        FEATURE_FLAGS, ConfigFileValueType.JSON,
+        SOURCE_PROPERTIES_KEY, ConfigFileValueType.JSON
+    );
+
+    @Override
+    public ConfigFileValueType getFileBackedConfigValueType(String configKey) {
+        return FILE_BACKED_CONFIG_VALUE_TYPES.getOrDefault(configKey, super.getFileBackedConfigValueType(configKey));
+    }
 
     @SneakyThrows
     @Override

@@ -1,0 +1,15 @@
+# Pin the Rust toolchain for the migration-assistant CLI.
+#
+# rustup honors this file automatically: any `cargo`/`rustc` invocation inside
+# this directory uses the pinned channel, fetching it on first use. This is the
+# Rust analogue of the repo's JVM story — gradle.properties sets
+# `org.gradle.java.installations.auto-download=true` and the build pins Amazon
+# Corretto JDK 21; here we pin a stable Rust and let rustup provision it.
+#
+# Pinned to 1.96.0 — comfortably above every dependency floor (ratatui 0.30
+# needs >=1.88) and matching the version we build/test against locally and in
+# CI. Keep in sync with Cargo.toml rust-version.
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

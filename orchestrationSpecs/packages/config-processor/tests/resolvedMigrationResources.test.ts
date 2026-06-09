@@ -94,6 +94,72 @@ describe("resolved migration resources", () => {
         )).toBe(true);
     });
 
+    it("omits capture proxy workflow-only file source fields from generated custom resources", async () => {
+        const config = sampleConfig();
+        config.traffic!.proxies!["source-proxy"].proxyConfig.tls = {
+            mode: "existingSecret",
+            secretName: "proxy-tls",
+            clientAuth: {
+                trustedClientCaFile: {
+                    configMap: "trusted-client-roots",
+                    path: "ca.crt",
+                },
+            },
+        };
+
+        const workflowConfig = await new MigrationConfigTransformer().processFromObject(config);
+        const transformedProxyConfig = workflowConfig.proxies![0].proxyConfig;
+        expect(transformedProxyConfig.fileSourceVolumes).toHaveLength(1);
+        expect(transformedProxyConfig.fileSourceVolumeMounts).toHaveLength(1);
+        expect(transformedProxyConfig.sslTrustCertFile).toMatch(/\/ca\.crt$/);
+
+        const resolvedMigrationResources = buildResolvedMigrationResources(workflowConfig, "workflow-a");
+        const proxyResource = resolvedMigrationResources.resources.find(resource =>
+            resource.kind === "CaptureProxy" && resource.name === "source-proxy");
+
+        expect(proxyResource?.annotations).toEqual(expect.objectContaining({
+            "migrations.opensearch.org/workflow-only-fields":
+                "fileSourceVolumes,fileSourceVolumeMounts,sslTrustCertFile,requireClientAuth",
+            "migrations.opensearch.org/workflow-only-hash": expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+            "migrations.opensearch.org/file-source-refs": JSON.stringify([{
+                configMap: {name: "trusted-client-roots"},
+                paths: ["ca.crt"],
+            }]),
+        }));
+        // clientAuth stays inside spec.tls (gated subtree); only the flat resolved
+        // bridge fields are stripped from the custom resource.
+        expect(proxyResource?.parameters).toEqual(expect.objectContaining({
+            dependsOn: ["source-proxy-topic"],
+            tls: {
+                mode: "existingSecret",
+                secretName: "proxy-tls",
+                clientAuth: {
+                    required: true,
+                    trustedClientCaFile: {
+                        configMap: "trusted-client-roots",
+                        path: "ca.crt",
+                    },
+                },
+            },
+        }));
+        expect(proxyResource?.parameters).not.toHaveProperty("fileSourceVolumes");
+        expect(proxyResource?.parameters).not.toHaveProperty("fileSourceVolumeMounts");
+        expect(proxyResource?.parameters).not.toHaveProperty("sslTrustCertFile");
+        expect(proxyResource?.parameters).not.toHaveProperty("sslTrustCertPem");
+        expect(proxyResource?.parameters).not.toHaveProperty("sslTrustCertPemEnvVar");
+        expect(proxyResource?.parameters).not.toHaveProperty("requireClientAuth");
+
+        const bundle = await new MigrationInitializer().generateMigrationBundle(
+            config,
+            "workflow-a",
+            {runNumber: 1700000000000}
+        );
+        const proxyCr = bundle.customMigrationResources.items.find((resource: any) =>
+            resource.kind === "CaptureProxy" && resource.metadata.name === "source-proxy");
+        expect(proxyCr.metadata.annotations).toEqual(proxyResource?.annotations);
+        expect(proxyCr.spec).toEqual(proxyResource?.parameters);
+    });
+
     it("includes policy metadata only when debug metadata is requested", async () => {
         const workflowConfig = await new MigrationConfigTransformer().processFromObject(sampleConfig());
         const resolvedMigrationResources = buildResolvedMigrationResources(

@@ -6,6 +6,8 @@ import {
     DEFAULT_RESOURCES,
     NAMED_TARGET_CLUSTER_CONFIG,
     ResourceRequirementsType,
+    ARGO_FILE_SOURCE_VOLUME,
+    ARGO_FILE_SOURCE_VOLUME_MOUNT,
     ARGO_RFS_OPTIONS,
     ARGO_RFS_WORKFLOW_OPTION_KEYS,
 } from "@opensearch-migrations/schemas";
@@ -30,11 +32,9 @@ import {Deployment} from "@opensearch-migrations/argo-workflow-builders";
 import {OwnerReference} from "@opensearch-migrations/k8s-types";
 import {makeRepoParamDict} from "./metadataMigration";
 import {
-    getTransformsPresence,
+    setupFileSourcesForContainer,
     setupLog4jConfigForContainer,
     setupTestCredsForContainer,
-    setupTransformsForContainerForMode,
-    TransformVolumeMode
 } from "./commonUtils/containerFragments";
 import {CommonWorkflowParameters, workflowIdentityEnvVars, workflowScriptCommand, workflowScriptRootEnvVars} from "./commonUtils/workflowParameters";
 import {makeRequiredImageParametersForKeys} from "./commonUtils/imageDefinitions";
@@ -109,9 +109,8 @@ const startHistoricalBackfillInputs = {
     podReplicas: defineRequiredParam<number>(),
     jvmArgs: defineRequiredParam<string>(),
     loggingConfigurationOverrideConfigMap: defineRequiredParam<string>(),
-    transformsImage: defineRequiredParam<string>(),
-    transformsImagePullPolicy: defineRequiredParam<IMAGE_PULL_POLICY>(),
-    transformsConfigMap: defineRequiredParam<string>(),
+    fileSourceVolumes: defineRequiredParam<z.infer<typeof ARGO_FILE_SOURCE_VOLUME>[]>(),
+    fileSourceVolumeMounts: defineRequiredParam<z.infer<typeof ARGO_FILE_SOURCE_VOLUME_MOUNT>[]>(),
     useLocalStack: defineRequiredParam<boolean>({description: "Only used for local testing"}),
     resources: defineRequiredParam<ResourceRequirementsType>(),
     crdName: defineRequiredParam<string>(),
@@ -136,10 +135,8 @@ function getRfsDeploymentManifest
     useLocalstackAwsCreds: BaseExpression<boolean>,
     loggingConfigMap: BaseExpression<string>,
     jvmArgs: BaseExpression<string>,
-    transformsImage: BaseExpression<string>,
-    transformsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
-    transformsConfigMap: BaseExpression<string>,
-    transformsVolumeMode: TransformVolumeMode,
+    fileSourceVolumes: BaseExpression<any[]>,
+    fileSourceVolumeMounts: BaseExpression<any[]>,
 
     rfsImageName: BaseExpression<string>,
     rfsImagePullPolicy: BaseExpression<IMAGE_PULL_POLICY>,
@@ -188,11 +185,9 @@ function getRfsDeploymentManifest
         resources: makeDirectTypeProxy(args.resources)
     };
 
-    const finalContainerDefinition = setupTransformsForContainerForMode(
-        args.transformsVolumeMode,
-        args.transformsImage,
-        args.transformsImagePullPolicy,
-        args.transformsConfigMap,
+    const finalContainerDefinition = setupFileSourcesForContainer(
+        args.fileSourceVolumes,
+        args.fileSourceVolumeMounts,
         setupTestCredsForContainer(
             args.useLocalstackAwsCreds,
             setupLog4jConfigForContainer(
@@ -250,7 +245,7 @@ function getRfsDeploymentManifest
                 spec: {
                     serviceAccountName: "argo-workflow-executor",
                     containers: [finalContainerDefinition.container],
-                    volumes: [...finalContainerDefinition.volumes]
+                    volumes: finalContainerDefinition.volumes
                 }
             }
         }
@@ -310,8 +305,7 @@ const documentBulkLoadBaseBuilder = WorkflowBuilder.create({
 type StartHistoricalBackfillInputExpressions = InputParamsToExpressions<typeof startHistoricalBackfillInputs>;
 
 function makeRfsDeploymentDefinition(
-    inputs: StartHistoricalBackfillInputExpressions,
-    transformsVolumeMode: TransformVolumeMode
+    inputs: StartHistoricalBackfillInputExpressions
 ) {
     return {
         action: "apply" as const,
@@ -320,10 +314,8 @@ function makeRfsDeploymentDefinition(
             podReplicas: expr.deserializeRecord(inputs.podReplicas),
             loggingConfigMap: inputs.loggingConfigurationOverrideConfigMap,
             jvmArgs: inputs.jvmArgs,
-            transformsImage: inputs.transformsImage,
-            transformsImagePullPolicy: inputs.transformsImagePullPolicy,
-            transformsConfigMap: inputs.transformsConfigMap,
-            transformsVolumeMode,
+            fileSourceVolumes: expr.deserializeRecord(inputs.fileSourceVolumes),
+            fileSourceVolumeMounts: expr.deserializeRecord(inputs.fileSourceVolumeMounts),
             useLocalstackAwsCreds: expr.deserializeRecord(inputs.useLocalStack),
             sessionName: inputs.sessionName,
             targetBasicCredsSecretNameOrEmpty: inputs.targetBasicCredsSecretNameOrEmpty,
@@ -344,50 +336,13 @@ function makeRfsDeploymentDefinition(
     };
 }
 
-function addDocumentBulkLoadTransformTemplates(builder: typeof documentBulkLoadBaseBuilder) {
-    return builder
-        .addTemplate("startHistoricalBackfillWithImageTransforms", t => t
-            .addInputsFromRecord(startHistoricalBackfillInputs)
-            .addResourceTask(b => b
-                .setDefinition(makeRfsDeploymentDefinition(b.inputs, "image")))
-            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-        )
-        .addTemplate("startHistoricalBackfillWithConfigMapTransforms", t => t
-            .addInputsFromRecord(startHistoricalBackfillInputs)
-            .addResourceTask(b => b
-                .setDefinition(makeRfsDeploymentDefinition(b.inputs, "configMap")))
-            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-        )
-        .addTemplate("startHistoricalBackfillNoTransforms", t => t
-            .addInputsFromRecord(startHistoricalBackfillInputs)
-            .addResourceTask(b => b
-                .setDefinition(makeRfsDeploymentDefinition(b.inputs, "emptyDir")))
-            .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
-        );
-}
-
-export const DocumentBulkLoad = addDocumentBulkLoadTransformTemplates(documentBulkLoadBaseBuilder)
+export const DocumentBulkLoad = documentBulkLoadBaseBuilder
 
     .addTemplate("startHistoricalBackfill", t => t
         .addInputsFromRecord(startHistoricalBackfillInputs)
-        .addSteps(b => {
-            const {hasImage, hasConfigMapOnly, hasNone} =
-                getTransformsPresence(b.inputs.transformsImage, b.inputs.transformsConfigMap);
-
-            return b
-                .addStep("withImageTransforms", INTERNAL, "startHistoricalBackfillWithImageTransforms", c =>
-                    c.register({...selectInputsForRegister(b, c), taskK8sLabel: b.inputs.taskK8sLabel}),
-                    {when: {templateExp: hasImage}}
-                )
-                .addStep("withConfigMapTransforms", INTERNAL, "startHistoricalBackfillWithConfigMapTransforms", c =>
-                    c.register({...selectInputsForRegister(b, c), taskK8sLabel: b.inputs.taskK8sLabel}),
-                    {when: {templateExp: hasConfigMapOnly}}
-                )
-                .addStep("withoutTransforms", INTERNAL, "startHistoricalBackfillNoTransforms", c =>
-                    c.register({...selectInputsForRegister(b, c), taskK8sLabel: b.inputs.taskK8sLabel}),
-                    {when: {templateExp: hasNone}}
-                );
-        })
+        .addResourceTask(b => b
+            .setDefinition(makeRfsDeploymentDefinition(b.inputs)))
+        .addRetryParameters(K8S_RESOURCE_RETRY_STRATEGY)
     )
 
 
@@ -413,12 +368,8 @@ export const DocumentBulkLoad = addDocumentBulkLoadTransformTemplates(documentBu
                     coordinatorBasicCredsSecretNameOrEmpty: getHttpAuthSecretName(b.inputs.rfsCoordinatorConfig),
                     loggingConfigurationOverrideConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["loggingConfigurationOverrideConfigMap"], ""),
                     jvmArgs: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["jvmArgs"], ""),
-                    transformsImage: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["transformsImage"], ""),
-                    transformsImagePullPolicy: expr.get(
-                        expr.deserializeRecord(b.inputs.documentBackfillConfig),
-                        "transformsImagePullPolicy"
-                    ),
-                    transformsConfigMap: expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["transformsConfigMap"], ""),
+                    fileSourceVolumes: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["fileSourceVolumes"], [])),
+                    fileSourceVolumeMounts: expr.serialize(expr.dig(expr.deserializeRecord(b.inputs.documentBackfillConfig), ["fileSourceVolumeMounts"], [])),
                     useLocalStack: expr.dig(expr.deserializeRecord(b.inputs.snapshotConfig), ["repoConfig", "useLocalStack"], false),
                     rfsJsonConfig: expr.asString(expr.serialize(
                         makeParamsDict(b.inputs.sourceVersion,
@@ -508,7 +459,7 @@ export const DocumentBulkLoad = addDocumentBulkLoadTransformTemplates(documentBu
                         rfsCoordinatorConfig
                     }))
 
-                .addStep("waitForSnapshotMigration", ResourceManagement, "waitForSnapshotMigration", c =>
+                .addStep("waitIndefinitelyForSnapshotMigration", ResourceManagement, "waitIndefinitelyForSnapshotMigration", c =>
                     c.register({
                         ...selectInputsForRegister(b, c),
                         resourceName: b.inputs.crdName,

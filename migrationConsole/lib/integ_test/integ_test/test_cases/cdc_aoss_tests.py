@@ -20,9 +20,8 @@ from console_link.models.cluster import Cluster
 
 from .cdc_base import (
     MATestBase, MigrationType, MATestUserArguments,
-    REPLAYER_LABEL_SELECTOR, PROXY_LABEL_SELECTOR,
-    wait_for_pod_ready, wait_for_replayer_consuming,
-    run_generate_data,
+    wait_for_proxy_ready, wait_for_replayer_consuming,
+    run_generate_data, log_kafka_consumer_group_state, log_topic_records, assert_replay_drained,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,6 +81,7 @@ class Test0034CdcOnlyAossTarget(MATestBase):
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
         self.workflow_template = "cdc-only-imported-clusters"
+        self.parameters["capture-proxy-service-type"] = self.capture_proxy_service_type
 
     def prepare_clusters(self):
         pass
@@ -89,13 +89,14 @@ class Test0034CdcOnlyAossTarget(MATestBase):
     def workflow_perform_migrations(self, timeout_seconds: int = 3600):
         if not self.workflow_name:
             raise ValueError("Workflow name is not available")
-        logger.info("Waiting for replayer to start...")
-        wait_for_pod_ready(self.argo_service.namespace, REPLAYER_LABEL_SELECTOR, timeout_seconds)
-        logger.info("Replayer is running")
+        logger.info("CDC workflow submitted; replayer readiness is checked before traffic is sent")
 
     def post_migration_actions(self):
+        logger.info("Waiting for capture-proxy service to be ready...")
+        wait_for_proxy_ready(self.argo_service.namespace)
         logger.info("Waiting for replayer to join Kafka consumer group...")
         wait_for_replayer_consuming(namespace=self.argo_service.namespace)
+        log_kafka_consumer_group_state(label="replay-start")
 
         logger.info("Generating %d docs via proxy for AOSS target...", self.CDC_NUM_DOCS)
         run_generate_data("proxy", self.cdc_index, self.CDC_NUM_DOCS)
@@ -108,21 +109,24 @@ class Test0034CdcOnlyAossTarget(MATestBase):
 
     def verify_clusters(self):
         logger.info("Verifying docs on AOSS target...")
-        count = 0
-        for attempt in range(30):
-            try:
-                resp = self.target_cluster.call_api(f"/{self.cdc_index}/_count", raise_error=False)
-                if resp.status_code == 200:
-                    count = resp.json().get("count", 0)
-                    if count == self.CDC_NUM_DOCS:
-                        logger.info("AOSS target: %s has %d docs ✓", self.cdc_index, count)
-                        return
-                logger.info("Attempt %d: %s status=%d, count=%d/%d",
-                            attempt + 1, self.cdc_index, resp.status_code, count, self.CDC_NUM_DOCS)
-            except Exception as e:
-                logger.info("Attempt %d: %s", attempt + 1, e)
-            time.sleep(10)
-        raise AssertionError(f"{self.cdc_index}: expected {self.CDC_NUM_DOCS} docs, got {count}")
+        try:
+            count = 0
+            for attempt in range(30):
+                try:
+                    resp = self.target_cluster.call_api(f"/{self.cdc_index}/_count", raise_error=False)
+                    if resp.status_code == 200:
+                        count = resp.json().get("count", 0)
+                        if count == self.CDC_NUM_DOCS:
+                            logger.info("AOSS target: %s has %d docs ✓", self.cdc_index, count)
+                            return
+                    logger.info("Attempt %d: %s status=%d, count=%d/%d",
+                                attempt + 1, self.cdc_index, resp.status_code, count, self.CDC_NUM_DOCS)
+                except Exception as e:
+                    logger.info("Attempt %d: %s", attempt + 1, e)
+                time.sleep(10)
+            raise AssertionError(f"{self.cdc_index}: expected {self.CDC_NUM_DOCS} docs, got {count}")
+        finally:
+            assert_replay_drained(label="replay-end")
 
 
 class Test0041CdcFullE2eAossTarget(MATestBase):
@@ -174,6 +178,8 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
     def prepare_workflow_parameters(self, keep_workflows: bool = False):
         super().prepare_workflow_parameters(keep_workflows=keep_workflows)
         self.workflow_template = "cdc-full-e2e-imported-clusters"
+        self.parameters["pre-snapshot-proxy-submit"] = "true"
+        self.parameters["capture-proxy-service-type"] = self.capture_proxy_service_type
 
     def prepare_clusters(self):
         pass
@@ -185,16 +191,25 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
 
         # --- Pre-snapshot: generate-data via proxy ---
         logger.info("Waiting for capture-proxy to be ready...")
-        wait_for_pod_ready(ns, PROXY_LABEL_SELECTOR, timeout_seconds)
+        wait_for_proxy_ready(ns, timeout_seconds)
 
+        # Topic-record counts bracket the pre-snapshot generate-data. No consumer
+        # group exists yet, so this is the earliest confirmation that the capture
+        # proxy is actually offloading the generated traffic into the topic.
+        log_topic_records(label="pre-gen")
         logger.info("Pre-snapshot: generating %d docs into %s via proxy", self.PRE_SNAPSHOT_DOCS, self.idx_pre)
         run_generate_data("proxy", self.idx_pre, self.PRE_SNAPSHOT_DOCS)
+        log_topic_records(label="post-gen")
+
+        logger.info("Waiting for workflow to pause before full migration submit...")
+        self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=600)
+        logger.info("Resuming workflow to submit full migration...")
+        self.argo_service.resume_workflow(workflow_name=self.workflow_name)
 
         # --- Wait for replayer (signals backfill done) ---
-        logger.info("Waiting for replayer to start...")
-        wait_for_pod_ready(ns, REPLAYER_LABEL_SELECTOR, timeout_seconds)
         logger.info("Waiting for replayer to join Kafka consumer group...")
         wait_for_replayer_consuming(namespace=ns)
+        log_kafka_consumer_group_state(label="replay-start")
 
         # --- Post-snapshot: bulk into idx_post through proxy ---
         logger.info("Post-snapshot: generating %d docs into %s via proxy", self.POST_SNAPSHOT_DOCS, self.idx_post)
@@ -218,24 +233,27 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
         # generate-data uses auto-generated IDs, so replayed docs don't overwrite backfilled ones.
         expected_pre = self.PRE_SNAPSHOT_DOCS * 2
         logger.info("Verifying both indices on AOSS target...")
-        pre, post = 0, 0
-        for attempt in range(30):
-            try:
-                resp_pre = self.target_cluster.call_api(f"/{self.idx_pre}/_count", raise_error=False)
-                resp_post = self.target_cluster.call_api(f"/{self.idx_post}/_count", raise_error=False)
-                if resp_pre.status_code == 200:
-                    pre = resp_pre.json().get("count", 0)
-                if resp_post.status_code == 200:
-                    post = resp_post.json().get("count", 0)
-                if pre == expected_pre and post == self.POST_SNAPSHOT_DOCS:
-                    logger.info("AOSS target: %s=%d, %s=%d ✓", self.idx_pre, pre, self.idx_post, post)
-                    return
-                logger.info("Attempt %d: %s=%d/%d (status=%d), %s=%d/%d (status=%d)", attempt + 1,
-                            self.idx_pre, pre, expected_pre, resp_pre.status_code,
-                            self.idx_post, post, self.POST_SNAPSHOT_DOCS, resp_post.status_code)
-            except Exception as e:
-                logger.info("Attempt %d: %s", attempt + 1, e)
-            time.sleep(10)
-        raise AssertionError(
-            f"Expected {self.idx_pre}={expected_pre}, {self.idx_post}={self.POST_SNAPSHOT_DOCS}, "
-            f"got {self.idx_pre}={pre}, {self.idx_post}={post}")
+        try:
+            pre, post = 0, 0
+            for attempt in range(30):
+                try:
+                    resp_pre = self.target_cluster.call_api(f"/{self.idx_pre}/_count", raise_error=False)
+                    resp_post = self.target_cluster.call_api(f"/{self.idx_post}/_count", raise_error=False)
+                    if resp_pre.status_code == 200:
+                        pre = resp_pre.json().get("count", 0)
+                    if resp_post.status_code == 200:
+                        post = resp_post.json().get("count", 0)
+                    if pre == expected_pre and post == self.POST_SNAPSHOT_DOCS:
+                        logger.info("AOSS target: %s=%d, %s=%d ✓", self.idx_pre, pre, self.idx_post, post)
+                        return
+                    logger.info("Attempt %d: %s=%d/%d (status=%d), %s=%d/%d (status=%d)", attempt + 1,
+                                self.idx_pre, pre, expected_pre, resp_pre.status_code,
+                                self.idx_post, post, self.POST_SNAPSHOT_DOCS, resp_post.status_code)
+                except Exception as e:
+                    logger.info("Attempt %d: %s", attempt + 1, e)
+                time.sleep(10)
+            raise AssertionError(
+                f"Expected {self.idx_pre}={expected_pre}, {self.idx_post}={self.POST_SNAPSHOT_DOCS}, "
+                f"got {self.idx_pre}={pre}, {self.idx_post}={post}")
+        finally:
+            assert_replay_drained(label="replay-end")

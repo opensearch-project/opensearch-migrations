@@ -284,7 +284,7 @@
             {
               "templateRef": {
                 "template": "waitforkafkacluster",
-                "name": "resource-management"
+                "name": "setup-kafka"
               },
               "when": "{{=true && !(steps.reconcileCapturedTrafficResource.outputs.parameters.currentConfigChecksum == inputs.parameters.checksumForReplayer) && sprig.dig('kafkaConfig', 'managedByWorkflow', false, fromJSON(inputs.parameters.loaderConfig))}}",
               "arguments": {

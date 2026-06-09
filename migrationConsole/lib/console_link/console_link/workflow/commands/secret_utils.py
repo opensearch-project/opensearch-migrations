@@ -108,7 +108,7 @@ def _handle_missing_config_secrets(secret_store: SecretStore, missing, interacti
             f"Found {len(missing)} missing secret{'s' if len(missing) > 1 else ''} "
             f"that must be created to make well-formed HTTP-Basic requests to clusters:\n  " +
             "\n  ".join(missing) +
-            "\n\nRun `workflow configure edit` to create them."
+            "\n\nRun `workflow configure credentials create` before `workflow submit`."
         )
 
 

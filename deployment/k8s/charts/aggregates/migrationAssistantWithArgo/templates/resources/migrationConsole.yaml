@@ -11,8 +11,11 @@ metadata:
   name: migration-console-access-role
 rules:
   - apiGroups: [ "" ]
-    resources: ["configmaps", "events", "persistentvolumeclaims", "pods", "pods/log", "secrets", "services"]
+    resources: ["configmaps", "endpoints", "events", "persistentvolumeclaims", "pods", "pods/log", "secrets", "services"]
     verbs: ["get", "watch", "list", "create", "update", "patch", "delete", "deletecollection"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "watch", "list"]
   - apiGroups: [""]
     resources: ["pods/attach"]
     verbs: ["create", "get"]
@@ -23,9 +26,45 @@ rules:
     resources: ["workflows", "workflows/finalizers", "workflowtemplates", "workflowtemplates/finalizers", "workflowtaskresults" ]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
   - apiGroups: ["migrations.opensearch.org"]
-    resources: ["approvalgates", "capturedtraffics", "captureproxies", "datasnapshots", "kafkaclusters", "migrationruns", "snapshotmigrations", "trafficreplays",
-                "approvalgates/status", "capturedtraffics/status", "captureproxies/status", "datasnapshots/status", "kafkaclusters/status", "migrationruns/status", "snapshotmigrations/status", "trafficreplays/status"]
+    # Listed one (resource, /status) per line so a missing status sub-resource
+    # is obvious at a glance.
+    resources:
+      - approvalgates
+      - approvalgates/status
+      - capturedtraffics
+      - capturedtraffics/status
+      - captureproxies
+      - captureproxies/status
+      - datasnapshots
+      - datasnapshots/status
+      - kafkaclusters
+      - kafkaclusters/status
+      - migrationruns
+      - migrationruns/status
+      - snapshotmigrations
+      - snapshotmigrations/status
+      - trafficreplays
+      - trafficreplays/status
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # `workflow reset` (run under this SA) walks the Strimzi resource tree to clean
+  # up between integ-test cases. reset.py iterates kafkas / kafkausers /
+  # kafkatopics / kafkanodepools and the core.strimzi.io strimzipodsets — all
+  # five need delete + deletecollection or the cleanup 403's mid-walk and
+  # leaves residual broker pods that deadlock the next test's setup.
+  - apiGroups: ["kafka.strimzi.io"]
+    resources: ["kafkas", "kafkausers", "kafkatopics", "kafkanodepools"]
+    verbs: ["get", "list", "watch", "delete", "deletecollection"]
+  - apiGroups: ["core.strimzi.io"]
+    resources: ["strimzipodsets"]
+    verbs: ["get", "list", "watch", "delete", "deletecollection"]
+  # Read-only, for drain-stall diagnostics. On a replayer drain failure
+  # (assert_replay_drained in cdc_base.py) we dump the Kafka PodDisruptionBudget
+  # state — is minAvailable actually gating disruptions, or is the budget
+  # already at its floor? — alongside broker pod placement. PDBs are namespaced;
+  # nodes are cluster-scoped and granted via the ClusterRole below.
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -51,6 +90,14 @@ rules:
       - /openapi/v3
       - /openapi/v3/*
     verbs: ["get"]
+  # Read-only node access for drain-stall diagnostics: on a replayer drain
+  # failure, cdc_base.py dumps `kubectl get nodes -o wide` and broker pod
+  # placement to reveal whether all Kafka brokers are co-located on a single
+  # node (a node that Karpenter could consolidate, taking the whole cluster
+  # down at once). Nodes are cluster-scoped, so this lives on the ClusterRole.
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1

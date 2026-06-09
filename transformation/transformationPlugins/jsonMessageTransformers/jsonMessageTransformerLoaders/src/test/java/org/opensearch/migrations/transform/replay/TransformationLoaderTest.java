@@ -1,5 +1,7 @@
 package org.opensearch.migrations.transform.replay;
 
+import java.nio.file.Files;
+import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.transform.TransformationLoader;
@@ -60,6 +62,93 @@ public class TransformationLoaderTest {
         Assertions.assertNotNull(transformer);
         var origDoc = parseAsMap(SampleContents.loadSampleJsonRequestAsString());
         Assertions.assertNotNull(transformer.transformJson(origDoc));
+    }
+
+    @Test
+    public void testProviderConfigFilesAreResolvedBeforeProviderCreation() throws Exception {
+        var scriptFile = Files.createTempFile("jmespath-transform", ".txt");
+        try {
+            Files.writeString(scriptFile, "headers.host");
+            var fullConfig = mapper.writeValueAsString(List.of(Map.of(
+                "JsonJMESPathTransformerProvider",
+                Map.of(
+                    "providerConfigFiles", Map.of("script", Map.of("path", scriptFile.toString()))))));
+
+            var transformer = new TransformationLoader().getTransformerFactoryLoader(null, null, fullConfig);
+            var transformed = transformer.transformJson(parseAsMap(TEST_INPUT_REQUEST));
+
+            Assertions.assertEquals("127.0.0.1", transformed);
+        } finally {
+            Files.deleteIfExists(scriptFile);
+        }
+    }
+
+    @Test
+    public void testProviderConfigFilesUseProviderDeclaredValueTypes() throws Exception {
+        var configDir = Files.createTempDirectory("type-mapping-provider-config");
+        var regexMappingsFile = Files.createTempFile("type-mapping-regex", ".json");
+        try {
+            Files.writeString(configDir.resolve("sourceProperties"), "{\"version\":{\"major\":7,\"minor\":10}}");
+            Files.writeString(configDir.resolve("featureFlags"), "{}");
+            Files.writeString(regexMappingsFile, "[]");
+
+            var fullConfig = mapper.writeValueAsString(List.of(Map.of(
+                "TypeMappingSanitizationTransformerProvider",
+                Map.of(
+                    "providerConfigDirs", List.of(Map.of("path", configDir.toString())),
+                    "providerConfigFiles", Map.of("regexMappings", Map.of("path", regexMappingsFile.toString()))))));
+
+            var transformer = new TransformationLoader().getTransformerFactoryLoader(null, null, fullConfig);
+            var transformed = transformer.transformJson(parseAsMap(TEST_INPUT_REQUEST));
+
+            Assertions.assertNotNull(transformed);
+        } finally {
+            Files.deleteIfExists(configDir.resolve("sourceProperties"));
+            Files.deleteIfExists(configDir.resolve("featureFlags"));
+            Files.deleteIfExists(configDir);
+            Files.deleteIfExists(regexMappingsFile);
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testProviderConfigFilesSupportProviderDeclaredMaterializationTypes() throws Exception {
+        var jsonValueFile = Files.createTempFile("materialization-json", ".json");
+        var textValueFile = Files.createTempFile("materialization-text", ".txt");
+        var bytesValueFile = Files.createTempFile("materialization-bytes", ".bin");
+        var base64ValueFile = Files.createTempFile("materialization-base64", ".bin");
+        var pathValueFile = Files.createTempFile("materialization-path", ".txt");
+        try {
+            Files.writeString(jsonValueFile, "{\"enabled\":true}");
+            Files.writeString(textValueFile, "hello");
+            Files.write(bytesValueFile, new byte[]{1, 2, 3});
+            Files.write(base64ValueFile, new byte[]{1, 2, 3});
+            Files.writeString(pathValueFile, "ignored");
+
+            var fullConfig = mapper.writeValueAsString(List.of(Map.of(
+                "MaterializationProbeTransformerProvider",
+                Map.of("providerConfigFiles", Map.of(
+                    "jsonValue", Map.of("path", jsonValueFile.toString()),
+                    "textValue", Map.of("path", textValueFile.toString()),
+                    "bytesValue", Map.of("path", bytesValueFile.toString()),
+                    "base64Value", Map.of("path", base64ValueFile.toString()),
+                    "pathValue", Map.of("path", pathValueFile.toString()))))));
+
+            var transformer = new TransformationLoader().getTransformerFactoryLoader(null, null, fullConfig);
+            var transformed = (Map<String, Object>) transformer.transformJson(parseAsMap(TEST_INPUT_REQUEST));
+
+            Assertions.assertEquals(true, ((Map<String, Object>) transformed.get("jsonValue")).get("enabled"));
+            Assertions.assertEquals("hello", transformed.get("textValue"));
+            Assertions.assertArrayEquals(new byte[]{1, 2, 3}, (byte[]) transformed.get("bytesValue"));
+            Assertions.assertEquals("AQID", transformed.get("base64Value"));
+            Assertions.assertEquals(pathValueFile.toString(), transformed.get("pathValue"));
+        } finally {
+            Files.deleteIfExists(jsonValueFile);
+            Files.deleteIfExists(textValueFile);
+            Files.deleteIfExists(bytesValueFile);
+            Files.deleteIfExists(base64ValueFile);
+            Files.deleteIfExists(pathValueFile);
+        }
     }
 
     static final String TEST_INPUT_REQUEST = "{\n"

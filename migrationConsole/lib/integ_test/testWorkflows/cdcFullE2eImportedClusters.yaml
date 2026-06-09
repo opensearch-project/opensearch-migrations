@@ -26,10 +26,12 @@ spec:
         value: "20"
       - name: observed-packet-timeout
         value: "30"
-      - name: transforms-sources
-        value: "{}"
       - name: replayer-config-overrides
         value: "{}"
+      - name: pre-snapshot-proxy-submit
+        value: "false"
+      - name: capture-proxy-service-type
+        value: "LoadBalancer"
 
   templates:
     - name: main
@@ -37,8 +39,6 @@ spec:
         parameters:
           - name: source-configs
           - name: target-config
-          - name: transforms-sources
-            default: "{}"
           - name: replayer-config-overrides
             default: "{}"
           - name: tupleS3Region
@@ -86,12 +86,48 @@ spec:
                   value: "{{inputs.parameters.source-configs}}"
                 - name: target-config
                   value: "{{inputs.parameters.target-config}}"
-                - name: transforms-sources
-                  value: "{{inputs.parameters.transforms-sources}}"
                 - name: imageMigrationConsoleLocation
                   value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
                 - name: imageMigrationConsolePullPolicy
                   value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+
+        - - name: add-proxy-only-traffic-config
+            templateRef:
+              name: cdc-overlay
+              template: add-proxy-only-traffic-config
+            when: "{{workflow.parameters.pre-snapshot-proxy-submit}} == true"
+            arguments:
+              parameters:
+                - name: baseConfigBase64
+                  value: "{{steps.generate-base-config.outputs.parameters.migrationConfigBase64}}"
+                - name: imageMigrationConsoleLocation
+                  value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                - name: imageMigrationConsolePullPolicy
+                  value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                - name: captureProxyServiceType
+                  value: "{{workflow.parameters.capture-proxy-service-type}}"
+
+        - - name: run-proxy-only-migration-with-workflow-cli
+            templateRef:
+              name: full-migration-with-workflow-cli
+              template: main
+            when: "{{workflow.parameters.pre-snapshot-proxy-submit}} == true"
+            arguments:
+              parameters:
+                - name: migrationConfigBase64
+                  value: "{{steps.add-proxy-only-traffic-config.outputs.parameters.migrationConfigBase64}}"
+                - name: imageMigrationConsoleLocation
+                  value: "{{inputs.parameters.imageMigrationConsoleLocation}}"
+                - name: imageMigrationConsolePullPolicy
+                  value: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
+                - name: keepMigrationWorkflow
+                  value: "true"
+
+        - - name: pause-for-pre-snapshot-data
+            templateRef:
+              name: full-migration-with-clusters
+              template: suspend-step
+            when: "{{workflow.parameters.pre-snapshot-proxy-submit}} == true"
 
         - - name: add-traffic-config
             templateRef:
@@ -119,6 +155,8 @@ spec:
                   value: "{{inputs.parameters.tupleS3Endpoint}}"
                 - name: tupleS3BucketName
                   value: "{{inputs.parameters.tupleS3BucketName}}"
+                - name: captureProxyServiceType
+                  value: "{{workflow.parameters.capture-proxy-service-type}}"
 
         - - name: run-full-migration-with-workflow-cli
             templateRef:

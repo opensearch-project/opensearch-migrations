@@ -201,7 +201,7 @@ export const CreateSnapshot = WorkflowBuilder.create({
                     sourceK8sLabel: expr.jsonPathStrict(b.inputs.sourceConfig, "label"),
                     snapshotK8sLabel: expr.jsonPathStrict(b.inputs.snapshotConfig, "label")
                 }))
-            .addStep("waitForCompletion", ResourceManagement, "waitForDataSnapshot", c =>
+            .addStep("waitIndefinitelyForCompletion", ResourceManagement, "waitIndefinitelyForDataSnapshot", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
                     resourceName: b.inputs.dataSnapshotName,
