@@ -18,11 +18,17 @@ permissions:
 jobs:
   approve-release:
     name: Approve release
-    if: ${{ !github.event.act && github.repository == 'opensearch-project/opensearch-migrations' }}
+    # Repo-agnostic: this workflow runs on whatever repo it's checked
+    # into. The actual gate against accidental fork releases is the
+    # `release-approval` environment below — forks that haven't
+    # configured that environment will block here forever waiting for
+    # an approver that doesn't exist, which is the desired safety net.
+    # The only thing we actively skip is local `act` simulation.
+    if: ${{ !github.event.act }}
     runs-on: ubuntu-22.04
     environment: release-approval
     steps:
-      - run: echo "Release approved"
+      - run: echo "Release approved on ${{ github.repository }}"
 
   extract-version:
     # Lifted out of draft-a-release so the matrix TUI build can consume
@@ -147,7 +153,19 @@ jobs:
   draft-a-release:
     name: Draft a release
     needs: [extract-version, build-tui-binaries]
-    if: ${{ github.event.act || (needs.extract-version.result == 'success' && needs.build-tui-binaries.result == 'success') }}
+    # Two gates:
+    #   1. extract-version + build-tui-binaries must have succeeded
+    #      (the things THIS workflow can do on any repo).
+    #   2. Repository must be the upstream — this job depends on
+    #      AWS OIDC, opensearchstaging Docker images, and S3 buckets
+    #      that only exist for opensearch-project. Forks should run
+    #      everything BEFORE this job (TUI matrix, artifact upload)
+    #      and stop here cleanly.
+    if: >-
+      github.event.act ||
+      (needs.extract-version.result == 'success' &&
+       needs.build-tui-binaries.result == 'success' &&
+       github.repository == 'opensearch-project/opensearch-migrations')
     runs-on: ubuntu-22.04
     services:
       registry:
