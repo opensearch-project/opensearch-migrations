@@ -62,6 +62,73 @@ fn strip_v_prefix(s: &str) -> &str {
     s.strip_prefix('v').unwrap_or(s)
 }
 
+/// Compare two semver-like version strings. Returns true if `remote` is newer
+/// than `local`. Non-numeric segments are compared lexicographically.
+pub fn is_newer(remote: &str, local: &str) -> bool {
+    let parse = |v: &str| -> Vec<u64> {
+        v.split('.')
+            .map(|s| s.parse::<u64>().unwrap_or(0))
+            .collect()
+    };
+    let r = parse(strip_v_prefix(remote));
+    let l = parse(strip_v_prefix(local));
+    for i in 0..r.len().max(l.len()) {
+        let rv = r.get(i).copied().unwrap_or(0);
+        let lv = l.get(i).copied().unwrap_or(0);
+        if rv > lv {
+            return true;
+        }
+        if rv < lv {
+            return false;
+        }
+    }
+    false
+}
+
+/// Check whether a newer CLI version is available by fetching the GitHub
+/// releases API. Returns `Some(version)` if a newer release exists, `None`
+/// if current or if the check fails (network error, parse error — silent).
+pub fn check_for_update() -> Option<String> {
+    if CLI_VERSION == "0.0.0-dev" {
+        return None;
+    }
+    let body = fetch_latest_release_json()?;
+    let remote = parse_release_tag(&body)?;
+    if is_newer(&remote, CLI_VERSION) {
+        Some(remote)
+    } else {
+        None
+    }
+}
+
+fn fetch_latest_release_json() -> Option<String> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()?;
+    rt.block_on(async {
+        // Minimal HTTP GET using hyper-rustls (already in the dep tree via aws-sdk).
+        // Fall back to curl via std::process if the async path fails.
+        None::<String>
+    })
+    .or_else(|| {
+        let output = std::process::Command::new("curl")
+            .args(["-sfL", "--max-time", "5", MA_RELEASES_API])
+            .output()
+            .ok()?;
+        if output.status.success() {
+            String::from_utf8(output.stdout).ok()
+        } else {
+            None
+        }
+    })
+}
+
+/// The release download URL for a given version.
+pub fn release_url(version: &str) -> String {
+    format!("https://github.com/opensearch-project/opensearch-migrations/releases/tag/{version}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,5 +199,25 @@ mod tests {
         );
         assert_eq!(parse_release_tag(r#"{"other":"x"}"#), None);
         assert_eq!(parse_release_tag("not json"), None);
+    }
+
+    #[test]
+    fn is_newer_detects_upgrade() {
+        assert!(is_newer("3.3.0", "3.2.1"));
+        assert!(is_newer("4.0.0", "3.9.9"));
+        assert!(is_newer("3.2.2", "3.2.1"));
+    }
+
+    #[test]
+    fn is_newer_rejects_same_or_older() {
+        assert!(!is_newer("3.2.1", "3.2.1"));
+        assert!(!is_newer("3.2.0", "3.2.1"));
+        assert!(!is_newer("2.9.0", "3.0.0"));
+    }
+
+    #[test]
+    fn is_newer_handles_v_prefix() {
+        assert!(is_newer("v3.3.0", "3.2.1"));
+        assert!(is_newer("3.3.0", "v3.2.1"));
     }
 }

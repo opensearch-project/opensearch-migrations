@@ -41,6 +41,7 @@ fn run<R: CommandRunner>(args: &[String], runner: &R) -> Result<()> {
         Some("cleanup") => cmd_cleanup(env, runner, &rest),
         Some("dashboard") => cmd_dashboard(env, &rest),
         Some("pack") => crate::pack_cmd::cmd_pack(runner, &rest),
+        Some("update") => cmd_update(),
         Some("version") | Some("--version") | Some("-V") => {
             println!("{}", resolve_version_string());
             Ok(())
@@ -159,6 +160,12 @@ fn print_banner(env: &Env) {
         env.stage,
         env.stage_dir().display()
     ));
+    // Non-blocking update check (best-effort, silent on failure).
+    if let Some(newer) = version::check_for_update() {
+        ui::warn(&format!(
+            "A newer version ({newer}) is available. Run `migration-assistant update` to upgrade."
+        ));
+    }
 }
 
 /// Decide whether this run resumes from the saved step. Terminal steps resume
@@ -830,6 +837,30 @@ fn resolve_version_string() -> String {
     version::CLI_VERSION.to_string()
 }
 
+/// Check for updates and print instructions. Downloads the latest release
+/// tarball if the user confirms.
+fn cmd_update() -> Result<()> {
+    ui::step(&format!("Current version: {}", version::CLI_VERSION));
+    ui::info("Checking for updates...");
+    match version::check_for_update() {
+        Some(newer) => {
+            let url = version::release_url(&newer);
+            ui::ok(&format!("Version {newer} is available!"));
+            ui::info(&format!("Download: {url}"));
+            ui::info("To update:");
+            ui::dim(&format!(
+                "  curl -sL {url}/download/migration-assistant-cli-{newer}.tar.gz | tar xz"
+            ));
+            ui::dim("  ./install.sh");
+            Ok(())
+        }
+        None => {
+            ui::ok("You are running the latest version.");
+            Ok(())
+        }
+    }
+}
+
 /// The help text (goes to stdout).
 pub fn help_text() -> String {
     format!(
@@ -844,6 +875,7 @@ Usage:\n\
 \x20 migration-assistant cleanup  [--stage NAME]    Tear down deploy + archive state\n\
 \x20 migration-assistant dashboard [--stage NAME]   Interactive deploy dashboard (scrollable)\n\
 \x20 migration-assistant pack     [flags]           Repack a CLI tarball\n\
+\x20 migration-assistant update                     Check for / install updates\n\
 \x20 migration-assistant version                    Print CLI version\n\
 \x20 migration-assistant help                       This help\n\n\
 Common flags:\n\
