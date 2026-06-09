@@ -85,20 +85,77 @@ pub fn is_newer(remote: &str, local: &str) -> bool {
     false
 }
 
-/// Check whether a newer CLI version is available by fetching the GitHub
-/// releases API. Returns `Some(version)` if a newer release exists, `None`
-/// if current or if the check fails (network error, parse error — silent).
+/// Check whether a newer CLI version is available. Skips the network call if
+/// a check was already performed in the last 24 hours (timestamp cached in
+/// `~/.migration-assistant/last-update-check`). Returns `Some(version)` if a
+/// newer release exists, `None` otherwise (including on any failure).
 pub fn check_for_update() -> Option<String> {
     if CLI_VERSION == "0.0.0-dev" {
         return None;
     }
+    if !should_check_today() {
+        return None;
+    }
     let body = fetch_latest_release_json()?;
     let remote = parse_release_tag(&body)?;
+    record_check();
     if is_newer(&remote, CLI_VERSION) {
         Some(remote)
     } else {
         None
     }
+}
+
+/// Force a check regardless of the cache (used by `migration-assistant update`).
+pub fn check_for_update_now() -> Option<String> {
+    if CLI_VERSION == "0.0.0-dev" {
+        return None;
+    }
+    let body = fetch_latest_release_json()?;
+    let remote = parse_release_tag(&body)?;
+    record_check();
+    if is_newer(&remote, CLI_VERSION) {
+        Some(remote)
+    } else {
+        None
+    }
+}
+
+fn cache_dir() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+    Some(std::path::PathBuf::from(home).join(".migration-assistant"))
+}
+
+fn cache_file() -> Option<std::path::PathBuf> {
+    Some(cache_dir()?.join("last-update-check"))
+}
+
+fn should_check_today() -> bool {
+    let Some(path) = cache_file() else {
+        return true;
+    };
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return true;
+    };
+    let Ok(ts) = contents.trim().parse::<u64>() else {
+        return true;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    now.saturating_sub(ts) > 86400
+}
+
+fn record_check() {
+    let Some(path) = cache_file() else { return };
+    let Some(dir) = cache_dir() else { return };
+    let _ = std::fs::create_dir_all(dir);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let _ = std::fs::write(path, now.to_string());
 }
 
 fn fetch_latest_release_json() -> Option<String> {

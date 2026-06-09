@@ -842,7 +842,7 @@ fn resolve_version_string() -> String {
 fn cmd_update() -> Result<()> {
     ui::step(&format!("Current version: {}", version::CLI_VERSION));
     ui::info("Checking for updates...");
-    match version::check_for_update() {
+    match version::check_for_update_now() {
         Some(newer) => {
             let url = version::release_url(&newer);
             ui::ok(&format!("Version {newer} is available!"));
