@@ -93,42 +93,36 @@ public class SnapshotCreator {
                 body.put("type", "fs");
             }
             case RepoUri.S3RepoUri s -> {
-                settings.put("bucket", s.s3Uri().bucketName);
+                putBucketSettings(settings, s.s3Uri().bucketName, s.s3Uri().key);
                 settings.put("region", region);
-                if (!s.s3Uri().key.isEmpty()) {
-                    settings.put("base_path", s.s3Uri().key);
-                }
-                settings.put("compress", compressionEnabled);
                 if (roleArn != null) {
                     settings.put("role_arn", roleArn);
                 }
                 if (endpoint != null) {
                     settings.put("endpoint", endpoint);
                 }
-                if (maxSnapshotRateMBPerNode != null) {
-                    settings.put("max_snapshot_bytes_per_sec", maxSnapshotRateMBPerNode + "mb");
-                }
                 body.put("type", "s3");
             }
             case RepoUri.GcsRepoUri g -> {
-                // Parse gs://bucket/path manually (GcsUri is in a downstream module)
-                String raw = g.rawUri().substring(5); // strip "gs://"
-                String[] parts = raw.split("/", 2);
-                settings.put("bucket", parts[0]);
-                if (parts.length > 1 && !parts[1].isEmpty()) {
-                    String basePath = parts[1].endsWith("/") ? parts[1].substring(0, parts[1].length() - 1) : parts[1];
-                    settings.put("base_path", basePath);
-                }
-                settings.put("compress", compressionEnabled);
-                if (maxSnapshotRateMBPerNode != null) {
-                    settings.put("max_snapshot_bytes_per_sec", maxSnapshotRateMBPerNode + "mb");
-                }
+                var gcsUri = new GcsUri(g.rawUri());
+                putBucketSettings(settings, gcsUri.bucketName, gcsUri.key);
                 body.put("type", "gcs");
             }
         }
 
         body.set("settings", settings);
         return body;
+    }
+
+    private void putBucketSettings(ObjectNode settings, String bucket, String key) {
+        settings.put("bucket", bucket);
+        if (key != null && !key.isEmpty()) {
+            settings.put("base_path", key);
+        }
+        settings.put("compress", compressionEnabled);
+        if (maxSnapshotRateMBPerNode != null) {
+            settings.put("max_snapshot_bytes_per_sec", maxSnapshotRateMBPerNode + "mb");
+        }
     }
 
     public String getIndexAllowlist() {
