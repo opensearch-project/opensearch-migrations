@@ -9,7 +9,6 @@ import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
-import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
@@ -141,7 +140,8 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
         dataFilterArgs.indexAllowlist = List.of(originalIndexName);
         arguments.dataFilterArgs = dataFilterArgs;
 
-        arguments.metadataTransformationParams.multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.UNION;
+        // Multi-type union is auto-applied by the TypeMappingsSanitization transform for ES <7
+        // sources, so no explicit multi-type configuration is needed here.
     }
 
     @Test
