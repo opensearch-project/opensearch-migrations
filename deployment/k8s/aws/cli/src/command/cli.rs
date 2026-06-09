@@ -192,10 +192,30 @@ fn resolve_resume(state: &mut State, env: &Env) -> Result<bool> {
 }
 
 /// The Manual deploy pipeline — `manual_path`. Discovers the environment,
-/// collects the wizard config, then drives the orchestrator through
-/// CFN → kubeconfig → crane → helm → console. AWS-touching steps require real
-/// credentials; without `aws` on PATH the discovery step fails cleanly with the
-/// a clear error message.
+/// Verify that required external tools are available on PATH.
+fn check_dependencies<R: CommandRunner>(runner: &R) -> Result<()> {
+    let required = [
+        ("kubectl", "kubernetes CLI"),
+        ("helm", "Helm package manager"),
+    ];
+    let mut missing = Vec::new();
+    for (bin, desc) in &required {
+        if !runner.has_command(bin) {
+            missing.push(format!("  • {bin} — {desc}"));
+        }
+    }
+    if !missing.is_empty() {
+        let list = missing.join("\n");
+        return Err(Error::die(format!(
+            "required tools not found on PATH:\n{list}\n\n\
+             Install them and rerun. See: https://kubernetes.io/docs/tasks/tools/"
+        )));
+    }
+    Ok(())
+}
+
+/// The Manual deploy pipeline. Discovers the environment, collects the wizard
+/// config, then drives CFN → kubeconfig → image mirror → helm → console.
 fn manual_path<R: CommandRunner>(env: Env, runner: &R, state: State, resuming: bool) -> Result<()> {
     // Init the run log under <stage>/log/migrate.log. The Jenkins helper
     // (test/awsRunEksValidation.sh) dumps this file on failure, so it must
@@ -206,6 +226,9 @@ fn manual_path<R: CommandRunner>(env: Env, runner: &R, state: State, resuming: b
         env.stage, resuming
     ));
     let mut app = crate::app::App { env, runner, state };
+
+    // Check required external dependencies before doing any work.
+    check_dependencies(runner)?;
 
     ui::step("Discover environment");
     log.info("discover: os + aws + resources");
