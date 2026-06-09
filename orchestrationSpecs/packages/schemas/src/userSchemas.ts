@@ -569,14 +569,6 @@ export const USER_PROXY_PROCESS_OPTIONS = z.object({
         .describe("ISO 8601 duration for how long idle connections in the destination pool are kept alive before being closed (e.g. 'PT30S' = 30 seconds, 'PT5M' = 5 minutes)."),
     kafkaClientId: z.string().default("HttpCaptureProxyProducer").optional()
         .describe("Kafka producer client ID used when publishing captured traffic to Kafka. Useful for identifying this proxy in Kafka broker logs and metrics."),
-    kafkaBrokers: z.string().optional()
-        .describe("Comma-separated list of Kafka broker addresses (host:port) for an externally managed Kafka cluster. When set, the proxy publishes traffic to this cluster instead of a workflow-managed one."),
-    kafkaAuthType: z.string().optional()
-        .describe("Authentication type for the external Kafka cluster (e.g. 'SASL_SSL'). Required when kafkaBrokers is set and the cluster requires authentication."),
-    kafkaUserName: z.string().optional()
-        .describe("Username for SASL authentication to the external Kafka cluster."),
-    kafkaPassword: z.string().optional()
-        .describe("Password for SASL authentication to the external Kafka cluster."),
     listenPort: z.number()
         .describe("TCP port the capture proxy listens on for incoming HTTP(S) traffic. This port is exposed via the Kubernetes Service and used to construct the proxy endpoint URL.")
         .checksumFor('snapshot', 'replayer')
@@ -639,18 +631,6 @@ export const USER_REPLAYER_WORKFLOW_OPTIONS = z.object({
 }).describe("Kubernetes deployment-level options for the traffic replayer.");
 
 export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
-    kafkaTrafficBrokers: z.string().optional()
-        .describe("Comma-separated list of Kafka broker addresses (host:port) for an externally managed Kafka cluster. When set, the replayer consumes from this cluster instead of a workflow-managed one.")
-        .changeRestriction('impossible'),
-    kafkaTrafficAuthType: z.string().optional()
-        .describe("Authentication type for the external Kafka cluster (e.g. 'SASL_SSL'). Required when kafkaTrafficBrokers is set and the cluster requires authentication.")
-        .changeRestriction('impossible'),
-    kafkaTrafficUserName: z.string().optional()
-        .describe("Username for SASL authentication to the external Kafka cluster.")
-        .changeRestriction('impossible'),
-    kafkaTrafficPassword: z.string().optional()
-        .describe("Password for SASL authentication to the external Kafka cluster.")
-        .changeRestriction('impossible'),
     kafkaTrafficEnableMSKAuth: z.boolean().default(false).optional()
         .describe("Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.")
         .changeRestriction('impossible'),

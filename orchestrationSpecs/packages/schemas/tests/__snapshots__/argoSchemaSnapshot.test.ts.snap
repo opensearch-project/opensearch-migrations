@@ -1601,8 +1601,8 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "version": {
                       "type": "string",
-                      "pattern": "^(?:ES [125678]|OS [123]|SOLR [89])(?:\\\\.[0-9]+)+$",
-                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0'."
+                      "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
+                      "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
                     },
                     "label": {
                       "type": "string"
@@ -2481,6 +2481,106 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "useRecoverySource": {
                       "type": "boolean",
                       "default": false
+                    },
+                    "fileSourceVolumes": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configMap": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "configMap"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "image": {
+                                "type": "object",
+                                "properties": {
+                                  "reference": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "pullPolicy": {
+                                    "type": "string",
+                                    "enum": [
+                                      "Always",
+                                      "Never",
+                                      "IfNotPresent"
+                                    ],
+                                    "default": "IfNotPresent"
+                                  }
+                                },
+                                "required": [
+                                  "reference"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "image"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "default": []
+                    },
+                    "fileSourceVolumeMounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "mountPath": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "readOnly": {
+                            "type": "boolean",
+                            "enum": [
+                              true
+                            ],
+                            "default": true
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "mountPath"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "default": []
                     }
                   }
                 },
@@ -2630,6 +2730,15 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "default": "AUTO"
                     },
+                    "emitDocType": {
+                      "type": "string",
+                      "enum": [
+                        "AUTO",
+                        "ON",
+                        "OFF"
+                      ],
+                      "default": "AUTO"
+                    },
                     "allowedDocExceptionTypes": {
                       "type": "array",
                       "items": {
@@ -2656,6 +2765,110 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     "useRecoverySource": {
                       "type": "boolean",
                       "default": false
+                    },
+                    "positionGapStopword": {
+                      "type": "string",
+                      "default": "a"
+                    },
+                    "fileSourceVolumes": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "configMap": {
+                                "type": "object",
+                                "properties": {
+                                  "name": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "name"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "configMap"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "image": {
+                                "type": "object",
+                                "properties": {
+                                  "reference": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "pullPolicy": {
+                                    "type": "string",
+                                    "enum": [
+                                      "Always",
+                                      "Never",
+                                      "IfNotPresent"
+                                    ],
+                                    "default": "IfNotPresent"
+                                  }
+                                },
+                                "required": [
+                                  "reference"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "image"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "default": []
+                    },
+                    "fileSourceVolumeMounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "mountPath": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "readOnly": {
+                            "type": "boolean",
+                            "enum": [
+                              true
+                            ],
+                            "default": true
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "mountPath"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "default": []
                     }
                   }
                 },
@@ -2819,7 +3032,14 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                   "type": "boolean"
                 },
                 "sourceAuth": {
-                  "nullable": true
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "object",
+                    "array",
+                    "null"
+                  ]
                 },
                 "configChecksum": {
                   "type": "string"
