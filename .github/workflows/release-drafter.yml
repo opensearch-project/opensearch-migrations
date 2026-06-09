@@ -434,8 +434,8 @@ jobs:
           mv tui-release-artifacts/install.sh           tui-release-artifacts/migration-tui-install.sh
           mv tui-release-artifacts/install.ps1          tui-release-artifacts/migration-tui-install.ps1
           mv tui-release-artifacts/VERSION.txt          tui-release-artifacts/migration-tui-VERSION.txt
-          mv tui-release-artifacts/migration-assistant-bundle.tar.gz \
-             tui-release-artifacts/migration-tui-bundle-${{ needs.extract-version.outputs.version }}.tar.gz
+          # Bundle keeps its build name (migration-assistant-bundle.tar.gz); install.sh
+          # references that exact name. Don't rename — lets install.sh stay version-free.
           ls -la tui-release-artifacts/
       - name: Draft a release
         if: ${{ !github.event.act }}
@@ -462,5 +462,5 @@ jobs:
             tui-release-artifacts/migration-tui-install.sh
             tui-release-artifacts/migration-tui-install.ps1
             tui-release-artifacts/migration-tui-VERSION.txt
-            tui-release-artifacts/migration-tui-bundle-${{ needs.extract-version.outputs.version }}.tar.gz
+            tui-release-artifacts/migration-assistant-bundle.tar.gz
             **/*.spdx.json

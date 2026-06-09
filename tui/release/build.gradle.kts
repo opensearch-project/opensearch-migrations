@@ -60,6 +60,23 @@ dependencies {
     add(tuiBinary.name, project(mapOf("path" to ":tui", "configuration" to "tuiBinary")))
 }
 
+// ─── consume the agent-skills tarball from :agent-skills ──────────────
+//
+// `:agent-skills` exposes its bundled skill tree (Startup.md + manifest +
+// SKILL.md dirs + agent-sops/) via the `agentSkills` Configuration as
+// agent-skills.tar.gz. We extract it into the bundle staging area under
+// skills/ so the migration-tui ships the same skill content the CLI
+// already consumes — single source of truth, no duplication of file
+// lists.
+val agentSkillsTarball by configurations.registering {
+    isCanBeResolved = true
+    isCanBeConsumed = false
+}
+
+dependencies {
+    add(agentSkillsTarball.name, project(mapOf("path" to ":agent-skills", "configuration" to "agentSkills")))
+}
+
 // ─── output directory ─────────────────────────────────────────────────
 val distDir: Provider<Directory> = layout.buildDirectory.dir("dist/${project.version}")
 
@@ -113,13 +130,82 @@ val writeVersionFile = tasks.register("writeVersionFile") {
 
 // ─── 3. bundle.tar.gz ─────────────────────────────────────────────────
 //
-// The bundle/ directory is the source tree. In the monorepo, the helm/
-// cfn/ values/ skills/ subdirs are populated by sibling subprojects
-// (e.g. :deployment:helm) emitting into bundle/ via their own copy
-// tasks. For the POC, bundle/ is whatever exists in the source tree.
+// Bundle layout in the published tarball:
+//   helm/migrationAssistantWithArgo/   the deployment chart (`helm install`)
+//   samples/                            sample workflow YAMLs (TUI ConfigStore::list_samples)
+//   manifest.yaml                       schema-v1 manifest of what's bundled
+//   README.md                           how to consume each piece
+//
+// `tui/release/bundle/` carries only README.md (the human-readable spec).
+// helm/ + samples/ are STAGED at build time by stageBundle from authoritative
+// monorepo locations, so a single source-of-truth can't drift.
+val bundleStageDir = layout.buildDirectory.dir("bundle-staged")
+
+// Helm chart source: deployment/k8s/charts/aggregates/migrationAssistantWithArgo
+val helmSource = rootProject.layout.projectDirectory
+    .dir("deployment/k8s/charts/aggregates/migrationAssistantWithArgo")
+
+// Samples source: orchestrationSpecs/.../scripts/samples
+val samplesSource = rootProject.layout.projectDirectory
+    .dir("orchestrationSpecs/packages/config-processor/scripts/samples")
+
+val stageBundle = tasks.register<Copy>("stageBundle") {
+    group = "release"
+    description = "Stage helm chart + samples + skills + README into build/bundle-staged/"
+
+    // Ensure :agent-skills produces its tarball before we try to extract it.
+    // The configuration→artifact wiring exposes the file but doesn't add an
+    // implicit task dependency on a Copy task's `from(tarTree(...))`.
+    dependsOn(":agent-skills:agentSkillsTar")
+
+    // Authoritative spec/README from the source tree.
+    from(layout.projectDirectory.dir("bundle"))
+    // Helm chart, preserving its directory name so `helm install ./helm/migrationAssistantWithArgo` works.
+    from(helmSource) { into("helm/migrationAssistantWithArgo") }
+    // Workflow samples, flat under samples/.
+    from(samplesSource) { into("samples") }
+    // Agent skills extracted from :agent-skills's agent-skills.tar.gz.
+    // The tarball already wraps everything in skills/, so we extract its
+    // tree as-is — output lands at bundle-staged/skills/.
+    from(agentSkillsTarball.map { tarTree(it.singleFile) })
+
+    into(bundleStageDir)
+
+    doLast {
+        // Generate manifest.yaml describing what's bundled. Written last so
+        // it captures exactly what stageBundle assembled.
+        val manifest = bundleStageDir.get().file("manifest.yaml").asFile
+        val ver = project.version.toString()
+        manifest.writeText(
+            """
+            |# migration-assistant bundle manifest
+            |schema_version: 1
+            |bundle_version: "$ver"
+            |contents:
+            |  helm:
+            |    path: helm/migrationAssistantWithArgo
+            |    description: Helm chart for the migration-assistant deployment.
+            |    values_files:
+            |      - helm/migrationAssistantWithArgo/values.yaml
+            |      - helm/migrationAssistantWithArgo/valuesEks.yaml
+            |      - helm/migrationAssistantWithArgo/valuesForLocalK8s.yaml
+            |      - helm/migrationAssistantWithArgo/valuesForLocalK8sWithEnvSubst.yaml
+            |  samples:
+            |    path: samples
+            |    description: Sample workflow YAMLs (consumed by migration-tui ConfigStore::list_samples).
+            |  skills:
+            |    path: skills
+            |    description: Agent skills (Startup.md, manifest.json, SKILL.md trees, agent-sops). Source of truth = :agent-skills subproject.
+            |""".trimMargin()
+        )
+    }
+}
+
 val assembleBundle = tasks.register<Tar>("assembleBundle") {
     group = "release"
-    description = "Tar+gzip the assistant bundle into build/dist/<version>/migration-assistant-bundle.tar.gz"
+    description = "Tar+gzip the staged assistant bundle into build/dist/<version>/migration-assistant-bundle.tar.gz"
+
+    dependsOn(stageBundle)
 
     archiveBaseName.set("migration-assistant-bundle")
     // No version suffix on the bundle filename. The version is injected
@@ -131,7 +217,7 @@ val assembleBundle = tasks.register<Tar>("assembleBundle") {
     compression = Compression.GZIP
     destinationDirectory.set(distDir)
 
-    from(layout.projectDirectory.dir("bundle"))
+    from(bundleStageDir)
     // No leading directory inside the tarball; install.sh extracts
     // directly into ~/.opensearch-migration-assistant/.
     into("")
