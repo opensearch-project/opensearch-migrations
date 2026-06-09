@@ -1,0 +1,38 @@
+[package]
+name = "migration-tui"
+# Perma-placeholder: never bumped in source. The release version is
+# injected at build time by Gradle via `cargo --config
+# 'package.version=$tuiVersion'` (see tui/build.gradle.kts), where
+# $tuiVersion is derived from the git tag in CI. Local dev builds emit
+# binaries stamped with `0.0.0-dev`.
+version = "0.0.0-dev"
+edition = "2021"
+
+[[bin]]
+name = "migration-tui"
+path = "src/main.rs"
+
+[lib]
+name = "migration_tui"
+path = "src/lib.rs"
+
+[dependencies]
+ratatui     = "0.29"
+crossterm   = { version = "0.28", features = ["event-stream"] }
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+tokio       = { version = "1", features = ["full"] }
+anyhow      = "1"
+strum       = { version = "0.26", features = ["derive"] }
+strum_macros = "0.26"
+
+tempfile   = { version = "3",  optional = false }
+async-trait = "0.1"
+thiserror   = "2"
+
+[dev-dependencies]
+proptest    = "1"
+insta       = { version = "1", features = ["yaml"] }
+
+[profile.test]
+opt-level = 0

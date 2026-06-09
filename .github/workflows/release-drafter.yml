@@ -24,10 +24,94 @@ jobs:
     steps:
       - run: echo "Release approved"
 
-  draft-a-release:
-    name: Draft a release
+  extract-version:
+    # Lifted out of draft-a-release so the matrix TUI build can consume
+    # the version BEFORE draft-a-release runs. The job is trivial — it
+    # just exposes the tag-derived version as an output.
+    name: Extract release version
     needs: approve-release
     if: ${{ github.event.act || needs.approve-release.result == 'success' }}
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.get_data.outputs.version }}
+    steps:
+      - id: get_data
+        run: |
+          echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+  build-tui-binaries:
+    # Native builds per architecture. Each matrix job builds the
+    # migration-tui binary for its host arch via Gradle (Model C
+    # injects -PtuiVersion at build time; the binary itself reads the
+    # version from a sibling VERSION.txt at runtime, so the binary is
+    # technically architecture-versioned only by file name).
+    #
+    # The aarch64 entry runs on `ubuntu-22.04-arm` for native builds
+    # (no cross-compile linker complications). x86_64 stays on plain
+    # ubuntu-22.04.
+    name: Build migration-tui (${{ matrix.target }})
+    needs: extract-version
+    if: ${{ github.event.act || needs.extract-version.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: ./.github/actions/setup-env
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # 1.92.0 pinned
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+          components: clippy
+      - name: Build TUI release artifacts
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+        run: |
+          ./gradlew :tui:release:assemble \
+            -PtuiVersion=${{ needs.extract-version.outputs.version }} \
+            -Ptarget=${{ matrix.target }} \
+            --no-daemon
+      - name: Stage per-target artifacts
+        # The dist directory for ALL matrix runs has the same name
+        # (the version), so we stage into a target-namespaced sub-dir
+        # so download-artifact can merge cleanly downstream.
+        # Shared artifacts (install.sh, VERSION.txt, bundle tarball)
+        # are emitted by every matrix run identically; we upload them
+        # ONLY from the x86_64 leg to avoid duplicate-file conflicts at
+        # merge time.
+        run: |
+          set -euo pipefail
+          DIST="tui/release/build/dist/${{ needs.extract-version.outputs.version }}"
+          mkdir -p staged-bin staged-shared
+          cp "${DIST}/migration-tui-${{ matrix.target }}" staged-bin/
+          if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
+            cp "${DIST}/install.sh" "${DIST}/VERSION.txt" "${DIST}/migration-assistant-bundle.tar.gz" staged-shared/
+          fi
+      - name: Upload per-target binary
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tui-bin-${{ matrix.target }}
+          path: staged-bin/
+          if-no-files-found: error
+      - name: Upload shared TUI artifacts (x86_64 only)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tui-shared
+          path: staged-shared/
+          if-no-files-found: error
+
+  draft-a-release:
+    name: Draft a release
+    needs: [extract-version, build-tui-binaries]
+    if: ${{ github.event.act || (needs.extract-version.result == 'success' && needs.build-tui-binaries.result == 'success') }}
     runs-on: ubuntu-22.04
     services:
       registry:
@@ -44,9 +128,6 @@ jobs:
           curl -sS http://docker-registry:5000/v2/ || true
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: ./.github/actions/setup-env
-      - id: get_data
-        run: |
-          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
       - name: Set up QEMU (for arm64 emulation)
         uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4
       - name: Set up Buildx builder (BuildKit)
@@ -78,7 +159,7 @@ jobs:
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
         run: |
-          ./gradlew publishMavenJavaPublicationToMavenRepository -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }} && tar -C build -cvf opensearch-migrations-build.tar.gz repository
+          ./gradlew publishMavenJavaPublicationToMavenRepository -Dbuild.snapshot=false -Dbuild.version=0.${{ needs.extract-version.outputs.version }} && tar -C build -cvf opensearch-migrations-build.tar.gz repository
       - name: Configure AWS Credentials
         if: ${{ !github.event.act }}
         uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v6
@@ -107,10 +188,10 @@ jobs:
             -Pbuilder=local-remote-builder \
             -PintermediateRegistry=localhost:5000 \
             -PregistryEndpoint=opensearchstaging \
-            -PimageVersion=${{ steps.get_data.outputs.version }} \
+            -PimageVersion=${{ needs.extract-version.outputs.version }} \
             -PpublishStyle='separateRepos' \
             -Dbuild.snapshot=false \
-            -Dbuild.version=0.${{ steps.get_data.outputs.version }} \
+            -Dbuild.version=0.${{ needs.extract-version.outputs.version }} \
             --no-build-cache \
             --no-daemon \
             --no-continue \
@@ -127,17 +208,17 @@ jobs:
         if: ${{ !github.event.act }}
         run: |
           # Pull images that were just pushed to DockerHub
-          docker pull opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }}
-          docker pull opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }}
-          docker pull opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }}
-          docker pull opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }}
-          docker pull opensearchstaging/opensearch-migrations-transformation-shim:${{ steps.get_data.outputs.version }}
+          docker pull opensearchstaging/opensearch-migrations-console:${{ needs.extract-version.outputs.version }}
+          docker pull opensearchstaging/opensearch-migrations-traffic-replayer:${{ needs.extract-version.outputs.version }}
+          docker pull opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ needs.extract-version.outputs.version }}
+          docker pull opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ needs.extract-version.outputs.version }}
+          docker pull opensearchstaging/opensearch-migrations-transformation-shim:${{ needs.extract-version.outputs.version }}
           # Tag them with the expected names for SBOM scanning
-          docker tag opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }} migrations/migration_console:latest
-          docker tag opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }} migrations/traffic_replayer:latest
-          docker tag opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }} migrations/capture_proxy:latest
-          docker tag opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }} migrations/reindex_from_snapshot:latest
-          docker tag opensearchstaging/opensearch-migrations-transformation-shim:${{ steps.get_data.outputs.version }} migrations/transformation_shim:latest
+          docker tag opensearchstaging/opensearch-migrations-console:${{ needs.extract-version.outputs.version }} migrations/migration_console:latest
+          docker tag opensearchstaging/opensearch-migrations-traffic-replayer:${{ needs.extract-version.outputs.version }} migrations/traffic_replayer:latest
+          docker tag opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ needs.extract-version.outputs.version }} migrations/capture_proxy:latest
+          docker tag opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ needs.extract-version.outputs.version }} migrations/reindex_from_snapshot:latest
+          docker tag opensearchstaging/opensearch-migrations-transformation-shim:${{ needs.extract-version.outputs.version }} migrations/transformation_shim:latest
       - name: Generate SBOM for migration_console
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
@@ -174,8 +255,8 @@ jobs:
       - name: Package Helm chart
         run: |
           helm package deployment/k8s/charts/aggregates/migrationAssistantWithArgo \
-            --version ${{ steps.get_data.outputs.version }} \
-            --app-version ${{ steps.get_data.outputs.version }}
+            --version ${{ needs.extract-version.outputs.version }} \
+            --app-version ${{ needs.extract-version.outputs.version }}
       - name: Set up Kind cluster for schema verification
         if: ${{ !github.event.act }}
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
@@ -188,7 +269,7 @@ jobs:
           chmod +x ./deployment/k8s/generateWorkflowSchemaArtifact.sh
           KUBE_CONTEXT=kind-release-schema-verification \
           IMAGE_REPOSITORY_PREFIX=opensearchstaging \
-          IMAGE_TAG=${{ steps.get_data.outputs.version }} \
+          IMAGE_TAG=${{ needs.extract-version.outputs.version }} \
           OUTPUT_PATH="${PWD}/workflowMigration.schema.json" \
           ./deployment/k8s/generateWorkflowSchemaArtifact.sh
       - name: Generate Solutions Artifact
@@ -198,7 +279,7 @@ jobs:
         if: ${{ !github.event.act }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: workflowMigration-schema-${{ steps.get_data.outputs.version }}
+          name: workflowMigration-schema-${{ needs.extract-version.outputs.version }}
           path: workflowMigration.schema.json
       - name: Dump schema verification diagnostics
         if: ${{ failure() && !github.event.act }}
@@ -225,19 +306,19 @@ jobs:
         if: ${{ !github.event.act }}
         run: |
           aws s3 cp deployment/migration-assistant-solution/build/artifact.zip \
-            s3://cornerstone-amazonaws/SO0290/${{ steps.get_data.outputs.version }}/${{ github.sha }}/artifact.zip \
+            s3://cornerstone-amazonaws/SO0290/${{ needs.extract-version.outputs.version }}/${{ github.sha }}/artifact.zip \
             --content-type application/zip \
             --metadata branch=${{ github.ref_name }},\
           commitauthor="$(git log -1 --format='%an' | sed 's/"//g')",\
           commitid=${{ github.sha }},\
-          commitmessage="Release opensearch-migrations version ${{ steps.get_data.outputs.version }}",\
+          commitmessage="Release opensearch-migrations version ${{ needs.extract-version.outputs.version }}",\
           committimestamp=$(git log -1 --format='%cI'),\
           enablequicksight=No,\
           package=https://github.com/${{ github.repository }},\
           publishpublicecrimage=false,\
           solutionid=SO0290,\
           solutionname="migration-assistant-for-amazon-opensearch-service",\
-          solutionversion=${{ steps.get_data.outputs.version }}
+          solutionversion=${{ needs.extract-version.outputs.version }}
       - name: Assemble self-contained aws-bootstrap.sh
         # Production deploy artifact. assemble-bootstrap.sh inlines every
         # sourced helper into deployment/k8s/aws/dist/aws-bootstrap.sh.
@@ -252,7 +333,28 @@ jobs:
         # on source builds (vars/resolveBootstrap.groovy) for coverage.
         run: |
           ./gradlew :deployment:k8s:aws:packageMigrationAssistantCli \
-            -PcliVersion="${{ steps.get_data.outputs.version }}"
+            -PcliVersion="${{ needs.extract-version.outputs.version }}"
+      - name: Download Rust TUI artifacts (built in matrix)
+        # Pulls all tui-bin-<target>/ + tui-shared/ artifacts produced by
+        # the build-tui-binaries matrix. merge-multiple flattens them
+        # into a single directory so the release `files:` block can
+        # glob them.
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          path: tui-release-artifacts
+          pattern: tui-*
+          merge-multiple: true
+      - name: Stage Rust TUI artifacts with versioned filenames
+        # Rename install.sh/VERSION.txt to disambiguate from the Bash
+        # CLI artifacts that share the same basenames in the existing
+        # release. Binaries are already arch-suffixed so they ship as-is.
+        run: |
+          set -euo pipefail
+          mv tui-release-artifacts/install.sh           tui-release-artifacts/migration-tui-install.sh
+          mv tui-release-artifacts/VERSION.txt          tui-release-artifacts/migration-tui-VERSION.txt
+          mv tui-release-artifacts/migration-assistant-bundle.tar.gz \
+             tui-release-artifacts/migration-tui-bundle-${{ needs.extract-version.outputs.version }}.tar.gz
+          ls -la tui-release-artifacts/
       - name: Draft a release
         if: ${{ !github.event.act }}
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
@@ -265,9 +367,14 @@ jobs:
             opensearch-migrations-build.tar.gz
             agent-skills/build/agent-skills.tar.gz
             bootstrap-kiro-agent.sh
-            migration-assistant-${{ steps.get_data.outputs.version }}.tgz
+            migration-assistant-${{ needs.extract-version.outputs.version }}.tgz
             workflowMigration.schema.json
             deployment/k8s/aws/dist/aws-bootstrap.sh
             deployment/k8s/aws/build/migrate-cli-dist/install.sh
-            deployment/k8s/aws/build/migrate-cli-dist/migration-assistant-cli-${{ steps.get_data.outputs.version }}.tar.gz
+            deployment/k8s/aws/build/migrate-cli-dist/migration-assistant-cli-${{ needs.extract-version.outputs.version }}.tar.gz
+            tui-release-artifacts/migration-tui-x86_64-unknown-linux-gnu
+            tui-release-artifacts/migration-tui-aarch64-unknown-linux-gnu
+            tui-release-artifacts/migration-tui-install.sh
+            tui-release-artifacts/migration-tui-VERSION.txt
+            tui-release-artifacts/migration-tui-bundle-${{ needs.extract-version.outputs.version }}.tar.gz
             **/*.spdx.json

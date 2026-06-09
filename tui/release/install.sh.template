@@ -1,0 +1,121 @@
+#!/bin/sh
+# install.sh — opensearch-migration-assistant installer.
+#
+# This script is PER-RELEASE. The VERSION below is stamped at release-build
+# time and never changes. To install a different version, fetch a different
+# install.sh.
+#
+# Latest:    curl -fsSL https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/install.sh | sh
+# Specific:  curl -fsSL https://github.com/opensearch-project/opensearch-migrations/releases/download/0.4.2/install.sh | sh
+#
+# What it does:
+#   1. detects OS and arch
+#   2. downloads the matching migration-tui binary into ~/.local/bin
+#   3. downloads and extracts the assistant bundle into
+#      ~/.opensearch-migration-assistant
+#
+# Posix sh; no bashisms. Passes shellcheck -s sh.
+
+set -eu
+
+# ── stamped at release time ───────────────────────────────────────────────
+# Gradle's `stampInstallScript` task substitutes @VERSION@ → real version.
+# When the template is run unstamped (local testing), the literal
+# fallback "0.0.0-dev" applies.
+VERSION="@VERSION@"
+[ "$VERSION" = "@VERSION@" ] && VERSION="0.0.0-dev"
+REPO="opensearch-project/opensearch-migrations"
+BASE="https://github.com/${REPO}/releases/download/${VERSION}"
+
+# ── targets ───────────────────────────────────────────────────────────────
+BIN_DIR="${HOME}/.local/bin"
+BUNDLE_DIR="${HOME}/.opensearch-migration-assistant"
+
+# ── helpers ───────────────────────────────────────────────────────────────
+say()  { printf '==> %s\n' "$*"; }
+die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+need() {
+    command -v "$1" >/dev/null 2>&1 || die "missing required tool: $1"
+}
+
+need uname
+need tar
+need mkdir
+need rm
+need mv
+need chmod
+
+if command -v curl >/dev/null 2>&1; then
+    fetch() { curl -fsSL "$1" -o "$2"; }
+elif command -v wget >/dev/null 2>&1; then
+    fetch() { wget -q -O "$2" "$1"; }
+else
+    die "need curl or wget"
+fi
+
+# ── detect platform ───────────────────────────────────────────────────────
+os=$(uname -s | tr '[:upper:]' '[:lower:]')
+case "$os" in
+    linux)  os=linux  ;;
+    darwin) os=darwin ;;
+    *) die "unsupported OS: $os (only linux and darwin are supported)" ;;
+esac
+
+arch=$(uname -m)
+case "$arch" in
+    x86_64|amd64)   arch=x86_64  ;;
+    aarch64|arm64)  arch=aarch64 ;;
+    *) die "unsupported architecture: $arch (only x86_64 and aarch64 are supported)" ;;
+esac
+
+target="${os}-${arch}"
+say "platform: ${target}, version: ${VERSION}"
+
+# ── temp workspace ────────────────────────────────────────────────────────
+tmp=$(mktemp -d 2>/dev/null || mktemp -d -t omig)
+trap 'rm -rf "$tmp"' EXIT INT TERM
+
+# ── download & install binary ─────────────────────────────────────────────
+binary_url="${BASE}/migration-tui-${target}"
+say "downloading binary: ${binary_url}"
+fetch "$binary_url" "$tmp/migration-tui" \
+    || die "binary download failed"
+
+mkdir -p "$BIN_DIR"
+chmod +x "$tmp/migration-tui"
+mv "$tmp/migration-tui" "$BIN_DIR/migration-tui"
+say "installed: ${BIN_DIR}/migration-tui"
+
+# ── download & extract bundle ─────────────────────────────────────────────
+bundle_url="${BASE}/migration-assistant-bundle.tar.gz"
+say "downloading bundle: ${bundle_url}"
+fetch "$bundle_url" "$tmp/bundle.tar.gz" \
+    || die "bundle download failed"
+
+# replace bundle directory atomically so a partial install can't mix
+# old and new bundle contents.
+if [ -d "$BUNDLE_DIR" ]; then
+    rm -rf "${BUNDLE_DIR}.old" 2>/dev/null || true
+    mv "$BUNDLE_DIR" "${BUNDLE_DIR}.old" \
+        || die "could not move existing bundle aside"
+fi
+mkdir -p "$BUNDLE_DIR"
+tar -xzf "$tmp/bundle.tar.gz" -C "$BUNDLE_DIR" \
+    || { rm -rf "$BUNDLE_DIR"; mv "${BUNDLE_DIR}.old" "$BUNDLE_DIR" 2>/dev/null || true; die "bundle extract failed"; }
+rm -rf "${BUNDLE_DIR}.old" 2>/dev/null || true
+say "installed: ${BUNDLE_DIR}"
+
+# ── PATH check ────────────────────────────────────────────────────────────
+case ":${PATH}:" in
+    *":${BIN_DIR}:"*) ;;
+    *)
+        printf '\n'
+        printf 'note: %s is not on your PATH.\n' "$BIN_DIR"
+        printf '      add this to your shell profile:\n\n'
+        printf '          export PATH="%s:$PATH"\n\n' "$BIN_DIR"
+        ;;
+esac
+
+printf '\n'
+say "done. run: migration-tui"

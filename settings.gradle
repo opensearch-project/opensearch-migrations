@@ -72,6 +72,8 @@ include 'TrafficCapture:SolrTransformations'
 include 'buildImages'
 include 'custom-es-images'
 include 'agent-skills'
+include 'tui'
+include 'tui:release'
 include 'deployment:k8s:aws'
 project(':deployment:k8s:aws').projectDir = file('deployment/k8s/aws')
 

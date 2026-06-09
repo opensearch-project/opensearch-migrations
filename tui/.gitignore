@@ -1,0 +1,12 @@
+# Cargo build outputs
+/target/
+/build/
+**/*.rs.bk
+*.pdb
+
+# Cargo local config (CI uses --config CLI flag instead)
+.cargo/config.toml
+
+# IDE
+/.idea/
+/.vscode/

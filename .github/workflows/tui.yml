@@ -1,0 +1,85 @@
+# CI for the migration-tui Rust crate under tui/.
+# Path-scoped: only runs when TUI files (or this workflow) change.
+#
+# Matrix structure mirrors release-drafter.yml's build-tui-binaries job
+# so any cross-arch issue surfaces on PR rather than at release time.
+name: tui
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tui/**'
+      - '.github/workflows/tui.yml'
+  pull_request:
+    paths:
+      - 'tui/**'
+      - '.github/workflows/tui.yml'
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: tui:check (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-env
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # 1.92.0 pinned
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+          components: clippy, rustfmt
+      - name: Versions
+        run: |
+          rustc --version
+          cargo --version
+          cargo clippy --version
+      - name: Run :tui:check (versionCheck + cargoTest + cargoClippy + spotless)
+        run: |
+          ./gradlew :tui:check -Ptarget=${{ matrix.target }} --no-daemon
+      - name: Smoke-test release packaging (no actual release)
+        # Validates that the release subproject assembles end-to-end
+        # against a placeholder version. Catches gradle-side breakage
+        # before it lands in release-drafter where the matrix runs for
+        # real.
+        run: |
+          ./gradlew :tui:release:assemble \
+            -PtuiVersion=0.0.0-ci \
+            -Ptarget=${{ matrix.target }} \
+            --no-daemon
+          # Verify the artifacts the release-drafter `files:` block expects.
+          DIST="tui/release/build/dist/0.0.0-ci"
+          test -f "${DIST}/migration-tui-${{ matrix.target }}"
+          test -f "${DIST}/install.sh"
+          test -f "${DIST}/VERSION.txt"
+          test -f "${DIST}/migration-assistant-bundle.tar.gz"
+          # Sanity: install.sh is well-formed POSIX sh.
+          sh -n "${DIST}/install.sh"
+      - name: Smoke-test --version reads VERSION.txt at runtime
+        # Validates the runtime resolution path that ships in the
+        # released binary. cargo run from the source tree falls back
+        # to "0.0.0-dev"; placing VERSION.txt next to the binary should
+        # override that.
+        run: |
+          set -euo pipefail
+          DIST="tui/release/build/dist/0.0.0-ci"
+          # Already in install layout: <dist>/migration-tui-<target> next
+          # to <dist>/VERSION.txt. Run --version and confirm output.
+          out=$("${DIST}/migration-tui-${{ matrix.target }}" --version)
+          echo "got: $out"
+          [[ "$out" == "migration-tui 0.0.0-ci" ]] || {
+            echo "::error::--version did not pick up sibling VERSION.txt"
+            exit 1
+          }
