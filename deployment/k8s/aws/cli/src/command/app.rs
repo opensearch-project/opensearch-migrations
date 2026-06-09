@@ -876,8 +876,10 @@ impl<'r, R: CommandRunner> App<'r, R> {
                 // helm registry login doesn't support --password-stdin via
                 // runner (no stdin pipe), so write a temp script.
                 if !login.success() {
-                    let script =
-                        format!("echo '{}' | helm registry login {ecr_host} -u AWS --password-stdin", pass.replace('\'', "'\\''"));
+                    let script = format!(
+                        "echo '{}' | helm registry login {ecr_host} -u AWS --password-stdin",
+                        pass.replace('\'', "'\\''")
+                    );
                     if !self.runner.run("bash", &["-c", &script]).success() {
                         ui::warn("helm ECR login failed — chart mirror may fail");
                     }
