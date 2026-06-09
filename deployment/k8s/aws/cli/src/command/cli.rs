@@ -135,11 +135,7 @@ fn cmd_resume<R: CommandRunner>(mut env: Env, runner: &R, args: &[String]) -> Re
 
     match mode.as_str() {
         "Manual" => manual_path(env, runner, state, resuming),
-        "Agent" => {
-            ui::ok(&format!("mode: Agent (stage={})", env.stage));
-            ui::info("Agent handoff flow ready; use `migration-assistant agent` after deploy.");
-            Ok(())
-        }
+        "Agent" => agent_first_handoff(env, runner, state),
         other => Err(Error::die(format!("unknown mode: {other}"))),
     }
 }
@@ -418,6 +414,89 @@ fn pick_mode(current: &str, env: &Env) -> String {
     ui::resolve_pick(&pick, &ids, &labels)
         .unwrap_or("Manual")
         .to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Agent-first handoff — the CLI discovers an agent and execs it with a prompt
+// that tells it to drive `migration-assistant resume --non-interactive`.
+// ---------------------------------------------------------------------------
+
+fn agent_first_handoff<R: CommandRunner>(env: Env, runner: &R, state: State) -> Result<()> {
+    ui::ok(&format!("mode: Agent (stage={})", env.stage));
+
+    // Discover available agents.
+    let found = agent::discover(runner);
+    if found.is_empty() {
+        let hints = agent::missing_hints(&[]);
+        let install_msg = hints
+            .iter()
+            .map(|(name, url)| format!("  • {name}: {url}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(Error::die(format!(
+            "no supported agent found on PATH.\nInstall one of:\n{install_msg}"
+        )));
+    }
+
+    let agent_name = found[0];
+    let bin = agent::bin_for(runner, agent_name).unwrap_or(agent_name);
+
+    // Check for an existing session (resume vs fresh).
+    let home_dir = std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("/root"));
+    let cwd = env.stage_dir().to_string_lossy().to_string();
+    let resuming = agent_name == "claude" && agent::claude_has_session(&home_dir, &cwd);
+
+    // Build the fresh prompt: tell the agent to drive the deploy via the CLI.
+    let stage = &env.stage;
+    let fresh_prompt = format!(
+        "You are the OpenSearch Migration Assistant operator. \
+         Drive the deployment by running: \
+         `migration-assistant resume --non-interactive --stage {stage}` \
+         and monitor its output. If it fails, diagnose the issue using \
+         `migration-assistant diag --stage {stage}` and the kubectl/helm \
+         commands described in the loaded skills. Your goal is a fully \
+         deployed and healthy Migration Assistant on EKS."
+    );
+
+    // Save state so the agent can pick up context.
+    let mut state = state;
+    state.set("MODE", "Agent");
+    state.set("AGENT", agent_name);
+    state.save()?;
+
+    ui::step(&format!("Handing off to {agent_name} ({bin})"));
+    if resuming {
+        ui::dim("  (resuming existing session)");
+    }
+
+    let cmd = agent::exec_command(agent_name, bin, resuming, &fresh_prompt);
+    ui::dim(&format!("  exec: {}", cmd.join(" ")));
+
+    let args: Vec<&str> = cmd[1..].iter().map(String::as_str).collect();
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let err = std::process::Command::new(&cmd[0]).args(&args).exec();
+        Err(Error::die(format!("exec {bin} failed: {err}")))
+    }
+    #[cfg(not(unix))]
+    {
+        let status = std::process::Command::new(&cmd[0])
+            .args(&args)
+            .status()
+            .map_err(|e| Error::die(format!("spawn {bin}: {e}")))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(Error::with_code(
+                format!("{bin} exited with {:?}", status.code()),
+                status.code().unwrap_or(1),
+            ))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

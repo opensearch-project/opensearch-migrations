@@ -108,14 +108,19 @@ fn agent_mode_is_gated_off_by_default() {
 
 #[test]
 fn agent_mode_is_accepted_when_gate_is_on() {
-    // With the gate on, `--mode Agent` is allowed (no AWS work happens because
-    // the Agent path just prints handoff guidance).
+    // With the gate on, `--mode Agent` passes the gate check and attempts to
+    // hand off to the agent. Without a real agent on PATH, it errors with
+    // "no supported agent found" (NOT the gate rejection message).
+    let runner = MockRunner::new();
     let code = dispatch_isolated(
         &["resume", "--mode", "Agent", "-y"],
         &[("MIGRATE_ENABLE_AGENT", "1")],
-        &MockRunner::new(),
+        &runner,
     );
-    assert_eq!(code, 0);
+    // No agent binary on PATH → exits 1 with "no supported agent found".
+    // The key assertion: it was NOT rejected by the gate (which would be a
+    // different message about MIGRATE_ENABLE_AGENT).
+    assert_eq!(code, 1);
 }
 
 #[test]

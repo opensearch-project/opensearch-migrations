@@ -32,7 +32,8 @@ mod view;
 pub use command::{app, cli, pack_cmd};
 pub use core::{config, error, log, runner, state, util};
 pub use domain::{
-    agent, artifact, cfn, crane, discover, ecr, helm, manifest, oci, pack, timeline, version,
+    agent, artifact, cfn, crane, discover, ecr, helm, manifest, mirror, oci, pack, timeline,
+    version,
 };
 pub use view::{dashboard, tui, ui};
 

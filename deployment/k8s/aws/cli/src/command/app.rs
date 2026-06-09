@@ -881,15 +881,12 @@ impl<'r, R: CommandRunner> App<'r, R> {
         Ok(())
     }
 
-    /// Mirror the third-party images + helm charts into the private ECR and
+    /// Mirror all third-party images + helm charts into the private ECR and
     /// generate a helm values override that repoints every sub-chart at the
-    /// mirror. Returns the generated values file(s) to pass to helm (empty when
-    /// mirroring is disabled, e.g. `--use-public-images`). Delegates to the
-    /// chart's own vendored mirror scripts (sourced via bash) rather than
-    /// reimplementing the IMAGES/CHARTS manifest + mirror logic in Rust.
+    /// mirror. Returns the generated values file path (empty when mirroring is
+    /// disabled via `--use-public-images`).
     ///
-    /// REQUIRED for the chart's `ma-dependency-installer` pre-install hook to
-    /// pull its sub-charts/images — without it that job hangs → DeadlineExceeded.
+    /// Uses native oci-client for images and `helm pull/push` for charts.
     pub fn mirror_images_and_charts(&mut self) -> Result<Vec<String>> {
         if self.state.get_or("MIRROR_IMAGES", "Y") != "Y" {
             ui::info("MIRROR_IMAGES=N → using public images; skipping ECR mirror");
@@ -906,40 +903,125 @@ impl<'r, R: CommandRunner> App<'r, R> {
         }
         let ecr_host = registry.split('/').next().unwrap_or(&registry).to_string();
 
-        // The chart's mirror scripts live under the chart dir's scripts/. On the
-        // --build lane that's the in-repo chart; the release tarball vendors them
-        // under skills/ but the full set (mirrorToEcr/generatePrivateEcrValues)
-        // is in the source tree, so require --base-dir for the mirror flow.
-        let base = self.base_dir()?;
-        let scripts_dir =
-            format!("{base}/deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts");
+        let creds = self.ecr_creds(&ecr_host, &region);
+        if creds.is_empty() {
+            return Err(Error::die("mirror: ECR auth failed"));
+        }
+
+        // --- Mirror container images via native OCI client ---
+        ui::step("Mirroring third-party container images to private ECR");
+        let retry = OciRetry::from_env();
+        let mut img_failed = 0usize;
+        for &src in crate::mirror::IMAGES {
+            let repo = crate::mirror::ecr_repo_name(src);
+            let dst = crate::mirror::ecr_dest(src, &ecr_host);
+            if let Err(e) = ecr_sdk::create_repository(&repo, &region) {
+                ui::warn(&format!("create-repository {repo}: {e}"));
+            }
+            if retry.copy(src, &dst, &creds) {
+                ui::dim(&format!("  ✓ {src}"));
+            } else {
+                ui::err(&format!("  ✗ {src}"));
+                img_failed += 1;
+            }
+        }
+        if img_failed > 0 {
+            return Err(Error::die(format!(
+                "{img_failed} third-party images failed to mirror"
+            )));
+        }
+
+        // --- Mirror helm charts via helm pull + helm push ---
+        ui::step("Mirroring helm charts to private ECR");
+        // Login helm to ECR.
+        let ecr_pass_out = self.runner.run(
+            "bash",
+            &[
+                "-c",
+                &format!(
+                    "aws ecr get-login-password --region {region} | \
+                     helm registry login {ecr_host} -u AWS --password-stdin"
+                ),
+            ],
+        );
+        if !ecr_pass_out.success() {
+            ui::warn("helm ECR login failed — chart mirror may fail");
+        }
+        let mut chart_failed = 0usize;
+        for chart in crate::mirror::CHARTS {
+            // Create the ECR repo for this chart.
+            let chart_repo = format!("charts/{}", chart.name);
+            if let Err(e) = ecr_sdk::create_repository(&chart_repo, &region) {
+                ui::warn(&format!("create-repository {chart_repo}: {e}"));
+            }
+            // Pull the chart.
+            let pull_ok = if chart.repo.starts_with("oci://") {
+                self.runner
+                    .run(
+                        "helm",
+                        &[
+                            "pull",
+                            &format!("{}/{}", chart.repo, chart.name),
+                            "--version",
+                            chart.version,
+                        ],
+                    )
+                    .success()
+            } else {
+                self.runner
+                    .run(
+                        "helm",
+                        &[
+                            "pull",
+                            chart.name,
+                            "--repo",
+                            chart.repo,
+                            "--version",
+                            chart.version,
+                        ],
+                    )
+                    .success()
+            };
+            if !pull_ok {
+                ui::err(&format!(
+                    "  ✗ chart pull failed: {} {}",
+                    chart.name, chart.version
+                ));
+                chart_failed += 1;
+                continue;
+            }
+            // Find the downloaded tgz and push it.
+            let tgz = format!("{}-{}.tgz", chart.name, chart.version);
+            let push_ok = self
+                .runner
+                .run("helm", &["push", &tgz, &format!("oci://{ecr_host}/charts")])
+                .success();
+            // Clean up the tgz regardless.
+            let _ = std::fs::remove_file(&tgz);
+            if push_ok {
+                ui::dim(&format!("  ✓ {} {}", chart.name, chart.version));
+            } else {
+                ui::err(&format!("  ✗ chart push failed: {}", chart.name));
+                chart_failed += 1;
+            }
+        }
+        if chart_failed > 0 {
+            ui::warn(&format!("{chart_failed} chart(s) failed to mirror"));
+        }
+
+        // --- Generate private-ECR values override ---
         let values_out = std::env::temp_dir()
             .join(format!("ma-ecr-values-{}.yaml", std::process::id()))
             .to_string_lossy()
             .to_string();
+        let yaml = crate::mirror::generate_private_ecr_values(&ecr_host);
+        std::fs::write(&values_out, &yaml)
+            .map_err(|e| Error::die(format!("failed to write ECR values file: {e}")))?;
 
-        ui::step("Mirroring third-party images + charts to private ECR");
-        let script = artifact::mirror_to_ecr_script(&scripts_dir, &ecr_host, &region, &values_out);
-        let out = self
-            .runner
-            .run_streamed("bash", &["-c", &script], &[], "mirror");
-        if !out.success() {
-            return Err(Error::die(format!(
-                "mirror images/charts to ECR failed (rc={})",
-                out.status
-            )));
-        }
         self.state.set("CRANE_REGISTRY", &registry);
         self.state.set("CRANE_MIRRORED", "1");
         self.state.save()?;
-        if std::path::Path::new(&values_out).is_file() {
-            Ok(vec![values_out])
-        } else {
-            // The generator should always write the file; if not, proceed with
-            // none (helm may still succeed if the chart defaults are reachable).
-            ui::warn("mirror: private-ECR values file was not produced");
-            Ok(Vec::new())
-        }
+        Ok(vec![values_out])
     }
 
     /// Resolve the helm chart path + the values files to apply (in order).
@@ -1543,32 +1625,6 @@ mod tests {
     }
 
     #[test]
-    fn mirror_images_and_charts_runs_scripts_and_returns_values() {
-        let dir = tempfile::tempdir().unwrap();
-        let r = MockRunner::new()
-            .stub("aws", &["describe-stacks"], 0, REAL_OUTPUTS)
-            .stub("bash", &["mirror_images_to_ecr"], 0, "");
-        let mut app = App::load(env_in(dir.path()), &r).unwrap();
-        app.state.set("MIRROR_IMAGES", "Y");
-        app.state.set("BASE_DIR", "/repo");
-        app.state.set("AWS_REGION", "us-east-1");
-        app.state.set("CFN_STACK_NAME", "MigrationAssistant-ma");
-        // The generated values file won't exist (bash is mocked), so an empty
-        // vec is acceptable; assert the mirror script ran with the right calls.
-        let _ = app.mirror_images_and_charts().unwrap();
-        let b = r
-            .calls_to("bash")
-            .into_iter()
-            .find(|c| c.joined().contains("mirror_images_to_ecr"))
-            .unwrap()
-            .joined();
-        assert!(b.contains("mirror_charts_to_ecr"));
-        assert!(b.contains("generate_private_ecr_values"));
-        assert!(b.contains("privateEcrManifest.sh"));
-        assert_eq!(app.state.get("CRANE_MIRRORED"), Some("1"));
-    }
-
-    #[test]
     fn mirror_skipped_when_public_images() {
         let dir = tempfile::tempdir().unwrap();
         let r = MockRunner::new();
@@ -1576,6 +1632,19 @@ mod tests {
         app.state.set("MIRROR_IMAGES", "N");
         let v = app.mirror_images_and_charts().unwrap();
         assert!(v.is_empty());
-        assert!(!r.any_call_contains("mirror_images_to_ecr"));
+        assert!(r.calls_to("helm").is_empty());
+    }
+
+    #[test]
+    fn mirror_fails_without_ecr_credentials() {
+        let dir = tempfile::tempdir().unwrap();
+        let r = MockRunner::new().stub("aws", &["describe-stacks"], 0, REAL_OUTPUTS);
+        let mut app = App::load(env_in(dir.path()), &r).unwrap();
+        app.state.set("MIRROR_IMAGES", "Y");
+        app.state.set("AWS_REGION", "us-east-1");
+        app.state.set("CFN_STACK_NAME", "MigrationAssistant-ma");
+        // No real ECR creds in test env → mirror fails.
+        let result = app.mirror_images_and_charts();
+        assert!(result.is_err());
     }
 }

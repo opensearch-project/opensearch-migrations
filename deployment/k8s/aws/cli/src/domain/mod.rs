@@ -14,6 +14,7 @@ pub mod discover;
 pub mod ecr;
 pub mod helm;
 pub mod manifest;
+pub mod mirror;
 pub mod oci;
 pub mod pack;
 pub mod timeline;
