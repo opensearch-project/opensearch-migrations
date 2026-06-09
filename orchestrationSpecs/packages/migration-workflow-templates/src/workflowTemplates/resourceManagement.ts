@@ -19,7 +19,7 @@ import {
     WorkflowBuilder
 } from '@opensearch-migrations/argo-workflow-builders';
 import {
-    ARGO_PROXY_WORKFLOW_OPTION_KEYS,
+    ARGO_PROXY_CR_OMITTED_KEYS,
     ARGO_REPLAYER_OPTIONS,
     ARGO_REPLAYER_WORKFLOW_OPTION_KEYS,
     DEFAULT_RESOURCES,
@@ -277,7 +277,7 @@ function makeCaptureProxyManifest(
         },
         spec: makeDirectTypeProxy(expr.mergeDicts(
             workflowSpecFields,
-            expr.omit(proxyOpts, ...ARGO_PROXY_WORKFLOW_OPTION_KEYS)
+            expr.omit(proxyOpts, ...ARGO_PROXY_CR_OMITTED_KEYS)
         )),
     };
 }
@@ -316,7 +316,6 @@ function makeSnapshotMigrationManifest(
             metadataMigrationClusterAwarenessAttributes: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "clusterAwarenessAttributes"], 1)),
             metadataMigrationEnableSourcelessMigrations: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "enableSourcelessMigrations"], false)),
             metadataMigrationUseRecoverySource: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "useRecoverySource"], false)),
-            metadataMigrationMultiTypeBehavior: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "multiTypeBehavior"], expr.literal("NONE"))),
             metadataMigrationOtelCollectorEndpoint: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "otelCollectorEndpoint"], expr.literal(""))),
             metadataMigrationOutput: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "output"], expr.literal("HUMAN_READABLE"))),
             metadataMigrationTransformerConfigBase64: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "transformerConfigBase64"], expr.literal(""))),

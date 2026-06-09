@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - 'deployment/k8s/**'
+      - '!deployment/k8s/aws/cli/**'
       - 'packages/schemas/**'
       - 'packages/config-processor/**'
       - 'migrationConsole/**'
@@ -15,6 +16,7 @@ on:
   pull_request:
     paths:
       - 'deployment/k8s/**'
+      - '!deployment/k8s/aws/cli/**'
       - 'packages/schemas/**'
       - 'packages/config-processor/**'
       - 'migrationConsole/**'
@@ -27,7 +29,7 @@ jobs:
     outputs:
       docker_cache_key: ${{ steps.generate_docker_cache_key.outputs.key }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Generate Docker Cache Key
         id: generate_docker_cache_key
         run: |
@@ -46,7 +48,7 @@ jobs:
         ports:
           - 5000:5000
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: ./.github/actions/setup-env
         with:
           gradle-cache-enabled: 'true'
@@ -59,7 +61,7 @@ jobs:
           curl -sS http://docker-registry:5000/v2/ || true
 
       - name: Restore Docker Cache
-        uses: AndreKurait/docker-cache@0.6.0
+        uses: AndreKurait/docker-cache@0.7.0
         with:
           key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
           read-only: ${{ github.event_name != 'push' }}

@@ -165,7 +165,6 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "metadataMigrationIndexTemplateAllowlist": [],
       "metadataMigrationJvmArgs": "",
       "metadataMigrationLoggingConfigurationOverrideConfigMap": "",
-      "metadataMigrationMultiTypeBehavior": "NONE",
       "metadataMigrationOtelCollectorEndpoint": "http://otel-collector:4317",
       "metadataMigrationOutput": "HUMAN_READABLE",
       "metadataMigrationTransformerConfigBase64": "",

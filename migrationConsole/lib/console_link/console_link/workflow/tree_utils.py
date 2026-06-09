@@ -18,6 +18,8 @@ APPROVAL_GATE_PLURAL = 'approvalgates'
 SNAPSHOT_MIGRATION_PLURAL = 'snapshotmigrations'
 DATA_SNAPSHOT_PLURAL = 'datasnapshots'
 
+APPROVAL_TEMPLATE_NAME = 'waitforuserapproval'
+
 
 @dataclass
 class ArtifactRef:
@@ -45,15 +47,37 @@ class WorkflowDisplayer:
         raise NotImplementedError
 
 
+def _is_approval_template_name(name: Optional[str]) -> bool:
+    """True if a template name denotes an approval-gate *wait* step.
+
+    Matched semantically rather than by exact string: any name that (case
+    insensitively) contains both ``approval`` and ``wait`` qualifies. This
+    keeps the detector working across template renames — ``waitForApproval``
+    became ``waitForUserApproval`` (see APPROVAL_TEMPLATE_NAME) and a future
+    ``waitFor<Whatever>Approval`` would match too — without re-introducing the
+    exact-string drift that previously made ``workflow approve`` blind to a
+    live gate.
+
+    The ``wait`` token is what distinguishes the blocking gate step from the
+    sibling templates that merely act on the gate CRD (``patchApprovalGatePhase``,
+    ``patchApprovalAnnotation``, ``cleanupApprovalGates``), so those are
+    correctly excluded.
+    """
+    if not name:
+        return False
+    lowered = name.lower()
+    return 'approval' in lowered and 'wait' in lowered
+
+
 def is_approval_node(node: Dict[str, Any]) -> bool:
     """Check if a node is an approval gate wait step."""
     if node.get('is_approval'):
         return True
     tref = node.get('templateRef') or node.get('template_ref')
-    if tref and tref.get('template') == 'waitforuserapproval':
+    if tref and _is_approval_template_name(tref.get('template')):
         return True
     tname = node.get('templateName') or node.get('template_name')
-    return tname == 'waitforuserapproval'
+    return _is_approval_template_name(tname)
 
 
 def get_node_input_parameter(node: Dict[str, Any], param_name: str) -> Optional[str]:

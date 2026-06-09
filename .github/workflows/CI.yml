@@ -25,7 +25,7 @@ jobs:
     outputs:
       docker_cache_key: ${{ steps.generate_docker_cache_key.outputs.key }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Generate Docker Cache Key
         id: generate_docker_cache_key
         run: |
@@ -43,7 +43,7 @@ jobs:
           - spotlessCheck
           - publishToMavenLocal
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: ./.github/actions/setup-env
         with:
           gradle-cache-enabled: true
@@ -55,7 +55,7 @@ jobs:
   gradle-build-macos:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: ./.github/actions/setup-env
         with:
           gradle-cache-enabled: false
@@ -67,7 +67,7 @@ jobs:
   python-lint:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: ./.github/actions/setup-env
       - name: Install dependencies
         run: |
@@ -85,17 +85,16 @@ jobs:
         py-project:
           - migrationConsole/lib/console_link
           - migrationConsole/cluster_tools
-          - AIAdvisor/skills/solr-opensearch-migration-advisor
           - solrMigrationDevSandbox
           - libraries/testAutomation
     env:
-      WORKING_DIR: ${{ startsWith(matrix.py-project, 'migrationConsole/') && format('./{0}', matrix.py-project) || startsWith(matrix.py-project, 'AIAdvisor/') && format('./{0}', matrix.py-project) || startsWith(matrix.py-project, 'libraries/') && format('./{0}', matrix.py-project) || matrix.py-project == 'solrMigrationDevSandbox' && format('./{0}', matrix.py-project) || format('./TrafficCapture/dockerSolution/src/main/docker/{0}', matrix.py-project) }}
+      WORKING_DIR: ${{ startsWith(matrix.py-project, 'migrationConsole/') && format('./{0}', matrix.py-project) || startsWith(matrix.py-project, 'libraries/') && format('./{0}', matrix.py-project) || matrix.py-project == 'solrMigrationDevSandbox' && format('./{0}', matrix.py-project) || format('./TrafficCapture/dockerSolution/src/main/docker/{0}', matrix.py-project) }}
       WORKFLOW_TEST_KUBE_CONTEXT: kind-console-link-test
     defaults:
       run:
         working-directory: ${{ env.WORKING_DIR }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: ./.github/actions/setup-env
 
       # Set up Kind cluster for workflow integration tests (only for console_link project)
@@ -118,32 +117,15 @@ jobs:
         run: ./scripts/setupWorkflowTestCluster.sh
 
       - name: Install dependencies (Pipfile)
-        if: matrix.py-project != 'AIAdvisor/skills/solr-opensearch-migration-advisor'
         run: |
           python3 -m pip install pipenv==2026.5.0
           pipenv install --deploy --dev
           pipenv graph
 
-      # Install dependencies for pyproject.toml-based projects
-      - name: Install dependencies (pyproject.toml)
-        if: matrix.py-project == 'AIAdvisor/skills/solr-opensearch-migration-advisor'
-        run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install -e ".[dev]"
-          python3 -m pip list
-
-      # Run tests for Pipfile-based projects
       - name: Run tests (Pipfile)
-        if: matrix.py-project != 'AIAdvisor/skills/solr-opensearch-migration-advisor'
         run: |
           pipenv run test
           pipenv run coverage xml
-
-      # Run tests for pyproject.toml-based projects
-      - name: Run tests (pyproject.toml)
-        if: matrix.py-project == 'AIAdvisor/skills/solr-opensearch-migration-advisor'
-        run: |
-          python3 -m pytest --cov=scripts --cov-report=xml
 
       - name: Get Sanitized Name
         env:
@@ -151,7 +133,7 @@ jobs:
         run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT//\//-}" >> $GITHUB_ENV
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f
         with:
           fail_ci_if_error: true
           flags: python
@@ -186,7 +168,7 @@ jobs:
       matrix:
         index: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: ./.github/actions/setup-env
         with:
           gradle-cache-enabled: true
@@ -197,7 +179,7 @@ jobs:
           sudo docker system prune -af
           df -h
       - name: Restore Docker Cache
-        uses: AndreKurait/docker-cache@0fe76702a40db986d9663c24954fc14c6a6031b7 # 0.6.0
+        uses: AndreKurait/docker-cache@7a3887908bdb97935395833df69b060cfcca0f7f # 0.7.0
         with:
           key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
           # Read-only cache for gradle-tests
@@ -241,7 +223,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f
         with:
           fail_ci_if_error: true
           flags: gradle
@@ -274,7 +256,7 @@ jobs:
       run:
         working-directory: ${{ matrix.npm-project }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: ./.github/actions/setup-env
       - name: Install NPM dependencies
         run: npm ci
@@ -285,7 +267,7 @@ jobs:
         run: npm run test:integ:crds
       - name: Upload coverage to Codecov
         if: always()
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f
         with:
           fail_ci_if_error: true
           flags: node
@@ -297,7 +279,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Set up kind cluster
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
@@ -317,7 +299,7 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: lychee Link Checker
         id: lychee
         uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2
@@ -337,53 +319,6 @@ jobs:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
 
 
-  agent-skills-spec:
-    # Validate every SKILL.md under AIAdvisor/skills/ against the Agent
-    # Skills Spec (https://agentskills.io). Catches things like frontmatter
-    # fields outside the allowed set, or a skill whose `name:` disagrees
-    # with its directory — both of which are silent bugs for downstream
-    # skill-loaders that key on either the filesystem or the YAML.
-    #
-    # Fast job (~20s): pip-installs the reference validator from PyPI and
-    # runs `skills-ref validate` on every SKILL.md found. No Gradle, no
-    # Docker. Kept out of python-lint/python-tests because it's a narrow
-    # spec gate, not a Python-code gate — if it fails, the diagnostic
-    # ("Directory name X must match skill name Y" etc.) should not be
-    # hidden behind an unrelated flake8 / pytest failure.
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
-        with:
-          python-version: '3.11'
-      - name: Install skills-ref validator
-        run: python -m pip install --upgrade 'skills-ref>=0.1.1'
-      - name: Validate every SKILL.md under AIAdvisor/skills/
-        run: |
-          set -euo pipefail
-          shopt -s globstar nullglob
-          failures=0
-          total=0
-          # Find every directory that contains a SKILL.md and validate it.
-          # `python -m skills_ref.cli` over the console-script entrypoint so
-          # this stays robust if the published entry-point name changes.
-          while IFS= read -r -d '' skill_md; do
-            skill_dir="$(dirname "$skill_md")"
-            total=$((total + 1))
-            if ! python -m skills_ref.cli validate "$skill_dir"; then
-              failures=$((failures + 1))
-            fi
-          done < <(find AIAdvisor/skills -name SKILL.md -print0 | sort -z)
-          echo
-          if [ "$total" -eq 0 ]; then
-            echo "No SKILL.md files found under AIAdvisor/skills/ — nothing to validate."
-          else
-            echo "Validated $total skill(s); $failures failure(s)."
-          fi
-          if [ "$failures" -gt 0 ]; then
-            exit 1
-          fi
-
   codeql-analyze:
     name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-22.04
@@ -398,12 +333,12 @@ jobs:
         - language: javascript-typescript
         - language: python
     steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-    - uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+    - uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
       with:
         languages: ${{ matrix.language }}
         build-mode: none
-    - uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4
+    - uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4
       with:
         category: "/language:${{matrix.language}}"
 
@@ -423,7 +358,7 @@ jobs:
         env:
           SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
     steps:
-    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
     - uses: ./.github/actions/setup-env
       with:
         gradle-cache-enabled: true
@@ -525,7 +460,6 @@ jobs:
       - python-lint
       - gradle-extended-check
       - gradle-build-macos
-      - agent-skills-spec
       - codeql-analyze
       - sonarqube-analysis
     if: always()
