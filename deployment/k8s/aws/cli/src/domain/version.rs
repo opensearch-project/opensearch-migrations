@@ -121,6 +121,100 @@ pub fn check_for_update_now() -> Option<String> {
     }
 }
 
+/// The `latest.json` URL at the stable releases path.
+pub const LATEST_JSON_URL: &str =
+    "https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/latest.json";
+
+/// Parsed `latest.json` manifest from the release.
+#[derive(Debug, Clone)]
+pub struct ReleaseManifest {
+    pub version: String,
+    pub tarball_url: String,
+    pub binary_url: Option<String>,
+    pub sha256: Option<String>,
+}
+
+/// Detect the current platform key: `x86_64-linux`, `aarch64-linux`,
+/// `x86_64-darwin`, `aarch64-darwin`.
+pub fn platform_key() -> String {
+    let arch = if cfg!(target_arch = "x86_64") {
+        "x86_64"
+    } else if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "unknown"
+    };
+    let os = if cfg!(target_os = "linux") {
+        "linux"
+    } else if cfg!(target_os = "macos") {
+        "darwin"
+    } else {
+        "unknown"
+    };
+    format!("{arch}-{os}")
+}
+
+/// Fetch and parse `latest.json`, resolving the binary URL for this platform.
+pub fn fetch_release_manifest() -> Option<ReleaseManifest> {
+    let body = fetch_url(LATEST_JSON_URL)?;
+    let v: serde_json::Value = serde_json::from_str(&body).ok()?;
+    let version = v.get("version")?.as_str()?.to_string();
+    let tarball_url = v
+        .get("tarball")
+        .and_then(|t| t.as_str())
+        .unwrap_or("")
+        .to_string();
+    let key = platform_key();
+    let binary_url = v
+        .get("binaries")
+        .and_then(|b| b.get(&key))
+        .and_then(|entry| {
+            if entry.is_string() {
+                entry.as_str().map(str::to_string)
+            } else {
+                entry
+                    .get("url")
+                    .and_then(|u| u.as_str())
+                    .map(str::to_string)
+            }
+        });
+    let sha256 = v
+        .get("binaries")
+        .and_then(|b| b.get(&key))
+        .and_then(|entry| entry.get("sha256"))
+        .and_then(|s| s.as_str())
+        .map(str::to_string);
+    Some(ReleaseManifest {
+        version,
+        tarball_url,
+        binary_url,
+        sha256,
+    })
+}
+
+/// Download a URL to a local path. Returns true on success.
+pub fn download_to(url: &str, dest: &std::path::Path) -> bool {
+    std::process::Command::new("curl")
+        .args(["-fsSL", "--max-time", "120", "-o"])
+        .arg(dest)
+        .arg(url)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn fetch_url(url: &str) -> Option<String> {
+    let output = std::process::Command::new("curl")
+        .args(["-sfL", "--max-time", "10", url])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        String::from_utf8(output.stdout).ok()
+    } else {
+        None
+    }
+}
+
 fn cache_dir() -> Option<std::path::PathBuf> {
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
     Some(std::path::PathBuf::from(home).join(".migration-assistant"))
@@ -159,26 +253,7 @@ fn record_check() {
 }
 
 fn fetch_latest_release_json() -> Option<String> {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .ok()?;
-    rt.block_on(async {
-        // Minimal HTTP GET using hyper-rustls (already in the dep tree via aws-sdk).
-        // Fall back to curl via std::process if the async path fails.
-        None::<String>
-    })
-    .or_else(|| {
-        let output = std::process::Command::new("curl")
-            .args(["-sfL", "--max-time", "5", MA_RELEASES_API])
-            .output()
-            .ok()?;
-        if output.status.success() {
-            String::from_utf8(output.stdout).ok()
-        } else {
-            None
-        }
-    })
+    fetch_url(MA_RELEASES_API)
 }
 
 /// The release download URL for a given version.

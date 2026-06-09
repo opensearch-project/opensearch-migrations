@@ -840,25 +840,90 @@ fn resolve_version_string() -> String {
 /// Check for updates and print instructions. Downloads the latest release
 /// tarball if the user confirms.
 fn cmd_update() -> Result<()> {
-    ui::step(&format!("Current version: {}", version::CLI_VERSION));
-    ui::info("Checking for updates...");
-    match version::check_for_update_now() {
-        Some(newer) => {
-            let url = version::release_url(&newer);
-            ui::ok(&format!("Version {newer} is available!"));
-            ui::info(&format!("Download: {url}"));
-            ui::info("To update:");
-            ui::dim(&format!(
-                "  curl -sL {url}/download/migration-assistant-cli-{newer}.tar.gz | tar xz"
-            ));
-            ui::dim("  ./install.sh");
-            Ok(())
-        }
+    ui::step(&format!(
+        "Current version: {} ({})",
+        version::CLI_VERSION,
+        version::platform_key()
+    ));
+    ui::info("Fetching release manifest...");
+
+    let manifest = match version::fetch_release_manifest() {
+        Some(m) => m,
         None => {
-            ui::ok("You are running the latest version.");
-            Ok(())
+            ui::info("Could not fetch latest.json; falling back to GitHub releases API");
+            match version::check_for_update_now() {
+                Some(newer) => {
+                    let url = version::release_url(&newer);
+                    ui::ok(&format!("Version {newer} is available: {url}"));
+                    return Ok(());
+                }
+                None => {
+                    ui::ok("You are running the latest version.");
+                    return Ok(());
+                }
+            }
         }
+    };
+
+    if !version::is_newer(&manifest.version, version::CLI_VERSION) {
+        ui::ok("You are running the latest version.");
+        return Ok(());
     }
+
+    ui::ok(&format!("Version {} is available!", manifest.version));
+
+    let Some(binary_url) = &manifest.binary_url else {
+        ui::warn(&format!(
+            "No prebuilt binary for {} in this release.",
+            version::platform_key()
+        ));
+        let url = version::release_url(&manifest.version);
+        ui::info(&format!("Download manually: {url}"));
+        return Ok(());
+    };
+
+    ui::step(&format!(
+        "Downloading binary for {}...",
+        version::platform_key()
+    ));
+
+    // Download to a temp file next to our own binary, then atomically replace.
+    let self_path = std::env::current_exe().map_err(|e| Error::die(e.to_string()))?;
+    let parent = self_path.parent().unwrap_or(std::path::Path::new("."));
+    let tmp_path = parent.join(".migration-assistant-update.tmp");
+
+    if !version::download_to(binary_url, &tmp_path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(Error::die(format!("download failed: {binary_url}")));
+    }
+
+    // Set executable permission.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o755));
+    }
+
+    // Replace the current binary. Try the prebuilt path first (bin/migration-assistant-bin),
+    // then fall back to replacing ourselves.
+    let bin_target = parent.join("migration-assistant-bin");
+    let target = if bin_target.exists() {
+        &bin_target
+    } else {
+        &self_path
+    };
+
+    std::fs::rename(&tmp_path, target).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp_path);
+        Error::die(format!("failed to replace binary: {e}"))
+    })?;
+
+    ui::ok(&format!(
+        "Updated to {} → {}",
+        manifest.version,
+        target.display()
+    ));
+    Ok(())
 }
 
 /// The help text (goes to stdout).
