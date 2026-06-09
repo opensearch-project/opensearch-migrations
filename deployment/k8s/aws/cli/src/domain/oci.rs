@@ -1,10 +1,10 @@
 //! Native OCI image copy between registries.
 //!
-//! Uses `oci-distribution` to pull all layers from the source registry and
+//! Uses `oci-client` to pull all layers from the source registry and
 //! push them to the destination, with per-host credential injection.
 //! Authentication is provided by the caller so this module stays testable.
 
-use oci_distribution::{
+use oci_client::{
     client::{Client, ClientConfig, ClientProtocol, Config},
     manifest::{IMAGE_LAYER_GZIP_MEDIA_TYPE, IMAGE_LAYER_MEDIA_TYPE},
     secrets::RegistryAuth,

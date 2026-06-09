@@ -330,30 +330,11 @@ impl<'r, R: CommandRunner> App<'r, R> {
         for src in images.iter().filter(|s| !s.is_empty()) {
             let dst = crane::dst_for(src, ecr_host);
             let repo = crane::ecr_repo_for(src);
-            // Pre-create the ECR repo idempotently via SDK (errors tolerated).
+            // Pre-create the ECR repo idempotently via SDK.
             if let Err(e) = ecr_sdk::create_repository(&repo, region) {
-                // Fall back to the aws CLI create-repository if SDK fails.
-                let cli_ok = self
-                    .runner
-                    .run(
-                        "aws",
-                        &[
-                            "ecr",
-                            "create-repository",
-                            "--repository-name",
-                            &repo,
-                            "--region",
-                            region,
-                            "--image-scanning-configuration",
-                            "scanOnPush=false",
-                        ],
-                    )
-                    .success();
-                if !cli_ok {
-                    ui::warn(&format!("create-repository {repo}: {e}"));
-                }
+                ui::warn(&format!("create-repository {repo}: {e}"));
             }
-            if !retry.copy(src, &dst, creds, self.runner) {
+            if !retry.copy(src, &dst, creds) {
                 failed += 1;
             }
         }
@@ -376,51 +357,26 @@ impl<'r, R: CommandRunner> App<'r, R> {
         let source = (!ma_src.is_empty()).then_some(ma_src.as_str());
         for (build_name, suffix) in crane::MA_IMAGE_PAIRS {
             let (src, dst) = crane::ma_image_copy(build_name, suffix, registry, &ma_ver, source);
-            if !retry.copy(&src, &dst, creds, self.runner) {
+            if !retry.copy(&src, &dst, creds) {
                 return Err(Error::die(format!("MA-image mirror failed: {src}")));
             }
         }
         Ok(())
     }
 
-    /// Obtain ECR credentials for `registry_host` and return a `RegistryCred`
-    /// list.
-    ///
-    /// Primary path: AWS SDK `ecr:GetAuthorizationToken` — no binary required.
-    /// Fallback path: `aws ecr get-login-password | crane auth login` via bash
-    /// (used when the SDK call fails, which covers test environments that inject
-    /// credentials via [`MockRunner`] stubs).
+    /// Obtain ECR credentials for `registry_host` via the AWS SDK.
     fn ecr_creds(&self, registry_host: &str, region: &str) -> Vec<RegistryCred> {
-        // SDK path.
-        if let Ok((user, pass)) = ecr_sdk::get_ecr_credentials(registry_host, region) {
-            return vec![RegistryCred {
+        match ecr_sdk::get_ecr_credentials(registry_host, region) {
+            Ok((user, pass)) => vec![RegistryCred {
                 registry: registry_host.to_string(),
                 username: user,
                 password: pass,
-            }];
-        }
-        // Runner fallback: run the login pipe and return a stub credential so
-        // the caller knows auth was attempted. In MockRunner test environments the
-        // login pipe stub succeeds; on real hosts this path is only reached when
-        // both the SDK and binary paths are available.
-        if self.runner.has_command("crane") && self.runner.has_command("aws") {
-            let script = format!(
-                "set -o pipefail; aws ecr get-login-password --region {region} \
-                 | crane auth login --username AWS --password-stdin {registry_host}"
-            );
-            if self.runner.run("bash", &["-c", &script]).success() {
-                // Credentials are now stored in crane's config; return a marker
-                // so the caller knows login succeeded (oci-client will use the
-                // crane credential store for the actual push/pull).
-                return vec![RegistryCred {
-                    registry: registry_host.to_string(),
-                    username: "AWS".to_string(),
-                    password: String::new(), // used by crane store, not directly
-                }];
+            }],
+            Err(e) => {
+                ui::warn(&format!("ECR auth failed: {e}"));
+                vec![]
             }
         }
-        ui::warn("ECR auth failed — could not obtain credentials via SDK or aws CLI");
-        vec![]
     }
 
     /// Build the helm install/upgrade argument vector and run it, advancing
@@ -1214,36 +1170,14 @@ impl OciRetry {
         }
     }
 
-    /// Copy `src` to `dst` with exponential backoff.
-    ///
-    /// Primary path: native OCI client (`oci-distribution`). Fallback path:
-    /// `crane copy` via the runner (supports [`MockRunner`] in tests and also
-    /// handles the rare case where the native client can't reach the registry).
-    fn copy<R: CommandRunner>(
-        self,
-        src: &str,
-        dst: &str,
-        creds: &[RegistryCred],
-        runner: &R,
-    ) -> bool {
+    /// Copy `src` to `dst` with exponential backoff using the native OCI client.
+    fn copy(self, src: &str, dst: &str, creds: &[RegistryCred]) -> bool {
         let mut backoff = self.initial_secs;
         for attempt in 1..=self.attempts {
-            // Try native OCI copy first.
             match oci::copy_image(src, dst, creds) {
                 Ok(()) => return true,
-                Err(oci_err) => {
-                    // Fall back to crane binary if available (keeps tests working
-                    // via MockRunner stubs and provides a safety net on real hosts).
-                    if runner.has_command("crane") {
-                        let out = runner.run("crane", &["copy", src, dst]);
-                        if out.success() {
-                            return true;
-                        }
-                    }
-                    ui::warn(&format!(
-                        "mirror attempt {attempt}/{}: {oci_err}",
-                        self.attempts
-                    ));
+                Err(e) => {
+                    ui::warn(&format!("mirror attempt {attempt}/{}: {e}", self.attempts));
                     if attempt < self.attempts && backoff > 0 {
                         std::thread::sleep(std::time::Duration::from_secs(backoff));
                         backoff = backoff.saturating_mul(2);

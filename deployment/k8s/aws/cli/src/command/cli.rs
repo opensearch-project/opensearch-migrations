@@ -210,12 +210,14 @@ fn manual_path<R: CommandRunner>(env: Env, runner: &R, state: State, resuming: b
     ui::step("Discover environment");
     log.info("discover: os + aws + resources");
     crate::discover::discover_os(runner, &mut app.state);
-    if let Err(e) = crate::discover::discover_aws(runner, &mut app.state) {
-        log.error(&format!("AWS credentials unavailable: {}", e.message));
-        return Err(Error::die(format!(
-            "AWS credentials are required. Set up 'aws configure' and rerun. ({})",
-            e.message
-        )));
+    if app.state.get("AWS_ACCOUNT").unwrap_or("").is_empty() {
+        if let Err(e) = crate::discover::discover_aws(&mut app.state) {
+            log.error(&format!("AWS credentials unavailable: {}", e.message));
+            return Err(Error::die(format!(
+                "AWS credentials are required. Set up 'aws configure' and rerun. ({})",
+                e.message
+            )));
+        }
     }
     crate::discover::discover_resources(runner, &mut app.state);
     app.state.save()?;

@@ -20,16 +20,20 @@ fn dispatch_isolated(args: &[&str], extra_env: &[(&str, &str)], runner: &MockRun
     let _guard = ENV_LOCK.lock().unwrap();
     let home = tempfile::tempdir().unwrap();
 
-    // Snapshot + set the env knobs dispatch reads, then restore afterwards so
-    // tests stay independent.
     let keys = [
         "MIGRATE_HOME",
         "MIGRATE_ENABLE_AGENT",
         "MIGRATE_NONINTERACTIVE",
         "STAGE",
+        "AWS_ACCOUNT",
+        "AWS_USER_ARN",
     ];
     let saved: Vec<(&str, Option<String>)> =
         keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
+    let extra_saved: Vec<(&str, Option<String>)> = extra_env
+        .iter()
+        .map(|(k, _)| (*k, std::env::var(k).ok()))
+        .collect();
     for k in keys {
         std::env::remove_var(k);
     }
@@ -42,6 +46,12 @@ fn dispatch_isolated(args: &[&str], extra_env: &[(&str, &str)], runner: &MockRun
     let code = cli::dispatch(&owned, runner);
 
     for (k, v) in saved {
+        match v {
+            Some(val) => std::env::set_var(k, val),
+            None => std::env::remove_var(k),
+        }
+    }
+    for (k, v) in extra_saved {
         match v {
             Some(val) => std::env::set_var(k, val),
             None => std::env::remove_var(k),
@@ -145,9 +155,7 @@ fn headless_deploy_runs_cfn_and_helm() {
         .with_command("curl")
         .with_command("helm")
         .with_command("kubectl")
-        // discovery
-        .stub("aws", &["sts", "get-caller-identity"], 0, r#"{"Account":"111122223333","Arn":"arn:aws:iam::111122223333:role/x"}"#)
-        .stub("aws", &["configure", "get", "region"], 0, "us-east-1")
+        // discovery (AWS identity now via SDK + env vars; stubs only for resources)
         .stub("aws", &["eks", "list-clusters"], 0, "{}")
         .stub("aws", &["cloudformation", "list-stacks"], 0, "{}")
         // artifact downloads
@@ -196,7 +204,10 @@ fn headless_deploy_runs_cfn_and_helm() {
             "--eks-access-principal-arn",
             "arn:aws:iam::111122223333:role/JenkinsDeploymentRole",
         ],
-        &[],
+        &[
+            ("AWS_ACCOUNT", "111122223333"),
+            ("AWS_USER_ARN", "arn:aws:iam::111122223333:role/x"),
+        ],
         &runner,
     );
 

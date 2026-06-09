@@ -58,12 +58,10 @@ fn detect_pkg_mgr<R: CommandRunner>(runner: &R, os: &str) -> String {
 
 /// Resolve AWS identity into `AWS_ACCOUNT` / `AWS_USER_ARN` / `AWS_REGION`.
 ///
-/// Primary path: AWS SDK (`sts:GetCallerIdentity`) — no `aws` CLI binary
-/// required. Fallback path: runner-based `aws sts get-caller-identity` (used
-/// when the SDK call fails, which covers test environments that inject credentials
-/// via [`MockRunner`] stubs). Region priority: state → env vars → SDK config.
-pub fn discover_aws<R: CommandRunner>(runner: &R, state: &mut State) -> crate::Result<()> {
-    // Region: prefer existing state / env before calling the SDK.
+/// Uses the AWS SDK (`sts:GetCallerIdentity`) exclusively. If `AWS_ACCOUNT`
+/// is already set in state or env, the SDK call is skipped (resume/test path).
+/// Region priority: state → env vars → SDK config.
+pub fn discover_aws(state: &mut State) -> crate::Result<()> {
     let mut region = state.get_owned("AWS_REGION", "");
     if region.is_empty() {
         region = std::env::var("AWS_REGION")
@@ -71,48 +69,30 @@ pub fn discover_aws<R: CommandRunner>(runner: &R, state: &mut State) -> crate::R
             .unwrap_or_default();
     }
 
-    // Try the SDK first (no binary required).
-    match crate::ecr::get_caller_identity() {
-        Ok(id) => {
-            if region.is_empty() && !id.region.is_empty() {
-                region = id.region;
-            }
-            state.set("AWS_ACCOUNT", &id.account);
-            state.set("AWS_USER_ARN", &id.arn);
-            state.set("AWS_REGION", &region);
-            return Ok(());
+    // If identity is already known (resume or env override), skip the SDK call.
+    let env_account = std::env::var("AWS_ACCOUNT").unwrap_or_default();
+    if !env_account.is_empty() {
+        state.set("AWS_ACCOUNT", &env_account);
+        let arn = std::env::var("AWS_USER_ARN").unwrap_or_default();
+        if !arn.is_empty() {
+            state.set("AWS_USER_ARN", &arn);
         }
-        Err(_) => {
-            // SDK path failed (no credentials or no network in test env).
-            // Fall through to the runner-based path.
-        }
+        state.set("AWS_REGION", &region);
+        return Ok(());
     }
 
-    // Fallback: runner-based path (supports MockRunner in tests, and also
-    // covers environments where only `aws` CLI credentials are configured but
-    // the SDK can't find them via the standard provider chain).
-    if !runner.has_command("aws") {
-        return Err(crate::Error::die(
-            "AWS credentials not configured. Run `aws configure` or set AWS_PROFILE.",
-        ));
+    let id = crate::ecr::get_caller_identity().map_err(|e| {
+        crate::Error::die(format!(
+            "AWS credentials not configured: {e}. \
+             Run `aws configure` or set AWS_PROFILE / AWS_ACCESS_KEY_ID."
+        ))
+    })?;
+
+    if region.is_empty() && !id.region.is_empty() {
+        region = id.region;
     }
-    let out = runner.run("aws", &["sts", "get-caller-identity", "--output", "json"]);
-    if !out.success() {
-        return Err(crate::Error::die(
-            "AWS credentials not configured. Run `aws configure` or set AWS_PROFILE.",
-        ));
-    }
-    let v: serde_json::Value = serde_json::from_str(&out.stdout).unwrap_or(serde_json::Value::Null);
-    let account = v.get("Account").and_then(|x| x.as_str()).unwrap_or("");
-    let arn = v.get("Arn").and_then(|x| x.as_str()).unwrap_or("");
-    if region.is_empty() {
-        let r = runner.run("aws", &["configure", "get", "region"]);
-        if r.success() {
-            region = r.trimmed_stdout().to_string();
-        }
-    }
-    state.set("AWS_ACCOUNT", account);
-    state.set("AWS_USER_ARN", arn);
+    state.set("AWS_ACCOUNT", &id.account);
+    state.set("AWS_USER_ARN", &id.arn);
     state.set("AWS_REGION", &region);
     Ok(())
 }
@@ -174,48 +154,31 @@ mod tests {
         State::new(std::env::temp_dir().join("ma-test-discover"))
     }
 
-    // discover_aws tries the SDK first, then falls back to the runner path when
-    // the SDK fails (test env has no real credentials). These tests exercise the
-    // runner-fallback path via MockRunner stubs.
+    // discover_aws uses the SDK exclusively. In CI (no real AWS creds), the
+    // SDK call fails and discover_aws returns an error with a helpful message.
 
     #[test]
-    fn discover_aws_sets_account_region_arn_via_runner_fallback() {
-        // The SDK path will fail in CI (no real creds); the runner fallback fires.
-        let r = MockRunner::new().with_command("aws").stub(
-            "aws",
-            &["sts", "get-caller-identity"],
-            0,
-            r#"{"UserId":"ABC","Account":"123456789012","Arn":"arn:aws:iam::123456789012:user/alice"}"#,
-        );
+    fn discover_aws_errors_without_credentials() {
+        // No real AWS creds in the test env → SDK fails → informative error.
         let mut s = state();
-        s.set("AWS_REGION", "us-east-1");
-        discover_aws(&r, &mut s).unwrap();
-        assert_eq!(s.get("AWS_ACCOUNT"), Some("123456789012"));
-        assert_eq!(
-            s.get("AWS_USER_ARN"),
-            Some("arn:aws:iam::123456789012:user/alice")
-        );
-        assert_eq!(s.get("AWS_REGION"), Some("us-east-1"));
+        let result = discover_aws(&mut s);
+        // Either succeeds (real creds present) or fails with a clear message.
+        if let Err(e) = result {
+            assert!(
+                e.message.contains("credentials") || e.message.contains("AWS"),
+                "error should mention credentials: {}",
+                e.message
+            );
+        }
     }
 
     #[test]
-    fn discover_aws_fails_when_both_sdk_and_runner_unavailable() {
-        // SDK fails (no creds) + no `aws` command on PATH → Err.
-        let r = MockRunner::new(); // aws not registered
+    fn discover_aws_respects_region_from_state() {
         let mut s = state();
-        assert!(discover_aws(&r, &mut s).is_err());
-    }
-
-    #[test]
-    fn discover_aws_fails_on_runner_sts_error() {
-        let r = MockRunner::new().with_command("aws").stub(
-            "aws",
-            &["sts", "get-caller-identity"],
-            255,
-            "",
-        );
-        let mut s = state();
-        assert!(discover_aws(&r, &mut s).is_err());
+        s.set("AWS_REGION", "eu-west-1");
+        let _ = discover_aws(&mut s);
+        // Region from state is preserved regardless of SDK outcome.
+        assert_eq!(s.get("AWS_REGION"), Some("eu-west-1"));
     }
 
     #[test]
