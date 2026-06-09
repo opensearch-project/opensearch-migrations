@@ -19,10 +19,9 @@ sourceClusters:
     snapshotInfo:
       repos:
         default:
-          type: s3
           awsRegion: us-east-2
           endpoint: http://10.99.62.203:4566
-          s3RepoPathUri: s3://migrations-default-123456789012-dev-us-east-2
+          repoPathUri: s3://migrations-default-123456789012-dev-us-east-2
       snapshots:
         snap1:
           config:

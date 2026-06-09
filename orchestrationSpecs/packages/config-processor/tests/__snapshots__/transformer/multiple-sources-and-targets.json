@@ -100,10 +100,10 @@
           "repo": {
             "awsRegion": "us-east-2",
             "endpoint": "http://localhost:4566",
-            "s3RepoPathUri": "s3://migration-bucket",
             "s3RoleArn": "",
             "useLocalStack": false,
-            "repoName": "repoA"
+            "repoName": "repoA",
+            "repoPathUri": "s3://migration-bucket"
           },
           "dependsOnProxySetups": [
             "proxyA"
@@ -138,10 +138,10 @@
           "repo": {
             "awsRegion": "us-east-2",
             "endpoint": "http://localhost:4566",
-            "s3RepoPathUri": "s3://bucket-b",
             "s3RoleArn": "",
             "useLocalStack": false,
-            "repoName": "repoB"
+            "repoName": "repoB",
+            "repoPathUri": "s3://bucket-b"
           },
           "dependsOnProxySetups": [
             "proxyB"
@@ -198,10 +198,10 @@
         "repoConfig": {
           "awsRegion": "us-east-2",
           "endpoint": "http://localhost:4566",
-          "s3RepoPathUri": "s3://migration-bucket",
           "s3RoleArn": "",
           "useLocalStack": false,
-          "repoName": "repoA"
+          "repoName": "repoA",
+          "repoPathUri": "s3://migration-bucket"
         }
       }
     },
@@ -253,10 +253,10 @@
         "repoConfig": {
           "awsRegion": "us-east-2",
           "endpoint": "http://localhost:4566",
-          "s3RepoPathUri": "s3://bucket-b",
           "s3RoleArn": "",
           "useLocalStack": false,
-          "repoName": "repoB"
+          "repoName": "repoB",
+          "repoPathUri": "s3://bucket-b"
         }
       }
     }

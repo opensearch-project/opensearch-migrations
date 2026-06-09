@@ -312,7 +312,7 @@ class TestMapFromWorkflowConfig:
             "snapshotRepo": {
                 "awsRegion": "us-east-2",
                 "endpoint": "localstack://localstack.ma.svc.cluster.local:4566",
-                "s3RepoPathUri": "s3://migrations-default-123456789012-dev-us-east-2"
+                "repoPathUri": "s3://migrations-default-123456789012-dev-us-east-2"
             },
             "proxy": {}
         }
@@ -483,7 +483,7 @@ class TestMapFromWorkflowConfig:
             "snapshotRepo": {
                 "awsRegion": "us-east-2",
                 "endpoint": "localstack://localstack.ma.svc.cluster.local:4566",
-                "s3RepoPathUri": "s3://migrations-default-123456789012-dev-us-east-2"
+                "repoPathUri": "s3://migrations-default-123456789012-dev-us-east-2"
             },
             "proxy": {}
         }
