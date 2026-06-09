@@ -3,7 +3,6 @@ package org.opensearch.migrations.commands;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.stream.Collectors;
 
 import org.opensearch.migrations.MetadataTransformationRegistry;
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
@@ -58,19 +57,22 @@ public abstract class MigratorEvaluatorBase {
         var transformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.metadataCustomTransformationParams);
         if (transformerConfig != null) {
             MetadataTransformationRegistry.logTransformerConfig("User supplied custom transform", transformerConfig);
-            var customTransformInfoBuilder = Transformers.TransformerInfo
+            var userTransformer = MetadataTransformationRegistry.configToTransformer(transformerConfig);
+            var userTransformInfo = Transformers.TransformerInfo
                     .builder()
                     .name("User Supplied Custom Transform")
-                    .descriptionLine("Custom transformation applied from supplied arguments.");
-                if (!versionSpecificCustomTransforms.getTransformerInfos().isEmpty()) {
-                    customTransformInfoBuilder
-                        .descriptionLine("Skipped default version-specific transformations:")
-                        .descriptionLine("(" + versionSpecificCustomTransforms.getTransformerInfos().stream()
-                            .map(Transformers.TransformerInfo::getName).collect(Collectors.joining(", ")) + ")") ;
-                }
-                return Transformers.builder()
-                    .transformer(MetadataTransformationRegistry.configToTransformer(transformerConfig))
-                    .transformerInfo(customTransformInfoBuilder.build())
+                    .descriptionLine("Custom transformation applied from supplied arguments.")
+                    .build();
+            // Auto-applied version-specific transforms (e.g. multi-type mapping union, analysis
+            // compatibility, knn shape fixes) ALWAYS run — a user-supplied transform composes
+            // alongside them rather than replacing them. The version transforms run first so the
+            // user transform sees already-normalized mappings.
+            return Transformers.builder()
+                    .transformer(new FanOutCompositeTransformer(
+                        versionSpecificCustomTransforms.getTransformer(),
+                        userTransformer))
+                    .transformerInfos(versionSpecificCustomTransforms.getTransformerInfos())
+                    .transformerInfo(userTransformInfo)
                     .build();
         }
         return versionSpecificCustomTransforms;
@@ -80,7 +82,6 @@ public abstract class MigratorEvaluatorBase {
         var mapper = new TransformerMapper(clusters.getSource().getVersion(), clusters.getTarget().getVersion());
         var versionTransformer = mapper.getTransformer(
                 awarenessAttributes,
-                arguments.metadataTransformationParams,
                 allowLooseVersionMatches
         );
         var customTransformer = getCustomTransformer(clusters.getSource().getVersion(), clusters.getTarget().getVersion());
@@ -88,8 +89,12 @@ public abstract class MigratorEvaluatorBase {
                 .addArgument(customTransformer.getClass().getSimpleName())
                 .addArgument(versionTransformer.getClass().getSimpleName())
                 .log();
+        // Custom transformers run BEFORE the version transformer. The auto-applied
+        // TypeMappingsSanitizationTransformer (multi-type union) and user-supplied custom
+        // transforms must reshape the index/mappings first so the version rules operate on
+        // already-resolved single-type mappings.
         return Transformers.builder()
-                .transformer(new FanOutCompositeTransformer(versionTransformer, customTransformer.getTransformer()))
+                .transformer(new FanOutCompositeTransformer(customTransformer.getTransformer(), versionTransformer))
                 .transformerInfos(customTransformer.getTransformerInfos())
                 .transformerInfo(Transformers.TransformerInfo.builder()
                     .name("Version Transform")

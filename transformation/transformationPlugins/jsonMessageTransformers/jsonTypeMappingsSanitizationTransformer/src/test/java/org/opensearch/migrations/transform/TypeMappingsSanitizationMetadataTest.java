@@ -109,6 +109,30 @@ public class TypeMappingsSanitizationMetadataTest {
         }
     }
 
+    @Test
+    public void testEmptyMappingsIsKeptAndRetargeted() throws Exception {
+        // A legacy index template that carries only analysis settings has an empty
+        // "mappings" array (the ES 6 wire form). There is nothing to union, but it
+        // must still be migrated (name-retargeted via the default _doc route)
+        // rather than dropped.
+        String inputJson = "{" +
+                "\"type\":\"org.opensearch.migrations.bulkload.version_es_6_8.IndexMetadataData_ES_6_8\"," +
+                "\"name\":\"time-templ\"," +
+                "\"body\":{\"settings\":{\"index\":{\"number_of_shards\":\"1\"}},\"mappings\":[]}" +
+                "}";
+        String expectedJson = "[" +
+                "{\"type\":\"org.opensearch.migrations.bulkload.version_es_6_8.IndexMetadataData_ES_6_8\"," +
+                "\"name\":\"time-templ-_doc\"," +
+                "\"body\":{\"settings\":{\"index\":{\"number_of_shards\":\"1\"}},\"mappings\":[]}}" +
+                "]";
+        try (var transformer = makeIndexTypeMappingRewriter()) {
+            Object result = transformer.transformJson(OBJECT_MAPPER.readValue(inputJson, LinkedHashMap.class));
+            String resultJson = OBJECT_MAPPER.writeValueAsString(result);
+            Assertions.assertEquals(expectedJson, resultJson,
+                "Empty-mappings metadata should be kept and name-retargeted, not dropped");
+        }
+    }
+
     private static String makeMetadataRequestWithDynamic(String indexName, String type1, boolean dynamic1,
                                                           String type2, boolean dynamic2) {
         StringBuilder json = new StringBuilder();
