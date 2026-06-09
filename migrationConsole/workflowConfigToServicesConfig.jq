@@ -42,43 +42,40 @@ def normalizeSnapshotRepo:
     .
   end;
 
-# Normalize S3 config inside snapshot
-def normalizeS3Config:
-  (if has("s3RepoPathUri") then
-    .repo_uri = .s3RepoPathUri | del(.s3RepoPathUri)
+# Map the unified repoPathUri to console_link's repo_uri.
+def normalizeRepoUri:
+  if has("repoPathUri") then
+    .repo_uri = .repoPathUri | del(.repoPathUri)
   else
     .
-  end)
-  | (if has("s3RoleArn") then
-    .role = .s3RoleArn | del(.s3RoleArn)
-  else
-    .
-  end)
-  | del(.repoName, .useLocalStack, .type);
+  end;
 
-# Normalize GCS config inside snapshot.
-# Maps orchestration field names → console_link snapshot schema:
-#   gcsRepoPathUri → repo_uri
+# S3-side enrichment: awsRegion → aws_region, s3RoleArn → role.
+def normalizeS3Config:
+  normalizeRepoUri
+  | (if has("awsRegion") then
+      .aws_region = .awsRegion | del(.awsRegion)
+    else
+      .
+    end)
+  | (if has("s3RoleArn") then
+      .role = .s3RoleArn | del(.s3RoleArn)
+    else
+      .
+    end)
+  | del(.repoName, .useLocalStack);
+
+# GCS has no extra fields beyond repoPathUri/endpoint at the moment.
 def normalizeGcsConfig:
-  (if has("gcsRepoPathUri") then
-    .repo_uri = .gcsRepoPathUri | del(.gcsRepoPathUri)
-  else
-    .
-  end)
-  | del(.repoName, .type, .gcsRegion, .gcsEndpoint);
+  normalizeRepoUri
+  | del(.repoName, .useLocalStack, .awsRegion, .s3RoleArn);
 
 def normalizeRepoConfig:
   if has("repoConfig") then
-    (if (.repoConfig.type // "s3") == "gcs" then
+    (if (.repoConfig.repoPathUri // "" | startswith("gs://")) then
       .gcs = (.repoConfig | normalizeGcsConfig)
     else
-      .s3 = (.repoConfig |
-        if has("awsRegion") then
-          .aws_region = .awsRegion | del(.awsRegion)
-        else
-          .
-        end
-        | normalizeS3Config)
+      .s3 = (.repoConfig | normalizeS3Config)
     end)
     | del(.repoConfig)
   elif has("s3") then

@@ -18,8 +18,8 @@ describe('migration initializer CRD resource generation', () => {
                     },
                     snapshotInfo: {
                         repos: {
-                            default: { type: "s3", awsRegion: "us-east-2",
-                                s3RepoPathUri: "s3://bucket/path" }
+                            default: { awsRegion: "us-east-2",
+                                repoPathUri: "s3://bucket/path" }
                         },
                         snapshots: {
                             snap1: {
@@ -252,7 +252,7 @@ describe('migration initializer CRD resource generation', () => {
                     endpoint: "https://source.example.com",
                     version: "ES 7.10.2",
                     snapshotInfo: {
-                        repos: { default: { type: "s3", awsRegion: "us-east-2", s3RepoPathUri: "s3://bucket/path" } },
+                        repos: { default: { awsRegion: "us-east-2", repoPathUri: "s3://bucket/path" } },
                         snapshots: { snap1: { repoName: "default", config: { createSnapshotConfig: {} } } }
                     }
                 }
@@ -351,7 +351,7 @@ describe('migration initializer CRD resource generation', () => {
                     endpoint: "https://source.example.com",
                     version: "ES 7.10.2",
                     snapshotInfo: {
-                        repos: { default: { type: "s3", awsRegion: "us-east-2", s3RepoPathUri: "s3://bucket/path" } },
+                        repos: { default: { awsRegion: "us-east-2", repoPathUri: "s3://bucket/path" } },
                         snapshots: { snap1: { repoName: "default", config: { createSnapshotConfig: {} } } }
                     }
                 }
@@ -406,8 +406,8 @@ describe('migration initializer CRD resource generation', () => {
                     },
                     snapshotInfo: {
                         repos: {
-                            default: { type: "s3", awsRegion: "us-east-2",
-                                s3RepoPathUri: "s3://bucket/path" }
+                            default: { awsRegion: "us-east-2",
+                                repoPathUri: "s3://bucket/path" }
                         },
                         snapshots: {
                             snap1: {

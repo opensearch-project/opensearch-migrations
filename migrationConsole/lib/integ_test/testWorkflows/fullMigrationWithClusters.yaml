@@ -307,7 +307,7 @@ spec:
               '{
                 "awsRegion": $region,
                 "endpoint": $endpoint,
-                "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
+                "repoPathUri": ("s3://" + $bucket + "/" + $suffix)
               }')
             
             # Add s3RoleArn only if provided

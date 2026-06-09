@@ -1,6 +1,6 @@
 # GCS variant of fullMigrationImportedClusters.yaml.
 # Builds an OVERALL_MIGRATION_CONFIG whose sourceClusters[*].snapshotInfo.repos.default
-# uses { type: "gcs", gcsRepoPathUri } instead of S3.
+# uses a gs:// repoPathUri so the unified REPO_CONFIG schema selects GCS.
 #
 # Requires:
 #   - migrations-default-gcs-config configmap (rendered when cloudProvider=gcp) with keys:
@@ -107,13 +107,12 @@ spec:
 
             SUFFIX=$(echo "{{workflow.uid}}" | cut -c1-8)
 
-            # Build snapshot repo config (GCS discriminator)
+            # Build snapshot repo config (URI scheme selects backend)
             SNAPSHOT_REPO=$(jq -n \
               --arg bucket "$GCS_BUCKET" \
               --arg suffix "$SUFFIX" \
               '{
-                "type": "gcs",
-                "gcsRepoPathUri": ("gs://" + $bucket + "/" + $suffix)
+                "repoPathUri": ("gs://" + $bucket + "/" + $suffix)
               }')
 
             # Build sourceClusters map from source-configs array with schema transformation
@@ -138,7 +137,7 @@ spec:
                     if $extSnap != null then
                       (($entry.source.snapshotRepo // null) as $srcRepo |
                       . + {"snapshotInfo": {
-                        "repos": {"default": (if $srcRepo != null then ($repo + {gcsRepoPathUri: $srcRepo.gcsRepoPathUri}) else $repo end)},
+                        "repos": {"default": (if $srcRepo != null then ($repo + {repoPathUri: $srcRepo.repoPathUri}) else $repo end)},
                         "snapshots": {
                           ($extSnap): {
                             "repoName": "default",

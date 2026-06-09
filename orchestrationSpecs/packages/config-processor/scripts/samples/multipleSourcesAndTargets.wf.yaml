@@ -12,10 +12,9 @@ sourceClusters:
     snapshotInfo:
       repos:
         repoA:
-          type: s3
           awsRegion: us-east-2
           endpoint: http://10.99.62.203:4566
-          s3RepoPathUri: s3://migrations-default-123456789012-dev-us-east-2
+          repoPathUri: s3://migrations-default-123456789012-dev-us-east-2
       snapshots:
         snapA:
           config:
@@ -31,10 +30,9 @@ sourceClusters:
     snapshotInfo:
       repos:
         repoB:
-          type: s3
           awsRegion: us-east-2
           endpoint: http://10.99.62.203:4566
-          s3RepoPathUri: s3://bucket-b
+          repoPathUri: s3://bucket-b
       snapshots:
         snapB:
           config:

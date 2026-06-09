@@ -37,7 +37,7 @@ function sampleConfig(): z.infer<typeof OVERALL_MIGRATION_CONFIG> {
                     repos: {
                         default: {
                             awsRegion: "us-east-2",
-                            s3RepoPathUri: "s3://bucket/path",
+                            repoPathUri: "s3://bucket/path",
                         },
                     },
                     snapshots: {

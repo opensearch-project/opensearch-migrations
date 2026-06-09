@@ -911,8 +911,6 @@ export class MigrationInitializer {
             "  | .snapshots |= ((. // []) | map(. as $snapshot | .createSnapshotConfig |= ((. // []) | map(. + {resourceUid: $uids.dataSnapshots[($snapshot.sourceConfig.label + \"-\" + .label)]}))))",
             "  | .s3TrafficLoaders |= ((. // []) | map(. + {resourceUid: $uids.s3TrafficLoaders[.name]} | .kafkaConfig += {clusterResourceUid: $uids.kafkaClusters[.kafkaConfig.label]}))",
             "  | .snapshotMigrations |= ((. // []) | map(. + {resourceUid: $uids.snapshotMigrations[(.sourceLabel + \"-\" + .targetConfig.label + \"-\" + .label + \"-\" + .migrationLabel)]}))",
-            "  | (if has(\"snapshotsGcs\") then .snapshotsGcs |= ((. // []) | map(. + {resourceUid: \"imported\"})) else . end)",
-            "  | (if has(\"snapshotMigrationsGcs\") then .snapshotMigrationsGcs |= ((. // []) | map(. + {resourceUid: \"imported\"})) else . end)",
             "  | .trafficReplays |= ((. // []) | map(. + {resourceUid: $uids.trafficReplays[.name]}))",
             "' \"$CONFIG_PATH\" > \"$tmp_file\"",
             "",

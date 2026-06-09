@@ -16,9 +16,9 @@ describe("unifiedSchemaValidator", () => {
                 },
                 snapshotInfo: {
                     repos: {
-                        default: { type: "s3", awsRegion: "us-east-2",
+                        default: { awsRegion: "us-east-2",
                             endpoint: "http://localhost:4566",
-                            s3RepoPathUri: "s3://test-bucket" }
+                            repoPathUri: "s3://test-bucket" }
                     },
                     snapshots: {
                         snap1: {

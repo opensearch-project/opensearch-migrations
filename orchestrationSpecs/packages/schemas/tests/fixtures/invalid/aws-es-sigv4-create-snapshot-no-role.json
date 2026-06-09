@@ -11,9 +11,8 @@
       "snapshotInfo": {
         "repos": {
           "default": {
-            "type": "s3",
             "awsRegion": "us-east-1",
-            "s3RepoPathUri": "s3://my-snapshot-bucket/snapshots"
+            "repoPathUri": "s3://my-snapshot-bucket/snapshots"
           }
         },
         "snapshots": {

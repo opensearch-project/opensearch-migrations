@@ -4,9 +4,10 @@ import { OVERALL_MIGRATION_CONFIG } from "@opensearch-migrations/schemas";
 import { z } from "zod";
 
 /**
- * Stage 4 GCS routing tests: verify that source clusters with GCS repos flow
- * into the parallel `snapshotsGcs` and `snapshotMigrationsGcs` output fields
- * rather than the S3 `snapshots`/`snapshotMigrations` arrays.
+ * GCS routing tests: under the unified provider-agnostic REPO_CONFIG schema,
+ * snapshot configs with gs:// URIs flow through the same `snapshots` and
+ * `snapshotMigrations` output arrays as s3:// URIs. The URI scheme on
+ * `repoPathUri` selects the backend at the Java tools layer.
  */
 describe('GCS repo routing', () => {
     const transformer = new MigrationConfigTransformer();
@@ -21,8 +22,7 @@ describe('GCS repo routing', () => {
                 snapshotInfo: {
                     repos: {
                         default: {
-                            type: "gcs",
-                            gcsRepoPathUri: "gs://my-bucket/snapshots",
+                            repoPathUri: "gs://my-bucket/snapshots",
                         }
                     },
                     snapshots: {
@@ -54,34 +54,31 @@ describe('GCS repo routing', () => {
         ]
     };
 
-    it('routes GCS createSnapshot configs into snapshotsGcs (not snapshots)', async () => {
+    it('emits GCS createSnapshot configs into the unified snapshots array', async () => {
         const result = await transformer.processFromObject(baseGcsConfig);
-        expect(result.snapshots ?? []).toEqual([]);
-        expect(result.snapshotsGcs).toBeDefined();
-        expect(result.snapshotsGcs!.length).toBe(1);
-        const ss = result.snapshotsGcs![0];
+        expect(result.snapshots).toBeDefined();
+        expect(result.snapshots!.length).toBe(1);
+        const ss = result.snapshots![0];
         expect(ss.sourceConfig.label).toBe("gcs_source");
         expect(ss.createSnapshotConfig).toHaveLength(1);
         expect(ss.createSnapshotConfig[0].label).toBe("snap1");
-        expect(ss.createSnapshotConfig[0].repo.type).toBe("gcs");
+        expect(ss.createSnapshotConfig[0].repo.repoPathUri).toBe("gs://my-bucket/snapshots");
         expect(ss.createSnapshotConfig[0].configChecksum).toBeTruthy();
     });
 
-    it('routes GCS migrations into snapshotMigrationsGcs and resolves snapshotConfigChecksum', async () => {
+    it('emits GCS migrations into the unified snapshotMigrations array and resolves snapshotConfigChecksum', async () => {
         const result = await transformer.processFromObject(baseGcsConfig);
-        expect(result.snapshotMigrations ?? []).toEqual([]);
-        expect(result.snapshotMigrationsGcs).toBeDefined();
-        expect(result.snapshotMigrationsGcs!.length).toBe(1);
-        const m = result.snapshotMigrationsGcs![0];
+        expect(result.snapshotMigrations).toBeDefined();
+        expect(result.snapshotMigrations!.length).toBe(1);
+        const m = result.snapshotMigrations![0];
         expect(m.sourceLabel).toBe("gcs_source");
         expect(m.label).toBe("snap1");
-        // snapshotChecksums map must include GCS entries so the migration can resolve its parent.
         expect(m.snapshotConfigChecksum).toBeTruthy();
         expect(m.snapshotConfigChecksum)
-            .toBe(result.snapshotsGcs![0].createSnapshotConfig[0].configChecksum);
+            .toBe(result.snapshots![0].createSnapshotConfig[0].configChecksum);
     });
 
-    it('keeps S3 and GCS repos in separate output arrays when both are present', async () => {
+    it('mixes S3 and GCS repos in the same output arrays', async () => {
         const mixed: z.infer<typeof OVERALL_MIGRATION_CONFIG> = {
             sourceClusters: {
                 s3_source: {
@@ -91,7 +88,7 @@ describe('GCS repo routing', () => {
                     authConfig: { basic: { secretName: "s3-creds" } },
                     snapshotInfo: {
                         repos: {
-                            default: { type: "s3", awsRegion: "us-east-2", s3RepoPathUri: "s3://my-bucket/path" }
+                            default: { awsRegion: "us-east-2", repoPathUri: "s3://my-bucket/path" }
                         },
                         snapshots: {
                             s3snap: { repoName: "default", config: { createSnapshotConfig: { snapshotPrefix: "s3snap" } } }
@@ -114,11 +111,13 @@ describe('GCS repo routing', () => {
         };
 
         const result = await transformer.processFromObject(mixed);
-        expect(result.snapshots?.length).toBe(1);
-        expect(result.snapshotsGcs?.length).toBe(1);
-        expect(result.snapshotMigrations?.length).toBe(1);
-        expect(result.snapshotMigrationsGcs?.length).toBe(1);
-        expect(result.snapshots![0].sourceConfig.label).toBe("s3_source");
-        expect(result.snapshotsGcs![0].sourceConfig.label).toBe("gcs_source");
+        expect(result.snapshots?.length).toBe(2);
+        expect(result.snapshotMigrations?.length).toBe(2);
+        const sourceLabels = result.snapshots!.map(s => s.sourceConfig.label).sort();
+        expect(sourceLabels).toEqual(["gcs_source", "s3_source"]);
+        const repoUris = result.snapshots!
+            .flatMap(s => s.createSnapshotConfig.map(c => c.repo.repoPathUri))
+            .sort();
+        expect(repoUris).toEqual(["gs://my-bucket/snapshots", "s3://my-bucket/path"]);
     });
 });
