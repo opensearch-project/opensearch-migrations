@@ -1411,15 +1411,6 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 1
                     },
-                    "multiTypeBehavior": {
-                      "type": "string",
-                      "enum": [
-                        "NONE",
-                        "UNION",
-                        "SPLIT"
-                      ],
-                      "default": "NONE"
-                    },
                     "otelCollectorEndpoint": {
                       "type": "string",
                       "default": "http://otel-collector:4317"
@@ -3217,16 +3208,6 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "type": "number",
                         "default": 1,
                         "description": "Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."
-                      },
-                      "multiTypeBehavior": {
-                        "type": "string",
-                        "enum": [
-                          "NONE",
-                          "UNION",
-                          "SPLIT"
-                        ],
-                        "default": "NONE",
-                        "description": "Strategy for handling Elasticsearch multi-type indices (ES 5.x and earlier). 'NONE': fail if multi-type indices are encountered. 'UNION': merge all types into a single mapping. 'SPLIT': create separate indices for each type."
                       },
                       "otelCollectorEndpoint": {
                         "type": "string",

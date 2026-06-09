@@ -70,6 +70,9 @@ dependencies {
     testImplementation libs.junit.jupiter.api
     testImplementation libs.testcontainers.junit.jupiter
     testImplementation libs.testcontainers.kafka
+    testImplementation libs.testcontainers.localstack
+    testImplementation libs.testcontainers.toxiproxy
+    testImplementation libs.toxiproxy
     testImplementation libs.testcontainers
 
     testImplementation libs.mockito.core
