@@ -900,108 +900,10 @@ impl<'r, R: CommandRunner> App<'r, R> {
             return Err(Error::die("mirror: ECR auth failed"));
         }
 
-        // --- Mirror container images via native OCI client ---
-        ui::step("Mirroring third-party container images to private ECR");
-        let retry = OciRetry::from_env();
-        let mut img_failed = 0usize;
-        for &src in crate::mirror::IMAGES {
-            let repo = crate::mirror::ecr_repo_name(src);
-            let dst = crate::mirror::ecr_dest(src, &ecr_host);
-            if let Err(e) = ecr_sdk::create_repository(&repo, &region) {
-                ui::warn(&format!("create-repository {repo}: {e}"));
-            }
-            if retry.copy(src, &dst, &creds) {
-                ui::dim(&format!("  ✓ {src}"));
-            } else {
-                ui::err(&format!("  ✗ {src}"));
-                img_failed += 1;
-            }
-        }
-        if img_failed > 0 {
-            return Err(Error::die(format!(
-                "{img_failed} third-party images failed to mirror"
-            )));
-        }
+        self.mirror_container_images(&ecr_host, &region, &creds)?;
+        self.mirror_helm_charts(&ecr_host, &region)?;
 
-        // --- Mirror helm charts via helm pull + helm push ---
-        ui::step("Mirroring helm charts to private ECR");
-        // Login helm to ECR.
-        let ecr_pass_out = self.runner.run(
-            "bash",
-            &[
-                "-c",
-                &format!(
-                    "aws ecr get-login-password --region {region} | \
-                     helm registry login {ecr_host} -u AWS --password-stdin"
-                ),
-            ],
-        );
-        if !ecr_pass_out.success() {
-            ui::warn("helm ECR login failed — chart mirror may fail");
-        }
-        let mut chart_failed = 0usize;
-        for chart in crate::mirror::CHARTS {
-            // Create the ECR repo for this chart.
-            let chart_repo = format!("charts/{}", chart.name);
-            if let Err(e) = ecr_sdk::create_repository(&chart_repo, &region) {
-                ui::warn(&format!("create-repository {chart_repo}: {e}"));
-            }
-            // Pull the chart.
-            let pull_ok = if chart.repo.starts_with("oci://") {
-                self.runner
-                    .run(
-                        "helm",
-                        &[
-                            "pull",
-                            &format!("{}/{}", chart.repo, chart.name),
-                            "--version",
-                            chart.version,
-                        ],
-                    )
-                    .success()
-            } else {
-                self.runner
-                    .run(
-                        "helm",
-                        &[
-                            "pull",
-                            chart.name,
-                            "--repo",
-                            chart.repo,
-                            "--version",
-                            chart.version,
-                        ],
-                    )
-                    .success()
-            };
-            if !pull_ok {
-                ui::err(&format!(
-                    "  ✗ chart pull failed: {} {}",
-                    chart.name, chart.version
-                ));
-                chart_failed += 1;
-                continue;
-            }
-            // Find the downloaded tgz and push it.
-            let tgz = format!("{}-{}.tgz", chart.name, chart.version);
-            let push_ok = self
-                .runner
-                .run("helm", &["push", &tgz, &format!("oci://{ecr_host}/charts")])
-                .success();
-            // Clean up the tgz regardless.
-            let _ = std::fs::remove_file(&tgz);
-            if push_ok {
-                ui::dim(&format!("  ✓ {} {}", chart.name, chart.version));
-            } else {
-                ui::err(&format!("  ✗ chart push failed: {}", chart.name));
-                chart_failed += 1;
-            }
-        }
-        if chart_failed > 0 {
-            ui::warn(&format!("{chart_failed} chart(s) failed to mirror"));
-        }
-
-        // --- Generate private-ECR values override ---
+        // Generate private-ECR values override.
         let values_out = std::env::temp_dir()
             .join(format!("ma-ecr-values-{}.yaml", std::process::id()))
             .to_string_lossy()
@@ -1014,6 +916,115 @@ impl<'r, R: CommandRunner> App<'r, R> {
         self.state.set("CRANE_MIRRORED", "1");
         self.state.save()?;
         Ok(vec![values_out])
+    }
+
+    fn mirror_container_images(
+        &self,
+        ecr_host: &str,
+        region: &str,
+        creds: &[RegistryCred],
+    ) -> Result<()> {
+        ui::step("Mirroring third-party container images to private ECR");
+        let retry = OciRetry::from_env();
+        let mut failed = 0usize;
+        for &src in crate::mirror::IMAGES {
+            let repo = crate::mirror::ecr_repo_name(src);
+            let dst = crate::mirror::ecr_dest(src, ecr_host);
+            if let Err(e) = ecr_sdk::create_repository(&repo, region) {
+                ui::warn(&format!("create-repository {repo}: {e}"));
+            }
+            if retry.copy(src, &dst, creds) {
+                ui::dim(&format!("  ✓ {src}"));
+            } else {
+                ui::err(&format!("  ✗ {src}"));
+                failed += 1;
+            }
+        }
+        if failed > 0 {
+            return Err(Error::die(format!(
+                "{failed} third-party images failed to mirror"
+            )));
+        }
+        Ok(())
+    }
+
+    fn mirror_helm_charts(&self, ecr_host: &str, region: &str) -> Result<()> {
+        ui::step("Mirroring helm charts to private ECR");
+        let login_script = format!(
+            "aws ecr get-login-password --region {region} | \
+             helm registry login {ecr_host} -u AWS --password-stdin"
+        );
+        if !self.runner.run("bash", &["-c", &login_script]).success() {
+            ui::warn("helm ECR login failed — chart mirror may fail");
+        }
+        let mut failed = 0usize;
+        for chart in crate::mirror::CHARTS {
+            if !self.mirror_one_chart(chart, ecr_host, region) {
+                failed += 1;
+            }
+        }
+        if failed > 0 {
+            ui::warn(&format!("{failed} chart(s) failed to mirror"));
+        }
+        Ok(())
+    }
+
+    fn mirror_one_chart(
+        &self,
+        chart: &crate::mirror::ChartEntry,
+        ecr_host: &str,
+        region: &str,
+    ) -> bool {
+        let chart_repo = format!("charts/{}", chart.name);
+        if let Err(e) = ecr_sdk::create_repository(&chart_repo, region) {
+            ui::warn(&format!("create-repository {chart_repo}: {e}"));
+        }
+        let pull_ok = if chart.repo.starts_with("oci://") {
+            self.runner
+                .run(
+                    "helm",
+                    &[
+                        "pull",
+                        &format!("{}/{}", chart.repo, chart.name),
+                        "--version",
+                        chart.version,
+                    ],
+                )
+                .success()
+        } else {
+            self.runner
+                .run(
+                    "helm",
+                    &[
+                        "pull",
+                        chart.name,
+                        "--repo",
+                        chart.repo,
+                        "--version",
+                        chart.version,
+                    ],
+                )
+                .success()
+        };
+        if !pull_ok {
+            ui::err(&format!(
+                "  ✗ chart pull failed: {} {}",
+                chart.name, chart.version
+            ));
+            return false;
+        }
+        let tgz = format!("{}-{}.tgz", chart.name, chart.version);
+        let push_ok = self
+            .runner
+            .run("helm", &["push", &tgz, &format!("oci://{ecr_host}/charts")])
+            .success();
+        let _ = std::fs::remove_file(&tgz);
+        if push_ok {
+            ui::dim(&format!("  ✓ {} {}", chart.name, chart.version));
+        } else {
+            ui::err(&format!("  ✗ chart push failed: {}", chart.name));
+        }
+        push_ok
     }
 
     /// Resolve the helm chart path + the values files to apply (in order).
