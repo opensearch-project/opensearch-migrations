@@ -149,7 +149,7 @@ snapshot:
   snapshot_name: "test_snapshot"
   fs:
     repo_path: "/snapshot/test-console"
-  otel_endpoint: "http://otel-collector:4317"
+  otel_metrics_endpoint: "http://otel-collector:4317"
   """
     yaml_path = tmp_path / "services.yaml"
     with open(yaml_path, 'w') as f:
@@ -173,7 +173,7 @@ snapshot:
   snapshot_name: "test_snapshot"
   fs:
     repo_path: "/snapshot/test-console"
-  otel_endpoint: "http://otel-collector:4317"
+  otel_metrics_endpoint: "http://otel-collector:4317"
   """
     yaml_path = tmp_path / "services.yaml"
     with open(yaml_path, 'w') as f:

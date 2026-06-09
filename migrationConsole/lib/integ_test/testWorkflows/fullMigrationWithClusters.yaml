@@ -45,8 +45,6 @@ spec:
         value: "migration-image-config"
       - name: monitor-retry-limit
         value: "33"
-      - name: otel-collector-endpoint
-        value: "http://otel-collector:4317"
 
   templates:
     # Main workflow template

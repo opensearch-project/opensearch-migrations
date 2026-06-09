@@ -108,7 +108,8 @@
 ###                "clusterAwarenessAttributes": 1,
 ###                "loggingConfigurationOverrideConfigMap": "",  # string
 ###                "multiTypeBehavior": "",  # "NONE" | "UNION" | "SPLIT"
-###                "otelCollectorEndpoint": "http://otel-collector:4317",
+###                "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
+###                "otelTraceCollectorEndpoint": "http://otel-trace-collector:4317",
 ###                "output": "",  # "HUMAN_READABLE" | "JSON"
 ###                "transformerConfigBase64": "",  # string
 ###                "skipEvaluateApproval": false,
@@ -124,7 +125,8 @@
 ###                "initialLeaseDuration": "PT10M",
 ###                "maxConnections": 10,
 ###                "maxShardSizeBytes": 85899345920,
-###                "otelCollectorEndpoint": "http://otel-collector:4317",
+###                "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
+###                "otelTraceCollectorEndpoint": "http://otel-trace-collector:4317",
 ###                "skipApproval": false,
 ##                # Resource limits and requests for RFS container
 ##                "resources": ""  # unknown
@@ -164,7 +166,8 @@
 ##                        "ephemeral-storage": ""  # string
 #                    }
 #                },
-#                "otelCollectorEndpoint": "http://otel-collector:4317",
+#                "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
+#                "otelTraceCollectorEndpoint": "http://otel-trace-collector:4317",
 #                "setHeaders": [],  # string[]
 #                "destinationConnectionPoolSize": 0,
 #                "destinationConnectionPoolTimeout": "PT30S",
@@ -218,9 +221,10 @@
 ###                        "ephemeral-storage": ""  # string
 ##                    }
 ##                }
+##                "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
+##                "otelTraceCollectorEndpoint": "http://otel-trace-collector:4317"
 #            }
         }
     }
 }
 }
-

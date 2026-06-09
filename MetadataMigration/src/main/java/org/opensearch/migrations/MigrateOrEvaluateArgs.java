@@ -66,10 +66,21 @@ public class MigrateOrEvaluateArgs {
         + " Default: 1 (which does not apply any transformation)")
     public int clusterAwarenessAttributes = 1;
 
-    @Parameter(required = false, names = {
-        "--otel-collector-endpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
-            + "forwarded. If no value is provided, metrics will not be forwarded.")
-    String otelCollectorEndpoint;
+    @Parameter(
+        required = false,
+        names = { "--otel-trace-collector-endpoint", "--otelTraceCollectorEndpoint" },
+        arity = 1,
+        description = "Endpoint for the OpenTelemetry Collector to which traces should be forwarded. " +
+            "Omit this option to disable trace export.")
+    String otelTraceCollectorEndpoint;
+
+    @Parameter(
+        required = false,
+        names = { "--otel-metrics-collector-endpoint", "--otelMetricsCollectorEndpoint" },
+        arity = 1,
+        description = "Endpoint for the OpenTelemetry Collector to which metrics should be forwarded. " +
+            "Omit this option to disable metric export.")
+    String otelMetricsCollectorEndpoint;
 
     @Parameter(names = {"--source-version" }, description = "Version of the source cluster, for example: Elasticsearch 7.10 or OS 1.3.", converter = VersionConverter.class)
     public Version sourceVersion = null;

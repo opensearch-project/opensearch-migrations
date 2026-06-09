@@ -273,8 +273,21 @@ function validatePipelineRawConfigConflict(
     }
 }
 
-const OTEL_COLLECTOR_ENDPOINT = z.string().default("http://otel-collector:4317").optional()
-    .describe("URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317').");
+const blankStringAsDisabled = (value: unknown) =>
+    typeof value === "string" && value.trim().length === 0 ? "" : value;
+
+const OPTIONAL_ENDPOINT = z.union([z.literal("").transform(() => undefined), z.string()]);
+
+const optionalEndpoint = () => z.preprocess(blankStringAsDisabled, OPTIONAL_ENDPOINT.optional());
+
+const optionalEndpointWithDefault = (defaultValue: string) =>
+    z.preprocess(blankStringAsDisabled, OPTIONAL_ENDPOINT.default(defaultValue).optional());
+
+const OTEL_TRACE_COLLECTOR_ENDPOINT = optionalEndpoint()
+    .describe("URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export.");
+
+const OTEL_METRICS_COLLECTOR_ENDPOINT = optionalEndpointWithDefault("http://otel-collector:4317")
+    .describe("URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export.");
 
 export const KAFKA_CLIENT_CONFIG = z.object({
     enableMSKAuth: z.boolean().default(false).optional()
@@ -532,7 +545,8 @@ export const USER_PROXY_WORKFLOW_OPTIONS = z.object({
 }).describe("Kubernetes deployment-level options for the capture proxy.");
 
 export const USER_PROXY_PROCESS_OPTIONS = z.object({
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     setHeader: z.array(z.string()).optional()
         .describe("List of static headers to add to proxied requests, each in 'Header-Name: value' format.")
         .checksumFor('snapshot', 'replayer')
@@ -630,7 +644,8 @@ export const USER_REPLAYER_PROCESS_OPTIONS = z.object({
             "illegal_argument_exception, resource_already_exists_exception."),
     observedPacketConnectionTimeout: z.number().default(360).optional()
         .describe("Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."),
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     quiescentPeriodMs: z.number().default(5000).optional()
         .describe("Milliseconds to delay the first request on a resumed connection after a Kafka partition reassignment. Prevents request bursts during rebalancing."),
     removeAuthHeader: z.boolean().default(false).optional()
@@ -736,6 +751,8 @@ export const USER_CREATE_SNAPSHOT_WORKFLOW_OPTIONS = z.object({
 }).describe("Workflow-level options for snapshot creation, controlling naming and JVM configuration.");
 
 export const USER_CREATE_SNAPSHOT_PROCESS_OPTIONS = z.object({
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     indexAllowlist: z.array(z.string()).default([]).optional()
         .describe("Filters which indices are captured at the snapshot layer — evaluated by the source cluster when the snapshot is created. " +
             "Entries use the cluster's native multi-index expression syntax (the same format accepted by the _snapshot API's 'indices' field): " +
@@ -798,7 +815,8 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
             "'NONE': fail if multi-type indices are encountered. " +
             "'UNION': merge all types into a single mapping. " +
             "'SPLIT': create separate indices for each type."),
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
     transformerConfigBase64: z.string().default("").optional()
@@ -913,7 +931,8 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
     maxShardSizeBytes: z.number().default(80*1024*1024*1024).optional()
         .describe("Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.")
         .changeRestriction('gated'),
-    otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
+    otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
+    otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     serverGeneratedIds: z.enum(["AUTO", "ALWAYS", "NEVER"]).default("AUTO").optional()
         .describe("Controls document ID generation on the target. " +
             "'AUTO': auto-detect serverless TIMESERIES/VECTOR collections and enable server-generated IDs. " +

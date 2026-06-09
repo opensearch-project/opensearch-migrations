@@ -94,7 +94,8 @@ export class S3SnapshotYaml {
 
 export class SnapshotYaml {
     snapshot_name = '';
-    otel_endpoint = '';
+    otel_trace_endpoint = '';
+    otel_metrics_endpoint = '';
     snapshot_repo_name = '';
     s3?: S3SnapshotYaml;
     fs?: FileSystemSnapshotYaml;
@@ -102,8 +103,9 @@ export class SnapshotYaml {
     toDict() {
         return {
             snapshot_name: this.snapshot_name,
-            otel_endpoint: this.otel_endpoint,
             snapshot_repo_name: this.snapshot_repo_name,
+            ...(this.otel_trace_endpoint && { otel_trace_endpoint: this.otel_trace_endpoint }),
+            ...(this.otel_metrics_endpoint && { otel_metrics_endpoint: this.otel_metrics_endpoint }),
             // This conditinally includes the s3 and fs parameters if they're defined,
             // but does not add the keys otherwise
             ...(this.s3 && { s3: this.s3 }),
@@ -117,8 +119,19 @@ export class SnapshotYaml {
 export class MetadataMigrationYaml {
     from_snapshot = null;
     cluster_awareness_attributes = 1;
-    otel_endpoint = '';
+    otel_trace_endpoint = '';
+    otel_metrics_endpoint = '';
     source_cluster_version?: string;
+
+    toDict() {
+        return {
+            from_snapshot: this.from_snapshot,
+            cluster_awareness_attributes: this.cluster_awareness_attributes,
+            ...(this.otel_trace_endpoint && { otel_trace_endpoint: this.otel_trace_endpoint }),
+            ...(this.otel_metrics_endpoint && { otel_metrics_endpoint: this.otel_metrics_endpoint }),
+            ...(this.source_cluster_version && { source_cluster_version: this.source_cluster_version }),
+        };
+    }
 }
 export class KafkaYaml {
     broker_endpoints = '';
@@ -148,7 +161,7 @@ export class ServicesYaml {
             metrics_source: this.metrics_source,
             backfill: this.backfill?.toDict(),
             snapshot: this.snapshot?.toDict(),
-            metadata_migration: this.metadata_migration,
+            metadata_migration: this.metadata_migration?.toDict(),
             replay: this.replayer?.toDict(),
             kafka: this.kafka,
             client_options: this.client_options
@@ -158,5 +171,3 @@ export class ServicesYaml {
         })
     }
 }
-
-

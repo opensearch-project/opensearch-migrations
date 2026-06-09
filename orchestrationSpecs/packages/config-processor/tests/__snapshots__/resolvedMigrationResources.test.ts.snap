@@ -60,7 +60,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "maxTrafficBufferSize": 1048576,
       "noCapture": false,
       "numThreads": 1,
-      "otelCollectorEndpoint": "http://otel-collector:4317",
+      "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
       "podReplicas": 1,
       "resources": {
         "limits": {
@@ -108,6 +108,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "jvmArgs": "",
       "loggingConfigurationOverrideConfigMap": "",
       "maxSnapshotRateMbPerNode": 0,
+      "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
       "snapshotPrefix": "snap1",
     },
   },
@@ -137,7 +138,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "documentBackfillLoggingConfigurationOverrideConfigMap": "",
       "documentBackfillMaxConnections": 8,
       "documentBackfillMaxShardSizeBytes": 85899345920,
-      "documentBackfillOtelCollectorEndpoint": "http://otel-collector:4317",
+      "documentBackfillOtelMetricsCollectorEndpoint": "http://otel-collector:4317",
       "documentBackfillPodReplicas": 1,
       "documentBackfillPositionGapStopword": "a",
       "documentBackfillResources": {
@@ -166,7 +167,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "metadataMigrationJvmArgs": "",
       "metadataMigrationLoggingConfigurationOverrideConfigMap": "",
       "metadataMigrationMultiTypeBehavior": "NONE",
-      "metadataMigrationOtelCollectorEndpoint": "http://otel-collector:4317",
+      "metadataMigrationOtelMetricsCollectorEndpoint": "http://otel-collector:4317",
       "metadataMigrationOutput": "HUMAN_READABLE",
       "metadataMigrationTransformerConfigBase64": "",
       "metadataMigrationUseRecoverySource": false,
@@ -194,7 +195,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "maxConcurrentRequests": 10000,
       "numClientThreads": 0,
       "observedPacketConnectionTimeout": 360,
-      "otelCollectorEndpoint": "http://otel-collector:4317",
+      "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
       "podReplicas": 1,
       "quiescentPeriodMs": 5000,
       "removeAuthHeader": false,

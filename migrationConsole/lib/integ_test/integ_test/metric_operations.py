@@ -1,13 +1,18 @@
 import functools
+import json
 import logging
+import subprocess
 import time
 import pytest
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Tuple
 from unittest import TestCase
 from console_link.models.metrics_source import MetricsSource, CloudwatchMetricsSource
 from console_link.middleware.metrics import get_metric_data
+from console_link.models.utils import create_boto3_client, raise_for_aws_api_error
 
 logger = logging.getLogger(__name__)
+CW_NAMESPACE = "OpenSearchMigrations"
 
 
 # Note that the names of metrics are a bit different in a local vs cloud deployment.
@@ -81,3 +86,102 @@ def assert_metrics_present(*wrapper_args, **wrapper_kwargs):
                         assert_metrics(test_case=self, deployment_type=deployment_type, *wrapper_args, **wrapper_kwargs)
         return wrapper
     return decorator
+
+
+def _load_aws_metadata(namespace: str = "ma"):
+    result = subprocess.run(
+        ["kubectl", "-n", namespace, "get", "configmap", "aws-metadata", "-o", "json"],
+        capture_output=True,
+        text=True,
+        timeout=30
+    )
+    if result.returncode != 0:
+        logger.info("No aws-metadata ConfigMap found; skipping CloudWatch metric assertion for local/non-EKS run.")
+        return None
+    return json.loads(result.stdout).get("data", {})
+
+
+def _find_metric_dimensions(client, metric_name: str, required_dimensions: Dict[str, str]):
+    response = client.list_metrics(
+        Namespace=CW_NAMESPACE,
+        MetricName=metric_name,
+        RecentlyActive="PT3H"
+    )
+    raise_for_aws_api_error(response)
+    for metric in response.get("Metrics", []):
+        dimensions = {d["Name"]: d["Value"] for d in metric.get("Dimensions", [])}
+        if all(dimensions.get(k) == v for k, v in required_dimensions.items()):
+            return metric.get("Dimensions", [])
+    return None
+
+
+def _metric_has_recent_data(client, metric_name: str, dimensions, lookback_minutes: int) -> bool:
+    end_time = datetime.now(timezone.utc)
+    response = client.get_metric_data(
+        MetricDataQueries=[
+            {
+                "Id": "metric0",
+                "MetricStat": {
+                    "Metric": {
+                        "Namespace": CW_NAMESPACE,
+                        "MetricName": metric_name,
+                        "Dimensions": dimensions,
+                    },
+                    "Period": 60,
+                    "Stat": "Sum",
+                },
+            },
+        ],
+        StartTime=end_time - timedelta(minutes=lookback_minutes),
+        EndTime=end_time,
+        ScanBy="TimestampAscending",
+    )
+    raise_for_aws_api_error(response)
+    results = response.get("MetricDataResults", [])
+    return bool(results and results[0].get("Timestamps"))
+
+
+def _any_candidate_has_recent_data(client, candidates, lookback_minutes: int) -> bool:
+    for metric_name, required_dimensions in candidates:
+        dimensions = _find_metric_dimensions(client, metric_name, required_dimensions)
+        if dimensions and _metric_has_recent_data(client, metric_name, dimensions, lookback_minutes):
+            logger.info("Found CloudWatch metric data for %s with dimensions %s", metric_name, dimensions)
+            return True
+    return False
+
+
+def assert_cloudwatch_capture_replay_metrics_for_workflow_run(namespace: str = "ma", lookback_minutes: int = 20,
+                                                             attempts: int = 5, wait_seconds: int = 60):
+    aws_metadata = _load_aws_metadata(namespace)
+    if not aws_metadata:
+        return
+
+    region = aws_metadata.get("AWS_REGION")
+    qualifier = aws_metadata.get("STAGE_NAME")
+    if not region or not qualifier:
+        raise AssertionError(f"aws-metadata ConfigMap is missing AWS_REGION or STAGE_NAME: {aws_metadata}")
+
+    client = create_boto3_client(aws_service_name="cloudwatch", region=region)
+    app_metric_candidates = [
+        ("bytesSent", {"qualifier": qualifier, "OTelLib": "documentMigration"}),
+        ("kafkaCommitCount", {"qualifier": qualifier, "OTelLib": "replayer"}),
+        ("bytesRead", {"qualifier": qualifier, "OTelLib": "captureProxy"}),
+    ]
+    for attempt in range(1, attempts + 1):
+        app_metric_found = _any_candidate_has_recent_data(client, app_metric_candidates, lookback_minutes)
+        if app_metric_found:
+            return
+        if attempt < attempts:
+            logger.info(
+                "CloudWatch capture/replay app metrics not visible yet (attempt %s/%s, app=%s); waiting %ss",
+                attempt,
+                attempts,
+                app_metric_found,
+                wait_seconds
+            )
+            time.sleep(wait_seconds)
+
+    raise AssertionError(
+        "Expected CloudWatch capture/replay app metrics were not found in namespace "
+        f"{CW_NAMESPACE} for qualifier {qualifier} within the last {lookback_minutes} minutes"
+    )

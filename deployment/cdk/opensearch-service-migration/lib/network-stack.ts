@@ -54,6 +54,7 @@ export interface NetworkStackProps extends StackPropsExt {
     readonly sourceClusterDisabled?: boolean;
     readonly albAcmCertArn?: string;
     readonly managedServiceSourceSnapshotEnabled: boolean;
+    readonly otelTraceCollectorEnabled?: boolean;
     readonly sourceClusterDefinition?: Record<string, unknown>;
     readonly targetClusterDefinition?: Record<string, unknown>;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -155,7 +156,7 @@ export class NetworkStack extends Stack {
     public readonly targetClusterYaml?: ClusterYaml;
     public readonly vpcDetails: VpcDetails;
 
-    private createVpcEndpoints(vpc: IVpc) {
+    private createVpcEndpoints(vpc: IVpc, otelTraceCollectorEnabled?: boolean) {
         // Gateway endpoints
         new GatewayVpcEndpoint(this, 'S3VpcEndpoint', {
             service: GatewayVpcEndpointAwsService.S3,
@@ -183,7 +184,7 @@ export class NetworkStack extends Stack {
             InterfaceVpcEndpointAwsService.SECRETS_MANAGER, // Cluster Password Secret
             InterfaceVpcEndpointAwsService.SSM_MESSAGES, // Session Manager
             InterfaceVpcEndpointAwsService.SSM, // Parameter Store
-            InterfaceVpcEndpointAwsService.XRAY, // X-Ray Traces
+            ...(otelTraceCollectorEnabled ? [InterfaceVpcEndpointAwsService.XRAY] : []), // X-Ray Traces
             isStackInGovCloud(this) ?
                 InterfaceVpcEndpointAwsService.ELASTIC_FILESYSTEM_FIPS : // EFS Control Plane GovCloud
                 InterfaceVpcEndpointAwsService.ELASTIC_FILESYSTEM, // EFS Control Plane
@@ -241,7 +242,7 @@ export class NetworkStack extends Stack {
                 natGateways: 0,
             });
             // Only create interface endpoints if VPC not imported
-            this.createVpcEndpoints(vpc);
+            this.createVpcEndpoints(vpc, props.otelTraceCollectorEnabled);
         }
         if(!props.addOnMigrationDeployId) {
             createMigrationStringParameter(this, vpc.vpcId, {

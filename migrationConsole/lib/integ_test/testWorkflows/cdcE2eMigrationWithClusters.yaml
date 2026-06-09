@@ -57,8 +57,6 @@ spec:
         value: "migration-image-config"
       - name: monitor-retry-limit
         value: "120"
-      - name: otel-collector-endpoint
-        value: "http://otel-collector:4317"
       - name: speedup-factor
         value: "20"
       - name: observed-packet-timeout

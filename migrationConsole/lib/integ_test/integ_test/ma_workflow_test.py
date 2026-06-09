@@ -7,6 +7,7 @@ from console_link.workflow.commands.crd_utils import list_migration_resources, r
 from console_link.workflow.models.utils import load_k8s_config
 
 from .test_cases.ma_argo_test_base import MATestBase
+from .metric_operations import assert_cloudwatch_capture_replay_metrics_for_workflow_run
 
 
 logger = logging.getLogger(__name__)
@@ -136,3 +137,5 @@ def test_migration_assistant_workflow(record_data, keep_workflows, test_case: MA
     test_case.verify_clusters()
     test_case.workflow_finish()
     test_case.test_after()
+    test_case.assert_observability()
+    assert_cloudwatch_capture_replay_metrics_for_workflow_run(namespace=test_case.argo_service.namespace)
