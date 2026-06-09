@@ -196,12 +196,10 @@ spec:
             - |
               set -euo pipefail
 
+              OPENAPI_PATH=/tmp/strimzi-openapi.json
               SCHEMA_PATH=/root/schema/workflowMigration.schema.json
               SAMPLE_PATH=/root/schema/sample.yaml
 
-      {{- if and (get .Values.conditionalPackageInstalls "strimzi-kafka-operator") (not .Values.kafkaExternal.enabled) }}
-
-              OPENAPI_PATH=/tmp/strimzi-openapi.json
               echo "Waiting for Strimzi OpenAPI to become available..."
               for attempt in $(seq 1 180); do
                 if kubectl get --raw /openapi/v3/apis/kafka.strimzi.io/v1 > "$OPENAPI_PATH" 2>/dev/null; then
@@ -223,16 +221,6 @@ spec:
               MIGRATION_UNIFIED_SCHEMA_PATH="$SCHEMA_PATH" \
                 ${NODEJS:-node-22} /root/configProcessor/index.js makeSample > "$SAMPLE_PATH"
               printf '# yaml-language-server: $schema=/root/schema/workflowMigration.schema.json\n%s' "$(cat "$SAMPLE_PATH")" > "$SAMPLE_PATH"
-      {{- else }}
-              echo "External Kafka mode — generating base-only schema (no Strimzi defs)..."
-              ${NODEJS:-node-22} /root/configProcessor/index.js buildUnifiedSchema \
-                --base-only \
-                --output "$SCHEMA_PATH"
-              echo "Generating sample workflow config..."
-              MIGRATION_UNIFIED_SCHEMA_PATH="$SCHEMA_PATH" \
-                ${NODEJS:-node-22} /root/configProcessor/index.js makeSample > "$SAMPLE_PATH"
-              printf '# yaml-language-server: $schema=/root/schema/workflowMigration.schema.json\n%s' "$(cat "$SAMPLE_PATH")" > "$SAMPLE_PATH"
-      {{- end }}
           volumeMounts:
             - name: workflow-schema
               mountPath: /root/schema

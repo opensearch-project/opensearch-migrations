@@ -9,7 +9,7 @@ export const STRIMZI_OPENAPI_API_PATH = "/openapi/v3/apis/kafka.strimzi.io/v1";
 export const UNIFIED_SCHEMA_PATH_ENV = "MIGRATION_UNIFIED_SCHEMA_PATH";
 export const ALLOW_FALLBACK_UNIFIED_SCHEMA_ENV = "MIGRATION_ALLOW_FALLBACK_UNIFIED_SCHEMA";
 
-export type UnifiedSchemaMode = "full" | "base-only";
+export type UnifiedSchemaMode = "full";
 export type UnifiedSchemaSource = "file" | "live-cluster" | "fallback-artifact" | "generated";
 
 export interface LoadedUnifiedSchema {
@@ -21,7 +21,6 @@ export interface LoadedUnifiedSchema {
 
 export interface UnifiedSchemaBuildOptions {
     strimziSchemaPath?: string;
-    baseOnly?: boolean;
 }
 
 function packageRoot(...segments: string[]) {
@@ -227,33 +226,6 @@ function buildBaseUnifiedSchema() {
     return zodSchemaToJsonSchema(OVERALL_MIGRATION_CONFIG);
 }
 
-function stripOpenApiNullable(value: unknown): unknown {
-    if (Array.isArray(value)) {
-        return value.map(stripOpenApiNullable);
-    }
-    if (!value || typeof value !== "object") {
-        return value;
-    }
-    const updated: Record<string, unknown> = {};
-    for (const [key, inner] of Object.entries(value)) {
-        if (key === "nullable") {
-            continue;
-        }
-        updated[key] = stripOpenApiNullable(inner);
-    }
-    return updated;
-}
-
-function buildBaseOnlyUnifiedSchema(detail: string): LoadedUnifiedSchema {
-    const cleaned = stripOpenApiNullable(buildBaseUnifiedSchema()) as Record<string, unknown>;
-    return {
-        schema: addSchemaMetadata(cleaned, "base-only", detail),
-        mode: "base-only",
-        source: "generated",
-        detail,
-    };
-}
-
 export function buildUnifiedSchema(options: UnifiedSchemaBuildOptions = {}): LoadedUnifiedSchema {
     if (options.strimziSchemaPath && fs.existsSync(options.strimziSchemaPath)) {
         const base = buildBaseUnifiedSchema();
@@ -265,10 +237,6 @@ export function buildUnifiedSchema(options: UnifiedSchemaBuildOptions = {}): Loa
             source: "file",
             detail: normalizeSchemaDetail(options.strimziSchemaPath),
         };
-    }
-
-    if (options.baseOnly) {
-        return buildBaseOnlyUnifiedSchema("base-only (external-kafka or strimzi unavailable)");
     }
 
     if (process.env[ALLOW_FALLBACK_UNIFIED_SCHEMA_ENV] === "true") {
@@ -339,7 +307,7 @@ export function loadUnifiedSchema(): LoadedUnifiedSchema {
 }
 
 export function assertUnifiedSchemaIsUsable(loaded: LoadedUnifiedSchema) {
-    if (loaded.mode !== "full" && loaded.mode !== "base-only") {
-        throw new Error(`The migration config validator requires a 'full' or 'base-only' unified schema, got '${loaded.mode}' from ${loaded.detail}`);
+    if (loaded.mode !== "full") {
+        throw new Error(`The migration config validator requires a full unified schema, got '${loaded.mode}' from ${loaded.detail}`);
     }
 }
