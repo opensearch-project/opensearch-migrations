@@ -141,10 +141,6 @@ RUN mkdir -p /usr/share/bash-completion/completions && \
     _CONSOLE_COMPLETE=bash_source console > /usr/share/bash-completion/completions/console && \
     test -s /usr/share/bash-completion/completions/console
 
-# Copy Java tools (built from source, overrides base image versions)
-COPY javaTools/createSnapshot /root/createSnapshot
-COPY javaTools/metadataMigration /root/metadataMigration
-COPY javaTools/documentMigration /root/documentMigration
 
 COPY nodeStaging/configProcessor /root/configProcessor
 
