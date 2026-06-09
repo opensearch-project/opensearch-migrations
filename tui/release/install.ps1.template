@@ -1,0 +1,106 @@
+# install.ps1 — opensearch-migration-assistant installer (Windows).
+#
+# This script is PER-RELEASE. The VERSION below is stamped at release-build
+# time and never changes. To install a different version, fetch a different
+# install.ps1.
+#
+# Latest:    iwr -useb https://github.com/opensearch-project/opensearch-migrations/releases/latest/download/install.ps1 | iex
+# Specific:  iwr -useb https://github.com/opensearch-project/opensearch-migrations/releases/download/0.4.2/install.ps1 | iex
+#
+# What it does:
+#   1. detects arch (x86_64 only on Windows for now)
+#   2. downloads the matching migration-tui.exe into %USERPROFILE%\.local\bin
+#   3. downloads and extracts the assistant bundle into
+#      %USERPROFILE%\.opensearch-migration-assistant
+#
+# Requires: PowerShell 5.1+ (Windows 10 1607+) — built-in tar.exe and curl.exe
+# are available since Windows 10 1803/1809.
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+# ── stamped at release time ───────────────────────────────────────────────
+# Gradle's `stampInstallScriptWindows` task substitutes @VERSION@ → real version.
+$version = '@VERSION@'
+if ($version -eq '@VERSION@') { $version = '0.0.0-dev' }
+$repo = 'opensearch-project/opensearch-migrations'
+$base = "https://github.com/$repo/releases/download/$version"
+
+# ── targets ───────────────────────────────────────────────────────────────
+$binDir    = Join-Path $env:USERPROFILE '.local\bin'
+$bundleDir = Join-Path $env:USERPROFILE '.opensearch-migration-assistant'
+
+function Say  { param($Message) Write-Host "==> $Message" }
+function Die  { param($Message) Write-Error $Message; exit 1 }
+
+# ── detect platform ───────────────────────────────────────────────────────
+$arch = (Get-CimInstance Win32_Processor | Select-Object -First 1).Architecture
+# 0=x86, 9=x64, 12=arm64
+switch ($arch) {
+    9       { $archName = 'x86_64' }
+    12      { Die 'arm64 Windows is not supported yet (only x86_64-pc-windows-msvc is published)' }
+    default { Die "unsupported architecture code: $arch" }
+}
+
+$target = "$archName-pc-windows-msvc"
+Say "platform: $target, version: $version"
+
+# ── temp workspace ────────────────────────────────────────────────────────
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+
+try {
+    # ── download & install binary ─────────────────────────────────────────
+    $binaryUrl = "$base/migration-tui-$target.exe"
+    Say "downloading binary: $binaryUrl"
+    $binaryDst = Join-Path $tmp 'migration-tui.exe'
+    Invoke-WebRequest -Uri $binaryUrl -OutFile $binaryDst -UseBasicParsing
+
+    if (-not (Test-Path $binDir)) {
+        New-Item -ItemType Directory -Path $binDir -Force | Out-Null
+    }
+    Move-Item -Path $binaryDst -Destination (Join-Path $binDir 'migration-tui.exe') -Force
+    Say "installed: $binDir\migration-tui.exe"
+
+    # ── download & extract bundle ─────────────────────────────────────────
+    $bundleUrl = "$base/migration-assistant-bundle.tar.gz"
+    Say "downloading bundle: $bundleUrl"
+    $bundleDst = Join-Path $tmp 'bundle.tar.gz'
+    Invoke-WebRequest -Uri $bundleUrl -OutFile $bundleDst -UseBasicParsing
+
+    # Replace bundle directory atomically.
+    if (Test-Path $bundleDir) {
+        $oldDir = "$bundleDir.old"
+        if (Test-Path $oldDir) { Remove-Item -Recurse -Force $oldDir }
+        Move-Item -Path $bundleDir -Destination $oldDir
+    }
+    New-Item -ItemType Directory -Path $bundleDir -Force | Out-Null
+    # Use built-in tar.exe (available since Windows 10 1803).
+    tar.exe -xzf $bundleDst -C $bundleDir
+    if ($LASTEXITCODE -ne 0) {
+        if (Test-Path "$bundleDir.old") {
+            Remove-Item -Recurse -Force $bundleDir
+            Move-Item -Path "$bundleDir.old" -Destination $bundleDir
+        }
+        Die 'bundle extract failed'
+    }
+    if (Test-Path "$bundleDir.old") { Remove-Item -Recurse -Force "$bundleDir.old" }
+    Say "installed: $bundleDir"
+
+    # ── PATH check ────────────────────────────────────────────────────────
+    $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
+    if (-not $userPath -or ($userPath -notlike "*$binDir*")) {
+        Write-Host ''
+        Write-Host "note: $binDir is not on your PATH."
+        Write-Host '      to add it permanently, run:'
+        Write-Host ''
+        Write-Host "          [Environment]::SetEnvironmentVariable('PATH', `"$binDir;`$env:PATH`", 'User')"
+        Write-Host ''
+    }
+
+    Write-Host ''
+    Say 'done. run: migration-tui'
+}
+finally {
+    if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+}

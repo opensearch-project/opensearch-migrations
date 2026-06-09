@@ -4,21 +4,25 @@
  * What ships per release:
  *
  *   migration-tui-<target>          one binary per arch (consumed from :tui)
+ *                                   Windows binary has .exe suffix.
  *   migration-assistant-bundle.tar.gz   helm/cfn/values/skills/manifest
- *   install.sh                      POSIX sh, version-stamped
+ *   install.sh                      POSIX sh, version-stamped (linux + macOS)
+ *   install.ps1                     PowerShell, version-stamped (Windows)
  *   VERSION.txt                     plain text, just the version
  *
- * This file produces all four into build/dist/<version>/. The CI release
+ * This file produces all five into build/dist/<version>/. The CI release
  * job uploads them to the GitHub Release; nothing in here pushes
  * anything anywhere.
  *
  * Tasks:
- *   stampInstallScript  install.sh.template → install.sh, with @VERSION@ replaced
- *   writeVersionFile    write VERSION.txt
- *   assembleBundle      tar -czf migration-assistant-bundle.tar.gz of bundle/
- *   stageBinary         copy the binary from :tui's `tuiBinary` configuration
- *                       into build/dist/<version>/migration-tui-<classifier>
- *   assemble            depends on all four
+ *   stampInstallScript        install.sh.template  → install.sh, with @VERSION@ replaced
+ *   stampInstallScriptWindows install.ps1.template → install.ps1, with @VERSION@ replaced
+ *   writeVersionFile          write VERSION.txt
+ *   assembleBundle            tar -czf migration-assistant-bundle.tar.gz of bundle/
+ *   stageBinary               copy the binary from :tui's `tuiBinary` configuration
+ *                             into build/dist/<version>/migration-tui-<classifier>
+ *                             (with .exe suffix on windows targets)
+ *   assemble                  depends on all five
  *
  * Cross-target story: the binary is matrix-built in CI. Each matrix
  * entry runs `./gradlew :tui:release:assemble -Ptarget=<triple>` and
@@ -78,6 +82,19 @@ val stampInstallScript = tasks.register<Copy>("stampInstallScript") {
     }
 }
 
+// ─── 1b. stamp install.ps1 ────────────────────────────────────────────
+val stampInstallScriptWindows = tasks.register<Copy>("stampInstallScriptWindows") {
+    group = "release"
+    description = "Substitute @VERSION@ in install.ps1.template → build/dist/<version>/install.ps1"
+
+    from(layout.projectDirectory.file("install.ps1.template")) {
+        rename { "install.ps1" }
+        filter { line -> line.replace("@VERSION@", project.version.toString()) }
+    }
+    into(distDir)
+    // No exec-bit on Windows; PowerShell scripts don't need it.
+}
+
 // ─── 2. VERSION.txt ───────────────────────────────────────────────────
 val writeVersionFile = tasks.register("writeVersionFile") {
     group = "release"
@@ -135,8 +152,10 @@ val stageBinary = tasks.register<Copy>("stageBinary") {
         // Configuration artifacts arrive as <name>-<classifier>.<ext>; we
         // strip the extension if blank and end up with e.g.
         // "migration-tui-linux-aarch64" or "migration-tui-host".
+        // Windows targets get .exe appended so the artifact runs natively.
         val target = (findProperty("target") as String?)?.takeIf { it.isNotBlank() } ?: "host"
-        "migration-tui-$target"
+        val suffix = if (target.contains("windows")) ".exe" else ""
+        "migration-tui-$target$suffix"
     }
 
     doLast {
@@ -148,7 +167,7 @@ val stageBinary = tasks.register<Copy>("stageBinary") {
 
 // ─── lifecycle ────────────────────────────────────────────────────────
 tasks.named("assemble") {
-    dependsOn(stampInstallScript, writeVersionFile, assembleBundle, stageBinary)
+    dependsOn(stampInstallScript, stampInstallScriptWindows, writeVersionFile, assembleBundle, stageBinary)
 }
 
 // ─── outgoing artifacts ───────────────────────────────────────────────
@@ -163,6 +182,6 @@ val releaseArtifacts by configurations.registering {
 
 artifacts {
     add(releaseArtifacts.name, distDir) {
-        builtBy(stampInstallScript, writeVersionFile, assembleBundle, stageBinary)
+        builtBy(stampInstallScript, stampInstallScriptWindows, writeVersionFile, assembleBundle, stageBinary)
     }
 }

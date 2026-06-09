@@ -2,7 +2,10 @@
 # Path-scoped: only runs when TUI files (or this workflow) change.
 #
 # Matrix structure mirrors release-drafter.yml's build-tui-binaries job
-# so any cross-arch issue surfaces on PR rather than at release time.
+# so any cross-OS issue surfaces on PR rather than at release time.
+#
+# Native runners per target — no cross-compilation. Five jobs total:
+# linux x86_64 + aarch64, macOS x86_64 (Intel) + aarch64 (M1), windows x86_64.
 name: tui
 
 on:
@@ -29,14 +32,37 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-22.04
+            shell: bash
+            bin_suffix: ''
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-22.04-arm
+            shell: bash
+            bin_suffix: ''
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            shell: bash
+            bin_suffix: ''
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            shell: bash
+            bin_suffix: ''
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2022
+            shell: bash
+            bin_suffix: '.exe'
     runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-env
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Set up Java 21
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v5.0.0
+        with:
+          distribution: 'corretto'
+          java-version: '21'
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # 1.92.0 pinned
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # master @ 2025-02-17
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
@@ -46,40 +72,39 @@ jobs:
           rustc --version
           cargo --version
           cargo clippy --version
-      - name: Run :tui:check (versionCheck + cargoTest + cargoClippy + spotless)
+      - name: Run :tui:check (versionCheck + cargoTest + cargoClippy + fmt)
         run: |
           ./gradlew :tui:check -Ptarget=${{ matrix.target }} --no-daemon
-      - name: Smoke-test release packaging (no actual release)
-        # Validates that the release subproject assembles end-to-end
-        # against a placeholder version. Catches gradle-side breakage
-        # before it lands in release-drafter where the matrix runs for
-        # real.
+      - name: Smoke-test release packaging
+        # Validates that the release subproject assembles end-to-end against
+        # a placeholder version. Catches gradle-side breakage before it
+        # lands in release-drafter where the matrix runs for real.
         run: |
           ./gradlew :tui:release:assemble \
             -PtuiVersion=0.0.0-ci \
             -Ptarget=${{ matrix.target }} \
             --no-daemon
-          # Verify the artifacts the release-drafter `files:` block expects.
           DIST="tui/release/build/dist/0.0.0-ci"
-          test -f "${DIST}/migration-tui-${{ matrix.target }}"
+          test -f "${DIST}/migration-tui-${{ matrix.target }}${{ matrix.bin_suffix }}"
           test -f "${DIST}/install.sh"
+          test -f "${DIST}/install.ps1"
           test -f "${DIST}/VERSION.txt"
           test -f "${DIST}/migration-assistant-bundle.tar.gz"
-          # Sanity: install.sh is well-formed POSIX sh.
-          sh -n "${DIST}/install.sh"
+      - name: Validate install.sh is well-formed POSIX sh (unix only)
+        if: ${{ runner.os != 'Windows' }}
+        run: |
+          sh -n "tui/release/build/dist/0.0.0-ci/install.sh"
       - name: Smoke-test --version reads VERSION.txt at runtime
-        # Validates the runtime resolution path that ships in the
-        # released binary. cargo run from the source tree falls back
-        # to "0.0.0-dev"; placing VERSION.txt next to the binary should
-        # override that.
+        # Validates the runtime resolution path that ships in the released
+        # binary. cargo run from the source tree falls back to "0.0.0-dev";
+        # placing VERSION.txt next to the binary should override that.
         run: |
           set -euo pipefail
           DIST="tui/release/build/dist/0.0.0-ci"
-          # Already in install layout: <dist>/migration-tui-<target> next
-          # to <dist>/VERSION.txt. Run --version and confirm output.
-          out=$("${DIST}/migration-tui-${{ matrix.target }}" --version)
+          BIN="${DIST}/migration-tui-${{ matrix.target }}${{ matrix.bin_suffix }}"
+          out=$("${BIN}" --version)
           echo "got: $out"
-          [[ "$out" == "migration-tui 0.0.0-ci" ]] || {
+          if [ "$out" != "migration-tui 0.0.0-ci" ]; then
             echo "::error::--version did not pick up sibling VERSION.txt"
             exit 1
-          }
+          fi

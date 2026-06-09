@@ -43,12 +43,12 @@ jobs:
     # Native builds per architecture. Each matrix job builds the
     # migration-tui binary for its host arch via Gradle (Model C
     # injects -PtuiVersion at build time; the binary itself reads the
-    # version from a sibling VERSION.txt at runtime, so the binary is
-    # technically architecture-versioned only by file name).
+    # version from a sibling VERSION.txt at runtime).
     #
-    # The aarch64 entry runs on `ubuntu-22.04-arm` for native builds
-    # (no cross-compile linker complications). x86_64 stays on plain
-    # ubuntu-22.04.
+    # Five targets: linux x86_64+aarch64, macOS Intel+Apple Silicon,
+    # Windows x86_64. setup-java is invoked directly rather than
+    # ./.github/actions/setup-env because that composite action assumes
+    # Linux apt-get and won't run on macos/windows runners.
     name: Build migration-tui (${{ matrix.target }})
     needs: extract-version
     if: ${{ github.event.act || needs.extract-version.result == 'success' }}
@@ -58,14 +58,37 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-22.04
+            shell: bash
+            bin_suffix: ''
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-22.04-arm
+            shell: bash
+            bin_suffix: ''
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+            shell: bash
+            bin_suffix: ''
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            shell: bash
+            bin_suffix: ''
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2022
+            shell: bash
+            bin_suffix: '.exe'
     runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: ./.github/actions/setup-env
+      - name: Set up Java 21
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v5.0.0
+        with:
+          distribution: 'corretto'
+          java-version: '21'
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # 1.92.0 pinned
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # master @ 2025-02-17
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
@@ -79,20 +102,26 @@ jobs:
             -Ptarget=${{ matrix.target }} \
             --no-daemon
       - name: Stage per-target artifacts
-        # The dist directory for ALL matrix runs has the same name
-        # (the version), so we stage into a target-namespaced sub-dir
-        # so download-artifact can merge cleanly downstream.
-        # Shared artifacts (install.sh, VERSION.txt, bundle tarball)
+        # The dist directory for ALL matrix runs has the same name (the
+        # version), so we stage into target-namespaced sub-dirs so
+        # download-artifact can merge cleanly downstream.
+        #
+        # Shared artifacts (install.sh + VERSION.txt + bundle tarball)
         # are emitted by every matrix run identically; we upload them
-        # ONLY from the x86_64 leg to avoid duplicate-file conflicts at
-        # merge time.
+        # ONLY from the linux x86_64 leg to avoid duplicate-file
+        # conflicts at merge time. install.ps1 is upload-once from the
+        # windows leg (its content is identical across runs but it's
+        # the natural runner to mark "windows-side shared file").
         run: |
           set -euo pipefail
           DIST="tui/release/build/dist/${{ needs.extract-version.outputs.version }}"
-          mkdir -p staged-bin staged-shared
-          cp "${DIST}/migration-tui-${{ matrix.target }}" staged-bin/
+          mkdir -p staged-bin staged-shared-posix staged-shared-windows
+          cp "${DIST}/migration-tui-${{ matrix.target }}${{ matrix.bin_suffix }}" staged-bin/
           if [ "${{ matrix.target }}" = "x86_64-unknown-linux-gnu" ]; then
-            cp "${DIST}/install.sh" "${DIST}/VERSION.txt" "${DIST}/migration-assistant-bundle.tar.gz" staged-shared/
+            cp "${DIST}/install.sh" "${DIST}/VERSION.txt" "${DIST}/migration-assistant-bundle.tar.gz" staged-shared-posix/
+          fi
+          if [ "${{ matrix.target }}" = "x86_64-pc-windows-msvc" ]; then
+            cp "${DIST}/install.ps1" staged-shared-windows/
           fi
       - name: Upload per-target binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -100,12 +129,19 @@ jobs:
           name: tui-bin-${{ matrix.target }}
           path: staged-bin/
           if-no-files-found: error
-      - name: Upload shared TUI artifacts (x86_64 only)
+      - name: Upload shared POSIX artifacts (linux x86_64 only)
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: tui-shared
-          path: staged-shared/
+          name: tui-shared-posix
+          path: staged-shared-posix/
+          if-no-files-found: error
+      - name: Upload shared Windows artifacts (windows x86_64 only)
+        if: ${{ matrix.target == 'x86_64-pc-windows-msvc' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tui-shared-windows
+          path: staged-shared-windows/
           if-no-files-found: error
 
   draft-a-release:
@@ -351,6 +387,7 @@ jobs:
         run: |
           set -euo pipefail
           mv tui-release-artifacts/install.sh           tui-release-artifacts/migration-tui-install.sh
+          mv tui-release-artifacts/install.ps1          tui-release-artifacts/migration-tui-install.ps1
           mv tui-release-artifacts/VERSION.txt          tui-release-artifacts/migration-tui-VERSION.txt
           mv tui-release-artifacts/migration-assistant-bundle.tar.gz \
              tui-release-artifacts/migration-tui-bundle-${{ needs.extract-version.outputs.version }}.tar.gz
@@ -374,7 +411,11 @@ jobs:
             deployment/k8s/aws/build/migrate-cli-dist/migration-assistant-cli-${{ needs.extract-version.outputs.version }}.tar.gz
             tui-release-artifacts/migration-tui-x86_64-unknown-linux-gnu
             tui-release-artifacts/migration-tui-aarch64-unknown-linux-gnu
+            tui-release-artifacts/migration-tui-x86_64-apple-darwin
+            tui-release-artifacts/migration-tui-aarch64-apple-darwin
+            tui-release-artifacts/migration-tui-x86_64-pc-windows-msvc.exe
             tui-release-artifacts/migration-tui-install.sh
+            tui-release-artifacts/migration-tui-install.ps1
             tui-release-artifacts/migration-tui-VERSION.txt
             tui-release-artifacts/migration-tui-bundle-${{ needs.extract-version.outputs.version }}.tar.gz
             **/*.spdx.json
