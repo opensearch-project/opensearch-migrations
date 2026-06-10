@@ -431,7 +431,27 @@ fn collect_wizard<R: CommandRunner>(app: &mut crate::app::App<R>) -> Result<()> 
             saved
         }
     };
-    let region = ui::prompt("AWS region (deploy target)", &region_default, ni);
+    let region = loop {
+        let r = ui::prompt("AWS region (deploy target)", &region_default, ni);
+        if r.is_empty() {
+            ui::warn("region cannot be empty");
+            if ni {
+                return Err(Error::die("AWS region is required"));
+            }
+            continue;
+        }
+        if !r
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            ui::warn("region should be lowercase letters, digits, and hyphens (e.g. us-east-1)");
+            if ni {
+                return Err(Error::die(format!("invalid region: {r}")));
+            }
+            continue;
+        }
+        break r;
+    };
     app.state.set("AWS_REGION", &region);
 
     // Adopt-existing: if discover found MigrationAssistant-* stacks, offer
@@ -451,20 +471,30 @@ fn collect_wizard<R: CommandRunner>(app: &mut crate::app::App<R>) -> Result<()> 
                     ui::ok(&format!("adopting stack: {} (stage={})", stacks[0], name));
                     name.to_string()
                 } else {
-                    ui::prompt("Stage name", "ma", ni)
+                    prompt_stage_name(ni)
                 }
             } else {
                 ui::info("found multiple Migration Assistant stacks:");
                 for (i, s) in stacks.iter().enumerate() {
                     ui::dim(&format!("  [{}] {}", i + 1, s));
                 }
-                ui::dim(&format!(
-                    "  [{}] none — deploy a new stack",
-                    stacks.len() + 1
-                ));
-                let pick = ui::prompt("Pick", "1", ni);
-                let idx = pick.trim().parse::<usize>().unwrap_or(stacks.len() + 1);
-                if idx >= 1 && idx <= stacks.len() {
+                let none_idx = stacks.len() + 1;
+                ui::dim(&format!("  [{none_idx}] none — deploy a new stack"));
+                let idx = loop {
+                    let pick = ui::prompt("Pick", "1", ni);
+                    match pick.trim().parse::<usize>() {
+                        Ok(n) if n >= 1 && n <= none_idx => break n,
+                        _ => {
+                            ui::warn(&format!(
+                                "please enter a number between 1 and {none_idx}"
+                            ));
+                            if ni {
+                                break none_idx;
+                            }
+                        }
+                    }
+                };
+                if idx <= stacks.len() {
                     let chosen = stacks[idx - 1];
                     let name = chosen.strip_prefix("MigrationAssistant-").unwrap_or(chosen);
                     app.state.set("CFN_STACK_NAME", chosen);
@@ -472,12 +502,12 @@ fn collect_wizard<R: CommandRunner>(app: &mut crate::app::App<R>) -> Result<()> 
                     ui::ok(&format!("adopting stack: {} (stage={})", chosen, name));
                     name.to_string()
                 } else {
-                    ui::prompt("Stage name", "ma", ni)
+                    prompt_stage_name(ni)
                 }
             }
         } else {
             let stage_default = app.state.get_owned("STAGE_NAME", "ma");
-            ui::prompt("Stage name", &stage_default, ni)
+            prompt_stage_name_with_default(&stage_default, ni)
         };
     app.state.set("STAGE_NAME", &stage_name);
 
@@ -1039,6 +1069,34 @@ fn load_manifest() -> Option<crate::manifest::Manifest> {
     crate::manifest::Manifest::load(&dir).ok().flatten()
 }
 
+
+fn prompt_stage_name(ni: bool) -> String {
+    prompt_stage_name_with_default("ma", ni)
+}
+
+fn prompt_stage_name_with_default(default: &str, ni: bool) -> String {
+    loop {
+        let name = ui::prompt("Stage name", default, ni);
+        if name.is_empty() {
+            ui::warn("stage name cannot be empty");
+            if ni {
+                return default.to_string();
+            }
+            continue;
+        }
+        if !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            ui::warn("stage name must be letters, digits, hyphens, or underscores");
+            if ni {
+                return default.to_string();
+            }
+            continue;
+        }
+        return name;
+    }
+}
 
 /// Install skills, agent-specific config, and MCP servers into the stage
 /// directory before handing off to the agent. Mirrors the bash agent_setup.
