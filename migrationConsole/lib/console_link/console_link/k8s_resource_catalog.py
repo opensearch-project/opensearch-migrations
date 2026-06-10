@@ -68,10 +68,9 @@ class ConsoleResourceEntry:
         values = [self.ref_name, *self.aliases]
         if self.k8s_name:
             values.append(self.k8s_name)
-            values.extend(_public_k8s_selector_aliases(self.role, self.k8s_name))
         return _dedupe(
             value for value in values
-            if value and not _is_fully_qualified_k8s_selector(value)
+            if value and not _is_k8s_selector_alias(self.role, value)
         )
 
     def matches(self, selector: str) -> bool:
@@ -666,6 +665,10 @@ def _k8s_selector_name(role: ResourceRole, selector: str) -> Optional[str]:
 
 def _is_fully_qualified_k8s_selector(value: str) -> bool:
     return f".{CRD_GROUP}/" in value
+
+
+def _is_k8s_selector_alias(role: ResourceRole, value: str) -> bool:
+    return _is_fully_qualified_k8s_selector(value) or _k8s_selector_name(role, value) is not None
 
 
 def _dedupe(values: Iterable[Optional[str]]) -> List[str]:

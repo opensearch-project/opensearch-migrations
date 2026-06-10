@@ -1250,6 +1250,39 @@ def test_cli_kafka_list_topics_uses_selected_k8s_resource(runner, mocker):
     assert list_topics.call_args.args[0].brokers == "broker-b:9092"
 
 
+def test_cli_kafka_selector_completion_omits_k8s_aliases(mocker):
+    env = _catalog_env([
+        ConsoleResourceEntry(
+            ResourceRole.KAFKA,
+            "default",
+            ["default", "kafkacluster.default"],
+            k8s_name="default",
+            kafka_runtime={
+                "type": "direct",
+                "clientConfig": {"broker_endpoints": "broker-a:9092", "standard": None},
+            },
+        ),
+        ConsoleResourceEntry(
+            ResourceRole.KAFKA,
+            "kafka-b",
+            ["kafka-b", "kafkacluster.kafka-b"],
+            k8s_name="kafka-b",
+            kafka_runtime={
+                "type": "direct",
+                "clientConfig": {"broker_endpoints": "broker-b:9092", "standard": None},
+            },
+        ),
+    ])
+    ctx = mocker.Mock()
+    ctx.find_root.return_value.params = {}
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+
+    completions = cli_module.get_kafka_resource_completions(ctx, None, "")
+
+    assert [item.value for item in completions] == ["default", "kafka-b"]
+
+
 def test_cli_kafka_list_topics_requires_selector_for_ambiguous_k8s_resources(runner, mocker):
     env = _catalog_env([
         ConsoleResourceEntry(

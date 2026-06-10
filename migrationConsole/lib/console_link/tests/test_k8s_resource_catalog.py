@@ -244,8 +244,6 @@ def test_cluster_selector_values_only_advertise_role_shorthand_for_singletons():
         "targetb",
     ]
     assert catalog.selector_values(ResourceRole.PROXY) == [
-        "captureproxy.proxy-a",
-        "captureproxy.proxy-b",
         "proxy-a",
         "proxy-b",
     ]
@@ -316,7 +314,7 @@ def test_source_proxy_config_is_sanitized_for_source_cluster_schema():
     assert source_cluster.proxy.auth_details == {"k8s_secret_name": "source-basic"}
 
 
-def test_k8s_selector_values_hide_api_group_but_still_accept_legacy_full_names():
+def test_k8s_selector_values_hide_k8s_aliases_but_still_accept_legacy_names():
     catalog = ConsoleResourceCatalog([
         ConsoleResourceEntry(
             role=ResourceRole.PROXY,
@@ -346,16 +344,18 @@ def test_k8s_selector_values_hide_api_group_but_still_accept_legacy_full_names()
     kafka_selectors = catalog.selector_values(ResourceRole.KAFKA)
 
     assert "captureproxies.migrations.opensearch.org/source-proxy" not in proxy_selectors
+    assert "captureproxy.source-proxy" not in proxy_selectors
     assert "kafkaclusters.migrations.opensearch.org/default" not in kafka_selectors
+    assert "kafkacluster.default" not in kafka_selectors
     assert "source-proxy" in proxy_selectors
-    assert "captureproxy.source-proxy" in proxy_selectors
     assert "default" in kafka_selectors
-    assert "kafkacluster.default" in kafka_selectors
 
+    assert catalog.resolve(ResourceRole.PROXY, "captureproxy.source-proxy").ref_name == "source-proxy"
     assert catalog.resolve(
         ResourceRole.PROXY,
         "captureproxies.migrations.opensearch.org/source-proxy",
     ).ref_name == "source-proxy"
+    assert catalog.resolve(ResourceRole.KAFKA, "kafkacluster.default").ref_name == "default"
     assert catalog.resolve(ResourceRole.PROXY, "captureproxies/source-proxy").ref_name == "source-proxy"
     assert catalog.resolve(ResourceRole.PROXY, "captureproxy/source-proxy").ref_name == "source-proxy"
     assert catalog.resolve(
