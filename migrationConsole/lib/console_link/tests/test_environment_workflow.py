@@ -111,7 +111,12 @@ def test_get_source_cluster_from_workflow_config_attaches_proxy():
     assert cluster.proxy.endpoint == "https://capture-proxy:9201"
 
 
-def test_get_kafka_from_workflow_config_autocreate_default_cluster():
+@patch.object(Environment, '_resolve_strimzi_bootstrap', return_value="default-kafka-bootstrap.ma.svc:9093")
+@patch.object(Environment, '_resolve_strimzi_scram_credentials', return_value=("test-password", "/tmp/fake-ca.crt"))
+def test_get_kafka_from_workflow_config_autocreate_default_cluster(mock_creds, mock_bootstrap):
+    # When the user omits auth on an autoCreate cluster, the workflow's
+    # transform-time policy resolves it to scram-sha-512 (single "tls"
+    # listener on 9093). The console must read it the same way.
     config = {
         "kafkaClusterConfiguration": {
             "default": {
@@ -129,8 +134,9 @@ def test_get_kafka_from_workflow_config_autocreate_default_cluster():
 
     kafka = Environment._get_kafka_from_workflow_config(config)
 
-    assert isinstance(kafka, StandardKafka)
-    assert kafka.brokers == "default-kafka-bootstrap:9092"
+    assert isinstance(kafka, ScramKafka)
+    assert kafka.brokers == "default-kafka-bootstrap.ma.svc:9093"
+    mock_bootstrap.assert_called_once_with("default", "tls")
 
 
 def test_get_kafka_from_workflow_config_existing_cluster_uses_reference():
@@ -160,8 +166,9 @@ def test_get_kafka_from_workflow_config_existing_cluster_uses_reference():
     assert kafka.brokers == "broker.a:9092,broker.b:9092"
 
 
-def test_get_kafka_from_workflow_config_autocreate_scram(monkeypatch):
-    monkeypatch.setenv("KAFKA_SCRAM_PASSWORD", "test-password")
+@patch.object(Environment, '_resolve_strimzi_bootstrap', return_value="default-kafka-bootstrap.ma.svc:9093")
+@patch.object(Environment, '_resolve_strimzi_scram_credentials', return_value=("test-password", "/tmp/fake-ca.crt"))
+def test_get_kafka_from_workflow_config_autocreate_scram(mock_creds, mock_bootstrap):
     config = {
         "kafkaClusterConfiguration": {
             "default": {
@@ -184,8 +191,103 @@ def test_get_kafka_from_workflow_config_autocreate_scram(monkeypatch):
     kafka = Environment._get_kafka_from_workflow_config(config)
 
     assert isinstance(kafka, ScramKafka)
-    assert kafka.brokers == "default-kafka-bootstrap:9093"
+    assert kafka.brokers == "default-kafka-bootstrap.ma.svc:9093"
     assert kafka.username == "default-migration-app"
+    assert kafka.password == "test-password"
+    mock_creds.assert_called_once_with("default")
+    mock_bootstrap.assert_called_once_with("default", "tls")
+
+
+@patch.object(Environment, '_resolve_strimzi_bootstrap', return_value="default-kafka-bootstrap.ma.svc:9092")
+def test_get_kafka_from_workflow_config_autocreate_explicit_none_auth(mock_bootstrap):
+    # Explicit auth.type: "none" still selects the plain listener on 9092,
+    # matching the workflow transformer when the user opts out of SCRAM.
+    config = {
+        "kafkaClusterConfiguration": {
+            "default": {
+                "autoCreate": {
+                    "auth": {"type": "none"}
+                }
+            }
+        },
+        "traffic": {
+            "proxies": {
+                "capture-proxy": {"source": "source"}
+            }
+        }
+    }
+
+    kafka = Environment._get_kafka_from_workflow_config(config)
+
+    assert isinstance(kafka, StandardKafka)
+    assert kafka.brokers == "default-kafka-bootstrap.ma.svc:9092"
+    mock_bootstrap.assert_called_once_with("default", "plain")
+
+
+def test_get_kafka_consumer_groups_returns_replayer_target_groups():
+    # Each replayer's group is `replayer-<toTarget>` per fullMigration.ts;
+    # mirror that here so `console kafka` resolves the right groups in EKS.
+    config = {
+        "traffic": {
+            "replayers": {
+                "first": {"fromProxy": "p1", "toTarget": "alpha"},
+                "second": {"fromProxy": "p1", "toTarget": "beta"},
+            }
+        }
+    }
+    groups = Environment._get_kafka_consumer_groups_from_workflow_config(config)
+    assert groups == ["replayer-alpha", "replayer-beta"]
+
+
+def test_get_kafka_consumer_groups_dedupes_when_replayers_share_target():
+    config = {
+        "traffic": {
+            "replayers": {
+                "r1": {"fromProxy": "p1", "toTarget": "default"},
+                "r2": {"fromProxy": "p2", "toTarget": "default"},
+            }
+        }
+    }
+    groups = Environment._get_kafka_consumer_groups_from_workflow_config(config)
+    assert groups == ["replayer-default"]
+
+
+def test_get_kafka_consumer_groups_empty_when_no_replayers():
+    assert Environment._get_kafka_consumer_groups_from_workflow_config({}) == []
+    assert Environment._get_kafka_consumer_groups_from_workflow_config(
+        {"traffic": {"proxies": {"p": {"source": "s"}}}}
+    ) == []
+
+
+def test_get_kafka_consumer_groups_skips_replayers_missing_totarget():
+    config = {
+        "traffic": {
+            "replayers": {
+                "good": {"fromProxy": "p", "toTarget": "tgt"},
+                "missing": {"fromProxy": "p"},
+                "blank": {"fromProxy": "p", "toTarget": ""},
+            }
+        }
+    }
+    assert Environment._get_kafka_consumer_groups_from_workflow_config(config) == ["replayer-tgt"]
+
+
+@patch.object(Environment, '_get_cluster_from_workflow_config', return_value=None)
+@patch.object(Environment, '_get_source_cluster_from_workflow_config', return_value=None)
+@patch.object(Environment, '_get_kafka_from_workflow_config', return_value=None)
+@patch('console_link.environment.WorkflowConfigStore')
+def test_from_workflow_config_populates_kafka_consumer_groups(
+    mock_store_cls, _mock_kafka, _mock_source, _mock_target,
+):
+    mock_store_cls.return_value.load_config.return_value = {
+        "traffic": {
+            "replayers": {
+                "r": {"fromProxy": "p", "toTarget": "my-target"},
+            }
+        }
+    }
+    env = Environment.from_workflow_config()
+    assert env.kafka_consumer_groups == ["replayer-my-target"]
 
 
 @patch('console_link.environment.WorkflowConfigStore')

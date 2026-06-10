@@ -27,10 +27,13 @@ public class TypeMappingsSanitizationDocBackfillTest {
             "  \"include_document\": true\n" +
             "}";
 
+        // With the default (null) regexMappings, every type is unioned into the index's
+        // own name (performance/network -> performance), matching the metadata-side union
+        // default so documents route to the same merged index.
         var expectedString = "{\n" +
             "  \"schema\": \"rfs-opensearch-bulk-v1\",\n" +
             "  \"operation_type\": \"index\",\n" +
-            "  \"operation\": { \"_index\": \"performance_network\", \"_id\": \"1\" },\n" +
+            "  \"operation\": { \"_index\": \"performance\", \"_id\": \"1\" },\n" +
             "  \"document\": { \"field1\": \"value1\" },\n" +
             "  \"include_document\": true\n" +
             "}";

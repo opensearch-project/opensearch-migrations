@@ -127,14 +127,14 @@ class GzipJsonLinesSinkTest {
     }
 
     @Test
-    void periodicFlushFlushesUncommittedTuples() throws Exception {
+    void flushFlushesUncommittedTuples() throws Exception {
         try (var sink = new GzipJsonLinesSink(tempDir, 10 * 1024 * 1024, Duration.ofMinutes(10))) {
             var f1 = new CompletableFuture<Void>();
             sink.accept(makeTuple("conn1.0"), f1);
             assertFalse(f1.isDone());
 
-            sink.periodicFlush();
-            assertTrue(f1.isDone(), "Future should complete on periodicFlush when tuples are pending");
+            sink.flush();
+            assertTrue(f1.isDone(), "Future should complete on flush when tuples are pending");
             f1.get(1, TimeUnit.SECONDS);
         }
     }

@@ -211,9 +211,9 @@ function createRfsCoordinatorStatefulSetManifest(
                                 periodSeconds: 15,
                                 // Must be >= the curl internal timeout (10s) to allow the API to respond
                                 timeoutSeconds: 15,
-                                // 20 failures * 15s = 300s (5m). Provides a 5min window for the
+                                // 40 failures * 15s = 600s (10m). Provides a 10min window for the
                                 // single-node cluster to reach 'yellow' status during bootstrap.
-                                failureThreshold: 20
+                                failureThreshold: 40
                             },
                             volumeMounts: [
                                 {

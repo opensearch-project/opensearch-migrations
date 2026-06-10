@@ -9,7 +9,6 @@ import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
-import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
@@ -114,7 +113,6 @@ class MetadataDropFieldsTest extends BaseMigrationTest {
         dataFilterArgs.indexAllowlist = List.of(testData.indexWithMappingThatHasAll);
         arguments.dataFilterArgs = dataFilterArgs;
 
-        arguments.metadataTransformationParams.multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.UNION;
     }
 
     @SneakyThrows

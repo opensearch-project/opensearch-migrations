@@ -5,7 +5,7 @@
 # Generates a helm values override that points all chart repositories and
 # image references to a private ECR mirror.
 #
-# Can be run standalone or sourced by aws-bootstrap.sh.
+# Can be run standalone or sourced by the migration-assistant CLI.
 #
 # Usage: ./generatePrivateEcrValues.sh <ecr-host> > private-ecr-values.yaml
 # =============================================================================

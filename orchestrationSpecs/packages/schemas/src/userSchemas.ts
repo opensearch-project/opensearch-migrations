@@ -395,30 +395,30 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
         },
         template: {
             pod: {
-                // Soft anti-affinity — prefers spreading brokers across nodes
-                // but still schedules on single-node dev clusters. Required
-                // anti-affinity would wedge broker rescheduling during an EKS
-                // node rotation if the new pool temporarily has <3 nodes.
-                affinity: {
-                    podAntiAffinity: {
-                        preferredDuringSchedulingIgnoredDuringExecution: [
-                            {
-                                weight: 100,
-                                podAffinityTerm: {
-                                    labelSelector: {
-                                        matchExpressions: [
-                                            {
-                                                key: "strimzi.io/name",
-                                                operator: "Exists",
-                                            },
-                                        ],
-                                    },
-                                    topologyKey: "kubernetes.io/hostname",
+                // Spread brokers one-per-node so a single node disruption
+                // (Karpenter consolidation during the RFS scale-up/down churn,
+                // a spot reclaim, a drain) can only ever take ONE broker. With
+                // RF=3/minISR=2 the cluster then survives it as a rolling event
+                // instead of losing quorum. whenUnsatisfiable=ScheduleAnyway
+                // keeps this soft: on a <3-node dev cluster the brokers must
+                // still schedule (and reschedule during rotation) rather than
+                // wedge Pending. maxSkew=1 means the scheduler only doubles up
+                // on a node once every other node already has one.
+                topologySpreadConstraints: [
+                    {
+                        maxSkew: 1,
+                        topologyKey: "kubernetes.io/hostname",
+                        whenUnsatisfiable: "ScheduleAnyway",
+                        labelSelector: {
+                            matchExpressions: [
+                                {
+                                    key: "strimzi.io/name",
+                                    operator: "Exists",
                                 },
-                            },
-                        ],
+                            ],
+                        },
                     },
-                },
+                ],
             },
         },
     },

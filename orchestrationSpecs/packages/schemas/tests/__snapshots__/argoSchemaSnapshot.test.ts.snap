@@ -971,18 +971,22 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                     },
                     "sslTrustCertFile": {
                       "type": "string",
-                      "minLength": 1
+                      "minLength": 1,
+                      "description": "Resolved mount path of tls.clientAuth.trustedClientCaFile, passed to the proxy process. Stripped from the CaptureProxy CR."
                     },
                     "sslTrustCertPem": {
                       "type": "string",
-                      "minLength": 1
+                      "minLength": 1,
+                      "description": "Inline PEM from tls.clientAuth.trustedClientCaPem, passed to the proxy process. Stripped from the CaptureProxy CR."
                     },
                     "sslTrustCertPemEnvVar": {
                       "type": "string",
-                      "minLength": 1
+                      "minLength": 1,
+                      "description": "Name of the env var carrying the trusted-client-CA PEM into the proxy process. Stripped from the CaptureProxy CR."
                     },
                     "requireClientAuth": {
-                      "type": "boolean"
+                      "type": "boolean",
+                      "description": "Flattened tls.clientAuth.required for the proxy process. Stripped from the CaptureProxy CR."
                     },
                     "fileSourceVolumes": {
                       "type": "array",

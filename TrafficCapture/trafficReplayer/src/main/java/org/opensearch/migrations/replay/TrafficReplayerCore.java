@@ -388,12 +388,16 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 return;
             }
             notifyConnectionDone(trafficStreamKeysBeingHeld);
+            // Commit eagerly to match the other commitTrafficStreams call sites
+            // (processCompletedTransaction, handleTupleWriteCompletion, onTrafficStreamsExpired,
+            // onTrafficStreamIgnored). Deferring the commit to the closeConnection() future left
+            // the offset pinned at the head of OffsetLifecycleTracker's priority queue when the
+            // channel close stalled — every subsequent commit returned BLOCKED_BY_OTHER_COMMITS
+            // and CDC E2E runs observed 30m+ TIME-LAG. Channel close is independent network
+            // cleanup, not a migration-semantics gate.
+            commitTrafficStreams(status, trafficStreamKeysBeingHeld);
             replayEngine.setFirstTimestamp(timestamp);
-            var cf = replayEngine.closeConnection(channelInteractionNum, ctx, channelSessionNumber, timestamp);
-            cf.map(
-                f -> f.whenComplete((v, t) -> commitTrafficStreams(status, trafficStreamKeysBeingHeld)),
-                () -> "closing the channel in the ReplayEngine"
-            );
+            replayEngine.closeConnection(channelInteractionNum, ctx, channelSessionNumber, timestamp);
         }
 
         @Override
