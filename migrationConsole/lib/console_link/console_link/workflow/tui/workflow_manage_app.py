@@ -16,10 +16,12 @@ from textual.widgets import Footer, Header, Static, Tree
 
 from .confirm_modal import ConfirmModal
 from .container_select_modal import ContainerSelectModal
+from .config_edit_tree import render_edit_state, selected_edit_node, update_help_panel
 from .live_status_manager import LiveStatusManager
 from .log_manager import LogManager
 from .manage_injections import ArgoWorkflowInterface, PodScraperInterface, WaiterInterface
 from .pod_name_manager import PodNameManager
+from .text_input_modal import TextInputModal
 from .tree_state_manager import TreeStateManager
 from .resource_tree_state_manager import RESOURCE_ID_PREFIX
 from ..commands.artifact_store import ArtifactStoreError
@@ -46,6 +48,12 @@ PATCH_OUTPUT_STEPS = {
 class WorkflowTreeApp(App):
     CSS = """
     Tree { scrollbar-gutter: stable; }
+    #edit-help {
+        height: 4;
+        padding: 0 1;
+        border-top: solid $primary;
+        display: none;
+    }
     #pod-status { height: 1; padding: 0 1; }
     """
 
@@ -56,7 +64,8 @@ class WorkflowTreeApp(App):
                  pod_scraper: PodScraperInterface,
                  workflow_waiter: WaiterInterface,
                  refresh_interval: float,
-                 resource_view: bool = False):
+                 resource_view: bool = False,
+                 config_edit_service=None):
         super().__init__()
         self.title = f"[{namespace}] {name}"  # override from base
 
@@ -70,6 +79,11 @@ class WorkflowTreeApp(App):
         self._pod_scraper = pod_scraper
         self._refresh_interval = refresh_interval
         self._resource_view = resource_view
+        self._config_edit_service = config_edit_service
+        self._edit_mode = False
+        self._edit_state: Optional[Dict] = None
+        self._edit_draft_yaml: Optional[str] = None
+        self._edit_dirty = False
 
         # State Containers (Managers)
         self._pods = PodNameManager(self, pod_scraper, name, namespace)
@@ -88,6 +102,7 @@ class WorkflowTreeApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Container(Tree(LOADING_ROOT_LABEL, id="workflow-tree"), id="tree-container")
+        yield Static("", id="edit-help")
         yield Static("", id="pod-status")
         yield Footer()
 
@@ -116,6 +131,8 @@ class WorkflowTreeApp(App):
             return {"success": False, "error": str(e)}, {}
 
     def action_refresh_workflow(self) -> None:
+        if self._edit_mode:
+            return
         self.run_worker(self._refresh_workflow_worker, thread=True, name="refresh_wf")
 
     def _refresh_workflow_worker(self) -> None:
@@ -217,6 +234,8 @@ class WorkflowTreeApp(App):
 
     def action_manual_refresh(self) -> None:
         """User-triggered manual refresh (Strongly Consistent)."""
+        if self._edit_mode:
+            return
         self.run_worker(self._force_refresh_workflow, thread=True, name="_force_refresh_workflow")
 
     def _force_refresh_workflow(self) -> None:
@@ -232,6 +251,8 @@ class WorkflowTreeApp(App):
     # --- Event Handlers & Actions ---
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
+        if self._edit_mode:
+            self._update_edit_help()
         self.update_pod_status()
         self._update_dynamic_bindings()
 
@@ -460,6 +481,15 @@ class WorkflowTreeApp(App):
 
     def update_pod_status(self) -> None:
         status_bar = self.query_one("#pod-status", Static)
+        if self._edit_mode:
+            node = selected_edit_node(self.tree_root_widget)
+            dirty = "dirty" if self._edit_dirty else "clean"
+            if node:
+                status = node.get("status", "ok")
+                status_bar.update(f"Config edit: [bold cyan]{status}[/]  [{dirty}]  Ctrl+s saves, Esc exits")
+            else:
+                status_bar.update(f"Config edit: [{dirty}]  Ctrl+s saves, Esc exits")
+            return
         if not self.current_node_data:
             status_bar.update("")
             return
@@ -486,8 +516,25 @@ class WorkflowTreeApp(App):
         self.bind("ctrl+p", "command_palette", show=False)
         self.bind("r", "manual_refresh", description="Refresh")
         self.bind("q", "quit", description="Quit")
+
+        if self._edit_mode:
+            self.bind("escape", "exit_config_edit", description="Exit Edit")
+            self.bind("ctrl+s", "save_config_edit", description="Save")
+            self.bind("?", "show_config_edit_help", description="Help")
+            self.bind("enter", "edit_selected_config_node", description="Edit")
+            self.bind("left", "previous_config_variant", show=False)
+            self.bind("right", "next_config_variant", show=False)
+            self.bind("space", "toggle_config_boolean", show=False)
+            self.bind("delete", "remove_config_node", description="Remove")
+            self.bind("backspace", "remove_config_node", show=False)
+            self.refresh_bindings()
+            return
+
         self.bind("left", "collapse_node", show=False)
         self.bind("right", "expand_node", show=False)
+
+        if self._resource_view:
+            self.bind("e", "edit_config", description="Edit Config")
 
         node = self.current_node_data
         if node:
@@ -515,6 +562,249 @@ class WorkflowTreeApp(App):
             self.bind("a", "approve_step", description="Approve")
         elif self._collect_managed_output_refs():
             self.bind("o", "view_output", description=DESC_SHOW_OUTPUT)
+
+    def action_edit_config(self) -> None:
+        """Enter schema-guided pending-config edit mode."""
+        if not self._resource_view:
+            self.notify("Config edit is available from resource view", severity="warning")
+            return
+        self.run_worker(self._load_config_edit_state_worker, thread=True, name="load_config_edit_state")
+
+    def _config_edit_service_or_default(self):
+        if self._config_edit_service is not None:
+            return self._config_edit_service
+        from ..services.config_edit_service import ConfigEditService
+        return ConfigEditService(namespace=self._namespace)
+
+    def _load_config_edit_state_worker(self) -> None:
+        try:
+            service = self._config_edit_service_or_default()
+            if hasattr(service, "load_edit_session"):
+                session = service.load_edit_session()
+            else:
+                session = {
+                    "raw_yaml": "",
+                    "edit_state": service.load_edit_state(),
+                }
+            self.call_from_thread(self._handle_config_edit_session, session)
+        except Exception as e:
+            logger.exception("Failed to load config edit state")
+            self.call_from_thread(self.notify, f"Config edit unavailable: {e}", severity="error")
+
+    def _handle_config_edit_session(self, session) -> None:
+        edit_state = getattr(session, "edit_state", None) or session["edit_state"]
+        raw_yaml = getattr(session, "raw_yaml", None)
+        if raw_yaml is None:
+            raw_yaml = session.get("raw_yaml", "")
+        self._edit_mode = True
+        self._edit_state = edit_state
+        self._edit_draft_yaml = raw_yaml
+        self._edit_dirty = False
+        render_edit_state(self.tree_root_widget, edit_state)
+        help_panel = self.query_one("#edit-help", Static)
+        help_panel.display = True
+        self._update_edit_help()
+        self.update_pod_status()
+        self._update_dynamic_bindings()
+
+    def action_exit_config_edit(self) -> None:
+        """Leave edit mode and restore the live resource tree."""
+        if not self._edit_mode:
+            return
+        self._edit_mode = False
+        self._edit_state = None
+        self._edit_draft_yaml = None
+        self._edit_dirty = False
+        self.current_run_id = None
+        self.query_one("#edit-help", Static).display = False
+        self.action_manual_refresh()
+
+    def action_save_config_edit(self) -> None:
+        """Save the current edit draft back to the workflow config store."""
+        if not self._edit_mode or self._edit_draft_yaml is None:
+            return
+        self.run_worker(self._save_config_edit_worker, thread=True, name="save_config_edit")
+
+    def _save_config_edit_worker(self) -> None:
+        try:
+            service = self._config_edit_service_or_default()
+            message = service.save_raw_yaml(self._edit_draft_yaml or "")
+            self.call_from_thread(self._handle_config_edit_saved, message)
+        except Exception as e:
+            logger.exception("Failed to save config edit draft")
+            self.call_from_thread(self.notify, f"Save failed: {e}", severity="error")
+
+    def _handle_config_edit_saved(self, message: str) -> None:
+        self._edit_dirty = False
+        self.update_pod_status()
+        self.notify(message or "Configuration saved")
+
+    def action_show_config_edit_help(self) -> None:
+        node = selected_edit_node(self.tree_root_widget)
+        if node:
+            description = node.get("description") or node.get("descriptionShort") or "No field description available"
+            self.notify(description, timeout=8)
+
+    def _update_edit_help(self) -> None:
+        help_panel = self.query_one("#edit-help", Static)
+        update_help_panel(help_panel, selected_edit_node(self.tree_root_widget))
+
+    def action_next_config_variant(self) -> None:
+        self._cycle_config_variant(1)
+
+    def action_previous_config_variant(self) -> None:
+        self._cycle_config_variant(-1)
+
+    def _cycle_config_variant(self, delta: int) -> None:
+        node = selected_edit_node(self.tree_root_widget)
+        if not node or node.get("valueKind") != "union":
+            if delta > 0:
+                self.action_expand_node()
+            else:
+                self.action_collapse_node()
+            return
+        variants = node.get("variants") or []
+        values = [variant.get("value") for variant in variants]
+        if not values:
+            return
+        try:
+            current_index = values.index(node.get("value"))
+        except ValueError:
+            current_index = 0
+        next_value = values[(current_index + delta) % len(values)]
+        self._apply_config_edit_operation({
+            "op": "set",
+            "path": node.get("path"),
+            "value": next_value,
+        }, selected_id=node.get("id"))
+
+    def action_toggle_config_boolean(self) -> None:
+        node = selected_edit_node(self.tree_root_widget)
+        if not node or node.get("valueKind") != "boolean":
+            return
+        self._apply_config_edit_operation({
+            "op": "set",
+            "path": node.get("path"),
+            "value": not bool(node.get("value")),
+        }, selected_id=node.get("id"))
+
+    def action_edit_selected_config_node(self) -> None:
+        node = selected_edit_node(self.tree_root_widget)
+        if not node:
+            return
+        kind = node.get("valueKind")
+        if kind == "command" and node.get("id", "").endswith(":add"):
+            label = str(node.get("label", "+ Add")).replace("[OK] ", "")
+            self.push_screen(
+                TextInputModal(f"{label} name"),
+                lambda value: self._handle_add_config_name(node, value),
+            )
+        elif kind == "scalar":
+            self.push_screen(
+                TextInputModal(f"Edit {'.'.join(node.get('path', []))}", str(node.get("value") or "")),
+                lambda value: self._handle_scalar_config_value(node, value),
+            )
+        elif kind == "boolean":
+            self.action_toggle_config_boolean()
+        elif kind == "union":
+            self._cycle_config_variant(1)
+        else:
+            tree = self.tree_root_widget
+            if tree.cursor_node:
+                if tree.cursor_node.is_expanded:
+                    tree.cursor_node.collapse()
+                else:
+                    tree.cursor_node.expand()
+
+    def _handle_add_config_name(self, node: Dict, value: Optional[str]) -> None:
+        name = (value or "").strip()
+        if not name:
+            return
+        self._apply_config_edit_operation({
+            "op": "add",
+            "path": node.get("path"),
+            "value": {"name": name},
+        })
+
+    def _handle_scalar_config_value(self, node: Dict, value: Optional[str]) -> None:
+        if value is None:
+            return
+        self._apply_config_edit_operation({
+            "op": "set",
+            "path": node.get("path"),
+            "value": value,
+        }, selected_id=node.get("id"))
+
+    def action_remove_config_node(self) -> None:
+        node = selected_edit_node(self.tree_root_widget)
+        if not node or node.get("valueKind") == "command":
+            return
+        path = node.get("path") or []
+        if len(path) != 2 or path[0] not in ("sourceClusters", "targetClusters"):
+            self.notify("Remove is available for source/target entries in this slice", severity="warning")
+            return
+        self.push_screen(
+            ConfirmModal(f"Remove config entry '{'.'.join(path)}' from pending YAML?"),
+            lambda confirmed: self._remove_config_node(path) if confirmed else None,
+        )
+
+    def _remove_config_node(self, path: list[str]) -> None:
+        self._apply_config_edit_operation({
+            "op": "removeConfig",
+            "path": path,
+        })
+
+    def _apply_config_edit_operation(self, operation: Dict, selected_id: Optional[str] = None) -> None:
+        if self._edit_draft_yaml is None:
+            self.notify("No edit draft loaded", severity="error")
+            return
+        if selected_id is None:
+            node = self.tree_root_widget.cursor_node
+            if node and node.data:
+                selected_id = node.data.get("id")
+        self.run_worker(
+            lambda: self._apply_config_edit_operation_worker(operation, selected_id),
+            thread=True,
+            name="apply_config_edit_operation",
+        )
+
+    def _apply_config_edit_operation_worker(self, operation: Dict, selected_id: Optional[str]) -> None:
+        try:
+            service = self._config_edit_service_or_default()
+            result = service.apply_operation(self._edit_draft_yaml or "", operation)
+            self.call_from_thread(self._handle_config_edit_apply_result, result, selected_id)
+        except Exception as e:
+            logger.exception("Failed to apply config edit operation")
+            self.call_from_thread(self.notify, f"Edit failed: {e}", severity="error")
+
+    def _handle_config_edit_apply_result(self, result, selected_id: Optional[str]) -> None:
+        edit_state = getattr(result, "edit_state", None) or result["edit_state"]
+        raw_yaml = getattr(result, "raw_yaml", None)
+        if raw_yaml is None:
+            raw_yaml = result.get("raw_yaml") or result.get("yaml", "")
+        self._edit_state = edit_state
+        self._edit_draft_yaml = raw_yaml
+        self._edit_dirty = True
+        render_edit_state(self.tree_root_widget, edit_state)
+        if selected_id:
+            self.call_after_refresh(lambda: self._restore_config_edit_selection(selected_id))
+        self._update_edit_help()
+        self.update_pod_status()
+        self._update_dynamic_bindings()
+
+    def _restore_config_edit_selection(self, selected_id: str) -> None:
+        self._select_tree_node_by_id(selected_id)
+        self._update_edit_help()
+        self.update_pod_status()
+
+    def _select_tree_node_by_id(self, selected_id: str) -> None:
+        stack = list(self.tree_root_widget.root.children)
+        while stack:
+            node = stack.pop()
+            if node.data and node.data.get("id") == selected_id:
+                self.tree_root_widget.select_node(node)
+                return
+            stack.extend(reversed(node.children))
 
 
 # --- Utilities ---
