@@ -5,7 +5,7 @@ lib = library(identifier: 'jenkins@12.0.0', retriever: modernSCM([
 
 def secret_github_bot = [
     [envVar: 'GITHUB_USER', secretRef: 'op://opensearch-release-secrets/github-bot/ci-bot-username'],
-    [envVar: 'GITHUB_TOKEN', secretRef: 'op://opensearch-release-secrets/github-bot/opensearch-migrations-release']
+    [envVar: 'GITHUB_TOKEN', secretRef: 'op://opensearch-release-secrets/github-bot/ci-bot-token']
 ]
 
 pipeline {
