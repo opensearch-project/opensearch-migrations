@@ -1053,11 +1053,11 @@ export const KAFKA_CLUSTER_CREATION_CONFIG = z.preprocess(
 );
 
 export const KAFKA_CLUSTER_CONFIG = z.union([
+    z.object({existing: KAFKA_EXISTING_CLUSTER_CONFIG })
+        .describe("Use an existing Kafka cluster by providing connection details."),
     z.object({autoCreate: KAFKA_CLUSTER_CREATION_CONFIG})
         .describe("Auto-create a new Strimzi Kafka cluster with the specified configuration. " +
-            "The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."),
-    z.object({existing: KAFKA_EXISTING_CLUSTER_CONFIG })
-        .describe("Use an existing Kafka cluster by providing connection details.")
+            "The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'.")
 ]).describe("Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one.");
 
 export const HTTP_AUTH_BASIC = z.object({
@@ -1327,6 +1327,16 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                 "All top-level items are independent, but replayers can declare dependencies on snapshot migrations to ensure data consistency.")
             .optional()
     }).describe("Top-level migration configuration defining source clusters, target clusters, snapshot migrations, and optional traffic capture/replay.").superRefine((data, ctx) => {
+        const duplicateClusterNames = Object.keys(data.sourceClusters)
+            .filter(name => name in data.targetClusters);
+        for (const name of duplicateClusterNames) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Cluster name '${name}' is used in both sourceClusters and targetClusters. Source and target cluster names must be unique.`,
+                path: ['targetClusters', name]
+            });
+        }
+
         for (let i = 0; i < data.snapshotMigrationConfigs.length; i++) {
             const mc = data.snapshotMigrationConfigs[i];
 
