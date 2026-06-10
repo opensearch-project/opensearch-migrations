@@ -40,7 +40,7 @@ class TestGetSnapshotFactory:
     def test_get_gcs_snapshot(self):
         config = {
             "snapshot_name": "test_snapshot",
-            "gcs": {"repo_uri": "gs://bucket", "region": "us-central1"}
+            "gcs": {"repo_uri": "gs://bucket"}
         }
         result = get_snapshot(config, create_valid_cluster())
         assert isinstance(result, GcsSnapshot)

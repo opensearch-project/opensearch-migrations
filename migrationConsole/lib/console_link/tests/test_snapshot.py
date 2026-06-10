@@ -83,7 +83,6 @@ def gcs_snapshot(mock_cluster):
         "snapshot_name": "test_snapshot",
         "gcs": {
             "repo_uri": "gs://test-bucket/test-path",
-            "region": "us-central1",
         }
     }
     return GcsSnapshot(config, mock_cluster)
@@ -320,7 +319,6 @@ def test_gcs_snapshot_init_succeeds():
             "snapshot_name": "reindex_from_snapshot",
             "gcs": {
                 "repo_uri": "gs://my-bucket",
-                "region": "us-central1"
             },
         }
     }
@@ -334,7 +332,6 @@ def test_get_snapshot_for_gcs_config():
             "snapshot_name": "reindex_from_snapshot",
             "gcs": {
                 "repo_uri": "gs://my-bucket",
-                "region": "us-central1"
             },
         }
     }
@@ -349,7 +346,6 @@ def test_gcs_snapshot_create_calls_subprocess_run(mocker):
             "snapshot_name": "reindex_from_snapshot",
             "gcs": {
                 "repo_uri": "gs://my-bucket",
-                "region": "us-central1"
             },
         }
     }
