@@ -191,8 +191,9 @@ tasks.register('stageBinary', Copy) {
 
 tasks.register('assembleBundle', Tar) {
     group = 'release'
-    description = 'Package skills + helm chart + CFN + VERSION.txt into a self-contained bundle'
-    dependsOn 'writeVersionFile', ':agent-skills:agentSkillsTar'
+    description = 'Package skills + helm chart + pre-synthesized CFN templates + VERSION.txt'
+    dependsOn 'writeVersionFile', ':agent-skills:agentSkillsTar',
+              ':deployment:migration-assistant-solution:cdkSynthMinified'
 
     archiveBaseName.set('migration-assistant-bundle')
     archiveVersion.set('')
@@ -204,17 +205,15 @@ tasks.register('assembleBundle', Tar) {
     from({ configurations.agentSkills.files.collect { tarTree(it) } })
 
     // Helm chart — preserving dir name so `helm install ./helm/migrationAssistantWithArgo` works.
-    // This is the deployment artifact: after install, operators never need to clone the repo.
     from(rootProject.layout.projectDirectory.dir(
             'deployment/k8s/charts/aggregates/migrationAssistantWithArgo')) {
         into('helm/migrationAssistantWithArgo')
     }
 
-    // CDK/CFN solution — the templates, cdk.json, and supporting scripts so
-    // the CLI can synthesize/deploy CloudFormation without fetching from GitHub.
-    from(rootProject.layout.projectDirectory.dir('deployment/migration-assistant-solution')) {
-        into('cfn')
-        exclude 'node_modules', 'build', 'cdk.out', 'cdk.out-minified', '.gradle'
+    // Pre-synthesized CFN templates (the CLI reads these directly — no cdk synth at runtime).
+    from(rootProject.layout.projectDirectory.dir(
+            'deployment/migration-assistant-solution/cdk.out-minified')) {
+        into('cfn/cdk.out-minified')
     }
 
     // VERSION.txt at the bundle root

@@ -3,7 +3,8 @@
   "build": {
     "name": "opensearch-migrations",
     "version": "0.0.0-dev",
-    "packs": []
+    "packs": [],
+    "updateCheckUrl": "https://api.github.com/repos/opensearch-project/opensearch-migrations/releases/latest"
   },
   "branding": {
     "appName":          "OpenSearch Migration Assistant",
@@ -34,6 +35,29 @@
   "skills": {
     "discovery": "auto"
   },
+  "agents": [
+    {
+      "id": "claude",
+      "binaries": ["claude"],
+      "label": "Claude Code",
+      "description": "Anthropic's AI coding agent",
+      "installUrl": "https://code.claude.com/docs/en/quickstart"
+    },
+    {
+      "id": "codex",
+      "binaries": ["codex"],
+      "label": "Codex CLI",
+      "description": "OpenAI's CLI coding agent",
+      "installUrl": "https://developers.openai.com/codex/cli"
+    },
+    {
+      "id": "kiro",
+      "binaries": ["kiro-cli", "kiro"],
+      "label": "Kiro",
+      "description": "AWS's AI development environment",
+      "installUrl": "https://kiro.dev/cli/"
+    }
+  ],
   "mcpServers": {
     "aws-mcp": {
       "command": "uvx",

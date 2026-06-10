@@ -161,7 +161,11 @@ fn print_banner(env: &Env) {
         env.stage_dir().display()
     ));
     // Non-blocking update check (best-effort, silent on failure).
-    if let Some(newer) = version::check_for_update() {
+    let update_url = manifest
+        .as_ref()
+        .map(|m| m.build.update_check_url.as_str())
+        .unwrap_or("");
+    if let Some(newer) = version::check_for_update(update_url) {
         ui::warn(&format!(
             "A newer version ({newer}) is available. Run `migration-assistant update` to upgrade."
         ));
@@ -197,24 +201,47 @@ fn resolve_resume(state: &mut State, env: &Env) -> Result<bool> {
 /// The Manual deploy pipeline — `manual_path`. Discovers the environment,
 /// Verify that required external tools are available on PATH.
 fn check_dependencies<R: CommandRunner>(runner: &R) -> Result<()> {
-    let required = [
-        ("kubectl", "kubernetes CLI"),
-        ("helm", "Helm package manager"),
+    let required: &[(&str, &str, &str)] = &[
+        (
+            "kubectl",
+            "Kubernetes CLI",
+            "https://kubernetes.io/docs/tasks/tools/",
+        ),
+        (
+            "helm",
+            "Helm package manager",
+            "https://helm.sh/docs/intro/install/",
+        ),
+        (
+            "aws",
+            "AWS CLI",
+            "https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
+        ),
+        (
+            "jq",
+            "JSON processor",
+            "https://jqlang.github.io/jq/download/",
+        ),
     ];
-    let mut missing = Vec::new();
-    for (bin, desc) in &required {
+    let mut missing: Vec<(&str, &str, &str)> = Vec::new();
+    for &(bin, desc, url) in required {
         if !runner.has_command(bin) {
-            missing.push(format!("  • {bin} — {desc}"));
+            missing.push((bin, desc, url));
         }
     }
-    if !missing.is_empty() {
-        let list = missing.join("\n");
-        return Err(Error::die(format!(
-            "required tools not found on PATH:\n{list}\n\n\
-             Install them and rerun. See: https://kubernetes.io/docs/tasks/tools/"
-        )));
+    if missing.is_empty() {
+        return Ok(());
     }
-    Ok(())
+
+    let list: Vec<String> = missing
+        .iter()
+        .map(|(bin, desc, url)| format!("  • {bin} — {desc}\n    {url}"))
+        .collect();
+
+    Err(Error::die(format!(
+        "required tools not found on PATH:\n{}",
+        list.join("\n")
+    )))
 }
 
 /// The Manual deploy pipeline. Discovers the environment, collects the wizard
@@ -228,7 +255,20 @@ fn manual_path<R: CommandRunner>(env: Env, runner: &R, state: State, resuming: b
         "manual_path start stage={} resuming={}",
         env.stage, resuming
     ));
+    state.acquire_lock()?;
     let mut app = crate::app::App { env, runner, state };
+
+    // First-run welcome message (only when state is fresh — no last_step set).
+    if app.state.resumable_step().is_empty() {
+        let manifest = load_manifest();
+        let welcome = manifest
+            .as_ref()
+            .map(|m| m.brand("welcomeMessage", &|n: &str| std::env::var(n).ok()))
+            .unwrap_or_default();
+        if !welcome.is_empty() {
+            ui::info(&welcome);
+        }
+    }
 
     // Check required external dependencies before doing any work.
     check_dependencies(runner)?;
@@ -237,6 +277,7 @@ fn manual_path<R: CommandRunner>(env: Env, runner: &R, state: State, resuming: b
     log.info("discover: os + aws + resources");
     crate::discover::discover_os(runner, &mut app.state);
     if app.state.get("AWS_ACCOUNT").unwrap_or("").is_empty() {
+        ui::dim("  resolving AWS identity...");
         if let Err(e) = crate::discover::discover_aws(&mut app.state) {
             log.error(&format!("AWS credentials unavailable: {}", e.message));
             return Err(Error::die(format!(
@@ -244,19 +285,33 @@ fn manual_path<R: CommandRunner>(env: Env, runner: &R, state: State, resuming: b
                 e.message
             )));
         }
+        ui::dim(&format!(
+            "  account={} region={}",
+            app.state.get_or("AWS_ACCOUNT", "?"),
+            app.state.get_or("AWS_REGION", "?")
+        ));
     }
+    ui::dim("  checking EKS clusters + CFN stacks...");
     crate::discover::discover_resources(runner, &mut app.state);
     app.state.save()?;
 
-    // Wizard: in non-interactive mode (or on resume with everything saved) we
-    // take saved values + defaults; otherwise the TUI collects them. The
-    // resume fast-path: skip wizard if state is already populated.
-    if !(resuming
-        && !app.state.get_or("AWS_REGION", "").is_empty()
+    // Wizard: skip if all required values are already populated (resume OR
+    // re-run after a previous wizard completed). Only re-prompt when state is
+    // missing values or operator passes --switch.
+    let wizard_complete = !app.state.get_or("AWS_REGION", "").is_empty()
         && !app.state.get_or("STAGE_NAME", "").is_empty()
         && !app.state.get_or("MIRROR_IMAGES", "").is_empty()
-        && !app.state.get_or("MA_VERSION", "").is_empty())
-    {
+        && !app.state.get_or("MA_VERSION", "").is_empty();
+    if wizard_complete {
+        ui::dim("  resuming with saved config:");
+        ui::dim(&format!(
+            "    region={} stage={} mirror={} version={}",
+            app.state.get_or("AWS_REGION", ""),
+            app.state.get_or("STAGE_NAME", ""),
+            app.state.get_or("MIRROR_IMAGES", ""),
+            app.state.get_or("MA_VERSION", ""),
+        ));
+    } else {
         collect_wizard(&mut app)?;
     }
 
@@ -274,6 +329,45 @@ fn manual_path<R: CommandRunner>(env: Env, runner: &R, state: State, resuming: b
     run_deploy(&mut app, &log)?;
 
     ui::ok(&format!("Deploy complete for stage={}", app.env.stage));
+
+    // Drop into migration-console-0 unless --skip-console-exec was passed.
+    if app.state.get_or("SKIP_CONSOLE_EXEC", "N") != "Y" {
+        ui::step("Connecting to migration-console-0...");
+        let kube_ctx = app.state.get_owned("KUBECTL_CONTEXT", "");
+        app.state.release_lock();
+
+        let mut cmd = std::process::Command::new("kubectl");
+        if !kube_ctx.is_empty() {
+            cmd.args(["--context", &kube_ctx]);
+        }
+        cmd.args([
+            "exec",
+            "-n",
+            "ma",
+            "-it",
+            "migration-console-0",
+            "--",
+            "/bin/bash",
+        ]);
+
+        // exec replaces this process so the terminal is fully interactive.
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            let err = cmd.exec();
+            return Err(Error::die(format!("exec kubectl failed: {err}")));
+        }
+        #[cfg(not(unix))]
+        {
+            let status = cmd
+                .status()
+                .map_err(|e| Error::die(format!("kubectl exec: {e}")))?;
+            if !status.success() {
+                return Err(Error::die("kubectl exec failed"));
+            }
+        }
+    }
+    app.state.release_lock();
     Ok(())
 }
 
@@ -340,9 +434,52 @@ fn collect_wizard<R: CommandRunner>(app: &mut crate::app::App<R>) -> Result<()> 
     let region = ui::prompt("AWS region (deploy target)", &region_default, ni);
     app.state.set("AWS_REGION", &region);
 
-    let stage_default = app.state.get_owned("STAGE_NAME", "ma");
-    let stage_name = ui::prompt("Stage name", &stage_default, ni);
-    app.state.set("STAGE_NAME", stage_name);
+    // Adopt-existing: if discover found MigrationAssistant-* stacks, offer
+    // to adopt one before prompting for a fresh stage name.
+    let existing_stacks = app.state.get_owned("CFN_MA_STACKS", "");
+    let stage_name =
+        if !existing_stacks.is_empty() && app.state.get_or("STAGE_NAME", "").is_empty() && !ni {
+            let stacks: Vec<&str> = existing_stacks.split_whitespace().collect();
+            if stacks.len() == 1 {
+                ui::info(&format!("found existing stack: {}", stacks[0]));
+                if ui::confirm("Adopt this stack (skip CFN deploy)?", true, ni) {
+                    let name = stacks[0]
+                        .strip_prefix("MigrationAssistant-")
+                        .unwrap_or(stacks[0]);
+                    app.state.set("CFN_STACK_NAME", stacks[0]);
+                    app.state.set("SKIP_CFN_DEPLOY", "Y");
+                    ui::ok(&format!("adopting stack: {} (stage={})", stacks[0], name));
+                    name.to_string()
+                } else {
+                    ui::prompt("Stage name", "ma", ni)
+                }
+            } else {
+                ui::info("found multiple Migration Assistant stacks:");
+                for (i, s) in stacks.iter().enumerate() {
+                    ui::dim(&format!("  [{}] {}", i + 1, s));
+                }
+                ui::dim(&format!(
+                    "  [{}] none — deploy a new stack",
+                    stacks.len() + 1
+                ));
+                let pick = ui::prompt("Pick", "1", ni);
+                let idx = pick.trim().parse::<usize>().unwrap_or(stacks.len() + 1);
+                if idx >= 1 && idx <= stacks.len() {
+                    let chosen = stacks[idx - 1];
+                    let name = chosen.strip_prefix("MigrationAssistant-").unwrap_or(chosen);
+                    app.state.set("CFN_STACK_NAME", chosen);
+                    app.state.set("SKIP_CFN_DEPLOY", "Y");
+                    ui::ok(&format!("adopting stack: {} (stage={})", chosen, name));
+                    name.to_string()
+                } else {
+                    ui::prompt("Stage name", "ma", ni)
+                }
+            }
+        } else {
+            let stage_default = app.state.get_owned("STAGE_NAME", "ma");
+            ui::prompt("Stage name", &stage_default, ni)
+        };
+    app.state.set("STAGE_NAME", &stage_name);
 
     let mirror_default = app.state.get_or("MIRROR_IMAGES", "Y") == "Y";
     let mirror = ui::confirm(
@@ -354,8 +491,19 @@ fn collect_wizard<R: CommandRunner>(app: &mut crate::app::App<R>) -> Result<()> 
         .set("MIRROR_IMAGES", if mirror { "Y" } else { "N" });
 
     let ver_default = app.state.get_owned("MA_VERSION", "");
-    let ma_ver = ui::prompt("Migration Assistant version", &ver_default, ni);
-    app.state.set("MA_VERSION", ma_ver);
+    let ver_default = if ver_default.is_empty() {
+        // Use build.version from manifest as the default image tag.
+        // This is the upstream release tag images are published under.
+        let manifest = load_manifest();
+        manifest
+            .as_ref()
+            .map(|m| m.build.version.clone())
+            .filter(|v| !v.is_empty() && v != "0.0.0-dev")
+            .unwrap_or_else(|| version::resolve_cli_version())
+    } else {
+        ver_default
+    };
+    app.state.set("MA_VERSION", &ver_default);
 
     app.state.set("last_step", "wizard_done");
     app.state.save()?;
@@ -396,29 +544,65 @@ fn resolve_mode(
     }
 }
 
-/// Present the mode picker and return the chosen id. Agent is offered only when
-/// the gate is on (`MIGRATE_ENABLE_AGENT=1`).
+/// Present the mode picker. Modes come from the manifest (order + visibility);
+/// Agent is also shown when `MIGRATE_ENABLE_AGENT=1` even if the manifest
+/// doesn't list it.
 fn pick_mode(current: &str, env: &Env) -> String {
-    let mut ids = vec!["Manual"];
-    let mut labels = vec!["Manual"];
-    if env.enable_agent {
-        ids.push("Agent");
-        labels.push("AI");
+    let manifest = load_manifest();
+    let mut ids: Vec<String> = Vec::new();
+    let mut labels: Vec<String> = Vec::new();
+
+    if let Some(m) = &manifest {
+        for mode in m.visible_modes() {
+            ids.push(mode.id.clone());
+            labels.push(mode.label.clone());
+        }
     }
+
+    // Fallback if manifest has no modes or wasn't loaded
+    if ids.is_empty() {
+        ids.push("Manual".into());
+        labels.push("Manual".into());
+        if env.enable_agent {
+            ids.push("Agent".into());
+            labels.push("AI".into());
+        }
+    }
+
     ui::step("How do you want to drive this migration?");
+    let descriptions: Vec<String> = if let Some(m) = &manifest {
+        m.visible_modes()
+            .iter()
+            .map(|mode| mode.description.clone())
+            .collect()
+    } else {
+        ids.iter().map(|_| String::new()).collect()
+    };
     for (i, label) in labels.iter().enumerate() {
-        ui::dim(&format!("  [{}] {}", i + 1, label));
+        let desc = descriptions.get(i).map(|s| s.as_str()).unwrap_or("");
+        if desc.is_empty() {
+            ui::dim(&format!("  [{}] {}", i + 1, label));
+        } else {
+            ui::dim(&format!("  [{}] {} — {}", i + 1, label, desc));
+        }
     }
     let default = if !current.is_empty() {
         ids.iter()
-            .position(|id| *id == current)
+            .position(|id| id == current)
             .map(|i| i + 1)
             .unwrap_or(1)
     } else {
-        1
+        // Use the mode marked default in the manifest
+        manifest
+            .as_ref()
+            .and_then(|m| m.branding.modes.iter().position(|mode| mode.default))
+            .map(|i| i + 1)
+            .unwrap_or(1)
     };
     let pick = ui::prompt("Select", &default.to_string(), env.non_interactive);
-    ui::resolve_pick(&pick, &ids, &labels)
+    let id_refs: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+    let label_refs: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+    ui::resolve_pick(&pick, &id_refs, &label_refs)
         .unwrap_or("Manual")
         .to_string()
 }
@@ -431,22 +615,65 @@ fn pick_mode(current: &str, env: &Env) -> String {
 fn agent_first_handoff<R: CommandRunner>(env: Env, runner: &R, state: State) -> Result<()> {
     ui::ok(&format!("mode: Agent (stage={})", env.stage));
 
-    // Discover available agents.
-    let found = agent::discover(runner);
+    // Discover available agents (manifest order if configured, else defaults).
+    let manifest = load_manifest();
+    let agent_configs = manifest
+        .as_ref()
+        .map(|m| m.agents.clone())
+        .unwrap_or_default();
+
+    let found: Vec<(String, String)> = if !agent_configs.is_empty() {
+        agent::discover_from_config(runner, &agent_configs)
+    } else {
+        agent::discover(runner)
+            .into_iter()
+            .map(|name| {
+                let bin = agent::bin_for(runner, name).unwrap_or(name);
+                (name.to_string(), bin.to_string())
+            })
+            .collect()
+    };
+
     if found.is_empty() {
-        let hints = agent::missing_hints(&[]);
-        let install_msg = hints
-            .iter()
-            .map(|(name, url)| format!("  • {name}: {url}"))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let hints = if !agent_configs.is_empty() {
+            agent::missing_hints_from_config(&[], &agent_configs)
+                .iter()
+                .map(|(name, url)| format!("  • {name}: {url}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        } else {
+            agent::missing_hints(&[])
+                .iter()
+                .map(|(name, url)| format!("  • {name}: {url}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
         return Err(Error::die(format!(
-            "no supported agent found on PATH.\nInstall one of:\n{install_msg}"
+            "no supported agent found on PATH.\nInstall one of:\n{hints}"
         )));
     }
 
-    let agent_name = found[0];
-    let bin = agent::bin_for(runner, agent_name).unwrap_or(agent_name);
+    // Pick agent: if only one found, use it. If multiple, ask.
+    let (agent_name, bin) = if found.len() == 1 {
+        (found[0].0.clone(), found[0].1.clone())
+    } else {
+        ui::step("Multiple agents found on PATH:");
+        for (i, (name, _)) in found.iter().enumerate() {
+            let label = agent_configs
+                .iter()
+                .find(|a| a.id == *name)
+                .map(|a| a.label.as_str())
+                .unwrap_or(name.as_str());
+            ui::dim(&format!("  [{}] {}", i + 1, label));
+        }
+        let pick = ui::prompt("Select agent", "1", env.non_interactive);
+        let idx = pick.trim().parse::<usize>().unwrap_or(1).saturating_sub(1);
+        let chosen = found.get(idx).unwrap_or(&found[0]);
+        (chosen.0.clone(), chosen.1.clone())
+    };
+
+    // Install skills + agent config + MCPs into the stage directory.
+    agent_setup(&agent_name, &env, &manifest);
 
     // Check for an existing session (resume vs fresh).
     let home_dir = std::env::var("HOME")
@@ -455,22 +682,28 @@ fn agent_first_handoff<R: CommandRunner>(env: Env, runner: &R, state: State) -> 
     let cwd = env.stage_dir().to_string_lossy().to_string();
     let resuming = agent_name == "claude" && agent::claude_has_session(&home_dir, &cwd);
 
-    // Build the fresh prompt: tell the agent to drive the deploy via the CLI.
+    // Build the fresh prompt from the manifest (or a default).
     let stage = &env.stage;
-    let fresh_prompt = format!(
-        "You are the OpenSearch Migration Assistant operator. \
-         Drive the deployment by running: \
-         `migration-assistant resume --non-interactive --stage {stage}` \
-         and monitor its output. If it fails, diagnose the issue using \
-         `migration-assistant diag --stage {stage}` and the kubectl/helm \
-         commands described in the loaded skills. Your goal is a fully \
-         deployed and healthy Migration Assistant on EKS."
-    );
+    let fresh_prompt = manifest
+        .as_ref()
+        .map(|m| m.branding.agent_fresh_prompt.clone())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "You are the OpenSearch Migration Assistant operator. \
+                 Drive the deployment by running: \
+                 `migration-assistant resume --non-interactive --stage {stage}` \
+                 and monitor its output. If it fails, diagnose the issue using \
+                 `migration-assistant diag --stage {stage}` and the kubectl/helm \
+                 commands described in the loaded skills. Your goal is a fully \
+                 deployed and healthy Migration Assistant on EKS."
+            )
+        });
 
     // Save state so the agent can pick up context.
     let mut state = state;
     state.set("MODE", "Agent");
-    state.set("AGENT", agent_name);
+    state.set("AGENT", &agent_name);
     state.save()?;
 
     ui::step(&format!("Handing off to {agent_name} ({bin})"));
@@ -478,7 +711,7 @@ fn agent_first_handoff<R: CommandRunner>(env: Env, runner: &R, state: State) -> 
         ui::dim("  (resuming existing session)");
     }
 
-    let cmd = agent::exec_command(agent_name, bin, resuming, &fresh_prompt);
+    let cmd = agent::exec_command(&agent_name, &bin, resuming, &fresh_prompt);
     ui::dim(&format!("  exec: {}", cmd.join(" ")));
 
     let args: Vec<&str> = cmd[1..].iter().map(String::as_str).collect();
@@ -784,6 +1017,7 @@ fn cmd_cleanup<R: CommandRunner>(env: Env, runner: &R, args: &[String]) -> Resul
 /// to `<cli>`. Used to locate the bundled `manifest.json` + `skills/`.
 fn cli_dir() -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
+    let exe = exe.canonicalize().unwrap_or(exe);
     let parent = exe.parent()?;
     // target/release/<bin> → up 2 to crate root; bin/<bin> → up 1.
     if parent
@@ -803,6 +1037,216 @@ fn cli_dir() -> Option<std::path::PathBuf> {
 fn load_manifest() -> Option<crate::manifest::Manifest> {
     let dir = cli_dir()?;
     crate::manifest::Manifest::load(&dir).ok().flatten()
+}
+
+/// Extract the upstream version from a CLI version string by stripping the
+/// `-amzn.N.sha` suffix. E.g. `3.2.1-amzn.1.abc1234` → `3.2.1`.
+/// If there's no `-amzn` suffix, returns the input as-is.
+fn upstream_version_from_cli(cli_ver: &str) -> String {
+    if let Some(idx) = cli_ver.find("-amzn") {
+        cli_ver[..idx].to_string()
+    } else {
+        cli_ver.to_string()
+    }
+}
+
+/// Install skills, agent-specific config, and MCP servers into the stage
+/// directory before handing off to the agent. Mirrors the bash agent_setup.
+fn agent_setup(agent_name: &str, env: &config::Env, manifest: &Option<crate::manifest::Manifest>) {
+    let stage_dir = env.stage_dir();
+    let cli_dir = cli_dir();
+
+    // Find the skills source directory.
+    let skills_src = cli_dir.as_ref().and_then(|d| agent::skills_src(d));
+
+    let Some(skills_src) = skills_src else {
+        ui::warn("could not locate skills source; skipping agent setup");
+        return;
+    };
+
+    ui::dim("  installing skills + agent config...");
+
+    // 1. Copy Startup.md as CLAUDE.md, AGENTS.md at stage root (agent auto-load).
+    let startup = skills_src.join("Startup.md");
+    if startup.is_file() {
+        let _ = std::fs::copy(&startup, stage_dir.join("CLAUDE.md"));
+        let _ = std::fs::copy(&startup, stage_dir.join("AGENTS.md"));
+        let _ = std::fs::copy(&startup, stage_dir.join("Startup.md"));
+    }
+
+    // 2. Install all skills under $STAGE_DIR/skills/<name>/.
+    let skills_dest = stage_dir.join("skills");
+    let _ = std::fs::create_dir_all(&skills_dest);
+    let discovered = agent::discover_skills(&skills_src);
+    for name in &discovered {
+        let src = skills_src.join(name);
+        let dst = skills_dest.join(name);
+        copy_dir_recursive(&src, &dst);
+    }
+
+    // 3. Per-agent config.
+    match agent_name {
+        "claude" => {
+            // .claude/skills/<name>/SKILL.md
+            let claude_skills = stage_dir.join(".claude/skills");
+            let _ = std::fs::create_dir_all(&claude_skills);
+            if startup.is_file() {
+                let _ = std::fs::create_dir_all(claude_skills.join("opensearch-migration"));
+                let _ = std::fs::copy(
+                    &startup,
+                    claude_skills.join("opensearch-migration/Startup.md"),
+                );
+            }
+            for name in &discovered {
+                let src = skills_src.join(name);
+                let dst = claude_skills.join(name);
+                copy_dir_recursive(&src, &dst);
+            }
+            // .claude/settings.json with permissions
+            write_claude_settings(&stage_dir, manifest);
+            // .mcp.json with MCP servers
+            write_mcp_json(&stage_dir, "claude", manifest);
+        }
+        "codex" => {
+            let codex_dir = stage_dir.join(".codex");
+            let _ = std::fs::create_dir_all(&codex_dir);
+            if startup.is_file() {
+                let _ = std::fs::copy(&startup, codex_dir.join("Startup.md"));
+            }
+        }
+        "kiro" => {
+            let kiro_dir = stage_dir.join(".kiro");
+            let _ = std::fs::create_dir_all(kiro_dir.join("steering"));
+            // Copy kiro config if available.
+            let kiro_src = skills_src.join("../kiro");
+            if kiro_src.is_dir() {
+                copy_dir_recursive(&kiro_src, &kiro_dir);
+            }
+            if startup.is_file() {
+                let _ = std::fs::copy(&startup, kiro_dir.join("steering/00-Startup.md"));
+                let _ = std::fs::copy(&startup, kiro_dir.join("Startup.md"));
+            }
+            // Copy operator skill docs into steering.
+            let op_dir = skills_src.join("migration-assistant-operator");
+            if op_dir.is_dir() {
+                for name in ["workflow", "deployment", "migration-prompt", "product"] {
+                    let f = op_dir.join(format!("{name}.md"));
+                    if f.is_file() {
+                        let _ = std::fs::copy(&f, kiro_dir.join(format!("steering/{name}.md")));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+
+    ui::dim(&format!(
+        "  installed {} skill(s) for {agent_name}",
+        discovered.len()
+    ));
+}
+
+/// Write .claude/settings.json with operator permissions allowlist + MCP tool perms.
+fn write_claude_settings(
+    stage_dir: &std::path::Path,
+    manifest: &Option<crate::manifest::Manifest>,
+) {
+    let settings_path = stage_dir.join(".claude/settings.json");
+    if settings_path.is_file() {
+        return; // Don't clobber operator customizations.
+    }
+    let _ = std::fs::create_dir_all(stage_dir.join(".claude"));
+
+    let mut allow: Vec<String> = vec![
+        "Bash(aws sts get-caller-identity:*)".into(),
+        "Bash(aws eks list-clusters:*)".into(),
+        "Bash(aws eks describe-cluster:*)".into(),
+        "Bash(aws cloudformation describe-stacks:*)".into(),
+        "Bash(aws cloudformation describe-stack-events:*)".into(),
+        "Bash(kubectl get:*)".into(),
+        "Bash(kubectl describe:*)".into(),
+        "Bash(kubectl logs:*)".into(),
+        "Bash(kubectl exec:*)".into(),
+        "Bash(kubectl wait:*)".into(),
+        "Bash(helm status:*)".into(),
+        "Bash(helm list:*)".into(),
+        "Bash(helm get values:*)".into(),
+        "Bash(cat:*)".into(),
+        "Bash(ls:*)".into(),
+        "Bash(jq:*)".into(),
+        "Bash(grep:*)".into(),
+        "Bash(find:*)".into(),
+        "Read(*)".into(),
+        "Write(*)".into(),
+        "Edit(*)".into(),
+    ];
+
+    // Add MCP tool permissions from manifest.
+    if let Some(m) = manifest {
+        allow.extend(m.all_perms());
+    }
+    allow.sort();
+    allow.dedup();
+
+    let settings = serde_json::json!({
+        "permissions": { "allow": allow }
+    });
+    let _ = std::fs::write(
+        &settings_path,
+        serde_json::to_string_pretty(&settings).unwrap(),
+    );
+}
+
+/// Write .mcp.json (Claude project-scope MCP config) from manifest.
+fn write_mcp_json(
+    stage_dir: &std::path::Path,
+    agent_name: &str,
+    manifest: &Option<crate::manifest::Manifest>,
+) {
+    let Some(m) = manifest else { return };
+    let mcp_path = stage_dir.join(".mcp.json");
+
+    let var_src = |name: &str| std::env::var(name).ok();
+    let mut servers = serde_json::Map::new();
+
+    for name in m.mcp_names_for(agent_name) {
+        if let Some(srv) = m.mcp_servers.get(name) {
+            let args: Vec<String> = m.mcp_args(name, &var_src);
+            servers.insert(
+                name.to_string(),
+                serde_json::json!({
+                    "command": srv.command,
+                    "args": args
+                }),
+            );
+        }
+    }
+
+    if servers.is_empty() {
+        return;
+    }
+
+    let doc = serde_json::json!({ "mcpServers": servers });
+    let _ = std::fs::write(&mcp_path, serde_json::to_string_pretty(&doc).unwrap());
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) {
+    if !src.is_dir() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(dst);
+    let Ok(entries) = std::fs::read_dir(src) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir_recursive(&from, &to);
+        } else {
+            let _ = std::fs::copy(&from, &to);
+        }
+    }
 }
 
 /// Resolve a branding field via the manifest, falling back to `default`.
@@ -845,23 +1289,28 @@ fn cmd_update() -> Result<()> {
         version::resolve_cli_version(),
         version::platform_key()
     ));
-    ui::info("Fetching release manifest...");
+    let loaded_manifest = load_manifest();
+    let update_url = loaded_manifest
+        .as_ref()
+        .map(|m| m.build.update_check_url.as_str())
+        .unwrap_or("");
+    ui::info("Checking for updates...");
+
+    match version::check_for_update_now(update_url) {
+        Some(newer) => {
+            ui::ok(&format!("Version {newer} is available!"));
+        }
+        None => {
+            ui::ok("You are running the latest version.");
+            return Ok(());
+        }
+    }
 
     let manifest = match version::fetch_release_manifest() {
         Some(m) => m,
         None => {
-            ui::info("Could not fetch latest.json; falling back to GitHub releases API");
-            match version::check_for_update_now() {
-                Some(newer) => {
-                    let url = version::release_url(&newer);
-                    ui::ok(&format!("Version {newer} is available: {url}"));
-                    return Ok(());
-                }
-                None => {
-                    ui::ok("You are running the latest version.");
-                    return Ok(());
-                }
-            }
+            ui::info("No release manifest available for auto-update.");
+            return Ok(());
         }
     };
 

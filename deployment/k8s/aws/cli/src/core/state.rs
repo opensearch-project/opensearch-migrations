@@ -148,6 +148,36 @@ impl State {
         Ok(())
     }
 
+    /// Acquire a PID lock for this stage. Returns `Err` with a user-friendly
+    /// message if another instance is already running. The lock is automatically
+    /// released when the process exits (file is deleted on drop or stale on crash).
+    pub fn acquire_lock(&self) -> Result<()> {
+        std::fs::create_dir_all(&self.stage_dir)?;
+        let lock_path = self.stage_dir.join(".pid");
+        if let Ok(contents) = std::fs::read_to_string(&lock_path) {
+            if let Ok(pid) = contents.trim().parse::<u32>() {
+                if process_alive(pid) {
+                    return Err(crate::Error::die(format!(
+                        "another migration-assistant is already running for this stage (pid {pid}).\n\
+                         \n\
+                         If that process is stuck, kill it first:\n\
+                         \x20 kill {pid}\n\
+                         \n\
+                         Or run a different stage:\n\
+                         \x20 migration-assistant --stage <other-name>"
+                    )));
+                }
+            }
+        }
+        std::fs::write(&lock_path, std::process::id().to_string())?;
+        Ok(())
+    }
+
+    /// Release the PID lock.
+    pub fn release_lock(&self) {
+        let _ = std::fs::remove_file(self.stage_dir.join(".pid"));
+    }
+
     /// Move `state.env`/`state.json` into `archive/<timestamp>/` and clear the
     /// in-memory state.
     pub fn archive(&mut self) -> Result<PathBuf> {
@@ -163,6 +193,16 @@ impl State {
         self.clear();
         Ok(dest)
     }
+}
+
+fn process_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 fn write_atomic(path: &Path, content: &str) -> Result<()> {

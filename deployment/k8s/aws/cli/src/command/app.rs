@@ -297,8 +297,17 @@ impl<'r, R: CommandRunner> App<'r, R> {
     pub fn helm_install_or_upgrade(&mut self, chart: &str, values_files: &[String]) -> Result<()> {
         let kube_ctx = self.state.get_owned("KUBECTL_CONTEXT", "");
 
-        // Recovery: classify any stuck release before installing.
+        // Fast path: if the release is already deployed and migration-console-0
+        // is Ready, skip reinstall entirely — the deploy is healthy.
         let status = self.helm_release_status(&kube_ctx);
+        if status == "deployed" && self.migration_console_ready(&kube_ctx) {
+            ui::ok("helm release already deployed and migration-console-0 is Ready");
+            self.state.set("last_step", "helm_done");
+            self.state.save()?;
+            return Ok(());
+        }
+
+        // Recovery: classify any stuck release before installing.
         if helm::classify_recovery(&status) == helm::Recovery::Uninstall {
             self.helm(
                 &kube_ctx,
@@ -327,6 +336,7 @@ impl<'r, R: CommandRunner> App<'r, R> {
             .runner
             .run_streamed("bash", &["-c", &script], &[], "helm");
         if !out.success() {
+            self.explain_helm_failure(&kube_ctx);
             return Err(Error::die(format!(
                 "helm install/upgrade failed (rc={})",
                 out.status
@@ -369,6 +379,9 @@ impl<'r, R: CommandRunner> App<'r, R> {
 
         let image_flags = if mirror && !registry.is_empty() {
             helm::mirrored_image_flags(&registry, &mirror_tag)
+        } else if self.has_custom_image_values() {
+            // Custom pack provides image repos+tags via valuesImages.yaml
+            Vec::new()
         } else {
             helm::public_image_flags(&ma_ver)
         };
@@ -468,6 +481,166 @@ impl<'r, R: CommandRunner> App<'r, R> {
                     .map(str::to_string)
             })
             .unwrap_or_default()
+    }
+
+    /// After a helm failure, dump diagnostic info: the release description
+    /// (which names the failing job), the job's events, and pod logs.
+    fn explain_helm_failure(&self, kube_ctx: &str) {
+        ui::dim("  diagnosing helm failure...");
+        let status_out = self.helm(
+            kube_ctx,
+            &[
+                "status",
+                helm::RELEASE_NAME,
+                "--namespace",
+                helm::NAMESPACE,
+                "-o",
+                "json",
+            ],
+        );
+        if status_out.success() {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&status_out.stdout) {
+                if let Some(desc) = v
+                    .get("info")
+                    .and_then(|i| i.get("description"))
+                    .and_then(|d| d.as_str())
+                {
+                    ui::dim(&format!("  helm says: {desc}"));
+                    // Extract failed job name from "name: <job>, kind: Job"
+                    if let Some(job_start) = desc.find("name: ") {
+                        let rest = &desc[job_start + 6..];
+                        if let Some(end) = rest.find(',') {
+                            let job_name = &rest[..end];
+                            self.dump_failed_job(kube_ctx, job_name);
+                        }
+                    }
+                }
+            }
+        }
+        // Show migration-console-0 status.
+        let console_out = self.runner.run(
+            "kubectl",
+            &self.kubectl_args(
+                kube_ctx,
+                &[
+                    "get",
+                    "pod",
+                    "migration-console-0",
+                    "-n",
+                    "ma",
+                    "-o",
+                    "wide",
+                    "--no-headers",
+                ],
+            ),
+        );
+        if console_out.success() && !console_out.stdout.trim().is_empty() {
+            ui::dim(&format!(
+                "  migration-console-0: {}",
+                console_out.stdout.trim()
+            ));
+        }
+        ui::dim("  run `migration-assistant diag` for full diagnostics");
+    }
+
+    fn dump_failed_job(&self, kube_ctx: &str, job_name: &str) {
+        // Job events.
+        let events = self.runner.run(
+            "kubectl",
+            &self.kubectl_args(
+                kube_ctx,
+                &[
+                    "get",
+                    "events",
+                    "-n",
+                    "ma",
+                    "--field-selector",
+                    &format!("involvedObject.kind=Job,involvedObject.name={job_name}"),
+                    "--sort-by=.lastTimestamp",
+                    "--no-headers",
+                    "-o",
+                    "custom-columns=REASON:.reason,MESSAGE:.message",
+                ],
+            ),
+        );
+        if events.success() && !events.stdout.trim().is_empty() {
+            ui::dim(&format!("  job {job_name} events:"));
+            for line in events.stdout.lines().take(8) {
+                ui::dim(&format!("    {line}"));
+            }
+        }
+        // Pod logs (best-effort — pod may be GC'd).
+        let pods = self.runner.run(
+            "kubectl",
+            &self.kubectl_args(
+                kube_ctx,
+                &[
+                    "get",
+                    "pods",
+                    "-n",
+                    "ma",
+                    "--selector",
+                    &format!("job-name={job_name}"),
+                    "-o",
+                    "jsonpath={range .items[*]}{.metadata.name}{\"\\n\"}{end}",
+                ],
+            ),
+        );
+        if pods.success() {
+            for pod in pods.stdout.lines().take(2) {
+                if pod.trim().is_empty() {
+                    continue;
+                }
+                let logs = self.runner.run(
+                    "kubectl",
+                    &self.kubectl_args(
+                        kube_ctx,
+                        &[
+                            "logs",
+                            pod.trim(),
+                            "-n",
+                            "ma",
+                            "--all-containers",
+                            "--tail=20",
+                        ],
+                    ),
+                );
+                if logs.success() && !logs.stdout.trim().is_empty() {
+                    ui::dim(&format!("  pod {pod} logs:"));
+                    for line in logs.stdout.lines().take(20) {
+                        ui::dim(&format!("    {line}"));
+                    }
+                }
+            }
+        }
+    }
+
+    fn kubectl_args<'a>(&self, kube_ctx: &'a str, args: &[&'a str]) -> Vec<&'a str> {
+        let mut full = Vec::new();
+        if !kube_ctx.is_empty() {
+            full.push("--context");
+            full.push(kube_ctx);
+        }
+        full.extend_from_slice(args);
+        full
+    }
+
+    fn migration_console_ready(&self, kube_ctx: &str) -> bool {
+        let mut args = Vec::new();
+        if !kube_ctx.is_empty() {
+            args.extend(["--context", kube_ctx]);
+        }
+        args.extend([
+            "get",
+            "pod",
+            "migration-console-0",
+            "-n",
+            "ma",
+            "-o",
+            "jsonpath={.status.conditions[?(@.type=='Ready')].status}",
+        ]);
+        let out = self.runner.run("kubectl", &args);
+        out.trimmed_stdout() == "True"
     }
 
     /// Run helm bound to the kube context.
@@ -998,6 +1171,20 @@ impl<'r, R: CommandRunner> App<'r, R> {
         Ok((chart.to_string_lossy().to_string(), values))
     }
 
+    /// Whether the bundled chart has custom image overrides via a values file.
+    /// When present, image repos/tags come from that file — the CLI doesn't
+    /// need to pass --set flags. Custom packs generate this file to point
+    /// images at their own registry.
+    fn has_custom_image_values(&self) -> bool {
+        artifact::bundle_dir()
+            .map(|b| {
+                artifact::bundled_chart_dir(&b)
+                    .join("valuesImages.yaml")
+                    .is_file()
+            })
+            .unwrap_or(false)
+    }
+
     /// The repo root for `--build` (`--base-dir`), error if missing on a build run.
     fn base_dir(&self) -> Result<String> {
         let base = self.state.get_owned("BASE_DIR", "");
@@ -1009,30 +1196,32 @@ impl<'r, R: CommandRunner> App<'r, R> {
         Ok(base)
     }
 
-    /// The container image tag used for BOTH the gradle build and the helm
-    /// `images.*.tag` flags — they MUST match or the chart pulls an image that
-    /// was never pushed (an empty/mismatched tag → `migrations_<name>_…`
-    /// ErrImagePull → the installer hook hangs → DeadlineExceeded).
+    /// The container image tag for helm `images.*.tag` flags.
     ///
     /// Resolution (first non-empty wins):
-    ///   1. `IMAGE_TAG`        — explicit `--image-tag <x>` operator override
-    ///      (use a git SHA / version here for immutable, reproducible deploys).
+    ///   1. `IMAGE_TAG`        — explicit `--image-tag <x>` operator override.
     ///   2. `BUILD_IMAGE_TAG`  — what the build step recorded it pushed.
-    ///   3. `MA_VERSION`       — the `--version <v>` release lane: images are the
-    ///      published `…:<version>`, so the version IS the tag. (Build lane only;
-    ///      skipped under `--build`.)
-    ///   4. `latest`           — the `--build` default. NOTE: today the
-    ///      `:buildImages` gradle build hard-codes the pushed tag to `latest`
-    ///      and ignores `-PimageVersion`, so on the source-build lane `latest`
-    ///      is the ONLY tag that actually exists in ECR. Honoring a specific
-    ///      `--image-tag` on `--build` additionally requires teaching the
-    ///      buildImages gradle build to tag with that value — a build-side
-    ///      change, not done here. Never returns empty.
+    ///   3. `build.imageTag`   — from manifest.json (set by pack for custom builds).
+    ///   4. `MA_VERSION`       — the version resolved from the bundle.
+    ///   5. `latest`           — fallback.
     fn resolve_image_tag(&self) -> String {
         for key in ["IMAGE_TAG", "BUILD_IMAGE_TAG"] {
             let v = self.state.get_owned(key, "");
             if !v.is_empty() {
                 return v;
+            }
+        }
+        if let Some(manifest) = crate::manifest::Manifest::load(
+            &std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|x| x.to_path_buf()))
+                .unwrap_or_default(),
+        )
+        .ok()
+        .flatten()
+        {
+            if !manifest.build.image_tag.is_empty() {
+                return manifest.build.image_tag;
             }
         }
         if !self.is_build() {

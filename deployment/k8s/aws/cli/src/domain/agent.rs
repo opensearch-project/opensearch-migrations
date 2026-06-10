@@ -53,24 +53,40 @@ pub fn discover_skills(skills_src: &Path) -> Vec<String> {
     names
 }
 
-/// Canonical agent name → ordered candidate binaries. Kiro ships as `kiro-cli`
-/// or `kiro`.
-pub const AGENT_CANDIDATES: &[(&str, &[&str])] = &[
+use crate::manifest::AgentConfig;
+
+/// Default agent candidates (used when manifest has no `agents` array).
+pub const DEFAULT_AGENT_CANDIDATES: &[(&str, &[&str])] = &[
     ("claude", &["claude"]),
     ("codex", &["codex"]),
     ("kiro", &["kiro-cli", "kiro"]),
 ];
 
-/// The candidate binaries for a canonical agent name.
+/// The candidate binaries for a canonical agent name, checking the manifest
+/// config first, then falling back to the hardcoded defaults.
+pub fn binaries_for_with_config(canonical: &str, config: &[AgentConfig]) -> Vec<String> {
+    if let Some(ac) = config.iter().find(|a| a.id == canonical) {
+        if !ac.binaries.is_empty() {
+            return ac.binaries.clone();
+        }
+    }
+    DEFAULT_AGENT_CANDIDATES
+        .iter()
+        .find(|(name, _)| *name == canonical)
+        .map(|(_, bins)| bins.iter().map(|s| s.to_string()).collect())
+        .unwrap_or_default()
+}
+
+/// The candidate binaries for a canonical agent name (no manifest config).
 pub fn binaries_for(canonical: &str) -> &'static [&'static str] {
-    AGENT_CANDIDATES
+    DEFAULT_AGENT_CANDIDATES
         .iter()
         .find(|(name, _)| *name == canonical)
         .map(|(_, bins)| *bins)
         .unwrap_or(&[])
 }
 
-/// The first candidate binary for `canonical` that resolves on PATH, if any.
+/// The first candidate binary for `canonical` that resolves on PATH.
 pub fn bin_for<R: CommandRunner>(runner: &R, canonical: &str) -> Option<&'static str> {
     binaries_for(canonical)
         .iter()
@@ -78,10 +94,26 @@ pub fn bin_for<R: CommandRunner>(runner: &R, canonical: &str) -> Option<&'static
         .find(|b| runner.has_command(b))
 }
 
+/// Discover agents from manifest config. Returns `(id, resolved_binary)` pairs
+/// in manifest order for agents found on PATH.
+pub fn discover_from_config<R: CommandRunner>(
+    runner: &R,
+    config: &[AgentConfig],
+) -> Vec<(String, String)> {
+    config
+        .iter()
+        .filter_map(|ac| {
+            let bins = binaries_for_with_config(&ac.id, config);
+            let found = bins.iter().find(|b| runner.has_command(b))?;
+            Some((ac.id.clone(), found.clone()))
+        })
+        .collect()
+}
+
 /// Canonical names of agents whose binary resolves on PATH, in candidate order.
-/// Empty when none are installed.
+/// Uses default candidates when no manifest config is provided.
 pub fn discover<R: CommandRunner>(runner: &R) -> Vec<&'static str> {
-    AGENT_CANDIDATES
+    DEFAULT_AGENT_CANDIDATES
         .iter()
         .filter(|(name, _)| bin_for(runner, name).is_some())
         .map(|(name, _)| *name)
@@ -103,17 +135,34 @@ pub fn mcp_envvar(name: &str) -> String {
         .collect()
 }
 
+/// Default install hints (used when manifest has no `agents` config).
+const DEFAULT_INSTALL_URLS: &[(&str, &str)] = &[
+    ("claude", "https://code.claude.com/docs/en/quickstart"),
+    ("codex", "https://developers.openai.com/codex/cli"),
+    ("kiro", "https://kiro.dev/cli/"),
+];
+
 /// Install hints for supported agents NOT in `installed`. Returns `(name, url)`
 /// pairs in canonical order; empty when all are installed.
 pub fn missing_hints(installed: &[&str]) -> Vec<(&'static str, &'static str)> {
-    const URLS: &[(&str, &str)] = &[
-        ("claude", "https://code.claude.com/docs/en/quickstart"),
-        ("codex", "https://developers.openai.com/codex/cli"),
-        ("kiro", "https://kiro.dev/cli/"),
-    ];
-    URLS.iter()
+    DEFAULT_INSTALL_URLS
+        .iter()
         .filter(|(name, _)| !installed.contains(name))
         .copied()
+        .collect()
+}
+
+/// Install hints from manifest config. Returns `(id, url)` pairs for agents
+/// not found in `installed_ids`.
+pub fn missing_hints_from_config(
+    installed_ids: &[String],
+    config: &[AgentConfig],
+) -> Vec<(String, String)> {
+    config
+        .iter()
+        .filter(|ac| !installed_ids.contains(&ac.id))
+        .filter(|ac| !ac.install_url.is_empty())
+        .map(|ac| (ac.id.clone(), ac.install_url.clone()))
         .collect()
 }
 

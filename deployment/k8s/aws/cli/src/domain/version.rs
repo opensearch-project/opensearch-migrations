@@ -148,7 +148,15 @@ pub fn is_newer(remote: &str, local: &str) -> bool {
 /// a check was already performed in the last 24 hours (timestamp cached in
 /// `~/.migration-assistant/last-update-check`). Returns `Some(version)` if a
 /// newer release exists, `None` otherwise (including on any failure).
-pub fn check_for_update() -> Option<String> {
+///
+/// `update_check_url` is read from `manifest.json → build.updateCheckUrl`.
+/// It's the single source of truth for where to check — no hardcoded fallback.
+/// The upstream GitHub bundle sets it to the GitHub releases API; the Amazon
+/// pack sets it to the Solutions S3 VERSION.txt endpoint.
+pub fn check_for_update(update_check_url: &str) -> Option<String> {
+    if update_check_url.is_empty() {
+        return None;
+    }
     let current = resolve_cli_version();
     if current == FALLBACK_VERSION {
         return None;
@@ -156,8 +164,7 @@ pub fn check_for_update() -> Option<String> {
     if !should_check_today() {
         return None;
     }
-    let body = fetch_latest_release_json()?;
-    let remote = parse_release_tag(&body)?;
+    let remote = fetch_remote_version(update_check_url)?;
     record_check();
     if is_newer(&remote, &current) {
         Some(remote)
@@ -167,19 +174,44 @@ pub fn check_for_update() -> Option<String> {
 }
 
 /// Force a check regardless of the cache (used by `migration-assistant update`).
-pub fn check_for_update_now() -> Option<String> {
+pub fn check_for_update_now(update_check_url: &str) -> Option<String> {
+    if update_check_url.is_empty() {
+        return None;
+    }
     let current = resolve_cli_version();
     if current == FALLBACK_VERSION {
         return None;
     }
-    let body = fetch_latest_release_json()?;
-    let remote = parse_release_tag(&body)?;
+    let remote = fetch_remote_version(update_check_url)?;
     record_check();
     if is_newer(&remote, &current) {
         Some(remote)
     } else {
         None
     }
+}
+
+/// Fetch the remote version from the given URL. Tries to parse as JSON first
+/// (`tag_name` field for GitHub API, or `version` field), then falls back to
+/// treating the entire body as a plain-text version (for S3 VERSION.txt).
+fn fetch_remote_version(url: &str) -> Option<String> {
+    let body = fetch_url(url)?;
+    // JSON with tag_name (GitHub releases API)
+    if let Some(v) = parse_release_tag(&body) {
+        return Some(v);
+    }
+    // JSON with a "version" field
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&body) {
+        if let Some(v) = parsed.get("version").and_then(|v| v.as_str()) {
+            return Some(strip_v_prefix(v).to_string());
+        }
+    }
+    // Plain text: the body IS the version (e.g. S3 VERSION.txt)
+    let trimmed = body.trim();
+    if !trimmed.is_empty() && trimmed.len() < 50 {
+        return Some(strip_v_prefix(trimmed).to_string());
+    }
+    None
 }
 
 /// The `latest.json` URL at the stable releases path.
@@ -311,10 +343,6 @@ fn record_check() {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let _ = std::fs::write(path, now.to_string());
-}
-
-fn fetch_latest_release_json() -> Option<String> {
-    fetch_url(MA_RELEASES_API)
 }
 
 /// The release download URL for a given version.

@@ -23,6 +23,27 @@ pub struct Manifest {
     pub mcp_servers: BTreeMap<String, McpServer>,
     #[serde(default)]
     pub build: Build,
+    #[serde(default)]
+    pub agents: Vec<AgentConfig>,
+}
+
+/// One supported AI coding agent. Order in the array = picker display order.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct AgentConfig {
+    /// Canonical id (e.g. "claude", "codex", "kiro", "q").
+    pub id: String,
+    /// Binaries to probe on PATH, in priority order. First match wins.
+    #[serde(default)]
+    pub binaries: Vec<String>,
+    /// Human-readable label for the picker.
+    #[serde(default)]
+    pub label: String,
+    /// One-line description shown in the picker.
+    #[serde(default)]
+    pub description: String,
+    /// Install URL shown when the agent isn't found on PATH.
+    #[serde(rename = "installUrl", default)]
+    pub install_url: String,
 }
 
 /// Operator-visible UI strings.
@@ -112,6 +133,19 @@ pub struct Build {
     pub version: String,
     #[serde(default)]
     pub packs: Vec<Pack>,
+    /// URL to check for newer versions. The CLI fetches this URL and extracts
+    /// a version string to compare against the local version. Supports two
+    /// response formats:
+    ///   - JSON with a `tag_name` field (GitHub releases API)
+    ///   - JSON with a `version` field (custom endpoint)
+    ///   - Plain text (the body IS the version, trimmed)
+    /// When absent, the update check is disabled.
+    #[serde(rename = "updateCheckUrl", default)]
+    pub update_check_url: String,
+    /// Default container image tag for helm deploys. When set, this is used
+    /// instead of `build.version`. Operator can override with `--image-tag`.
+    #[serde(rename = "imageTag", default)]
+    pub image_tag: String,
 }
 
 /// One applied pack record (written by `migration-assistant pack`).
