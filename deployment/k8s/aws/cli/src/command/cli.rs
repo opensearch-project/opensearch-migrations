@@ -421,94 +421,10 @@ fn collect_wizard<R: CommandRunner>(app: &mut crate::app::App<R>) -> Result<()> 
     ui::step("Configure deployment");
     let ni = app.env.non_interactive;
 
-    let region_default = {
-        let saved = app.state.get_owned("AWS_REGION", "");
-        if saved.is_empty() {
-            std::env::var("AWS_REGION")
-                .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
-                .unwrap_or_else(|_| "us-east-1".to_string())
-        } else {
-            saved
-        }
-    };
-    let region = loop {
-        let r = ui::prompt("AWS region (deploy target)", &region_default, ni);
-        if r.is_empty() {
-            ui::warn("region cannot be empty");
-            if ni {
-                return Err(Error::die("AWS region is required"));
-            }
-            continue;
-        }
-        if !r
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        {
-            ui::warn("region should be lowercase letters, digits, and hyphens (e.g. us-east-1)");
-            if ni {
-                return Err(Error::die(format!("invalid region: {r}")));
-            }
-            continue;
-        }
-        break r;
-    };
+    let region = prompt_region(app, ni)?;
     app.state.set("AWS_REGION", &region);
 
-    // Adopt-existing: if discover found MigrationAssistant-* stacks, offer
-    // to adopt one before prompting for a fresh stage name.
-    let existing_stacks = app.state.get_owned("CFN_MA_STACKS", "");
-    let stage_name =
-        if !existing_stacks.is_empty() && app.state.get_or("STAGE_NAME", "").is_empty() && !ni {
-            let stacks: Vec<&str> = existing_stacks.split_whitespace().collect();
-            if stacks.len() == 1 {
-                ui::info(&format!("found existing stack: {}", stacks[0]));
-                if ui::confirm("Adopt this stack (skip CFN deploy)?", true, ni) {
-                    let name = stacks[0]
-                        .strip_prefix("MigrationAssistant-")
-                        .unwrap_or(stacks[0]);
-                    app.state.set("CFN_STACK_NAME", stacks[0]);
-                    app.state.set("SKIP_CFN_DEPLOY", "Y");
-                    ui::ok(&format!("adopting stack: {} (stage={})", stacks[0], name));
-                    name.to_string()
-                } else {
-                    prompt_stage_name(ni)
-                }
-            } else {
-                ui::info("found multiple Migration Assistant stacks:");
-                for (i, s) in stacks.iter().enumerate() {
-                    ui::dim(&format!("  [{}] {}", i + 1, s));
-                }
-                let none_idx = stacks.len() + 1;
-                ui::dim(&format!("  [{none_idx}] none — deploy a new stack"));
-                let idx = loop {
-                    let pick = ui::prompt("Pick", "1", ni);
-                    match pick.trim().parse::<usize>() {
-                        Ok(n) if n >= 1 && n <= none_idx => break n,
-                        _ => {
-                            ui::warn(&format!(
-                                "please enter a number between 1 and {none_idx}"
-                            ));
-                            if ni {
-                                break none_idx;
-                            }
-                        }
-                    }
-                };
-                if idx <= stacks.len() {
-                    let chosen = stacks[idx - 1];
-                    let name = chosen.strip_prefix("MigrationAssistant-").unwrap_or(chosen);
-                    app.state.set("CFN_STACK_NAME", chosen);
-                    app.state.set("SKIP_CFN_DEPLOY", "Y");
-                    ui::ok(&format!("adopting stack: {} (stage={})", chosen, name));
-                    name.to_string()
-                } else {
-                    prompt_stage_name(ni)
-                }
-            }
-        } else {
-            let stage_default = app.state.get_owned("STAGE_NAME", "ma");
-            prompt_stage_name_with_default(&stage_default, ni)
-        };
+    let stage_name = resolve_stage_name(app, ni);
     app.state.set("STAGE_NAME", &stage_name);
 
     let mirror_default = app.state.get_or("MIRROR_IMAGES", "Y") == "Y";
@@ -1069,6 +985,100 @@ fn load_manifest() -> Option<crate::manifest::Manifest> {
     crate::manifest::Manifest::load(&dir).ok().flatten()
 }
 
+fn prompt_region<R: CommandRunner>(app: &crate::app::App<R>, ni: bool) -> Result<String> {
+    let default = {
+        let saved = app.state.get_owned("AWS_REGION", "");
+        if saved.is_empty() {
+            std::env::var("AWS_REGION")
+                .or_else(|_| std::env::var("AWS_DEFAULT_REGION"))
+                .unwrap_or_else(|_| "us-east-1".to_string())
+        } else {
+            saved
+        }
+    };
+    loop {
+        let r = ui::prompt("AWS region (deploy target)", &default, ni);
+        if r.is_empty() {
+            ui::warn("region cannot be empty");
+            if ni {
+                return Err(Error::die("AWS region is required"));
+            }
+            continue;
+        }
+        if !r
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            ui::warn("region should be lowercase letters, digits, and hyphens (e.g. us-east-1)");
+            if ni {
+                return Err(Error::die(format!("invalid region: {r}")));
+            }
+            continue;
+        }
+        return Ok(r);
+    }
+}
+
+fn resolve_stage_name<R: CommandRunner>(app: &mut crate::app::App<R>, ni: bool) -> String {
+    let existing_stacks = app.state.get_owned("CFN_MA_STACKS", "");
+    if existing_stacks.is_empty() || !app.state.get_or("STAGE_NAME", "").is_empty() || ni {
+        let default = app.state.get_owned("STAGE_NAME", "ma");
+        return prompt_stage_name_with_default(&default, ni);
+    }
+    let stacks: Vec<&str> = existing_stacks.split_whitespace().collect();
+    if let Some(adopted) = offer_adopt_stack(app, &stacks, ni) {
+        return adopted;
+    }
+    prompt_stage_name(ni)
+}
+
+fn offer_adopt_stack<R: CommandRunner>(
+    app: &mut crate::app::App<R>,
+    stacks: &[&str],
+    ni: bool,
+) -> Option<String> {
+    if stacks.len() == 1 {
+        ui::info(&format!("found existing stack: {}", stacks[0]));
+        if ui::confirm("Adopt this stack (skip CFN deploy)?", true, ni) {
+            return Some(adopt_stack(app, stacks[0]));
+        }
+        return None;
+    }
+    ui::info("found multiple Migration Assistant stacks:");
+    for (i, s) in stacks.iter().enumerate() {
+        ui::dim(&format!("  [{}] {}", i + 1, s));
+    }
+    let none_idx = stacks.len() + 1;
+    ui::dim(&format!("  [{none_idx}] none — deploy a new stack"));
+    let idx = prompt_pick(none_idx, ni);
+    if idx <= stacks.len() {
+        return Some(adopt_stack(app, stacks[idx - 1]));
+    }
+    None
+}
+
+fn adopt_stack<R: CommandRunner>(app: &mut crate::app::App<R>, stack: &str) -> String {
+    let name = stack.strip_prefix("MigrationAssistant-").unwrap_or(stack);
+    app.state.set("CFN_STACK_NAME", stack);
+    app.state.set("SKIP_CFN_DEPLOY", "Y");
+    ui::ok(&format!("adopting stack: {stack} (stage={name})"));
+    name.to_string()
+}
+
+fn prompt_pick(max: usize, ni: bool) -> usize {
+    loop {
+        let pick = ui::prompt("Pick", "1", ni);
+        match pick.trim().parse::<usize>() {
+            Ok(n) if n >= 1 && n <= max => return n,
+            _ => {
+                ui::warn(&format!("please enter a number between 1 and {max}"));
+                if ni {
+                    return max;
+                }
+            }
+        }
+    }
+}
 
 fn prompt_stage_name(ni: bool) -> String {
     prompt_stage_name_with_default("ma", ni)

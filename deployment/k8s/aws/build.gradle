@@ -192,7 +192,7 @@ tasks.register('stageBinary', Copy) {
 tasks.register('assembleBundle', Tar) {
     group = 'release'
     description = 'Package skills + helm chart + pre-synthesized CFN templates + VERSION.txt'
-    dependsOn 'writeVersionFile', ':agent-skills:agentSkillsTar',
+    dependsOn 'writeVersionFile', 'stageBinary', ':agent-skills:agentSkillsTar',
               ':deployment:migration-assistant-solution:cdkSynthMinified'
 
     archiveBaseName.set('migration-assistant-bundle')
