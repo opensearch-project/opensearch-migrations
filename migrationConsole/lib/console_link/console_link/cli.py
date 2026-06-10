@@ -524,17 +524,20 @@ def parse_headers(header: str) -> Dict:
 
 
 def _complete_from_command_result(result, incomplete):
+    return [
+        CompletionItem(value)
+        for value in _command_result_values(result)
+        if value.startswith(incomplete)
+    ]
+
+
+def _command_result_values(result) -> list[str]:
     if not result.success or not result.value:
         return []
-
     return [
-        CompletionItem(line.strip())
+        line.strip()
         for line in result.value.splitlines()
-        if (
-            line.strip()
-            and not _is_empty_command_success_message(line)
-            and line.strip().startswith(incomplete)
-        )
+        if line.strip() and not _is_empty_command_success_message(line)
     ]
 
 
@@ -588,7 +591,11 @@ def get_kafka_topic_completions(ctx, _, incomplete):
     try:
         env = _get_completion_env(ctx)
         kafka_resource = _resolve_kafka_from_env(env, _ctx_param(ctx, "kafka_selector"))
-        return _complete_from_command_result(kafka_.list_topics(kafka_resource), incomplete)
+        return [
+            CompletionItem(topic)
+            for topic in _non_internal_topics(kafka_.list_topics(kafka_resource))
+            if topic.startswith(incomplete)
+        ]
     except Exception:
         return []
 
@@ -1109,6 +1116,7 @@ def delete_topic_cmd(ctx, kafka_selector, acknowledge_risk, topic_name):
 
 
 DEFAULT_LEGACY_CONSUMER_GROUP = "logging-group-default"
+DEFAULT_LEGACY_TOPIC = "logging-traffic-topic"
 
 
 def _consumer_group_hint(groups: Sequence[str]) -> str:
@@ -1153,6 +1161,43 @@ def _resolve_default_consumer_group(env, kafka_selector=None) -> str:
     return DEFAULT_LEGACY_CONSUMER_GROUP
 
 
+def _topic_hint(topics: Sequence[str]) -> str:
+    return f"Specify: TOPIC_NAME <{'|'.join(topics)}>."
+
+
+def _non_internal_topics(result) -> list[str]:
+    return [
+        topic
+        for topic in _command_result_values(result)
+        if not topic.startswith("__")
+    ]
+
+
+def _resolve_default_topic_name(env, kafka_selector, kafka_resource) -> str:
+    catalog = _resource_catalog(env)
+    if catalog is None or hasattr(catalog, "_legacy_env"):
+        return DEFAULT_LEGACY_TOPIC
+
+    kafka_name = catalog.resolve(ResourceRole.KAFKA, kafka_selector).ref_name
+    topics_result = kafka_.list_topics(kafka_resource)
+    if not topics_result.success:
+        raise click.UsageError(f"Unable to list topics for kafka resource '{kafka_name}'. Specify TOPIC_NAME.")
+
+    topics = _non_internal_topics(topics_result)
+    if len(topics) == 1:
+        return topics[0]
+    if not topics:
+        raise click.UsageError(
+            f"No non-internal topics are available for kafka resource '{kafka_name}'. "
+            "Specify TOPIC_NAME explicitly, or run "
+            f"`console kafka list-topics --kafka {kafka_name}` to inspect Kafka directly."
+        )
+    raise click.UsageError(
+        f"Multiple topics are available for kafka resource '{kafka_name}': {', '.join(topics)}.\n"
+        f"{_topic_hint(topics)}"
+    )
+
+
 @kafka_group.command(name="describe-consumer-group")
 @_kafka_selector_option
 @click.argument('group_name', required=False, default=None,
@@ -1176,11 +1221,14 @@ def list_consumer_groups_cmd(ctx, kafka_selector):
 
 @kafka_group.command(name="describe-topic-records")
 @_kafka_selector_option
-@click.argument('topic_name', required=False, default="logging-traffic-topic",
+@click.argument('topic_name', required=False, default=None,
                 shell_complete=get_kafka_topic_completions)
 @click.pass_obj
 def describe_topic_records_cmd(ctx, kafka_selector, topic_name):
-    result = kafka_.describe_topic_records(resolve_kafka_resource(ctx, kafka_selector), topic_name=topic_name)
+    kafka_resource = resolve_kafka_resource(ctx, kafka_selector)
+    if topic_name is None:
+        topic_name = _resolve_default_topic_name(ctx.env, kafka_selector, kafka_resource)
+    result = kafka_.describe_topic_records(kafka_resource, topic_name=topic_name)
     click.echo(result.value)
 
 # ##################### UTILITIES ###################

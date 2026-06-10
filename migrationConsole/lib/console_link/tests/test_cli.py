@@ -1524,7 +1524,7 @@ def test_kafka_topic_completion_uses_list_topics(mocker, env):
     ctx.find_root.return_value.params = {'config_file': '/fake/config.yaml', 'force_use_config_file': True}
     mocker.patch('console_link.cli.Environment', return_value=env)
     mocker.patch('console_link.middleware.kafka.list_topics',
-                 return_value=CommandResult(success=True, value='logging-traffic-topic\nlogs-topic\n'))
+                 return_value=CommandResult(success=True, value='__consumer_offsets\nlogging-traffic-topic\nlogs-topic\n'))
 
     completions = get_kafka_topic_completions(ctx, None, 'log')
 
@@ -1569,6 +1569,81 @@ def test_cli_kafka_describe_topic(runner, mocker):
     model_mock.assert_called_once_with(topic_name='test')
     middleware_mock.assert_called_once()
     assert result.exit_code == 0
+
+
+def test_cli_kafka_describe_topic_records_falls_back_to_legacy_default(runner, mocker):
+    model_mock = mocker.patch.object(StandardKafka, 'describe_topic_records')
+
+    result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'describe-topic-records'],
+                           catch_exceptions=True)
+
+    model_mock.assert_called_once_with(topic_name='logging-traffic-topic')
+    assert result.exit_code == 0
+
+
+def test_cli_kafka_describe_topic_records_uses_only_topic_for_selected_k8s_kafka(runner, mocker):
+    env = _catalog_env([
+        _catalog_kafka_entry("default", "broker-a:9092"),
+    ])
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+    mocker.patch(
+        'console_link.middleware.kafka.list_topics',
+        return_value=CommandResult(success=True, value='__consumer_offsets\nproxy-a-traffic\n'),
+    )
+    describe_records = mocker.patch(
+        'console_link.middleware.kafka.describe_topic_records',
+        return_value=CommandResult(success=True, value='TOPIC PARTITION RECORDS\n'),
+    )
+
+    result = runner.invoke(cli, ['kafka', 'describe-topic-records', '--kafka', 'default'],
+                           catch_exceptions=True)
+
+    assert result.exit_code == 0
+    describe_records.assert_called_once()
+    assert describe_records.call_args.kwargs["topic_name"] == "proxy-a-traffic"
+
+
+def test_cli_kafka_describe_topic_records_requires_topic_when_selected_kafka_has_multiple_topics(runner, mocker):
+    env = _catalog_env([
+        _catalog_kafka_entry("default", "broker-a:9092"),
+    ])
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+    mocker.patch(
+        'console_link.middleware.kafka.list_topics',
+        return_value=CommandResult(success=True, value='__consumer_offsets\nproxy-a-traffic\nproxy-b-traffic\n'),
+    )
+    describe_records = mocker.patch('console_link.middleware.kafka.describe_topic_records')
+
+    result = runner.invoke(cli, ['kafka', 'describe-topic-records', '--kafka', 'default'],
+                           catch_exceptions=True)
+
+    assert result.exit_code == 2
+    assert "Multiple topics are available for kafka resource 'default'" in result.output
+    assert "Specify: TOPIC_NAME <proxy-a-traffic|proxy-b-traffic>." in result.output
+    describe_records.assert_not_called()
+
+
+def test_cli_kafka_describe_topic_records_does_not_default_to_internal_topic(runner, mocker):
+    env = _catalog_env([
+        _catalog_kafka_entry("kafka-b", "broker-b:9092"),
+    ])
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+    mocker.patch(
+        'console_link.middleware.kafka.list_topics',
+        return_value=CommandResult(success=True, value='__consumer_offsets\n'),
+    )
+    describe_records = mocker.patch('console_link.middleware.kafka.describe_topic_records')
+
+    result = runner.invoke(cli, ['kafka', 'describe-topic-records', '--kafka', 'kafka-b'],
+                           catch_exceptions=True)
+
+    assert result.exit_code == 2
+    assert "No non-internal topics are available for kafka resource 'kafka-b'" in result.output
+    assert "`console kafka list-topics --kafka kafka-b`" in result.output
+    describe_records.assert_not_called()
 
 
 def test_completion_script(runner):
