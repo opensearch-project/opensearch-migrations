@@ -54,4 +54,32 @@ class MetadataTransformationRegistryTest {
         assertThat(configCtx, containsString("standard"));
         assertThat(configCtx, containsString("delimited_payload"));
     }
+
+    @Test
+    void multiTypeUnionTransformIsActive_ES5_to_OS() {
+        var src = Version.fromString("ES 5.6.16");
+        var tgt = Version.fromString("OS 2.19.0");
+        var transformers = MetadataTransformationRegistry.getCustomTransformationByClusterVersions(src, tgt);
+        assertThat("Multi-type mapping union should auto-apply for ES 5 → OS",
+            infoNames(transformers), hasItem("Multi-type mapping union"));
+    }
+
+    @Test
+    void multiTypeUnionTransformIsActive_ES6_to_ES7() {
+        var src = Version.fromString("ES 6.8.23");
+        var tgt = Version.fromString("ES 7.10.2");
+        var transformers = MetadataTransformationRegistry.getCustomTransformationByClusterVersions(src, tgt);
+        assertThat("Multi-type mapping union should auto-apply for ES 6 → ES 7",
+            infoNames(transformers), hasItem("Multi-type mapping union"));
+    }
+
+    @Test
+    void multiTypeUnionTransformIsSkipped_ES7_source() {
+        // ES 7+ has single-type mappings already; no union needed.
+        var src = Version.fromString("ES 7.10.2");
+        var tgt = Version.fromString("OS 2.19.0");
+        var transformers = MetadataTransformationRegistry.getCustomTransformationByClusterVersions(src, tgt);
+        assertThat("Multi-type mapping union should NOT apply for an ES 7 source",
+            infoNames(transformers), not(hasItem("Multi-type mapping union")));
+    }
 }

@@ -1,0 +1,137 @@
+plugins {
+    id 'base'
+}
+
+// =============================================================================
+// agent-skills/build.gradle
+//
+// Two parallel deliverables:
+//
+//   1. Agent-agnostic skill bundle (skills/) — Startup.md +
+//      manifest.json + the operator runbook + the CLI reference.
+//      Consumed by the migration-assistant CLI (deployment/k8s/aws/cli)
+//      via task `agentSkillsTar`. Skill discovery is by-convention:
+//      every skills/<name>/ subdir with a SKILL.md is bundled. Partner
+//      packs add their own skill dirs the same way.
+//
+//   2. Kiro-specific bundle (kiro/) — Kiro CLI config (agents/, prompts/,
+//      settings/, steering/). Built into a runnable `.kiro/` tree by
+//      `setupKiro` and packaged for release by `packageKiro`. The
+//      Kiro `setupKiro` step ALSO grafts the agent-agnostic skills
+//      into its steering and resource set, so picking the
+//      opensearch-migration Kiro agent gets the same skill content.
+// =============================================================================
+
+def kiroBuildDir = layout.buildDirectory.dir('.kiro')
+def skillsBuildDir = layout.buildDirectory.dir('skills')
+
+// ---------- (1) agent-agnostic skill bundle ----------
+
+tasks.register('assembleAgentSkills', Copy) {
+    description = 'Stage the agent-agnostic skill tree (Startup.md + SOPs) under build/skills'
+    group = 'agent-skills'
+    from 'skills'
+    // Pull in the per-product SOPs co-located in agent-sops/. These get
+    // dropped into skills/sops/ rather than overwriting top-level skill
+    // dirs so they're discoverable but visibly distinct.
+    from('../agent-sops') {
+        include '*.md'
+        into 'sops'
+    }
+    into skillsBuildDir
+}
+
+tasks.register('agentSkillsTar', Tar) {
+    description = 'Package the agent-agnostic skill tree as agent-skills.tar.gz'
+    group = 'agent-skills'
+    dependsOn 'assembleAgentSkills'
+    archiveFileName = 'agent-skills.tar.gz'
+    destinationDirectory = layout.buildDirectory
+    compression = Compression.GZIP
+    from(skillsBuildDir) {
+        into 'skills'
+    }
+}
+
+// Configurations / artifacts so other Gradle modules (notably the
+// migration-assistant CLI tarball builder) can resolve the skill bundle
+// as a producer→consumer dependency. Inside the same project tree:
+//   dependencies { agentSkills project(path: ':agent-skills', configuration: 'agentSkills') }
+configurations {
+    agentSkills {
+        canBeConsumed = true
+        canBeResolved = false
+    }
+}
+artifacts {
+    agentSkills(tasks.named('agentSkillsTar')) {
+        builtBy 'agentSkillsTar'
+    }
+}
+
+// ---------- (2) Kiro-specific bundle ----------
+
+tasks.register('setupKiro', Copy) {
+    description = 'Copy the kiro/ config tree + agent-agnostic skills into build/.kiro/'
+    group = 'kiro'
+    // Kiro's own config (agents, prompts, settings).
+    from 'kiro'
+    // Agent-agnostic skill content lands in .kiro/skills/ so the Kiro
+    // agent can reference it via file://.kiro/skills/* in its resources
+    // glob.
+    from(skillsBuildDir) {
+        into 'skills'
+    }
+    // Steering docs that Kiro auto-loads. The migration-assistant-operator
+    // skill is the single source of truth — these used to live at
+    // kiro/steering/ but are now in skills/migration-assistant-operator/
+    // so every supported agent (claude, codex, kiro) reads them.
+    from('skills/migration-assistant-operator') {
+        include 'workflow.md'
+        include 'deployment.md'
+        include 'migration-prompt.md'
+        include 'product.md'
+        into 'steering'
+    }
+    // Per-product SOPs (deploy + cluster integration playbooks) folded
+    // into steering as well.
+    from('../agent-sops') {
+        include '*.md'
+        into 'steering'
+    }
+    into kiroBuildDir
+    dependsOn 'assembleAgentSkills'
+}
+
+tasks.register('kiroChat', Exec) {
+    description = 'Run kiro-cli chat from the build directory'
+    group = 'kiro'
+    dependsOn 'setupKiro'
+    workingDir layout.buildDirectory
+    commandLine 'kiro-cli', 'chat'
+}
+
+tasks.register('kiroAgent', Exec) {
+    description = 'Run kiro-cli chat with the opensearch-migration agent'
+    group = 'kiro'
+    dependsOn 'setupKiro'
+    workingDir layout.buildDirectory
+    commandLine 'kiro-cli', 'chat', '--agent', 'opensearch-migration'
+}
+
+tasks.register('packageKiro', Tar) {
+    description = 'Create kiro-assistant.tar.gz for release'
+    group = 'kiro'
+    dependsOn 'setupKiro'
+    archiveFileName = 'kiro-assistant.tar.gz'
+    destinationDirectory = layout.buildDirectory
+    compression = Compression.GZIP
+    from(kiroBuildDir) {
+        into '.kiro'
+    }
+}
+
+clean {
+    delete kiroBuildDir
+    delete skillsBuildDir
+}

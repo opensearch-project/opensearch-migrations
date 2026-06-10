@@ -47,9 +47,13 @@ PHASE_SYMBOLS = {
 SPEC_DISPLAY_FIELDS = {
     'kafkaclusters': ['version', 'auth.type', 'nodePool.replicas'],
     'capturedtraffics': ['topicName', 'partitions', 'replicas'],
-    'captureproxies': ['podReplicas', 'listenPort', 'internetFacing'],
+    'captureproxies': ['podReplicas', 'listenPort', 'internetFacing', 'serviceType'],
     'datasnapshots': ['snapshotPrefix', 'indexAllowlist'],
-    'snapshotmigrations': ['documentBackfillPodReplicas', 'sourceVersion'],
+    'snapshotmigrations': [
+        'documentBackfillPodReplicas', 'sourceVersion',
+        'documentBackfillIndexAllowlist', 'metadataMigrationIndexAllowlist',
+        'metadataMigrationMultiTypeBehavior',
+    ],
     'trafficreplays': ['podReplicas', 'speedupFactor', 'removeAuthHeader'],
 }
 
@@ -214,7 +218,8 @@ def _mark_not_configured_from_filtered(sections: List[ResourceSection], filtered
                 group.not_configured = True
 
 
-def display_resource_tree(sections: List[ResourceSection], workflow_unavailable: bool = False) -> None:
+def display_resource_tree(sections: List[ResourceSection], workflow_unavailable: bool = False,
+                          show_live_status: bool = True) -> None:
     """Render the resource tree using Rich."""
     console = Console()
     has_any = any(
@@ -231,14 +236,14 @@ def display_resource_tree(sections: List[ResourceSection], workflow_unavailable:
             continue
         section_tree = Tree(f"[bold]{section.name}[/bold]")
         for group in section.groups:
-            _render_group(section_tree, group)
+            _render_group(section_tree, group, show_live_status)
         console.print(section_tree)
 
     if workflow_unavailable:
         console.print("\n[dim](Workflow progress unavailable)[/dim]")
 
 
-def _render_group(parent_tree, group: ResourceGroup) -> None:
+def _render_group(parent_tree, group: ResourceGroup, show_live_status: bool = True) -> None:
     """Render a resource group as a subtree."""
     if not group.resources and not group.not_configured:
         return
@@ -253,14 +258,14 @@ def _render_group(parent_tree, group: ResourceGroup) -> None:
     )
     plural_order = {p: i for i, p in enumerate(group_plurals)}
     for resource in sorted(group.resources, key=lambda r: (plural_order.get(r.plural, 99), r.name)):
-        _render_resource(group_node, resource)
+        _render_resource(group_node, resource, show_live_status)
 
 
 # Phases shown in the resource label (settled states)
 DISPLAY_PHASES = {'Ready', 'Completed', 'Failed', 'Error'}
 
 
-def _render_resource(parent_node, resource: ResourceNode) -> None:
+def _render_resource(parent_node, resource: ResourceNode, show_live_status: bool = True) -> None:
     """Render a single resource node with its children."""
     symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
     if resource.phase in DISPLAY_PHASES:
@@ -268,21 +273,27 @@ def _render_resource(parent_node, resource: ResourceNode) -> None:
     else:
         label = f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold]"
     node = parent_node.add(label)
-    _add_resource_details(node, resource)
+    _add_resource_details(node, resource, show_live_status)
     for child in resource.children:
-        _render_resource(node, child)
+        _render_resource(node, child, show_live_status)
 
 
-def _add_resource_details(node, resource: ResourceNode) -> None:
+def _add_resource_details(node, resource: ResourceNode, show_live_status: bool = True) -> None:
     """Add spec/status detail lines under a resource node."""
-    details = _format_spec_fields(resource)
-    if details:
-        node.add(f"[dim]{details}[/dim]")
-    if resource.depends_on:
+    for spec_line in format_spec_fields(resource):
+        node.add(f"[dim]{spec_line}[/dim]")
+    if resource.depends_on and resource.phase not in ('Ready', 'Completed'):
         deps = ", ".join(resource.depends_on)
         node.add(f"[dim]Depends on: {deps}[/dim]")
+    if show_live_status:
+        live = format_live_status(resource)
+        if live:
+            summary_line, detail_lines = live
+            status_node = node.add(f"[cyan]{summary_line}[/cyan]")
+            for line in detail_lines:
+                status_node.add(f"[cyan]{line}[/cyan]")
     if resource.workflow_progress:
-        if _has_notable_steps(resource.workflow_progress):
+        if has_notable_steps(resource.workflow_progress):
             _add_workflow_subtree(node, resource.workflow_progress)
 
 
@@ -298,37 +309,37 @@ def _should_show_step(step: Dict[str, Any]) -> bool:
     return False
 
 
-def _has_notable_steps(steps: List[Dict[str, Any]]) -> bool:
+def has_notable_steps(steps: List[Dict[str, Any]]) -> bool:
     """Return True if any step in the subtree should be shown."""
     for step in steps:
         if _should_show_step(step):
             return True
-        if _has_notable_steps(step.get('children', [])):
+        if has_notable_steps(step.get('children', [])):
             return True
     return False
 
 
-def _step_timestamp(step: Dict[str, Any]) -> str:
+def step_timestamp(step: Dict[str, Any]) -> str:
     """Get the display timestamp for sorting (finished_at or started_at)."""
     return step.get('finished_at') or step.get('started_at') or ''
 
 
 def _add_workflow_subtree(parent_node, steps: List[Dict[str, Any]]) -> None:
     """Render only notable workflow steps under a resource."""
-    notable = _collect_notable_steps(steps)
+    notable = collect_notable_steps(steps)
     if not notable:
         return
     # Add the most recent succeeded step for transition context
-    last_succeeded = _find_last_succeeded(steps)
+    last_succeeded = find_last_succeeded(steps)
     if last_succeeded and last_succeeded not in notable:
         notable.append(last_succeeded)
-    notable.sort(key=_step_timestamp)
+    notable.sort(key=step_timestamp)
     workflow_node = parent_node.add("Workflow progress:")
     for step in notable:
         _render_workflow_step(workflow_node, step)
 
 
-def _find_last_succeeded(steps: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+def find_last_succeeded(steps: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """Find the most recently completed step (by finished_at) among top-level steps only."""
     best = None
     for step in steps:
@@ -339,7 +350,7 @@ def _find_last_succeeded(steps: List[Dict[str, Any]]) -> Optional[Dict[str, Any]
     return best
 
 
-def _collect_notable_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def collect_notable_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Filter steps to only those worth showing, preserving hierarchy for notable children."""
     result = []
     for step in steps:
@@ -347,18 +358,18 @@ def _collect_notable_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             result.append(step)
         else:
             # Check if any children are notable — if so, lift them up
-            notable_children = _collect_notable_steps(step.get('children', []))
+            notable_children = collect_notable_steps(step.get('children', []))
             result.extend(notable_children)
     return result
 
 
-def _maybe_rewrite_wait_step(step: Dict[str, Any]) -> Dict[str, Any]:
+def maybe_rewrite_wait_step(step: Dict[str, Any]) -> Dict[str, Any]:
     """Rewrite waitFor steps to show the resource being waited on."""
     if is_approval_node(step):
         return step
     display_name = step.get('display_name', '')
     base_name = display_name.split('(')[0].strip() if '(' in display_name else display_name
-    if not base_name.startswith('waitFor'):
+    if not base_name.startswith('wait'):
         return step
     resource_name = get_node_input_parameter(step, 'resourceName')
     if resource_name and resource_name.strip():
@@ -373,7 +384,7 @@ def _maybe_rewrite_wait_step(step: Dict[str, Any]) -> Dict[str, Any]:
 
 def _render_workflow_step(parent_node, step: Dict[str, Any]) -> None:
     """Recursively render a workflow step node using the same formatting as workflow status."""
-    display_step = _maybe_rewrite_wait_step(step)
+    display_step = maybe_rewrite_wait_step(step)
     label = get_step_rich_label(display_step, status_output=None, show_approval_name=False)
     node = parent_node.add(label)
     # Show live check results if present (from LiveCheckProcessor)
@@ -383,7 +394,7 @@ def _render_workflow_step(parent_node, step: Dict[str, Any]) -> None:
         for line in value.strip().split('\n'):
             if line.strip():
                 node.add(f"[cyan]{line.strip()}[/cyan]")
-    for child in sorted(_collect_notable_steps(step.get('children', [])), key=_step_timestamp):
+    for child in sorted(collect_notable_steps(step.get('children', [])), key=step_timestamp):
         _render_workflow_step(node, child)
 
 
@@ -392,8 +403,8 @@ def _node_phase(node: Dict[str, Any]) -> str:
     return node.get('phase', 'Unknown')
 
 
-def _format_spec_fields(resource: ResourceNode) -> str:
-    """Extract key spec fields for display."""
+def format_spec_fields(resource: ResourceNode) -> List[str]:
+    """Extract key spec fields for display. Returns list of 'field: value' strings."""
     fields = SPEC_DISPLAY_FIELDS.get(resource.plural, [])
     parts = []
     for field_path in fields:
@@ -405,7 +416,96 @@ def _format_spec_fields(resource: ResourceNode) -> str:
                 if len(resource.spec.get(field_path, [])) > 3:
                     value += '...'
             parts.append(f"{label}: {value}")
-    return ' | '.join(parts)
+    return parts
+
+
+def format_live_status(resource: ResourceNode):
+    """Format live progress from CR status fields.
+
+    Returns (summary_line, detail_lines) or None if no status data.
+    """
+    if resource.plural == 'snapshotmigrations':
+        backfill = resource.status.get('documentBackfill')
+        if isinstance(backfill, dict):
+            return _format_backfill_status(backfill)
+    elif resource.plural == 'datasnapshots':
+        creation = resource.status.get('snapshotCreation')
+        if isinstance(creation, dict):
+            return _format_snapshot_creation_status(creation)
+    elif resource.plural == 'captureproxies':
+        endpoint = (resource.status.get('loadBalancerEndpoint') or '').strip()
+        if endpoint:
+            return f"endpoint: {endpoint}", []
+    return None
+
+
+def _format_backfill_status(backfill: Dict[str, Any]):
+    summary = backfill.get('summary') or {}
+    parts = []
+    details = []
+    phase = backfill.get('phase')
+    if phase:
+        details.append(f"phase: {phase}")
+    pct = summary.get('percentageCompleted')
+    if pct is not None:
+        parts.append(f"{pct:.0f}%")
+    shards_total = summary.get('shardsTotal')
+    shards_migrated = summary.get('shardsMigrated')
+    if shards_total is not None:
+        parts.append(f"shards {shards_migrated or 0}/{shards_total}")
+        details.append(f"shards migrated: {shards_migrated or 0}/{shards_total}")
+    shards_in_progress = summary.get('shardsInProgress')
+    if shards_in_progress:
+        details.append(f"shards in progress: {shards_in_progress}")
+    shards_waiting = summary.get('shardsWaiting')
+    if shards_waiting:
+        details.append(f"shards waiting: {shards_waiting}")
+    eta_ms = summary.get('etaMs')
+    if eta_ms:
+        secs = int(eta_ms / 1000)
+        m, s = divmod(secs, 60)
+        h, m = divmod(m, 60)
+        parts.append(f"ETA {h}h {m}m {s}s")
+        details.append(f"ETA: {h}h {m}m {s}s")
+    started = summary.get('started')
+    if started:
+        details.append(f"started: {started}")
+    finished = summary.get('finished')
+    if finished:
+        details.append(f"finished: {finished}")
+    updated_at = backfill.get('updatedAt')
+    if updated_at:
+        details.append(f"updated at: {updated_at}")
+    if parts:
+        return f"Backfill status: {', '.join(parts)}", details
+    return None
+
+
+def _format_snapshot_creation_status(creation: Dict[str, Any]):
+    summary = creation.get('summary') or {}
+    parts = []
+    details = []
+    phase = creation.get('phase')
+    if phase:
+        details.append(f"phase: {phase}")
+    shards_total = summary.get('shardsTotal')
+    shards_done = summary.get('shardsSuccessful')
+    if shards_total is not None:
+        parts.append(f"shards {shards_done or 0}/{shards_total}")
+        details.append(f"shards: {shards_done or 0}/{shards_total}")
+    shards_failed = summary.get('shardsFailed')
+    if shards_failed:
+        details.append(f"shards failed: {shards_failed}")
+    data_processed = summary.get('dataProcessed')
+    if data_processed and phase != 'Completed':
+        unit = summary.get('dataProcessedUnit', 'MiB')
+        details.append(f"data processed: {data_processed} {unit}")
+    updated_at = creation.get('updatedAt')
+    if updated_at:
+        details.append(f"updated at: {updated_at}")
+    if parts:
+        return f"Snapshot status: {', '.join(parts)}", details
+    return None
 
 
 def _get_nested(d: Dict[str, Any], path: str) -> Any:
