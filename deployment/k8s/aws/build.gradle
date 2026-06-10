@@ -189,37 +189,48 @@ tasks.register('stageBinary', Copy) {
     }
 }
 
+def bundleDir = layout.buildDirectory.dir('bundle')
+
 tasks.register('assembleBundle', Tar) {
     group = 'release'
     description = 'Package skills + helm chart + pre-synthesized CFN templates + VERSION.txt'
-    dependsOn 'writeVersionFile', 'stageBinary', ':agent-skills:agentSkillsTar',
+    dependsOn 'writeVersionFile', ':agent-skills:agentSkillsTar',
               ':deployment:migration-assistant-solution:cdkSynthMinified'
 
     archiveBaseName.set('migration-assistant-bundle')
     archiveVersion.set('')
     archiveExtension.set('tar.gz')
     compression = org.gradle.api.tasks.bundling.Compression.GZIP
-    destinationDirectory.set(distDir)
+    // Output to a separate dir to avoid Gradle's implicit-dependency check
+    // against stageBinary's distDir.
+    destinationDirectory.set(bundleDir)
 
     // Agent skills (Startup.md, manifest.json, skill dirs, agent-sops)
     from({ configurations.agentSkills.files.collect { tarTree(it) } })
 
-    // Helm chart — preserving dir name so `helm install ./helm/migrationAssistantWithArgo` works.
+    // Helm chart
     from(rootProject.layout.projectDirectory.dir(
             'deployment/k8s/charts/aggregates/migrationAssistantWithArgo')) {
         into('helm/migrationAssistantWithArgo')
     }
 
-    // Pre-synthesized CFN templates (the CLI reads these directly — no cdk synth at runtime).
+    // Pre-synthesized CFN templates
     from(rootProject.layout.projectDirectory.dir(
             'deployment/migration-assistant-solution/cdk.out-minified')) {
         into('cfn/cdk.out-minified')
     }
 
-    // VERSION.txt at the bundle root
+    // VERSION.txt
     from(distDir.map { it.file('VERSION.txt') })
+}
+
+// Copy bundle tarball into distDir alongside the binary + install.sh.
+tasks.register('copyBundle', Copy) {
+    dependsOn 'assembleBundle'
+    from(bundleDir.map { it.file('migration-assistant-bundle.tar.gz') })
+    into(distDir)
 }
 
 // ─── lifecycle wiring ────────────────────────────────────────────────────────
 
-assemble.dependsOn 'cargoBuild', 'writeVersionFile', 'stampInstallScript', 'stageBinary', 'assembleBundle'
+assemble.dependsOn 'cargoBuild', 'writeVersionFile', 'stampInstallScript', 'stageBinary', 'copyBundle'
