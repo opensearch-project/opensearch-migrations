@@ -1,12 +1,18 @@
 import {
     CLUSTER_CONFIG,
+    CAPTURE_CONFIG,
     HTTP_AUTH_BASIC,
     HTTP_AUTH_MTLS,
     HTTP_AUTH_SIGV4,
+    KAFKA_CLUSTER_CONFIG,
+    KAFKA_CLUSTERS_MAP,
+    NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
+    REPLAYER_CONFIG,
     SOURCE_CLUSTER_CONFIG,
     SOURCE_CLUSTERS_MAP,
     TARGET_CLUSTER_CONFIG,
     TARGET_CLUSTERS_MAP,
+    TRAFFIC_CONFIG,
 } from "@opensearch-migrations/schemas";
 import {z} from "zod";
 import {stringify} from "yaml";
@@ -104,6 +110,12 @@ const SOURCE_CLUSTER_DESCRIPTION = descriptionOf(SOURCE_CLUSTER_CONFIG);
 const TARGET_CLUSTER_DESCRIPTION = descriptionOf(TARGET_CLUSTER_CONFIG);
 const SOURCE_CLUSTERS_DESCRIPTION = descriptionOf(SOURCE_CLUSTERS_MAP);
 const TARGET_CLUSTERS_DESCRIPTION = descriptionOf(TARGET_CLUSTERS_MAP);
+const KAFKA_CLUSTERS_DESCRIPTION = descriptionOf(KAFKA_CLUSTERS_MAP);
+const KAFKA_CLUSTER_DESCRIPTION = descriptionOf(KAFKA_CLUSTER_CONFIG);
+const TRAFFIC_DESCRIPTION = descriptionOf(TRAFFIC_CONFIG);
+const CAPTURE_DESCRIPTION = descriptionOf(CAPTURE_CONFIG);
+const REPLAYER_DESCRIPTION = descriptionOf(REPLAYER_CONFIG);
+const SNAPSHOT_MIGRATION_DESCRIPTION = descriptionOf(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG);
 const AUTH_DESCRIPTION = "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS.";
 
 function descriptionOf(schema: {description?: string}): string | undefined {
@@ -327,6 +339,185 @@ function snapshotInfoNode(path: string[], snapshotInfo: unknown): EditNode {
     });
 }
 
+function kafkaMode(config: unknown): "autoCreate" | "existing" | "unknown" {
+    if (!config || typeof config !== "object") {
+        return "autoCreate";
+    }
+    const keys = Object.keys(config as Record<string, unknown>);
+    if (keys.includes("autoCreate")) {
+        return "autoCreate";
+    }
+    if (keys.includes("existing")) {
+        return "existing";
+    }
+    return "unknown";
+}
+
+function kafkaClusterNode(name: string, value: any): EditNode {
+    const rootPath = ["kafkaClusterConfiguration", name];
+    const mode = kafkaMode(value);
+    const children: EditNode[] = [
+        finalizeNode({
+            id: `edit:${[...rootPath, "mode"].join(".")}`,
+            path: [...rootPath, "mode"],
+            label: `mode: < ${mode} >`,
+            value: mode,
+            valueKind: "union",
+            description: KAFKA_CLUSTER_DESCRIPTION,
+            status: mode === "unknown" ? "error" : "ok",
+            diagnostics: mode === "unknown"
+                ? [{severity: "error", message: "Unknown Kafka cluster variant. Expected autoCreate or existing.", path: rootPath}]
+                : [],
+            variants: [
+                {label: "autoCreate", value: "autoCreate"},
+                {label: "existing", value: "existing"},
+            ],
+        }),
+    ];
+    if (mode === "existing") {
+        children.push(
+            scalarNode(
+                [...rootPath, "existing", "bootstrapServers"],
+                "bootstrapServers",
+                value?.existing?.bootstrapServers,
+                "Kafka bootstrap servers for an existing cluster.",
+                true
+            )
+        );
+    }
+    return finalizeNode({
+        id: `edit:${rootPath.join(".")}`,
+        path: rootPath,
+        label: `kafka: ${name}`,
+        valueKind: "object",
+        description: KAFKA_CLUSTER_DESCRIPTION,
+        status: "ok",
+        children,
+    });
+}
+
+function kafkaGroupNode(config: Record<string, any> | undefined): EditNode {
+    const path = ["kafkaClusterConfiguration"];
+    const children = Object.entries(config ?? {})
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([name, value]) => kafkaClusterNode(name, value));
+    children.push(addRow(path, "Kafka cluster", "Create a Kafka cluster configuration in pending workflow YAML."));
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: "Kafka Clusters",
+        valueKind: "record",
+        description: KAFKA_CLUSTERS_DESCRIPTION,
+        status: "ok",
+        children,
+    });
+}
+
+function captureProxyNode(name: string, value: any): EditNode {
+    const rootPath = ["traffic", "proxies", name];
+    return finalizeNode({
+        id: `edit:${rootPath.join(".")}`,
+        path: rootPath,
+        label: `capture proxy: ${name}`,
+        valueKind: "object",
+        description: CAPTURE_DESCRIPTION,
+        status: "ok",
+        children: [
+            scalarNode([...rootPath, "source"], "source", value?.source, "Name of the source cluster this proxy sits in front of. Must match a key in sourceClusters.", true),
+            scalarNode([...rootPath, "kafka"], "kafka", value?.kafka ?? "default", "Label of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration."),
+            scalarNode([...rootPath, "kafkaTopic"], "kafkaTopic", value?.kafkaTopic ?? "", "Kafka topic name for captured traffic. If empty, defaults to the proxy name."),
+        ],
+    });
+}
+
+function trafficReplayNode(name: string, value: any): EditNode {
+    const rootPath = ["traffic", "replayers", name];
+    return finalizeNode({
+        id: `edit:${rootPath.join(".")}`,
+        path: rootPath,
+        label: `traffic replay: ${name}`,
+        valueKind: "object",
+        description: REPLAYER_DESCRIPTION,
+        status: "ok",
+        children: [
+            scalarNode([...rootPath, "fromProxy"], "fromProxy", value?.fromProxy, "Name of the capture proxy to replay traffic from. Must match a key in traffic.proxies.", true),
+            scalarNode([...rootPath, "toTarget"], "toTarget", value?.toTarget, "Name of the target cluster to replay traffic to. Must match a key in targetClusters.", true),
+        ],
+    });
+}
+
+function trafficGroupNode(traffic: any): EditNode {
+    const proxyChildren = Object.entries(traffic?.proxies ?? {})
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([name, value]) => captureProxyNode(name, value));
+    proxyChildren.push(addRow(["traffic", "proxies"], "capture proxy", "Create a capture proxy configuration in pending workflow YAML."));
+
+    const replayChildren = Object.entries(traffic?.replayers ?? {})
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([name, value]) => trafficReplayNode(name, value));
+    replayChildren.push(addRow(["traffic", "replayers"], "traffic replay", "Create a traffic replay configuration in pending workflow YAML."));
+
+    return finalizeNode({
+        id: "edit:traffic",
+        path: ["traffic"],
+        label: "Live Traffic Migration",
+        valueKind: "object",
+        description: TRAFFIC_DESCRIPTION,
+        status: "ok",
+        children: [
+            finalizeNode({
+                id: "edit:traffic.proxies",
+                path: ["traffic", "proxies"],
+                label: "Capture",
+                valueKind: "record",
+                description: "Capture proxies that receive source traffic and write it to Kafka.",
+                status: "ok",
+                children: proxyChildren,
+            }),
+            finalizeNode({
+                id: "edit:traffic.replayers",
+                path: ["traffic", "replayers"],
+                label: "Replay",
+                valueKind: "record",
+                description: "Traffic replayers that consume captured traffic and replay it to targets.",
+                status: "ok",
+                children: replayChildren,
+            }),
+        ],
+    });
+}
+
+function snapshotMigrationNode(index: number, value: any): EditNode {
+    const rootPath = ["snapshotMigrationConfigs", String(index)];
+    const fromSource = value?.fromSource ?? "";
+    const toTarget = value?.toTarget ?? "";
+    return finalizeNode({
+        id: `edit:${rootPath.join(".")}`,
+        path: rootPath,
+        label: `snapshot migration: ${fromSource || "<source>"} -> ${toTarget || "<target>"}`,
+        valueKind: "object",
+        description: SNAPSHOT_MIGRATION_DESCRIPTION,
+        status: "ok",
+        children: [
+            scalarNode([...rootPath, "fromSource"], "fromSource", fromSource, "Label of the source cluster to migrate from. Must match a key in sourceClusters.", true),
+            scalarNode([...rootPath, "toTarget"], "toTarget", toTarget, "Label of the target cluster to migrate to. Must match a key in targetClusters.", true),
+        ],
+    });
+}
+
+function snapshotMigrationGroupNode(configs: any[] | undefined): EditNode {
+    const path = ["snapshotMigrationConfigs"];
+    return finalizeNode({
+        id: `edit:${path.join(".")}`,
+        path,
+        label: "Snapshot Migrations",
+        valueKind: "array",
+        description: "List of snapshot-based migration configurations.",
+        status: "ok",
+        children: (configs ?? []).map((value, index) => snapshotMigrationNode(index, value)),
+    });
+}
+
 function clusterNode(kind: "source" | "target", name: string, value: any): EditNode {
     const rootPath = [kind === "source" ? "sourceClusters" : "targetClusters", name];
     const children: EditNode[] = [
@@ -413,6 +604,9 @@ export function buildEditStateFromObject(config: any): EditStateV1 {
         nodes: [
             clusterGroupNode("source", config?.sourceClusters),
             clusterGroupNode("target", config?.targetClusters),
+            kafkaGroupNode(config?.kafkaClusterConfiguration),
+            trafficGroupNode(config?.traffic),
+            snapshotMigrationGroupNode(config?.snapshotMigrationConfigs),
         ],
         pendingSubmitChanges: [],
         submittedRolloutChanges: [],
@@ -455,6 +649,16 @@ function authConfigForVariant(existing: any, variant: unknown): unknown {
     throw new Error(`Unknown authConfig variant: ${String(variant)}`);
 }
 
+function kafkaConfigForVariant(existing: any, variant: unknown): unknown {
+    if (variant === "autoCreate") {
+        return {autoCreate: existing?.autoCreate ?? {}};
+    }
+    if (variant === "existing") {
+        return {existing: existing?.existing ?? {}};
+    }
+    throw new Error(`Unknown Kafka cluster variant: ${String(variant)}`);
+}
+
 function setAtPath(config: any, path: string[], value: unknown): void {
     const {parent, key} = parentAtPath(config, path);
     if (key === "authConfig") {
@@ -464,6 +668,14 @@ function setAtPath(config: any, path: string[], value: unknown): void {
         } else {
             parent[key] = next;
         }
+        return;
+    }
+    if (key === "mode" && path.length === 3 && path[0] === "kafkaClusterConfiguration") {
+        const replacement = kafkaConfigForVariant(parent, value);
+        for (const existingKey of Object.keys(parent)) {
+            delete parent[existingKey];
+        }
+        Object.assign(parent, replacement);
         return;
     }
     parent[key] = value;
@@ -477,24 +689,38 @@ function removeAtPath(config: any, path: string[]): void {
     if (!parent || typeof parent !== "object" || !(key in parent)) {
         throw new Error(`Config entry does not exist at path ${path.join(".")}`);
     }
+    if (Array.isArray(parent)) {
+        parent.splice(Number(key), 1);
+        return;
+    }
     delete parent[key];
 }
 
-function defaultClusterConfig(path: string[]): Record<string, unknown> {
-    if (path.length !== 1 || (path[0] !== "sourceClusters" && path[0] !== "targetClusters")) {
-        throw new Error(`Add is not supported at path ${path.join(".")}`);
-    }
-    if (path[0] === "sourceClusters") {
+function defaultConfigForPath(path: string[]): Record<string, unknown> {
+    const key = path.join(".");
+    if (key === "sourceClusters") {
         return {
             endpoint: "",
             allowInsecure: false,
             version: "",
         };
     }
-    return {
-        endpoint: "",
-        allowInsecure: false,
-    };
+    if (key === "targetClusters") {
+        return {
+            endpoint: "",
+            allowInsecure: false,
+        };
+    }
+    if (key === "kafkaClusterConfiguration") {
+        return {autoCreate: {}};
+    }
+    if (key === "traffic.proxies") {
+        return {source: ""};
+    }
+    if (key === "traffic.replayers") {
+        return {fromProxy: "", toTarget: ""};
+    }
+    throw new Error(`Add is not supported at path ${path.join(".")}`);
 }
 
 function addAtPath(config: any, path: string[], value: unknown): void {
@@ -511,7 +737,7 @@ function addAtPath(config: any, path: string[], value: unknown): void {
     if (name in parent) {
         throw new Error(`Config entry already exists at ${[...path, name].join(".")}`);
     }
-    parent[name] = defaultClusterConfig(path);
+    parent[name] = defaultConfigForPath(path);
 }
 
 export function applyEditOperation(config: any, operation: EditOperation): any {

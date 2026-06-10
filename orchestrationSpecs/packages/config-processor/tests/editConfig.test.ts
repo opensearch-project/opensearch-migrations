@@ -167,4 +167,60 @@ describe("editConfig state", () => {
         expect(removed.yaml).not.toContain("legacy:");
         expect(findNode(removed.editState.nodes, "edit:sourceClusters.legacy")).toBeUndefined();
     });
+
+    it("renders and applies map-backed resource config groups", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {legacy: {endpoint: "https://legacy.example.com:9200", version: "ES 7.10.2"}},
+            targetClusters: {prod: {endpoint: "https://prod.example.com:9200"}},
+            kafkaClusterConfiguration: {
+                default: {autoCreate: {}},
+            },
+            traffic: {
+                proxies: {
+                    capture: {source: "legacy"},
+                },
+                replayers: {
+                    replay: {fromProxy: "capture", toTarget: "prod"},
+                },
+            },
+            snapshotMigrationConfigs: [{fromSource: "legacy", toTarget: "prod", perSnapshotConfig: {}}],
+        });
+
+        expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default")?.label).toContain("kafka: default");
+        expect(findNode(state.nodes, "edit:traffic.proxies.capture")?.label).toContain("capture proxy: capture");
+        expect(findNode(state.nodes, "edit:traffic.replayers.replay")?.label).toContain("traffic replay: replay");
+        expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0")?.label).toContain("snapshot migration: legacy -> prod");
+    });
+
+    it("adds/removes nested traffic resources and switches Kafka mode", () => {
+        const config = {
+            sourceClusters: {},
+            targetClusters: {},
+            snapshotMigrationConfigs: [],
+        };
+
+        const addedKafka = applyEditOperationToObject(config, {
+            op: "add",
+            path: ["kafkaClusterConfiguration"],
+            value: {name: "default"},
+        });
+        const existingKafka = applyEditOperationToObject(parse(addedKafka.yaml), {
+            op: "set",
+            path: ["kafkaClusterConfiguration", "default", "mode"],
+            value: "existing",
+        });
+        const addedProxy = applyEditOperationToObject(parse(existingKafka.yaml), {
+            op: "add",
+            path: ["traffic", "proxies"],
+            value: {name: "capture"},
+        });
+        const removedProxy = applyEditOperationToObject(parse(addedProxy.yaml), {
+            op: "removeConfig",
+            path: ["traffic", "proxies", "capture"],
+        });
+
+        expect(existingKafka.yaml).toContain("existing: {}");
+        expect(addedProxy.yaml).toContain("capture:");
+        expect(removedProxy.yaml).not.toContain("capture:");
+    });
 });

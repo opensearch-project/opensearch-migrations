@@ -740,12 +740,26 @@ class WorkflowTreeApp(App):
         if not node or node.get("valueKind") == "command":
             return
         path = node.get("path") or []
-        if len(path) != 2 or path[0] not in ("sourceClusters", "targetClusters"):
-            self.notify("Remove is available for source/target entries in this slice", severity="warning")
+        if not self._is_removable_config_path(path):
+            self.notify("Remove is available for config resource entries", severity="warning")
             return
         self.push_screen(
             ConfirmModal(f"Remove config entry '{'.'.join(path)}' from pending YAML?"),
             lambda confirmed: self._remove_config_node(path) if confirmed else None,
+        )
+
+    @staticmethod
+    def _is_removable_config_path(path: list[str]) -> bool:
+        if len(path) == 2 and path[0] in (
+            "sourceClusters",
+            "targetClusters",
+            "kafkaClusterConfiguration",
+            "snapshotMigrationConfigs",
+        ):
+            return True
+        return len(path) == 3 and path[:2] in (
+            ["traffic", "proxies"],
+            ["traffic", "replayers"],
         )
 
     def _remove_config_node(self, path: list[str]) -> None:
