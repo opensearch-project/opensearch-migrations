@@ -171,7 +171,7 @@ download_binary() {
   local url="https://github.com/${REPO}/releases/download/${version}/${binary_name}"
   local dest="${dest_dir}/${binary_name}"
 
-  printf '  Downloading binary: %s\n' "$binary_name"
+  printf '  Downloading binary: %s\n' "$binary_name" >&2
   fetch "$url" "$dest"
   chmod +x "$dest"
   printf '%s' "$dest"

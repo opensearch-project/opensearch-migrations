@@ -168,6 +168,7 @@ fn headless_deploy_runs_cfn_and_helm() {
         .with_command("aws")
         .with_command("helm")
         .with_command("kubectl")
+        .with_command("jq")
         // CFN exports query (kubeconfig/helm) — MORE SPECIFIC, registered first
         // so first-match-wins returns the export blob, not the health status.
         .stub(

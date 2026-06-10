@@ -139,6 +139,7 @@ pub struct Build {
     ///   - JSON with a `tag_name` field (GitHub releases API)
     ///   - JSON with a `version` field (custom endpoint)
     ///   - Plain text (the body IS the version, trimmed)
+    ///
     /// When absent, the update check is disabled.
     #[serde(rename = "updateCheckUrl", default)]
     pub update_check_url: String,

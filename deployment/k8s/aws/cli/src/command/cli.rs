@@ -499,7 +499,7 @@ fn collect_wizard<R: CommandRunner>(app: &mut crate::app::App<R>) -> Result<()> 
             .as_ref()
             .map(|m| m.build.version.clone())
             .filter(|v| !v.is_empty() && v != "0.0.0-dev")
-            .unwrap_or_else(|| version::resolve_cli_version())
+            .unwrap_or_else(version::resolve_cli_version)
     } else {
         ver_default
     };
@@ -1039,16 +1039,6 @@ fn load_manifest() -> Option<crate::manifest::Manifest> {
     crate::manifest::Manifest::load(&dir).ok().flatten()
 }
 
-/// Extract the upstream version from a CLI version string by stripping the
-/// `-amzn.N.sha` suffix. E.g. `3.2.1-amzn.1.abc1234` → `3.2.1`.
-/// If there's no `-amzn` suffix, returns the input as-is.
-fn upstream_version_from_cli(cli_ver: &str) -> String {
-    if let Some(idx) = cli_ver.find("-amzn") {
-        cli_ver[..idx].to_string()
-    } else {
-        cli_ver.to_string()
-    }
-}
 
 /// Install skills, agent-specific config, and MCP servers into the stage
 /// directory before handing off to the agent. Mirrors the bash agent_setup.
