@@ -62,6 +62,9 @@ export interface EditNode {
         description?: string;
         childSchema?: EditNode[];
     }[];
+    command?: {
+        requiresName?: boolean;
+    };
     children?: EditNode[];
 }
 
@@ -507,6 +510,8 @@ function snapshotMigrationNode(index: number, value: any): EditNode {
 
 function snapshotMigrationGroupNode(configs: any[] | undefined): EditNode {
     const path = ["snapshotMigrationConfigs"];
+    const children = (configs ?? []).map((value, index) => snapshotMigrationNode(index, value));
+    children.push(addRow(path, "snapshot migration", "Create a snapshot migration configuration in pending workflow YAML.", false));
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
@@ -514,7 +519,7 @@ function snapshotMigrationGroupNode(configs: any[] | undefined): EditNode {
         valueKind: "array",
         description: "List of snapshot-based migration configurations.",
         status: "ok",
-        children: (configs ?? []).map((value, index) => snapshotMigrationNode(index, value)),
+        children,
     });
 }
 
@@ -547,13 +552,14 @@ function clusterNode(kind: "source" | "target", name: string, value: any): EditN
     });
 }
 
-function addRow(path: string[], label: string, description: string): EditNode {
+function addRow(path: string[], label: string, description: string, requiresName = true): EditNode {
     return finalizeNode({
         id: `edit:${path.join(".")}:add`,
         path,
         label: `+ Add ${label}`,
         valueKind: "command",
         description,
+        command: {requiresName},
         status: "ok",
     });
 }
@@ -720,10 +726,21 @@ function defaultConfigForPath(path: string[]): Record<string, unknown> {
     if (key === "traffic.replayers") {
         return {fromProxy: "", toTarget: ""};
     }
+    if (key === "snapshotMigrationConfigs") {
+        return {fromSource: "", toTarget: "", perSnapshotConfig: {}};
+    }
     throw new Error(`Add is not supported at path ${path.join(".")}`);
 }
 
 function addAtPath(config: any, path: string[], value: unknown): void {
+    if (path.length === 1 && path[0] === "snapshotMigrationConfigs") {
+        if (!Array.isArray(config.snapshotMigrationConfigs)) {
+            config.snapshotMigrationConfigs = [];
+        }
+        config.snapshotMigrationConfigs.push(defaultConfigForPath(path));
+        return;
+    }
+
     const name = typeof value === "object" && value !== null && "name" in value
         ? String((value as { name: unknown }).name).trim()
         : "";

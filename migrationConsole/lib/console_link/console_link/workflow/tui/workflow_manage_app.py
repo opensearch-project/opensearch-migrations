@@ -694,6 +694,14 @@ class WorkflowTreeApp(App):
             return
         kind = node.get("valueKind")
         if kind == "command" and node.get("id", "").endswith(":add"):
+            command = node.get("command") or {}
+            if command.get("requiresName") is False:
+                self._apply_config_edit_operation({
+                    "op": "add",
+                    "path": node.get("path"),
+                    "value": {},
+                })
+                return
             label = str(node.get("label", "+ Add")).replace("[OK] ", "")
             self.push_screen(
                 TextInputModal(f"{label} name"),

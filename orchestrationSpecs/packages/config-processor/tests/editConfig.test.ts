@@ -190,6 +190,7 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:traffic.proxies.capture")?.label).toContain("capture proxy: capture");
         expect(findNode(state.nodes, "edit:traffic.replayers.replay")?.label).toContain("traffic replay: replay");
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0")?.label).toContain("snapshot migration: legacy -> prod");
+        expect(findNode(state.nodes, "edit:snapshotMigrationConfigs:add")?.label).toContain("+ Add snapshot migration");
     });
 
     it("adds/removes nested traffic resources and switches Kafka mode", () => {
@@ -222,5 +223,21 @@ describe("editConfig state", () => {
         expect(existingKafka.yaml).toContain("existing: {}");
         expect(addedProxy.yaml).toContain("capture:");
         expect(removedProxy.yaml).not.toContain("capture:");
+    });
+
+    it("appends snapshot migration configs without a resource name", () => {
+        const result = applyEditOperationToObject({
+            sourceClusters: {},
+            targetClusters: {},
+            snapshotMigrationConfigs: [],
+        }, {
+            op: "add",
+            path: ["snapshotMigrationConfigs"],
+            value: {},
+        });
+
+        expect(result.yaml).toContain("fromSource: \"\"");
+        expect(result.yaml).toContain("toTarget: \"\"");
+        expect(findNode(result.editState.nodes, "edit:snapshotMigrationConfigs.0")?.status).toBe("required");
     });
 });
