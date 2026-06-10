@@ -65,15 +65,18 @@ def call(Map config = [:]) {
                     // Use minikube's default cri-dockerd runtime + bridge CNI: forcing
                     // containerd makes minikube install kindnet, which pulls a docker.io
                     // image at every cluster start and breaks under Docker Hub rate limits
-                    // in CI. `--insecure-registry=docker-registry:5000` lets dockerd accept
-                    // plain HTTP from our in-cluster registry name.
+                    // in CI. `--insecure-registry=docker-registry:5001` lets cri-dockerd
+                    // accept plain HTTP pulls from the host-bound registry port.
                     timeout(time: 10, unit: 'MINUTES') {
+                        // Tear down the registry before minikube/network so that
+                        // docker network rm isn't blocked by a connected container.
+                        sh '. ./buildImages/backends/dockerHostedBuildkit.sh && teardown_registry_container'
                         sh 'minikube delete || true'
                         // minikube delete sometimes leaves the "minikube" docker network behind
                         // with its 192.168.49.0/24 subnet; drop it so the next start can recreate
                         // it without "address already in use".
                         sh 'docker network rm minikube 2>/dev/null || true'
-                        sh 'minikube start --driver=docker --insecure-registry=docker-registry:5000'
+                        sh 'minikube start --driver=docker --insecure-registry=docker-registry:5001'
                     }
                 }
             }
@@ -83,8 +86,9 @@ def call(Map config = [:]) {
                     timeout(time: 30, unit: 'MINUTES') {
                         script {
                             sh "kubectl config unset current-context || true"
-                            // Bring up the docker-hosted registry/buildkit, then attach the minikube node
-                            // container to the same docker network so dockerd can pull docker-registry:5000.
+                            // Bring up the docker-hosted registry/buildkit, then configure each
+                            // minikube node to resolve docker-registry to the host gateway and
+                            // pull from the host-bound port (no docker network connect needed).
                             sh '''
                                 set -eu
                                 . ./buildImages/backends/dockerHostedBuildkit.sh
@@ -119,7 +123,7 @@ def call(Map config = [:]) {
                                 sh "pipenv install --deploy"
                                 sh "mkdir -p ./reports"
                                 sh "kubectl config unset current-context || true"
-                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5000/' --kube-context=minikube --capture-proxy-service-type=ClusterIP"
+                                sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --test-reports-dir='./reports' --copy-logs --registry-prefix='docker-registry:5001/' --kube-context=minikube --capture-proxy-service-type=ClusterIP"
                             }
                         }
                     }
