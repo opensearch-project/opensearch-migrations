@@ -43,12 +43,17 @@ if [ $STATUS_EXIT_CODE -ne 0 ]; then
     exit 1
 fi
 
-if echo "$STATUS_OUTPUT" | grep -q "Phase: Running\|Phase: Pending"; then
-    echo "Workflow still running or pending, will retry..."
+if echo "$STATUS_OUTPUT" | grep -q "Phase: Succeeded\|Phase: Failed\|Phase: Error"; then
+    echo "Workflow is in terminal state"
+    mkdir -p /tmp/outputs
+    echo "$STATUS_OUTPUT" > /tmp/outputs/monitorResult
+    exit 0
+fi
+
+if echo "$STATUS_OUTPUT" | grep -q "Phase:"; then
+    echo "Workflow is not terminal yet, will retry..."
     exit 1
 fi
 
-echo "Workflow is in terminal state"
-mkdir -p /tmp/outputs
-echo "$STATUS_OUTPUT" > /tmp/outputs/monitorResult
-exit 0
+echo "Workflow phase was not found, will retry..."
+exit 1

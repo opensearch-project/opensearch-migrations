@@ -67,6 +67,8 @@ spec:
         value: "false"
       - name: capture-proxy-service-type
         value: "LoadBalancer"
+      - name: otel-trace-collector-endpoint
+        value: ""
 
   templates:
     # Main workflow: provision clusters, pause for test data, run CDC+backfill.
@@ -196,6 +198,8 @@ spec:
                       key: migrationConsolePullPolicy
                 - name: captureProxyServiceType
                   value: "{{workflow.parameters.capture-proxy-service-type}}"
+                - name: otelTraceCollectorEndpoint
+                  value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
 
         - - name: run-proxy-only-migration-with-workflow-cli
             templateRef:
@@ -254,6 +258,8 @@ spec:
                   value: "{{workflow.parameters.replayer-config-overrides}}"
                 - name: captureProxyServiceType
                   value: "{{workflow.parameters.capture-proxy-service-type}}"
+                - name: otelTraceCollectorEndpoint
+                  value: "{{workflow.parameters.otel-trace-collector-endpoint}}"
 
         # Run the full migration using the CDC-enabled config.
         - - name: run-full-migration-with-workflow-cli

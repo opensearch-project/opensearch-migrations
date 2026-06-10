@@ -117,6 +117,49 @@ class TestFailureDetection:
                 passed=0, failed=0, expected=0, source="OS_1.3", target="OS_2.19")):
             runner.run()  # Should not raise
 
+    def test_skip_delete_does_not_skip_workflow_reset(self):
+        runner = _make_runner(combinations=[("ES_7.10", "OS_2.19")])
+        with patch.object(runner, "run_tests", return_value=_make_report(passed=1, failed=0)) as run_tests:
+            runner.run(skip_delete=True)
+
+        assert run_tests.call_args.kwargs["skip_workflow_reset"] is False
+        runner.k8s_service.reset_migration_resources.assert_not_called()
+
+    def test_trace_phase_uses_upgrade_overlay_and_trace_test_ids(self):
+        runner = _make_runner(combinations=[("ES_7.10", "OS_2.19")])
+        runner.ma_chart_path = "charts/ma"
+        runner.trace_test_ids = ["0051", "0053"]
+        runner.trace_values_file = "valuesTraceJaeger.yaml"
+        runner.trace_backend = "jaeger"
+        with patch.object(
+            runner,
+            "run_tests",
+            side_effect=[
+                _make_report(passed=2, failed=0, expected=2),
+                _make_report(passed=2, failed=0, expected=2),
+            ],
+        ) as run_tests:
+            runner.run()
+
+        runner.k8s_service.reset_migration_resources.assert_called_once()
+        runner.k8s_service.helm_upgrade.assert_called_once_with(
+            chart_path="charts/ma",
+            release_name="ma",
+            values_file="valuesTraceJaeger.yaml",
+            reuse_values=True,
+            wait=True,
+            timeout="10m",
+        )
+        runner.k8s_service.wait_for_daemonset_rollout.assert_called_once_with(
+            "otel-trace-collector", timeout_seconds=600)
+        runner.k8s_service.wait_for_service.assert_called_once_with("jaeger-query", timeout_seconds=300)
+
+        trace_call_kwargs = run_tests.call_args_list[1].kwargs
+        assert trace_call_kwargs["test_ids"] == ["0051", "0053"]
+        assert trace_call_kwargs["unique_id"] == "test-123-trace"
+        assert trace_call_kwargs["report_suffix"] == "trace"
+        assert trace_call_kwargs["skip_workflow_reset"] is False
+
 
 class TestPytestCommand:
     def test_capture_proxy_service_type_is_passed_to_pytest(self):
