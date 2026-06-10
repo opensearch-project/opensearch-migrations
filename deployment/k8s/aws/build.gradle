@@ -76,6 +76,7 @@ def binaryFile = cargoOutputDir.file(binaryName)
 // ─── output directory ────────────────────────────────────────────────────────
 
 def distDir = cliVersion.flatMap { ver -> layout.buildDirectory.dir("dist/${ver}") }
+def versionFileDir = layout.buildDirectory.dir('version')
 
 // ─── inputs that trigger a rebuild ───────────────────────────────────────────
 
@@ -131,9 +132,9 @@ tasks.register('cargoBuild', Exec) {
 
 tasks.register('writeVersionFile') {
     group = 'release'
-    description = 'Write VERSION.txt into build/dist/<version>/'
+    description = 'Write VERSION.txt into build/version/'
 
-    def output = distDir.map { it.file('VERSION.txt') }
+    def output = versionFileDir.map { it.file('VERSION.txt') }
     def ver = cliVersion.get()
     inputs.property('version', ver)
     outputs.file(output)
@@ -184,7 +185,7 @@ tasks.register('stageBinary', Copy) {
     }
 
     doLast {
-        distDir.get().asFile.listFiles { f -> f.name.startsWith('migration-assistant-') }
+        distDir.get().asFile.listFiles({ f -> f.name.startsWith('migration-assistant-') } as FileFilter)
                 ?.each { it.setExecutable(true, false) }
     }
 }
@@ -221,16 +222,18 @@ tasks.register('assembleBundle', Tar) {
     }
 
     // VERSION.txt
-    from(distDir.map { it.file('VERSION.txt') })
+    from(versionFileDir.map { it.file('VERSION.txt') })
 }
 
-// Copy bundle tarball into distDir alongside the binary + install.sh.
+// Copy bundle tarball + VERSION.txt into distDir alongside the binary + install.sh.
 tasks.register('copyBundle', Copy) {
-    dependsOn 'assembleBundle'
+    dependsOn 'assembleBundle', 'writeVersionFile'
+    mustRunAfter 'stageBinary', 'stampInstallScript'
     from(bundleDir.map { it.file('migration-assistant-bundle.tar.gz') })
+    from(versionFileDir.map { it.file('VERSION.txt') })
     into(distDir)
 }
 
 // ─── lifecycle wiring ────────────────────────────────────────────────────────
 
-assemble.dependsOn 'cargoBuild', 'writeVersionFile', 'stampInstallScript', 'stageBinary', 'copyBundle'
+assemble.dependsOn 'cargoBuild', 'stampInstallScript', 'stageBinary', 'copyBundle'
