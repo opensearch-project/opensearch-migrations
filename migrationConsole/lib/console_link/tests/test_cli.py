@@ -6,6 +6,7 @@ import time
 import pytest
 import requests_mock
 from click.testing import CliRunner
+from types import SimpleNamespace
 from subprocess import CompletedProcess
 
 import console_link.middleware as middleware
@@ -17,6 +18,7 @@ from console_link.cli import (
     main,
 )
 from console_link.environment import Environment
+from console_link.k8s_resource_catalog import ConsoleResourceCatalog, ConsoleResourceEntry, ResourceRole
 from console_link.models.backfill_rfs import ECSRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
@@ -29,6 +31,26 @@ from console_link.models.utils import DeploymentStatus
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 VALID_SERVICES_YAML = TEST_DATA_DIRECTORY / "services.yaml"
+
+
+def _catalog_cluster_config(endpoint):
+    return {
+        "endpoint": endpoint,
+        "allow_insecure": True,
+        "no_auth": None,
+    }
+
+
+def _catalog_env(entries, consumer_groups=None):
+    return SimpleNamespace(
+        resources=ConsoleResourceCatalog(entries),
+        client_options=None,
+        source_cluster=None,
+        target_cluster=None,
+        proxy=None,
+        kafka=None,
+        kafka_consumer_groups=consumer_groups or [],
+    )
 
 
 @pytest.fixture
@@ -224,6 +246,179 @@ def test_cli_cluster_cat_indices_proxy(runner, mocker, proxy_enabled_yaml_path):
     api_mock.assert_called_once()
 
 
+def test_cli_cluster_cat_indices_requires_selectors_for_ambiguous_k8s_resources(runner, mocker):
+    env = _catalog_env([
+        ConsoleResourceEntry(ResourceRole.SOURCE, "source1", ["source1"],
+                             client_config=_catalog_cluster_config("https://source1.example.com")),
+        ConsoleResourceEntry(ResourceRole.SOURCE, "source2", ["source2"],
+                             client_config=_catalog_cluster_config("https://source2.example.com")),
+        ConsoleResourceEntry(ResourceRole.TARGET, "target1", ["target1"],
+                             client_config=_catalog_cluster_config("https://target1.example.com")),
+        ConsoleResourceEntry(ResourceRole.TARGET, "target2", ["target2"],
+                             client_config=_catalog_cluster_config("https://target2.example.com")),
+    ])
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+    cat_indices = mocker.patch('console_link.middleware.clusters.cat_indices', return_value='indices')
+
+    result = runner.invoke(cli, ['clusters', 'cat-indices'], catch_exceptions=True)
+
+    assert result.exit_code == 2
+    assert "Multiple source resources are configured" in result.output
+    assert "Specify: --source <source1|source2> --target <target1|target2>." in result.output
+    cat_indices.assert_not_called()
+
+
+def test_cli_cluster_cat_indices_uses_selected_k8s_resources(runner, mocker):
+    env = _catalog_env([
+        ConsoleResourceEntry(ResourceRole.SOURCE, "source1", ["source1"],
+                             client_config=_catalog_cluster_config("https://source1.example.com")),
+        ConsoleResourceEntry(ResourceRole.SOURCE, "source2", ["source2"],
+                             client_config=_catalog_cluster_config("https://source2.example.com")),
+        ConsoleResourceEntry(ResourceRole.TARGET, "target1", ["target1"],
+                             client_config=_catalog_cluster_config("https://target1.example.com")),
+    ])
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+    cat_indices = mocker.patch('console_link.middleware.clusters.cat_indices', return_value='indices')
+
+    result = runner.invoke(
+        cli,
+        ['clusters', 'cat-indices', '--source', 'source2', '--target', 'target1'],
+        catch_exceptions=True,
+    )
+
+    assert result.exit_code == 0
+    assert [call.args[0].endpoint for call in cat_indices.call_args_list] == [
+        "https://source2.example.com",
+        "https://target1.example.com",
+    ]
+
+
+def test_cli_cluster_clear_indices_accepts_concrete_k8s_cluster_selector(runner, mocker):
+    env = _catalog_env([
+        ConsoleResourceEntry(ResourceRole.SOURCE, "source1", ["source1"],
+                             client_config=_catalog_cluster_config("https://source1.example.com")),
+        ConsoleResourceEntry(ResourceRole.SOURCE, "source2", ["source2"],
+                             client_config=_catalog_cluster_config("https://source2.example.com")),
+        ConsoleResourceEntry(ResourceRole.TARGET, "target1", ["target1"],
+                             client_config=_catalog_cluster_config("https://target1.example.com")),
+    ])
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+    clear_indices = mocker.patch('console_link.middleware.clusters.clear_indices', return_value='cleared')
+
+    result = runner.invoke(
+        cli,
+        ['clusters', 'clear-indices', '--cluster', 'source2', '--acknowledge-risk'],
+        catch_exceptions=True,
+    )
+
+    assert result.exit_code == 0
+    clear_indices.assert_called_once()
+    assert clear_indices.call_args.args[0].endpoint == "https://source2.example.com"
+
+
+def test_cli_cluster_clear_indices_role_shorthand_auto_selects_single_k8s_cluster(runner, mocker):
+    env = _catalog_env([
+        ConsoleResourceEntry(ResourceRole.SOURCE, "source-a", ["source-a"],
+                             client_config=_catalog_cluster_config("https://source-a.example.com")),
+        ConsoleResourceEntry(ResourceRole.TARGET, "target-a", ["target-a"],
+                             client_config=_catalog_cluster_config("https://target-a.example.com")),
+    ])
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+    clear_indices = mocker.patch('console_link.middleware.clusters.clear_indices', return_value='cleared')
+
+    result = runner.invoke(
+        cli,
+        ['clusters', 'clear-indices', '--cluster', 'source', '--acknowledge-risk'],
+        catch_exceptions=True,
+    )
+
+    assert result.exit_code == 0
+    clear_indices.assert_called_once()
+    assert clear_indices.call_args.args[0].endpoint == "https://source-a.example.com"
+
+
+def test_cli_cluster_clear_indices_role_shorthand_error_lists_selector_flag(runner, mocker):
+    env = _catalog_env([
+        ConsoleResourceEntry(ResourceRole.SOURCE, "source-a", ["source-a"],
+                             client_config=_catalog_cluster_config("https://source-a.example.com")),
+        ConsoleResourceEntry(ResourceRole.SOURCE, "source-b", ["source-b"],
+                             client_config=_catalog_cluster_config("https://source-b.example.com")),
+        ConsoleResourceEntry(ResourceRole.TARGET, "target-a", ["target-a"],
+                             client_config=_catalog_cluster_config("https://target-a.example.com")),
+    ])
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+    clear_indices = mocker.patch('console_link.middleware.clusters.clear_indices', return_value='cleared')
+
+    result = runner.invoke(
+        cli,
+        ['clusters', 'clear-indices', '--cluster', 'source', '--acknowledge-risk'],
+        catch_exceptions=True,
+    )
+
+    assert result.exit_code == 2
+    assert "Multiple source resources are configured" in result.output
+    assert "Specify: --source <source-a|source-b>." in result.output
+    clear_indices.assert_not_called()
+
+
+def test_cli_cluster_selector_completion_includes_roles_and_cluster_names(mocker):
+    env = _catalog_env([
+        ConsoleResourceEntry(ResourceRole.SOURCE, "source1", ["source1"],
+                             client_config=_catalog_cluster_config("https://source1.example.com")),
+        ConsoleResourceEntry(ResourceRole.TARGET, "target1", ["target1"],
+                             client_config=_catalog_cluster_config("https://target1.example.com")),
+        ConsoleResourceEntry(ResourceRole.PROXY, "proxy1", ["proxy1", "captureproxy.proxy1"],
+                             client_config=_catalog_cluster_config("https://proxy1.example.com")),
+    ])
+    ctx = mocker.Mock()
+    ctx.find_root.return_value.params = {}
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+
+    completions = cli_module.get_cluster_resource_completions(ctx, None, "s")
+
+    assert [item.value for item in completions] == ["source", "source1"]
+
+
+def test_cli_cluster_selector_completion_omits_ambiguous_roles_and_k8s_aliases(mocker):
+    env = _catalog_env([
+        ConsoleResourceEntry(ResourceRole.SOURCE, "source-a", ["source-a"],
+                             client_config=_catalog_cluster_config("https://source-a.example.com")),
+        ConsoleResourceEntry(ResourceRole.SOURCE, "source-b", ["source-b"],
+                             client_config=_catalog_cluster_config("https://source-b.example.com")),
+        ConsoleResourceEntry(ResourceRole.TARGET, "targeta", ["targeta"],
+                             client_config=_catalog_cluster_config("https://targeta.example.com")),
+        ConsoleResourceEntry(ResourceRole.TARGET, "targetb", ["targetb"],
+                             client_config=_catalog_cluster_config("https://targetb.example.com")),
+        ConsoleResourceEntry(ResourceRole.PROXY, "proxy-a", ["proxy-a", "captureproxy.proxy-a"],
+                             k8s_name="proxy-a",
+                             client_config=_catalog_cluster_config("https://proxy-a.example.com")),
+        ConsoleResourceEntry(ResourceRole.PROXY, "proxy-b", ["proxy-b", "captureproxy.proxy-b"],
+                             k8s_name="proxy-b",
+                             client_config=_catalog_cluster_config("https://proxy-b.example.com")),
+    ])
+    ctx = mocker.Mock()
+    ctx.find_root.return_value.params = {}
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+
+    completions = cli_module.get_cluster_resource_completions(ctx, None, "")
+
+    assert [item.value for item in completions] == [
+        "proxy-a",
+        "proxy-b",
+        "source-a",
+        "source-b",
+        "targeta",
+        "targetb",
+    ]
+
+
 def test_cli_cluster_connection_check(runner, mocker):
     middleware_mock = mocker.spy(middleware.clusters, 'connection_check')
     api_mock = mocker.patch.object(Cluster, 'call_api')
@@ -266,42 +461,67 @@ def test_cli_cluster_cat_indices_and_connection_check_with_one_cluster(runner, m
     middleware_connection_check_mock = mocker.spy(middleware.clusters, 'connection_check')
     middleware_cat_indices_mock = mocker.spy(middleware.clusters, 'cat_indices')
     api_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
-    # Connection check with no target cluster
+    # Connection check defaults to source+target and requires both roles.
     result = runner.invoke(cli, ['--config-file', str(source_cluster_only_yaml_path), 'clusters', 'connection-check'],
                            catch_exceptions=True)
+    assert result.exit_code == 2
+    assert "No target resource is configured" in result.output
+    middleware_connection_check_mock.assert_not_called()
+    api_mock.assert_not_called()
+
+    # Single-cluster mode only requires the selected role.
+    result = runner.invoke(cli, ['--config-file', str(source_cluster_only_yaml_path), 'clusters', 'connection-check',
+                                 '--cluster', 'source'],
+                           catch_exceptions=True)
     assert result.exit_code == 0
-    assert "SOURCE CLUSTER" in result.output
-    assert "No target cluster defined." in result.output
     middleware_connection_check_mock.assert_called_once()
     api_mock.assert_called_once()
     middleware_connection_check_mock.reset_mock()
     api_mock.reset_mock()
-    # Connection check with no source cluster
+
     result = runner.invoke(cli, ['--config-file', str(target_cluster_only_yaml_path), 'clusters', 'connection-check'],
                            catch_exceptions=True)
+    assert result.exit_code == 2
+    assert "No source resource is configured" in result.output
+    middleware_connection_check_mock.assert_not_called()
+    api_mock.assert_not_called()
+
+    result = runner.invoke(cli, ['--config-file', str(target_cluster_only_yaml_path), 'clusters', 'connection-check',
+                                 '--cluster', 'target'],
+                           catch_exceptions=True)
     assert result.exit_code == 0
-    assert "TARGET CLUSTER" in result.output
-    assert "No source cluster defined." in result.output
     middleware_connection_check_mock.assert_called_once()
     api_mock.assert_called_once()
     middleware_connection_check_mock.reset_mock()
     api_mock.reset_mock()
-    # Cat indices with no target cluster
+
     result = runner.invoke(cli, ['--config-file', str(source_cluster_only_yaml_path), 'clusters', 'cat-indices'],
                            catch_exceptions=True)
+    assert result.exit_code == 2
+    assert "No target resource is configured" in result.output
+    middleware_cat_indices_mock.assert_not_called()
+    api_mock.assert_not_called()
+
+    result = runner.invoke(cli, ['--config-file', str(source_cluster_only_yaml_path), 'clusters', 'cat-indices',
+                                 '--cluster', 'source'],
+                           catch_exceptions=True)
     assert result.exit_code == 0
-    assert "SOURCE CLUSTER" in result.output
-    assert "No target cluster defined." in result.output
     middleware_cat_indices_mock.assert_called_once()
     api_mock.assert_called_once()
     middleware_cat_indices_mock.reset_mock()
     api_mock.reset_mock()
-    # Cat indices with no source cluster
+
     result = runner.invoke(cli, ['--config-file', str(target_cluster_only_yaml_path), 'clusters', 'cat-indices'],
                            catch_exceptions=True)
+    assert result.exit_code == 2
+    assert "No source resource is configured" in result.output
+    middleware_cat_indices_mock.assert_not_called()
+    api_mock.assert_not_called()
+
+    result = runner.invoke(cli, ['--config-file', str(target_cluster_only_yaml_path), 'clusters', 'cat-indices',
+                                 '--cluster', 'target'],
+                           catch_exceptions=True)
     assert result.exit_code == 0
-    assert "TARGET CLUSTER" in result.output
-    assert "No source cluster defined." in result.output
     middleware_cat_indices_mock.assert_called_once()
     api_mock.assert_called_once()
 
@@ -973,7 +1193,7 @@ def test_cli_kafka_when_not_defined(runner, source_cluster_only_yaml_path):
     result = runner.invoke(cli, ['--config-file', source_cluster_only_yaml_path, 'kafka', 'create-topic'],
                            catch_exceptions=True)
     assert result.exit_code == 2
-    assert "Kafka is not set" in result.output
+    assert "No kafka resource is configured" in result.output
 
 
 def test_cli_kafka_create_topic(runner, mocker):
@@ -996,6 +1216,82 @@ def test_cli_kafka_list_topics(runner, mocker):
     model_mock.assert_called_once_with()
     middleware_mock.assert_called_once()
     assert result.exit_code == 0
+
+
+def test_cli_kafka_list_topics_uses_selected_k8s_resource(runner, mocker):
+    env = _catalog_env([
+        ConsoleResourceEntry(
+            ResourceRole.KAFKA,
+            "kafka-a",
+            ["kafka-a"],
+            kafka_runtime={
+                "type": "direct",
+                "clientConfig": {"broker_endpoints": "broker-a:9092", "standard": None},
+            },
+        ),
+        ConsoleResourceEntry(
+            ResourceRole.KAFKA,
+            "kafka-b",
+            ["kafka-b"],
+            kafka_runtime={
+                "type": "direct",
+                "clientConfig": {"broker_endpoints": "broker-b:9092", "standard": None},
+            },
+        ),
+    ])
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+    list_topics = mocker.patch('console_link.middleware.kafka.list_topics',
+                               return_value=CommandResult(success=True, value='topic-a\n'))
+
+    result = runner.invoke(cli, ['kafka', 'list-topics', '--kafka', 'kafka-b'], catch_exceptions=True)
+
+    assert result.exit_code == 0
+    assert list_topics.call_args.args[0].brokers == "broker-b:9092"
+
+
+def test_cli_kafka_list_topics_requires_selector_for_ambiguous_k8s_resources(runner, mocker):
+    env = _catalog_env([
+        ConsoleResourceEntry(
+            ResourceRole.KAFKA,
+            "kafka-a",
+            ["kafka-a"],
+            kafka_runtime={
+                "type": "direct",
+                "clientConfig": {"broker_endpoints": "broker-a:9092", "standard": None},
+            },
+        ),
+        ConsoleResourceEntry(
+            ResourceRole.KAFKA,
+            "kafka-b",
+            ["kafka-b"],
+            kafka_runtime={
+                "type": "direct",
+                "clientConfig": {"broker_endpoints": "broker-b:9092", "standard": None},
+            },
+        ),
+    ])
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+    list_topics = mocker.patch('console_link.middleware.kafka.list_topics',
+                               return_value=CommandResult(success=True, value='topic-a\n'))
+
+    result = runner.invoke(cli, ['kafka', 'list-topics'], catch_exceptions=True)
+
+    assert result.exit_code == 2
+    assert "Multiple kafka resources are configured" in result.output
+    assert "Specify: --kafka <kafka-a|kafka-b>." in result.output
+    list_topics.assert_not_called()
+
+
+def test_cli_kafka_group_errors_when_no_kafka_resource_is_configured(runner, mocker):
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=_catalog_env([]))
+
+    result = runner.invoke(cli, ['kafka', 'list-topics'], catch_exceptions=True)
+
+    assert result.exit_code == 2
+    assert "No kafka resource is configured" in result.output
 
 
 def test_cli_kafka_delete_topic(runner, mocker):
