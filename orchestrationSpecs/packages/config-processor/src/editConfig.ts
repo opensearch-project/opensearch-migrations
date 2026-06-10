@@ -782,6 +782,24 @@ export function applyEditOperationToObject(config: any, operation: EditOperation
     };
 }
 
+function withConsoleDiagnosticsOnStderr<T>(callback: () => T): T {
+    const originalLog = console.log;
+    const originalInfo = console.info;
+    const originalWarn = console.warn;
+    const redirect = (...args: unknown[]) => console.error(...args);
+
+    console.log = redirect;
+    console.info = redirect;
+    console.warn = redirect;
+    try {
+        return callback();
+    } finally {
+        console.log = originalLog;
+        console.info = originalInfo;
+        console.warn = originalWarn;
+    }
+}
+
 function usage(): never {
     console.error("Usage: editConfig state --pending-config <file|->");
     console.error("       editConfig apply --pending-config <file|-> --operation <json-file|->");
@@ -804,7 +822,8 @@ export async function main() {
         if (args.length > 0) {
             usage();
         }
-        process.stdout.write(JSON.stringify(buildEditStateFromObject(config), null, 2));
+        const editState = withConsoleDiagnosticsOnStderr(() => buildEditStateFromObject(config));
+        process.stdout.write(JSON.stringify(editState, null, 2));
         return;
     }
 
@@ -814,7 +833,8 @@ export async function main() {
         usage();
     }
     const operation = await parseYaml(operationPath) as EditOperation;
-    process.stdout.write(JSON.stringify(applyEditOperationToObject(config, operation), null, 2));
+    const result = withConsoleDiagnosticsOnStderr(() => applyEditOperationToObject(config, operation));
+    process.stdout.write(JSON.stringify(result, null, 2));
 }
 
 if (require.main === module && !process.env.SUPPRESS_AUTO_LOAD) {

@@ -1,5 +1,7 @@
 import {applyEditOperationToObject, buildEditStateFromObject, EditNode} from "../src/editConfig";
 import {parse} from "yaml";
+import {spawnSync} from "child_process";
+import path from "path";
 
 function findNode(nodes: EditNode[], id: string): EditNode | undefined {
     const stack = [...nodes];
@@ -239,5 +241,20 @@ describe("editConfig state", () => {
         expect(result.yaml).toContain("fromSource: \"\"");
         expect(result.yaml).toContain("toTarget: \"\"");
         expect(findNode(result.editState.nodes, "edit:snapshotMigrationConfigs.0")?.status).toBe("required");
+    });
+
+    it("keeps CLI stdout parseable when validation emits diagnostics", () => {
+        const cliPath = path.resolve(__dirname, "../src/cliRouter.ts");
+        const samplePath = path.resolve(__dirname, "../scripts/samples/proxyWithoutTlsNoAuth.wf.yaml");
+        const result = spawnSync(
+            process.execPath,
+            ["--import", "tsx", cliPath, "editConfig", "state", "--pending-config", samplePath],
+            {encoding: "utf8"}
+        );
+
+        expect(result.status).toBe(0);
+        expect(result.stdout.trimStart().startsWith("{")).toBe(true);
+        expect(() => JSON.parse(result.stdout)).not.toThrow();
+        expect(result.stderr).toContain("TLS was auto-configured");
     });
 });
