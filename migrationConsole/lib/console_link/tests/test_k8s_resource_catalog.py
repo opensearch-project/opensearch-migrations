@@ -3,6 +3,7 @@ import json
 import pytest
 
 from console_link.k8s_resource_catalog import (
+    ConsoleConsumerGroupEntry,
     ConsoleResourceCatalog,
     ConsoleResourceEntry,
     ResourceRole,
@@ -71,7 +72,12 @@ def test_from_k8s_merges_config_and_latest_migration_run_with_run_values_preferr
                 "clientConfig": _cluster_config("https://run-target.example.com"),
             }],
             "kafkas": [],
-            "consumerGroups": [{"name": "replayer-target1"}],
+            "consumerGroups": [{
+                "name": "replayer-target1",
+                "kafkaRef": "default",
+                "targetRef": "target1",
+                "replayRef": "replay1",
+            }],
         },
     }
     custom = FakeCustomObjectsApi({
@@ -100,7 +106,15 @@ def test_from_k8s_merges_config_and_latest_migration_run_with_run_values_preferr
 
     assert catalog.resolve_cluster(ResourceRole.SOURCE).endpoint == "https://run-source.example.com"
     assert catalog.resolve_cluster(ResourceRole.TARGET).endpoint == "https://run-target.example.com"
-    assert catalog.consumer_groups == ["replayer-target1"]
+    assert catalog.consumer_groups == [
+        ConsoleConsumerGroupEntry(
+            name="replayer-target1",
+            kafka_ref="default",
+            target_ref="target1",
+            replay_ref="replay1",
+        )
+    ]
+    assert catalog.consumer_group_names() == ["replayer-target1"]
     assert catalog.resolve(ResourceRole.SOURCE, "source1").origins == {"config", "migrationRun", "deployed"}
     assert any(call[1] == "--resolved-config" and '"new"' in call[2] for call in calls)
 

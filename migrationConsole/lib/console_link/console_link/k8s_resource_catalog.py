@@ -78,11 +78,19 @@ class ConsoleResourceEntry:
         return any(candidate in selectors for candidate in _selector_match_candidates(self.role, selector))
 
 
+@dataclass(frozen=True)
+class ConsoleConsumerGroupEntry:
+    name: str
+    kafka_ref: Optional[str] = None
+    target_ref: Optional[str] = None
+    replay_ref: Optional[str] = None
+
+
 class ConsoleResourceCatalog:
     def __init__(self, entries: Optional[Iterable[ConsoleResourceEntry]] = None, namespace: Optional[str] = None):
         self.entries: List[ConsoleResourceEntry] = list(entries or [])
         self.namespace = namespace
-        self.consumer_groups: List[str] = []
+        self.consumer_groups: List[ConsoleConsumerGroupEntry] = []
 
     @classmethod
     def empty(cls) -> "ConsoleResourceCatalog":
@@ -233,7 +241,15 @@ class ConsoleResourceCatalog:
                 origins={kafka.get("source") or "config"},
             ))
         catalog = cls(entries)
-        catalog.consumer_groups = [group["name"] for group in data.get("consumerGroups", [])]
+        catalog.consumer_groups = [
+            ConsoleConsumerGroupEntry(
+                name=group["name"],
+                kafka_ref=group.get("kafkaRef"),
+                target_ref=group.get("targetRef"),
+                replay_ref=group.get("replayRef"),
+            )
+            for group in data.get("consumerGroups", [])
+        ]
         return catalog
 
     def merge(self, other: "ConsoleResourceCatalog") -> None:
@@ -255,6 +271,20 @@ class ConsoleResourceCatalog:
                 *getattr(self, "consumer_groups", []),
                 *getattr(other, "consumer_groups", []),
             ])
+
+    def consumer_group_entries(self, kafka_selector: Optional[str] = None) -> List[ConsoleConsumerGroupEntry]:
+        groups = list(self.consumer_groups)
+        if kafka_selector is None and len(self.candidates(ResourceRole.KAFKA)) != 1:
+            return groups
+        kafka_entry = self.resolve(ResourceRole.KAFKA, kafka_selector)
+        return [
+            group
+            for group in groups
+            if group.kafka_ref is None or kafka_entry.matches(group.kafka_ref)
+        ]
+
+    def consumer_group_names(self, kafka_selector: Optional[str] = None) -> List[str]:
+        return _dedupe(group.name for group in self.consumer_group_entries(kafka_selector))
 
     def _same_ref_entry(self, incoming: ConsoleResourceEntry) -> Optional[ConsoleResourceEntry]:
         for entry in self.entries:

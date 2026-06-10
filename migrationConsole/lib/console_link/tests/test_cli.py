@@ -18,7 +18,12 @@ from console_link.cli import (
     main,
 )
 from console_link.environment import Environment
-from console_link.k8s_resource_catalog import ConsoleResourceCatalog, ConsoleResourceEntry, ResourceRole
+from console_link.k8s_resource_catalog import (
+    ConsoleConsumerGroupEntry,
+    ConsoleResourceCatalog,
+    ConsoleResourceEntry,
+    ResourceRole,
+)
 from console_link.models.backfill_rfs import ECSRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
@@ -41,15 +46,33 @@ def _catalog_cluster_config(endpoint):
     }
 
 
+def _catalog_kafka_entry(name, broker):
+    return ConsoleResourceEntry(
+        ResourceRole.KAFKA,
+        name,
+        [name],
+        kafka_runtime={
+            "type": "direct",
+            "clientConfig": {"broker_endpoints": broker, "standard": None},
+        },
+    )
+
+
 def _catalog_env(entries, consumer_groups=None):
+    catalog = ConsoleResourceCatalog(entries)
+    catalog.consumer_groups = consumer_groups or []
+    group_names = [
+        group.name if hasattr(group, "name") else group
+        for group in (consumer_groups or [])
+    ]
     return SimpleNamespace(
-        resources=ConsoleResourceCatalog(entries),
+        resources=catalog,
         client_options=None,
         source_cluster=None,
         target_cluster=None,
         proxy=None,
         kafka=None,
-        kafka_consumer_groups=consumer_groups or [],
+        kafka_consumer_groups=group_names,
     )
 
 
@@ -1359,9 +1382,26 @@ def test_cli_kafka_describe_consumer_group_falls_back_to_legacy_default(runner, 
     assert result.exit_code == 0
 
 
-def test_cli_kafka_describe_consumer_group_uses_resolved_group_when_present(runner, mocker):
+def test_cli_kafka_describe_consumer_group_uses_resolved_group_when_unambiguous(runner, mocker):
     # When the env was built from a workflow config containing replayers, the
     # CLI default should be the workflow-resolved group, not the legacy name.
+    model_mock = mocker.patch.object(StandardKafka, 'describe_consumer_group')
+
+    real_env = Environment(config_file=VALID_SERVICES_YAML)
+    real_env.kafka_consumer_groups = ["replayer-prod-target"]
+
+    class _StubContext:
+        env = real_env
+
+    mocker.patch.object(cli_module, "Context", return_value=_StubContext())
+
+    result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'describe-consumer-group'],
+                           catch_exceptions=True)
+    model_mock.assert_called_once_with(group_name='replayer-prod-target')
+    assert result.exit_code == 0
+
+
+def test_cli_kafka_describe_consumer_group_requires_group_when_legacy_groups_are_ambiguous(runner, mocker):
     model_mock = mocker.patch.object(StandardKafka, 'describe_consumer_group')
 
     real_env = Environment(config_file=VALID_SERVICES_YAML)
@@ -1374,8 +1414,99 @@ def test_cli_kafka_describe_consumer_group_uses_resolved_group_when_present(runn
 
     result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'describe-consumer-group'],
                            catch_exceptions=True)
-    model_mock.assert_called_once_with(group_name='replayer-prod-target')
+
+    assert result.exit_code == 2
+    assert "Multiple consumer groups are configured: replayer-prod-target, replayer-staging-target" in result.output
+    assert "Specify: GROUP_NAME <replayer-prod-target|replayer-staging-target>." in result.output
+    model_mock.assert_not_called()
+
+
+def test_cli_kafka_describe_consumer_group_uses_only_group_for_selected_k8s_kafka(runner, mocker):
+    env = _catalog_env(
+        [
+            _catalog_kafka_entry("default", "broker-a:9092"),
+            _catalog_kafka_entry("kafka-b", "broker-b:9092"),
+        ],
+        consumer_groups=[
+            ConsoleConsumerGroupEntry(
+                name="replayer-targetb",
+                kafka_ref="kafka-b",
+                target_ref="targetb",
+                replay_ref="proxy-b-targetb",
+            ),
+        ],
+    )
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+    model_mock = mocker.patch.object(StandardKafka, 'describe_consumer_group')
+
+    result = runner.invoke(cli, ['kafka', 'describe-consumer-group', '--kafka', 'kafka-b'],
+                           catch_exceptions=True)
+
     assert result.exit_code == 0
+    model_mock.assert_called_once_with(group_name='replayer-targetb')
+
+
+def test_cli_kafka_describe_consumer_group_requires_group_when_selected_kafka_has_multiple_groups(runner, mocker):
+    env = _catalog_env(
+        [
+            _catalog_kafka_entry("default", "broker-a:9092"),
+            _catalog_kafka_entry("kafka-b", "broker-b:9092"),
+        ],
+        consumer_groups=[
+            ConsoleConsumerGroupEntry(
+                name="replayer-targeta",
+                kafka_ref="default",
+                target_ref="targeta",
+                replay_ref="proxy-a-targeta",
+            ),
+            ConsoleConsumerGroupEntry(
+                name="replayer-targetb",
+                kafka_ref="default",
+                target_ref="targetb",
+                replay_ref="proxy-b-targetb",
+            ),
+        ],
+    )
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+    model_mock = mocker.patch.object(StandardKafka, 'describe_consumer_group')
+
+    result = runner.invoke(cli, ['kafka', 'describe-consumer-group', '--kafka', 'default'],
+                           catch_exceptions=True)
+
+    assert result.exit_code == 2
+    assert "Multiple consumer groups are configured for kafka resource 'default'" in result.output
+    assert "Specify: GROUP_NAME <replayer-targeta|replayer-targetb>." in result.output
+    model_mock.assert_not_called()
+
+
+def test_cli_kafka_describe_consumer_group_does_not_use_group_from_another_kafka(runner, mocker):
+    env = _catalog_env(
+        [
+            _catalog_kafka_entry("default", "broker-a:9092"),
+            _catalog_kafka_entry("kafka-b", "broker-b:9092"),
+        ],
+        consumer_groups=[
+            ConsoleConsumerGroupEntry(
+                name="replayer-targeta",
+                kafka_ref="default",
+                target_ref="targeta",
+                replay_ref="proxy-a-targeta",
+            ),
+        ],
+    )
+    mocker.patch.object(cli_module, "can_use_k8s_config_store", return_value=True)
+    mocker.patch.object(cli_module.Environment, "from_k8s_resource_catalog", return_value=env)
+    model_mock = mocker.patch.object(StandardKafka, 'describe_consumer_group')
+
+    result = runner.invoke(cli, ['kafka', 'describe-consumer-group', '--kafka', 'kafka-b'],
+                           catch_exceptions=True)
+
+    assert result.exit_code == 2
+    assert "No consumer groups are configured for kafka resource 'kafka-b'" in result.output
+    assert "`console kafka list-consumer-groups --kafka kafka-b`" in result.output
+    model_mock.assert_not_called()
 
 
 def test_cli_kafka_list_consumer_groups(runner, mocker):

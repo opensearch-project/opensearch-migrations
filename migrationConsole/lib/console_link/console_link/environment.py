@@ -191,7 +191,7 @@ class Environment:
         instance.target_cluster = cls._try_resolve_cluster(catalog, ResourceRole.TARGET)
         instance.proxy = cls._try_resolve_cluster(catalog, ResourceRole.PROXY)
         instance.kafka = cls._try_resolve_kafka(catalog)
-        instance.kafka_consumer_groups = getattr(catalog, "consumer_groups", [])
+        instance.kafka_consumer_groups = catalog.consumer_group_names()
         return instance
 
     @classmethod

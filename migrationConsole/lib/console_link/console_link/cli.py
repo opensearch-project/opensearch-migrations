@@ -1102,19 +1102,45 @@ def delete_topic_cmd(ctx, kafka_selector, acknowledge_risk, topic_name):
 DEFAULT_LEGACY_CONSUMER_GROUP = "logging-group-default"
 
 
-def _resolve_default_consumer_group(env) -> str:
+def _consumer_group_hint(groups: Sequence[str]) -> str:
+    return f"Specify: GROUP_NAME <{'|'.join(groups)}>."
+
+
+def _resolve_default_consumer_group(env, kafka_selector=None) -> str:
     """Pick the consumer group `describe-consumer-group` uses when the caller
     omits the argument.
 
     Workflow-driven deployments (k8s/EKS) set group IDs of the form
     `replayer-<targetLabel>` per fullMigration.ts; the legacy CDK/docker
     deployments and the local dev environment use `logging-group-default`.
-    Prefer the workflow-resolved group when available so CDC integ tests
-    and operators don't have to memorize the deploy-specific name.
+    Infer a workflow group only when the selected kafka has exactly one
+    configured group.
     """
+    catalog = _resource_catalog(env)
+    if catalog is not None and not hasattr(catalog, "_legacy_env"):
+        kafka_name = catalog.resolve(ResourceRole.KAFKA, kafka_selector).ref_name
+        groups = catalog.consumer_group_names(kafka_selector)
+        if len(groups) == 1:
+            return groups[0]
+        if not groups:
+            kafka_arg = f" --kafka {kafka_name}" if kafka_name else ""
+            raise click.UsageError(
+                f"No consumer groups are configured for kafka resource '{kafka_name}'. "
+                "Specify GROUP_NAME explicitly, or run "
+                f"`console kafka list-consumer-groups{kafka_arg}` to inspect Kafka directly."
+            )
+        raise click.UsageError(
+            f"Multiple consumer groups are configured for kafka resource '{kafka_name}': "
+            f"{', '.join(groups)}.\n{_consumer_group_hint(groups)}"
+        )
+
     groups = list(getattr(env, "kafka_consumer_groups", None) or [])
-    if groups:
+    if len(groups) == 1:
         return groups[0]
+    if len(groups) > 1:
+        raise click.UsageError(
+            f"Multiple consumer groups are configured: {', '.join(groups)}.\n{_consumer_group_hint(groups)}"
+        )
     return DEFAULT_LEGACY_CONSUMER_GROUP
 
 
@@ -1124,9 +1150,10 @@ def _resolve_default_consumer_group(env) -> str:
                 shell_complete=get_kafka_consumer_group_completions)
 @click.pass_obj
 def describe_group_command(ctx, kafka_selector, group_name):
+    kafka_resource = resolve_kafka_resource(ctx, kafka_selector)
     if group_name is None:
-        group_name = _resolve_default_consumer_group(ctx.env)
-    result = kafka_.describe_consumer_group(resolve_kafka_resource(ctx, kafka_selector), group_name=group_name)
+        group_name = _resolve_default_consumer_group(ctx.env, kafka_selector)
+    result = kafka_.describe_consumer_group(kafka_resource, group_name=group_name)
     click.echo(result.value)
 
 
