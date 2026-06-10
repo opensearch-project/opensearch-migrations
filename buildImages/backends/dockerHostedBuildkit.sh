@@ -134,10 +134,12 @@ connect_cluster_to_registry_network() {
     return 1
   fi
 
-  if [[ "$(docker inspect -f "{{json .NetworkSettings.Networks}}" "${EXTERNAL_REGISTRY_NAME}" \
-        | grep -c "\"${cluster_network}\":")" -eq 0 ]]; then
-    docker network connect "${cluster_network}" "${EXTERNAL_REGISTRY_NAME}"
-  fi
+  # Always disconnect before reconnecting. A stale minikube delete leaves kernel
+  # routing state in the container's network namespace even after Docker removes
+  # its own metadata; a plain conditional connect then fails with "conflicts with
+  # existing route". Disconnect flushes that state unconditionally.
+  docker network disconnect "${cluster_network}" "${EXTERNAL_REGISTRY_NAME}" 2>/dev/null || true
+  docker network connect "${cluster_network}" "${EXTERNAL_REGISTRY_NAME}"
 
   local registry_dir="/etc/containerd/certs.d/${EXTERNAL_REGISTRY_NAME}:5000"
   local node
