@@ -1543,6 +1543,23 @@ def test_kafka_consumer_group_completion_uses_list_groups(mocker, env):
     assert [item.value for item in completions] == ['logging-group-default']
 
 
+def test_kafka_consumer_group_completion_omits_empty_list_success_message(mocker, env):
+    ctx = mocker.Mock()
+    ctx.find_root.return_value.params = {'config_file': '/fake/config.yaml', 'force_use_config_file': True}
+    mocker.patch('console_link.cli.Environment', return_value=env)
+    mocker.patch(
+        'console_link.middleware.kafka.list_consumer_groups',
+        return_value=CommandResult(
+            success=True,
+            value='Command for List Consumer Groups completed successfully.\n',
+        ),
+    )
+
+    completions = get_kafka_consumer_group_completions(ctx, None, '')
+
+    assert completions == []
+
+
 def test_cli_kafka_describe_topic(runner, mocker):
     model_mock = mocker.patch.object(StandardKafka, 'describe_topic_records')
     middleware_mock = mocker.spy(middleware.kafka, 'describe_topic_records')

@@ -530,8 +530,17 @@ def _complete_from_command_result(result, incomplete):
     return [
         CompletionItem(line.strip())
         for line in result.value.splitlines()
-        if line.strip() and line.strip().startswith(incomplete)
+        if (
+            line.strip()
+            and not _is_empty_command_success_message(line)
+            and line.strip().startswith(incomplete)
+        )
     ]
+
+
+def _is_empty_command_success_message(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("Command for ") and stripped.endswith(" completed successfully.")
 
 
 def _ctx_param(ctx, name, default=None):
