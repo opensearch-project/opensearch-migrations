@@ -1,0 +1,2 @@
+# Solr collection backups written by the BACKUP API (bind-mounted at /backups)
+backups/
