@@ -95,32 +95,41 @@ ensure_docker_network() {
   fi
 }
 
-ensure_registry_container() {
-  if ! docker inspect "${EXTERNAL_REGISTRY_NAME}" >/dev/null 2>&1; then
-    local registry_image
-    registry_image="$(ptc_rewrite_image registry:2)"
-    docker run -d \
-      --name "${EXTERNAL_REGISTRY_NAME}" \
-      --network "${EXTERNAL_DOCKER_NETWORK}" \
-      -p "127.0.0.1:${EXTERNAL_REGISTRY_PORT}:5000" \
-      -v "${EXTERNAL_REGISTRY_VOLUME}:/var/lib/registry" \
-      --restart=always \
-      "${registry_image}" >/dev/null
-  else
-    if [[ "$(docker inspect -f '{{.State.Running}}' "${EXTERNAL_REGISTRY_NAME}")" != "true" ]]; then
-      docker start "${EXTERNAL_REGISTRY_NAME}" >/dev/null
-    fi
-    if ! docker inspect -f '{{json .NetworkSettings.Networks}}' "${EXTERNAL_REGISTRY_NAME}" | grep -q "\"${EXTERNAL_DOCKER_NETWORK}\":"; then
-      docker network connect "${EXTERNAL_DOCKER_NETWORK}" "${EXTERNAL_REGISTRY_NAME}"
-    fi
-  fi
+teardown_registry_container() {
+  set_docker_hosted_defaults
+  # Must be called before any docker network rm that the registry is connected
+  # to; docker network rm fails silently when containers are still attached.
+  docker rm -f "${EXTERNAL_REGISTRY_NAME}" >/dev/null 2>&1 || true
 }
 
-# Connect a Kubernetes cluster's docker network to the registry's network and
-# install a containerd hosts.toml on every node so pulls of
-# ${EXTERNAL_REGISTRY_NAME}:5000 are served over plain HTTP (the registry
-# container has no TLS). Pods reference images by that in-cluster name, which
-# the node container resolves via Docker's bridge DNS.
+ensure_registry_container() {
+  local registry_image
+  registry_image="$(ptc_rewrite_image registry:2)"
+  # Always recreate so the container starts with a clean network namespace.
+  # Bind on 0.0.0.0 so the registry is reachable at the host gateway IP from
+  # inside any cluster node container, without docker network connect.
+  # The registry-data volume persists across runs so image layers are reused.
+  teardown_registry_container
+  docker run -d \
+    --name "${EXTERNAL_REGISTRY_NAME}" \
+    --network "${EXTERNAL_DOCKER_NETWORK}" \
+    -p "${EXTERNAL_REGISTRY_PORT}:5000" \
+    -v "${EXTERNAL_REGISTRY_VOLUME}:/var/lib/registry" \
+    --restart=always \
+    "${registry_image}" >/dev/null
+}
+
+# Configure containerd on each cluster node to pull from the host-bound
+# registry port. No docker network connect is used: the registry is bound on
+# 0.0.0.0 so it is reachable at the node's default gateway IP (the host).
+#
+# Steps per node:
+#  1. Resolve the host gateway IP from inside the node (default route next-hop).
+#  2. Add an /etc/hosts entry mapping EXTERNAL_REGISTRY_NAME to that IP so
+#     containerd/cri-dockerd can resolve the name without Docker bridge DNS.
+#  3. Write a hosts.toml pointing containerd at http://<name>:EXTERNAL_REGISTRY_PORT
+#     so plain-HTTP pulls are accepted.
+#
 # Args: <cluster-docker-network> <node-container-name>...
 connect_cluster_to_registry_network() {
   local cluster_network="$1"
@@ -134,17 +143,14 @@ connect_cluster_to_registry_network() {
     return 1
   fi
 
-  if [[ "$(docker inspect -f "{{json .NetworkSettings.Networks}}" "${EXTERNAL_REGISTRY_NAME}" \
-        | grep -c "\"${cluster_network}\":")" -eq 0 ]]; then
-    docker network connect "${cluster_network}" "${EXTERNAL_REGISTRY_NAME}"
-  fi
-
-  local registry_dir="/etc/containerd/certs.d/${EXTERNAL_REGISTRY_NAME}:5000"
-  local node
+  local registry_dir="/etc/containerd/certs.d/${EXTERNAL_REGISTRY_NAME}:${EXTERNAL_REGISTRY_PORT}"
+  local node host_gw
   for node in "${nodes[@]}"; do
+    host_gw="$(docker exec "${node}" sh -c "ip route show default | awk '/default/ {print \$3}'")"
+    docker exec -i "${node}" sh -c "echo '${host_gw} ${EXTERNAL_REGISTRY_NAME}' >> /etc/hosts"
     docker exec "${node}" mkdir -p "${registry_dir}"
     cat <<EOF | docker exec -i "${node}" cp /dev/stdin "${registry_dir}/hosts.toml"
-server = "http://${EXTERNAL_REGISTRY_NAME}:5000"
+server = "http://${EXTERNAL_REGISTRY_NAME}:${EXTERNAL_REGISTRY_PORT}"
 EOF
   done
 }
