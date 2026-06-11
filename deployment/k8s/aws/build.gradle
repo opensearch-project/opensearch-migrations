@@ -163,28 +163,21 @@ def taskSuffixForClassifier = { String classifier ->
 
 // ---------- (0) compile the Rust CLI ----------
 
-abstract class BuildCliBinaryTask extends DefaultTask {
+abstract class RustToolchainTask extends DefaultTask {
     @Inject abstract ExecOperations getExec()
 
-    @InputFiles abstract ConfigurableFileCollection getSources()
-    @Input abstract Property<String> getCliVersion()
     @Input abstract Property<String> getRustAutoProvision()
     @Input abstract Property<String> getRustHome()
     @Input abstract Property<String> getRustupInitUrl()
-    @Input abstract Property<String> getCrossVersion()
-    @Input abstract Property<String> getCrossTarget()
-    @Input abstract Property<String> getForceCross()
-    @Input abstract Property<Boolean> getUseExplicitTarget()
-    @OutputFile abstract RegularFileProperty getOutBinary()
     @Internal abstract DirectoryProperty getCrateDir()
 
-    private static boolean isWindows() {
+    protected static boolean isWindows() {
         org.gradle.internal.os.OperatingSystem.current().isWindows()
     }
 
     // Resolve a cargo path + env, provisioning rustup into the managed home
     // when `cargo` isn't already on PATH.
-    private Map resolveCargo() {
+    protected Map resolveCargo() {
         def cargoName = isWindows() ? 'cargo.exe' : 'cargo'
         def onPath = System.getenv('PATH')?.split(File.pathSeparator)?.collect {
             new File(it, cargoName)
@@ -210,34 +203,136 @@ abstract class BuildCliBinaryTask extends DefaultTask {
                     "cargo not found and rust auto-provisioning is disabled " +
                     "(-PrustAutoProvision=false). Install Rust (https://rustup.rs) or re-enable it.")
         }
-        if (isWindows()) {
-            throw new GradleException(
-                    "cargo not found on PATH. Automatic rustup provisioning is Unix-only; " +
-                    "install Rust manually on Windows (https://rustup.rs).")
-        }
         logger.lifecycle "cargo not found; provisioning rustup into ${home} (toolchain pinned by cli/rust-toolchain.toml)"
         cargoHome.mkdirs(); rustupHome.mkdirs()
-        def initScript = new File(home, 'rustup-init.sh')
-        def dl = exec.exec {
-            ignoreExitValue = true
-            commandLine 'bash', '-c',
-                    "curl -fsSL --proto '=https' --tlsv1.2 '${rustupInitUrl.get()}' -o '${initScript.absolutePath}' " +
-                    "|| wget -qO '${initScript.absolutePath}' '${rustupInitUrl.get()}'"
-        }
-        if (dl.exitValue != 0 || !initScript.exists()) {
-            throw new GradleException("failed to download rustup installer from ${rustupInitUrl.get()}")
-        }
-        exec.exec {
-            environment env
-            commandLine 'bash', initScript.absolutePath,
-                    '-y', '--no-modify-path', '--profile', 'minimal', '--default-toolchain', 'none'
-        }
+        def initScript = provisionRustupInstaller(home)
+        def command = isWindows()
+                ? [initScript.absolutePath, '-y', '--no-modify-path', '--profile', 'minimal', '--default-toolchain', 'none']
+                : ['bash', initScript.absolutePath, '-y', '--no-modify-path', '--profile', 'minimal', '--default-toolchain', 'none']
+        exec.exec { spec ->
+            spec.environment env
+            spec.commandLine(*command)
+        }.assertNormalExitValue()
         if (!cargoBin.canExecute()) {
             throw new GradleException("rustup provisioning did not produce ${cargoBin}")
         }
         logger.lifecycle "provisioned rust toolchain manager at ${cargoBin}"
         return [cargo: cargoBin.absolutePath, env: env]
     }
+
+    private File provisionRustupInstaller(File home) {
+        def url = rustupInstallerUrl()
+        def installer = new File(home, isWindows() ? 'rustup-init.exe' : 'rustup-init.sh')
+        logger.lifecycle "rustup: downloading ${url}"
+        try {
+            installer.withOutputStream { out ->
+                new URL(url).openStream().withCloseable { input ->
+                    input.transferTo(out)
+                }
+            }
+        } catch (Exception e) {
+            throw new GradleException("failed to download rustup installer from ${url}", e)
+        }
+        if (!installer.isFile() || installer.length() == 0) {
+            throw new GradleException("failed to download rustup installer from ${url}")
+        }
+        if (!isWindows()) {
+            installer.setExecutable(true)
+        }
+        installer
+    }
+
+    private String rustupInstallerUrl() {
+        def configured = rustupInitUrl.get()
+        isWindows() && configured == 'https://sh.rustup.rs'
+                ? 'https://win.rustup.rs/x86_64'
+                : configured
+    }
+
+    protected void ensurePinnedToolchain(Map rust) {
+        def rustup = resolveRustup(rust)
+        if (rustup == null) {
+            logger.lifecycle 'rustup not found; assuming the pinned Rust toolchain is already installed'
+            return
+        }
+        def toolchain = pinnedRustToolchain()
+        if (!toolchain) {
+            return
+        }
+        exec.exec {
+            rust.env.each { k, v -> environment k, v }
+            commandLine rustup.absolutePath, 'toolchain', 'install', toolchain, '--profile', 'minimal'
+        }
+    }
+
+    protected void ensureRustTarget(Map rust, String target) {
+        ensurePinnedToolchain(rust)
+        def rustup = resolveRustup(rust)
+        if (rustup == null) {
+            logger.lifecycle "rustup not found; assuming Rust target ${target} is already installed"
+            return
+        }
+        def toolchain = pinnedRustToolchain()
+        def args = ['target', 'add']
+        if (toolchain) {
+            args.addAll(['--toolchain', toolchain])
+        }
+        args.add(target)
+        exec.exec {
+            rust.env.each { k, v -> environment k, v }
+            commandLine(*([rustup.absolutePath] + args))
+        }
+    }
+
+    protected String pinnedRustToolchain() {
+        def toolchainFile = new File(crateDir.get().asFile, 'rust-toolchain.toml')
+        if (!toolchainFile.isFile()) {
+            return null
+        }
+        def channelLine = toolchainFile.readLines().find { it.trim().startsWith('channel') }
+        def matcher = channelLine == null ? null : (channelLine =~ /channel\s*=\s*"([^"]+)"/)
+        return matcher?.find() ? matcher.group(1) : null
+    }
+
+    protected File resolveRustup(Map rust) {
+        def rustupName = isWindows() ? 'rustup.exe' : 'rustup'
+        def cargoFile = new File(rust.cargo)
+        def sibling = cargoFile.parentFile == null ? null : new File(cargoFile.parentFile, rustupName)
+        if (sibling?.canExecute()) {
+            return sibling
+        }
+        return System.getenv('PATH')?.split(File.pathSeparator)?.collect {
+            new File(it, rustupName)
+        }?.find { it.canExecute() }
+    }
+}
+
+abstract class CargoCommandTask extends RustToolchainTask {
+    @InputFiles abstract ConfigurableFileCollection getSources()
+    @Input abstract ListProperty<String> getCargoArgs()
+    @Input abstract MapProperty<String, String> getExtraEnvironment()
+
+    @TaskAction
+    void runCargoCommand() {
+        def rust = resolveCargo()
+        ensurePinnedToolchain(rust)
+        exec.exec {
+            workingDir crateDir.get().asFile
+            rust.env.each { k, v -> environment k, v }
+            extraEnvironment.get().each { k, v -> environment k, v }
+            commandLine(*([rust.cargo] + cargoArgs.get()))
+        }.assertNormalExitValue()
+    }
+}
+
+abstract class BuildCliBinaryTask extends RustToolchainTask {
+    @InputFiles abstract ConfigurableFileCollection getSources()
+    @Input abstract Property<String> getCliVersion()
+    @Input abstract Property<String> getCrossVersion()
+    @Input abstract Property<String> getCrossTarget()
+    @Input abstract Property<String> getForceCross()
+    @Input abstract Property<Boolean> getUseExplicitTarget()
+    @OutputFile abstract RegularFileProperty getOutBinary()
 
     @TaskAction
     void build() {
@@ -267,6 +362,8 @@ abstract class BuildCliBinaryTask extends DefaultTask {
             def target = crossTarget.get()
             ensureRustTarget(rust, target)
             args.addAll(['--target', target])
+        } else {
+            ensurePinnedToolchain(rust)
         }
         exec.exec {
             workingDir crateDir.get().asFile
@@ -278,52 +375,6 @@ abstract class BuildCliBinaryTask extends DefaultTask {
                 ? new File(crateDir.get().asFile, "target/${crossTarget.get()}/release/${out.name}")
                 : new File(crateDir.get().asFile, "target/release/${out.name}")
         copyProducedBinary(produced, out)
-    }
-
-    private void ensureRustTarget(Map rust, String target) {
-        def rustup = resolveRustup(rust)
-        if (rustup == null) {
-            logger.lifecycle "rustup not found; assuming Rust target ${target} is already installed"
-            return
-        }
-        def toolchain = pinnedRustToolchain()
-        if (toolchain) {
-            exec.exec {
-                rust.env.each { k, v -> environment k, v }
-                commandLine rustup.absolutePath, 'toolchain', 'install', toolchain, '--profile', 'minimal'
-            }
-        }
-        def args = ['target', 'add']
-        if (toolchain) {
-            args.addAll(['--toolchain', toolchain])
-        }
-        args.add(target)
-        exec.exec {
-            rust.env.each { k, v -> environment k, v }
-            commandLine(*([rustup.absolutePath] + args))
-        }
-    }
-
-    private String pinnedRustToolchain() {
-        def toolchainFile = new File(crateDir.get().asFile, 'rust-toolchain.toml')
-        if (!toolchainFile.isFile()) {
-            return null
-        }
-        def channelLine = toolchainFile.readLines().find { it.trim().startsWith('channel') }
-        def matcher = channelLine == null ? null : (channelLine =~ /channel\s*=\s*"([^"]+)"/)
-        return matcher?.find() ? matcher.group(1) : null
-    }
-
-    private File resolveRustup(Map rust) {
-        def rustupName = isWindows() ? 'rustup.exe' : 'rustup'
-        def cargoFile = new File(rust.cargo)
-        def sibling = cargoFile.parentFile == null ? null : new File(cargoFile.parentFile, rustupName)
-        if (sibling?.canExecute()) {
-            return sibling
-        }
-        return System.getenv('PATH')?.split(File.pathSeparator)?.collect {
-            new File(it, rustupName)
-        }?.find { it.canExecute() }
     }
 
     // Decide whether to route through `cross`. Forced via -PforceCross=true;
@@ -539,6 +590,43 @@ tasks.register('buildMigrationAssistantBinary', BuildCliBinaryTask) {
     forceCross.set(forceCrossProvider)
     useExplicitTarget.set(false)
     outBinary.set(layout.projectDirectory.file('cli/target/release/migration-assistant'))
+}
+
+def migrationAssistantRustSources = {
+    fileTree('cli') {
+        include 'Cargo.toml'
+        include 'Cargo.lock'
+        include 'build.rs'
+        include 'rust-toolchain.toml'
+        include 'src/**'
+        include 'tests/**'
+    }
+}
+
+def configureMigrationAssistantCargoTask = { CargoCommandTask task, List<String> args ->
+    task.group = 'migrate-cli'
+    task.crateDir.set(layout.projectDirectory.dir('cli'))
+    task.sources.from(migrationAssistantRustSources())
+    task.rustAutoProvision.set(rustAutoProvisionProvider)
+    task.rustHome.set(rustHomeProvider)
+    task.rustupInitUrl.set(rustupInitUrlProvider)
+    task.cargoArgs.set(args)
+    task.extraEnvironment.set([:])
+}
+
+tasks.register('cargoFmtCheckMigrationAssistant', CargoCommandTask) {
+    description = 'Run cargo fmt --check for the migration-assistant Rust CLI (provisions Rust if needed)'
+    configureMigrationAssistantCargoTask(it, ['fmt', '--check'])
+}
+
+tasks.register('cargoClippyMigrationAssistant', CargoCommandTask) {
+    description = 'Run cargo clippy for the migration-assistant Rust CLI (provisions Rust if needed)'
+    configureMigrationAssistantCargoTask(it, ['clippy', '--all-targets', '--locked', '--', '-D', 'warnings'])
+}
+
+tasks.register('cargoTestMigrationAssistant', CargoCommandTask) {
+    description = 'Run cargo test for the migration-assistant Rust CLI (provisions Rust if needed)'
+    configureMigrationAssistantCargoTask(it, ['test', '--locked'])
 }
 
 // ---------- (1) CLI tarball ----------
