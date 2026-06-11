@@ -2,9 +2,9 @@ plugins {
     id 'base'
 }
 
-import org.gradle.process.ExecOperations
 import org.gradle.api.tasks.*
-import javax.inject.Inject
+import org.gradle.api.tasks.bundling.Compression
+import org.gradle.api.tasks.bundling.Tar
 
 def helmChartVersionProvider = providers.environmentVariable('HELM_CHART_VERSION')
         .orElse(providers.gradleProperty('helmChartVersion'))
@@ -16,6 +16,7 @@ def helmChartVersionProvider = providers.environmentVariable('HELM_CHART_VERSION
 
 def chartSourceDir = layout.projectDirectory.dir('charts/aggregates/migrationAssistantWithArgo')
 def stagedChartDirProvider = layout.buildDirectory.dir('helm-staging/migrationAssistantWithArgo')
+def packagedChartDirProvider = layout.buildDirectory.dir('helm-package-staging/migration-assistant')
 def helmPackageDirProvider = layout.buildDirectory.dir('helm-package')
 def cfnTemplatesDir = rootProject.layout.projectDirectory.dir('deployment/migration-assistant-solution/cdk.out-minified')
 
@@ -48,48 +49,44 @@ tasks.register('stageMigrationAssistantHelmChart', Sync) {
     }
 }
 
-abstract class PackageHelmChartTask extends DefaultTask {
-    @Inject abstract ExecOperations getExec()
+tasks.register('stageMigrationAssistantHelmPackage', Sync) {
+    description = 'Stage the Migration Assistant Helm chart with release chart metadata'
+    group = 'helm'
+    dependsOn 'stageMigrationAssistantHelmChart'
 
-    @InputDirectory
-    @PathSensitive(PathSensitivity.RELATIVE)
-    abstract DirectoryProperty getChartDir()
+    into packagedChartDirProvider
 
-    @Input
-    abstract Property<String> getChartVersion()
-
-    @OutputFile
-    abstract RegularFileProperty getOutFile()
-
-    @TaskAction
-    void packageChart() {
-        def out = outFile.get().asFile
-        out.parentFile.mkdirs()
-
-        getExec().exec {
-            commandLine 'helm',
-                    'package', chartDir.get().asFile.absolutePath,
-                    '--version', chartVersion.get(),
-                    '--app-version', chartVersion.get(),
-                    '--destination', out.parentFile.absolutePath
-        }.assertNormalExitValue()
-
-        if (!out.isFile()) {
-            throw new GradleException("helm package did not produce ${out}")
+    from(stagedChartDirProvider) {
+        exclude 'Chart.yaml'
+    }
+    from(stagedChartDirProvider.map { dir -> dir.file('Chart.yaml') }) {
+        filter { line ->
+            if (line ==~ /^version:.*/) {
+                return "version: ${helmChartVersionProvider.get()}"
+            }
+            if (line ==~ /^appVersion:.*/) {
+                return "appVersion: \"${helmChartVersionProvider.get()}\""
+            }
+            return line
         }
-        logger.lifecycle "wrote ${out}"
     }
 }
 
-tasks.register('packageMigrationAssistantHelmChart', PackageHelmChartTask) {
+tasks.register('packageMigrationAssistantHelmChart', Tar) {
     description = 'Package the Migration Assistant Helm chart release tarball'
     group = 'helm'
-    dependsOn 'stageMigrationAssistantHelmChart'
-    chartDir.set(stagedChartDirProvider)
-    chartVersion.set(helmChartVersionProvider)
-    outFile.set(helmPackageDirProvider.zip(helmChartVersionProvider) { dir, ver ->
-        dir.file("migration-assistant-${ver}.tgz")
-    })
+    dependsOn 'stageMigrationAssistantHelmPackage'
+    compression = Compression.GZIP
+    archiveFileName.set(helmChartVersionProvider.map { ver -> "migration-assistant-${ver}.tgz" })
+    destinationDirectory.set(helmPackageDirProvider)
+
+    from(packagedChartDirProvider) {
+        into 'migration-assistant'
+    }
+
+    doLast {
+        logger.lifecycle "wrote ${archiveFile.get().asFile}"
+    }
 }
 
 assemble.dependsOn 'packageMigrationAssistantHelmChart'
