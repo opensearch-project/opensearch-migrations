@@ -9,9 +9,15 @@ plugins {
 // stages release artifacts into build/dist/<version>/.
 //
 // Design:
-//   - No cross-compilation. CI runs on each native target runner and passes
-//     -Ptarget=<triple>. Local dev builds for host when -Ptarget is unset.
-//   - No rustup provisioning. CI provides the toolchain via dtolnay/rust-toolchain.
+//   - Native builds on the GitHub Actions matrix: each runner ships a Rust
+//     toolchain (dtolnay/rust-toolchain) and passes -Ptarget=<triple>, so the
+//     compile is a plain `cargo build --release --target <triple>`.
+//   - Toolchain self-sufficiency for agents that DON'T pre-install Rust (the
+//     Jenkins EKS hosts run `./gradlew clean build` with no cargo on PATH and
+//     no C linker). There the build mirrors the repo's JDK auto-download: it
+//     provisions rustup into a Gradle-managed home, and — when there's no `cc`
+//     to link a native build but Docker is available — compiles inside a
+//     `cross` container. This keeps both CI paths green from one task.
 //   - Cargo.toml stays at '0.0.0-dev' (verified by versionCheck). Real version
 //     comes from -PcliVersion or CLI_VERSION env var, falling back to
 //     0.0.0-dev-<git-sha> for dev builds.
@@ -28,6 +34,10 @@ plugins {
 //   VERSION.txt                                  plain text version
 // =============================================================================
 
+import org.gradle.api.tasks.Internal
+import org.gradle.process.ExecOperations
+import javax.inject.Inject
+
 // ─── agent-skills dependency ─────────────────────────────────────────────────
 
 configurations {
@@ -43,7 +53,7 @@ dependencies {
 
 // ─── version plumbing ────────────────────────────────────────────────────────
 
-def cliVersion = providers.gradleProperty('cliVersion')
+def cliVersionProvider = providers.gradleProperty('cliVersion')
         .orElse(providers.environmentVariable('CLI_VERSION'))
         .orElse(provider {
             def execResult = providers.exec {
@@ -56,7 +66,7 @@ def cliVersion = providers.gradleProperty('cliVersion')
             sha ? "0.0.0-dev-${sha}" : '0.0.0-dev'
         })
 
-def defaultRepo = providers.gradleProperty('defaultRepo')
+def defaultRepoProvider = providers.gradleProperty('defaultRepo')
         .orElse(providers.environmentVariable('DEFAULT_REPO'))
         .orElse('opensearch-project/opensearch-migrations')
 
@@ -73,9 +83,48 @@ def cargoOutputDir = target
 def binaryName = 'migration-assistant'
 def binaryFile = cargoOutputDir.file(binaryName)
 
+// ─── rust toolchain provisioning knobs ───────────────────────────────────────
+
+// The repo auto-provisions its JVM toolchain (gradle.properties:
+// org.gradle.java.installations.auto-download=true + pinned Corretto JDK 21).
+// Rust has no Gradle toolchain provider, so we mirror that: if `cargo` isn't on
+// PATH (e.g. a fresh Jenkins agent running `./gradlew clean build`), bootstrap
+// rustup into a Gradle-managed home. The exact toolchain is pinned in
+// cli/rust-toolchain.toml. Opt out with -PrustAutoProvision=false (then a
+// missing cargo is a hard error). On the GitHub Actions matrix cargo is always
+// on PATH, so provisioning is a no-op there.
+def rustAutoProvisionProvider = providers.gradleProperty('rustAutoProvision')
+        .orElse(providers.environmentVariable('MIGRATE_RUST_AUTO_PROVISION'))
+        .orElse('true')
+def rustHomeProvider = providers.gradleProperty('rustHome')
+        .orElse(providers.environmentVariable('MIGRATE_RUST_HOME'))
+        .orElse(new File(gradle.gradleUserHomeDir, 'rust').absolutePath)
+def rustupInitUrlProvider = providers.gradleProperty('rustupInitUrl')
+        .orElse(providers.environmentVariable('RUSTUP_INIT_URL'))
+        .orElse('https://sh.rustup.rs')
+
+// `cross` fallback knobs. Some agents (the Jenkins EKS hosts) can provision a
+// Rust toolchain via rustup but have NO system C linker (`cc`), so a plain
+// `cargo build` fails at link time. When that happens AND a Docker daemon is
+// present, the build downloads a prebuilt `cross` binary and compiles inside a
+// cross container (which ships the C toolchain), then copies the artifact back
+// to the canonical target/release path. No host C toolchain, no libc recompile.
+//   - crossVersion: the cross release to download (pins the container image tag).
+//   - crossTarget:  the Linux triple to build (the deployment + agent target).
+//   - forceCross:   force the cross path even when a linker is present (testing).
+def crossVersionProvider = providers.gradleProperty('crossVersion')
+        .orElse(providers.environmentVariable('MIGRATE_CROSS_VERSION'))
+        .orElse('0.2.5')
+def crossTargetProvider = providers.gradleProperty('crossTarget')
+        .orElse(providers.environmentVariable('MIGRATE_CROSS_TARGET'))
+        .orElse('x86_64-unknown-linux-gnu')
+def forceCrossProvider = providers.gradleProperty('forceCross')
+        .orElse(providers.environmentVariable('MIGRATE_FORCE_CROSS'))
+        .orElse('false')
+
 // ─── output directory ────────────────────────────────────────────────────────
 
-def distDir = cliVersion.flatMap { ver -> layout.buildDirectory.dir("dist/${ver}") }
+def distDir = cliVersionProvider.flatMap { ver -> layout.buildDirectory.dir("dist/${ver}") }
 def versionFileDir = layout.buildDirectory.dir('version')
 
 // ─── inputs that trigger a rebuild ───────────────────────────────────────────
@@ -107,27 +156,325 @@ tasks.register('versionCheck') {
                     "Found: '${found}'. The release version is injected via " +
                     "-PcliVersion / CLI_VERSION env var.")
         }
-        logger.lifecycle("versionCheck: Cargo.toml placeholder intact (build version: ${cliVersion.get()})")
+        logger.lifecycle("versionCheck: Cargo.toml placeholder intact (build version: ${cliVersionProvider.get()})")
     }
 }
 
-tasks.register('cargoBuild', Exec) {
+// Compiles the Rust CLI. On the GitHub Actions matrix (cargo on PATH, native
+// linker) this is a plain `cargo build --release --target <triple>`. On agents
+// with no Rust and/or no C linker (Jenkins EKS) it provisions rustup into a
+// managed home and routes through `cross` when a linker is missing.
+abstract class CargoBuildTask extends DefaultTask {
+    @Inject abstract ExecOperations getExec()
+
+    @InputFiles abstract ConfigurableFileCollection getSources()
+    @Input abstract Property<String> getCliVersion()
+    @Input @Optional abstract Property<String> getTargetTriple()
+    @Input abstract Property<String> getRustAutoProvision()
+    @Input abstract Property<String> getRustHome()
+    @Input abstract Property<String> getRustupInitUrl()
+    @Input abstract Property<String> getCrossVersion()
+    @Input abstract Property<String> getCrossTarget()
+    @Input abstract Property<String> getForceCross()
+    @OutputFile abstract RegularFileProperty getOutBinary()
+    @Internal abstract DirectoryProperty getCrateDir()
+
+    private static boolean isWindows() {
+        org.gradle.internal.os.OperatingSystem.current().isWindows()
+    }
+
+    // Resolve a cargo path + env, provisioning rustup into the managed home
+    // when `cargo` isn't already on PATH.
+    private Map resolveCargo() {
+        def cargoName = isWindows() ? 'cargo.exe' : 'cargo'
+        def onPath = System.getenv('PATH')?.split(File.pathSeparator)?.collect {
+            new File(it, cargoName)
+        }?.find { it.canExecute() }
+        if (onPath != null) {
+            return [cargo: onPath.absolutePath, env: [:]]
+        }
+
+        def home = new File(rustHome.get())
+        def cargoHome = new File(home, 'cargo')
+        def rustupHome = new File(home, 'rustup')
+        def cargoBin = new File(cargoHome, "bin/${cargoName}")
+        def env = [
+                CARGO_HOME : cargoHome.absolutePath,
+                RUSTUP_HOME: rustupHome.absolutePath,
+                PATH       : "${new File(cargoHome, 'bin').absolutePath}${File.pathSeparator}${System.getenv('PATH')}".toString(),
+        ]
+        if (cargoBin.canExecute()) {
+            return [cargo: cargoBin.absolutePath, env: env]
+        }
+        if (!Boolean.parseBoolean(rustAutoProvision.get())) {
+            throw new GradleException(
+                    "cargo not found and rust auto-provisioning is disabled " +
+                    "(-PrustAutoProvision=false). Install Rust (https://rustup.rs) or re-enable it.")
+        }
+        if (isWindows()) {
+            throw new GradleException(
+                    "cargo not found on PATH. Automatic rustup provisioning is Unix-only; " +
+                    "install Rust manually on Windows (https://rustup.rs).")
+        }
+        logger.lifecycle "cargo not found; provisioning rustup into ${home} (toolchain pinned by cli/rust-toolchain.toml)"
+        cargoHome.mkdirs(); rustupHome.mkdirs()
+        def initScript = new File(home, 'rustup-init.sh')
+        def dl = exec.exec {
+            ignoreExitValue = true
+            commandLine 'bash', '-c',
+                    "curl -fsSL --proto '=https' --tlsv1.2 '${rustupInitUrl.get()}' -o '${initScript.absolutePath}' " +
+                    "|| wget -qO '${initScript.absolutePath}' '${rustupInitUrl.get()}'"
+        }
+        if (dl.exitValue != 0 || !initScript.exists()) {
+            throw new GradleException("failed to download rustup installer from ${rustupInitUrl.get()}")
+        }
+        exec.exec {
+            environment env
+            commandLine 'bash', initScript.absolutePath,
+                    '-y', '--no-modify-path', '--profile', 'minimal', '--default-toolchain', 'none'
+        }
+        if (!cargoBin.canExecute()) {
+            throw new GradleException("rustup provisioning did not produce ${cargoBin}")
+        }
+        logger.lifecycle "provisioned rust toolchain manager at ${cargoBin}"
+        return [cargo: cargoBin.absolutePath, env: env]
+    }
+
+    @TaskAction
+    void build() {
+        def rust = resolveCargo()
+        def out = outBinary.get().asFile
+
+        // Native `cargo build` needs a system linker (`cc`). Some agents have a
+        // rustup toolchain but no C toolchain; there, link fails. If so (or when
+        // forced), and Docker is available, build via `cross` instead — it
+        // compiles inside a container that ships the C toolchain.
+        if (shouldUseCross(rust)) {
+            buildWithCross(rust, out)
+        } else {
+            buildWithCargo(rust, out)
+        }
+
+        if (!out.exists()) {
+            throw new GradleException("build did not produce ${out}")
+        }
+        logger.lifecycle "built ${out} (CLI_VERSION=${cliVersion.get()})"
+    }
+
+    // Plain `cargo build --release [--target <triple>]`. Cargo writes to
+    // target/release/ (host) or target/<triple>/release/ — which is exactly
+    // where outBinary points, so no copy-back is needed.
+    private void buildWithCargo(Map rust, File out) {
+        exec.exec {
+            workingDir crateDir.get().asFile
+            rust.env.each { k, v -> environment k, v }
+            environment 'CLI_VERSION', cliVersion.get()
+            def cmd = [rust.cargo, 'build', '--release', '--locked']
+            if (targetTriple.isPresent()) {
+                cmd += ['--target', targetTriple.get()]
+            }
+            commandLine cmd
+        }
+    }
+
+    // Decide whether to route through `cross`. Forced via -PforceCross=true;
+    // otherwise auto-trip only when there's no usable C linker on PATH (the
+    // exact condition that breaks native builds on the Jenkins EKS agents).
+    private boolean shouldUseCross(Map rust) {
+        if (Boolean.parseBoolean(forceCross.get())) {
+            logger.lifecycle 'cross: forced on (-PforceCross / MIGRATE_FORCE_CROSS)'
+            return true
+        }
+        if (isWindows() || hasLinker()) {
+            return false
+        }
+        if (!hasDocker()) {
+            // No linker AND no Docker — let the native build run and produce a
+            // clear linker error rather than a confusing "docker not found".
+            logger.warn 'cross: no C linker found and no Docker daemon — native build will likely fail to link'
+            return false
+        }
+        logger.lifecycle 'cross: no C linker (`cc`) found but Docker is available — building in a cross container'
+        return true
+    }
+
+    // Is a C linker (`cc`) on PATH? rustc shells out to it to link the binary.
+    private boolean hasLinker() {
+        ['cc', 'gcc', 'clang'].any { name ->
+            System.getenv('PATH')?.split(File.pathSeparator)?.any {
+                new File(it, name).canExecute()
+            }
+        }
+    }
+
+    // Is a Docker daemon reachable? `cross` does `docker run`, so a CLI on PATH
+    // is not enough — the daemon must answer `docker info`.
+    private boolean hasDocker() {
+        def onPath = System.getenv('PATH')?.split(File.pathSeparator)?.any {
+            new File(it, 'docker').canExecute()
+        }
+        if (!onPath) {
+            return false
+        }
+        def rc = exec.exec {
+            ignoreExitValue = true
+            commandLine 'docker', 'info'
+            standardOutput = new ByteArrayOutputStream()
+            errorOutput = new ByteArrayOutputStream()
+        }
+        return rc.exitValue == 0
+    }
+
+    // Build with `cross`: provision a prebuilt cross binary (no compile needed,
+    // so it works on a host with no linker), run it for the Linux target, then
+    // copy the artifact from target/<triple>/release/ back to outBinary so the
+    // wrapper + packaging contract is unchanged regardless of how it was built.
+    private void buildWithCross(Map rust, File out) {
+        def crossBin = provisionCross(rust)
+        // When -Ptarget is set (the GHA matrix), honor it; otherwise build the
+        // default deployment triple (the Jenkins/host case).
+        def triple = targetTriple.isPresent() ? targetTriple.get() : crossTarget.get()
+
+        // Diagnostics: cross shells out to `docker run`, bind-mounting the crate
+        // dir + the rustup home into its container. The exact paths + engine
+        // version are the first things to check if a run fails, so log them.
+        logger.lifecycle "cross: target=${triple} crate=${crateDir.get().asFile} rustHome=${rustHome.get()}"
+        logger.lifecycle "cross: CARGO_HOME=${rust.env['CARGO_HOME'] ?: '(host default)'} RUSTUP_HOME=${rust.env['RUSTUP_HOME'] ?: '(host default)'}"
+        exec.exec {
+            ignoreExitValue = true
+            commandLine 'docker', 'version', '--format', '{{.Server.Version}} (api {{.Server.APIVersion}})'
+        }
+
+        // Build with up to 3 attempts: the cargo registry fetch occasionally
+        // flakes on the CI agents (crates.io HTTP2 framing errors / transient
+        // download failures), which would otherwise fail the whole 100-min EKS
+        // run. Retrying the compile is cheap relative to that. A genuine compile
+        // error fails all 3 the same way; only transient network errors recover.
+        def attempts = 3
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            def res = exec.exec {
+                ignoreExitValue = true
+                workingDir crateDir.get().asFile
+                rust.env.each { k, v -> environment k, v }
+                environment 'CLI_VERSION', cliVersion.get()
+                // Verbose so the container's cargo output (and any mount/link
+                // error) lands on the Jenkins console rather than summarized away.
+                environment 'CROSS_CONTAINER_OPTS', System.getenv('CROSS_CONTAINER_OPTS') ?: ''
+                // cross reads the same rustup home; it picks its image per
+                // --target, so the host arch needs no matching cargo toolchain.
+                commandLine crossBin.absolutePath, 'build', '--release', '--locked', '--target', triple, '--verbose'
+            }
+            if (res.exitValue == 0) {
+                break
+            }
+            if (attempt == attempts) {
+                throw new GradleException("cross build failed after ${attempts} attempts (rc=${res.exitValue})")
+            }
+            logger.warn "cross build attempt ${attempt}/${attempts} failed (rc=${res.exitValue}); retrying in 10s (transient crates.io/network errors recover on retry)"
+            sleep(10_000)
+        }
+        def produced = new File(crateDir.get().asFile, "target/${triple}/release/${out.name}")
+        if (!produced.exists()) {
+            throw new GradleException(
+                    "cross build did not produce ${produced}. " +
+                    "Check the cross/docker output above (common causes: docker daemon " +
+                    "unreachable, or a bind-mount path not shared with the engine).")
+        }
+        if (produced.canonicalPath != out.canonicalPath) {
+            out.parentFile.mkdirs()
+            java.nio.file.Files.copy(produced.toPath(), out.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    java.nio.file.StandardCopyOption.COPY_ATTRIBUTES)
+        }
+        out.setExecutable(true)
+    }
+
+    // Download a prebuilt `cross` binary into the managed rust home's bin dir.
+    // Prefer one already on PATH; never `cargo install cross` (that would need
+    // the very linker we're missing). Returns the resolved cross executable.
+    private File provisionCross(Map rust) {
+        def onPath = System.getenv('PATH')?.split(File.pathSeparator)?.collect {
+            new File(it, 'cross')
+        }?.find { it.canExecute() }
+        if (onPath != null) {
+            logger.lifecycle "cross: using ${onPath.absolutePath} from PATH"
+            return onPath
+        }
+
+        def home = new File(rustHome.get())
+        def binDir = new File(home, 'cross/bin')
+        def crossBin = new File(binDir, 'cross')
+        def ver = crossVersion.get()
+        if (crossBin.canExecute()) {
+            logger.lifecycle "cross: reusing ${crossBin.absolutePath} (v${ver})"
+            return crossBin
+        }
+        binDir.mkdirs()
+
+        // cross publishes static musl release tarballs per host arch on GitHub.
+        def hostTriple = crossHostTriple()
+        def tarName = "cross-${hostTriple}.tar.gz"
+        def url = "https://github.com/cross-rs/cross/releases/download/v${ver}/${tarName}"
+        def tarball = new File(binDir, tarName)
+        logger.lifecycle "cross: downloading prebuilt ${url}"
+        def dl = exec.exec {
+            ignoreExitValue = true
+            commandLine 'bash', '-c',
+                    "curl -fsSL --proto '=https' --tlsv1.2 '${url}' -o '${tarball.absolutePath}' " +
+                    "|| wget -qO '${tarball.absolutePath}' '${url}'"
+        }
+        if (dl.exitValue != 0 || !tarball.exists() || tarball.length() == 0) {
+            throw new GradleException("cross: failed to download ${url}")
+        }
+        exec.exec {
+            workingDir binDir
+            commandLine 'tar', '-xzf', tarball.absolutePath
+        }
+        tarball.delete()
+        if (!crossBin.canExecute()) {
+            crossBin.setExecutable(true)
+        }
+        if (!crossBin.canExecute()) {
+            throw new GradleException("cross: extracted tarball did not yield an executable at ${crossBin}")
+        }
+        logger.lifecycle "cross: provisioned ${crossBin.absolutePath} (v${ver})"
+        return crossBin
+    }
+
+    // The host triple used to pick the prebuilt cross tarball. cross only
+    // publishes x86_64 darwin + x86_64/aarch64 linux-musl + x86_64 windows
+    // assets (no aarch64 darwin), so Apple Silicon falls back to the x86_64
+    // macOS binary, which runs under Rosetta 2. Linux uses the static musl
+    // builds (which run on any glibc/musl host).
+    private String crossHostTriple() {
+        def os = org.gradle.internal.os.OperatingSystem.current()
+        def arch = System.getProperty('os.arch')?.toLowerCase()
+        def isArm = arch in ['aarch64', 'arm64']
+        if (os.isMacOsX()) {
+            return 'x86_64-apple-darwin'
+        }
+        return isArm ? 'aarch64-unknown-linux-musl' : 'x86_64-unknown-linux-musl'
+    }
+}
+
+tasks.register('cargoBuild', CargoBuildTask) {
     group = 'build'
-    description = 'cargo build --release [--target <triple>]'
+    description = 'cargo build --release [--target <triple>] (provisions Rust / uses cross when needed)'
     dependsOn 'versionCheck'
 
-    inputs.files(rustSources)
-    outputs.file(binaryFile)
-
-    workingDir layout.projectDirectory.dir('cli').asFile
-    environment 'CLI_VERSION', cliVersion.get()
-    executable 'cargo'
-
-    def args = ['build', '--release']
+    crateDir.set(layout.projectDirectory.dir('cli'))
+    sources.from(rustSources)
+    cliVersion.set(cliVersionProvider)
     if (target) {
-        args += ['--target', target]
+        targetTriple.set(target)
     }
-    setArgs(args)
+    rustAutoProvision.set(rustAutoProvisionProvider)
+    rustHome.set(rustHomeProvider)
+    rustupInitUrl.set(rustupInitUrlProvider)
+    crossVersion.set(crossVersionProvider)
+    crossTarget.set(crossTargetProvider)
+    forceCross.set(forceCrossProvider)
+    outBinary.set(binaryFile)
 }
 
 tasks.register('writeVersionFile') {
@@ -135,7 +482,7 @@ tasks.register('writeVersionFile') {
     description = 'Write VERSION.txt into build/version/'
 
     def output = versionFileDir.map { it.file('VERSION.txt') }
-    def ver = cliVersion.get()
+    def ver = cliVersionProvider.get()
     inputs.property('version', ver)
     outputs.file(output)
 
@@ -153,8 +500,8 @@ tasks.register('stampInstallScript', Copy) {
     from(layout.projectDirectory.file('cli/install.sh.template')) {
         rename { 'install.sh' }
         filter { line ->
-            line.replace('@VERSION@', cliVersion.get())
-                .replace('@DEFAULT_REPO@', defaultRepo.get())
+            line.replace('@VERSION@', cliVersionProvider.get())
+                .replace('@DEFAULT_REPO@', defaultRepoProvider.get())
         }
     }
     into(distDir)

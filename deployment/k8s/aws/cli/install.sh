@@ -40,7 +40,7 @@ set -o pipefail
 
 # ── configuration ─────────────────────────────────────────────────────────
 
-# Repo path is baked at release time. The Gradle renderInstallScript
+# Repo path is baked at release time. The Gradle stampInstallScript
 # task substitutes @DEFAULT_REPO@ with the repo it was built from (the
 # upstream opensearch-project for releases, a fork for fork previews).
 # Operators can override at runtime via MIGRATE_REPO.

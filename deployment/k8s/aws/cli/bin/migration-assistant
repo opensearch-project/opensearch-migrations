@@ -58,8 +58,8 @@ if [[ -x "$PREBUILT" ]]; then
 fi
 
 # 3. A release binary already built at target/release/ — reuse it. The Gradle
-#    build (buildMigrationAssistantBinary) drops it here, possibly via `cross`
-#    on hosts with no C linker. Reusing it means a later invocation (e.g. the
+#    build (the :deployment:k8s:aws:cargoBuild task) drops it here, possibly via
+#    `cross` on hosts with no C linker. Reusing it means a later invocation (e.g. the
 #    Jenkins deploy stage running this wrapper after the build stage) never
 #    recompiles — which on a linker-less agent would otherwise fail. Set
 #    MIGRATE_CLI_FORCE_BUILD=1 to force a rebuild regardless.
@@ -69,10 +69,10 @@ if [[ -x "$TARGET_BIN" && -z "${MIGRATE_CLI_FORCE_BUILD:-}" ]]; then
 fi
 
 # 4. Build from source. Prefer cargo on PATH; otherwise fall back to a
-#    Gradle-provisioned toolchain. Gradle's packageMigrationAssistantCli task
-#    auto-installs rustup into a managed home (mirroring the repo's JDK
-#    auto-download); reuse it here so the source-checkout path also works on a
-#    fresh agent that has no cargo on PATH.
+#    Gradle-provisioned toolchain. Gradle's cargoBuild task auto-installs rustup
+#    into a managed home (mirroring the repo's JDK auto-download); reuse it here
+#    so the source-checkout path also works on a fresh agent that has no cargo
+#    on PATH.
 if ! command -v cargo >/dev/null 2>&1; then
   __gradle_home="${GRADLE_USER_HOME:-$HOME/.gradle}"
   for __cargo_bin in \
@@ -117,14 +117,14 @@ else
     printf '  No prebuilt binary, and a native build is not possible here\n' >&2
     printf '  (cargo missing or no C linker `cc`), and no gradlew was found to\n' >&2
     printf '  delegate to. Options:\n' >&2
-    printf '    - run ./gradlew :deployment:k8s:aws:buildMigrationAssistantBinary from a checkout\n' >&2
+    printf '    - run ./gradlew :deployment:k8s:aws:cargoBuild from a checkout\n' >&2
     printf '    - install Rust + a C toolchain (https://rustup.rs), or\n' >&2
     printf '    - use the released tarball (ships a prebuilt binary).\n' >&2
     exit 127
   }
   printf '· building migration-assistant via Gradle (provisions Rust; uses cross if no linker)…\n' >&2
   __root="$(cd -- "$(dirname -- "$__gradlew")" && pwd)"
-  ( cd "$__root" && ./gradlew :deployment:k8s:aws:buildMigrationAssistantBinary --console=plain ) 1>&2
+  ( cd "$__root" && ./gradlew :deployment:k8s:aws:cargoBuild --console=plain ) 1>&2
 fi
 
 if [[ ! -x "$TARGET_BIN" ]]; then
