@@ -581,8 +581,8 @@ def _resolve_strimzi_scram_credentials(
                 fd, ca_cert_path = tempfile.mkstemp(prefix="kafka-ca-", suffix=".crt")
                 with os.fdopen(fd, "w") as f:
                     f.write(ca_crt)
-        except Exception as e:
-            logger.warning("Could not read CA cert from secret '%s': %s", ca_secret, e)
+        except Exception:
+            logger.warning("Could not read Kafka CA certificate secret; continuing without a CA certificate")
     return password, ca_cert_path
 
 
