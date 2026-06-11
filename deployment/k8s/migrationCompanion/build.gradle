@@ -228,4 +228,5 @@ tasks.register('pushMigrationCompanionImage') {
     dependsOn 'buildMigrationCompanionImageToRegistry'
 }
 
-assemble.dependsOn 'stageMigrationCompanionDockerContext'
+// Keep Docker/cross-backed companion staging on the explicit image tasks. The
+// root `build` lifecycle also runs on macOS CI workers where Docker is absent.
