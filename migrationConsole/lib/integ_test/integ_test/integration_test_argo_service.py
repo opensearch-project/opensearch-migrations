@@ -490,7 +490,10 @@ class IntegrationTestArgoService:
             "has_suspended_nodes": has_suspended_nodes
         }
 
-        logger.info(f"Workflow {workflow_name} status: {status_info}")
+        # debug, not info: this is polled repeatedly (finish-wait loop, teardown pre-check) and
+        # at info it prints the same line several times per run. Callers that want a one-shot
+        # record of the final phase can log it themselves.
+        logger.debug(f"Workflow {workflow_name} status: {status_info}")
 
         return CommandResult(
             success=True,

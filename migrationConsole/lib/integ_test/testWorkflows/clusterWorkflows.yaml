@@ -1178,20 +1178,15 @@ spec:
             # Generate cluster configuration output
             cat > /tmp/cluster-config.json << EOF
             {
-              "endpoint": "https://{{inputs.parameters.cluster-name}}:9200",
-              "allowInsecure": true,
-              "authConfig": {
-                "basic": {
-                  "secretName": "{{inputs.parameters.cluster-name}}-creds"
-                }
-              }
+              "endpoint": "http://{{inputs.parameters.cluster-name}}:9200",
+              "allowInsecure": true
             }
             EOF
 
             kubectl create configmap {{inputs.parameters.cluster-name}}-migration-config \
               --from-file=cluster-config=/tmp/cluster-config.json \
               --namespace {{inputs.parameters.namespace}}
-            
+
             echo "OpenSearch 1.3 cluster created successfully"
             echo "Cluster config:"
             cat /tmp/cluster-config.json
