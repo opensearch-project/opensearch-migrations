@@ -49,24 +49,28 @@ minikube -p "${MINIKUBE_PROFILE}" config set memory $MINIKUBE_MEMORY_SIZE
 # `--insecure-registry=docker-registry:5000` lets dockerd accept plain HTTP
 # from our in-cluster registry name.
 print_step "Recreating minikube"
+# Tear down the registry before minikube/network so docker network rm
+# isn't blocked by a connected container.
+set_docker_hosted_defaults
+teardown_registry_container
 minikube -p "${MINIKUBE_PROFILE}" delete >/dev/null 2>&1 || true
 # `minikube delete` sometimes leaves the docker network behind with its
 # 192.168.49.0/24 subnet, which makes the next `minikube start` fail with
 # "address already in use". Drop it; minikube recreates it on start.
 docker network rm "${MINIKUBE_PROFILE}" >/dev/null 2>&1 || true
-set_docker_hosted_defaults
 minikube -p "${MINIKUBE_PROFILE}" start \
   --driver=docker \
-  --insecure-registry="${EXTERNAL_REGISTRY_NAME}:5000" \
+  --insecure-registry="${EXTERNAL_REGISTRY_NAME}:${EXTERNAL_REGISTRY_PORT}" \
   --extra-config=kubelet.authentication-token-webhook=true \
   --extra-config=kubelet.authorization-mode=Webhook \
   --extra-config=scheduler.bind-address=0.0.0.0 \
   --extra-config=controller-manager.bind-address=0.0.0.0
 
-# The shared docker-hosted backend joins the registry to the cluster's docker
-# network and writes a containerd hosts.toml on each node, so the docker-driver
-# is required (other minikube drivers — kvm, hyperkit, virtualbox — don't put
-# the node container on a docker network we can attach the registry to).
+# The shared docker-hosted backend configures each node to resolve
+# docker-registry to the host gateway IP and pull from the host-bound port,
+# so the docker driver is required (other minikube drivers use VMs where the
+# host gateway IP is different and the node containers are not accessible via
+# docker exec).
 ACTUAL_DRIVER="$(minikube -p "${MINIKUBE_PROFILE}" profile list -o json 2>/dev/null \
   | python3 -c "import json,sys; data=json.load(sys.stdin); valid=data.get('valid',[]); \
 print(next((p['Config']['Driver'] for p in valid if p.get('Name')=='${MINIKUBE_PROFILE}'), ''))" 2>/dev/null || true)"
@@ -78,17 +82,16 @@ fi
 export KUBE_CONTEXT="${KUBE_CONTEXT:-${MINIKUBE_PROFILE}}"
 wait_for_cluster_dns
 
-# In-cluster pulls use the docker-network DNS name; the host's `docker buildx`
-# push goes to the bind-mounted localhost port. Same registry, two URLs.
-LOCAL_REGISTRY="${EXTERNAL_REGISTRY_NAME}:5000"
+# In-cluster pulls use the host-gateway-resolved name at the host-bound port;
+# host-side `docker buildx` pushes to the same port via localhost.
+LOCAL_REGISTRY="${EXTERNAL_REGISTRY_NAME}:${EXTERNAL_REGISTRY_PORT}"
 BUILD_REGISTRY_ENDPOINT="${BUILD_REGISTRY_ENDPOINT:-localhost:${EXTERNAL_REGISTRY_PORT}}"
 export USE_LOCAL_REGISTRY="${USE_LOCAL_REGISTRY:-true}"
 POST_MA_INSTALL_HOOK="${POST_MA_INSTALL_HOOK:-wait_for_ma_runtime}"
 POST_TC_INSTALL_HOOK="${POST_TC_INSTALL_HOOK:-wait_for_test_clusters}"
 
-# Bring the registry/buildkit containers up first, then attach the minikube
-# node containers to the registry's docker network so containerd can pull
-# localhost:${EXTERNAL_REGISTRY_PORT} via the in-network docker-registry alias.
+# Bring the registry/buildkit containers up, then configure each minikube node
+# to resolve docker-registry to the host gateway and pull from the host-bound port.
 setup_build_backend
 mk_nodes=()
 while IFS= read -r node; do
