@@ -158,6 +158,7 @@ exports[`resolved migration resources extracts resolved resource parameters from
       "metadataMigrationAllowLooseVersionMatching": true,
       "metadataMigrationClusterAwarenessAttributes": 1,
       "metadataMigrationComponentTemplateAllowlist": [],
+      "metadataMigrationDeleteExistingIndexes": false,
       "metadataMigrationEnableSourcelessMigrations": false,
       "metadataMigrationFileSourceVolumeMounts": [],
       "metadataMigrationFileSourceVolumes": [],
