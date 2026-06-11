@@ -1028,6 +1028,23 @@ class ExprBuilder {
     toBase64<CIn extends ExpressionType>(data: AllowLiteralOrExpression<string,CIn>) {
         return fn<string,CIn>("toBase64", toExpression(data));
     }
+
+    /**
+     * Escapes a string value so it can be safely embedded in a double-quoted YAML scalar
+     * within a K8s manifest. Escapes backslashes, double quotes, carriage returns, and
+     * newlines — preventing content like PEM certificates or multi-line config from
+     * breaking YAML parsing after Argo parameter substitution.
+     *
+     * Use this for any parameter value that may contain newlines, quotes, or other
+     * YAML-special characters when it will be substituted into a resource manifest string.
+     */
+    yamlSafeString<CIn extends ExpressionType>(data: AllowLiteralOrExpression<string, CIn>) {
+        // Order matters: escape backslashes first, then quotes, then control chars
+        const escaped1 = this.regexReplaceAll("\\\\", "\\\\\\\\", data);
+        const escaped2 = this.regexReplaceAll("\"", "\\\\\"", escaped1);
+        const escaped3 = this.regexReplaceAll("\\r", "\\\\r", escaped2);
+        return this.regexReplaceAll("\\n", "\\\\n", escaped3);
+    }
 }
 
 export const expr = new ExprBuilder();

@@ -11,6 +11,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -350,6 +351,15 @@ public class CaptureProxy {
         if (pem == null || pem.isEmpty()) {
             throw new ParameterException("Environment variable " + envVarName
                 + " is required by --sslTrustCertPemEnvVar but was not set or was empty.");
+        }
+        // The env var value may be base64-encoded to avoid YAML parsing issues
+        // when embedded in Kubernetes manifests (see opensearch-migrations#3108).
+        if (!pem.contains("-----BEGIN")) {
+            try {
+                pem = new String(Base64.getDecoder().decode(pem), java.nio.charset.StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException e) {
+                // Not valid base64 — use the raw value as-is
+            }
         }
         return pem;
     }
