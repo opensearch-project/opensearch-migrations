@@ -316,7 +316,6 @@ function makeSnapshotMigrationManifest(
             metadataMigrationClusterAwarenessAttributes: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "clusterAwarenessAttributes"], 1)),
             metadataMigrationEnableSourcelessMigrations: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "enableSourcelessMigrations"], false)),
             metadataMigrationUseRecoverySource: makeDirectTypeProxy(expr.dig(config, ["metadataMigrationConfig", "useRecoverySource"], false)),
-            metadataMigrationMultiTypeBehavior: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "multiTypeBehavior"], expr.literal("NONE"))),
             metadataMigrationOtelTraceCollectorEndpoint: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "otelTraceCollectorEndpoint"], expr.literal(""))),
             metadataMigrationOtelMetricsCollectorEndpoint: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "otelMetricsCollectorEndpoint"], expr.literal(""))),
             metadataMigrationOutput: makeStringTypeProxy(expr.dig(config, ["metadataMigrationConfig", "output"], expr.literal("HUMAN_READABLE"))),

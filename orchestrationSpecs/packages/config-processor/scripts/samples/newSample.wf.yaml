@@ -107,7 +107,6 @@
 ###                "allowLooseVersionMatching": true,
 ###                "clusterAwarenessAttributes": 1,
 ###                "loggingConfigurationOverrideConfigMap": "",  # string
-###                "multiTypeBehavior": "",  # "NONE" | "UNION" | "SPLIT"
 ###                "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
 ###                "otelTraceCollectorEndpoint": "http://otel-trace-collector:4317",
 ###                "output": "",  # "HUMAN_READABLE" | "JSON"

@@ -48,7 +48,6 @@
             "allowLooseVersionMatching": true,
             "clusterAwarenessAttributes": 1,
             "loggingConfigurationOverrideConfigMap": "",
-            "multiTypeBehavior": "NONE",
             "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
             "output": "HUMAN_READABLE",
             "transformerConfigBase64": ""

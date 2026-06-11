@@ -810,11 +810,6 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
             "Only disable if metadata has parsing issues on snapshots that require strict version matching."),
     clusterAwarenessAttributes: z.number().default(1).optional()
         .describe("Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."),
-    multiTypeBehavior: z.enum(["NONE", "UNION", "SPLIT"]).default("NONE").optional()
-        .describe("Strategy for handling Elasticsearch multi-type indices (ES 5.x and earlier). " +
-            "'NONE': fail if multi-type indices are encountered. " +
-            "'UNION': merge all types into a single mapping. " +
-            "'SPLIT': create separate indices for each type."),
     otelTraceCollectorEndpoint: OTEL_TRACE_COLLECTOR_ENDPOINT,
     otelMetricsCollectorEndpoint: OTEL_METRICS_COLLECTOR_ENDPOINT,
     output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
