@@ -21,7 +21,7 @@ from console_link.models.cluster import Cluster
 from .cdc_base import (
     MATestBase, MigrationType, MATestUserArguments,
     wait_for_proxy_ready, wait_for_replayer_consuming,
-    run_generate_data, log_kafka_consumer_group_state, assert_replay_drained,
+    run_generate_data, log_kafka_consumer_group_state, log_topic_records, assert_replay_drained,
 )
 
 logger = logging.getLogger(__name__)
@@ -193,8 +193,13 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
         logger.info("Waiting for capture-proxy to be ready...")
         wait_for_proxy_ready(ns, timeout_seconds)
 
+        # Topic-record counts bracket the pre-snapshot generate-data. No consumer
+        # group exists yet, so this is the earliest confirmation that the capture
+        # proxy is actually offloading the generated traffic into the topic.
+        log_topic_records(label="pre-gen")
         logger.info("Pre-snapshot: generating %d docs into %s via proxy", self.PRE_SNAPSHOT_DOCS, self.idx_pre)
         run_generate_data("proxy", self.idx_pre, self.PRE_SNAPSHOT_DOCS)
+        log_topic_records(label="post-gen")
 
         logger.info("Waiting for workflow to pause before full migration submit...")
         self.argo_service.wait_for_suspend(workflow_name=self.workflow_name, timeout_seconds=600)

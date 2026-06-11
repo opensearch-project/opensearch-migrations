@@ -96,7 +96,9 @@ def _initialize_k8s_client(ctx):
 @click.option('--insecure', is_flag=True, default=True, hidden=True, envvar='WORKFLOW_INSECURE')
 @click.option('--token', hidden=True, envvar='ARGO_TOKEN')
 @click.option('--resource-view/--step-view', default=False, show_default='step-view',
-              help='Choose the resource-centric view or the Argo workflow step tree')
+              help='Show the resource-centric view (--resource-view) or the current Argo '
+                   "Workflow's step tree (--step-view). The step tree does not show "
+                   'historical actions from prior runs.')
 @click.pass_context
 def manage_command(ctx, workflow_name, argo_server, namespace, insecure, token, resource_view):
     _configure_file_logging()  # Configure logging when command actually runs

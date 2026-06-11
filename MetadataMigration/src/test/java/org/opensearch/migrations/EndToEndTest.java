@@ -14,7 +14,6 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
-import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval.MultiTypeResolutionBehavior;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -201,7 +200,6 @@ class EndToEndTest extends BaseMigrationTest {
             sourceCluster.copySnapshotData(localDirectory.toString());
 
             var arguments = prepareSnapshotMigrationArgs(snapshotName, localDirectory.toString());
-            arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
 
             MigrationItemResult result = executeMigration(arguments, MetadataCommands.MIGRATE);
             log.info(result.asCliOutput());
@@ -324,7 +322,6 @@ class EndToEndTest extends BaseMigrationTest {
             sourceCluster.copySnapshotData(localDirectory.toString());
 
             var arguments = prepareSnapshotMigrationArgs(snapshotName, localDirectory.toString());
-            arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
             // The customer's index has _source disabled, so we need this flag.
             arguments.enableSourcelessMigrations = true;
 
@@ -472,7 +469,6 @@ class EndToEndTest extends BaseMigrationTest {
             this.targetOperations = new org.opensearch.migrations.bulkload.http.ClusterOperations(targetCluster);
 
             var arguments = prepareSnapshotMigrationArgs(migrateSnapshotName, es7SnapshotDir.toString());
-            arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
 
             MigrationItemResult metaResult = executeMigration(arguments, MetadataCommands.MIGRATE);
             log.info(metaResult.asCliOutput());
@@ -626,7 +622,6 @@ class EndToEndTest extends BaseMigrationTest {
             arguments.versionStrictness.allowLooseVersionMatches = true;
         }
 
-        arguments.metadataTransformationParams.multiTypeResolutionBehavior = MultiTypeResolutionBehavior.UNION;
 
         targetOperations.createDocument(testData.indexThatAlreadyExists, "doc77", "{}");
 

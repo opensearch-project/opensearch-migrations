@@ -197,13 +197,23 @@ export const ARGO_RFS_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_RFS_OPTIONS.pick({
     fileSourceVolumeMounts: true,
 }));
 
+// Fields config lowering adds on top of the user-facing proxy schema, named as a
+// single shape so ARGO_PROXY_OPTIONS and ARGO_PROXY_RESOLVED_ONLY_KEYS share one
+// source of truth.
+const PROXY_RESOLVED_FIELDS = {
+    sslTrustCertFile: z.string().min(1).optional()
+        .describe("Resolved mount path of tls.clientAuth.trustedClientCaFile, passed to the proxy process. Stripped from the CaptureProxy CR."),
+    sslTrustCertPem: z.string().min(1).optional()
+        .describe("Inline PEM from tls.clientAuth.trustedClientCaPem, passed to the proxy process. Stripped from the CaptureProxy CR."),
+    sslTrustCertPemEnvVar: z.string().min(1).optional()
+        .describe("Name of the env var carrying the trusted-client-CA PEM into the proxy process. Stripped from the CaptureProxy CR."),
+    requireClientAuth: z.boolean().optional()
+        .describe("Flattened tls.clientAuth.required for the proxy process. Stripped from the CaptureProxy CR."),
+    ...FILE_SOURCE_RESOLVED_FIELDS,
+} as const;
+
 export const ARGO_PROXY_OPTIONS = makeOptionalDefaultedFieldsRequired(
-    USER_PROXY_OPTIONS.extend({
-        sslTrustCertFile: z.string().min(1).optional(),
-        sslTrustCertPem: z.string().min(1).optional(),
-        sslTrustCertPemEnvVar: z.string().min(1).optional(),
-        requireClientAuth: z.boolean().optional(),
-    }).extend(FILE_SOURCE_RESOLVED_FIELDS)
+    USER_PROXY_OPTIONS.extend(PROXY_RESOLVED_FIELDS)
 );
 export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pick({
     loggingConfigurationOverrideConfigMap: true,
@@ -216,6 +226,22 @@ export const ARGO_PROXY_WORKFLOW_OPTION_KEYS = getZodKeys(ARGO_PROXY_OPTIONS.pic
     fileSourceVolumes: true,
     fileSourceVolumeMounts: true,
 }));
+
+// Resolved-only keys are the fields PROXY_RESOLVED_FIELDS adds over the user
+// schema, i.e. keys(ARGO_PROXY_OPTIONS) - keys(USER_PROXY_OPTIONS). The CaptureProxy
+// CRD is projected from USER_PROXY_OPTIONS, so these are the top-level keys the CRD
+// does not define and that must be stripped from the CR. Derived from the shape so
+// the set stays in sync as PROXY_RESOLVED_FIELDS changes.
+export const ARGO_PROXY_RESOLVED_ONLY_KEYS =
+    Object.keys(PROXY_RESOLVED_FIELDS) as (keyof typeof PROXY_RESOLVED_FIELDS)[];
+
+// All keys stripped from the CaptureProxy custom resource: workflow-option fields,
+// which makeCaptureProxyManifest re-adds explicitly as spec fields, plus the
+// resolved-only fields above. Deduped because the two sets overlap, so the rendered
+// sprig.omit lists each key once.
+export const ARGO_PROXY_CR_OMITTED_KEYS = [
+    ...new Set([...ARGO_PROXY_WORKFLOW_OPTION_KEYS, ...ARGO_PROXY_RESOLVED_ONLY_KEYS]),
+];
 
 export const ARGO_REPLAYER_OPTIONS = makeOptionalDefaultedFieldsRequired(
     USER_REPLAYER_OPTIONS.omit({

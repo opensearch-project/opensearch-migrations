@@ -1231,6 +1231,45 @@ def describe_topic_records_cmd(ctx, kafka_selector, topic_name):
     result = kafka_.describe_topic_records(kafka_resource, topic_name=topic_name)
     click.echo(result.value)
 
+
+@kafka_group.command(name="dump-topic-records")
+@click.argument('topic_name', required=False, default="capture-proxy",
+                shell_complete=get_kafka_topic_completions)
+@click.option('--mode', type=click.Choice(['dump-both', 'dump-http', 'dump-raw']),
+              default='dump-both', show_default=True,
+              help="dump-raw: TrafficStream records as captured; dump-http: reconstructed "
+                   "HTTP transactions; dump-both: both.")
+@click.option('--start-offset', type=int, default=None,
+              help="Start reading at this offset on every partition (default: beginning).")
+@click.option('--end-offset', type=int, default=None,
+              help="Stop after passing this offset on every partition.")
+@click.option('--start-time', type=int, default=None,
+              help="Start at the earliest record at/after this epoch-seconds timestamp.")
+@click.option('--end-time', type=int, default=None,
+              help="Stop after the first record whose timestamp exceeds this epoch-seconds value.")
+@click.option('--namespace', default=None,
+              help="Kubernetes namespace to launch the dump pod in (default: current/ma).")
+@click.option('--pod-timeout', type=int, default=600, show_default=True,
+              help="Max seconds to wait for the dump pod to finish streaming.")
+@click.pass_obj
+def dump_topic_records_cmd(ctx, topic_name, mode, start_offset, end_offset,
+                           start_time, end_time, namespace, pod_timeout):
+    """Launch a one-shot traffic-replayer pod to print a topic's captured
+    records, then stop. Reads with NO consumer group, so it never disturbs
+    the replayer's offsets. Requires a k8s/EKS deployment."""
+    if namespace is None:
+        from console_link.workflow.models.utils import get_current_namespace
+        namespace = get_current_namespace()
+    result = kafka_.dump_topic_records(
+        ctx.env.kafka, namespace=namespace, topic=topic_name, mode=mode,
+        start_offset=start_offset, end_offset=end_offset,
+        start_time=start_time, end_time=end_time,
+        pod_timeout_seconds=pod_timeout, echo=click.echo,
+    )
+    if not result.success:
+        raise click.ClickException(result.value)
+    click.echo(result.value)
+
 # ##################### UTILITIES ###################
 
 

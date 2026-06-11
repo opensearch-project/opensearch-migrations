@@ -258,6 +258,45 @@ def _dump_service_diagnostics(namespace: str, service_name: str) -> None:
             logger.warning("$ %s failed: %s", " ".join(cmd), e)
 
 
+def _dump_kafka_disruption_diagnostics(namespace: str = "ma") -> None:
+    """Best-effort dump of Kafka broker placement + disruption-budget state.
+
+    Surfaces the deployment-level conditions behind a replayer drain stall:
+      * broker pod -> node placement (`-o wide`): are all brokers co-located on
+        one node that Karpenter could consolidate, taking the cluster down at
+        once instead of one broker at a time?
+      * the Strimzi-managed PodDisruptionBudget: is `ALLOWED DISRUPTIONS` 0
+        (budget at floor) or is it actually permitting only single-broker moves?
+      * nodes (`-o wide`) and recent non-Normal events: node rotation /
+        consolidation / eviction activity in the window.
+
+    All failures are swallowed — this runs on an already-failing path and must
+    never mask the ReplayLagDrainTimeout.
+    """
+    cmds = (
+        # Broker pods and which node each landed on.
+        ["kubectl", "get", "pods", "-n", namespace,
+         "-l", "strimzi.io/broker-role=true", "-o", "wide"],
+        # Disruption budget state (ALLOWED DISRUPTIONS column is the tell).
+        ["kubectl", "get", "pdb", "-n", namespace, "-o", "wide"],
+        ["kubectl", "describe", "pdb", "-n", namespace],
+        # Node inventory — how many nodes exist for brokers to spread across.
+        ["kubectl", "get", "nodes", "-o", "wide"],
+        # Disruption / eviction / scheduling activity.
+        ["kubectl", "get", "events", "-n", namespace,
+         "--sort-by=.lastTimestamp", "--field-selector=type!=Normal"],
+    )
+    for cmd in cmds:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            if result.stdout.strip():
+                logger.warning("$ %s\n%s", " ".join(cmd), result.stdout.rstrip())
+            if result.stderr.strip():
+                logger.warning("$ %s stderr\n%s", " ".join(cmd), result.stderr.rstrip())
+        except Exception as e:  # noqa: BLE001 — diagnostic must not raise
+            logger.warning("$ %s failed: %s", " ".join(cmd), e)
+
+
 def wait_for_replayer_consuming(
     namespace: str,
     timeout_seconds: int = 120,
@@ -473,7 +512,8 @@ def _wait_for_consumer_group_caught_up(group_name: Optional[str], label: str,
     pass `max_allowed_lag=1` so a fully-replayed run isn't reported as still
     behind.
     """
-    deadline = time.monotonic() + timeout_seconds
+    start = time.monotonic()
+    deadline = start + timeout_seconds
     attempt = 0
     last_observed: Optional[int] = None
     display_name = group_name if group_name is not None else "<workflow-resolved>"
@@ -481,8 +521,17 @@ def _wait_for_consumer_group_caught_up(group_name: Optional[str], label: str,
         attempt += 1
         observed = _consumer_group_max_lag(group_name)
         last_observed = observed
+        elapsed = int(time.monotonic() - start)
+        # Log the LAG trajectory every poll so a slow/recovering drain (e.g. a
+        # replayer pod evicted mid-run, cold-restarting, then re-draining its
+        # backlog) is visible as it happens instead of only at success/timeout.
+        logger.info("[%s] Consumer group '%s' max LAG=%s (target <=%d) "
+                    "[probe %d, elapsed=%ds/%ds]",
+                    label, display_name,
+                    "<unparsed>" if observed is None else observed,
+                    max_allowed_lag, attempt, elapsed, timeout_seconds)
         if observed is not None and observed <= max_allowed_lag:
-            logger.info("[%s] Consumer group '%s' max LAG=%d (<=%d) after %d probe(s)",
+            logger.info("[%s] Consumer group '%s' drained to LAG=%d (<=%d) after %d probe(s)",
                         label, display_name, observed, max_allowed_lag, attempt)
             return True, observed
         time.sleep(interval_seconds)
@@ -542,11 +591,77 @@ def log_kafka_consumer_group_state(label: str, group_name: Optional[str] = None,
     _emit_describe_snapshot(label, group_name, timeout_seconds)
 
 
+def log_topic_records(label: str, topic: Optional[str] = None,
+                      timeout_seconds: int = 60) -> None:
+    """Pure snapshot: run `console kafka describe-topic-records` and log the
+    per-partition record counts (LOG-END-OFFSETs). Useful as a [pre-gen] /
+    [post-gen] checkpoint around generate-data — before any consumer group
+    exists, this is the only signal that the capture proxy is offloading
+    records to the topic at all.
+
+    Infrastructure-level failures are logged, never raised.
+    """
+    cmd = ["console", "kafka", "describe-topic-records"]
+    if topic is not None:
+        cmd.append(topic)
+    logger.info("[%s] Running: %s", label, " ".join(cmd))
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        logger.warning("[%s] '%s' timed out after %ds; continuing.",
+                       label, " ".join(cmd), timeout_seconds)
+        return
+    except FileNotFoundError:
+        logger.warning("[%s] 'console' CLI not found on PATH; skipping topic-records.", label)
+        return
+    stdout = (result.stdout or "").rstrip()
+    if result.returncode != 0:
+        logger.warning("[%s] describe-topic-records exited with %d. stdout:\n%s\nstderr:\n%s",
+                       label, result.returncode, stdout, (result.stderr or "").rstrip())
+        return
+    logger.info("[%s] describe-topic-records output:\n%s", label, stdout)
+
+
+def _dump_topic_on_drain_failure(label: str, topic: Optional[str],
+                                 timeout_seconds: int) -> None:
+    """On a drain stall, dump the full reconstructed traffic (and raw records)
+    still sitting in the topic, so the failing CI run captures exactly what the
+    replayer never finished committing.
+
+    Launches a one-shot `console kafka dump-topic-records` (replayer image,
+    `--mode dump-both`, no consumer group — does not perturb the stuck
+    replayer's offsets). Best-effort: any failure is logged, never raised, so
+    it can't mask the ReplayLagDrainTimeout.
+    """
+    cmd = ["console", "kafka", "dump-topic-records"]
+    if topic is not None:
+        cmd.append(topic)
+    cmd += ["--mode", "dump-both", "--pod-timeout", str(timeout_seconds)]
+    logger.info("[%s] Drain failed — dumping topic for diagnostics: %s", label, " ".join(cmd))
+    try:
+        # Allow headroom over the pod timeout for image pull + pod teardown.
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                timeout=timeout_seconds + 180)
+    except subprocess.TimeoutExpired:
+        logger.warning("[%s] dump-topic-records timed out; continuing to raise drain failure.", label)
+        return
+    except FileNotFoundError:
+        logger.warning("[%s] 'console' CLI not found on PATH; skipping topic dump.", label)
+        return
+    stdout = (result.stdout or "").rstrip()
+    stderr = (result.stderr or "").rstrip()
+    logger.info("[%s] dump-topic-records output:\n%s", label, stdout)
+    if stderr:
+        logger.info("[%s] dump-topic-records stderr:\n%s", label, stderr)
+
+
 def assert_replay_drained(label: str = "replay-end",
                           group_name: Optional[str] = None,
                           max_lag: int = 1,
-                          timeout_seconds: int = 600,
-                          describe_timeout_seconds: int = 120) -> None:
+                          timeout_seconds: int = 300,
+                          describe_timeout_seconds: int = 120,
+                          dump_topic: Optional[str] = "capture-proxy",
+                          dump_timeout_seconds: int = 300) -> None:
     """Wait for the replayer consumer-group to drain to max per-partition
     LAG <=`max_lag`, log the describe snapshot, and raise on timeout.
 
@@ -562,12 +677,26 @@ def assert_replay_drained(label: str = "replay-end",
     target. Set higher only if you've consciously decided the test
     tolerates more drift.
 
-    `timeout_seconds=600` (10min) covers production-shaped runs where
-    drain takes minutes after `check_doc_counts_match` returns. Override
-    if your test is bounded smaller.
+    `timeout_seconds=300` (5min): by [replay-end] every response has already
+    landed on the target (verify_clusters passed), so an undisturbed run drains
+    within seconds. The window is sized to outlast a single mid-drain pod
+    disruption: a Karpenter "Underutilized" consolidation can evict the replayer
+    pod, after which the replacement cold-starts on a fresh node (node provision
+    + image pull + JVM boot), re-joins the group under a new consumer-id, and
+    re-drains the backlog — observed end-to-end at ~2m40s in EKS CI. 5 minutes
+    leaves headroom for that recovery while still bounding a genuinely-stalled
+    offset commit (the in-order OffsetLifecycleTracker bug this assertion
+    guards). The LAG is logged every poll (see `_wait_for_consumer_group_caught_up`)
+    so the drain/recovery trajectory is visible in CI as it happens.
+
+    On a drain stall, before raising we dump the still-uncommitted topic
+    contents (`dump_topic`, full reconstructed HTTP via `dump-both`) so the
+    failing run captures exactly what the replayer left behind. Set
+    `dump_topic=None` to skip the dump. The dump reads with no consumer group
+    and does not perturb the stalled replayer.
 
     Raises `ReplayLagDrainTimeout` (an AssertionError) on drain stall.
-    Infrastructure-level describe failures are logged but never raised.
+    Infrastructure-level describe/dump failures are logged but never raised.
     """
     drain_succeeded, last_lag = _wait_for_consumer_group_caught_up(
         group_name, label,
@@ -576,11 +705,19 @@ def assert_replay_drained(label: str = "replay-end",
     )
     _emit_describe_snapshot(label, group_name, describe_timeout_seconds)
     if not drain_succeeded:
+        # Deployment-level context first: broker placement + PDB + node/eviction
+        # state explain whether a Kafka disruption (e.g. all brokers co-located
+        # on a consolidated node) perturbed the consumer group.
+        _dump_kafka_disruption_diagnostics()
+        # Native record counts + full reconstructed dump of what's stuck.
+        log_topic_records(label, topic=dump_topic)
+        if dump_topic is not None:
+            _dump_topic_on_drain_failure(label, dump_topic, dump_timeout_seconds)
         raise ReplayLagDrainTimeout(
             f"[{label}] Replayer consumer-group did not drain to LAG<={max_lag} "
             f"within {timeout_seconds}s "
             f"(last observed max LAG={last_lag if last_lag is not None else '<unparsed>'}). "
-            f"See the snapshot logged above for per-partition state."
+            f"See the snapshot and topic dump logged above for per-partition state."
         )
 
 
