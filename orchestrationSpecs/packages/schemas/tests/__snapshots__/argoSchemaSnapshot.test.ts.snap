@@ -1403,6 +1403,10 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       },
                       "default": []
                     },
+                    "deleteExistingIndexes": {
+                      "type": "boolean",
+                      "default": false
+                    },
                     "allowLooseVersionMatching": {
                       "type": "boolean",
                       "default": true
@@ -3198,6 +3202,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         },
                         "default": [],
                         "description": "List of index template names to include in the metadata migration. Each entry is either an exact name or a regex pattern prefixed with 'regex:'. An empty list includes all non-system index templates."
+                      },
+                      "deleteExistingIndexes": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "[Destructive] When true, each in-scope index (subject to indexAllowlist) is deleted from the target cluster by name before the metadata migration recreates it, giving a clean re-run. Deleting by exact name works even when the target has action.destructive_requires_name=true, and only touches the indexes being migrated (unlike clearing the whole target). Only takes effect during the migrate phase, not evaluate. When false (default), existing target indexes are left untouched (combine with allowExistingIndexes to treat them as non-fatal instead)."
                       },
                       "allowLooseVersionMatching": {
                         "type": "boolean",
