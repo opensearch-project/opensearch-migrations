@@ -14,6 +14,7 @@ from console_link.models.kafka import Kafka
 from console_link.models.client_options import ClientOptions
 from console_link.models.utils import map_cluster_from_workflow_config
 from console_link.workflow.models.workflow_config_store import WorkflowConfigStore
+from console_link.k8s_resource_catalog import ConsoleResourceCatalog, ResourceRole, ResourceSelectionError
 
 import yaml
 from cerberus import Validator
@@ -65,6 +66,7 @@ class Environment:
     kafka: Optional[Kafka] = None
     kafka_consumer_groups: List[str] = []
     client_options: Optional[ClientOptions] = None
+    resources: ConsoleResourceCatalog
     config: Dict
 
     def __init__(self, config: Optional[Dict] = None, config_file: Optional[Union[str, Path]] = None,
@@ -163,6 +165,67 @@ class Environment:
         # Initialize on each instance — class-level default exists, but assigning
         # here guarantees per-instance state when callers extend the list.
         self.kafka_consumer_groups = []
+        self.resources = ConsoleResourceCatalog.from_legacy_environment(self)
+
+    @classmethod
+    def from_k8s_resource_catalog(cls, namespace='ma', session_name='default', allow_empty=False) -> 'Environment':
+        store = WorkflowConfigStore(namespace=namespace)
+        config = store.load_config(session_name=session_name)
+        logger.info(f"Loading console resources with namespace {namespace} and session {session_name}")
+
+        catalog = ConsoleResourceCatalog.from_k8s(
+            namespace=namespace,
+            session_name=session_name,
+            config=config,
+        )
+        if not catalog.entries and config is None:
+            if allow_empty:
+                return cls._empty(catalog)
+            raise WorkflowConfigException(
+                f"A workflow config or deployed migration resource can't be found for namespace `{namespace}` "
+                f"and session name `{session_name}`."
+            )
+
+        instance = cls._empty(catalog)
+        instance.source_cluster = cls._try_resolve_cluster(catalog, ResourceRole.SOURCE)
+        instance.target_cluster = cls._try_resolve_cluster(catalog, ResourceRole.TARGET)
+        instance.proxy = cls._try_resolve_cluster(catalog, ResourceRole.PROXY)
+        instance.kafka = cls._try_resolve_kafka(catalog)
+        instance.kafka_consumer_groups = catalog.consumer_group_names()
+        return instance
+
+    @classmethod
+    def _empty(cls, catalog: Optional[ConsoleResourceCatalog] = None) -> 'Environment':
+        instance = super().__new__(cls)
+        instance.config = {}
+        instance.source_cluster = None
+        instance.target_cluster = None
+        instance.proxy = None
+        instance.backfill = None
+        instance.metrics_source = None
+        instance.snapshot = None
+        instance.metadata = None
+        instance.replay = None
+        instance.kafka = None
+        instance.kafka_consumer_groups = []
+        instance.client_options = None
+        instance.resources = catalog or ConsoleResourceCatalog.empty()
+        return instance
+
+    @staticmethod
+    def _try_resolve_cluster(catalog: ConsoleResourceCatalog, role: ResourceRole):
+        try:
+            return catalog.resolve_cluster(role)
+        except ResourceSelectionError:
+            return None
+
+    @staticmethod
+    def _try_resolve_kafka(catalog: ConsoleResourceCatalog):
+        try:
+            return catalog.resolve_kafka()
+        except Exception as e:
+            logger.debug("Could not eagerly resolve kafka resource for compatibility attributes: %s", e)
+            return None
 
     @classmethod
     def from_workflow_config(cls, namespace='ma', session_name='default', allow_empty=False) -> 'Environment':
@@ -171,7 +234,7 @@ class Environment:
         logger.info(f"Loading workflow config with namespace {namespace} and session {session_name}")
         if config is None:
             if allow_empty:
-                return super().__new__(cls)
+                return cls._empty()
             raise WorkflowConfigException(
                 f"A workflow config can't be found for namespace `{namespace}` and session name `{session_name}`."
             )
@@ -181,6 +244,8 @@ class Environment:
 
         instance = super().__new__(cls)
 
+        instance.config = {}
+        instance.client_options = None
         instance.target_cluster = target_cluster
         instance.source_cluster = source_cluster
         instance.proxy = getattr(source_cluster, "proxy", None)
@@ -191,6 +256,9 @@ class Environment:
         instance.metadata = None
         instance.backfill = None
         instance.snapshot = None
+        instance.metrics_source = None
+        instance.replay = None
+        instance.resources = ConsoleResourceCatalog.from_legacy_environment(instance)
 
         return instance
 

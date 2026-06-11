@@ -14,6 +14,15 @@ def stub_kafka_tool_paths(mocker):
                         return_value='/root/kafka-tools/aws/msk-iam-auth.properties')
 
 
+def _assert_kafka_subprocess_run(mock, command):
+    mock.assert_called_once()
+    assert mock.call_args.args[0] == command
+    assert mock.call_args.kwargs["capture_output"] is True
+    assert mock.call_args.kwargs["text"] is True
+    assert mock.call_args.kwargs["check"] is True
+    assert mock.call_args.kwargs["env"]["KAFKA_OPTS"].split()[-1] == kafka_module.DISABLE_JAVA_PERFDATA_OPT
+
+
 def test_get_msk_kafka():
     config = {
         "broker_endpoints": "abc",
@@ -74,11 +83,12 @@ def test_msk_kafka_create_topic(mocker):
     result = kafka.create_topic(topic_name='new_topic')
 
     assert result.success
-    mock.assert_called_once_with(
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-topics.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--create',
          '--topic', 'new_topic', '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties'
-         ], capture_output=True, text=True, check=True)
+         ])
 
 
 def test_standard_kafka_create_topic(mocker):
@@ -91,11 +101,12 @@ def test_standard_kafka_create_topic(mocker):
     result = kafka.create_topic(topic_name='new_topic')
 
     assert result.success
-    mock.assert_called_once_with(
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-topics.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--create',
          '--topic', 'new_topic'
-         ], capture_output=True, text=True, check=True)
+         ])
 
 
 def test_msk_kafka_list_topics(mocker):
@@ -108,11 +119,12 @@ def test_msk_kafka_list_topics(mocker):
     result = kafka.list_topics()
 
     assert result.success
-    mock.assert_called_once_with(
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-topics.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--list',
          '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties'
-         ], capture_output=True, text=True, check=True)
+         ])
 
 
 def test_standard_kafka_list_topics(mocker):
@@ -125,10 +137,31 @@ def test_standard_kafka_list_topics(mocker):
     result = kafka.list_topics()
 
     assert result.success
-    mock.assert_called_once_with(
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-topics.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--list'
-         ], capture_output=True, text=True, check=True)
+         ])
+
+
+def test_kafka_command_result_disables_java_perfdata(monkeypatch, mocker):
+    monkeypatch.delenv("KAFKA_OPTS", raising=False)
+    mock = mocker.patch('subprocess.run', autospec=True)
+
+    result = kafka_module.get_result_for_command(['kafka-topics.sh'], 'List Topics')
+
+    assert result.success
+    assert mock.call_args.kwargs["env"]["KAFKA_OPTS"] == kafka_module.DISABLE_JAVA_PERFDATA_OPT
+
+
+def test_kafka_command_result_preserves_existing_kafka_opts(monkeypatch, mocker):
+    monkeypatch.setenv("KAFKA_OPTS", "-Dexisting=true")
+    mock = mocker.patch('subprocess.run', autospec=True)
+
+    result = kafka_module.get_result_for_command(['kafka-topics.sh'], 'List Topics')
+
+    assert result.success
+    assert mock.call_args.kwargs["env"]["KAFKA_OPTS"] == "-Dexisting=true -XX:-UsePerfData"
 
 
 def test_msk_kafka_delete_topic(mocker):
@@ -141,11 +174,12 @@ def test_msk_kafka_delete_topic(mocker):
     result = kafka.delete_topic(topic_name='new_topic')
 
     assert result.success
-    mock.assert_called_once_with(
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-topics.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--delete',
          '--topic', 'new_topic', '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties'
-         ], capture_output=True, text=True, check=True)
+         ])
 
 
 def test_standard_kafka_delete_topic(mocker):
@@ -158,11 +192,12 @@ def test_standard_kafka_delete_topic(mocker):
     result = kafka.delete_topic(topic_name='new_topic')
 
     assert result.success
-    mock.assert_called_once_with(
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-topics.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--delete',
          '--topic', 'new_topic'
-         ], capture_output=True, text=True, check=True)
+         ])
 
 
 def test_msk_kafka_describe_topic(mocker):
@@ -175,13 +210,14 @@ def test_msk_kafka_describe_topic(mocker):
     result = kafka.describe_topic_records(topic_name='new_topic')
 
     assert result.success
-    mock.assert_called_once_with(
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-run-class.sh', 'org.apache.kafka.tools.GetOffsetShell',
          '--bootstrap-server', f"{config['broker_endpoints']}",
          '--topic', 'new_topic',
          '--time', '-1',
          '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties'
-         ], capture_output=True, text=True, check=True)
+         ])
 
 
 def test_standard_kafka_describe_topic(mocker):
@@ -194,12 +230,13 @@ def test_standard_kafka_describe_topic(mocker):
     result = kafka.describe_topic_records(topic_name='new_topic')
 
     assert result.success
-    mock.assert_called_once_with(
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-run-class.sh', 'org.apache.kafka.tools.GetOffsetShell',
          '--bootstrap-server', f"{config['broker_endpoints']}",
          '--topic', 'new_topic',
          '--time', '-1'
-         ], capture_output=True, text=True, check=True)
+         ])
 
 
 def test_msk_kafka_describe_group(mocker):
@@ -216,12 +253,13 @@ def test_msk_kafka_describe_group(mocker):
     result = kafka.describe_consumer_group(group_name='new_group')
 
     assert result.success
-    mock.assert_called_once_with(
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--timeout', '100000', '--describe',
          '--group', 'new_group',
          '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties'
-         ], capture_output=True, text=True, check=True)
+         ])
 
 
 def test_standard_kafka_describe_group(mocker):
@@ -236,11 +274,12 @@ def test_standard_kafka_describe_group(mocker):
     result = kafka.describe_consumer_group(group_name='new_group')
 
     assert result.success
-    mock.assert_called_once_with(
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--timeout', '100000', '--describe',
          '--group', 'new_group',
-         ], capture_output=True, text=True, check=True)
+         ])
 
 
 def test_msk_kafka_list_groups(mocker):
@@ -253,11 +292,12 @@ def test_msk_kafka_list_groups(mocker):
     result = kafka.list_consumer_groups()
 
     assert result.success
-    mock.assert_called_once_with(
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--timeout', '100000', '--list',
          '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties'
-         ], capture_output=True, text=True, check=True)
+         ])
 
 
 def test_standard_kafka_list_groups(mocker):
@@ -270,10 +310,11 @@ def test_standard_kafka_list_groups(mocker):
     result = kafka.list_consumer_groups()
 
     assert result.success
-    mock.assert_called_once_with(
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--timeout', '100000', '--list'
-         ], capture_output=True, text=True, check=True)
+         ])
 
 
 def test_get_scram_kafka(monkeypatch):
