@@ -80,7 +80,7 @@ spec:
                 },
                 "replayers": {
                   "replay1": {
-                    "fromProxy": "capture-proxy",
+                    "fromCapturedTraffic": "capture-proxy",
                     "toTarget": "target1",
                     "dependsOnSnapshotMigrations": [
                       {"source": "source1", "snapshot": "testsnapshot"}

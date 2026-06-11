@@ -57,7 +57,7 @@ def _run(
     env: dict[str, str] | None = None,
     input_text: str | None = None,
 ) -> subprocess.CompletedProcess:
-    logger.info("Running: %s", " ".join(command))
+    logger.info("Running command with %d arguments", len(command))
     return subprocess.run(
         command,
         check=True,
@@ -216,7 +216,8 @@ def _upload_fixture_to_localstack():
     if not FIXTURE_PATH.exists():
         raise FileNotFoundError(
             f"BYOC fixture not found at {FIXTURE_PATH}. "
-            "The migration-console image build should stage it from :libraries:kafkaUtils:generateByocPutTrafficFixture."
+            "The migration-console image build should stage it from "
+            ":libraries:kafkaUtils:generateByocPutTrafficFixture."
         )
     aws_env = _localstack_aws_env()
     subprocess.run(
