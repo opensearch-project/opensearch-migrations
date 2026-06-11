@@ -1,0 +1,231 @@
+plugins {
+    id 'base'
+}
+
+import org.gradle.api.tasks.*
+import groovy.json.JsonSlurper
+import org.opensearch.migrations.image.RegistryImageBuildUtils
+import org.opensearch.migrations.image.RegistryImageBuildUtils.Registry
+import org.opensearch.migrations.image.PullThroughCacheHelper
+
+def migrationAssistantVersionProvider = providers.environmentVariable('MIGRATION_ASSISTANT_VERSION')
+        .orElse(providers.gradleProperty('migrationAssistantVersion'))
+        .orElse(providers.environmentVariable('IMAGE_VERSION'))
+        .orElse(providers.gradleProperty('imageVersion'))
+        .orElse(providers.environmentVariable('HELM_CHART_VERSION'))
+        .orElse(providers.gradleProperty('helmChartVersion'))
+        .orElse(provider { project.version.toString() })
+
+def cliVersionProvider = providers.environmentVariable('CLI_VERSION')
+        .orElse(providers.gradleProperty('cliVersion'))
+        .orElse(migrationAssistantVersionProvider)
+
+def publishedRegistryProvider = providers.environmentVariable('REGISTRY_ENDPOINT')
+        .orElse(providers.gradleProperty('registryEndpoint'))
+        .orElse('localhost:5001')
+def intermediateRegistryProvider = providers.gradleProperty('intermediateRegistry')
+        .orElse(publishedRegistryProvider)
+def localContainerRegistryEndpointProvider = providers.gradleProperty('localContainerRegistryEndpoint')
+        .orElse('docker-registry:5000')
+
+def publishStyleProvider = providers.gradleProperty('publishStyle')
+        .orElse('paths')
+
+def ptcEndpoint = rootProject.findProperty('pullThroughCacheEndpoint')?.toString() ?: ''
+def ptc = new PullThroughCacheHelper(ptcEndpoint)
+def baseImageProvider = providers.environmentVariable('MIGRATION_COMPANION_BASE_IMAGE')
+        .orElse(providers.gradleProperty('migrationCompanionBaseImage'))
+        .orElse(ptc.rewrite('docker.io/library/amazonlinux:2023'))
+
+def dockerContextDirProvider = layout.buildDirectory.dir('docker-context')
+def helmPackageDirProvider = rootProject.layout.projectDirectory.dir('deployment/k8s/build/helm-package')
+def cliDistDirProvider = rootProject.layout.projectDirectory.dir('deployment/k8s/aws/build/migrate-cli-dist')
+def cliInstallersDirProvider = rootProject.layout.projectDirectory.dir('deployment/k8s/aws/build/migrate-cli-dist/installers')
+def cliTargetsDirProvider = rootProject.layout.projectDirectory.dir('deployment/k8s/aws/build/cli-targets')
+def externalCliInstallersDirPath = providers.gradleProperty('migrationAssistantCliInstallersDir')
+        .orElse(providers.environmentVariable('MIGRATION_ASSISTANT_CLI_INSTALLERS_DIR'))
+        .orNull
+def externalCliInstallersManifestPath = providers.gradleProperty('migrationAssistantCliInstallersManifest')
+        .orElse(providers.environmentVariable('MIGRATION_ASSISTANT_CLI_INSTALLERS_MANIFEST'))
+        .orNull
+def requireCompleteInstallerSetProvider = providers.gradleProperty('migrationAssistantRequireCompleteInstallerSet')
+        .orElse(providers.environmentVariable('MIGRATION_ASSISTANT_REQUIRE_COMPLETE_INSTALLER_SET'))
+        .orElse('false')
+def completeInstallerClassifiers = [
+        'linux-amd64',
+        'linux-arm64',
+        'darwin-amd64',
+        'darwin-arm64',
+        'windows-amd64',
+        'windows-arm64'
+]
+
+def helmChartTarballProvider = migrationAssistantVersionProvider.map { ver ->
+    helmPackageDirProvider.file("migration-assistant-${ver}.tgz")
+}
+def cliTarballProvider = cliVersionProvider.map { ver ->
+    cliDistDirProvider.file("migration-assistant-cli-${ver}.tar.gz")
+}
+def cliInstallScriptProvider = providers.provider {
+    cliDistDirProvider.file('install.sh')
+}
+
+def imageName = 'migration_companion'
+def separateRepoName = 'opensearch-migrations-migration-companion'
+
+tasks.register('stageMigrationCompanionDockerContext', Sync) {
+    description = 'Stage Docker context for the Migration Companion image'
+    group = 'migration-companion'
+    dependsOn ':deployment:k8s:packageMigrationAssistantHelmChart'
+    dependsOn ':deployment:k8s:aws:packageMigrationAssistantCli'
+    dependsOn ':deployment:k8s:aws:packageMigrationAssistantCliInstallers'
+
+    into dockerContextDirProvider
+
+    from(layout.projectDirectory.file('Dockerfile'))
+    from(helmChartTarballProvider) {
+        into 'artifacts/helm'
+        rename { 'migration-assistant.tgz' }
+    }
+    from(cliTarballProvider) {
+        into 'artifacts/cli'
+        rename { 'migration-assistant-cli.tar.gz' }
+    }
+    from(cliInstallScriptProvider) {
+        into 'artifacts/cli'
+        rename { 'install.sh' }
+    }
+    from(cliInstallersDirProvider) {
+        into 'artifacts/cli/installers'
+        include '*.tar.gz'
+    }
+    if (externalCliInstallersDirPath) {
+        from(rootProject.file(externalCliInstallersDirPath)) {
+            into 'artifacts/cli/installers'
+            include '*.tar.gz'
+        }
+    }
+    from(externalCliInstallersManifestPath
+            ? rootProject.file(externalCliInstallersManifestPath)
+            : cliInstallersDirProvider.file('manifest.json')) {
+        into 'artifacts/cli/installers'
+        rename { 'manifest.json' }
+    }
+    from(cliTargetsDirProvider) {
+        into 'runtime-binaries'
+        include 'linux-amd64/migration-assistant'
+        include 'linux-arm64/migration-assistant'
+    }
+    from({
+        tarTree(resources.gzip(cliTarballProvider.get().asFile))
+    }) {
+        eachFile { details ->
+            details.path = "cli/${details.path.replaceFirst('^[^/]+/', '')}"
+        }
+        includeEmptyDirs = false
+    }
+
+    doLast {
+        def ctx = dockerContextDirProvider.get().asFile
+        [
+                'Dockerfile',
+                'artifacts/helm/migration-assistant.tgz',
+                'artifacts/cli/migration-assistant-cli.tar.gz',
+                'artifacts/cli/install.sh',
+                'artifacts/cli/installers/manifest.json',
+                'cli/bin/migration-assistant',
+                'cli/bin/migration-assistant-bin',
+                'cli/manifest.json',
+                'runtime-binaries/linux-amd64/migration-assistant',
+                'runtime-binaries/linux-arm64/migration-assistant'
+        ].each { rel ->
+            def f = new File(ctx, rel)
+            if (!f.isFile()) {
+                throw new GradleException("missing staged companion image artifact: ${f}")
+            }
+        }
+        def installerFiles = fileTree(new File(ctx, 'artifacts/cli/installers')) {
+            include '*.tar.gz'
+        }.files
+        if (installerFiles.isEmpty()) {
+            throw new GradleException("expected CLI installers in ${new File(ctx, 'artifacts/cli/installers')}, found none")
+        }
+        def manifestFile = new File(ctx, 'artifacts/cli/installers/manifest.json')
+        def manifest = new JsonSlurper().parse(manifestFile)
+        def manifestInstallers = manifest.installers ?: []
+        def missingArchives = manifestInstallers.collect { it.archive?.toString() }
+                .findAll { it }
+                .findAll { !new File(ctx, "artifacts/cli/installers/${it}").isFile() }
+        if (!missingArchives.isEmpty()) {
+            throw new GradleException("installer manifest references missing archives: ${missingArchives.join(', ')}")
+        }
+        if (Boolean.parseBoolean(requireCompleteInstallerSetProvider.get())) {
+            def classifiers = manifestInstallers.collect { it.classifier?.toString() }.findAll { it } as Set
+            def missingClassifiers = completeInstallerClassifiers.findAll { !classifiers.contains(it) }
+            if (!missingClassifiers.isEmpty()) {
+                throw new GradleException("installer manifest is missing release classifiers: ${missingClassifiers.join(', ')}")
+            }
+        }
+    }
+}
+
+def companionBuildKitConfig = [
+        serviceName         : 'migrationCompanion',
+        contextDir          : dockerContextDirProvider.get().asFile.absolutePath,
+        imageName           : imageName,
+        imageTag            : 'latest',
+        repoName            : publishStyleProvider.get() == 'separateRepos' ? separateRepoName : null,
+        buildArgs           : [
+                BASE_IMAGE       : baseImageProvider.get(),
+                MIGRATION_ASSISTANT_VERSION: migrationAssistantVersionProvider.get()
+        ],
+        requiredDependencies: [
+                ':deployment:k8s:migrationCompanion:stageMigrationCompanionDockerContext'
+        ]
+]
+
+gradle.projectsEvaluated {
+    def publishedRegistry = new Registry(
+            publishedRegistryProvider.get().toString(),
+            localContainerRegistryEndpointProvider.get().toString())
+    def intermediateRegistry = new Registry(
+            intermediateRegistryProvider.get().toString(),
+            localContainerRegistryEndpointProvider.get().toString())
+    def imageHelper = new RegistryImageBuildUtils()
+    if (!publishedRegistry.isEcr() || !rootProject.tasks.findByName('loginToECR')) {
+        imageHelper.registerLoginTask(rootProject, publishedRegistry)
+    }
+    imageHelper.applyBuildKitConfigurations(rootProject, [companionBuildKitConfig], publishedRegistry, intermediateRegistry)
+}
+
+tasks.register('buildMigrationCompanionImage') {
+    description = 'Build and push the Migration Companion image to registryEndpoint'
+    group = 'migration-companion'
+    dependsOn ':buildKit_migrationCompanion'
+}
+
+tasks.register('buildMigrationCompanionImageToRegistry') {
+    description = 'Build and push the Migration Companion image to registryEndpoint'
+    group = 'migration-companion'
+    dependsOn ':buildKit_migrationCompanion'
+}
+
+tasks.register('buildMigrationCompanionImageToRegistry_amd64') {
+    description = 'Build and push the amd64 Migration Companion image to registryEndpoint'
+    group = 'migration-companion'
+    dependsOn ':buildKit_migrationCompanion_amd64'
+}
+
+tasks.register('buildMigrationCompanionImageToRegistry_arm64') {
+    description = 'Build and push the arm64 Migration Companion image to registryEndpoint'
+    group = 'migration-companion'
+    dependsOn ':buildKit_migrationCompanion_arm64'
+}
+
+tasks.register('pushMigrationCompanionImage') {
+    description = 'Alias for buildMigrationCompanionImageToRegistry'
+    group = 'migration-companion'
+    dependsOn 'buildMigrationCompanionImageToRegistry'
+}
+
+assemble.dependsOn 'stageMigrationCompanionDockerContext'

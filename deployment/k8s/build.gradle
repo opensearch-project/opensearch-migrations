@@ -1,0 +1,95 @@
+plugins {
+    id 'base'
+}
+
+import org.gradle.process.ExecOperations
+import org.gradle.api.tasks.*
+import javax.inject.Inject
+
+def helmChartVersionProvider = providers.environmentVariable('HELM_CHART_VERSION')
+        .orElse(providers.gradleProperty('helmChartVersion'))
+        .orElse(providers.environmentVariable('MIGRATION_ASSISTANT_VERSION'))
+        .orElse(providers.gradleProperty('migrationAssistantVersion'))
+        .orElse(providers.environmentVariable('IMAGE_VERSION'))
+        .orElse(providers.gradleProperty('imageVersion'))
+        .orElse(provider { project.version.toString() })
+
+def chartSourceDir = layout.projectDirectory.dir('charts/aggregates/migrationAssistantWithArgo')
+def stagedChartDirProvider = layout.buildDirectory.dir('helm-staging/migrationAssistantWithArgo')
+def helmPackageDirProvider = layout.buildDirectory.dir('helm-package')
+def cfnTemplatesDir = rootProject.layout.projectDirectory.dir('deployment/migration-assistant-solution/cdk.out-minified')
+
+tasks.register('stageMigrationAssistantHelmChart', Sync) {
+    description = 'Stage the Migration Assistant Helm chart with release-only distribution assets'
+    group = 'helm'
+    dependsOn ':deployment:migration-assistant-solution:cdkSynthMinified'
+
+    into stagedChartDirProvider
+
+    from(chartSourceDir) {
+        exclude 'infra/cfn/**'
+    }
+    from(cfnTemplatesDir) {
+        include '*-eks.template.json'
+        into 'infra/cfn'
+    }
+    doLast {
+        def stagedDir = stagedChartDirProvider.get().asFile
+        def cfnFiles = fileTree(new File(stagedDir, 'infra/cfn')) {
+            include '*-eks.template.json'
+        }.files
+        if (cfnFiles.size() < 2) {
+            throw new GradleException("expected EKS CFN templates in ${new File(stagedDir, 'infra/cfn')}, found ${cfnFiles.size()}")
+        }
+        def mirrorManifest = new File(stagedDir, 'infra/mirror/private-ecr-manifest.yaml')
+        if (!mirrorManifest.isFile()) {
+            throw new GradleException("missing ECR mirror manifest in staged chart: ${mirrorManifest}")
+        }
+    }
+}
+
+abstract class PackageHelmChartTask extends DefaultTask {
+    @Inject abstract ExecOperations getExec()
+
+    @InputDirectory
+    @PathSensitive(PathSensitivity.RELATIVE)
+    abstract DirectoryProperty getChartDir()
+
+    @Input
+    abstract Property<String> getChartVersion()
+
+    @OutputFile
+    abstract RegularFileProperty getOutFile()
+
+    @TaskAction
+    void packageChart() {
+        def out = outFile.get().asFile
+        out.parentFile.mkdirs()
+
+        getExec().exec {
+            commandLine 'helm',
+                    'package', chartDir.get().asFile.absolutePath,
+                    '--version', chartVersion.get(),
+                    '--app-version', chartVersion.get(),
+                    '--destination', out.parentFile.absolutePath
+        }.assertNormalExitValue()
+
+        if (!out.isFile()) {
+            throw new GradleException("helm package did not produce ${out}")
+        }
+        logger.lifecycle "wrote ${out}"
+    }
+}
+
+tasks.register('packageMigrationAssistantHelmChart', PackageHelmChartTask) {
+    description = 'Package the Migration Assistant Helm chart release tarball'
+    group = 'helm'
+    dependsOn 'stageMigrationAssistantHelmChart'
+    chartDir.set(stagedChartDirProvider)
+    chartVersion.set(helmChartVersionProvider)
+    outFile.set(helmPackageDirProvider.zip(helmChartVersionProvider) { dir, ver ->
+        dir.file("migration-assistant-${ver}.tgz")
+    })
+}
+
+assemble.dependsOn 'packageMigrationAssistantHelmChart'

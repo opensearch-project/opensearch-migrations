@@ -42,6 +42,7 @@ plugins {
 import org.gradle.api.tasks.Internal
 import org.gradle.process.ExecOperations
 import org.gradle.api.file.FileSystemOperations
+import groovy.json.JsonOutput
 import javax.inject.Inject
 
 configurations {
@@ -62,6 +63,10 @@ dependencies {
 
 def cliVersionProvider = providers.environmentVariable('CLI_VERSION')
         .orElse(providers.gradleProperty('cliVersion'))
+        .orElse(providers.environmentVariable('MIGRATION_ASSISTANT_VERSION'))
+        .orElse(providers.gradleProperty('migrationAssistantVersion'))
+        .orElse(providers.environmentVariable('IMAGE_VERSION'))
+        .orElse(providers.gradleProperty('imageVersion'))
         .orElse(provider {
             // Fall back to "0.0.0-dev-<git-short-sha>" so each commit gets its
             // own cache slot.
@@ -116,6 +121,46 @@ def forceCrossProvider = providers.gradleProperty('forceCross')
         .orElse(providers.environmentVariable('MIGRATE_FORCE_CROSS'))
         .orElse('false')
 
+def linuxCliInstallerTargets = 'linux-amd64=x86_64-unknown-linux-gnu,linux-arm64=aarch64-unknown-linux-gnu'
+def cliInstallerTargetsProvider = providers.gradleProperty('cliInstallerTargets')
+        .orElse(providers.environmentVariable('MIGRATION_ASSISTANT_CLI_INSTALLER_TARGETS'))
+        .orElse(linuxCliInstallerTargets)
+def cliInstallerManifestTargetsProvider = providers.gradleProperty('cliInstallerManifestTargets')
+        .orElse(providers.environmentVariable('MIGRATION_ASSISTANT_CLI_INSTALLER_MANIFEST_TARGETS'))
+        .orElse(cliInstallerTargetsProvider)
+def cliInstallerForceCrossProvider = providers.gradleProperty('cliInstallerForceCross')
+        .orElse(providers.environmentVariable('MIGRATION_ASSISTANT_CLI_INSTALLER_FORCE_CROSS'))
+        .orElse('true')
+
+def parseCliInstallerTargetSpecs = { String rawTargets, String propertyName ->
+    rawTargets
+            .split(',')
+            .collect { it.trim() }
+            .findAll { it }
+            .collect { entry ->
+                def parts = entry.split('=', 2)
+                if (parts.length != 2 || !parts[0].trim() || !parts[1].trim()) {
+                    throw new GradleException(
+                            "Invalid ${propertyName} entry '${entry}'. Expected classifier=rust-target.")
+                }
+                [
+                        classifier: parts[0].trim(),
+                        rustTarget: parts[1].trim()
+                ]
+            }
+}
+
+def cliInstallerTargetSpecs = parseCliInstallerTargetSpecs(cliInstallerTargetsProvider.get(), 'cliInstallerTargets')
+def cliInstallerManifestTargetSpecs = parseCliInstallerTargetSpecs(
+        cliInstallerManifestTargetsProvider.get(), 'cliInstallerManifestTargets')
+
+def taskSuffixForClassifier = { String classifier ->
+    classifier.split(/[^A-Za-z0-9]+/)
+            .findAll { it }
+            .collect { it.substring(0, 1).toUpperCase(Locale.ROOT) + it.substring(1) }
+            .join('')
+}
+
 // ---------- (0) compile the Rust CLI ----------
 
 abstract class BuildCliBinaryTask extends DefaultTask {
@@ -129,6 +174,7 @@ abstract class BuildCliBinaryTask extends DefaultTask {
     @Input abstract Property<String> getCrossVersion()
     @Input abstract Property<String> getCrossTarget()
     @Input abstract Property<String> getForceCross()
+    @Input abstract Property<Boolean> getUseExplicitTarget()
     @OutputFile abstract RegularFileProperty getOutBinary()
     @Internal abstract DirectoryProperty getCrateDir()
 
@@ -216,12 +262,68 @@ abstract class BuildCliBinaryTask extends DefaultTask {
 
     // Plain `cargo build --release` into target/release/.
     private void buildWithCargo(Map rust, File out) {
+        def args = ['build', '--release', '--locked']
+        if (useExplicitTarget.get()) {
+            def target = crossTarget.get()
+            ensureRustTarget(rust, target)
+            args.addAll(['--target', target])
+        }
         exec.exec {
             workingDir crateDir.get().asFile
             rust.env.each { k, v -> environment k, v }
             environment 'CLI_VERSION', cliVersion.get()
-            commandLine rust.cargo, 'build', '--release', '--locked'
+            commandLine(*([rust.cargo] + args))
         }
+        def produced = useExplicitTarget.get()
+                ? new File(crateDir.get().asFile, "target/${crossTarget.get()}/release/${out.name}")
+                : new File(crateDir.get().asFile, "target/release/${out.name}")
+        copyProducedBinary(produced, out)
+    }
+
+    private void ensureRustTarget(Map rust, String target) {
+        def rustup = resolveRustup(rust)
+        if (rustup == null) {
+            logger.lifecycle "rustup not found; assuming Rust target ${target} is already installed"
+            return
+        }
+        def toolchain = pinnedRustToolchain()
+        if (toolchain) {
+            exec.exec {
+                rust.env.each { k, v -> environment k, v }
+                commandLine rustup.absolutePath, 'toolchain', 'install', toolchain, '--profile', 'minimal'
+            }
+        }
+        def args = ['target', 'add']
+        if (toolchain) {
+            args.addAll(['--toolchain', toolchain])
+        }
+        args.add(target)
+        exec.exec {
+            rust.env.each { k, v -> environment k, v }
+            commandLine(*([rustup.absolutePath] + args))
+        }
+    }
+
+    private String pinnedRustToolchain() {
+        def toolchainFile = new File(crateDir.get().asFile, 'rust-toolchain.toml')
+        if (!toolchainFile.isFile()) {
+            return null
+        }
+        def channelLine = toolchainFile.readLines().find { it.trim().startsWith('channel') }
+        def matcher = channelLine == null ? null : (channelLine =~ /channel\s*=\s*"([^"]+)"/)
+        return matcher?.find() ? matcher.group(1) : null
+    }
+
+    private File resolveRustup(Map rust) {
+        def rustupName = isWindows() ? 'rustup.exe' : 'rustup'
+        def cargoFile = new File(rust.cargo)
+        def sibling = cargoFile.parentFile == null ? null : new File(cargoFile.parentFile, rustupName)
+        if (sibling?.canExecute()) {
+            return sibling
+        }
+        return System.getenv('PATH')?.split(File.pathSeparator)?.collect {
+            new File(it, rustupName)
+        }?.find { it.canExecute() }
     }
 
     // Decide whether to route through `cross`. Forced via -PforceCross=true;
@@ -326,6 +428,17 @@ abstract class BuildCliBinaryTask extends DefaultTask {
                     "Check the cross/docker output above (common causes: docker daemon " +
                     "unreachable, or a bind-mount path not shared with the engine).")
         }
+        copyProducedBinary(produced, out)
+    }
+
+    private void copyProducedBinary(File produced, File out) {
+        if (!produced.exists()) {
+            throw new GradleException("build did not produce ${produced}")
+        }
+        if (produced.canonicalFile == out.canonicalFile) {
+            out.setExecutable(true)
+            return
+        }
         out.parentFile.mkdirs()
         java.nio.file.Files.copy(produced.toPath(), out.toPath(),
                 java.nio.file.StandardCopyOption.REPLACE_EXISTING,
@@ -397,6 +510,9 @@ abstract class BuildCliBinaryTask extends DefaultTask {
         if (os.isMacOsX()) {
             return 'x86_64-apple-darwin'
         }
+        if (os.isWindows()) {
+            return 'x86_64-pc-windows-gnu'
+        }
         return isArm ? 'aarch64-unknown-linux-musl' : 'x86_64-unknown-linux-musl'
     }
 }
@@ -421,6 +537,7 @@ tasks.register('buildMigrationAssistantBinary', BuildCliBinaryTask) {
     crossVersion.set(crossVersionProvider)
     crossTarget.set(crossTargetProvider)
     forceCross.set(forceCrossProvider)
+    useExplicitTarget.set(false)
     outBinary.set(layout.projectDirectory.file('cli/target/release/migration-assistant'))
 }
 
@@ -430,24 +547,30 @@ abstract class PackageCliTarballTask extends DefaultTask {
     @Inject abstract ExecOperations getExec()
     @Inject abstract FileSystemOperations getFs()
 
-    @InputDirectory abstract DirectoryProperty getCliDir()
+    @Internal abstract DirectoryProperty getCliDir()
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    abstract ConfigurableFileCollection getCliFiles()
     @InputFile abstract RegularFileProperty getCompiledBinary()
     @InputFile abstract RegularFileProperty getLicenseFile()
-    @InputFile abstract RegularFileProperty getEcrManifestFile()
+    @InputFile abstract RegularFileProperty getMirrorManifestFile()
     @InputFiles abstract ConfigurableFileCollection getAgentSkillsTar()
     @Input abstract Property<String> getCliVersion()
-    @OutputDirectory abstract DirectoryProperty getDistDir()
+    @Input abstract Property<String> getArchiveClassifier()
+    @Input abstract Property<String> getPackagedBinaryName()
+    @OutputFile abstract RegularFileProperty getArchiveFile()
 
     @TaskAction
     void run() {
         def ver = cliVersion.get()
-        def out = distDir.get().asFile
-        out.mkdirs()
-        def tarball = new File(out, "migration-assistant-cli-${ver}.tar.gz")
+        def classifier = archiveClassifier.get()
+        def archiveSuffix = classifier ? "-${classifier}" : ""
+        def tarball = archiveFile.get().asFile
+        tarball.parentFile.mkdirs()
 
         def stage = File.createTempFile('migrate-cli-stage', '').with { delete(); mkdirs(); it }
         try {
-            def root = new File(stage, "migration-assistant-cli-${ver}")
+            def root = new File(stage, "migration-assistant-cli-${ver}${archiveSuffix}")
             root.mkdirs()
 
             // Wrapper + README + install.sh.
@@ -462,10 +585,10 @@ abstract class PackageCliTarballTask extends DefaultTask {
             fs.copy {
                 from compiledBinary
                 into new File(root, 'bin')
-                rename '.*', 'migration-assistant-bin'
+                rename '.*', packagedBinaryName.get()
             }
             new File(root, 'bin/migration-assistant').setExecutable(true)
-            new File(root, 'bin/migration-assistant-bin').setExecutable(true)
+            new File(root, "bin/${packagedBinaryName.get()}").setExecutable(true)
 
             // Drop the agent-skills tree under skills/. The producer emits a
             // gzipped tar whose entries are already rooted at skills/..., so we
@@ -475,10 +598,10 @@ abstract class PackageCliTarballTask extends DefaultTask {
                 workingDir root
                 commandLine 'tar', '-xzf', agentSkillsTar.singleFile.absolutePath
             }
-            // Vendor privateEcrManifest.sh next to the skills.
+            // Vendor the ECR mirror manifest as data, matching the Helm chart layout.
             fs.copy {
-                from ecrManifestFile
-                into new File(root, 'skills')
+                from mirrorManifestFile
+                into new File(root, 'infra/mirror')
             }
             fs.copy {
                 from licenseFile
@@ -498,7 +621,7 @@ abstract class PackageCliTarballTask extends DefaultTask {
 
             exec.exec {
                 workingDir stage
-                commandLine 'tar', '-czf', tarball.absolutePath, "migration-assistant-cli-${ver}"
+                commandLine 'tar', '-czf', tarball.absolutePath, "migration-assistant-cli-${ver}${archiveSuffix}"
             }
         } finally {
             stage.deleteDir()
@@ -507,18 +630,131 @@ abstract class PackageCliTarballTask extends DefaultTask {
     }
 }
 
+abstract class WriteCliInstallerManifestTask extends DefaultTask {
+    @Input abstract Property<String> getCliVersion()
+    @Input abstract ListProperty<Map<String, String>> getInstallerSpecs()
+    @OutputFile abstract RegularFileProperty getOutFile()
+
+    @TaskAction
+    void write() {
+        def ver = cliVersion.get()
+        def installers = installerSpecs.get().collect { spec ->
+            [
+                    classifier: spec.classifier,
+                    rustTarget: spec.rustTarget,
+                    archive   : "migration-assistant-cli-${ver}-${spec.classifier}.tar.gz"
+            ]
+        }
+        def payload = [
+                version   : ver,
+                installers: installers
+        ]
+        def out = outFile.get().asFile
+        out.parentFile.mkdirs()
+        out.text = JsonOutput.prettyPrint(JsonOutput.toJson(payload)) + System.lineSeparator()
+        logger.lifecycle "wrote ${out}"
+    }
+}
+
 tasks.register('packageMigrationAssistantCliTarball', PackageCliTarballTask) {
     description = 'Package the migration-assistant CLI into a release tarball'
     group = 'migrate-cli'
     dependsOn 'buildMigrationAssistantBinary'
     cliDir.set(layout.projectDirectory.dir('cli'))
+    cliFiles.from(fileTree('cli') {
+        include 'bin/migration-assistant'
+        include 'install.sh'
+        include 'README.md'
+    })
     compiledBinary.set(layout.projectDirectory.file('cli/target/release/migration-assistant'))
     licenseFile.set(rootProject.layout.projectDirectory.file('LICENSE'))
-    ecrManifestFile.set(rootProject.layout.projectDirectory.file(
-            'deployment/k8s/charts/aggregates/migrationAssistantWithArgo/scripts/privateEcrManifest.sh'))
+    mirrorManifestFile.set(rootProject.layout.projectDirectory.file(
+            'deployment/k8s/charts/aggregates/migrationAssistantWithArgo/infra/mirror/private-ecr-manifest.yaml'))
     agentSkillsTar.from(configurations.agentSkills)
     cliVersion.set(cliVersionProvider)
-    distDir.set(layout.buildDirectory.dir('migrate-cli-dist'))
+    archiveClassifier.set('')
+    packagedBinaryName.set('migration-assistant-bin')
+    archiveFile.set(distDirProvider.zip(cliVersionProvider) { dir, ver ->
+        dir.file("migration-assistant-cli-${ver}.tar.gz")
+    })
+}
+
+def cliInstallerArchiveTasks = []
+def cleanCliInstallersTask = tasks.register('cleanMigrationAssistantCliInstallers', Delete) {
+    delete layout.buildDirectory.dir('migrate-cli-dist/installers')
+}
+
+cliInstallerTargetSpecs.each { spec ->
+    def classifier = spec.classifier
+    def rustTarget = spec.rustTarget
+    def suffix = taskSuffixForClassifier(classifier)
+    def binaryExtension = rustTarget.contains('windows') ? '.exe' : ''
+    def packagedBinaryFileName = "migration-assistant-bin${binaryExtension}"
+    def binaryFile = layout.buildDirectory.file("cli-targets/${classifier}/migration-assistant${binaryExtension}")
+    def installerArchive = layout.buildDirectory.dir('migrate-cli-dist/installers').zip(cliVersionProvider) { dir, ver ->
+        dir.file("migration-assistant-cli-${ver}-${classifier}.tar.gz")
+    }
+
+    def buildTask = tasks.register("buildMigrationAssistantBinary${suffix}", BuildCliBinaryTask) {
+        description = "Build the migration-assistant Rust CLI for ${classifier} (${rustTarget})"
+        group = 'migrate-cli'
+        crateDir.set(layout.projectDirectory.dir('cli'))
+        sources.from(fileTree('cli') {
+            include 'Cargo.toml'
+            include 'Cargo.lock'
+            include 'build.rs'
+            include 'rust-toolchain.toml'
+            include 'src/**'
+        })
+        cliVersion.set(cliVersionProvider)
+        rustAutoProvision.set(rustAutoProvisionProvider)
+        rustHome.set(rustHomeProvider)
+        rustupInitUrl.set(rustupInitUrlProvider)
+        crossVersion.set(crossVersionProvider)
+        crossTarget.set(rustTarget)
+        forceCross.set(cliInstallerForceCrossProvider)
+        useExplicitTarget.set(true)
+        outBinary.set(binaryFile)
+    }
+
+    def packageTask = tasks.register("packageMigrationAssistantCliTarball${suffix}", PackageCliTarballTask) {
+        description = "Package the migration-assistant CLI installer for ${classifier}"
+        group = 'migrate-cli'
+        dependsOn cleanCliInstallersTask
+        dependsOn buildTask
+        cliDir.set(layout.projectDirectory.dir('cli'))
+        cliFiles.from(fileTree('cli') {
+            include 'bin/migration-assistant'
+            include 'install.sh'
+            include 'README.md'
+        })
+        compiledBinary.set(binaryFile)
+        licenseFile.set(rootProject.layout.projectDirectory.file('LICENSE'))
+        mirrorManifestFile.set(rootProject.layout.projectDirectory.file(
+                'deployment/k8s/charts/aggregates/migrationAssistantWithArgo/infra/mirror/private-ecr-manifest.yaml'))
+        agentSkillsTar.from(configurations.agentSkills)
+        cliVersion.set(cliVersionProvider)
+        archiveClassifier.set(classifier)
+        packagedBinaryName.set(packagedBinaryFileName)
+        archiveFile.set(installerArchive)
+    }
+    cliInstallerArchiveTasks << packageTask
+}
+
+tasks.register('writeMigrationAssistantCliInstallersManifest', WriteCliInstallerManifestTask) {
+    description = 'Write a manifest for the platform-specific migration-assistant CLI installers'
+    group = 'migrate-cli'
+    dependsOn cleanCliInstallersTask
+    cliVersion.set(cliVersionProvider)
+    installerSpecs.set(cliInstallerManifestTargetSpecs)
+    outFile.set(layout.buildDirectory.file('migrate-cli-dist/installers/manifest.json'))
+}
+
+tasks.register('packageMigrationAssistantCliInstallers') {
+    description = 'Build platform-specific migration-assistant CLI installer tarballs'
+    group = 'migrate-cli'
+    dependsOn cliInstallerArchiveTasks
+    dependsOn 'writeMigrationAssistantCliInstallersManifest'
 }
 
 // ---------- (2) install.sh with DEFAULT_REPO baked in ----------
