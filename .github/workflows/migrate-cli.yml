@@ -183,8 +183,6 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x cli-artifacts/migration-assistant-x86_64-unknown-linux-gnu
-          # Place VERSION.txt next to the binary for runtime resolution
-          cp cli-artifacts/VERSION.txt "$(dirname cli-artifacts/migration-assistant-x86_64-unknown-linux-gnu)/"
           cli-artifacts/migration-assistant-x86_64-unknown-linux-gnu version
       - name: Validate install.sh is well-formed bash
         run: bash -n cli-artifacts/install.sh

@@ -487,35 +487,8 @@ impl<'r, R: CommandRunner> App<'r, R> {
     /// (which names the failing job), the job's events, and pod logs.
     fn explain_helm_failure(&self, kube_ctx: &str) {
         ui::dim("  diagnosing helm failure...");
-        let status_out = self.helm(
-            kube_ctx,
-            &[
-                "status",
-                helm::RELEASE_NAME,
-                "--namespace",
-                helm::NAMESPACE,
-                "-o",
-                "json",
-            ],
-        );
-        if status_out.success() {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&status_out.stdout) {
-                if let Some(desc) = v
-                    .get("info")
-                    .and_then(|i| i.get("description"))
-                    .and_then(|d| d.as_str())
-                {
-                    ui::dim(&format!("  helm says: {desc}"));
-                    // Extract failed job name from "name: <job>, kind: Job"
-                    if let Some(job_start) = desc.find("name: ") {
-                        let rest = &desc[job_start + 6..];
-                        if let Some(end) = rest.find(',') {
-                            let job_name = &rest[..end];
-                            self.dump_failed_job(kube_ctx, job_name);
-                        }
-                    }
-                }
-            }
+        if let Some(job_name) = self.helm_failed_job_name(kube_ctx) {
+            self.dump_failed_job(kube_ctx, &job_name);
         }
         // Show migration-console-0 status.
         let console_out = self.runner.run(
@@ -541,6 +514,34 @@ impl<'r, R: CommandRunner> App<'r, R> {
             ));
         }
         ui::dim("  run `migration-assistant diag` for full diagnostics");
+    }
+
+    /// Parse the failing job name from `helm status` JSON output.
+    fn helm_failed_job_name(&self, kube_ctx: &str) -> Option<String> {
+        let status_out = self.helm(
+            kube_ctx,
+            &[
+                "status",
+                helm::RELEASE_NAME,
+                "--namespace",
+                helm::NAMESPACE,
+                "-o",
+                "json",
+            ],
+        );
+        if !status_out.success() {
+            return None;
+        }
+        let v: serde_json::Value = serde_json::from_str(&status_out.stdout).ok()?;
+        let desc = v
+            .get("info")
+            .and_then(|i| i.get("description"))
+            .and_then(|d| d.as_str())?;
+        ui::dim(&format!("  helm says: {desc}"));
+        // Extract failed job name from "name: <job>, kind: Job"
+        let rest = &desc[desc.find("name: ")? + 6..];
+        let end = rest.find(',')?;
+        Some(rest[..end].to_string())
     }
 
     fn dump_failed_job(&self, kube_ctx: &str, job_name: &str) {
@@ -587,30 +588,24 @@ impl<'r, R: CommandRunner> App<'r, R> {
             ),
         );
         if pods.success() {
-            for pod in pods.stdout.lines().take(2) {
-                if pod.trim().is_empty() {
-                    continue;
-                }
-                let logs = self.runner.run(
-                    "kubectl",
-                    &self.kubectl_args(
-                        kube_ctx,
-                        &[
-                            "logs",
-                            pod.trim(),
-                            "-n",
-                            "ma",
-                            "--all-containers",
-                            "--tail=20",
-                        ],
-                    ),
-                );
-                if logs.success() && !logs.stdout.trim().is_empty() {
-                    ui::dim(&format!("  pod {pod} logs:"));
-                    for line in logs.stdout.lines().take(20) {
-                        ui::dim(&format!("    {line}"));
-                    }
-                }
+            for pod in pods.stdout.lines().take(2).filter(|p| !p.trim().is_empty()) {
+                self.dump_pod_logs(kube_ctx, pod.trim());
+            }
+        }
+    }
+
+    fn dump_pod_logs(&self, kube_ctx: &str, pod: &str) {
+        let logs = self.runner.run(
+            "kubectl",
+            &self.kubectl_args(
+                kube_ctx,
+                &["logs", pod, "-n", "ma", "--all-containers", "--tail=20"],
+            ),
+        );
+        if logs.success() && !logs.stdout.trim().is_empty() {
+            ui::dim(&format!("  pod {pod} logs:"));
+            for line in logs.stdout.lines().take(20) {
+                ui::dim(&format!("    {line}"));
             }
         }
     }

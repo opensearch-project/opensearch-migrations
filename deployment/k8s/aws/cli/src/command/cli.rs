@@ -1137,64 +1137,14 @@ fn agent_setup(agent_name: &str, env: &config::Env, manifest: &Option<crate::man
     let _ = std::fs::create_dir_all(&skills_dest);
     let discovered = agent::discover_skills(&skills_src);
     for name in &discovered {
-        let src = skills_src.join(name);
-        let dst = skills_dest.join(name);
-        copy_dir_recursive(&src, &dst);
+        copy_dir_recursive(&skills_src.join(name), &skills_dest.join(name));
     }
 
     // 3. Per-agent config.
     match agent_name {
-        "claude" => {
-            // .claude/skills/<name>/SKILL.md
-            let claude_skills = stage_dir.join(".claude/skills");
-            let _ = std::fs::create_dir_all(&claude_skills);
-            if startup.is_file() {
-                let _ = std::fs::create_dir_all(claude_skills.join("opensearch-migration"));
-                let _ = std::fs::copy(
-                    &startup,
-                    claude_skills.join("opensearch-migration/Startup.md"),
-                );
-            }
-            for name in &discovered {
-                let src = skills_src.join(name);
-                let dst = claude_skills.join(name);
-                copy_dir_recursive(&src, &dst);
-            }
-            // .claude/settings.json with permissions
-            write_claude_settings(&stage_dir, manifest);
-            // .mcp.json with MCP servers
-            write_mcp_json(&stage_dir, "claude", manifest);
-        }
-        "codex" => {
-            let codex_dir = stage_dir.join(".codex");
-            let _ = std::fs::create_dir_all(&codex_dir);
-            if startup.is_file() {
-                let _ = std::fs::copy(&startup, codex_dir.join("Startup.md"));
-            }
-        }
-        "kiro" => {
-            let kiro_dir = stage_dir.join(".kiro");
-            let _ = std::fs::create_dir_all(kiro_dir.join("steering"));
-            // Copy kiro config if available.
-            let kiro_src = skills_src.join("../kiro");
-            if kiro_src.is_dir() {
-                copy_dir_recursive(&kiro_src, &kiro_dir);
-            }
-            if startup.is_file() {
-                let _ = std::fs::copy(&startup, kiro_dir.join("steering/00-Startup.md"));
-                let _ = std::fs::copy(&startup, kiro_dir.join("Startup.md"));
-            }
-            // Copy operator skill docs into steering.
-            let op_dir = skills_src.join("migration-assistant-operator");
-            if op_dir.is_dir() {
-                for name in ["workflow", "deployment", "migration-prompt", "product"] {
-                    let f = op_dir.join(format!("{name}.md"));
-                    if f.is_file() {
-                        let _ = std::fs::copy(&f, kiro_dir.join(format!("steering/{name}.md")));
-                    }
-                }
-            }
-        }
+        "claude" => setup_claude_agent(&stage_dir, &skills_src, &startup, &discovered, manifest),
+        "codex" => setup_codex_agent(&stage_dir, &startup),
+        "kiro" => setup_kiro_agent(&stage_dir, &skills_src, &startup),
         _ => {}
     }
 
@@ -1202,6 +1152,63 @@ fn agent_setup(agent_name: &str, env: &config::Env, manifest: &Option<crate::man
         "  installed {} skill(s) for {agent_name}",
         discovered.len()
     ));
+}
+
+fn setup_claude_agent(
+    stage_dir: &std::path::Path,
+    skills_src: &std::path::Path,
+    startup: &std::path::Path,
+    discovered: &[String],
+    manifest: &Option<crate::manifest::Manifest>,
+) {
+    let claude_skills = stage_dir.join(".claude/skills");
+    let _ = std::fs::create_dir_all(&claude_skills);
+    if startup.is_file() {
+        let _ = std::fs::create_dir_all(claude_skills.join("opensearch-migration"));
+        let _ = std::fs::copy(
+            startup,
+            claude_skills.join("opensearch-migration/Startup.md"),
+        );
+    }
+    for name in discovered {
+        copy_dir_recursive(&skills_src.join(name), &claude_skills.join(name));
+    }
+    write_claude_settings(stage_dir, manifest);
+    write_mcp_json(stage_dir, "claude", manifest);
+}
+
+fn setup_codex_agent(stage_dir: &std::path::Path, startup: &std::path::Path) {
+    let codex_dir = stage_dir.join(".codex");
+    let _ = std::fs::create_dir_all(&codex_dir);
+    if startup.is_file() {
+        let _ = std::fs::copy(startup, codex_dir.join("Startup.md"));
+    }
+}
+
+fn setup_kiro_agent(
+    stage_dir: &std::path::Path,
+    skills_src: &std::path::Path,
+    startup: &std::path::Path,
+) {
+    let kiro_dir = stage_dir.join(".kiro");
+    let _ = std::fs::create_dir_all(kiro_dir.join("steering"));
+    let kiro_src = skills_src.join("../kiro");
+    if kiro_src.is_dir() {
+        copy_dir_recursive(&kiro_src, &kiro_dir);
+    }
+    if startup.is_file() {
+        let _ = std::fs::copy(startup, kiro_dir.join("steering/00-Startup.md"));
+        let _ = std::fs::copy(startup, kiro_dir.join("Startup.md"));
+    }
+    let op_dir = skills_src.join("migration-assistant-operator");
+    if op_dir.is_dir() {
+        for name in ["workflow", "deployment", "migration-prompt", "product"] {
+            let f = op_dir.join(format!("{name}.md"));
+            if f.is_file() {
+                let _ = std::fs::copy(&f, kiro_dir.join(format!("steering/{name}.md")));
+            }
+        }
+    }
 }
 
 /// Write .claude/settings.json with operator permissions allowlist + MCP tool perms.
