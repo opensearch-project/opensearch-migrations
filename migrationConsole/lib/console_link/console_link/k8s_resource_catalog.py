@@ -534,9 +534,10 @@ def _build_strimzi_kafka(runtime: Dict) -> Kafka:
             ca_secret=runtime.get("caSecret") or f"{cluster_name}-cluster-ca-cert",
             namespace=namespace,
         )
-        scram_config = {
-            "username": runtime.get("kafkaUserName") or runtime.get("usernameSecret") or f"{cluster_name}-migration-app",
-        }
+        username = runtime.get("kafkaUserName") or runtime.get("usernameSecret")
+        if not username:
+            username = f"{cluster_name}-migration-app"
+        scram_config = {"username": username}
         if ca_cert_path:
             scram_config["ca_cert_path"] = ca_cert_path
         return get_kafka({"broker_endpoints": bootstrap, "scram": scram_config}, scram_password=password)

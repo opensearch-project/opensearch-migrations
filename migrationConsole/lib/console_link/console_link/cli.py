@@ -315,7 +315,7 @@ def resolve_cluster_resource(ctx, role: ResourceRole, selector=None, hint_roles=
             raise click.UsageError(_add_selector_flag_hints(str(e), catalog, hint_roles or (role,)))
 
     if selector:
-        raise click.UsageError(f"Resource selectors are only supported for k8s resource catalogs.")
+        raise click.UsageError("Resource selectors are only supported for k8s resource catalogs.")
     cluster_map = {
         ResourceRole.SOURCE: ('source', ctx.env.source_cluster),
         ResourceRole.TARGET: ('target', ctx.env.target_cluster),

@@ -83,7 +83,8 @@ def test_msk_kafka_create_topic(mocker):
     result = kafka.create_topic(topic_name='new_topic')
 
     assert result.success
-    _assert_kafka_subprocess_run(mock,
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-topics.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--create',
          '--topic', 'new_topic', '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties'
@@ -100,7 +101,8 @@ def test_standard_kafka_create_topic(mocker):
     result = kafka.create_topic(topic_name='new_topic')
 
     assert result.success
-    _assert_kafka_subprocess_run(mock,
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-topics.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--create',
          '--topic', 'new_topic'
@@ -117,7 +119,8 @@ def test_msk_kafka_list_topics(mocker):
     result = kafka.list_topics()
 
     assert result.success
-    _assert_kafka_subprocess_run(mock,
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-topics.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--list',
          '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties'
@@ -134,7 +137,8 @@ def test_standard_kafka_list_topics(mocker):
     result = kafka.list_topics()
 
     assert result.success
-    _assert_kafka_subprocess_run(mock,
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-topics.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--list'
          ])
@@ -170,7 +174,8 @@ def test_msk_kafka_delete_topic(mocker):
     result = kafka.delete_topic(topic_name='new_topic')
 
     assert result.success
-    _assert_kafka_subprocess_run(mock,
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-topics.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--delete',
          '--topic', 'new_topic', '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties'
@@ -187,7 +192,8 @@ def test_standard_kafka_delete_topic(mocker):
     result = kafka.delete_topic(topic_name='new_topic')
 
     assert result.success
-    _assert_kafka_subprocess_run(mock,
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-topics.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--delete',
          '--topic', 'new_topic'
@@ -204,7 +210,8 @@ def test_msk_kafka_describe_topic(mocker):
     result = kafka.describe_topic_records(topic_name='new_topic')
 
     assert result.success
-    _assert_kafka_subprocess_run(mock,
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-run-class.sh', 'org.apache.kafka.tools.GetOffsetShell',
          '--bootstrap-server', f"{config['broker_endpoints']}",
          '--topic', 'new_topic',
@@ -223,7 +230,8 @@ def test_standard_kafka_describe_topic(mocker):
     result = kafka.describe_topic_records(topic_name='new_topic')
 
     assert result.success
-    _assert_kafka_subprocess_run(mock,
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-run-class.sh', 'org.apache.kafka.tools.GetOffsetShell',
          '--bootstrap-server', f"{config['broker_endpoints']}",
          '--topic', 'new_topic',
@@ -245,7 +253,8 @@ def test_msk_kafka_describe_group(mocker):
     result = kafka.describe_consumer_group(group_name='new_group')
 
     assert result.success
-    _assert_kafka_subprocess_run(mock,
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--timeout', '100000', '--describe',
          '--group', 'new_group',
@@ -265,7 +274,8 @@ def test_standard_kafka_describe_group(mocker):
     result = kafka.describe_consumer_group(group_name='new_group')
 
     assert result.success
-    _assert_kafka_subprocess_run(mock,
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--timeout', '100000', '--describe',
          '--group', 'new_group',
@@ -282,7 +292,8 @@ def test_msk_kafka_list_groups(mocker):
     result = kafka.list_consumer_groups()
 
     assert result.success
-    _assert_kafka_subprocess_run(mock,
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--timeout', '100000', '--list',
          '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties'
@@ -299,7 +310,8 @@ def test_standard_kafka_list_groups(mocker):
     result = kafka.list_consumer_groups()
 
     assert result.success
-    _assert_kafka_subprocess_run(mock,
+    _assert_kafka_subprocess_run(
+        mock,
         ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh',
          '--bootstrap-server', f"{config['broker_endpoints']}", '--timeout', '100000', '--list'
          ])

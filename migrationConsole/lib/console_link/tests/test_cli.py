@@ -1523,8 +1523,9 @@ def test_kafka_topic_completion_uses_list_topics(mocker, env):
     ctx = mocker.Mock()
     ctx.find_root.return_value.params = {'config_file': '/fake/config.yaml', 'force_use_config_file': True}
     mocker.patch('console_link.cli.Environment', return_value=env)
+    topic_output = '__consumer_offsets\nlogging-traffic-topic\nlogs-topic\n'
     mocker.patch('console_link.middleware.kafka.list_topics',
-                 return_value=CommandResult(success=True, value='__consumer_offsets\nlogging-traffic-topic\nlogs-topic\n'))
+                 return_value=CommandResult(success=True, value=topic_output))
 
     completions = get_kafka_topic_completions(ctx, None, 'log')
 
