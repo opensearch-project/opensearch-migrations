@@ -256,6 +256,14 @@ public class RestClient {
         return putAsync(path, body, context).block();
     }
 
+    public Mono<HttpResponse> deleteAsync(String path, IRfsContexts.IRequestContext context) {
+        return asyncRequest(HttpMethod.DELETE, path, null, null, context);
+    }
+
+    public HttpResponse delete(String path, IRfsContexts.IRequestContext context) {
+        return deleteAsync(path, context).block();
+    }
+
     private static void removeIfPresent(ChannelPipeline p, String name) {
         var h = p.get(name);
         if (h != null) {

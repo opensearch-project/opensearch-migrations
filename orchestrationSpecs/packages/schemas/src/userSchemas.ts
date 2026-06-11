@@ -788,6 +788,13 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
             "Each entry is either an exact name or a regex pattern prefixed with 'regex:'. " +
             "An empty list includes all non-system index templates."),
 
+    deleteExistingIndexes: z.boolean().default(false).optional()
+        .describe("[Destructive] When true, each in-scope index (subject to indexAllowlist) is deleted from the " +
+            "target cluster by name before the metadata migration recreates it, giving a clean re-run. Deleting by " +
+            "exact name works even when the target has action.destructive_requires_name=true, and only touches the " +
+            "indexes being migrated (unlike clearing the whole target). Only takes effect during the migrate phase, " +
+            "not evaluate. When false (default), existing target indexes are left untouched (combine with " +
+            "allowExistingIndexes to treat them as non-fatal instead)."),
     allowLooseVersionMatching: z.boolean().default(true).optional()
         .describe("[Expert] Allows migration between clusters with non-exact version compatibility (e.g. ES 7.x to OS 2.x). " +
             "Only disable if metadata has parsing issues on snapshots that require strict version matching."),

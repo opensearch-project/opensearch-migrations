@@ -9,6 +9,7 @@ import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.transformers.FanOutCompositeTransformer;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.bulkload.transformers.TransformerMapper;
@@ -124,6 +125,12 @@ public abstract class MigratorEvaluatorBase {
             // Validate sourceless indices before proceeding with migration
             validateSourcelessIndices(clusters);
 
+            // Optionally clear existing target indexes so a re-run starts clean. Only in the
+            // PERFORM phase — evaluation must never mutate the target.
+            if (migrationMode.equals(MigrationMode.PERFORM) && arguments.deleteExistingIndexes) {
+                deleteExistingTargetIndices(clusters);
+            }
+
             var indexResults = migrateIndices(migrationMode, clusters, transformer, context);
             items.indexes(indexResults.getIndexes());
             items.aliases(indexResults.getAliases());
@@ -203,6 +210,36 @@ public abstract class MigratorEvaluatorBase {
 
         if (!sourcelessIndices.isEmpty()) {
             log.info("Sourceless indices detected (--enable-sourceless-migrations is set): {}", sourcelessIndices);
+        }
+    }
+
+    /**
+     * Deletes each in-scope index (those that pass the index allowlist) from the target cluster
+     * by exact name, so a re-run recreates them from a clean slate. Deleting by name works even
+     * when the target has {@code action.destructive_requires_name=true}, and is scoped to only the
+     * indexes being migrated. A failure to delete one index is logged but does not abort the
+     * migration (the subsequent create will surface a real conflict).
+     */
+    protected void deleteExistingTargetIndices(Clusters clusters) {
+        var repoDataProvider = clusters.getSource().getIndexMetadata().getRepoDataProvider();
+        var skipFilter = FilterScheme.filterByAllowList(arguments.dataFilterArgs.indexAllowlist,
+                FilterScheme.FilterContext.INDEX).negate();
+        var targetClient = new OpenSearchClientFactory(arguments.targetArgs.toConnectionContext())
+                .determineVersionAndCreate();
+        log.info("--delete-existing-indexes is set: removing in-scope target indexes before migration.");
+        for (var index : repoDataProvider.getIndicesInSnapshot(arguments.snapshotName)) {
+            if (skipFilter.test(index.getName())) {
+                continue;
+            }
+            try {
+                targetClient.deleteIndex(index.getName());
+            } catch (Exception e) {
+                log.atWarn()
+                    .setMessage("Failed to delete existing target index {} before migration: {}")
+                    .addArgument(index.getName())
+                    .addArgument(e.getMessage())
+                    .log();
+            }
         }
     }
 }
