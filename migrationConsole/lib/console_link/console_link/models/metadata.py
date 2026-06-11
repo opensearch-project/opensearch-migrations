@@ -189,6 +189,13 @@ class Metadata:
         logger.info("Starting metadata migration")
         return self.migrate_or_evaluate("migrate", extra_args)
 
+    def _add_otel_args(self, command_args: Dict[str, Any]) -> None:
+        otel_args = {
+            "--otel-trace-collector-endpoint": self._otel_trace_endpoint,
+            "--otel-metrics-collector-endpoint": self._otel_metrics_endpoint,
+        }
+        command_args.update({key: value for key, value in otel_args.items() if value})
+
     def migrate_or_evaluate(self, command: str, extra_args=None) -> CommandResult:
         if not self._target_cluster:
             raise NoTargetClusterDefinedError()
@@ -197,10 +204,7 @@ class Metadata:
         command_args = {}
 
         # Add any common metadata parameter before the command
-        if self._otel_trace_endpoint:
-            command_args.update({"--otel-trace-collector-endpoint": self._otel_trace_endpoint})
-        if self._otel_metrics_endpoint:
-            command_args.update({"--otel-metrics-collector-endpoint": self._otel_metrics_endpoint})
+        self._add_otel_args(command_args)
 
         command_args.update({
             command: None,

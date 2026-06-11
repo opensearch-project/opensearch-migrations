@@ -20,7 +20,7 @@ export class OtelCollectorSidecar {
     }
 
     static addOtelCollectorContainer(taskDefinition: TaskDefinition, logGroupPrefix: string, stage: string,
-                                     traceCollectorEnabled: boolean = false) {
+                                     traceCollectorEnabled = false) {
         const otelCollectorPort: PortMapping = {
             name: "otel-collector-connect",
             hostPort: this.OTEL_CONTAINER_PORT,

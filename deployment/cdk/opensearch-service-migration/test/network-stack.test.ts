@@ -8,7 +8,7 @@ import { GatewayVpcEndpointAwsService, InterfaceVpcEndpointAwsService } from "aw
 import { Stack } from "aws-cdk-lib";
 
 
-function getExpectedEndpoints(networkStack: NetworkStack, includeXray: boolean = false): (InterfaceVpcEndpointAwsService | GatewayVpcEndpointAwsService)[] {
+function getExpectedEndpoints(networkStack: NetworkStack, includeXray = false): (InterfaceVpcEndpointAwsService | GatewayVpcEndpointAwsService)[] {
     return [
         InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
         InterfaceVpcEndpointAwsService.CLOUDWATCH_MONITORING,

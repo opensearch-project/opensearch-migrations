@@ -150,8 +150,11 @@ def _any_candidate_has_recent_data(client, candidates, lookback_minutes: int) ->
     return False
 
 
-def assert_cloudwatch_capture_replay_metrics_for_workflow_run(namespace: str = "ma", lookback_minutes: int = 20,
-                                                             attempts: int = 5, wait_seconds: int = 60):
+def assert_cloudwatch_capture_replay_metrics_for_workflow_run(
+        namespace: str = "ma",
+        lookback_minutes: int = 20,
+        attempts: int = 5,
+        wait_seconds: int = 60):
     aws_metadata = _load_aws_metadata(namespace)
     if not aws_metadata:
         return

@@ -200,7 +200,7 @@ export function createMSKProducerIAMPolicies(scope: Construct, partition: string
     return [mskClusterConnectPolicy, mskTopicProducerPolicy]
 }
 
-export function createAwsDistroForOtelPushInstrumentationPolicy(includeXrayTracePermissions: boolean = false): PolicyStatement {
+export function createAwsDistroForOtelPushInstrumentationPolicy(includeXrayTracePermissions = false): PolicyStatement {
     // see https://aws-otel.github.io/docs/setup/permissions
     const actions = [
         "logs:PutLogEvents",
