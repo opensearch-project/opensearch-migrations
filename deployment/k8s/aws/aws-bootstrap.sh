@@ -1021,6 +1021,10 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
     # EKS/bootstrap builds are always Kubernetes-hosted; they cannot assume
     # direct access to a local Docker daemon from the target environment.
     source "${base_dir}/buildImages/backends/eksKubernetesBuildkit.sh"
+    # Use the ECR-mirrored buildkit image so the kubernetes driver doesn't pull
+    # from Docker Hub. mirror_images_to_ecr already copied this image above.
+    ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
+    export BUILDKIT_IMAGE="${ECR_HOST}/mirrored/moby/buildkit:buildx-stable-1"
     setup_build_backend
   fi
 

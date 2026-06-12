@@ -382,30 +382,30 @@ const DEFAULT_AUTO_CREATE_KAFKA = {
         },
         template: {
             pod: {
-                // Soft anti-affinity — prefers spreading brokers across nodes
-                // but still schedules on single-node dev clusters. Required
-                // anti-affinity would wedge broker rescheduling during an EKS
-                // node rotation if the new pool temporarily has <3 nodes.
-                affinity: {
-                    podAntiAffinity: {
-                        preferredDuringSchedulingIgnoredDuringExecution: [
-                            {
-                                weight: 100,
-                                podAffinityTerm: {
-                                    labelSelector: {
-                                        matchExpressions: [
-                                            {
-                                                key: "strimzi.io/name",
-                                                operator: "Exists",
-                                            },
-                                        ],
-                                    },
-                                    topologyKey: "kubernetes.io/hostname",
+                // Spread brokers one-per-node so a single node disruption
+                // (Karpenter consolidation during the RFS scale-up/down churn,
+                // a spot reclaim, a drain) can only ever take ONE broker. With
+                // RF=3/minISR=2 the cluster then survives it as a rolling event
+                // instead of losing quorum. whenUnsatisfiable=ScheduleAnyway
+                // keeps this soft: on a <3-node dev cluster the brokers must
+                // still schedule (and reschedule during rotation) rather than
+                // wedge Pending. maxSkew=1 means the scheduler only doubles up
+                // on a node once every other node already has one.
+                topologySpreadConstraints: [
+                    {
+                        maxSkew: 1,
+                        topologyKey: "kubernetes.io/hostname",
+                        whenUnsatisfiable: "ScheduleAnyway",
+                        labelSelector: {
+                            matchExpressions: [
+                                {
+                                    key: "strimzi.io/name",
+                                    operator: "Exists",
                                 },
-                            },
-                        ],
+                            ],
+                        },
                     },
-                },
+                ],
             },
         },
     },
@@ -793,11 +793,6 @@ export const USER_METADATA_PROCESS_OPTIONS = z.object({
             "Only disable if metadata has parsing issues on snapshots that require strict version matching."),
     clusterAwarenessAttributes: z.number().default(1).optional()
         .describe("Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."),
-    multiTypeBehavior: z.enum(["NONE", "UNION", "SPLIT"]).default("NONE").optional()
-        .describe("Strategy for handling Elasticsearch multi-type indices (ES 5.x and earlier). " +
-            "'NONE': fail if multi-type indices are encountered. " +
-            "'UNION': merge all types into a single mapping. " +
-            "'SPLIT': create separate indices for each type."),
     otelCollectorEndpoint: OTEL_COLLECTOR_ENDPOINT,
     output: z.enum(["HUMAN_READABLE", "JSON"]).default("HUMAN_READABLE").optional()
         .describe("Output format for the metadata migration evaluation report. 'HUMAN_READABLE' for formatted text, 'JSON' for machine-parseable output."),
@@ -1053,11 +1048,11 @@ export const KAFKA_CLUSTER_CREATION_CONFIG = z.preprocess(
 );
 
 export const KAFKA_CLUSTER_CONFIG = z.union([
+    z.object({existing: KAFKA_EXISTING_CLUSTER_CONFIG })
+        .describe("Use an existing Kafka cluster by providing connection details."),
     z.object({autoCreate: KAFKA_CLUSTER_CREATION_CONFIG})
         .describe("Auto-create a new Strimzi Kafka cluster with the specified configuration. " +
-            "The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'."),
-    z.object({existing: KAFKA_EXISTING_CLUSTER_CONFIG })
-        .describe("Use an existing Kafka cluster by providing connection details.")
+            "The cluster bootstrap service is available at '<clusterName>-kafka-bootstrap.<namespace>:9092'.")
 ]).describe("Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one.");
 
 export const HTTP_AUTH_BASIC = z.object({
@@ -1327,6 +1322,16 @@ export const OVERALL_MIGRATION_CONFIG = //validateOptionalDefaultConsistency
                 "All top-level items are independent, but replayers can declare dependencies on snapshot migrations to ensure data consistency.")
             .optional()
     }).describe("Top-level migration configuration defining source clusters, target clusters, snapshot migrations, and optional traffic capture/replay.").superRefine((data, ctx) => {
+        const duplicateClusterNames = Object.keys(data.sourceClusters)
+            .filter(name => name in data.targetClusters);
+        for (const name of duplicateClusterNames) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: `Cluster name '${name}' is used in both sourceClusters and targetClusters. Source and target cluster names must be unique.`,
+                path: ['targetClusters', name]
+            });
+        }
+
         for (let i = 0; i < data.snapshotMigrationConfigs.length; i++) {
             const mc = data.snapshotMigrationConfigs[i];
 

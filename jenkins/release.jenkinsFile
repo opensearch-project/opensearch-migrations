@@ -3,6 +3,11 @@ lib = library(identifier: 'jenkins@12.0.0', retriever: modernSCM([
     remote: 'https://github.com/opensearch-project/opensearch-build-libraries.git',
 ]))
 
+def secret_github_bot = [
+    [envVar: 'GITHUB_USER', secretRef: 'op://opensearch-release-secrets/github-bot/ci-bot-username'],
+    [envVar: 'GITHUB_TOKEN', secretRef: 'op://opensearch-release-secrets/github-bot/ci-bot-token']
+]
+
 pipeline {
         agent
         {
@@ -43,12 +48,11 @@ pipeline {
                 steps {
                     script {
                         if ("$assets_url" != '') {
-                            withCredentials([usernamePassword(credentialsId: 'jenkins-github-bot-token', usernameVariable: 'GITHUB_USER', passwordVariable: 'GITHUB_TOKEN')]) {
+                            withSecrets(secrets: secret_github_bot){
                                 String assets = sh(
                                     script: "curl -H 'Accept: application/vnd.github+json' -H 'Authorization: Bearer ${GITHUB_TOKEN}' ${assets_url}",
                                     returnStdout: true
                                 )
-                                String assetUrl = null
                                 def parsedJson = readJSON text: assets
                                 parsedJson.each { item ->
                                     if(item.name == 'opensearch-migrations-source.tar.gz') {
@@ -118,7 +122,7 @@ pipeline {
             success {
                 script {
                     if (release_url != null) {
-                        withCredentials([usernamePassword(credentialsId: 'jenkins-github-bot-token', usernameVariable: 'GITHUB_USER', passwordVariable: 'GITHUB_TOKEN')]) {
+                        withSecrets(secrets: secret_github_bot){
                             sh "curl -X PATCH -H 'Accept: application/vnd.github+json' -H 'Authorization: Bearer ${GITHUB_TOKEN}' ${release_url} -d '{\"tag_name\":\"${tag}\",\"draft\":false,\"prerelease\":false}'"
                         }
                     }

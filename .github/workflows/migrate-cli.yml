@@ -1,0 +1,116 @@
+# CI for the migration-assistant CLI (Rust) under deployment/k8s/aws/cli/.
+# Path-scoped: only runs when CLI files (or this workflow) change.
+name: migrate-cli
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'deployment/k8s/aws/cli/**'
+      - 'deployment/k8s/aws/build.gradle'
+      - 'agent-skills/**'
+      - '.github/workflows/migrate-cli.yml'
+  pull_request:
+    paths:
+      - 'deployment/k8s/aws/cli/**'
+      - 'deployment/k8s/aws/build.gradle'
+      - 'agent-skills/**'
+      - '.github/workflows/migrate-cli.yml'
+  merge_group:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: deployment/k8s/aws/cli
+
+# The exact toolchain (channel + rustfmt/clippy components) is pinned in
+# cli/rust-toolchain.toml; rustup (preinstalled on the GitHub runners) fetches
+# it automatically on the first cargo/rustup call in this directory. No explicit
+# `rustup toolchain install` is needed — the pin is the single source of truth,
+# the same way the JVM build pins Corretto JDK 21.
+
+jobs:
+  # Fast feedback: format + lints. Fails the PR on any rustfmt diff or clippy
+  # warning (-D warnings), matching the crate's quality bar.
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain (from rust-toolchain.toml)
+        run: rustup show && cargo --version && cargo clippy --version && cargo fmt --version
+      - name: rustfmt (check)
+        run: cargo fmt --check
+      - name: clippy (deny warnings)
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+  # The unit + integration suites — pure logic, orchestration vs the mock
+  # runner, the TUI vs TestBackend, and the public CLI surface end-to-end.
+  # No AWS, no network.
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain (from rust-toolchain.toml)
+        run: rustup show
+      - name: cargo test
+        run: cargo test --locked
+      - name: build + smoke the binary (version, help, exit codes)
+        run: |
+          set -e
+          cargo build --release --locked
+          BIN=target/release/migration-assistant
+          v="$("$BIN" version)"
+          echo "version: $v"
+          echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+' || { echo "::error::version not x.y.z"; exit 1; }
+          "$BIN" help | grep -q 'OpenSearch Migration Assistant CLI'
+          # Unknown command must exit 64 (CLI dispatcher contract).
+          rc=0; "$BIN" notacommand >/dev/null 2>&1 || rc=$?
+          [ "$rc" -eq 64 ] || { echo "::error::expected exit 64, got $rc"; exit 1; }
+
+  # The release packaging path: gradle cargo-builds the binary, stages the
+  # bundle (wrapper + prebuilt binary + agent-skills + manifest), tars it, and
+  # renders install.sh. This job deliberately does NOT install Rust itself — it
+  # verifies that gradle auto-provisions the toolchain (the same way it
+  # auto-downloads Corretto JDK 21), which is the exact scenario that failed on
+  # a fresh Jenkins agent.
+  smoke:
+    runs-on: ubuntu-22.04
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-env
+      - name: gradle packages CLI tarball + install.sh (provisions Rust itself)
+        working-directory: .
+        run: |
+          # Hide any preinstalled cargo so this genuinely exercises gradle's
+          # auto-provisioning path.
+          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v cargo | grep -v rustup | paste -sd: -)"
+          ./gradlew :deployment:k8s:aws:packageMigrationAssistantCli \
+            -PcliVersion=0.0.0-ci
+          dist=deployment/k8s/aws/build/migrate-cli-dist
+          test -f "$dist/migration-assistant-cli-0.0.0-ci.tar.gz"
+          test -x "$dist/install.sh"
+          # Rendered install.sh is well-formed bash.
+          bash -n "$dist/install.sh"
+          # The tarball carries the wrapper, the prebuilt binary, and a
+          # root manifest.json.
+          tar -tzf "$dist/migration-assistant-cli-0.0.0-ci.tar.gz" \
+            | grep -q 'migration-assistant-cli-0.0.0-ci/bin/migration-assistant-bin'
+          tar -tzf "$dist/migration-assistant-cli-0.0.0-ci.tar.gz" \
+            | grep -q 'migration-assistant-cli-0.0.0-ci/manifest.json'
+      - name: install.sh from local tarball needs NO Rust toolchain
+        working-directory: .
+        run: |
+          set -e
+          dist=deployment/k8s/aws/build/migrate-cli-dist
+          # Extract the staged bundle and install from it locally.
+          work="$(mktemp -d)"
+          tar -xzf "$dist/migration-assistant-cli-0.0.0-ci.tar.gz" -C "$work" --strip-components=1
+          INSTALL_FROM_LOCAL="$work" \
+          MIGRATE_PREFIX="$work/installed" \
+          BIN_DIR="$work/bin-link" \
+            bash "$dist/install.sh"
+          # The installed binary runs (prebuilt; no cargo invoked).
+          PATH="$work/bin-link:$PATH" migration-assistant version

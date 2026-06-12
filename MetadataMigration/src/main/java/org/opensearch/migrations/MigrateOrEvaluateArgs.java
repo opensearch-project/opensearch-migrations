@@ -4,10 +4,8 @@ package org.opensearch.migrations;
 
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
-import org.opensearch.migrations.bulkload.transformers.MetadataTransformerParams;
 import org.opensearch.migrations.cli.OutputFormat;
 import org.opensearch.migrations.transform.TransformerParams;
-import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
@@ -75,9 +73,6 @@ public class MigrateOrEvaluateArgs {
     public Version sourceVersion = null;
 
     @ParametersDelegate
-    public MetadataTransformationParams metadataTransformationParams = new MetadataTransformationParams();
-
-    @ParametersDelegate
     public TransformerParams metadataCustomTransformationParams = new MetadataCustomTransformationParams();
 
     @Parameter(names = { "--succeed-on-empty" }, arity = 1, description = "When true (default), the command succeeds even if no migration items"
@@ -115,12 +110,6 @@ public class MigrateOrEvaluateArgs {
 
     @ParametersDelegate
     public VersionStrictness versionStrictness = new VersionStrictness();
-
-    @Getter
-    public static class MetadataTransformationParams implements MetadataTransformerParams {
-        @Parameter(names = {"--multi-type-behavior"}, description = "Define behavior for resolving multi type mappings.")
-        public IndexMappingTypeRemoval.MultiTypeResolutionBehavior multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.NONE;
-    }
 
     @Getter
     public static class MetadataCustomTransformationParams implements TransformerParams {

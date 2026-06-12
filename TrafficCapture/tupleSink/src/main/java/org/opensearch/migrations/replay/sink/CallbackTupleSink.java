@@ -31,11 +31,6 @@ public class CallbackTupleSink implements TupleSink {
     }
 
     @Override
-    public void periodicFlush() {
-        // No time-based thresholds — futures are completed immediately in accept()
-    }
-
-    @Override
     public void close() {
         // No resources to release
     }

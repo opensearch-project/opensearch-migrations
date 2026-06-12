@@ -1,6 +1,8 @@
+import base64
 import logging
+import tempfile
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 from console_link.models.factories import get_replayer, get_backfill, get_kafka, get_snapshot, \
     get_metrics_source
 from console_link.models.cluster import Cluster, SourceCluster
@@ -12,6 +14,7 @@ from console_link.models.kafka import Kafka
 from console_link.models.client_options import ClientOptions
 from console_link.models.utils import map_cluster_from_workflow_config
 from console_link.workflow.models.workflow_config_store import WorkflowConfigStore
+from console_link.k8s_resource_catalog import ConsoleResourceCatalog, ResourceRole, ResourceSelectionError
 
 import yaml
 from cerberus import Validator
@@ -61,7 +64,9 @@ class Environment:
     metadata: Optional[Metadata] = None
     replay: Optional[Replayer] = None
     kafka: Optional[Kafka] = None
+    kafka_consumer_groups: List[str] = []
     client_options: Optional[ClientOptions] = None
+    resources: ConsoleResourceCatalog
     config: Dict
 
     def __init__(self, config: Optional[Dict] = None, config_file: Optional[Union[str, Path]] = None,
@@ -157,6 +162,71 @@ class Environment:
             self.kafka = get_kafka(self.config["kafka"])
             logger.info(f"Kafka initialized: {self.kafka}")
 
+        # Initialize on each instance — class-level default exists, but assigning
+        # here guarantees per-instance state when callers extend the list.
+        self.kafka_consumer_groups = []
+        self.resources = ConsoleResourceCatalog.from_legacy_environment(self)
+
+    @classmethod
+    def from_k8s_resource_catalog(cls, namespace='ma', session_name='default', allow_empty=False) -> 'Environment':
+        store = WorkflowConfigStore(namespace=namespace)
+        config = store.load_config(session_name=session_name)
+        logger.info(f"Loading console resources with namespace {namespace} and session {session_name}")
+
+        catalog = ConsoleResourceCatalog.from_k8s(
+            namespace=namespace,
+            session_name=session_name,
+            config=config,
+        )
+        if not catalog.entries and config is None:
+            if allow_empty:
+                return cls._empty(catalog)
+            raise WorkflowConfigException(
+                f"A workflow config or deployed migration resource can't be found for namespace `{namespace}` "
+                f"and session name `{session_name}`."
+            )
+
+        instance = cls._empty(catalog)
+        instance.source_cluster = cls._try_resolve_cluster(catalog, ResourceRole.SOURCE)
+        instance.target_cluster = cls._try_resolve_cluster(catalog, ResourceRole.TARGET)
+        instance.proxy = cls._try_resolve_cluster(catalog, ResourceRole.PROXY)
+        instance.kafka = cls._try_resolve_kafka(catalog)
+        instance.kafka_consumer_groups = catalog.consumer_group_names()
+        return instance
+
+    @classmethod
+    def _empty(cls, catalog: Optional[ConsoleResourceCatalog] = None) -> 'Environment':
+        instance = super().__new__(cls)
+        instance.config = {}
+        instance.source_cluster = None
+        instance.target_cluster = None
+        instance.proxy = None
+        instance.backfill = None
+        instance.metrics_source = None
+        instance.snapshot = None
+        instance.metadata = None
+        instance.replay = None
+        instance.kafka = None
+        instance.kafka_consumer_groups = []
+        instance.client_options = None
+        instance.resources = catalog or ConsoleResourceCatalog.empty()
+        return instance
+
+    @staticmethod
+    def _try_resolve_cluster(catalog: ConsoleResourceCatalog, role: ResourceRole):
+        try:
+            return catalog.resolve_cluster(role)
+        except ResourceSelectionError:
+            return None
+
+    @staticmethod
+    def _try_resolve_kafka(catalog: ConsoleResourceCatalog):
+        try:
+            return catalog.resolve_kafka()
+        except Exception as e:
+            logger.debug("Could not eagerly resolve kafka resource for compatibility attributes: %s", e)
+            return None
+
     @classmethod
     def from_workflow_config(cls, namespace='ma', session_name='default', allow_empty=False) -> 'Environment':
         store = WorkflowConfigStore(namespace=namespace)
@@ -164,7 +234,7 @@ class Environment:
         logger.info(f"Loading workflow config with namespace {namespace} and session {session_name}")
         if config is None:
             if allow_empty:
-                return super().__new__(cls)
+                return cls._empty()
             raise WorkflowConfigException(
                 f"A workflow config can't be found for namespace `{namespace}` and session name `{session_name}`."
             )
@@ -174,15 +244,21 @@ class Environment:
 
         instance = super().__new__(cls)
 
+        instance.config = {}
+        instance.client_options = None
         instance.target_cluster = target_cluster
         instance.source_cluster = source_cluster
         instance.proxy = getattr(source_cluster, "proxy", None)
         instance.kafka = cls._get_kafka_from_workflow_config(config)
+        instance.kafka_consumer_groups = cls._get_kafka_consumer_groups_from_workflow_config(config)
 
         # Wire up Solr-specific metadata and backfill when source is Solr
         instance.metadata = None
         instance.backfill = None
         instance.snapshot = None
+        instance.metrics_source = None
+        instance.replay = None
+        instance.resources = ConsoleResourceCatalog.from_legacy_environment(instance)
 
         return instance
 
@@ -241,6 +317,63 @@ class Environment:
             "allow_insecure": has_tls,
         }
 
+    @staticmethod
+    def _resolve_strimzi_bootstrap(cluster_name: str, listener_name: str, namespace: str = 'ma') -> str:
+        """Read the bootstrap address from the Strimzi Kafka CR status."""
+        from kubernetes import client as k8s_client
+        from console_link.workflow.models.utils import load_k8s_config
+        load_k8s_config()
+        custom = k8s_client.CustomObjectsApi()
+        kafka_cr = custom.get_namespaced_custom_object(
+            group="kafka.strimzi.io", version="v1",
+            namespace=namespace, plural="kafkas", name=cluster_name,
+        )
+        for listener in kafka_cr.get("status", {}).get("listeners", []):
+            if listener.get("name") == listener_name:
+                return listener["bootstrapServers"]
+        raise ValueError(
+            f"Kafka CR '{cluster_name}' has no listener named '{listener_name}' in .status.listeners"
+        )
+
+    @staticmethod
+    def _resolve_strimzi_scram_credentials(cluster_name: str, namespace: str = 'ma') -> Tuple[str, Optional[str]]:
+        """Read SCRAM password and cluster CA cert from Strimzi-managed k8s Secrets.
+
+        Strimzi creates a Secret named '<cluster>-migration-app' with the SCRAM
+        password and '<cluster>-cluster-ca-cert' with the CA certificate when a
+        KafkaUser with SCRAM auth is provisioned.
+
+        Returns (password, ca_cert_path). ca_cert_path is a temp file that the
+        caller must keep alive for the lifetime of the Kafka client.
+        """
+        from kubernetes import client
+        from console_link.workflow.models.utils import load_k8s_config
+        load_k8s_config()
+        v1 = client.CoreV1Api()
+
+        user_secret_name = f"{cluster_name}-migration-app"
+        secret = v1.read_namespaced_secret(name=user_secret_name, namespace=namespace)
+        password_b64 = secret.data.get("password")
+        if not password_b64:
+            raise ValueError(f"Secret '{user_secret_name}' in namespace '{namespace}' has no 'password' key")
+        password = base64.b64decode(password_b64).decode('utf-8')
+
+        ca_cert_path = None
+        ca_name = f"{cluster_name}-cluster-ca-cert"
+        try:
+            ca_secret = v1.read_namespaced_secret(name=ca_name, namespace=namespace)
+            ca_crt_b64 = ca_secret.data.get("ca.crt")
+            if ca_crt_b64:
+                import os
+                ca_crt = base64.b64decode(ca_crt_b64).decode('utf-8')
+                fd, ca_cert_path = tempfile.mkstemp(prefix='kafka-ca-', suffix='.crt')
+                with os.fdopen(fd, 'w') as f:
+                    f.write(ca_crt)
+        except Exception as e:
+            logger.warning("Could not read CA cert from secret '%s': %s", ca_name, e)
+
+        return password, ca_cert_path
+
     @classmethod
     def _get_kafka_from_workflow_config(cls, config: Dict) -> Optional[Kafka]:
         kafka_clusters = config.get("kafkaClusterConfiguration") or {}
@@ -284,19 +417,29 @@ class Environment:
         elif "autoCreate" in cluster_config:
             auto_config = cluster_config["autoCreate"]
             auth_config = auto_config.get("auth") or {}
-            auth_type = auth_config.get("type", "")
+            # Mirror the workflow transformer's secure-by-default auth policy
+            # (DEFAULT_WORKFLOW_MANAGED_KAFKA_AUTH in migrationConfigTransformer.ts).
+            # When the user-config omits auth on an autoCreate cluster, the
+            # workflow deploys Strimzi with scram-sha-512 + a single "tls"
+            # listener; the console must read it the same way.
+            auth_type = auth_config.get("type") or "scram-sha-512"
             if auth_type == "scram-sha-512":
-                kafka_config = {
-                    "broker_endpoints": f"{cluster_name}-kafka-bootstrap:9093",
-                    "scram": {
-                        "username": f"{cluster_name}-migration-app",
-                        "password_env": "KAFKA_SCRAM_PASSWORD",
-                        "ca_cert_path": "/config/kafka-ca/ca.crt",
-                    }
+                password, ca_cert_path = cls._resolve_strimzi_scram_credentials(cluster_name)
+                bootstrap = cls._resolve_strimzi_bootstrap(cluster_name, "tls")
+                scram_config: Dict = {
+                    "username": f"{cluster_name}-migration-app",
                 }
-            else:
+                if ca_cert_path:
+                    scram_config["ca_cert_path"] = ca_cert_path
                 kafka_config = {
-                    "broker_endpoints": f"{cluster_name}-kafka-bootstrap:9092",
+                    "broker_endpoints": bootstrap,
+                    "scram": scram_config,
+                }
+                return get_kafka(kafka_config, scram_password=password)
+            else:
+                bootstrap = cls._resolve_strimzi_bootstrap(cluster_name, "plain")
+                kafka_config = {
+                    "broker_endpoints": bootstrap,
                     "standard": None
                 }
         else:
@@ -306,6 +449,28 @@ class Environment:
             }
 
         return get_kafka(kafka_config)
+
+    @classmethod
+    def _get_kafka_consumer_groups_from_workflow_config(cls, config: Dict) -> List[str]:
+        """Resolve the kafka consumer-group IDs the workflow's replayers use.
+
+        The workflow templates compute each replayer's group id as
+        `replayer-<targetConfig.label>` (see fullMigration.ts:651-652), and
+        the user-facing config exposes `traffic.replayers[*].toTarget` —
+        the target cluster name that becomes that label. Mirror that shape
+        here so `console kafka` commands and CDC integ tests know which
+        groups exist without scraping running pods.
+
+        Returns deduplicated, sorted group names. Replayers with empty or
+        missing `toTarget` are skipped.
+        """
+        replayers = ((config.get("traffic") or {}).get("replayers") or {})
+        groups = {
+            f"replayer-{rc['toTarget']}"
+            for rc in replayers.values()
+            if isinstance(rc, dict) and rc.get("toTarget")
+        }
+        return sorted(groups)
 
     @classmethod
     def _get_cluster_from_workflow_config(cls, config: Dict, cluster_key: str, cluster_label: str) -> Optional[Cluster]:

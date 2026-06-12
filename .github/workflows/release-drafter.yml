@@ -70,9 +70,9 @@ jobs:
           git archive --format=tar.gz \
             -o opensearch-migrations-source.tar.gz \
             HEAD
-      - name: Create Kiro assistant archive
+      - name: Create agent-skills archive
         run: |
-          ./gradlew :kiro-cli:packageKiro
+          ./gradlew :agent-skills:agentSkillsTar
       - name: Build and Publish to Maven
         if: ${{ !github.event.act }}
         env:
@@ -239,8 +239,20 @@ jobs:
           solutionname="migration-assistant-for-amazon-opensearch-service",\
           solutionversion=${{ steps.get_data.outputs.version }}
       - name: Assemble self-contained aws-bootstrap.sh
+        # Production deploy artifact. assemble-bootstrap.sh inlines every
+        # sourced helper into deployment/k8s/aws/dist/aws-bootstrap.sh.
+        # This is the file operators run via curl-pipe today.
         run: |
           deployment/k8s/aws/assemble-bootstrap.sh
+      - name: Assemble migration-assistant CLI artifacts (preview)
+        # Preview deploy artifact — the new TUI CLI. Ships alongside the
+        # bootstrap so operators can opt in via curl install.sh, but the
+        # production deploy path remains aws-bootstrap.sh until the TUI
+        # bakes through a few releases. Jenkins runs the TUI by default
+        # on source builds (vars/resolveBootstrap.groovy) for coverage.
+        run: |
+          ./gradlew :deployment:k8s:aws:packageMigrationAssistantCli \
+            -PcliVersion="${{ steps.get_data.outputs.version }}"
       - name: Draft a release
         if: ${{ !github.event.act }}
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
@@ -251,9 +263,11 @@ jobs:
             deployment/migration-assistant-solution/cdk.out-minified/*-eks.template.json
             opensearch-migrations-source.tar.gz
             opensearch-migrations-build.tar.gz
-            kiro-cli/build/kiro-assistant.tar.gz
+            agent-skills/build/agent-skills.tar.gz
             bootstrap-kiro-agent.sh
             migration-assistant-${{ steps.get_data.outputs.version }}.tgz
             workflowMigration.schema.json
             deployment/k8s/aws/dist/aws-bootstrap.sh
+            deployment/k8s/aws/build/migrate-cli-dist/install.sh
+            deployment/k8s/aws/build/migrate-cli-dist/migration-assistant-cli-${{ steps.get_data.outputs.version }}.tar.gz
             **/*.spdx.json
