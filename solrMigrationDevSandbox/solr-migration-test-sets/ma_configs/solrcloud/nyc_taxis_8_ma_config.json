@@ -1,4 +1,5 @@
 {
+    "skipApprovals": true,
     "sourceClusters": {
       "source": {
         "endpoint": "http://chorus.dev.o19s.com:8983",
@@ -7,7 +8,7 @@
           "repos": {
             "migration-repo": {
               "awsRegion": "us-east-1",
-              "s3RepoPathUri": "s3://migrations-default-371015648411-dev-us-east-1/solr-migration-test-sets/nyc_taxis_8"
+              "s3RepoPathUri": "s3://migrations-default-371015648411-dev-us-east-1/solr-migration-test-sets/solrcloud/nyc_taxis_8"
             }
           },
           "snapshots": {

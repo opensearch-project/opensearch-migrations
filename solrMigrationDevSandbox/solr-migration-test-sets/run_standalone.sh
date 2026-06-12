@@ -408,16 +408,33 @@ run_version() {
 # ---------------------------------------------------------------------------
 # S3 upload (step 6)
 # ---------------------------------------------------------------------------
+# The snapshot directory names a given version produces under ${BACKUP_BASE}.
+version_snapshots() {
+    local v="$1"
+    echo "snapshot.nyc_taxis_${v}"
+    case "$v" in
+        9) echo "snapshot.nyc_taxis_9_onesegment" ;;  # v9 single-segment backup
+    esac
+}
+
+# Sync only the snapshots produced by the requested --versions (not everything
+# that happens to be sitting under ${BACKUP_BASE}).
 s3_upload() {
     local s3_base="s3://migrations-default-${AWS_ACCOUNT}-dev-us-east-1/solr-migration-test-sets/standalone"
-    log "Syncing snapshots to ${s3_base}"
-    local snap
-    for snap in "${BACKUP_BASE}"/snapshot.*; do
-        [[ -d "$snap" ]] || continue
-        local name
-        name="$(basename "$snap")"
-        echo "  $snap -> ${s3_base}/${name}"
-        "$AWS_CLI" s3 sync "$snap" "${s3_base}/${name}"
+    log "Syncing snapshots for versions ${VERSIONS} to ${s3_base}"
+    local v name snap
+    for v in "${VERSION_LIST[@]}"; do
+        v="$(echo "$v" | tr -d '[:space:]')"
+        [[ -n "$v" ]] || continue
+        for name in $(version_snapshots "$v"); do
+            snap="${BACKUP_BASE}/${name}"
+            if [[ ! -d "$snap" ]]; then
+                warn "expected snapshot ${snap} not found; skipping"
+                continue
+            fi
+            echo "  $snap -> ${s3_base}/${name}"
+            "$AWS_CLI" s3 sync "$snap" "${s3_base}/${name}"
+        done
     done
 }
 
