@@ -5,10 +5,7 @@ conditionalPackageInstalls:
 cloudProvider: gcp
 
 gcp:
-  configureGkeResources: true
   project: ""
-  region: us-central1
-  zone: ""
   serviceAccountEmail: ""
 
 logs:

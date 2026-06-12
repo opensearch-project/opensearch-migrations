@@ -73,10 +73,7 @@ aws:
 cloudProvider: ""
 
 gcp:
-  configureGkeResources: false
   project: ""
-  region: us-central1
-  zone: ""
   serviceAccountEmail: ""
 
 # EKS cluster configuration for Karpenter NodeClass
