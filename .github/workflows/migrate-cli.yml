@@ -26,10 +26,9 @@ defaults:
     working-directory: deployment/k8s/aws/cli
 
 # The exact toolchain (channel + rustfmt/clippy components) is pinned in
-# cli/rust-toolchain.toml; rustup (preinstalled on the GitHub runners) fetches
-# it automatically on the first cargo/rustup call in this directory. No explicit
-# `rustup toolchain install` is needed — the pin is the single source of truth,
-# the same way the JVM build pins Corretto JDK 21.
+# cli/rust-toolchain.toml. Gradle provisions rustup/cargo into its managed home
+# when the host does not already have Rust, matching the repo's JVM toolchain
+# story instead of relying on runner-global Rust installs.
 
 jobs:
   # Fast feedback: format + lints. Fails the PR on any rustfmt diff or clippy
@@ -38,12 +37,14 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Toolchain (from rust-toolchain.toml)
-        run: rustup show && cargo --version && cargo clippy --version && cargo fmt --version
-      - name: rustfmt (check)
-        run: cargo fmt --check
-      - name: clippy (deny warnings)
-        run: cargo clippy --all-targets --locked -- -D warnings
+      - uses: ./.github/actions/setup-env
+      - name: rustfmt + clippy through Gradle-managed Rust
+        working-directory: .
+        run: |
+          ./gradlew \
+            :deployment:k8s:aws:cargoFmtCheckMigrationAssistant \
+            :deployment:k8s:aws:cargoClippyMigrationAssistant \
+            --no-daemon
 
   # The unit + integration suites — pure logic, orchestration vs the mock
   # runner, the TUI vs TestBackend, and the public CLI surface end-to-end.
@@ -52,15 +53,18 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Toolchain (from rust-toolchain.toml)
-        run: rustup show
-      - name: cargo test
-        run: cargo test --locked
+      - uses: ./.github/actions/setup-env
+      - name: cargo test through Gradle-managed Rust
+        working-directory: .
+        run: ./gradlew :deployment:k8s:aws:cargoTestMigrationAssistant --no-daemon
       - name: build + smoke the binary (version, help, exit codes)
+        working-directory: .
         run: |
           set -e
-          cargo build --release --locked
-          BIN=target/release/migration-assistant
+          ./gradlew :deployment:k8s:aws:buildMigrationAssistantBinary \
+            -PcliVersion=0.0.0-ci \
+            --no-daemon
+          BIN=deployment/k8s/aws/cli/target/release/migration-assistant
           v="$("$BIN" version)"
           echo "version: $v"
           echo "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+' || { echo "::error::version not x.y.z"; exit 1; }
@@ -87,11 +91,17 @@ jobs:
           # Hide any preinstalled cargo so this genuinely exercises gradle's
           # auto-provisioning path.
           export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v cargo | grep -v rustup | paste -sd: -)"
-          ./gradlew :deployment:k8s:aws:packageMigrationAssistantCli \
-            -PcliVersion=0.0.0-ci
+          ./gradlew \
+            :deployment:k8s:aws:packageMigrationAssistantCli \
+            :deployment:k8s:aws:packageMigrationAssistantCliInstallers \
+            -PcliVersion=0.0.0-ci \
+            -PcliInstallerTargets=linux-amd64=x86_64-unknown-linux-gnu \
+            -PcliInstallerForceCross=false
           dist=deployment/k8s/aws/build/migrate-cli-dist
           test -f "$dist/migration-assistant-cli-0.0.0-ci.tar.gz"
           test -x "$dist/install.sh"
+          test -f "$dist/installers/migration-assistant-cli-0.0.0-ci-linux-amd64.tar.gz"
+          test -f "$dist/installers/manifest.json"
           # Rendered install.sh is well-formed bash.
           bash -n "$dist/install.sh"
           # The tarball carries the wrapper, the prebuilt binary, and a
@@ -100,6 +110,8 @@ jobs:
             | grep -q 'migration-assistant-cli-0.0.0-ci/bin/migration-assistant-bin'
           tar -tzf "$dist/migration-assistant-cli-0.0.0-ci.tar.gz" \
             | grep -q 'migration-assistant-cli-0.0.0-ci/manifest.json'
+          tar -tzf "$dist/installers/migration-assistant-cli-0.0.0-ci-linux-amd64.tar.gz" \
+            | grep -q 'migration-assistant-cli-0.0.0-ci-linux-amd64/bin/migration-assistant-bin'
       - name: install.sh from local tarball needs NO Rust toolchain
         working-directory: .
         run: |

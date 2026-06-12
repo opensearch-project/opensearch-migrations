@@ -10,6 +10,13 @@ on:
 env:
   java-version: '21'
   gradle-version: '8.12.1'
+  MIGRATION_ASSISTANT_CLI_RELEASE_TARGETS: >-
+    linux-amd64=x86_64-unknown-linux-gnu,
+    linux-arm64=aarch64-unknown-linux-gnu,
+    darwin-amd64=x86_64-apple-darwin,
+    darwin-arm64=aarch64-apple-darwin,
+    windows-amd64=x86_64-pc-windows-msvc,
+    windows-arm64=aarch64-pc-windows-msvc
 
 permissions:
   id-token: write
@@ -24,10 +31,60 @@ jobs:
     steps:
       - run: echo "Release approved"
 
-  draft-a-release:
-    name: Draft a release
+  build-cli-installers:
+    name: Build CLI installers (${{ matrix.name }})
     needs: approve-release
     if: ${{ github.event.act || needs.approve-release.result == 'success' }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            runner: ubuntu-22.04
+            targets: linux-amd64=x86_64-unknown-linux-gnu,linux-arm64=aarch64-unknown-linux-gnu
+            force-cross: 'true'
+          - name: macos
+            runner: macos-14
+            targets: darwin-amd64=x86_64-apple-darwin,darwin-arm64=aarch64-apple-darwin
+            force-cross: 'false'
+          - name: windows
+            runner: windows-2022
+            targets: windows-amd64=x86_64-pc-windows-msvc,windows-arm64=aarch64-pc-windows-msvc
+            force-cross: 'false'
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: corretto
+      - uses: gradle/actions/setup-gradle@v4
+      - id: get_data
+        shell: bash
+        run: |
+          echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+      - name: Build platform CLI installers
+        shell: bash
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+        run: |
+          ./gradlew :deployment:k8s:aws:packageMigrationAssistantCliInstallers \
+            -PcliVersion="${{ steps.get_data.outputs.version }}" \
+            -PcliInstallerTargets="${{ matrix.targets }}" \
+            -PcliInstallerForceCross="${{ matrix.force-cross }}" \
+            --no-daemon \
+            --no-continue \
+            --info
+      - name: Upload platform CLI installers
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: migration-assistant-cli-installers-${{ matrix.name }}-${{ steps.get_data.outputs.version }}
+          path: deployment/k8s/aws/build/migrate-cli-dist/installers/*.tar.gz
+
+  draft-a-release:
+    name: Draft a release
+    needs: [approve-release, build-cli-installers]
+    if: ${{ github.event.act || (needs.approve-release.result == 'success' && needs.build-cli-installers.result == 'success') }}
     runs-on: ubuntu-22.04
     services:
       registry:
@@ -115,14 +172,48 @@ jobs:
             --no-daemon \
             --no-continue \
             --info
-      - name: Logout to DockerHub
-        if: always()
-        run: docker logout
       - name: Build minified CFN templates for GitHub release
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
         run: |
           STACK_NAME_SUFFIX="" ./gradlew :deployment:migration-assistant-solution:cdkSynthMinified
+      - name: Install Helm
+        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5
+      - name: Package Helm chart
+        run: |
+          ./gradlew \
+            :deployment:k8s:packageMigrationAssistantHelmChart \
+            -PhelmChartVersion="${{ steps.get_data.outputs.version }}"
+      - name: Download Migration Assistant CLI installers
+        uses: actions/download-artifact@v7
+        with:
+          pattern: migration-assistant-cli-installers-*-${{ steps.get_data.outputs.version }}
+          path: deployment/k8s/aws/build/migrate-cli-dist/release-installers
+          merge-multiple: true
+      - name: Write Migration Assistant CLI installer manifest
+        run: |
+          ./gradlew :deployment:k8s:aws:writeMigrationAssistantCliInstallersManifest \
+            -PcliVersion="${{ steps.get_data.outputs.version }}" \
+            -PcliInstallerManifestTargets="${MIGRATION_ASSISTANT_CLI_RELEASE_TARGETS}"
+          cp deployment/k8s/aws/build/migrate-cli-dist/installers/manifest.json \
+            deployment/k8s/aws/build/migrate-cli-dist/release-installers/manifest.json
+          ls -l deployment/k8s/aws/build/migrate-cli-dist/release-installers
+      - name: Build and Push Migration Companion Image
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+        run: |
+          ./gradlew :deployment:k8s:migrationCompanion:buildMigrationCompanionImageToRegistry \
+            -Pbuilder=local-remote-builder \
+            -PregistryEndpoint=opensearchstaging \
+            -PpublishStyle='separateRepos' \
+            -PimageVersion=${{ steps.get_data.outputs.version }} \
+            -PmigrationAssistantCliInstallersDir="${PWD}/deployment/k8s/aws/build/migrate-cli-dist/release-installers" \
+            -PmigrationAssistantCliInstallersManifest="${PWD}/deployment/k8s/aws/build/migrate-cli-dist/release-installers/manifest.json" \
+            -PmigrationAssistantRequireCompleteInstallerSet=true \
+            --no-build-cache \
+            --no-daemon \
+            --no-continue \
+            --info
       - name: Pull images from DockerHub for SBOM scanning
         if: ${{ !github.event.act }}
         run: |
@@ -132,12 +223,14 @@ jobs:
           docker pull opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }}
           docker pull opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }}
           docker pull opensearchstaging/opensearch-migrations-transformation-shim:${{ steps.get_data.outputs.version }}
+          docker pull opensearchstaging/opensearch-migrations-migration-companion:${{ steps.get_data.outputs.version }}
           # Tag them with the expected names for SBOM scanning
           docker tag opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }} migrations/migration_console:latest
           docker tag opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }} migrations/traffic_replayer:latest
           docker tag opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }} migrations/capture_proxy:latest
           docker tag opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }} migrations/reindex_from_snapshot:latest
           docker tag opensearchstaging/opensearch-migrations-transformation-shim:${{ steps.get_data.outputs.version }} migrations/transformation_shim:latest
+          docker tag opensearchstaging/opensearch-migrations-migration-companion:${{ steps.get_data.outputs.version }} migrations/migration_companion:latest
       - name: Generate SBOM for migration_console
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
@@ -163,19 +256,19 @@ jobs:
         with:
           image: migrations/transformation_shim:latest
           output-file: opensearch-migrations-transformation-shim-sbom.spdx.json
+      - name: Generate SBOM for migration_companion
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: migrations/migration_companion:latest
+          output-file: opensearch-migrations-migration-companion-sbom.spdx.json
       - name: Generate SBOM for artifacts
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
           file: opensearch-migrations-source.tar.gz
           output-file: opensearch-migrations-source-sbom.spdx.json
-      - name: Install Helm
-        uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5
-        # Uses latest Helm version by default
-      - name: Package Helm chart
-        run: |
-          helm package deployment/k8s/charts/aggregates/migrationAssistantWithArgo \
-            --version ${{ steps.get_data.outputs.version }} \
-            --app-version ${{ steps.get_data.outputs.version }}
+      - name: Logout to DockerHub
+        if: always()
+        run: docker logout
       - name: Set up Kind cluster for schema verification
         if: ${{ !github.event.act }}
         uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
@@ -265,9 +358,11 @@ jobs:
             opensearch-migrations-build.tar.gz
             agent-skills/build/agent-skills.tar.gz
             bootstrap-kiro-agent.sh
-            migration-assistant-${{ steps.get_data.outputs.version }}.tgz
+            deployment/k8s/build/helm-package/migration-assistant-${{ steps.get_data.outputs.version }}.tgz
             workflowMigration.schema.json
             deployment/k8s/aws/dist/aws-bootstrap.sh
             deployment/k8s/aws/build/migrate-cli-dist/install.sh
             deployment/k8s/aws/build/migrate-cli-dist/migration-assistant-cli-${{ steps.get_data.outputs.version }}.tar.gz
+            deployment/k8s/aws/build/migrate-cli-dist/release-installers/manifest.json
+            deployment/k8s/aws/build/migrate-cli-dist/release-installers/*.tar.gz
             **/*.spdx.json
