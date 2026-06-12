@@ -62,10 +62,10 @@
           "repo": {
             "awsRegion": "us-east-2",
             "endpoint": "http://localhost:4566",
-            "s3RepoPathUri": "s3://migration-bucket",
             "s3RoleArn": "",
             "useLocalStack": false,
-            "repoName": "default"
+            "repoName": "default",
+            "repoPathUri": "s3://migration-bucket"
           },
           "dependsOnProxySetups": [
             "proxy1"
@@ -122,10 +122,10 @@
         "repoConfig": {
           "awsRegion": "us-east-2",
           "endpoint": "http://localhost:4566",
-          "s3RepoPathUri": "s3://migration-bucket",
           "s3RoleArn": "",
           "useLocalStack": false,
-          "repoName": "default"
+          "repoName": "default",
+          "repoPathUri": "s3://migration-bucket"
         }
       }
     }

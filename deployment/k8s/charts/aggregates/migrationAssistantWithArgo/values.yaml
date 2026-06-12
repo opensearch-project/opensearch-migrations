@@ -70,6 +70,12 @@ aws:
   region: us-east-2
   account: "123456789012"
 
+cloudProvider: ""
+
+gcp:
+  project: ""
+  serviceAccountEmail: ""
+
 # EKS cluster configuration for Karpenter NodeClass
 cluster:
   # Set to true for EKS clusters with Karpenter, false for other cluster types
@@ -111,6 +117,23 @@ defaultBucketConfiguration:
   serviceAccountName: "migrations-service-account"
   bucketOperationImage: "amazon/aws-cli:2.25.11"
   bucketOperationImagePullPolicy: "IfNotPresent"
+
+gcsBucketConfiguration:
+  create: false
+  deleteOnUninstall: false
+  emptyBeforeDelete: true
+  endpoint: ""
+  bucketName: ""
+  bucketOperationImage: "google/cloud-sdk:latest"
+  bucketOperationImagePullPolicy: "IfNotPresent"
+  serviceAccountName: "migrations-service-account"
+
+kafkaExternal:
+  enabled: false
+  brokers: ""
+  authType: scram-sha-512
+  userName: ""
+  password: ""
 
 logs:
   sharedLogsVolume:
@@ -379,7 +402,9 @@ charts:
         archiveLogs: false
         s3:
           insecure: false
-          keyFormat: "argo-artifacts/{{workflow.name}}/{{pod.name}}"
+          keyFormat: 'argo-artifacts/{{ "{{workflow.name}}" }}/{{ "{{pod.name}}" }}'
+        gcs:
+          keyFormat: 'argo-artifacts/{{ "{{workflow.name}}" }}/{{ "{{pod.name}}" }}'
       images:
         pullPolicy: IfNotPresent
       crds:

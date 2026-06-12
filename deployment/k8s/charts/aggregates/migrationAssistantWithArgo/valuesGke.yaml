@@ -1,0 +1,46 @@
+conditionalPackageInstalls:
+  localstack: false
+  jaeger: false
+
+cloudProvider: gcp
+
+gcp:
+  project: ""
+  serviceAccountEmail: ""
+
+logs:
+  sharedLogsVolume:
+    enabled: false
+
+defaultBucketConfiguration:
+  useLocalStack: false
+  create: false
+
+gcsBucketConfiguration:
+  create: false
+  deleteOnUninstall: false
+  emptyBeforeDelete: true
+  endpoint: ""
+  bucketOperationImage: "google/cloud-sdk:latest"
+  bucketOperationImagePullPolicy: "IfNotPresent"
+  serviceAccountName: "migrations-service-account"
+
+charts:
+  argo-workflows:
+    values:
+      artifactRepository:
+        s3: null
+  fluent-bit:
+    values:
+      extraVolumes:
+        - name: logs-pv
+          emptyDir: {}
+        - name: lua-scripts
+          configMap:
+            name: fluentbit-lua-scripts
+      extraVolumeMounts:
+        - name: logs-pv
+          mountPath: /shared_logs
+        - name: lua-scripts
+          mountPath: /fluentbit/scripts
+          readOnly: true

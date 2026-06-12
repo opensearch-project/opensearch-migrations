@@ -12,7 +12,7 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public abstract class SnapshotCreator {
+public class SnapshotCreator {
     private static final ObjectMapper mapper = ObjectMapperFactory.createDefaultMapper();
 
     private final OpenSearchClient client;
@@ -22,12 +22,51 @@ public abstract class SnapshotCreator {
     @Getter
     private final String snapshotRepoName;
     private final List<String> indexAllowlist;
-    protected final boolean compressionEnabled;
-    protected final boolean includeGlobalState;
+    private final boolean compressionEnabled;
+    private final boolean includeGlobalState;
+    private final RepoUri repoUri;
+    private final String region;
+    private final String endpoint;
+    private final Integer maxSnapshotRateMBPerNode;
+    private final String roleArn;
 
-    protected SnapshotCreator(String snapshotName, String snapshotRepoName, List<String> indexAllowlist,
-                              OpenSearchClient client, IRfsContexts.ICreateSnapshotContext context,
-                              boolean compressionEnabled, boolean includeGlobalState) {
+    public SnapshotCreator(
+        String snapshotName,
+        String snapshotRepoName,
+        OpenSearchClient client,
+        RepoUri repoUri,
+        List<String> indexAllowlist,
+        IRfsContexts.ICreateSnapshotContext context
+    ) {
+        this(snapshotName, snapshotRepoName, client, repoUri, indexAllowlist, context, false, true, null, null, null, null);
+    }
+
+    public SnapshotCreator(
+        String snapshotName,
+        String snapshotRepoName,
+        OpenSearchClient client,
+        RepoUri repoUri,
+        String region,
+        List<String> indexAllowlist,
+        IRfsContexts.ICreateSnapshotContext context
+    ) {
+        this(snapshotName, snapshotRepoName, client, repoUri, indexAllowlist, context, false, true, region, null, null, null);
+    }
+
+    public SnapshotCreator(
+        String snapshotName,
+        String snapshotRepoName,
+        OpenSearchClient client,
+        RepoUri repoUri,
+        List<String> indexAllowlist,
+        IRfsContexts.ICreateSnapshotContext context,
+        boolean compressionEnabled,
+        boolean includeGlobalState,
+        String region,
+        String endpoint,
+        Integer maxSnapshotRateMBPerNode,
+        String roleArn
+    ) {
         this.snapshotName = snapshotName;
         this.snapshotRepoName = snapshotRepoName;
         this.indexAllowlist = indexAllowlist;
@@ -35,9 +74,56 @@ public abstract class SnapshotCreator {
         this.context = context;
         this.compressionEnabled = compressionEnabled;
         this.includeGlobalState = includeGlobalState;
+        this.repoUri = repoUri;
+        this.region = region;
+        this.endpoint = endpoint;
+        this.maxSnapshotRateMBPerNode = maxSnapshotRateMBPerNode;
+        this.roleArn = roleArn;
     }
 
-    abstract ObjectNode getRequestBodyForRegisterRepo();
+    public ObjectNode getRequestBodyForRegisterRepo() {
+        // Assemble the request body
+        ObjectNode settings = mapper.createObjectNode();
+        ObjectNode body = mapper.createObjectNode();
+
+        switch (repoUri) {
+            case RepoUri.FileRepoUri f -> {
+                settings.put("location", f.path());
+                settings.put("compress", compressionEnabled);
+                body.put("type", "fs");
+            }
+            case RepoUri.S3RepoUri s -> {
+                putBucketSettings(settings, s.s3Uri().bucketName, s.s3Uri().key);
+                settings.put("region", region);
+                if (roleArn != null) {
+                    settings.put("role_arn", roleArn);
+                }
+                if (endpoint != null) {
+                    settings.put("endpoint", endpoint);
+                }
+                body.put("type", "s3");
+            }
+            case RepoUri.GcsRepoUri g -> {
+                var gcsUri = new GcsUri(g.rawUri());
+                putBucketSettings(settings, gcsUri.bucketName, gcsUri.key);
+                body.put("type", "gcs");
+            }
+        }
+
+        body.set("settings", settings);
+        return body;
+    }
+
+    private void putBucketSettings(ObjectNode settings, String bucket, String key) {
+        settings.put("bucket", bucket);
+        if (key != null && !key.isEmpty()) {
+            settings.put("base_path", key);
+        }
+        settings.put("compress", compressionEnabled);
+        if (maxSnapshotRateMBPerNode != null) {
+            settings.put("max_snapshot_bytes_per_sec", maxSnapshotRateMBPerNode + "mb");
+        }
+    }
 
     public String getIndexAllowlist() {
         if (this.indexAllowlist == null || this.indexAllowlist.isEmpty()) {

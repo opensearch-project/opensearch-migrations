@@ -126,7 +126,7 @@ spec:
               '{
                 "awsRegion": $region,
                 "endpoint": $endpoint,
-                "s3RepoPathUri": ("s3://" + $bucket + "/" + $suffix)
+                "repoPathUri": ("s3://" + $bucket + "/" + $suffix)
               } + (if $roleArn != "" then {"s3RoleArn": $roleArn} else {} end)')
             
             # Function to transform cluster config to match workflow schema
@@ -166,7 +166,7 @@ spec:
                     if $extSnap != null then
                       (($entry.source.snapshotRepo // null) as $srcRepo |
                       . + {"snapshotInfo": {
-                        "repos": {"default": (if $srcRepo != null then ($repo + {s3RepoPathUri: $srcRepo.s3RepoPathUri, awsRegion: ($srcRepo.awsRegion // $repo.awsRegion)}) else $repo end)},
+                        "repos": {"default": (if $srcRepo != null then ($repo + {repoPathUri: $srcRepo.repoPathUri, awsRegion: ($srcRepo.awsRegion // $repo.awsRegion)}) else $repo end)},
                         "snapshots": {
                           ($extSnap): {
                             "repoName": "default",

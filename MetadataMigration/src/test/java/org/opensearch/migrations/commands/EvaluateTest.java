@@ -30,7 +30,7 @@ class EvaluateTest {
     void evaluate_failsUnexpectedException() {
         var args = new EvaluateArgs();
         args.sourceVersion = Version.fromString("ES 7.10");
-        args.fileSystemRepoPath = "";
+        args.repoUri = "/tmp";
 
         var meta = new MetadataMigration();
         var context = mock(RootMetadataMigrationContext.class);

@@ -1,0 +1,74 @@
+{{- if and (eq .Values.cloudProvider "gcp") .Values.gcsBucketConfiguration.deleteOnUninstall }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: delete-gcs-bucket-{{ .Release.Name }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: gcs-bucket-delete
+      annotations:
+        karpenter.sh/do-not-disrupt: "true"
+    spec:
+      serviceAccountName: {{ .Values.gcsBucketConfiguration.serviceAccountName }}
+      restartPolicy: Never
+      containers:
+        - name: gcloud
+          image: {{ .Values.gcsBucketConfiguration.bucketOperationImage }}
+          imagePullPolicy: {{ .Values.gcsBucketConfiguration.bucketOperationImagePullPolicy }}
+          env:
+            - name: GCS_BUCKET_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-gcs-config
+                  key: GCS_BUCKET_NAME
+            - name: GCS_ENDPOINT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-gcs-config
+                  key: GCS_ENDPOINT_URL
+                  optional: true
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              {{ include "migration.gcsFunctions" . | nindent 12 }}
+
+              EMPTY_BEFORE_DELETE={{ .Values.gcsBucketConfiguration.emptyBeforeDelete }}
+              MAX_RETRIES=3
+              RETRY_INTERVAL=5
+
+              echo "Target bucket for deletion: $GCS_BUCKET_NAME"
+
+              retry_count=0
+              while ! check_gcs_available; do
+                retry_count=$((retry_count + 1))
+                if [ $retry_count -ge $MAX_RETRIES ]; then
+                  echo "GCS not available after $MAX_RETRIES attempts. Exiting."
+                  exit 1
+                fi
+                echo "GCS not available yet. Retrying in $RETRY_INTERVAL seconds... (Attempt $retry_count/$MAX_RETRIES)"
+                sleep $RETRY_INTERVAL
+              done
+
+              if bucket_exists "$GCS_BUCKET_NAME"; then
+                echo "Bucket $GCS_BUCKET_NAME exists."
+                if [ "${EMPTY_BEFORE_DELETE}" = "true" ]; then
+                  echo "Emptying bucket contents..."
+                  gcloud storage rm "gs://$GCS_BUCKET_NAME/**" --recursive 2>/dev/null || true
+                fi
+                echo "Deleting bucket $GCS_BUCKET_NAME..."
+                gcloud storage buckets delete "gs://$GCS_BUCKET_NAME" --quiet
+                echo "Bucket $GCS_BUCKET_NAME deleted."
+              else
+                echo "Bucket $GCS_BUCKET_NAME does not exist. Skipping deletion."
+              fi
+{{- end }}

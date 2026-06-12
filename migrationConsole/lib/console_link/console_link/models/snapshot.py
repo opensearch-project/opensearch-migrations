@@ -59,6 +59,13 @@ SNAPSHOT_SCHEMA = {
                     'endpoint': {'type': 'string', 'required': False}
                 }
             },
+            'gcs': {
+                'type': 'dict',
+                'nullable': True,
+                'schema': {
+                    'repo_uri': {'type': 'string', 'required': True, 'empty': False},
+                }
+            },
             'fs': {
                 'type': 'dict',
                 'schema': {
@@ -66,7 +73,7 @@ SNAPSHOT_SCHEMA = {
                 }
             }
         },
-        'check_with': contains_one_of({'s3', 'fs'})
+        'check_with': contains_one_of({'s3', 'fs', 'gcs'})
     }
 }
 
@@ -205,15 +212,11 @@ class S3Snapshot(Snapshot):
             raise NoSourceClusterDefinedError
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
 
-        s3_command_args = {
-            "--s3-repo-uri": self.s3_repo_uri,
-            "--s3-region": self.s3_region,
-        }
-        if self.s3_endpoint:
-            s3_command_args["--s3-endpoint"] = self.s3_endpoint
-
         command_args = self._collect_universal_command_args()
-        command_args.update(s3_command_args)
+        command_args["--repo-uri"] = self.s3_repo_uri
+        command_args["--s3-region"] = self.s3_region
+        if self.s3_endpoint:
+            command_args["--endpoint"] = self.s3_endpoint
 
         if self._is_solr_source():
             collections = self._get_solr_collections()
@@ -284,7 +287,7 @@ class FileSystemSnapshot(Snapshot):
         base_command = "/root/createSnapshot/bin/CreateSnapshot"
 
         command_args = self._collect_universal_command_args()
-        command_args["--file-system-repo-path"] = self.repo_path
+        command_args["--repo-uri"] = f"file://{self.repo_path}"
 
         if self._is_solr_source():
             collections = self._get_solr_collections()
@@ -293,6 +296,75 @@ class FileSystemSnapshot(Snapshot):
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
         extra_args = kwargs.get('extra_args')
 
+        if max_snapshot_rate_mb_per_node is not None:
+            command_args["--max-snapshot-rate-mb-per-node"] = max_snapshot_rate_mb_per_node
+        if extra_args:
+            for arg in extra_args:
+                command_args[arg] = FlagOnlyArgument
+
+        command_runner = CommandRunner(base_command, command_args, sensitive_fields=["--source-password"])
+        try:
+            command_runner.run()
+            logger.info(f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
+            return f"Snapshot {self.config['snapshot_name']} creation initiated successfully"
+        except CommandRunnerError as e:
+            logger.debug(f"Failed to create snapshot: {str(e)}")
+            ex = FailedToCreateSnapshot()
+            ex.add_note(f"Failure from {str(e)}")
+            raise ex
+
+    def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+        if self._is_solr_source():
+            return _solr_backup_status(self.source_cluster, self.snapshot_name, deep_check=deep_check)
+        return get_snapshot_status(self.source_cluster, self.snapshot_name, self.snapshot_repo_name, deep_check)
+
+    def delete(self, *args, **kwargs) -> str:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+        if self._is_solr_source():
+            return SOLR_NO_DELETE_MSG
+        return delete_snapshot(self.source_cluster, self.snapshot_name, self.snapshot_repo_name)
+
+    def delete_all_snapshots(self, *args, **kwargs) -> str:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+        if self._is_solr_source():
+            return SOLR_NO_DELETE_MSG
+        return delete_all_snapshots(self.source_cluster, self.snapshot_repo_name)
+
+    def delete_snapshot_repo(self, *args, **kwargs) -> str:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError()
+        if self._is_solr_source():
+            return "Solr does not use snapshot repositories."
+        return delete_snapshot_repo(self.source_cluster, self.snapshot_repo_name)
+
+
+class GcsSnapshot(Snapshot):
+    def __init__(self, config: Dict, source_cluster: Optional[Cluster]) -> None:
+        super().__init__(config, source_cluster)
+        self.gcs_repo_uri = config['gcs']['repo_uri']
+
+    def create(self, *args, **kwargs) -> str:
+        if not self.source_cluster:
+            raise NoSourceClusterDefinedError
+        base_command = "/root/createSnapshot/bin/CreateSnapshot"
+
+        command_args = self._collect_universal_command_args()
+        command_args["--repo-uri"] = self.gcs_repo_uri
+
+        if self._is_solr_source():
+            collections = self._get_solr_collections()
+            command_args["--solr-collections"] = ",".join(collections)
+
+        wait = kwargs.get('wait', False)
+        max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
+        extra_args = kwargs.get('extra_args')
+
+        if not wait:
+            command_args["--no-wait"] = FlagOnlyArgument
         if max_snapshot_rate_mb_per_node is not None:
             command_args["--max-snapshot-rate-mb-per-node"] = max_snapshot_rate_mb_per_node
         if extra_args:
@@ -1045,6 +1117,7 @@ def delete_snapshot_repo(cluster: Cluster, repository: str) -> str:
 class SnapshotSourceType(str, Enum):
     filesystem = "filesytem"
     s3 = "s3"
+    gcs = "gcs"
 
 
 class SnapshotSource(BaseModel):
@@ -1062,7 +1135,12 @@ class S3SnapshotSource(SnapshotSource):
     region: str
 
 
-SnapshotType: TypeAlias = FileSystemSnapshotSource | S3SnapshotSource
+class GcsSnapshotSource(SnapshotSource):
+    type: SnapshotSourceType = SnapshotSourceType.gcs
+    uri: str
+
+
+SnapshotType: TypeAlias = FileSystemSnapshotSource | S3SnapshotSource | GcsSnapshotSource
 
 
 class SnapshotConfig(BaseModel):

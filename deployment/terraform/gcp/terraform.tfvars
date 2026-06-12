@@ -1,0 +1,11 @@
+node_machine_type  = "e2-standard-8"
+node_disk_size     = 200
+node_disk_type     = "pd-ssd"
+node_count         = 8
+node_min_count     = 8
+node_max_count     = 8
+max_zones          = 1
+deploy_kafka       = true
+kafka_broker_count = 3
+kafka_disk_size_gb = 200
+kafka_disk_type    = "pd-ssd"

@@ -11,9 +11,10 @@ import org.opensearch.migrations.UnboundVersionMatchers;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
-import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
+import org.opensearch.migrations.bulkload.common.RepoUri;
 import org.opensearch.migrations.bulkload.common.RestClient;
+import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
@@ -233,9 +234,9 @@ public class PipelineEndToEndTest {
             var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
             var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
                 .host(cluster.getUrl()).insecure(true).build().toConnectionContext());
-            var snapshotCreator = new FileSystemSnapshotCreator(
+            var snapshotCreator = new SnapshotCreator(
                 SNAPSHOT_NAME, REPO_NAME, clientFactory.determineVersionAndCreate(),
-                SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, List.of(),
+                RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR), List.of(),
                 snapshotContext.createSnapshotCreateContext()
             );
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
@@ -326,9 +327,9 @@ public class PipelineEndToEndTest {
             var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
             var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
                 .host(cluster.getUrl()).insecure(true).build().toConnectionContext());
-            var snapshotCreator = new FileSystemSnapshotCreator(
+            var snapshotCreator = new SnapshotCreator(
                 SNAPSHOT_NAME, REPO_NAME, clientFactory.determineVersionAndCreate(),
-                SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, List.of(),
+                RepoUri.parse(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR), List.of(),
                 snapshotContext.createSnapshotCreateContext()
             );
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);

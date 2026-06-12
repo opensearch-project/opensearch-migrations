@@ -14,6 +14,10 @@
           "value": "s3-snapshot-config"
         },
         {
+          "name": "gcsSnapshotConfigMap",
+          "value": "gcs-snapshot-config"
+        },
+        {
           "name": "imageConfigMapName",
           "value": "migration-image-config"
         },
@@ -175,11 +179,8 @@
         },
         "resource": {
           "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: DataSnapshot\nmetadata:\n  name: \"{{inputs.parameters.resourceName}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{workflow.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceLabel}}\"\n    migrations.opensearch.org/snapshot: \"{{=fromJSON(inputs.parameters.snapshotItemConfig)['label']}}\"\nspec:\n  snapshotPrefix: \"{{=fromJSON(inputs.parameters.snapshotItemConfig)['snapshotPrefix']}}\"\n  indexAllowlist: {{=sprig.dig('indexAllowlist', [], fromJSON(inputs.parameters.snapshotItemConfig)['config'])}}\n  maxSnapshotRateMbPerNode: {{=sprig.dig('maxSnapshotRateMbPerNode', 0, fromJSON(inputs.parameters.snapshotItemConfig)['config'])}}\n  jvmArgs: \"{{=sprig.dig('jvmArgs', '', fromJSON(inputs.parameters.snapshotItemConfig)['config'])}}\"\n  loggingConfigurationOverrideConfigMap: \"{{=sprig.dig('loggingConfigurationOverrideConfigMap', '', fromJSON(inputs.parameters.snapshotItemConfig)['config'])}}\"\n",
-          "action": "patch",
-          "flags": [
-            "--type",
-            "merge"
-          ]
+          "action": "apply",
+          "setOwnerReference": false
         },
         "retryStrategy": {
           "limit": "6",
@@ -239,6 +240,12 @@
               "name": "resourceCreationTimestamp",
               "valueFrom": {
                 "jsonPath": "{.metadata.creationTimestamp}"
+              }
+            },
+            {
+              "name": "resourceUid",
+              "valueFrom": {
+                "jsonPath": "{.metadata.uid}"
               }
             }
           ]
@@ -1378,6 +1385,12 @@
               "name": "resourceCreationTimestamp",
               "valueFrom": {
                 "expression": "((steps.tryApply.status == 'Succeeded') ? (steps.tryApply.outputs.parameters.resourceCreationTimestamp) : (''))"
+              }
+            },
+            {
+              "name": "resourceUid",
+              "valueFrom": {
+                "expression": "((steps.tryApply.status == 'Succeeded') ? (steps.tryApply.outputs.parameters.resourceUid) : (''))"
               }
             }
           ]

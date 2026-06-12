@@ -16,6 +16,10 @@
           "value": "s3-snapshot-config"
         },
         {
+          "name": "gcsSnapshotConfigMap",
+          "value": "gcs-snapshot-config"
+        },
+        {
           "name": "imageConfigMapName",
           "value": "migration-image-config"
         },
@@ -1446,7 +1450,7 @@
                 "parameters": [
                   {
                     "name": "resourceUid",
-                    "value": "{{inputs.parameters.resourceUid}}"
+                    "value": "{{steps.reconcileSnapshotMigrationResource.outputs.parameters.resourceUid}}"
                   },
                   {
                     "name": "configChecksum",
@@ -1541,16 +1545,16 @@
                     "value": "{{steps.reconcileSnapshotMigrationResource.outputs.parameters.resourceCreationTimestamp}}"
                   },
                   {
-                    "name": "workloadIdentityChecksum",
-                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['workloadIdentityChecksum']}}"
+                    "name": "sourceEndpoint",
+                    "value": "{{=sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
                   },
                   {
                     "name": "checksumForReplayer",
                     "value": "{{=sprig.dig('checksumForReplayer', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
                   },
                   {
-                    "name": "sourceEndpoint",
-                    "value": "{{=sprig.dig('sourceEndpoint', '', fromJSON(inputs.parameters.snapshotMigrationConfig))}}"
+                    "name": "workloadIdentityChecksum",
+                    "value": "{{=fromJSON(inputs.parameters.snapshotMigrationConfig)['workloadIdentityChecksum']}}"
                   }
                 ]
               },
@@ -1563,7 +1567,7 @@
                 "template": "patchsnapshotmigrationcompleted",
                 "name": "resource-management"
               },
-              "when": "{{=true && !(steps.reconcileSnapshotMigrationResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum) && !('documentBackfillConfig' in fromJSON(inputs.parameters.snapshotMigrationConfig))}}",
+              "when": "{{=true && !(steps.reconcileSnapshotMigrationResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
               "arguments": {
                 "parameters": [
                   {
@@ -2280,7 +2284,7 @@
                   },
                   {
                     "name": "resourceName",
-                    "value": "{{=item['sourceLabel']+'-'+sprig.dig('label', '', fromJSON(item['targetConfig']))+'-'+item['label']+'-'+item['migrationLabel']}}"
+                    "value": "{{=sprig.regexReplaceAll('[-.]+$', sprig.regexReplaceAll('^[-.]+', sprig.regexReplaceAll('-+', sprig.regexReplaceAll('[^a-z0-9.-]+', lower(item['sourceLabel']+'-'+sprig.dig('label', '', fromJSON(item['targetConfig']))+'-'+item['label']+'-'+item['migrationLabel']), '-'), '-'), ''), '')}}"
                   },
                   {
                     "name": "groupName_view",

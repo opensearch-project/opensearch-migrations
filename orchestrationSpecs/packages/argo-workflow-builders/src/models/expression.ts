@@ -683,23 +683,27 @@ class ExprBuilder {
 
     // Regex functions
     regexMatch(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
-        return fn<boolean, ExpressionType, "complicatedExpression">("regexMatch", toExpression(pattern), toExpression(text));
+        return fn<boolean, ExpressionType, "complicatedExpression">("sprig.regexMatch", toExpression(pattern), toExpression(text));
     }
 
     regexFind(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
-        return fn<string, ExpressionType, "complicatedExpression">("regexFind", toExpression(pattern), toExpression(text));
+        return fn<string, ExpressionType, "complicatedExpression">("sprig.regexFind", toExpression(pattern), toExpression(text));
     }
 
     regexFindAll(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>, count: AllowLiteralOrExpression<number>) {
-        return fn<string[], ExpressionType, "complicatedExpression">("regexFindAll", toExpression(pattern), toExpression(text), toExpression(count));
+        return fn<string[], ExpressionType, "complicatedExpression">("sprig.regexFindAll", toExpression(pattern), toExpression(text), toExpression(count));
     }
 
     regexReplaceAll(pattern: AllowLiteralOrExpression<string>, replacement: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>) {
-        return fn<string, ExpressionType, "complicatedExpression">("regexReplaceAll", toExpression(pattern), toExpression(replacement), toExpression(text));
+        // Sprig's regexReplaceAll Go signature is (regex, src, replacement). When used in Argo expr
+        // (expr-lang), arguments are passed positionally matching the Go signature, NOT the Sprig
+        // template pipe-style convention (regex, replacement, src). The TS API here keeps the
+        // template-style argument order for ergonomics, but emits args in Go/expr order.
+        return fn<string, ExpressionType, "complicatedExpression">("sprig.regexReplaceAll", toExpression(pattern), toExpression(text), toExpression(replacement));
     }
 
     regexSplit(pattern: AllowLiteralOrExpression<string>, text: AllowLiteralOrExpression<string>, count: AllowLiteralOrExpression<number>) {
-        return fn<string[], ExpressionType, "complicatedExpression">("regexSplit", toExpression(pattern), toExpression(text), toExpression(count));
+        return fn<string[], ExpressionType, "complicatedExpression">("sprig.regexSplit", toExpression(pattern), toExpression(text), toExpression(count));
     }
 
     fillTemplate<T extends string>(
@@ -920,7 +924,7 @@ class ExprBuilder {
 
 
     serialize<R extends PlainObject, CIn extends ExpressionType>(data: BaseExpression<RejectWithParamHybridForSerialize<R>,CIn>) {
-        return fn<Serialized<DeepWiden<NormalizeSerializedForToBoundary<R>>>,CIn,"complicatedExpression">("toJSON", data);
+        return fn<Serialized<NormalizeSerializedForToBoundary<R>>,CIn,"complicatedExpression">("toJSON", data);
     }
 
     toString<

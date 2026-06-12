@@ -478,7 +478,7 @@ public class SolrSnapshotToOpenSearchTest {
 
             // 1. Push the converted Solr schema (with dotted-leaf-safe dynamic templates) to OS.
             var metadataArgs = new MigrateOrEvaluateArgs();
-            metadataArgs.fileSystemRepoPath = backupRoot.toString();
+            metadataArgs.repoUri = backupRoot.toString();
             metadataArgs.sourceVersion = Version.fromString("SOLR " + solrVersion.tag());
             metadataArgs.targetArgs.host = target.getUrl();
             var metaResult = new MetadataMigration().migrate(metadataArgs)

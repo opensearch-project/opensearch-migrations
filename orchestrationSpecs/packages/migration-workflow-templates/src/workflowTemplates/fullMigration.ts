@@ -86,6 +86,26 @@ function checksumNotDone(
     return expr.and(expr.literal(true), expr.not(expr.equals(actualChecksum, desiredChecksum)));
 }
 
+// Sanitize a string into a valid RFC-1123 subdomain segment used for k8s
+// CRD names. Mirrors makeCrdName() in config-processor/src/migrationInitializer.ts
+// and the jq `crdname()` helper used at workflow-submit time:
+//   1. lowercase
+//   2. replace any run of chars not in [a-z0-9.-] with a single "-"
+//   3. collapse runs of "-" to a single "-"
+//   4. strip leading "-" or "."
+//   5. strip trailing "-" or "."
+// Keeping these three sanitizers in lock-step is what binds workflow-built CRD
+// names (e.g. SnapshotMigration "source1-target1-global-state-snapshot-migration-0")
+// to the resourceUid lookup keys generated at init time.
+function sanitizeCrdName(s: BaseExpression<string>): BaseExpression<string, "complicatedExpression"> {
+    let out: BaseExpression<string> = expr.toLowerCase(s);
+    out = expr.regexReplaceAll("[^a-z0-9.-]+", "-", out);
+    out = expr.regexReplaceAll("-+", "-", out);
+    out = expr.regexReplaceAll("^[-.]+", "", out);
+    out = expr.regexReplaceAll("[-.]+$", "", out);
+    return out as BaseExpression<string, "complicatedExpression">;
+}
+
 export const FullMigration = WorkflowBuilder.create({
     k8sResourceName: "full-migration",
     parallelism: 100,
@@ -377,7 +397,6 @@ export const FullMigration = WorkflowBuilder.create({
         )
     )
 
-
     // ── Section 4: Snapshot Migrations ───────────────────────────────────
 
     .addTemplate("migrateFromSnapshot", t => t
@@ -539,21 +558,22 @@ export const FullMigration = WorkflowBuilder.create({
                             expr.makeDict({}) as any
                         )),
                         crdName: b.inputs.resourceName,
-                        resourceUid: b.inputs.resourceUid,
+                        // Use the apiserver-assigned UID emitted by reconcileSnapshotMigrationResource
+                        // (rather than b.inputs.resourceUid, which may be a placeholder like "imported"
+                        // for BYOS/imported-cluster flows). This is required so ownerReferences on
+                        // RFS coordinator Secret/Service/StatefulSet point at the real owner UID;
+                        // otherwise Kubernetes GC deletes those resources within ~1s.
+                        resourceUid: c.steps.reconcileSnapshotMigrationResource.outputs.resourceUid,
                         resourceCreationTimestamp: c.steps.reconcileSnapshotMigrationResource.outputs.resourceCreationTimestamp,
                         groupName_view: expr.get(snapshotMigrationConfig, "migrationLabel"),
-                        workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum"),
+                        sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], ""),
                         checksumForReplayer: expr.dig(snapshotMigrationConfig, ["checksumForReplayer"], ""),
-                        sourceEndpoint: expr.dig(snapshotMigrationConfig, ["sourceEndpoint"], "")
+                        workloadIdentityChecksum: expr.get(snapshotMigrationConfig, "workloadIdentityChecksum")
                     });
                 }, {
                     when: c => ({templateExp: checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum)}),
                 }
             )
-            // Metadata-only path: workflow patches SM.status itself. On the
-            // RFS-enabled path, the RFS-completion CronJob is the sole writer
-            // of SM.status (INV-1), so this step is suppressed when a
-            // documentBackfillConfig is present.
             .addStep("patchSnapshotMigrationCompleted", ResourceManagement, "patchSnapshotMigrationCompleted",
                 c => c.register({
                     resourceName: b.inputs.resourceName,
@@ -564,12 +584,7 @@ export const FullMigration = WorkflowBuilder.create({
                         ["checksumForReplayer"], ""
                     ),
                 }),
-                {when: c => ({templateExp: expr.and(
-                    checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum),
-                    expr.not(expr.hasKey(
-                        expr.deserializeRecord(b.inputs.snapshotMigrationConfig),
-                        "documentBackfillConfig"))
-                )})}
+                {when: c => ({templateExp: checksumNotDone(c.reconcileSnapshotMigrationResource.outputs.currentConfigChecksum, b.inputs.configChecksum)})}
             )
         })
     )
@@ -830,7 +845,7 @@ export const FullMigration = WorkflowBuilder.create({
             .addStep("performSnapshotMigration", INTERNAL, "runSingleSnapshotMigration", c =>
                 c.register({
                     ...selectInputsForRegister(b, c),
-                    resourceName: expr.concat(
+                    resourceName: sanitizeCrdName(expr.concat(
                         expr.get(c.item, "sourceLabel"),
                         expr.literal("-"),
                         expr.dig(
@@ -842,7 +857,7 @@ export const FullMigration = WorkflowBuilder.create({
                         expr.get(c.item, "label"),
                         expr.literal("-"),
                         expr.get(c.item, "migrationLabel")
-                    ),
+                    )),
                     groupName_view: expr.concat(
                         expr.get(c.item, "sourceLabel"),
                         expr.literal(" → "),

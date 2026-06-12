@@ -38,7 +38,7 @@
 #                    "awsRegion": "",  # string
 ##                    "endpoint": "",  # string
 #                    # s3://BUCKETNAME/PATH
-#                    "s3RepoPathUri": "",  # string
+#                    "repoPathUri": "",  # string
 ##                    "s3RoleArn": ""  # string
 #                }
 #            },

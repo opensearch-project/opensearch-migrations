@@ -7,7 +7,7 @@ from console_link.models.command_result import CommandResult
 from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.cluster import AuthMethod, Cluster, NoTargetClusterDefinedError
 from console_link.models.schema_tools import list_schema
-from console_link.models.snapshot import S3Snapshot, Snapshot, FileSystemSnapshot
+from console_link.models.snapshot import GcsSnapshot, S3Snapshot, Snapshot, FileSystemSnapshot
 
 logger = logging.getLogger(__name__)
 MAX_FILENAME_LEN = 255
@@ -36,6 +36,13 @@ FROM_SNAPSHOT_SCHEMA = {
             "required": False,
             'schema': {
                 'repo_path': {'type': 'string', 'required': True},
+            }
+        },
+        "gcs": {
+            'type': 'dict',
+            "required": False,
+            'schema': {
+                'repo_uri': {'type': 'string', 'required': True},
             }
         }
     },
@@ -110,6 +117,8 @@ class Metadata:
                 self._init_from_s3_snapshot(snapshot)
             elif isinstance(snapshot, FileSystemSnapshot):
                 self._init_from_fs_snapshot(snapshot)
+            elif isinstance(snapshot, GcsSnapshot):
+                self._init_from_gcs_snapshot(snapshot)
 
         if config["from_snapshot"] is not None and "local_dir" in config["from_snapshot"]:
             self._local_dir = config["from_snapshot"]["local_dir"]
@@ -120,6 +129,8 @@ class Metadata:
         if self._snapshot_location == 's3':
             logger.debug(f"S3 URI: {self._s3_uri}")
             logger.debug(f"AWS region: {self._aws_region}")
+        elif self._snapshot_location == 'gcs':
+            logger.debug(f"GCS URI: {self._gcs_uri}")
         else:
             logger.debug(f"Local dir: {self._local_dir}")
 
@@ -127,14 +138,22 @@ class Metadata:
 
     def _init_from_config(self) -> None:
         config = self._config
-        self._snapshot_location = 's3' if 's3' in config["from_snapshot"] else 'fs'
-        self._snapshot_name = config["from_snapshot"]["snapshot_name"]
+        from_snapshot = config["from_snapshot"]
+        if 's3' in from_snapshot:
+            self._snapshot_location = 's3'
+        elif 'gcs' in from_snapshot:
+            self._snapshot_location = 'gcs'
+        else:
+            self._snapshot_location = 'fs'
+        self._snapshot_name = from_snapshot["snapshot_name"]
 
         if self._snapshot_location == 'fs':
-            self._repo_path = config["from_snapshot"]["fs"]["repo_path"]
+            self._repo_path = from_snapshot["fs"]["repo_path"]
+        elif self._snapshot_location == 's3':
+            self._s3_uri = from_snapshot["s3"]["repo_uri"]
+            self._aws_region = from_snapshot["s3"]["aws_region"]
         else:
-            self._s3_uri = config["from_snapshot"]["s3"]["repo_uri"]
-            self._aws_region = config["from_snapshot"]["s3"]["aws_region"]
+            self._gcs_uri = from_snapshot["gcs"]["repo_uri"]
 
     def _init_from_s3_snapshot(self, snapshot: S3Snapshot) -> None:
         self._snapshot_name = snapshot.snapshot_name
@@ -147,6 +166,11 @@ class Metadata:
         self._snapshot_name = snapshot.snapshot_name
         self._snapshot_location = "fs"
         self._repo_path = snapshot.repo_path
+
+    def _init_from_gcs_snapshot(self, snapshot: GcsSnapshot) -> None:
+        self._snapshot_name = snapshot.snapshot_name
+        self._snapshot_location = "gcs"
+        self._gcs_uri = snapshot.gcs_repo_uri
 
     def _append_args(self, commands: Dict[str, Any], args_to_add: List[str]) -> None:
         if args_to_add is None:
@@ -205,9 +229,11 @@ class Metadata:
 
         if self._snapshot_location == 's3':
             self._add_s3_args(command_args=command_args)
+        elif self._snapshot_location == 'gcs':
+            self._add_gcs_args(command_args=command_args)
         elif self._snapshot_location == 'fs':
             command_args.update({
-                "--file-system-repo-path": self._repo_path,
+                "--repo-uri": f"file://{self._repo_path}",
             })
 
         if self._target_cluster.auth_type == AuthMethod.BASIC_AUTH:
@@ -272,11 +298,17 @@ class Metadata:
 
     def _add_s3_args(self, command_args: Dict[str, Any]) -> None:
         command_args.update({
-            "--s3-local-dir": self._local_dir,
-            "--s3-repo-uri": self._s3_uri,
+            "--local-dir": self._local_dir,
+            "--repo-uri": self._s3_uri,
             "--s3-region": self._aws_region,
         })
         if hasattr(self, '_s3_endpoint') and self._s3_endpoint:
             command_args.update({
-                "--s3-endpoint": self._s3_endpoint,
+                "--endpoint": self._s3_endpoint,
             })
+
+    def _add_gcs_args(self, command_args: Dict[str, Any]) -> None:
+        command_args.update({
+            "--local-dir": self._local_dir,
+            "--repo-uri": self._gcs_uri,
+        })
