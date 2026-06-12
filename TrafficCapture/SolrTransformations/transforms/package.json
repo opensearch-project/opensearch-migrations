@@ -18,13 +18,13 @@
     "@typescript-eslint/eslint-plugin": "^8.56.1",
     "@typescript-eslint/parser": "^8.56.1",
     "@typescript/native-preview": "7.0.0-dev.20251210.1",
-    "@vitest/coverage-v8": "^4.0.18",
-    "esbuild": "^0.25.0",
+    "@vitest/coverage-v8": "^4.1.8",
+    "esbuild": "^0.28.1",
     "eslint": "^10.0.2",
     "eslint-config-prettier": "^10.1.8",
     "peggy": "^5.1.0",
     "prettier": "^3.8.1",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.8"
   },
   "optionalDependencies": {
     "@typescript/native-preview-darwin-arm64": "7.0.0-dev.20251210.1",
