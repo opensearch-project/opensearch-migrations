@@ -27,6 +27,9 @@ Then you would run tests via:
     ```
     pipenv run pytest /root/lib/integ_test/integ_test/ma_workflow_test.py --unique_id 12345 --config_file_path "/config/migration_services.yaml" --test_ids "0001" --source_version "SOLR_6.6" --target_version "OS_2.19" --image_registry_prefix "$HOST_IP_FROM_MINIKUBE:5001/"
     ```
+  - workflow reset:
+    - ```workflow reset --all --include-proxies --delete-storage --namespace ma```
+    - ```console clusters clear-indices --cluster target```
 
 Alternatively you can start tests without ssh into the micrationConsole via:
 - from libraries/testAutomation/testAutomation folder (see test_runner.py):  `pipenv run app --test-ids=0001 --source-version=ES_7.10 --target-version=OS_2.19 --registry-prefix [your reachable docker registry ip]:[docker registry port]/`

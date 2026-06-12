@@ -44,7 +44,6 @@ import {getHttpAuthSecretName} from "./commonUtils/clusterSettingManipulators";
 import {getTargetHttpAuthCredsEnvVars, getCoordinatorHttpAuthCredsEnvVars} from "./commonUtils/basicCredsGetters";
 import {K8S_RESOURCE_RETRY_STRATEGY} from "./commonUtils/resourceRetryStrategy";
 import {RfsCoordinatorCluster, getRfsCoordinatorClusterName, makeRfsCoordinatorConfig} from "./rfsCoordinatorCluster";
-import {ResourceManagement} from "./resourceManagement";
 
 function shouldCreateRfsWorkCoordinationCluster(
     documentBackfillConfig: BaseExpression<Serialized<z.infer<typeof ARGO_RFS_OPTIONS>>>

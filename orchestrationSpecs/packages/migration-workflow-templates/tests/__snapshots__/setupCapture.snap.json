@@ -1173,6 +1173,24 @@
           [
             {
               "templateRef": {
+                "template": "waitforuserapproval",
+                "name": "resource-management"
+              },
+              "when": "{{=true && !(steps.reconcileCaptureProxyResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{='captureproxysetup.'+inputs.parameters.proxyName}}"
+                  }
+                ]
+              },
+              "name": "approveProxySetup"
+            }
+          ],
+          [
+            {
+              "templateRef": {
                 "template": "patchcaptureproxypending",
                 "name": "resource-management"
               },

@@ -1130,6 +1130,21 @@
             },
             {
               "name": "imageCoordinatorClusterPullPolicy"
+            },
+            {
+              "name": "skipApprovalMap",
+              "value": "{}",
+              "valueFrom": {
+                "configMapKeyRef": {
+                  "name": "{{workflow.parameters.approvalConfigMapName}}",
+                  "key": "autoApprove",
+                  "optional": true
+                }
+              }
+            },
+            {
+              "name": "skipDocumentBackfillApproval",
+              "value": "{{=sprig.dig(inputs.parameters.sourceLabel, fromJSON(inputs.parameters.targetConfig)['label'], jsonpath(inputs.parameters.snapshotConfig, '$.label'), inputs.parameters.migrationLabel, 'documentBackfill', false, fromJSON(inputs.parameters.skipApprovalMap))}}"
             }
           ]
         },
@@ -1196,12 +1211,34 @@
                     "value": "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
                   },
                   {
+                    "name": "skipApprovalMap",
+                    "value": "{{inputs.parameters.skipApprovalMap}}"
+                  },
+                  {
                     "name": "crdUid",
                     "value": "{{inputs.parameters.resourceUid}}"
                   }
                 ]
               },
               "name": "metadataMigrate"
+            }
+          ],
+          [
+            {
+              "templateRef": {
+                "template": "approvebackfill",
+                "name": "document-bulk-load"
+              },
+              "when": "{{=!(0 == len(inputs.parameters.documentBackfillConfig)) && !(inputs.parameters.skipDocumentBackfillApproval)}}",
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "name",
+                    "value": "{{='documentbackfill.'+inputs.parameters.crdName}}"
+                  }
+                ]
+              },
+              "name": "approveBackfill"
             }
           ],
           [
