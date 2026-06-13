@@ -221,7 +221,7 @@ sourceClusters:
       #s3RepoPathUri: string
     proxy:
       #loggingConfigurationOverrideConfigMap: string
-      #otelCollectorEndpoint: http://otel-collector:4317
+      #otelMetricsCollectorEndpoint: http://otel-collector:4317
 targetClusters:
   <NAME>:
 ...

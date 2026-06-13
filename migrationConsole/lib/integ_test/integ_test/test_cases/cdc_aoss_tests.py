@@ -95,7 +95,7 @@ class Test0034CdcOnlyAossTarget(MATestBase):
         logger.info("Waiting for capture-proxy service to be ready...")
         wait_for_proxy_ready(self.argo_service.namespace)
         logger.info("Waiting for replayer to join Kafka consumer group...")
-        wait_for_replayer_consuming(namespace=self.argo_service.namespace)
+        wait_for_replayer_consuming(namespace=self.argo_service.namespace, workflow_name=self.workflow_name)
         log_kafka_consumer_group_state(label="replay-start")
 
         logger.info("Generating %d docs via proxy for AOSS target...", self.CDC_NUM_DOCS)
@@ -208,7 +208,7 @@ class Test0041CdcFullE2eAossTarget(MATestBase):
 
         # --- Wait for replayer (signals backfill done) ---
         logger.info("Waiting for replayer to join Kafka consumer group...")
-        wait_for_replayer_consuming(namespace=ns)
+        wait_for_replayer_consuming(namespace=ns, workflow_name=self.workflow_name)
         log_kafka_consumer_group_state(label="replay-start")
 
         # --- Post-snapshot: bulk into idx_post through proxy ---

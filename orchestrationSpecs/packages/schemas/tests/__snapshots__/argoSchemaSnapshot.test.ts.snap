@@ -308,6 +308,35 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                                             "default": "",
                                             "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                                           },
+                                          "otelTraceCollectorEndpoint": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "enum": [
+                                                  ""
+                                                ]
+                                              },
+                                              {
+                                                "type": "string"
+                                              }
+                                            ],
+                                            "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                          },
+                                          "otelMetricsCollectorEndpoint": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "enum": [
+                                                  ""
+                                                ]
+                                              },
+                                              {
+                                                "type": "string"
+                                              }
+                                            ],
+                                            "default": "http://otel-collector:4317",
+                                            "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                          },
                                           "indexAllowlist": {
                                             "type": "array",
                                             "items": {
@@ -586,9 +615,34 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       ],
                       "description": "Kubernetes resource limits and requests for the capture proxy container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                     },
-                    "otelCollectorEndpoint": {
-                      "type": "string",
-                      "default": "http://otel-collector:4317"
+                    "otelTraceCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                    },
+                    "otelMetricsCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "default": "http://otel-collector:4317",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                     },
                     "setHeader": {
                       "type": "array",
@@ -1096,6 +1150,35 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                             "type": "string",
                             "default": ""
                           },
+                          "otelTraceCollectorEndpoint": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  ""
+                                ]
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ],
+                            "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                          },
+                          "otelMetricsCollectorEndpoint": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  ""
+                                ]
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ],
+                            "default": "http://otel-collector:4317",
+                            "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                          },
                           "indexAllowlist": {
                             "type": "array",
                             "items": {
@@ -1411,9 +1494,34 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 1
                     },
-                    "otelCollectorEndpoint": {
-                      "type": "string",
-                      "default": "http://otel-collector:4317"
+                    "otelTraceCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                    },
+                    "otelMetricsCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "default": "http://otel-collector:4317",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                     },
                     "output": {
                       "type": "string",
@@ -1678,9 +1786,34 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 85899345920
                     },
-                    "otelCollectorEndpoint": {
-                      "type": "string",
-                      "default": "http://otel-collector:4317"
+                    "otelTraceCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                    },
+                    "otelMetricsCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "default": "http://otel-collector:4317",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                     },
                     "serverGeneratedIds": {
                       "type": "string",
@@ -2297,9 +2430,34 @@ exports[`test schemas matches expected argo schema matches expected 1`] = `
                       "type": "number",
                       "default": 360
                     },
-                    "otelCollectorEndpoint": {
-                      "type": "string",
-                      "default": "http://otel-collector:4317"
+                    "otelTraceCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                    },
+                    "otelMetricsCollectorEndpoint": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            ""
+                          ]
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "default": "http://otel-collector:4317",
+                      "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                     },
                     "quiescentPeriodMs": {
                       "type": "number",
@@ -2954,6 +3112,35 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                                   "default": "",
                                   "description": "Name of a Kubernetes ConfigMap containing a custom Log4j2 properties configuration. The ConfigMap should have a single key whose value is the Log4j2 properties file content. When set, it is mounted into the container and passed via -Dlog4j2.configurationFile. See https://logging.apache.org/log4j/2.x/manual/configuration.html#properties for format reference."
                                 },
+                                "otelTraceCollectorEndpoint": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        ""
+                                      ]
+                                    },
+                                    {
+                                      "type": "string"
+                                    }
+                                  ],
+                                  "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                                },
+                                "otelMetricsCollectorEndpoint": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        ""
+                                      ]
+                                    },
+                                    {
+                                      "type": "string"
+                                    }
+                                  ],
+                                  "default": "http://otel-collector:4317",
+                                  "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
+                                },
                                 "indexAllowlist": {
                                   "type": "array",
                                   "items": {
@@ -3209,10 +3396,34 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "default": 1,
                         "description": "Number of shard allocation awareness attributes to preserve during metadata migration. Controls how index settings related to cluster topology are handled."
                       },
-                      "otelCollectorEndpoint": {
-                        "type": "string",
+                      "otelTraceCollectorEndpoint": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              ""
+                            ]
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ],
+                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                      },
+                      "otelMetricsCollectorEndpoint": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              ""
+                            ]
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ],
                         "default": "http://otel-collector:4317",
-                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
+                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                       },
                       "output": {
                         "type": "string",
@@ -4074,10 +4285,34 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                         "description": "Expected maximum shard size in bytes. Used to auto-calculate ephemeral storage requirements as ceil(2.5 * maxShardSizeBytes). Set this to match your largest shard to ensure sufficient disk space for Lucene segment processing.",
                         "changeRestriction": "gated"
                       },
-                      "otelCollectorEndpoint": {
-                        "type": "string",
+                      "otelTraceCollectorEndpoint": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              ""
+                            ]
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ],
+                        "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                      },
+                      "otelMetricsCollectorEndpoint": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              ""
+                            ]
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ],
                         "default": "http://otel-collector:4317",
-                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
+                        "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                       },
                       "serverGeneratedIds": {
                         "type": "string",
@@ -4295,10 +4530,34 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     ],
                     "description": "Kubernetes resource limits and requests for the capture proxy container. Partial overrides are deep-merged with the built-in defaults. By default, limits equal requests, giving the pod 'Guaranteed' QoS (least likely to be evicted). Setting requests lower than limits results in 'Burstable' QoS, allowing the pod to use less resources when idle but burst up to the limit."
                   },
-                  "otelCollectorEndpoint": {
-                    "type": "string",
+                  "otelTraceCollectorEndpoint": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          ""
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ],
+                    "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                  },
+                  "otelMetricsCollectorEndpoint": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          ""
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ],
                     "default": "http://otel-collector:4317",
-                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
+                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                   },
                   "setHeader": {
                     "type": "array",
@@ -4836,10 +5095,34 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "default": 360,
                     "description": "Seconds of inactivity on a captured connection before assuming it was terminated in the original traffic stream. Must be strictly less than lookaheadTimeSeconds."
                   },
-                  "otelCollectorEndpoint": {
-                    "type": "string",
+                  "otelTraceCollectorEndpoint": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          ""
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ],
+                    "description": "URL for the OpenTelemetry Collector endpoint used for traces (e.g. 'http://otel-trace-collector:4317'). Omit to disable trace export."
+                  },
+                  "otelMetricsCollectorEndpoint": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          ""
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ],
                     "default": "http://otel-collector:4317",
-                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics and traces (e.g. 'http://otel-collector:4317')."
+                    "description": "URL for the OpenTelemetry Collector endpoint used for metrics (e.g. 'http://otel-collector:4317'). Set to an empty string to disable metric export."
                   },
                   "quiescentPeriodMs": {
                     "type": "number",

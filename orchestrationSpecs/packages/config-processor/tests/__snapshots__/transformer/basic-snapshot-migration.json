@@ -48,8 +48,7 @@
             "allowLooseVersionMatching": true,
             "clusterAwarenessAttributes": 1,
             "loggingConfigurationOverrideConfigMap": "",
-            "multiTypeBehavior": "NONE",
-            "otelCollectorEndpoint": "http://otel-collector:4317",
+            "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
             "output": "HUMAN_READABLE",
             "transformerConfigBase64": ""
           },
@@ -63,7 +62,7 @@
             "initialLeaseDuration": "PT10M",
             "maxConnections": 4,
             "maxShardSizeBytes": 85899345920,
-            "otelCollectorEndpoint": "http://otel-collector:4317",
+            "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
             "resources": {
               "limits": {
                 "cpu": "2000m",
