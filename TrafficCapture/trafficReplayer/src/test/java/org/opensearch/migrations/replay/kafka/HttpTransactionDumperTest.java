@@ -17,18 +17,15 @@ import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumula
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.testutils.TrafficStreamFixtures;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
-import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
-import org.opensearch.migrations.trafficcapture.protos.ConnectObservation;
-import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
@@ -66,21 +63,12 @@ class HttpTransactionDumperTest {
         var baos = new ByteArrayOutputStream();
         var dumper = new HttpTransactionDumper(new PrintStream(baos));
 
-        var ts = TrafficStream.newBuilder()
-            .setNodeId("node1").setConnectionId("conn1").setNumber(0)
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(100))
-                .setConnect(ConnectObservation.newBuilder()))
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(101))
-                .setRead(ReadObservation.newBuilder()
-                    .setData(ByteString.copyFrom("GET /_cat/indices HTTP/1.1\r\nHost: localhost\r\n\r\n", StandardCharsets.UTF_8))))
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(102))
-                .setEndOfMessageIndicator(EndOfMessageIndication.newBuilder()))
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(103))
-                .setWrite(WriteObservation.newBuilder()
-                    .setData(ByteString.copyFrom("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n", StandardCharsets.UTF_8))))
-            .addSubStream(TrafficObservation.newBuilder().setTs(ts(104))
-                .setClose(CloseObservation.newBuilder()))
-            .build();
+        var ts = TrafficStreamFixtures.makeHttpRequestResponseTrafficStream(
+            "node1",
+            "conn1",
+            "GET /_cat/indices HTTP/1.1\r\nHost: localhost\r\n\r\n",
+            "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+        );
 
         var accumulator = new CapturedTrafficToHttpTransactionAccumulator(
             Duration.ofSeconds(30), "test", dumper);

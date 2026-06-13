@@ -4,11 +4,21 @@ plugins {
     id 'io.freefair.lombok'
 }
 
+configurations {
+    // Make a different configuration slot to add dependencies to (see below)
+    byocFixtureGenerator
+}
+
 dependencies {
     implementation project(':TrafficCapture:captureKafkaOffloader')
     implementation libs.jcommander
     implementation libs.kafka.clients
     implementation libs.slf4j.api
+
+    byocFixtureGenerator testFixtures(project(':testHelperFixtures'))
+    testImplementation testFixtures(project(':testHelperFixtures'))
+    testImplementation libs.junit.jupiter.api
+    testRuntimeOnly libs.junit.jupiter.engine
 }
 
 tasks.withType(Tar){
@@ -22,4 +32,13 @@ tasks.withType(Zip){
 application {
     // Define the main class for the application.
     mainClass = 'org.opensearch.migrations.utils.kafka.KafkaLoaderFromFile'
+}
+
+tasks.register('generateByocPutTrafficFixture', JavaExec) {
+    classpath = configurations.byocFixtureGenerator
+    mainClass = 'org.opensearch.migrations.testutils.TrafficStreamFixtures'
+
+    def outputFile = layout.buildDirectory.file("byoc-fixtures/byoc-put.proto.gz")
+    outputs.file(outputFile)
+    args outputFile.get().asFile.absolutePath
 }

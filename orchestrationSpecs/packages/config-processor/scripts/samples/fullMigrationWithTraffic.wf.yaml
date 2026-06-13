@@ -56,5 +56,5 @@ traffic:
         listenPort: 9201
   replayers:
     replay1:
-      fromProxy: "capture-proxy"
+      fromCapturedTraffic: "capture-proxy"
       toTarget: "target"

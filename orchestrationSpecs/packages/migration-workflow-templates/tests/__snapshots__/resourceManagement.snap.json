@@ -90,11 +90,19 @@
             },
             {
               "name": "topicConfig"
+            },
+            {
+              "name": "sourceKind",
+              "value": "proxy"
+            },
+            {
+              "name": "s3SourceUri",
+              "value": ""
             }
           ]
         },
         "resource": {
-          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.topicCrName}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{workflow.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceLabel}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.kafkaClusterName}}\"\nspec:\n  dependsOn:\n    - \"{{inputs.parameters.kafkaClusterName}}\"\n  kafkaClusterName: \"{{inputs.parameters.kafkaClusterName}}\"\n  topicName: \"{{inputs.parameters.kafkaTopicName}}\"\n  partitions: {{inputs.parameters.partitions}}\n  replicas: {{inputs.parameters.replicas}}\n  topicConfig: {{=fromJSON(inputs.parameters.topicConfig)}}\n",
+          "manifest": "apiVersion: migrations.opensearch.org/v1alpha1\nkind: CapturedTraffic\nmetadata:\n  name: \"{{inputs.parameters.topicCrName}}\"\n  labels:\n    workflows.argoproj.io/workflow: \"{{workflow.name}}\"\n    migrations.opensearch.org/run-number: \"{{workflow.parameters.migrationRunNumber}}\"\n    migrations.opensearch.org/source: \"{{inputs.parameters.sourceLabel}}\"\n    migrations.opensearch.org/kafka-cluster: \"{{inputs.parameters.kafkaClusterName}}\"\nspec:\n  dependsOn:\n    - \"{{inputs.parameters.kafkaClusterName}}\"\n  kafkaClusterName: \"{{inputs.parameters.kafkaClusterName}}\"\n  topicName: \"{{inputs.parameters.kafkaTopicName}}\"\n  partitions: {{inputs.parameters.partitions}}\n  replicas: {{inputs.parameters.replicas}}\n  topicConfig: {{=fromJSON(inputs.parameters.topicConfig)}}\n  sourceKind: \"{{inputs.parameters.sourceKind}}\"\n  s3SourceUri: \"{{inputs.parameters.s3SourceUri}}\"\n  loadStarted: true\n",
           "action": "apply",
           "setOwnerReference": false
         },
@@ -777,6 +785,14 @@
             {
               "name": "retryGroupName_view",
               "value": "Apply"
+            },
+            {
+              "name": "sourceKind",
+              "value": "proxy"
+            },
+            {
+              "name": "s3SourceUri",
+              "value": ""
             }
           ]
         },
@@ -813,6 +829,14 @@
                   {
                     "name": "topicConfig",
                     "value": "{{inputs.parameters.topicConfig}}"
+                  },
+                  {
+                    "name": "sourceKind",
+                    "value": "{{inputs.parameters.sourceKind}}"
+                  },
+                  {
+                    "name": "s3SourceUri",
+                    "value": "{{inputs.parameters.s3SourceUri}}"
                   }
                 ]
               },
@@ -931,6 +955,14 @@
                   {
                     "name": "topicConfig",
                     "value": "{{inputs.parameters.topicConfig}}"
+                  },
+                  {
+                    "name": "sourceKind",
+                    "value": "{{inputs.parameters.sourceKind}}"
+                  },
+                  {
+                    "name": "s3SourceUri",
+                    "value": "{{inputs.parameters.s3SourceUri}}"
                   },
                   {
                     "name": "configChecksum",

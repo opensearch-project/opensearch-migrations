@@ -30,7 +30,7 @@
     },
     "replayers": {
       "replayer": {
-        "fromProxy": "proxy",
+        "fromCapturedTraffic": "proxy",
         "toTarget": "target"
       }
     }

@@ -19,6 +19,8 @@ plugins {
 }
 
 dependencies {
+    testFixturesApi project(':TrafficCapture:captureProtobufs')
+
     testFixturesImplementation libs.jackson.databind
     testFixturesImplementation libs.guava
     testFixturesImplementation libs.toxiproxy

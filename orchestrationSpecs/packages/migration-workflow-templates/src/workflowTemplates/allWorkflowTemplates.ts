@@ -9,6 +9,7 @@ import {MigrationConsole} from "./migrationConsole";
 import {Replayer} from "./replayer";
 import {ResourceManagement} from "./resourceManagement";
 import {RfsCoordinatorCluster} from "./rfsCoordinatorCluster";
+import {S3TrafficLoader} from "./s3TrafficLoader";
 import {SetupKafka} from "./setupKafka";
 import {SetupCapture} from "./setupCapture";
 
@@ -23,6 +24,7 @@ export const AllWorkflowTemplates = [
     Replayer,
     ResourceManagement,
     RfsCoordinatorCluster,
+    S3TrafficLoader,
     SetupCapture,
     SetupKafka,
     TestMigrationWithWorkflowCli,
