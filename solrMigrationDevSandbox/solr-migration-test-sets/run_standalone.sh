@@ -433,7 +433,9 @@ s3_upload() {
                 continue
             fi
             echo "  $snap -> ${s3_base}/${name}"
-            "$AWS_CLI" s3 sync "$snap" "${s3_base}/${name}"
+            # --delete: mirror exactly, removing stale objects already in S3 that
+            # are no longer in the local snapshot dir.
+            "$AWS_CLI" s3 sync --delete "$snap" "${s3_base}/${name}"
         done
     done
 }

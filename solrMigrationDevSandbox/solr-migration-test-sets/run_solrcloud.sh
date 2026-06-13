@@ -9,8 +9,7 @@
 #   4. backs up the collection via the Collections API into ./backups/solrcloud/<name>
 #      (SolrCloud BACKUP already writes the layout Migration Assistant expects — no
 #      manual reshape needed, unlike the standalone path)
-#   5. (v8) also takes the doc's extra per-replica replication backup of shard3
-#   6. (v9) also produces a single-segment (optimized) backup
+#   5. (v9) also produces a single-segment (optimized) backup
 #
 # Before running the versions it (optionally) clones + installs solr-orbit and
 # solr-orbit-workloads, pointing solr-orbit at the local workloads clone.
@@ -258,6 +257,12 @@ wait_for_cluster() {
 
 create_collection() {
     local version="$1" cfg="nyc_taxis_${version}"
+    # Delete any pre-existing nyc_taxis collection first so re-runs start clean
+    # (create_collection fails if the collection already exists). Ignore errors —
+    # on a fresh cluster there's nothing to delete.
+    log "Deleting existing collection nyc_taxis (if present)"
+    curl -fsS "${SOLR_URL}/solr/admin/collections?action=DELETE&name=nyc_taxis&wt=json" >/dev/null 2>&1 \
+        || warn "no existing nyc_taxis collection to delete (or DELETE failed)"
     log "Creating collection nyc_taxis from ./solr_configsets/${cfg}/conf (3 shards, RF1)"
     docker cp "./solr_configsets/${cfg}/conf" "solr-node1:/tmp/${cfg}"
     docker exec solr-node1 solr create_collection \
@@ -318,33 +323,6 @@ backup_collection() {
     warn "backup ${BACKUP_BASE}/${name} did not produce a backup properties file in time"
 }
 
-# v8 only: the doc's extra per-replica replication-handler backup of shard3.
-# The doc hard-codes core name + node; we discover them so it survives any layout.
-backup_v8_extra() {
-    log "v8 extra: per-replica replication backup of shard3 (best-effort, per doc)"
-    local info parsed core port
-    info="$(curl -fsS "${SOLR_URL}/solr/admin/collections?action=CLUSTERSTATUS&collection=nyc_taxis&wt=json" 2>/dev/null)" \
-        || { warn "CLUSTERSTATUS failed; skipping v8 extra"; return; }
-    parsed="$(printf '%s' "$info" | python3 -c '
-import json, re, sys
-d = json.load(sys.stdin)
-reps = d["cluster"]["collections"]["nyc_taxis"]["shards"]["shard3"]["replicas"]
-r = next(iter(reps.values()))
-m = re.search(r":(\d+)/solr", r.get("base_url", ""))
-print(r.get("core", ""), m.group(1) if m else "")
-' 2>/dev/null)" || { warn "could not parse shard3 replica; skipping v8 extra"; return; }
-    core="${parsed%% *}"; port="${parsed##* }"
-    [[ -n "$core" && -n "$port" ]] || { warn "shard3 replica core/port not found; skipping v8 extra"; return; }
-    # Replication backup adds the `snapshot.` prefix; clear any prior one for a clean
-    # re-run (from inside the container to avoid the bind-mount propagation race).
-    docker exec solr-node1 rm -rf "/backups/solrcloud/snapshot.main-snapshot" 2>/dev/null || true
-    if curl -fsS "http://localhost:${port}/solr/${core}/replication?command=backup&location=/backups/solrcloud/&name=main-snapshot&wt=json" >/dev/null; then
-        echo "v8 extra replica backup 'main-snapshot' triggered (core=${core}, port=${port})"
-    else
-        warn "v8 extra replica backup failed"
-    fi
-}
-
 # ---------------------------------------------------------------------------
 # Per-version driver
 # ---------------------------------------------------------------------------
@@ -356,10 +334,6 @@ run_version() {
     create_collection "$version"
     run_orbit
     backup_collection "nyc_taxis_${version}"
-
-    if [[ "$version" == "8" ]]; then
-        backup_v8_extra
-    fi
 
     if [[ "$version" == "9" ]]; then
         # v9: also produce a single-segment (optimized) backup.
@@ -379,7 +353,6 @@ version_backups() {
     local v="$1"
     echo "nyc_taxis_${v}"
     case "$v" in
-        8) echo "snapshot.main-snapshot" ;;  # v8 extra per-replica backup
         9) echo "nyc_taxis_9_onesegment" ;;  # v9 single-segment backup
     esac
 }
@@ -400,7 +373,9 @@ s3_upload() {
                 continue
             fi
             echo "  $snap -> ${s3_base}/${name}"
-            "$AWS_CLI" s3 sync "$snap" "${s3_base}/${name}"
+            # --delete: mirror exactly, removing stale objects (e.g. older backup
+            # revisions) already in S3 that are no longer in the local backup dir.
+            "$AWS_CLI" s3 sync --delete "$snap" "${s3_base}/${name}"
         done
     done
 }
