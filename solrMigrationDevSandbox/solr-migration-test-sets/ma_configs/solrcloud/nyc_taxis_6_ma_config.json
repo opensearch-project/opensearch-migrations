@@ -1,4 +1,5 @@
 {
+    "skipApprovals": true,
     "sourceClusters": {
       "source": {
         "endpoint": "http://chorus.dev.o19s.com:8983",

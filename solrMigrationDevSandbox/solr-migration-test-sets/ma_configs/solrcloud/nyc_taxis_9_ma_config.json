@@ -3,7 +3,7 @@
     "sourceClusters": {
       "source": {
         "endpoint": "http://chorus.dev.o19s.com:8983",
-        "version": "SOLR 7.7.3",
+        "version": "SOLR 9.10.0",
         "snapshotInfo": {
           "repos": {
             "migration-repo": {
@@ -15,7 +15,7 @@
             "main-snapshot": {
               "repoName": "migration-repo",
               "config": {
-                "externallyManagedSnapshotName": "nyc_taxis_7"
+                "externallyManagedSnapshotName": "nyc_taxis_9"
               }
             }
           }

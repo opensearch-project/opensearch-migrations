@@ -7,8 +7,9 @@
 #   2. creates the `nyc_taxis` collection (3 shards, RF1) from ./solr_configsets/nyc_taxis_<v>/conf
 #   3. runs solr-orbit to load data
 #   4. backs up the collection via the Collections API into ./backups/solrcloud/<name>
-#      (SolrCloud BACKUP already writes the layout Migration Assistant expects — no
-#      manual reshape needed, unlike the standalone path)
+#      (v8/v9 incremental BACKUP already writes the <name>/<collection>/ layout MA
+#      expects; v6/v7 non-incremental BACKUP omits the <collection>/ level, so it is
+#      reshaped into ./backups/solrcloud/<name>/nyc_taxis/ — see reshape_solrcloud_collection)
 #   5. (v9) also produces a single-segment (optimized) backup
 #
 # Before running the versions it (optionally) clones + installs solr-orbit and
@@ -323,6 +324,35 @@ backup_collection() {
     warn "backup ${BACKUP_BASE}/${name} did not produce a backup properties file in time"
 }
 
+# v6/v7 only: nest the backup under a `nyc_taxis/` collection directory.
+#
+# The Solr 6/7 (non-incremental) SolrCloud BACKUP writes the collection's backup
+# contents (backup.properties, zk_backup/, snapshot.shardN/) DIRECTLY under
+# <backupName>/, with no collection-name subdirectory. Migration Assistant's
+# collection discovery expects <snapshotRoot>/<collection>/<shards...> (the
+# directory name becomes the OpenSearch index name), so without this nesting MA
+# mistakes each snapshot.shardN/ for a separate collection. Solr 8.9+ incremental
+# backups already write this extra <collection>/ level, so v8/v9 need no reshape.
+#
+# Run this after the cluster is down so we're not racing Solr's view of the mount.
+reshape_solrcloud_collection() {
+    local version="$1"
+    local dir="${BACKUP_BASE}/nyc_taxis_${version}"
+    local coll="${dir}/nyc_taxis"
+    [[ -d "$dir" ]] || { warn "backup dir ${dir} not found; skipping reshape"; return; }
+    # Idempotent: if the contents are already nested (e.g. a re-run), do nothing.
+    if [[ -f "${coll}/backup.properties" ]]; then
+        log "v${version}: backup already nested under nyc_taxis/; skipping reshape"
+        return
+    fi
+    log "v${version}: nesting backup under ${coll}/ for the MA collection layout"
+    mkdir -p "$coll"
+    # Move every top-level entry (backup.properties, zk_backup/, snapshot.shardN/)
+    # into the new collection dir, except the collection dir itself.
+    find "$dir" -maxdepth 1 -mindepth 1 ! -name nyc_taxis \
+        -exec mv {} "$coll/" \;
+}
+
 # ---------------------------------------------------------------------------
 # Per-version driver
 # ---------------------------------------------------------------------------
@@ -343,6 +373,11 @@ run_version() {
     fi
 
     compose_down "$version"
+
+    # v6/v7 non-incremental backups lack the collection-name directory MA expects.
+    if [[ "$version" == "6" || "$version" == "7" ]]; then
+        reshape_solrcloud_collection "$version"
+    fi
 }
 
 # ---------------------------------------------------------------------------
