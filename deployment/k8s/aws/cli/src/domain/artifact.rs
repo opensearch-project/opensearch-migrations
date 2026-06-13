@@ -137,8 +137,8 @@ docker buildx rm "$BUILDER_NAME" >/dev/null 2>&1 || true
 /// Shell block (run via `bash -c`) that mirrors the third-party images + helm
 /// charts into the private ECR and writes a private-ECR helm values override to
 /// `values_out`:
-/// it sources the chart's own `privateEcrManifest.sh` (the IMAGES/CHARTS lists),
-/// `mirrorToEcr.sh` (`mirror_images_to_ecr`/`mirror_charts_to_ecr`), and
+/// it sources the chart's own `mirrorToEcr.sh`
+/// (`load_private_ecr_manifest`/`mirror_images_to_ecr`/`mirror_charts_to_ecr`) and
 /// `generatePrivateEcrValues.sh` (`generate_private_ecr_values`) — the proven
 /// scripts vendored in the chart — rather than reimplementing them in Rust.
 ///
@@ -155,9 +155,9 @@ pub fn mirror_to_ecr_script(
 ) -> String {
     format!(
         r#"set -euo pipefail
-. "{scripts_dir}/privateEcrManifest.sh"
 . "{scripts_dir}/mirrorToEcr.sh"
 . "{scripts_dir}/generatePrivateEcrValues.sh"
+load_private_ecr_manifest "{scripts_dir}/../infra/mirror/private-ecr-manifest.yaml"
 echo "Mirroring third-party images to private ECR ({ecr_host}) ..."
 mirror_images_to_ecr "{ecr_host}" "{region}" "$IMAGES"
 echo "Mirroring helm charts to private ECR ..."

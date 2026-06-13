@@ -50,7 +50,7 @@ In an AWS deployment, the Shared Logs Volume is an EFS volume that's mounted to 
 
 #### Cloudwatch Metrics
 
-The various services making up the Migration Assistant emit metrics and traces via an OpenTelemetry Collector to the configured metrics provider. In an AWS deployment, that's Cloudwatch & X-Ray, and in a Docker deployment it's Prometheus and Jaeger. The Migration Console contains basic functionality to query the metrics, and supports both the AWS and Docker deployment sources.
+The various services making up the Migration Assistant emit metrics and, when explicitly enabled, traces via OpenTelemetry Collector endpoints. In an AWS deployment, metrics go to CloudWatch and opt-in traces go to X-Ray; in a Docker deployment, metrics use Prometheus and opt-in traces can use Jaeger. The Migration Console contains basic functionality to query the metrics, and supports both the AWS and Docker deployment sources.
 
 ## Library Architecture and Interface
 

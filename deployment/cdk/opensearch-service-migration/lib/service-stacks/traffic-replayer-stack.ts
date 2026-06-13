@@ -34,7 +34,8 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly userAgentSuffix?: string,
     readonly extraArgs?: string,
     readonly jvmArgs?: string,
-    readonly otelCollectorEnabled: boolean,
+    readonly otelMetricsCollectorEnabled: boolean,
+    readonly otelTraceCollectorEnabled: boolean,
     readonly maxUptime?: Duration
 }
 
@@ -114,8 +115,11 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             const sigv4AuthHeaderServiceRegion = `${props.clusterAuthDetails.sigv4.serviceSigningName},${props.clusterAuthDetails.sigv4.region}`
             appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--sigv4-auth-header-service-region", sigv4AuthHeaderServiceRegion)
         }
-        if (props.otelCollectorEnabled) {
-            appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--otelCollectorEndpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
+        if (props.otelTraceCollectorEnabled) {
+            appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--otelTraceCollectorEndpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
+        }
+        if (props.otelMetricsCollectorEnabled) {
+            appendArgArrayIfNotInExtraArgs(commandArgs, extraArgsDict, "--otelMetricsCollectorEndpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
         }
         commandArgs.push(...parseArgsStringToArray(props.extraArgs))
 

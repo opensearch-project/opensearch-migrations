@@ -19,7 +19,8 @@ export class OtelCollectorSidecar {
         return "http://localhost:" + OtelCollectorSidecar.OTEL_CONTAINER_PORT;
     }
 
-    static addOtelCollectorContainer(taskDefinition: TaskDefinition, logGroupPrefix: string, stage: string) {
+    static addOtelCollectorContainer(taskDefinition: TaskDefinition, logGroupPrefix: string, stage: string,
+                                     traceCollectorEnabled = false) {
         const otelCollectorPort: PortMapping = {
             name: "otel-collector-connect",
             hostPort: this.OTEL_CONTAINER_PORT,
@@ -42,7 +43,9 @@ export class OtelCollectorSidecar {
         const otelCollectorContainer = taskDefinition.addContainer("OtelCollectorContainer", {
             image: makeLocalAssetContainerImage(taskDefinition.stack, "migrations/otel_collector:latest"),
             containerName: "otel-collector",
-            command: ["--config=/etc/otel-config-aws.yaml"],
+            command: [
+                `--config=/etc/${traceCollectorEnabled ? "otel-config-aws.yaml" : "otel-config-aws-metrics.yaml"}`
+            ],
             portMappings: [otelCollectorPort, otelCollectorHealthcheckPort],
             logging: LogDrivers.awsLogs({
                 streamPrefix: "otel-collector-logs",
@@ -51,7 +54,7 @@ export class OtelCollectorSidecar {
             }),
             environment: {
                 "QUALIFIER": stage,
-                "TRACE_SAMPLING_PERCENTAGE": "1"
+                ...(traceCollectorEnabled ? {"TRACE_SAMPLING_PERCENTAGE": "1"} : {})
             },
             essential: true,
             healthCheck: {
@@ -62,7 +65,7 @@ export class OtelCollectorSidecar {
                 startPeriod: Duration.seconds(5),
             }
         });
-        taskDefinition.addToTaskRolePolicy(createAwsDistroForOtelPushInstrumentationPolicy());
+        taskDefinition.addToTaskRolePolicy(createAwsDistroForOtelPushInstrumentationPolicy(traceCollectorEnabled));
         taskDefinition.defaultContainer?.addContainerDependencies({
             container: otelCollectorContainer,
             condition: ContainerDependencyCondition.HEALTHY

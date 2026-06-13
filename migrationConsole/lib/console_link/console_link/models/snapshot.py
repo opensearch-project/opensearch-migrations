@@ -49,7 +49,8 @@ SNAPSHOT_SCHEMA = {
         'schema': {
             'snapshot_name': {'type': 'string', 'required': True},
             'snapshot_repo_name': {'type': 'string', 'required': False},
-            'otel_endpoint': {'type': 'string', 'required': False},
+            'otel_trace_endpoint': {'type': 'string', 'required': False},
+            'otel_metrics_endpoint': {'type': 'string', 'required': False},
             's3': {
                 'type': 'dict',
                 'schema': {
@@ -84,7 +85,8 @@ class Snapshot(ABC):
             raise ValueError("Invalid config file for snapshot", v.errors)
         self.snapshot_name = config['snapshot_name']
         self.snapshot_repo_name = config.get("snapshot_repo_name", DEFAULT_SNAPSHOT_REPO_NAME)
-        self.otel_endpoint = config.get("otel_endpoint", None)
+        self.otel_trace_endpoint = config.get("otel_trace_endpoint", None)
+        self.otel_metrics_endpoint = config.get("otel_metrics_endpoint", None)
 
     @abstractmethod
     def create(self, *args, **kwargs) -> str:
@@ -186,8 +188,10 @@ class Snapshot(ABC):
         if self.source_cluster.allow_insecure:
             command_args["--source-insecure"] = None
 
-        if self.otel_endpoint:
-            command_args["--otel-collector-endpoint"] = self.otel_endpoint
+        if self.otel_trace_endpoint:
+            command_args["--otel-trace-collector-endpoint"] = self.otel_trace_endpoint
+        if self.otel_metrics_endpoint:
+            command_args["--otel-metrics-collector-endpoint"] = self.otel_metrics_endpoint
 
         return command_args
 

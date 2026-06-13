@@ -302,7 +302,7 @@ traffic:
     return base64.b64encode(config_yaml.encode("utf-8")).decode("ascii")
 
 
-class Test0050ByocCapturedTrafficS3Replay(MATestBase):
+class Test0060ByocCapturedTrafficS3Replay(MATestBase):
     requires_explicit_selection = True
 
     def __init__(self, user_args: MATestUserArguments):

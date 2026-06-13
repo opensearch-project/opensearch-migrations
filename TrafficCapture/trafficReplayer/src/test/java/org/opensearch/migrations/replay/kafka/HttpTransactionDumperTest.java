@@ -21,6 +21,7 @@ import org.opensearch.migrations.testutils.TrafficStreamFixtures;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.OtelCollectorEndpoints;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
@@ -36,7 +37,7 @@ import org.junit.jupiter.api.Test;
 class HttpTransactionDumperTest {
 
     private static final RootReplayerContext ROOT_CONTEXT = new RootReplayerContext(
-        RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(null, "test", "test"),
+        RootOtelContext.initializeOpenTelemetryWithCollectorsOrAsNoop(OtelCollectorEndpoints.empty(), "test", "test"),
         new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
     );
 

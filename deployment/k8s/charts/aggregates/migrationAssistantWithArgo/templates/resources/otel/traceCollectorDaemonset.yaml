@@ -1,0 +1,84 @@
+{{- if .Values.tracing.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: otel-trace-collector
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: otel-trace-collector
+spec:
+  selector:
+    matchLabels:
+      app: otel-trace-collector
+  template:
+    metadata:
+      labels:
+        app: otel-trace-collector
+    spec:
+      serviceAccountName: {{ .Values.otelConfiguration.serviceAccountName }}
+      containers:
+        - name: otel-trace-collector
+          image: {{ .Values.otelCollectorImage }}
+          env:
+            - name: TRACE_SAMPLING_PERCENTAGE
+              value: {{ .Values.tracing.samplingPercentage | quote }}
+{{- if .Values.tracing.env }}
+{{ toYaml .Values.tracing.env | indent 12 }}
+{{- end }}
+          args:
+            - "--config=/etc/otel/collector.yaml"
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+            - name: health
+              containerPort: 13133
+          resources:
+{{ toYaml .Values.tracing.collectorResources | indent 12 }}
+          volumeMounts:
+            - name: otel-trace-collector-config
+              mountPath: /etc/otel/
+      tolerations:
+        - operator: Exists
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: karpenter.sh/nodepool
+                    operator: NotIn
+                    values:
+                      - dedicated-small-instance-migration-console-pool
+      volumes:
+        - name: otel-trace-collector-config
+          configMap:
+            name: otel-trace-collector-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-trace-collector-config
+  namespace: {{ .Release.Namespace }}
+data:
+  collector.yaml: |
+{{ tpl .Values.tracing.collectorConfig . | indent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-trace-collector
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: otel-trace-collector
+spec:
+  selector:
+    app: otel-trace-collector
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+{{- end }}

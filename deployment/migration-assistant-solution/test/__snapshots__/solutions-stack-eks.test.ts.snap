@@ -1186,6 +1186,14 @@ exports[`Solutions stack Migration stack with import VPC matches snapshot 1`] = 
             },
             {
               "Action": [
+                "cloudwatch:ListMetrics",
+                "cloudwatch:GetMetricData",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
                 "xray:PutTraceSegments",
                 "xray:PutTelemetryRecords",
               ],
@@ -2426,6 +2434,14 @@ exports[`Solutions stack Migration stack with new VPC matches snapshot 1`] = `
                 "logs:DescribeLogGroups",
                 "logs:CreateLogGroup",
                 "logs:CreateLogStream",
+              ],
+              "Effect": "Allow",
+              "Resource": "*",
+            },
+            {
+              "Action": [
+                "cloudwatch:ListMetrics",
+                "cloudwatch:GetMetricData",
               ],
               "Effect": "Allow",
               "Resource": "*",

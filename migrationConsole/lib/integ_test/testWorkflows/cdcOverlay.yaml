@@ -40,6 +40,8 @@ spec:
             default: ""
           - name: captureProxyServiceType
             default: "LoadBalancer"
+          - name: otelTraceCollectorEndpoint
+            default: ""
       container:
         image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
         imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
@@ -53,6 +55,7 @@ spec:
             USE_LOCAL_STACK='{{inputs.parameters.useLocalStack}}'
             TUPLE_S3_ENDPOINT='{{inputs.parameters.tupleS3Endpoint}}'
             TUPLE_S3_BUCKET='{{inputs.parameters.tupleS3BucketName}}'
+            OTEL_TRACE_COLLECTOR_ENDPOINT='{{inputs.parameters.otelTraceCollectorEndpoint}}'
 
             # Overlay CDC traffic config with capture enabled from start.
             CDC_CONFIG=$(echo "$BASE_CONFIG" | jq \
@@ -60,6 +63,7 @@ spec:
               --arg tupleS3Region "$TUPLE_S3_REGION" \
               --argjson useLocalStack "$USE_LOCAL_STACK" \
               --arg tupleS3Endpoint "$TUPLE_S3_ENDPOINT" \
+              --arg otelTraceCollectorEndpoint "$OTEL_TRACE_COLLECTOR_ENDPOINT" \
               --argjson replayerOverrides "$REPLAYER_CONFIG_OVERRIDES" \
               '. + {
               "kafkaClusterConfiguration": {
@@ -71,11 +75,13 @@ spec:
                 "proxies": {
                   "capture-proxy": {
                     "source": "source1",
-                    "proxyConfig": {
+                    "proxyConfig": ({
                       "listenPort": 9201,
                       "noCapture": false,
                       "serviceType": "{{inputs.parameters.captureProxyServiceType}}"
-                    }
+                    } + (if $otelTraceCollectorEndpoint != "" then {
+                      "otelTraceCollectorEndpoint": $otelTraceCollectorEndpoint
+                    } else {} end))
                   }
                 },
                 "replayers": {
@@ -96,6 +102,9 @@ spec:
                         "tupleS3Prefix": "tuples/"
                       } else {} end)
                     + (if $tupleS3Endpoint != "" then {"tupleS3Endpoint": $tupleS3Endpoint} else {} end)
+                    + (if $otelTraceCollectorEndpoint != "" then {
+                        "otelTraceCollectorEndpoint": $otelTraceCollectorEndpoint
+                      } else {} end)
                     + $replayerOverrides)
                   }
                 }
@@ -121,6 +130,8 @@ spec:
           - name: imageMigrationConsolePullPolicy
           - name: captureProxyServiceType
             default: "LoadBalancer"
+          - name: otelTraceCollectorEndpoint
+            default: ""
       container:
         image: "{{inputs.parameters.imageMigrationConsoleLocation}}"
         imagePullPolicy: "{{inputs.parameters.imageMigrationConsolePullPolicy}}"
@@ -129,8 +140,11 @@ spec:
           - |
             set -e
             BASE_CONFIG=$(echo "{{inputs.parameters.baseConfigBase64}}" | base64 -d)
+            OTEL_TRACE_COLLECTOR_ENDPOINT='{{inputs.parameters.otelTraceCollectorEndpoint}}'
 
-            PROXY_ONLY_CONFIG=$(echo "$BASE_CONFIG" | jq '
+            PROXY_ONLY_CONFIG=$(echo "$BASE_CONFIG" | jq \
+              --arg otelTraceCollectorEndpoint "$OTEL_TRACE_COLLECTOR_ENDPOINT" \
+              '
               .sourceClusters |= with_entries(.value |= del(.snapshotInfo))
               | .snapshotMigrationConfigs = []
               | . + {
@@ -143,11 +157,13 @@ spec:
                   "proxies": {
                     "capture-proxy": {
                       "source": "source1",
-                      "proxyConfig": {
+                      "proxyConfig": ({
                         "listenPort": 9201,
                         "noCapture": false,
                         "serviceType": "{{inputs.parameters.captureProxyServiceType}}"
-                      }
+                      } + (if $otelTraceCollectorEndpoint != "" then {
+                        "otelTraceCollectorEndpoint": $otelTraceCollectorEndpoint
+                      } else {} end))
                     }
                   },
                   "replayers": {}
