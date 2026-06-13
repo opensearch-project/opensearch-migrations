@@ -8,14 +8,14 @@
           "repos": {
             "migration-repo": {
               "awsRegion": "us-east-1",
-              "s3RepoPathUri": "s3://migrations-default-371015648411-dev-us-east-1/solr-migration-test-sets/solrcloud/nyc_taxis_8"
+              "s3RepoPathUri": "s3://migrations-default-371015648411-dev-us-east-1/solr-migration-test-sets/solrcloud"
             }
           },
           "snapshots": {
             "main-snapshot": {
               "repoName": "migration-repo",
               "config": {
-                "externallyManagedSnapshotName": "nyc_taxis"
+                "externallyManagedSnapshotName": "nyc_taxis_8"
               }
             }
           }
