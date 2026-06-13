@@ -433,6 +433,62 @@ async def test_waiter_loop_and_rediscovery(mock_workflow_with_two_pods):
 
 
 @pytest.mark.asyncio
+async def test_resource_view_renders_resources_without_workflow():
+    """Resource view should render deployed/configured resources even when no workflow exists."""
+
+    class FakeConfigEditService:
+        pass
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": False, "error": "not found"}, {})
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    mock_waiter = WaiterInterface(
+        trigger=MagicMock(),
+        checker=MagicMock(return_value=False),
+        reset=MagicMock(),
+    )
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=mock_waiter,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_with_kafka_config()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(
+                pilot,
+                lambda: (
+                    get_clean_text_label(tree.root) == "Migration Status"
+                    and find_tree_node_by_id(tree.root, "resource:default") is not None
+                ),
+                timeout=5.0,
+            )
+
+            assert "Waiting for Workflow" not in get_clean_text_label(tree.root)
+            assert "Values: All" in str(app.query_one("#pod-status").content)
+            assert binding_descriptions(app, "v") == ["Value Mode"]
+
+            await pilot.press("v")
+            assert await wait_until(
+                pilot,
+                lambda: "Values: Deployed" in str(app.query_one("#pod-status").content),
+            )
+            mock_waiter.trigger.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_functional_keybindings_execution(mock_workflow_with_pod_and_suspend):
     """Verify that injected K8sInterface and ArgoService methods are called by keys."""
 

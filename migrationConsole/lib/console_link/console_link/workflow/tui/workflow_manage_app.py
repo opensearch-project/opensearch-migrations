@@ -221,6 +221,7 @@ class WorkflowTreeApp(App):
             return
 
         new_run_id = workflow_data.get('status', {}).get('startedAt') if workflow_data else None
+        had_resource_tree = self._last_resource_sections is not None
         is_restart = self.current_run_id != new_run_id
         self._last_resource_sections = sections
         self._last_resource_workflow_data = workflow_data
@@ -228,7 +229,7 @@ class WorkflowTreeApp(App):
         if hasattr(self._tree_state, "set_config_value_mode"):
             self._tree_state.set_config_value_mode(self._resource_value_mode)
 
-        if is_restart:
+        if is_restart or not had_resource_tree:
             self.current_run_id = new_run_id
             self._pods.clear_cache()
             self._tree_state.rebuild(sections, workflow_data)
@@ -587,6 +588,8 @@ class WorkflowTreeApp(App):
                     f"[grey50]{summary.get('pending', 0)} pending[/]  Values: {value_mode}"
                 )
                 return
+            status_bar.update(f"Values: {value_mode}")
+            return
         if not self.current_node_data:
             status_bar.update("")
             return
