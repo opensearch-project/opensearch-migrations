@@ -28,6 +28,7 @@ from .crd_utils import (
     CRD_VERSION,
     match_names,
 )
+from .hints import hint_after_approve_step, hint_after_approve_change, hint_after_approve_retry
 
 logger = logging.getLogger(__name__)
 
@@ -814,6 +815,13 @@ def _run_subcommand(ctx, category, names, list_flag, all_flag, pre_approve,
             return
 
     _apply_approvals(ctx, namespace, targets)
+
+    if category == 'step':
+        hint_after_approve_step()
+    elif category == 'change':
+        hint_after_approve_change()
+    elif category == 'retry':
+        hint_after_approve_retry()
 
 
 # ─────────────────────────────────────────────────────────────

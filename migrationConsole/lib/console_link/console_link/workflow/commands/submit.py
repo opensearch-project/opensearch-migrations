@@ -16,6 +16,7 @@ from ..services.script_runner import ScriptRunner
 from .argo_utils import workflow_exists, stop_workflow, delete_workflow, wait_until_workflow_deleted
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 from .secret_utils import get_credentials_secret_store_for_namespace, verify_configured_secrets_exist
+from .hints import hint_after_submit
 
 logger = logging.getLogger(__name__)
 
@@ -176,6 +177,9 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
                 click.echo(f"\n{warning}", err=True)
 
             logger.info(f"Workflow {workflow_name} submitted successfully with namespace {namespace}")
+
+            if not wait:
+                hint_after_submit()
 
             if wait:
                 service = WorkflowService()

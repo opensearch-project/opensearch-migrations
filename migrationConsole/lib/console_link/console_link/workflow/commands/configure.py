@@ -15,6 +15,7 @@ from ...models.command_result import CommandResult
 from ..models.config import WorkflowConfig
 from ..models.utils import get_current_namespace, get_workflow_config_store, get_credentials_secret_store
 from .secret_utils import process_secrets, validate_and_find_secrets
+from .hints import hint_after_configure_edit
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,7 @@ def _handle_stdin_edit(wf_config_store, secret_store, session_name: str):
 
     _save_config(wf_config_store, new_config, session_name)
     process_secrets(secret_store, result, interactive=False)
+    hint_after_configure_edit()
 
 
 def _handle_editor_edit(store, secret_store, session_name: str):
@@ -178,6 +180,7 @@ def _handle_editor_edit(store, secret_store, session_name: str):
 
     _save_config(store, WorkflowConfig(raw_yaml=raw_yaml), session_name)
     process_secrets(secret_store, result, interactive=True)
+    hint_after_configure_edit()
 
 
 @configure_group.command(name="edit")
