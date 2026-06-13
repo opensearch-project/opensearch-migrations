@@ -16,11 +16,26 @@ All hint strings are defined here. The shared helper `_hint_for_phase(phase, *, 
 
 ### `workflow configure edit` → static
 
+**Valid save:**
 ```
 Hint: `workflow submit` to start the migration
 ```
 
-Call site: end of `_handle_editor_edit` and `_handle_stdin_edit` in `configure.py`, after a valid save. The "save anyway" (validation-failed) path is **not** hinted — the config is known-invalid and `workflow submit` would fail immediately.
+**Invalid config (save-anyway, discard, or stdin error):**
+```
+Hint: `workflow configure edit` to fix the config before submitting
+```
+
+| Exit path | Hint shown | Reason |
+|-----------|-----------|--------|
+| Valid save (editor) | `workflow submit` | Config is ready |
+| Valid save (stdin) | `workflow submit` | Config is ready |
+| Invalid + save-anyway (`s`) | `workflow configure edit` to fix | Config saved but broken; user needs to re-edit |
+| Invalid + discard (`d`) | `workflow configure edit` to fix | Changes lost; user needs to try again |
+| Invalid + edit-again (`e`) | *(none at this point — loops back)* | User re-enters editor immediately |
+| Stdin invalid | `workflow configure edit` to fix | Config saved with errors; emitted to stdout before ClickException propagates to stderr |
+
+Call site: `configure.py`. `hint_configure_fix()` is a separate function from `hint_after_configure_edit()` to keep the two paths distinguishable.
 
 ---
 

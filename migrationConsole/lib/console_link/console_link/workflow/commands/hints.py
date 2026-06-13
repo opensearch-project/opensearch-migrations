@@ -25,6 +25,11 @@ def hint_after_configure_edit() -> None:
     _hint("`workflow submit` to start the migration")
 
 
+def hint_configure_fix() -> None:
+    """Hint when the config was saved with validation errors or discarded."""
+    _hint("`workflow configure edit` to fix the config before submitting")
+
+
 # ── submit ─────────────────────────────────────────────────────────────────
 
 def hint_after_submit() -> None:
