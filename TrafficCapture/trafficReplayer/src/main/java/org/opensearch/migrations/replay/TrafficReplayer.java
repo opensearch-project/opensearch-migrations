@@ -192,22 +192,11 @@ public class TrafficReplayer {
         @ParametersDelegate
         private TupleTransformationParams tupleTransformationParams = new TupleTransformationParams();
 
-        @Parameter(
-            required = false,
-            names = {"--request-filter-config", "--requestFilterConfig"},
-            arity = 1,
-            description = "Configuration for request filtering. JSON array with one entry whose key is the "
-                + "predicate provider name. Requests failing the predicate are skipped (not sent to target).")
-        private String requestFilterConfig;
+        @ParametersDelegate
+        private RequestFilterParams requestFilterParams = new RequestFilterParams();
 
-        @Parameter(
-            required = false,
-            names = {"--response-post-processor-config", "--responsePostProcessorConfig"},
-            arity = 1,
-            description = "Configuration for response post-processing. Transforms target responses before "
-                + "tuple assembly (e.g., converting OpenSearch responses to Solr format for comparison). "
-                + "Same JSON format as --transformerConfig.")
-        private String responsePostProcessorConfig;
+        @ParametersDelegate
+        private ResponsePostProcessorParams responsePostProcessorParams = new ResponsePostProcessorParams();
 
         @Parameter(
             required = false,
@@ -521,6 +510,69 @@ public class TrafficReplayer {
         private String transformerConfigFile;
     }
 
+    @Getter
+    public static class RequestFilterParams implements TransformerParams {
+        @Override
+        public String getTransformerConfigParameterArgPrefix() { return REQUEST_FILTER_SNAKE_PREFIX; }
+        private static final String REQUEST_FILTER_SNAKE_PREFIX = "request-filter-";
+        private static final String REQUEST_FILTER_CAMEL_PREFIX = "requestFilter";
+
+        @Parameter(
+            required = false,
+            names = {"--" + REQUEST_FILTER_SNAKE_PREFIX + "config-encoded", "--" + REQUEST_FILTER_CAMEL_PREFIX + "ConfigEncoded"},
+            arity = 1,
+            description = "Configuration for request filtering. Base64 encoded. "
+                + "Same contents as --request-filter-config.")
+        private String transformerConfigEncoded;
+
+        @Parameter(
+            required = false,
+            names = {"--" + REQUEST_FILTER_SNAKE_PREFIX + "config", "--" + REQUEST_FILTER_CAMEL_PREFIX + "Config"},
+            arity = 1,
+            description = "Configuration for request filtering. JSON with one entry whose key is the "
+                + "predicate provider name. Requests failing the predicate are skipped (not sent to target).")
+        private String transformerConfig;
+
+        @Parameter(
+            required = false,
+            names = {"--" + REQUEST_FILTER_SNAKE_PREFIX + "config-file", "--" + REQUEST_FILTER_CAMEL_PREFIX + "ConfigFile"},
+            arity = 1,
+            description = "Path to JSON file containing request filter configuration.")
+        private String transformerConfigFile;
+    }
+
+    @Getter
+    public static class ResponsePostProcessorParams implements TransformerParams {
+        @Override
+        public String getTransformerConfigParameterArgPrefix() { return RESPONSE_PP_SNAKE_PREFIX; }
+        private static final String RESPONSE_PP_SNAKE_PREFIX = "response-post-processor-";
+        private static final String RESPONSE_PP_CAMEL_PREFIX = "responsePostProcessor";
+
+        @Parameter(
+            required = false,
+            names = {"--" + RESPONSE_PP_SNAKE_PREFIX + "config-encoded", "--" + RESPONSE_PP_CAMEL_PREFIX + "ConfigEncoded"},
+            arity = 1,
+            description = "Configuration for response post-processing. Base64 encoded. "
+                + "Same contents as --response-post-processor-config.")
+        private String transformerConfigEncoded;
+
+        @Parameter(
+            required = false,
+            names = {"--" + RESPONSE_PP_SNAKE_PREFIX + "config", "--" + RESPONSE_PP_CAMEL_PREFIX + "Config"},
+            arity = 1,
+            description = "Configuration for response post-processing. Transforms target responses before "
+                + "tuple assembly (e.g., converting OpenSearch responses to Solr format for comparison). "
+                + "Same JSON format as --transformerConfig.")
+        private String transformerConfig;
+
+        @Parameter(
+            required = false,
+            names = {"--" + RESPONSE_PP_SNAKE_PREFIX + "config-file", "--" + RESPONSE_PP_CAMEL_PREFIX + "ConfigFile"},
+            arity = 1,
+            description = "Path to JSON file containing response post-processor configuration.")
+        private String transformerConfigFile;
+    }
+
     private static Parameters parseArgs(String[] args) {
         Parameters p = EnvVarParameterPuller.injectFromEnv(new Parameters(), "TRAFFIC_REPLAYER_");
         var parser = JsonCommandLineParser.newBuilder().addObject(p).build();
@@ -696,7 +748,7 @@ public class TrafficReplayer {
 
             var transformationLoader = new TransformationLoader();
             var effectiveTransformerSupplier = buildTransformerSupplier(
-                transformationLoader, hostname, params.userAgent, requestTransformerConfig, params.requestFilterConfig);
+                transformationLoader, hostname, params.userAgent, requestTransformerConfig, TransformerConfigUtils.getTransformerConfig(params.requestFilterParams));
             var tr = new TrafficReplayerTopLevel(
                 topContext,
                 uri,
@@ -711,7 +763,7 @@ public class TrafficReplayer {
                 orderedRequestTracker,
                 errorClassifier
             );
-            configureResponsePostProcessor(tr, transformationLoader, params.responsePostProcessorConfig);
+            configureResponsePostProcessor(tr, transformationLoader, TransformerConfigUtils.getTransformerConfig(params.responsePostProcessorParams));
             log.atInfo().setMessage("ReplayerConfig - lookahead={}s speedup={} maxConcurrent={}" +
                     " serverResponseTimeout={}s observedPacketConnectionTimeout={}s" +
                     " targetUri={} numClientThreads={}")
