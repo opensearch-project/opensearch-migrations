@@ -360,6 +360,19 @@ run_version() {
     local version="$1"
     log "######## Solr ${version} ########"
 
+    # Solr 6.6.x SolrCloud non-incremental BACKUP writes a header-valid segments_N
+    # that enumerates zero segments, even with CREATESNAPSHOT + commitName. The
+    # per-segment data files (_0.fdt etc.) are copied but unreachable from the
+    # SegmentInfos, so RFS sees maxDoc=0 and silently migrates 0 docs. This is a
+    # Solr 6.x defect, not a workflow issue — incremental BACKUP (rewritten in
+    # 8.x) doesn't have it. Use the standalone v6 backup instead (see
+    # run_standalone.sh / backups/standalone/snapshot.nyc_taxis_6/).
+    if [[ "$version" == "6" ]]; then
+        warn "Solr 6 SolrCloud BACKUP produces a broken segments_N (numSegments=0)."
+        warn "Skipping v6 SolrCloud; use the standalone v6 backup for that test set."
+        return 0
+    fi
+
     compose_up "$version"
     create_collection "$version"
     run_orbit
