@@ -134,7 +134,7 @@ while [[ $# -gt 0 ]]; do
       echo "                                            (required with --deploy-import-vpc-cfn)."
       echo "  --create-vpc-endpoints [list]             Create VPC endpoints for private subnet connectivity."
       echo "                                            Only valid with --deploy-import-vpc-cfn."
-      echo "                                            No argument or 'all' creates: s3,ecr,ecrDocker,cloudwatchLogs,efs."
+      echo "                                            No argument or 'all' creates: s3,ecr,ecrDocker,cloudwatchLogs,efs,sts,eksAuth."
       echo "                                            Or specify a comma-separated subset, e.g. 's3,ecr,ecrDocker'."
       echo "  --ignore-checks                           Skip subnet connectivity and VPC endpoint pre-flight checks."
       echo "  --use-public-images                       Opt out of mirroring images to private ECR. Use public images"
@@ -644,7 +644,7 @@ if [[ "$deploy_cfn" == "true" ]]; then
           efs)             cfn_params+=("CreateEFSEndpoint=true") ;;
           sts)             cfn_params+=("CreateSTSEndpoint=true") ;;
           eksAuth)         cfn_params+=("CreateEKSAuthEndpoint=true") ;;
-          *) echo "Warning: Unknown VPC endpoint type: $ep (valid: s3,ecr,ecrDocker,cloudwatchLogs,efs)" >&2 ;;
+          *) echo "Warning: Unknown VPC endpoint type: $ep (valid: s3,ecr,ecrDocker,cloudwatchLogs,efs,sts,eksAuth)" >&2 ;;
         esac
       done
     fi
