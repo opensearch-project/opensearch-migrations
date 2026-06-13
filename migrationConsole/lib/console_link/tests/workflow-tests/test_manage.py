@@ -7,6 +7,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from console_link.workflow.tree_utils import APPROVAL_TEMPLATE_NAME
+from console_link.workflow.resource_tree import ResourceGroup, ResourceNode, ResourceSection
 from console_link.workflow.tui.workflow_manage_app import (
     WorkflowTreeApp,
     copy_to_clipboard, PHASE_SUCCEEDED, PHASE_RUNNING
@@ -76,6 +77,117 @@ FAILING_WAITER = WaiterInterface(
     checker=lambda: pytest.fail("Waiter checker called unexpectedly"),
     reset=MagicMock()
 )
+
+
+def edit_state_with_missing_basic_auth():
+    return {
+        "formatVersion": 1,
+        "provenance": {"source": "pending-yaml", "lossy": False, "warnings": []},
+        "nodes": [
+            {
+                "id": "edit:sourceClusters",
+                "path": ["sourceClusters"],
+                "label": "[REQ 1] Source Clusters",
+                "valueKind": "record",
+                "description": "Source Elasticsearch or OpenSearch clusters to migrate from.",
+                "status": "required",
+                "statusCounts": {"required": 1},
+                "children": [
+                    {
+                        "id": "edit:sourceClusters.legacy",
+                        "path": ["sourceClusters", "legacy"],
+                        "label": "[REQ 1] source: legacy",
+                        "valueKind": "object",
+                        "description": "Connection and snapshot configuration for a source cluster.",
+                        "status": "required",
+                        "statusCounts": {"required": 1},
+                        "children": [
+                            {
+                                "id": "edit:sourceClusters.legacy.endpoint",
+                                "path": ["sourceClusters", "legacy", "endpoint"],
+                                "label": "[OK] endpoint: https://legacy.example.com:9200",
+                                "valueKind": "scalar",
+                                "description": "HTTP(S) endpoint URL for the cluster.",
+                                "status": "ok",
+                                "statusCounts": {},
+                            },
+                            {
+                                "id": "edit:sourceClusters.legacy.authConfig",
+                                "path": ["sourceClusters", "legacy", "authConfig"],
+                                "label": "[REQ 1] authConfig: < basic >",
+                                "value": "basic",
+                                "valueKind": "union",
+                                "description": "Authentication configuration for connecting to the cluster.",
+                                "status": "required",
+                                "statusCounts": {"required": 1},
+                                "variants": [
+                                    {"label": "none", "value": "none"},
+                                    {"label": "basic", "value": "basic"},
+                                    {"label": "sigv4", "value": "sigv4"},
+                                ],
+                                "children": [
+                                    {
+                                        "id": "edit:sourceClusters.legacy.authConfig.basic.secretName",
+                                        "path": [
+                                            "sourceClusters", "legacy", "authConfig", "basic", "secretName"
+                                        ],
+                                        "label": "[REQ] secretName: <required>",
+                                        "valueKind": "scalar",
+                                        "description": "Name of a Kubernetes Secret containing credentials.",
+                                        "required": True,
+                                        "status": "required",
+                                        "statusCounts": {"required": 1},
+                                        "diagnostics": [
+                                            {
+                                                "severity": "required",
+                                                "message": "secretName is required.",
+                                                "path": [
+                                                    "sourceClusters", "legacy", "authConfig", "basic", "secretName"
+                                                ],
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                        ],
+                    }
+                ],
+            }
+        ],
+        "pendingSubmitChanges": [],
+        "submittedRolloutChanges": [],
+        "policyPreview": [],
+        "validation": {"valid": False, "errors": ["secretName is required"]},
+    }
+
+
+def edit_state_with_sigv4_auth():
+    state = copy.deepcopy(edit_state_with_missing_basic_auth())
+    source = state["nodes"][0]
+    legacy = source["children"][0]
+    auth = legacy["children"][1]
+    auth["label"] = "[REQ 1] authConfig: < sigv4 >"
+    auth["value"] = "sigv4"
+    auth["children"] = [
+        {
+            "id": "edit:sourceClusters.legacy.authConfig.sigv4.region",
+            "path": ["sourceClusters", "legacy", "authConfig", "sigv4", "region"],
+            "label": "[REQ] region: <required>",
+            "valueKind": "scalar",
+            "description": "AWS region for SigV4 request signing.",
+            "required": True,
+            "status": "required",
+            "statusCounts": {"required": 1},
+            "diagnostics": [
+                {
+                    "severity": "required",
+                    "message": "region is required.",
+                    "path": ["sourceClusters", "legacy", "authConfig", "sigv4", "region"],
+                }
+            ],
+        }
+    ]
+    return state
 
 
 async def wait_until(pilot, predicate, timeout=5.0, interval=0.1):
@@ -238,6 +350,172 @@ async def test_functional_keybindings_execution(mock_workflow_with_pod_and_suspe
         await pilot.pause()
 
         argo_service.approve_step.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_shows_branch_diagnostics(mock_workflow_with_two_pods):
+    """Pressing e in resource view renders the TS-provided edit tree and bottom help."""
+
+    class FakeConfigEditService:
+        def load_edit_state(self):
+            return edit_state_with_missing_basic_auth()
+
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    sections = [
+        ResourceSection(
+            name="Snapshot Migration",
+            groups=[
+                ResourceGroup(
+                    plural="datasnapshots",
+                    display_name="Snapshot",
+                    resources=[
+                        ResourceNode(
+                            name="snapshot-a",
+                            plural="datasnapshots",
+                            phase="Completed",
+                            depends_on=[],
+                            spec={},
+                            status={},
+                        )
+                    ],
+                )
+            ],
+        )
+    ]
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree", return_value=sections):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            for _ in range(4):
+                await pilot.press("down")
+            await pilot.pause()
+
+            selected = get_clean_text_label(tree.cursor_node)
+            help_text = app.query_one("#edit-help").content
+            assert "[REQ 1] authConfig: < basic >" in selected
+            assert "secretName is required" in str(help_text)
+            assert "Authentication configuration" in str(help_text)
+
+            await pilot.press("escape")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Migration Status")
+
+
+@pytest.mark.asyncio
+async def test_resource_view_edit_mode_applies_variant_and_saves(mock_workflow_with_two_pods):
+    """Edit mode applies committed UI operations to draft YAML and saves only on Ctrl+s."""
+
+    class FakeConfigEditService:
+        def __init__(self):
+            self.apply_calls = []
+            self.saved_yaml = []
+
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_missing_basic_auth(),
+            }
+
+        def apply_operation(self, raw_yaml, operation):
+            self.apply_calls.append((raw_yaml, operation))
+            return {
+                "raw_yaml": "updated-yaml",
+                "edit_state": edit_state_with_sigv4_auth(),
+            }
+
+        def save_raw_yaml(self, raw_yaml):
+            self.saved_yaml.append(raw_yaml)
+            return "Configuration saved"
+
+    service = FakeConfigEditService()
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+    sections = [
+        ResourceSection(
+            name="Snapshot Migration",
+            groups=[
+                ResourceGroup(
+                    plural="datasnapshots",
+                    display_name="Snapshot",
+                    resources=[
+                        ResourceNode(
+                            name="snapshot-a",
+                            plural="datasnapshots",
+                            phase="Completed",
+                            depends_on=[],
+                            spec={},
+                            status={},
+                        )
+                    ],
+                )
+            ],
+        )
+    ]
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=service,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree", return_value=sections):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            for _ in range(4):
+                await pilot.press("down")
+            await pilot.pause()
+
+            await pilot.press("right")
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 1)
+            assert service.apply_calls[0] == (
+                "initial-yaml",
+                {
+                    "op": "set",
+                    "path": ["sourceClusters", "legacy", "authConfig"],
+                    "value": "sigv4",
+                },
+            )
+            assert "[REQ 1] authConfig: < sigv4 >" in get_clean_text_label(tree.cursor_node)
+
+            await pilot.press("ctrl+s")
+            assert await wait_until(pilot, lambda: service.saved_yaml == ["updated-yaml"])
 
 
 @pytest.mark.asyncio

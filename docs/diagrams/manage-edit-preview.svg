@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Manage edit pending preview mockup</title>
+  <desc id="desc">Terminal-style mockup of pending-submit change preview grouped by virtual and real resources.</desc>
+  <style>
+    .bg { fill: #0f172a; }
+    .panel { fill: #111827; stroke: #334155; stroke-width: 1; }
+    .header { fill: #1f2937; }
+    .text { fill: #d1d5db; font: 16px Menlo, Consolas, monospace; }
+    .dim { fill: #94a3b8; font: 15px Menlo, Consolas, monospace; }
+    .title { fill: #f9fafb; font: 18px Menlo, Consolas, monospace; font-weight: 700; }
+    .green { fill: #86efac; font: 16px Menlo, Consolas, monospace; }
+    .yellow { fill: #fde68a; font: 16px Menlo, Consolas, monospace; }
+    .red { fill: #fca5a5; font: 16px Menlo, Consolas, monospace; }
+    .cyan { fill: #67e8f9; font: 16px Menlo, Consolas, monospace; }
+    .bluebox { fill: #082f49; stroke: #38bdf8; stroke-width: 1; }
+    .footer { fill: #020617; }
+  </style>
+  <rect class="bg" width="1200" height="760"/>
+  <rect class="header" x="0" y="0" width="1200" height="48"/>
+  <text class="title" x="24" y="31">Preview Pending Submit</text>
+  <text class="dim" x="902" y="31">pending YAML differs from last submitted run</text>
+
+  <rect class="panel" x="24" y="72" width="1152" height="612" rx="6"/>
+  <text class="title" x="52" y="112">Pending submit changes</text>
+  <text class="dim" x="52" y="144">These changes are saved in workflow_config.yaml but have not been submitted.</text>
+
+  <rect class="bluebox" x="52" y="178" width="1096" height="120" rx="6"/>
+  <text class="cyan" x="76" y="212">source: legacy-cluster</text>
+  <text class="text" x="100" y="244">endpoint: https://legacy.example.com:9200 -> https://legacy.example.com:443</text>
+  <text class="text" x="100" y="274">allowInsecure: false -> true</text>
+
+  <rect class="bluebox" x="52" y="324" width="1096" height="128" rx="6"/>
+  <text class="cyan" x="76" y="358">captureproxy.capture-proxy</text>
+  <text class="text" x="100" y="390">source provenance: legacy-cluster endpoint changed</text>
+  <text class="yellow" x="100" y="420">policy: approval-required for noCapture</text>
+
+  <rect class="bluebox" x="52" y="478" width="1096" height="104" rx="6"/>
+  <text class="cyan" x="76" y="512">snapshotmigration.legacy-prod-snapshot-a-migration-0</text>
+  <text class="text" x="100" y="544">target endpoint: https://target.example.com -> https://target-v2.example.com</text>
+  <text class="red" x="100" y="574">policy: blocked if completed without reset</text>
+
+  <text class="green" x="52" y="632">Validation: OK</text>
+  <text class="yellow" x="220" y="632">Approvals needed: 1</text>
+  <text class="red" x="452" y="632">Blocked changes: 1</text>
+
+  <rect class="footer" x="0" y="712" width="1200" height="48"/>
+  <text class="dim" x="24" y="742">Enter Submit   e Edit Selected   y Open YAML   r Refresh Preview   Esc Back</text>
+</svg>

@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" role="img" aria-labelledby="title desc">
+  <title id="title">Manage edit resource overview mockup</title>
+  <desc id="desc">Terminal-style mockup of workflow manage resource view with virtual source and target resources.</desc>
+  <style>
+    .bg { fill: #0f172a; }
+    .panel { fill: #111827; stroke: #334155; stroke-width: 1; }
+    .header { fill: #1f2937; }
+    .text { fill: #d1d5db; font: 16px Menlo, Consolas, monospace; }
+    .dim { fill: #94a3b8; font: 15px Menlo, Consolas, monospace; }
+    .title { fill: #f9fafb; font: 18px Menlo, Consolas, monospace; font-weight: 700; }
+    .green { fill: #86efac; font: 16px Menlo, Consolas, monospace; }
+    .yellow { fill: #fde68a; font: 16px Menlo, Consolas, monospace; }
+    .cyan { fill: #67e8f9; font: 16px Menlo, Consolas, monospace; }
+    .red { fill: #fca5a5; font: 16px Menlo, Consolas, monospace; }
+    .accent { fill: #38bdf8; font: 16px Menlo, Consolas, monospace; font-weight: 700; }
+    .selected { fill: #1e3a8a; opacity: 0.9; }
+    .footer { fill: #020617; }
+  </style>
+  <rect class="bg" width="1200" height="760"/>
+  <rect class="header" x="0" y="0" width="1200" height="48"/>
+  <text class="title" x="24" y="31">[ma] migration-workflow - Manage Resources</text>
+  <text class="dim" x="935" y="31">resource view | refreshed 14:32:08</text>
+
+  <rect class="panel" x="24" y="72" width="740" height="612" rx="6"/>
+  <rect class="panel" x="788" y="72" width="388" height="612" rx="6"/>
+  <text class="title" x="48" y="108">Migration Resources</text>
+
+  <text class="dim" x="54" y="144">Source Clusters</text>
+  <rect class="selected" x="44" y="158" width="696" height="30" rx="4"/>
+  <text class="accent" x="62" y="180">* source: legacy-cluster</text>
+  <text class="dim" x="86" y="208">endpoint: https://legacy.example.com:9200</text>
+  <text class="dim" x="86" y="232">version: ES 7.10.2</text>
+  <text class="cyan" x="62" y="258">+ Add source cluster</text>
+  <text class="dim" x="54" y="270">Target Clusters</text>
+  <text class="text" x="62" y="302">* target: prod-os</text>
+  <text class="dim" x="86" y="330">endpoint: https://target.example.com</text>
+  <text class="cyan" x="62" y="356">+ Add target cluster</text>
+
+  <text class="dim" x="54" y="390">Snapshot Migration</text>
+  <text class="green" x="62" y="422">[OK] legacy-cluster-snapshot-a</text>
+  <text class="dim" x="86" y="450">snapshotPrefix: snapshot-a</text>
+  <text class="cyan" x="62" y="476">+ Add snapshot</text>
+  <text class="yellow" x="62" y="508">[..] legacy-prod-snapshot-a-migration-0</text>
+  <text class="dim" x="86" y="536">Backfill status: 48%, shards 14/29</text>
+  <text class="cyan" x="62" y="562">+ Add snapshot migration</text>
+
+  <text class="dim" x="390" y="390">Live Traffic Migration</text>
+  <text class="green" x="398" y="422">[OK] default</text>
+  <text class="cyan" x="398" y="448">+ Add Kafka cluster</text>
+  <text class="green" x="398" y="480">[OK] capture-proxy</text>
+  <text class="dim" x="422" y="508">listenPort: 9200, replicas: 2</text>
+  <text class="cyan" x="398" y="534">+ Add capture proxy</text>
+  <text class="green" x="398" y="566">[OK] capture-proxy-prod-os-replay</text>
+  <text class="cyan" x="398" y="592">+ Add traffic replay</text>
+
+  <text class="title" x="812" y="108">Selected: source: legacy-cluster</text>
+  <text class="dim" x="812" y="148">Virtual config resource</text>
+  <text class="text" x="812" y="192">Pending changes: none</text>
+  <text class="text" x="812" y="224">Submitted rollout: none</text>
+  <text class="text" x="812" y="256">Referenced by:</text>
+  <text class="dim" x="834" y="288">capture-proxy</text>
+  <text class="dim" x="834" y="316">legacy-cluster-snapshot-a</text>
+  <text class="dim" x="834" y="344">legacy-prod-snapshot-a-migration-0</text>
+  <text class="text" x="812" y="400">Change scope</text>
+  <text class="dim" x="834" y="432">Config-only resource</text>
+  <text class="dim" x="834" y="460">Not resettable</text>
+  <text class="dim" x="834" y="488">Deletion allowed only when unreferenced</text>
+  <text class="dim" x="834" y="516">Dependent resources show changed fields</text>
+
+  <rect class="footer" x="0" y="712" width="1200" height="48"/>
+  <text class="dim" x="24" y="742">Enter Open/Add   e Edit   u Duplicate   Del/Bksp Remove   p Preview   s Submit   r Refresh   q Quit</text>
+</svg>
