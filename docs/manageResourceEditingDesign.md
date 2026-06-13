@@ -33,7 +33,9 @@ returned tree DTO, and updates the config store.
 This does not imply a long-lived Node.js daemon. The v1 design should use
 one-shot Node invocations through the existing `ScriptRunner` pattern: Python
 writes temporary input files, runs a config-processor command, reads the JSON
-result, and lets the process exit.
+result, and lets the process exit. A daemon/helper remains an optimization only
+if measured interaction latency becomes unacceptable; if added later, it should
+be a manage-owned stdio child process, not a cluster service or network daemon.
 
 ## Current Prototype Shape
 
@@ -71,6 +73,13 @@ Implemented pieces:
   migration configs.
 - Current guided variants cover HTTP auth (`none`, `basic`, `sigv4`, `mtls`)
   and Kafka mode (`autoCreate`, `existing`).
+- Current schema hints are authored in `userSchemas.ts` with `.uiHint(...)`,
+  exported to JSON Schema as `x-ui-hint`, copied into `EditStateV1` as
+  `inputHint`, and rendered generically by Python.
+- Reference hints currently drive pickers for source cluster, target cluster,
+  Kafka cluster, and capture proxy references when options are available.
+- Scalar edit dialogs use local schema regex hints immediately and schedule a
+  debounced one-shot TS validation pass for whole-config diagnostics.
 - `Enter` edits scalar values, toggles booleans, opens union pickers, expands objects,
   or starts add rows depending on the selected row.
 - `Del` and `Backspace` remove config entries after a confirmation modal, and
@@ -103,8 +112,12 @@ The current prototype runs TS more often than the original batching sketch:
 - once when entering edit mode, to build the initial editable tree;
 - once for each committed edit operation, such as a completed scalar edit,
   boolean toggle, union choice, add, or remove;
+- once after a scalar value is idle long enough in the edit dialog, using a
+  transient operation against the current draft YAML; stale validation results
+  are ignored with generation tokens;
 - not on cursor movement;
-- not on every keystroke while typing in the input modal;
+- not on every keystroke while typing in the input modal; local regex checks run
+  immediately, while full TS validation is debounced;
 - not on normal manage polling refreshes.
 
 `Ctrl+s` currently only writes the already-computed draft YAML to the ConfigMap.
@@ -340,42 +353,96 @@ For example, a source cluster row might show `[REQ 1] source: legacy-cluster`
 while the help strip says `1 required field, 2 changed fields`. This keeps the
 tree readable without hiding the queue of work under the branch.
 
-### Field Validation and Hints
+### Field Validation, Hints, and Suggestions
 
 The validation model should be layered so Python stays a thin UI and TS remains
 the schema authority:
 
-1. Static scalar validation metadata should travel in `EditStateV1` with each
-   editable node. For example, a string field can include a regex pattern,
-   a human message, requiredness, and the field description. Python can then
-   show immediate feedback in the input dialog without invoking Node on every
+1. Generative UI hints are authored in `userSchemas.ts` as Zod metadata:
+   `.uiHint(...)`. JSON schema generation lifts them to `x-ui-hint`, and the
+   config-processor edit engine copies them into `EditStateV1.inputHint`.
+   Python does not maintain a parallel field model.
+2. Static scalar validation metadata travels with each editable node. For
+   example, a string field can include a regex pattern, a human message,
+   requiredness, examples, and the field description. Python can then show
+   immediate feedback in the input dialog without invoking Node on every
    keystroke.
-2. Cross-field and lifecycle validation should stay in TS. This includes Zod
+3. Cross-field and lifecycle validation stays in TS. This includes Zod
    `refine`/`superRefine` logic such as unknown source/target references,
    duplicate names, source snapshot references, SigV4 snapshot constraints,
    and policy checks. Python should render the resulting diagnostics and
    aggregate status counts returned by TS after committed edits, preview, save,
    and submit.
-3. Reference fields should eventually be modeled as suggestions or selectable
-   values instead of plain strings. Examples: `fromSource` should be a picker
-   over current `sourceClusters`, `toTarget` over `targetClusters`, proxy
-   references over `traffic.proxies`, Kafka references over
-   `kafkaClusterConfiguration`, and snapshot names over the selected source's
-   `snapshotInfo.snapshots`.
+4. Reference fields should be modeled as suggestions or selectable values
+   instead of plain strings. Current implemented examples include `fromSource`
+   over `sourceClusters`, `toTarget` over `targetClusters`, proxy references
+   over `traffic.proxies`, and Kafka references over
+   `kafkaClusterConfiguration`. Snapshot names over the selected source's
+   `snapshotInfo.snapshots` should follow the same pattern.
 
 The DTO can grow without changing the Python architecture:
 
 ```ts
 type EditInputHint =
-  | { kind: "text"; pattern?: string; message?: string }
-  | { kind: "select"; options: { label: string; value: string; description?: string }[]; allowCustom?: boolean }
-  | { kind: "number"; min?: number; max?: number; step?: number };
+  | {
+      kind: "text";
+      format?: "text" | "http-endpoint" | "optional-http-endpoint" | "cluster-version" | "k8s-name";
+      pattern?: string;
+      message?: string;
+      examples?: string[];
+    }
+  | {
+      kind: "reference";
+      sourcePath: string[];
+      options?: { label: string; value: string; description?: string }[];
+      allowCustom?: boolean;
+      emptyMeansDefault?: string;
+      message?: string;
+    }
+  | {
+      kind: "record";
+      addLabel: string;
+      keyFormat?: "text" | "k8s-name";
+      keyPattern?: string;
+      message?: string;
+    }
+  | { kind: "array"; addLabel: string };
 ```
+
+Implemented first-pass hints:
+
+| Schema location | Hint | UI behavior |
+| --- | --- | --- |
+| `sourceClusters.*.endpoint` | optional HTTP endpoint text pattern | local regex feedback, full-config preview after idle |
+| `targetClusters.*.endpoint` | required HTTP endpoint text pattern | local regex feedback, full-config preview after idle |
+| `sourceClusters.*.version` | cluster version text pattern and examples | local regex feedback with examples in the message |
+| `authConfig.basic.secretName` | Kubernetes-name text pattern | local regex feedback for Basic auth secret names |
+| `sourceClusters`, `targetClusters`, `kafkaClusterConfiguration`, `traffic.proxies`, `traffic.replayers` | record add labels and key hints | synthetic add rows use the label and key validation |
+| `traffic.proxies.*.source`, `traffic.proxies.*.kafka`, `traffic.replayers.*.fromProxy`, `traffic.replayers.*.toTarget`, `snapshotMigrationConfigs.*.fromSource`, `snapshotMigrationConfigs.*.toTarget` | references to named config scopes | Python opens a picker when options exist, otherwise falls back to text |
+| `snapshotMigrationConfigs` | array add label | add row appends a new snapshot migration without asking for a key |
 
 For now, scalar regex validation is cheap enough to run locally in Python using
 metadata supplied by TS. The source of truth is still the Zod schema and the
 full TS validation pass; the modal feedback is a fast, user-friendly first line
 of defense.
+
+Narrow field validation should work by applying a transient operation to the
+whole draft in TS, not by validating the scalar in isolation. The one-shot
+response returns structured diagnostics:
+
+```ts
+interface EditDiagnostic {
+  severity: "required" | "error" | "warning" | "gated" | "blocked";
+  message: string;
+  path?: string[];
+}
+```
+
+The active dialog displays only diagnostics whose `path` matches the active
+edit node. This preserves whole-config validation, including Zod refinements,
+without flooding a narrow field edit with unrelated errors. Python schedules the
+one-shot after a short idle delay and increments a generation token for each
+change; when an older response arrives, the generation mismatch drops it.
 
 There are two viable ways to pick up richer Zod refinements without rewriting
 them in Python:
@@ -383,7 +450,8 @@ them in Python:
 - Keep one-shot TS commands for committed operations. This is the safest v1:
   Python sends an operation, TS applies it, runs Zod validation/refinements,
   returns the next tree, and Python renders it. It avoids daemon lifecycle bugs
-  and is already consistent with submit.
+  and is already consistent with submit. This is also the current scalar-dialog
+  validation path, except the returned YAML is discarded until the user commits.
 - Add a manage-scoped Node helper later if the UI needs per-keystroke
   cross-field validation, dynamic suggestions, or very low-latency preview. If
   we do this, it should be a child process using stdio JSON-RPC, not a network
@@ -596,6 +664,11 @@ interface EditStateV1 {
   validation: {
     valid: boolean;
     errors: string[];
+    diagnostics?: {
+      severity: "required" | "error" | "warning" | "gated" | "blocked";
+      message: string;
+      path?: string[];
+    }[];
   };
 }
 ```
@@ -638,6 +711,11 @@ interface EditNode {
     changed?: number;
     gated?: number;
     blocked?: number;
+  };
+  inputHint?: EditInputHint;
+  validation?: {
+    pattern?: string;
+    message?: string;
   };
   diagnostics?: {
     severity: "required" | "error" | "warning" | "gated" | "blocked";

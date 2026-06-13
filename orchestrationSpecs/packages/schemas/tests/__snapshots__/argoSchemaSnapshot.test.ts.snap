@@ -2773,7 +2773,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         "description": "Kafka cluster configuration: either auto-create a new Strimzi cluster or connect to an existing one."
       },
       "default": {},
-      "description": "Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'."
+      "description": "Kafka cluster configurations. If empty and traffic capture is configured, a default ephemeral Kafka cluster is auto-created for each referenced cluster label. Each entry defines a Kafka cluster (auto-created or external) referenced by proxies via 'kafka'.",
+      "x-ui-hint": {
+        "kind": "record",
+        "addLabel": "Kafka cluster",
+        "keyFormat": "k8s-name",
+        "keyPattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+        "message": "Use a valid Kubernetes DNS name for the Kafka cluster."
+      }
     },
     "sourceClusters": {
       "type": "object",
@@ -2784,7 +2791,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "type": "string",
             "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?)?$",
             "default": "",
-            "description": "HTTP(S) endpoint URL for the cluster (e.g. 'https://my-cluster:9200/'). Leave empty if the cluster is not directly accessible or will be accessed through a proxy."
+            "description": "HTTP(S) endpoint URL for the cluster (e.g. 'https://my-cluster:9200/'). Leave empty if the cluster is not directly accessible or will be accessed through a proxy.",
+            "x-ui-hint": {
+              "kind": "text",
+              "format": "optional-http-endpoint",
+              "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?)?$",
+              "message": "Leave empty or use an http:// or https:// endpoint with an optional port and trailing slash."
+            }
           },
           "allowInsecure": {
             "type": "boolean",
@@ -2802,7 +2815,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "secretName": {
                         "type": "string",
                         "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                        "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication."
+                        "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                        "x-ui-hint": {
+                          "kind": "text",
+                          "format": "k8s-name",
+                          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                          "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                        }
                       }
                     },
                     "required": [
@@ -2873,7 +2892,18 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "version": {
             "type": "string",
             "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
-            "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'."
+            "description": "Cluster version string in '<ENGINE> <VERSION>' format. Supported engines: 'ES' (Elasticsearch) versions 1, 2, 5, 6, 7, 8; 'OS' (OpenSearch) versions 1, 2, 3; 'SOLR' (Apache Solr) versions 6, 7, 8, 9. Examples: 'ES 7.10.2', 'OS 2.11.0', 'SOLR 9.7.0', 'SOLR 6.6.0'.",
+            "x-ui-hint": {
+              "kind": "text",
+              "format": "cluster-version",
+              "pattern": "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\\\.[0-9]+)+$",
+              "message": "Use '<ENGINE> <VERSION>', such as 'ES 7.10.2', 'OS 2.11.0', or 'SOLR 9.7.0'.",
+              "examples": [
+                "ES 7.10.2",
+                "OS 2.11.0",
+                "SOLR 9.7.0"
+              ]
+            }
           },
           "snapshotInfo": {
             "type": "object",
@@ -3017,7 +3047,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "version"
         ]
       },
-      "description": "Source Elasticsearch or OpenSearch clusters to migrate from."
+      "description": "Source Elasticsearch or OpenSearch clusters to migrate from.",
+      "x-ui-hint": {
+        "kind": "record",
+        "addLabel": "source cluster"
+      }
     },
     "targetClusters": {
       "type": "object",
@@ -3027,7 +3061,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "endpoint": {
             "type": "string",
             "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$",
-            "description": "HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters."
+            "description": "HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters.",
+            "x-ui-hint": {
+              "kind": "text",
+              "format": "http-endpoint",
+              "pattern": "^https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?$",
+              "message": "Use an http:// or https:// endpoint with an optional port and trailing slash."
+            }
           },
           "allowInsecure": {
             "type": "boolean",
@@ -3045,7 +3085,13 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "secretName": {
                         "type": "string",
                         "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
-                        "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication."
+                        "description": "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
+                        "x-ui-hint": {
+                          "kind": "text",
+                          "format": "k8s-name",
+                          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                          "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                        }
                       }
                     },
                     "required": [
@@ -3119,7 +3165,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
         ],
         "description": "Connection configuration for a target OpenSearch cluster. Extends the base cluster config with a required endpoint."
       },
-      "description": "Target OpenSearch clusters to migrate to."
+      "description": "Target OpenSearch clusters to migrate to.",
+      "x-ui-hint": {
+        "kind": "record",
+        "addLabel": "target cluster"
+      }
     },
     "snapshotMigrationConfigs": {
       "type": "array",
@@ -4169,7 +4219,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
           "perSnapshotConfig"
         ]
       },
-      "description": "List of snapshot-based migration configurations. Each entry binds a source cluster to a target cluster and defines which snapshots to migrate with what settings."
+      "description": "List of snapshot-based migration configurations. Each entry binds a source cluster to a target cluster and defines which snapshots to migrate with what settings.",
+      "x-ui-hint": {
+        "kind": "array",
+        "addLabel": "snapshot migration"
+      }
     },
     "traffic": {
       "type": "object",
@@ -4183,17 +4237,38 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                 "type": "string",
                 "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
                 "default": "default",
-                "description": "Label of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration."
+                "description": "Label of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration.",
+                "x-ui-hint": {
+                  "kind": "reference",
+                  "sourcePath": [
+                    "kafkaClusterConfiguration"
+                  ],
+                  "emptyMeansDefault": "default",
+                  "message": "Choose one Kafka cluster from kafkaClusterConfiguration."
+                }
               },
               "kafkaTopic": {
                 "type": "string",
                 "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
                 "default": "",
-                "description": "Kafka topic name for captured traffic. If empty, defaults to the proxy name (the key in the proxies record)."
+                "description": "Kafka topic name for captured traffic. If empty, defaults to the proxy name (the key in the proxies record).",
+                "x-ui-hint": {
+                  "kind": "text",
+                  "format": "k8s-name",
+                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+                  "message": "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character."
+                }
               },
               "source": {
                 "type": "string",
-                "description": "Name of the source cluster this proxy sits in front of. Must match a key in sourceClusters."
+                "description": "Name of the source cluster this proxy sits in front of. Must match a key in sourceClusters.",
+                "x-ui-hint": {
+                  "kind": "reference",
+                  "sourcePath": [
+                    "sourceClusters"
+                  ],
+                  "message": "Choose one source cluster from sourceClusters."
+                }
               },
               "proxyConfig": {
                 "type": "object",
@@ -4211,13 +4286,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     ],
                     "default": "LoadBalancer",
                     "description": "Expert setting controlling how the capture proxy Kubernetes Service is exposed. 'LoadBalancer' provisions a cloud/load-balancer-backed Service and waits for load balancer ingress before the proxy is Ready. 'ClusterIP' exposes the proxy only inside the Kubernetes cluster and waits for the cluster-local Service endpoint before the proxy is Ready.",
-                    "changeRestriction": "impossible"
+                    "changeRestriction": "impossible",
+                    "x-change-restriction": "impossible"
                   },
                   "internetFacing": {
                     "type": "boolean",
                     "default": false,
                     "description": "When true and serviceType is 'LoadBalancer', the proxy's Kubernetes Service is annotated with 'internet-facing' load balancer scheme, making it accessible from outside the VPC.",
-                    "changeRestriction": "impossible"
+                    "changeRestriction": "impossible",
+                    "x-change-restriction": "impossible"
                   },
                   "podReplicas": {
                     "type": "number",
@@ -4310,7 +4387,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "snapshot",
                       "replayer"
                     ],
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-checksum-for": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "x-change-restriction": "gated"
                   },
                   "destinationConnectionPoolSize": {
                     "type": "number",
@@ -4335,7 +4417,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "snapshot",
                       "replayer"
                     ],
-                    "changeRestriction": "impossible"
+                    "changeRestriction": "impossible",
+                    "x-checksum-for": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "x-change-restriction": "impossible"
                   },
                   "maxTrafficBufferSize": {
                     "type": "number",
@@ -4343,7 +4430,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "maximum": 1048576,
                     "default": 1048576,
                     "description": "Maximum size in bytes for buffering a single HTTP request/response payload before forwarding to Kafka.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "noCapture": {
                     "type": "boolean",
@@ -4353,7 +4441,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "snapshot",
                       "replayer"
                     ],
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-checksum-for": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "x-change-restriction": "gated"
                   },
                   "numThreads": {
                     "type": "number",
@@ -4612,13 +4705,15 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       }
                     ],
                     "description": "TLS certificate configuration for HTTPS termination at the proxy. When configured, the proxy serves HTTPS and the TLS secret is mounted at /etc/proxy-tls/.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "enableMSKAuth": {
                     "type": "boolean",
                     "default": false,
                     "description": "Enable SASL/IAM authentication for the proxy's Kafka producer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "suppressCaptureForHeaderMatch": {
                     "type": "array",
@@ -4631,7 +4726,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "snapshot",
                       "replayer"
                     ],
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-checksum-for": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "x-change-restriction": "gated"
                   },
                   "suppressCaptureForMethod": {
                     "type": "string",
@@ -4641,7 +4741,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "snapshot",
                       "replayer"
                     ],
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-checksum-for": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "x-change-restriction": "gated"
                   },
                   "suppressCaptureForUriPath": {
                     "type": "string",
@@ -4651,7 +4756,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "snapshot",
                       "replayer"
                     ],
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-checksum-for": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "x-change-restriction": "gated"
                   },
                   "suppressMethodAndPath": {
                     "type": "string",
@@ -4661,7 +4771,12 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "snapshot",
                       "replayer"
                     ],
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-checksum-for": [
+                      "snapshot",
+                      "replayer"
+                    ],
+                    "x-change-restriction": "gated"
                   }
                 },
                 "required": [
@@ -4676,7 +4791,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             ],
             "description": "Configuration for a single capture proxy instance, including its Kafka topic and source cluster binding."
           },
-          "description": "Map of proxy names to their capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels."
+          "description": "Map of proxy names to their capture configurations. Keys become the Kubernetes Service names and must be valid DNS labels.",
+          "x-ui-hint": {
+            "kind": "record",
+            "addLabel": "capture proxy",
+            "keyFormat": "k8s-name",
+            "keyPattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+            "message": "Use a valid Kubernetes DNS name for the capture proxy."
+          }
         },
         "replayers": {
           "type": "object",
@@ -4685,11 +4807,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             "properties": {
               "fromProxy": {
                 "type": "string",
-                "description": "Name of the capture proxy to replay traffic from. Must match a key in traffic.proxies."
+                "description": "Name of the capture proxy to replay traffic from. Must match a key in traffic.proxies.",
+                "x-ui-hint": {
+                  "kind": "reference",
+                  "sourcePath": [
+                    "traffic",
+                    "proxies"
+                  ],
+                  "message": "Choose one capture proxy from traffic.proxies."
+                }
               },
               "toTarget": {
                 "type": "string",
-                "description": "Name of the target cluster to replay traffic to. Must match a key in targetClusters."
+                "description": "Name of the target cluster to replay traffic to. Must match a key in targetClusters.",
+                "x-ui-hint": {
+                  "kind": "reference",
+                  "sourcePath": [
+                    "targetClusters"
+                  ],
+                  "message": "Choose one target cluster from targetClusters."
+                }
               },
               "dependsOnSnapshotMigrations": {
                 "type": "array",
@@ -4802,12 +4939,14 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "boolean",
                     "default": false,
                     "description": "Enable SASL/IAM authentication for the replayer's Kafka consumer when connecting to Amazon MSK. Uses the pod's IAM role via EKS Pod Identity.",
-                    "changeRestriction": "impossible"
+                    "changeRestriction": "impossible",
+                    "x-change-restriction": "impossible"
                   },
                   "kafkaTrafficPropertyFile": {
                     "type": "string",
                     "description": "[Expert] Path to a Java properties file with additional or overridden Kafka consumer configuration. The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
-                    "changeRestriction": "impossible"
+                    "changeRestriction": "impossible",
+                    "x-change-restriction": "impossible"
                   },
                   "lookaheadTimeSeconds": {
                     "type": "number",
@@ -4850,7 +4989,8 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                     "type": "boolean",
                     "default": false,
                     "description": "Remove the Authorization header from replayed requests without replacing it. Useful when the target uses a different auth mechanism (e.g. SigV4) configured separately.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "speedupFactor": {
                     "type": "number",
@@ -4865,17 +5005,20 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                   "transformerConfig": {
                     "type": "string",
                     "description": "Inline request transformer configuration as a JSON string. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "transformerConfigEncoded": {
                     "type": "string",
                     "description": "Base64-encoded request transformer configuration, for configurations that would be cumbersome to otherwise encode in a JSON field. Request transformers modify each captured HTTP request before it is replayed to the target cluster.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "transformerConfigFile": {
                     "type": "string",
                     "description": "Path to a JSON file containing request transformer configuration. Request transformers modify each captured HTTP request before it is replayed to the target cluster. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "requestTransforms": {
                     "type": "array",
@@ -5201,22 +5344,26 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "additionalProperties": false
                     },
                     "description": "Request transform pipeline. Generates the existing transformerConfig inline JSON option.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "tupleTransformerConfig": {
                     "type": "string",
                     "description": "Inline tuple transformer configuration as a JSON string. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "tupleTransformerConfigBase64": {
                     "type": "string",
                     "description": "Base64-encoded tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "tupleTransformerConfigFile": {
                     "type": "string",
                     "description": "Path to a JSON file containing tuple transformer configuration. Tuple transformers operate on request-response pairs, enabling stateful transformations that depend on the source cluster's response. [Expert] The file must be mounted into the container by the user (e.g. via Kyverno pod mutation or custom image). Not wired through the workflow by default.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "tupleTransforms": {
                     "type": "array",
@@ -5542,48 +5689,56 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
                       "additionalProperties": false
                     },
                     "description": "Tuple transform pipeline. Generates the existing tupleTransformerConfig inline JSON option.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "tupleS3Bucket": {
                     "type": "string",
                     "description": "S3 bucket for tuple output. When set, tuples are written directly to S3.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "tupleS3Region": {
                     "type": "string",
                     "description": "AWS region for the tuple S3 bucket. Required when tupleS3Bucket is set.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "tupleS3Prefix": {
                     "type": "string",
                     "default": "tuples/",
                     "description": "S3 key prefix for tuple objects.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "tupleS3Endpoint": {
                     "type": "string",
                     "pattern": "^(?:https?:\\\\/\\\\/[^:\\\\/\\\\s]+(?::(?:[1-9]\\\\d{0,3}|[1-5]\\\\d{4}|6[0-4]\\\\d{3}|65[0-4]\\\\d{2}|655[0-2]\\\\d|6553[0-5]))?(?:\\\\/)?)?$",
                     "default": "",
                     "description": "Custom S3 endpoint URL for tuple output.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "tupleMaxBufferSeconds": {
                     "type": "number",
                     "default": 60,
                     "description": "Maximum seconds before rotating/uploading a tuple file to S3.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "tupleMaxFileSizeMb": {
                     "type": "number",
                     "default": 256,
                     "description": "Maximum uncompressed size in MB before rotating a tuple file to S3.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "tupleMaxPerFile": {
                     "type": "number",
                     "default": 0,
                     "description": "Maximum number of tuples per S3 object. 0 means no count limit.",
-                    "changeRestriction": "gated"
+                    "changeRestriction": "gated",
+                    "x-change-restriction": "gated"
                   },
                   "userAgent": {
                     "type": "string",
@@ -5599,7 +5754,11 @@ exports[`test schemas matches expected argo user matches expected 1`] = `
             ],
             "description": "Configuration for a single traffic replayer instance, binding a proxy's captured traffic to a target cluster."
           },
-          "description": "Map of replayer names to their replay configurations. Each replayer consumes from a proxy's Kafka topic and replays to a target cluster."
+          "description": "Map of replayer names to their replay configurations. Each replayer consumes from a proxy's Kafka topic and replays to a target cluster.",
+          "x-ui-hint": {
+            "kind": "record",
+            "addLabel": "traffic replay"
+          }
         }
       },
       "required": [

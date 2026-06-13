@@ -9,7 +9,7 @@ import platform
 import subprocess
 import sys
 import time
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from textual.app import App, ComposeResult
 from textual.containers import Container
 from textual.screen import ModalScreen
@@ -105,6 +105,9 @@ class WorkflowTreeApp(App):
         self._last_resource_sections = None
         self._last_resource_workflow_data: Dict = {}
         self._submitting_workflow = False
+        self._edit_validation_generation = 0
+        self._edit_validation_timer: Optional[Any] = None
+        self._edit_validation_delay = 0.4
 
         # State Containers (Managers)
         self._pods = PodNameManager(self, pod_scraper, name, namespace)
@@ -796,6 +799,7 @@ class WorkflowTreeApp(App):
         self._edit_dirty = False
         self._edit_value_mode = EDIT_MODE_ALL
         self._edit_status_mode = EDIT_MODE_ALL
+        self._cancel_config_edit_validation()
         self.current_run_id = None
         self.query_one("#edit-help", Static).display = False
         self.action_manual_refresh()
@@ -927,22 +931,39 @@ class WorkflowTreeApp(App):
                 TextInputModal(
                     f"{label} name",
                     documentation=self._edit_node_documentation(node),
-                    validation=node.get("validation"),
+                    validation=self._edit_node_validation(node),
                     required=True,
                 ),
                 lambda value: self._handle_add_config_name(node, value),
             )
         elif kind == "scalar":
-            self.push_screen(
-                TextInputModal(
-                    f"Edit {'.'.join(node.get('path', []))}",
-                    str(node.get("value") or ""),
-                    documentation=self._edit_node_documentation(node),
-                    validation=node.get("validation"),
-                    required=bool(node.get("required")),
+            input_hint = node.get("inputHint") or {}
+            options = input_hint.get("options") or []
+            if input_hint.get("kind") == "reference" and options:
+                self.push_screen(
+                    ChoiceSelectModal(
+                        f"Select {'.'.join(node.get('path', []))}",
+                        options,
+                        node.get("value"),
+                        documentation=self._edit_node_documentation(node),
+                    ),
+                    lambda value: self._handle_scalar_config_value(node, value),
+                )
+                return
+            modal = TextInputModal(
+                f"Edit {'.'.join(node.get('path', []))}",
+                str(node.get("value") or ""),
+                documentation=self._edit_node_documentation(node),
+                validation=self._edit_node_validation(node),
+                required=bool(node.get("required")),
+                on_change=lambda value, locally_valid: self._schedule_scalar_config_validation(
+                    node,
+                    value,
+                    modal,
+                    locally_valid,
                 ),
-                lambda value: self._handle_scalar_config_value(node, value),
             )
+            self.push_screen(modal, lambda value: self._handle_scalar_config_value(node, value))
         elif kind == "boolean":
             self.action_toggle_config_boolean()
         elif kind == "union":
@@ -983,20 +1004,146 @@ class WorkflowTreeApp(App):
         name = (value or "").strip()
         if not name:
             return
+        self._cancel_config_edit_validation()
         self._apply_config_edit_operation({
             "op": "add",
             "path": node.get("path"),
             "value": {"name": name},
         })
 
-    def _handle_scalar_config_value(self, node: Dict, value: Optional[str]) -> None:
+    def _handle_scalar_config_value(self, node: Dict, value: Optional[Any]) -> None:
         if value is None:
             return
+        self._cancel_config_edit_validation()
         self._apply_config_edit_operation({
             "op": "set",
             "path": node.get("path"),
             "value": value,
         }, selected_id=node.get("id"))
+
+    def _schedule_scalar_config_validation(
+        self,
+        node: Dict,
+        value: str,
+        modal: TextInputModal,
+        locally_valid: bool,
+    ) -> None:
+        self._edit_validation_generation += 1
+        generation = self._edit_validation_generation
+        self._stop_config_edit_validation_timer()
+        if not locally_valid or self._edit_draft_yaml is None:
+            modal.set_remote_validation("")
+            return
+        modal.set_remote_validation("Checking full config...", "pending")
+        self._edit_validation_timer = self.set_timer(
+            self._edit_validation_delay,
+            lambda: self._start_scalar_config_validation(node, value, modal, generation),
+        )
+
+    def _start_scalar_config_validation(
+        self,
+        node: Dict,
+        value: str,
+        modal: TextInputModal,
+        generation: int,
+    ) -> None:
+        if generation != self._edit_validation_generation or self._edit_draft_yaml is None:
+            return
+        operation = {
+            "op": "set",
+            "path": node.get("path"),
+            "value": value,
+        }
+        raw_yaml = self._edit_draft_yaml or ""
+        self.run_worker(
+            lambda: self._validate_config_edit_operation_worker(raw_yaml, operation, generation, node.get("path") or [], modal),
+            thread=True,
+            name="validate_config_edit_operation",
+        )
+
+    def _validate_config_edit_operation_worker(
+        self,
+        raw_yaml: str,
+        operation: Dict,
+        generation: int,
+        path: list[str],
+        modal: TextInputModal,
+    ) -> None:
+        try:
+            service = self._config_edit_service_or_default()
+            if hasattr(service, "validate_operation"):
+                result = service.validate_operation(raw_yaml, operation)
+            else:
+                result = service.apply_operation(raw_yaml, operation)
+            self.call_from_thread(self._handle_config_edit_validation_result, result, generation, path, modal)
+        except Exception as e:
+            logger.exception("Failed to validate config edit operation")
+            self.call_from_thread(self._handle_config_edit_validation_error, e, generation, modal)
+
+    def _handle_config_edit_validation_result(
+        self,
+        result,
+        generation: int,
+        path: list[str],
+        modal: TextInputModal,
+    ) -> None:
+        if generation != self._edit_validation_generation or self.screen is not modal:
+            return
+        edit_state = getattr(result, "edit_state", None) or result["edit_state"]
+        diagnostic = self._diagnostic_for_path(edit_state, path)
+        if diagnostic:
+            modal.set_remote_validation(str(diagnostic.get("message") or ""), str(diagnostic.get("severity") or "error"))
+        else:
+            modal.set_remote_validation("No validation issues found.", "ok")
+
+    def _handle_config_edit_validation_error(
+        self,
+        error: Exception,
+        generation: int,
+        modal: TextInputModal,
+    ) -> None:
+        if generation != self._edit_validation_generation or self.screen is not modal:
+            return
+        modal.set_remote_validation(f"Validation unavailable: {error}", "warning")
+
+    def _cancel_config_edit_validation(self) -> None:
+        self._edit_validation_generation += 1
+        self._stop_config_edit_validation_timer()
+
+    def _stop_config_edit_validation_timer(self) -> None:
+        timer = self._edit_validation_timer
+        self._edit_validation_timer = None
+        if timer is not None and hasattr(timer, "stop"):
+            try:
+                timer.stop()
+            except Exception:
+                pass
+
+    @classmethod
+    def _diagnostic_for_path(cls, edit_state: Dict, path: list[str]) -> Optional[Dict]:
+        node = cls._find_edit_node_by_path(edit_state.get("nodes") or [], path)
+        for diagnostic in (node or {}).get("diagnostics") or []:
+            if cls._paths_equal(diagnostic.get("path") or path, path):
+                return diagnostic
+        validation = edit_state.get("validation") or {}
+        for diagnostic in validation.get("diagnostics") or []:
+            if cls._paths_equal(diagnostic.get("path") or [], path):
+                return diagnostic
+        return None
+
+    @classmethod
+    def _find_edit_node_by_path(cls, nodes, path: list[str]) -> Optional[Dict]:
+        stack = list(nodes or [])
+        while stack:
+            node = stack.pop()
+            if cls._paths_equal(node.get("path") or [], path):
+                return node
+            stack.extend(node.get("children") or [])
+        return None
+
+    @staticmethod
+    def _paths_equal(left, right) -> bool:
+        return [str(part) for part in left] == [str(part) for part in right]
 
     def action_remove_config_node(self) -> None:
         node = selected_edit_node(self.tree_root_widget)
@@ -1034,6 +1181,17 @@ class WorkflowTreeApp(App):
     @staticmethod
     def _edit_node_documentation(node: Dict) -> str:
         return str(node.get("description") or node.get("descriptionShort") or "")
+
+    @staticmethod
+    def _edit_node_validation(node: Dict) -> Dict:
+        validation = dict(node.get("validation") or {})
+        input_hint = node.get("inputHint") or {}
+        if not validation and input_hint.get("kind") == "text" and input_hint.get("pattern"):
+            validation = {
+                "pattern": input_hint.get("pattern"),
+                "message": input_hint.get("message"),
+            }
+        return validation
 
     @classmethod
     def _config_edit_enter_description(cls, node: Optional[Dict]) -> str:

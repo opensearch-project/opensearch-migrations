@@ -77,6 +77,10 @@ class ConfigEditService:
             edit_state=result["editState"],
         )
 
+    def validate_operation(self, raw_yaml: str, operation: Dict[str, Any]) -> ConfigEditApplyResult:
+        """Preview one operation through TS validation without saving the result."""
+        return self.apply_operation(raw_yaml, operation)
+
     def save_raw_yaml(self, raw_yaml: str) -> str:
         store = self.store or WorkflowConfigStore(namespace=self.namespace)
         return store.save_config(WorkflowConfig(raw_yaml=raw_yaml), self.session_name)

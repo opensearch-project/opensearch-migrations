@@ -108,11 +108,44 @@ describe("editConfig state", () => {
         const version = findNode(state.nodes, "edit:sourceClusters.legacy.version");
         const endpoint = findNode(state.nodes, "edit:targetClusters.prod.endpoint");
 
+        expect(version?.inputHint).toMatchObject({kind: "text", format: "cluster-version"});
         expect(version?.validation?.pattern).toContain("ES");
         expect(version?.status).toBe("error");
         expect(version?.diagnostics?.[0].message).toContain("Use '<ENGINE> <VERSION>'");
+        expect(endpoint?.inputHint).toMatchObject({kind: "text", format: "http-endpoint"});
         expect(endpoint?.validation?.message).toContain("http:// or https://");
         expect(endpoint?.status).toBe("error");
+    });
+
+    it("returns structured validation diagnostics from schema refinements", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {
+                legacy: {
+                    endpoint: "https://legacy.example.com:9200",
+                    version: "ES 7.10.2",
+                },
+            },
+            targetClusters: {
+                prod: {
+                    endpoint: "https://prod.example.com:9200",
+                },
+            },
+            traffic: {
+                proxies: {
+                    capture: {source: "missing-source", proxyConfig: {listenPort: 9201}},
+                },
+                replayers: {},
+            },
+            snapshotMigrationConfigs: [],
+        });
+
+        expect(state.validation.valid).toBe(false);
+        expect(state.validation.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                severity: "error",
+                path: ["traffic", "proxies", "capture", "source"],
+            }),
+        ]));
     });
 
     it("applies auth variant changes and refreshes required children", () => {
@@ -219,6 +252,16 @@ describe("editConfig state", () => {
         expect(findNode(state.nodes, "edit:traffic.replayers.replay")?.label).toContain("traffic replay: replay");
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0")?.label).toContain("snapshot migration: legacy -> prod");
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs:add")?.label).toContain("+ Add snapshot migration");
+        expect(findNode(state.nodes, "edit:traffic.proxies.capture.source")?.inputHint).toMatchObject({
+            kind: "reference",
+            sourcePath: ["sourceClusters"],
+            options: [{label: "legacy", value: "legacy"}],
+        });
+        expect(findNode(state.nodes, "edit:traffic.replayers.replay.toTarget")?.inputHint).toMatchObject({
+            kind: "reference",
+            sourcePath: ["targetClusters"],
+            options: [{label: "prod", value: "prod"}],
+        });
     });
 
     it("adds/removes nested traffic resources and switches Kafka mode", () => {

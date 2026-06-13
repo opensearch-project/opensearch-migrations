@@ -1,5 +1,5 @@
 import re
-from typing import Optional
+from typing import Callable, Optional
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -17,6 +17,7 @@ class TextInputModal(ModalScreen[Optional[str]]):
     #documentation { color: gray; margin-bottom: 1; }
     #value { margin-bottom: 1; }
     #validation { color: $error; margin-bottom: 1; min-height: 1; }
+    #remote-validation { margin-bottom: 1; min-height: 1; }
     #buttons { align: center middle; height: 3; }
     Button { margin: 0 1; min-width: 12; }
     """
@@ -32,6 +33,7 @@ class TextInputModal(ModalScreen[Optional[str]]):
         documentation: str = "",
         validation: Optional[dict] = None,
         required: bool = False,
+        on_change: Optional[Callable[[str, bool], None]] = None,
     ):
         super().__init__()
         self.prompt = prompt
@@ -39,6 +41,7 @@ class TextInputModal(ModalScreen[Optional[str]]):
         self.documentation = documentation
         self.validation = validation or {}
         self.required = required
+        self.on_change = on_change
         self._compiled_pattern = self._compile_pattern(self.validation.get("pattern"))
 
     def compose(self) -> ComposeResult:
@@ -47,6 +50,7 @@ class TextInputModal(ModalScreen[Optional[str]]):
             yield Static(escape(self.documentation), id="documentation")
             yield Input(value=self.initial_value, id="value", select_on_focus=False)
             yield Static("", id="validation")
+            yield Static("", id="remote-validation")
             with Horizontal(id="buttons"):
                 yield Button("Save", id="save", variant="success")
                 yield Button("Cancel", id="cancel", variant="error")
@@ -77,7 +81,14 @@ class TextInputModal(ModalScreen[Optional[str]]):
         self.dismiss(event.value)
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        self._update_validation(event.value)
+        message = self._update_validation(event.value)
+        if message:
+            self.set_remote_validation("")
+            if self.on_change:
+                self.on_change(event.value, False)
+            return
+        if self.on_change:
+            self.on_change(event.value, True)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "save":
@@ -90,6 +101,20 @@ class TextInputModal(ModalScreen[Optional[str]]):
         self.query_one("#validation", Static).update(escape(message or ""))
         self.query_one("#save", Button).disabled = bool(message)
         return message
+
+    def set_remote_validation(self, message: str, severity: str = "warning") -> None:
+        if not self.is_mounted:
+            return
+        color = {
+            "ok": "green",
+            "error": "red",
+            "warning": "yellow",
+            "pending": "cyan",
+        }.get(severity, "yellow")
+        if not message:
+            self.query_one("#remote-validation", Static).update("")
+            return
+        self.query_one("#remote-validation", Static).update(f"[{color}]{escape(message)}[/]")
 
     def _validation_message(self, value: str) -> Optional[str]:
         if self.required and not value.strip():

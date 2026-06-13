@@ -630,6 +630,7 @@ async def test_resource_view_edit_mode_applies_variant_and_saves(mock_workflow_w
     class FakeConfigEditService:
         def __init__(self):
             self.apply_calls = []
+            self.validate_calls = []
             self.saved_yaml = []
 
         def load_edit_session(self):
@@ -979,6 +980,7 @@ async def test_resource_view_edit_mode_edits_scalar_and_boolean_fields(mock_work
     class FakeConfigEditService:
         def __init__(self):
             self.apply_calls = []
+            self.validate_calls = []
 
         def load_edit_session(self):
             return {
@@ -991,6 +993,25 @@ async def test_resource_view_edit_mode_edits_scalar_and_boolean_fields(mock_work
             return {
                 "raw_yaml": f"updated-yaml-{len(self.apply_calls)}",
                 "edit_state": edit_state_with_editable_source_fields(),
+            }
+
+        def validate_operation(self, raw_yaml, operation):
+            self.validate_calls.append((raw_yaml, operation))
+            state = edit_state_with_editable_source_fields()
+            state["validation"] = {
+                "valid": False,
+                "errors": ["Endpoint will require connectivity review"],
+                "diagnostics": [
+                    {
+                        "severity": "warning",
+                        "message": "Endpoint will require connectivity review",
+                        "path": ["sourceClusters", "legacy", "endpoint"],
+                    }
+                ],
+            }
+            return {
+                "raw_yaml": "preview-yaml",
+                "edit_state": state,
             }
 
     service = FakeConfigEditService()
@@ -1041,6 +1062,13 @@ async def test_resource_view_edit_mode_edits_scalar_and_boolean_fields(mock_work
             )
             assert len(service.apply_calls) == 0
             value_input.value = "https://edited.example.com:9200"
+            assert await wait_until(pilot, lambda: len(service.validate_calls) == 1, timeout=3.0)
+            assert await wait_until(
+                pilot,
+                lambda: "Endpoint will require connectivity review" in str(
+                    app.screen.query_one("#remote-validation").content
+                ),
+            )
             await pilot.press("enter")
 
             assert await wait_until(pilot, lambda: len(service.apply_calls) == 1)

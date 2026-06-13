@@ -36,18 +36,51 @@ function unwrapZod(schema: z.ZodType): z.ZodType {
     return schema;
 }
 
+function fieldMeta(schema: z.ZodType): FieldMeta | undefined {
+    const direct = schema.meta() as FieldMeta | undefined;
+    const unwrapped = unwrapZod(schema);
+    const inner = unwrapped === schema ? undefined : unwrapped.meta() as FieldMeta | undefined;
+    return {
+        ...(inner ?? {}),
+        ...(direct ?? {}),
+    };
+}
+
 /** Walk a generated JSON Schema and inject x- extensions from Zod .meta(). */
 function injectMetaExtensions(jsonSchema: any, zodSchema: z.ZodType): void {
-    if (!(zodSchema instanceof z.ZodObject) || !isSafePlainObject(jsonSchema?.properties)) return;
-    for (const [key, propSchema] of safeObjectEntries(jsonSchema.properties)) {
-        if (!Object.hasOwn((zodSchema as z.ZodObject<any>).shape, key)) continue;
-        if (!isSafePlainObject(propSchema)) continue;
-        const fieldZod = (zodSchema as z.ZodObject<any>).shape[key];
-        const meta = fieldZod.meta() as FieldMeta | undefined;
-        if (meta?.checksumFor?.length) propSchema['x-checksum-for'] = meta.checksumFor;
-        if (meta?.changeRestriction) propSchema['x-change-restriction'] = meta.changeRestriction;
-        // Recurse into nested objects
-        injectMetaExtensions(propSchema, unwrapZod(fieldZod));
+    const unwrapped = unwrapZod(zodSchema);
+    if (unwrapped instanceof z.ZodObject) {
+        if (!isSafePlainObject(jsonSchema?.properties)) return;
+        for (const [key, propSchema] of safeObjectEntries(jsonSchema.properties)) {
+            if (!Object.hasOwn((unwrapped as z.ZodObject<any>).shape, key)) continue;
+            if (!isSafePlainObject(propSchema)) continue;
+            const fieldZod = (unwrapped as z.ZodObject<any>).shape[key];
+            const meta = fieldMeta(fieldZod);
+            if (meta?.checksumFor?.length) propSchema['x-checksum-for'] = meta.checksumFor;
+            if (meta?.changeRestriction) propSchema['x-change-restriction'] = meta.changeRestriction;
+            if (meta?.uiHint) propSchema['x-ui-hint'] = meta.uiHint;
+            injectMetaExtensions(propSchema, fieldZod);
+        }
+        return;
+    }
+
+    if (unwrapped instanceof z.ZodRecord && isSafePlainObject(jsonSchema?.additionalProperties)) {
+        injectMetaExtensions(jsonSchema.additionalProperties, (unwrapped as z.ZodRecord<any, any>).valueType);
+        return;
+    }
+
+    if (unwrapped instanceof z.ZodArray && isSafePlainObject(jsonSchema?.items)) {
+        injectMetaExtensions(jsonSchema.items, (unwrapped as z.ZodArray<any>).element);
+        return;
+    }
+
+    if (unwrapped instanceof z.ZodUnion && Array.isArray(jsonSchema?.anyOf)) {
+        const options = (unwrapped as z.ZodUnion<any>).options as z.ZodType[];
+        jsonSchema.anyOf.forEach((branch: unknown, index: number) => {
+            if (isSafePlainObject(branch) && options[index]) {
+                injectMetaExtensions(branch, options[index]);
+            }
+        });
     }
 }
 
@@ -70,6 +103,18 @@ function makeBareNullableSchemasAjvCompatible(jsonSchema: any): void {
     }
 
     safeObjectValues(jsonSchema).forEach(makeBareNullableSchemasAjvCompatible);
+}
+
+function removeRawUiHintMetadata(jsonSchema: any): void {
+    if (Array.isArray(jsonSchema)) {
+        jsonSchema.forEach(removeRawUiHintMetadata);
+        return;
+    }
+    if (!isSafePlainObject(jsonSchema)) {
+        return;
+    }
+    delete jsonSchema.uiHint;
+    safeObjectValues(jsonSchema).forEach(removeRawUiHintMetadata);
 }
 
 /**
@@ -95,7 +140,8 @@ export function zodSchemaToJsonSchema(
     const components = generator.generateComponents();
 
     const result = components.components?.schemas?.[schemaName];
-    injectMetaExtensions(result, schema);
+    injectMetaExtensions(result, schemaToRegister);
+    removeRawUiHintMetadata(result);
     makeBareNullableSchemasAjvCompatible(result);
     return result;
 }
