@@ -124,8 +124,9 @@ public class CaptureProxy {
         @Parameter(required = false,
             names = { "--numThreads" },
             arity = 1,
-            description = "How many threads netty should create in its event loop group")
-        public int numThreads = 1;
+            description = "How many threads netty should create in its event loop group. "
+                + "A value of 0 will use the default number of threads (2 * number of available processors).")
+        public int numThreads = 0;
         @Parameter(required = false,
             names = { "--destinationConnectionPoolSize" },
             arity = 1,
@@ -193,6 +194,19 @@ public class CaptureProxy {
                 "E.g. '(.* /ephemeral/*|GET /_cat/.*)' to ignore capturing all traffic for '/ephemeral' AND " +
                 "all GET requests to /_cat/.*")
         public String suppressMethodAndPath;
+        @Parameter(required = false,
+            names = { "--reliableCapture" },
+            arity = 1,
+            description = "If true, mutating HTTP methods (POST/PUT/DELETE/PATCH) will block until the capture "
+                + "offload completes before forwarding the request to the destination. If false, all requests "
+                + "are forwarded immediately and capture happens asynchronously.")
+        public boolean reliableCapture = true;
+        @Parameter(required = false,
+            names = { "--maxConnections" },
+            arity = 1,
+            description = "Maximum number of concurrent connections allowed. When exceeded, new connections "
+                + "receive a 503 Service Unavailable response. A value of 0 disables the limit.")
+        public int maxConnections = 0;
         @Parameter(required = false,
             names = { "--kafkaTopic" },
             arity = 1,
@@ -432,7 +446,8 @@ public class CaptureProxy {
                 .build();
             var proxyChannelInitializer =
                 buildProxyChannelInitializer(ctx, backsideConnectionPool, sslEngineSupplier, headerCapturePredicate,
-                    params.headerOverrides, getConnectionCaptureFactory(params, ctx));
+                    params.headerOverrides, getConnectionCaptureFactory(params, ctx), params.reliableCapture,
+                    params.maxConnections);
             proxy.start(proxyChannelInitializer, params.numThreads);
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Caught exception while setting up the server and rethrowing").log();
@@ -459,7 +474,9 @@ public class CaptureProxy {
                                                                 Supplier<SSLEngine> sslEngineSupplier,
                                                                 @NonNull RequestCapturePredicate headerCapturePredicate,
                                                                 List<String> headerOverridesArgs,
-                                                                IConnectionCaptureFactory<T> connectionFactory)
+                                                                IConnectionCaptureFactory<T> connectionFactory,
+                                                                boolean reliableCapture,
+                                                                int maxConnections)
     {
         var headers = new ArrayList<>(convertPairListToMap(headerOverridesArgs).entrySet());
         Collections.reverse(headers);
@@ -479,7 +496,9 @@ public class CaptureProxy {
             backsideConnectionPool,
             sslEngineSupplier,
             connectionFactory,
-            headerCapturePredicate
+            headerCapturePredicate,
+            reliableCapture,
+            maxConnections
         ) {
             @Override
             protected void initChannel(@NonNull SocketChannel ch) throws IOException {

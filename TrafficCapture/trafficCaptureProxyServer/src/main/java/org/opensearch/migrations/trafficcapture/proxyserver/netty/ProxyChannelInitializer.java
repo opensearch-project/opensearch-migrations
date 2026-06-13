@@ -25,6 +25,8 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
     protected final IRootWireLoggingContext rootContext;
     protected final BacksideConnectionPool backsideConnectionPool;
     protected final RequestCapturePredicate requestCapturePredicate;
+    protected final boolean reliableCapture;
+    protected final ConnectionLimitHandler connectionLimitHandler;
 
     public ProxyChannelInitializer(
         IRootWireLoggingContext rootContext,
@@ -33,15 +35,43 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
         IConnectionCaptureFactory<T> connectionCaptureFactory,
         @NonNull RequestCapturePredicate requestCapturePredicate
     ) {
+        this(rootContext, backsideConnectionPool, sslEngineSupplier, connectionCaptureFactory,
+            requestCapturePredicate, true, 0);
+    }
+
+    public ProxyChannelInitializer(
+        IRootWireLoggingContext rootContext,
+        BacksideConnectionPool backsideConnectionPool,
+        Supplier<SSLEngine> sslEngineSupplier,
+        IConnectionCaptureFactory<T> connectionCaptureFactory,
+        @NonNull RequestCapturePredicate requestCapturePredicate,
+        boolean reliableCapture
+    ) {
+        this(rootContext, backsideConnectionPool, sslEngineSupplier, connectionCaptureFactory,
+            requestCapturePredicate, reliableCapture, 0);
+    }
+
+    public ProxyChannelInitializer(
+        IRootWireLoggingContext rootContext,
+        BacksideConnectionPool backsideConnectionPool,
+        Supplier<SSLEngine> sslEngineSupplier,
+        IConnectionCaptureFactory<T> connectionCaptureFactory,
+        @NonNull RequestCapturePredicate requestCapturePredicate,
+        boolean reliableCapture,
+        int maxConnections
+    ) {
         this.rootContext = rootContext;
         this.backsideConnectionPool = backsideConnectionPool;
         this.sslEngineProvider = sslEngineSupplier;
         this.connectionCaptureFactory = connectionCaptureFactory;
         this.requestCapturePredicate = requestCapturePredicate;
+        this.reliableCapture = reliableCapture;
+        this.connectionLimitHandler = maxConnections > 0 ? new ConnectionLimitHandler(maxConnections) : null;
     }
 
     public boolean shouldGuaranteeMessageOffloading(HttpRequest httpRequest) {
-        return (httpRequest != null
+        return reliableCapture
+            && (httpRequest != null
             && (httpRequest.method().equals(HttpMethod.POST)
                 || httpRequest.method().equals(HttpMethod.PUT)
                 || httpRequest.method().equals(HttpMethod.DELETE)
@@ -50,6 +80,9 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
 
     @Override
     protected void initChannel(@NonNull SocketChannel ch) throws IOException {
+        if (connectionLimitHandler != null) {
+            ch.pipeline().addLast(connectionLimitHandler);
+        }
         var sslContext = sslEngineProvider != null ? sslEngineProvider.get() : null;
         if (sslContext != null) {
             ch.pipeline().addLast(new SslHandler(sslEngineProvider.get()));
