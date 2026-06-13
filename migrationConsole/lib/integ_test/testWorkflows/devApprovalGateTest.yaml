@@ -1,0 +1,140 @@
+# Dev-only workflow for testing the appearance of approval gates in the TUI without
+# running a full migration pipeline.
+#
+# How it works:
+#   1. Creates the two step-approval gates (captureproxysetup, documentbackfill) in the
+#      "Created" phase at the start, exactly as configProcessor does before a real run.
+#   2. Uses the `donothing` template (from document-bulk-load) for every upstream step
+#      that would normally do real work (kafka setup, proxy deployment, snapshot, metadata).
+#   3. Calls the real `waitforuserapproval` template (from resource-management) for both
+#      gates, so the TUI sees genuine waiting nodes and displays the approval UI.
+#
+# Submit with:
+#   argo submit -n ma migrationConsole/lib/integ_test/testWorkflows/devApprovalGateTest.yaml --watch
+# or:
+#   kubectl create -f migrationConsole/lib/integ_test/testWorkflows/devApprovalGateTest.yaml
+#
+# Approve from the migration console TUI, or via CLI:
+#   workflow approve step --list
+#   workflow approve step captureproxysetup.dev-test-proxy
+#   workflow approve step documentbackfill.dev-test-backfill
+#
+# Clean up afterwards:
+#   argo delete -n ma -l workflows.argoproj.io/workflow-template=dev-approval-gate-test
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: dev-approval-gate-test
+  namespace: ma
+  labels:
+    migrations.opensearch.org/dev-test: "approval-gates"
+spec:
+  serviceAccountName: argo-workflow-executor
+  entrypoint: test-approval-gates
+
+  templates:
+    - name: test-approval-gates
+      steps:
+        # Create both step approval gates upfront with phase=Created,
+        # mirroring what configProcessor does before a real migration run.
+        # Both can be created in parallel since they are independent.
+        - - name: create-proxy-gate
+            template: create-approval-gate
+            arguments:
+              parameters:
+                - name: gateName
+                  value: captureproxysetup.dev-test-proxy
+          - name: create-backfill-gate
+            template: create-approval-gate
+            arguments:
+              parameters:
+                - name: gateName
+                  value: documentbackfill.dev-test-backfill
+
+        # Proxy setup: skip all real work, go straight to the approval gate.
+        - - name: mock-proxy-setup
+            templateRef:
+              name: document-bulk-load
+              template: donothing
+
+        - - name: approve-proxy-setup
+            templateRef:
+              name: resource-management
+              template: waitforuserapproval
+            arguments:
+              parameters:
+                - name: resourceName
+                  value: captureproxysetup.dev-test-proxy
+
+        # Snapshot + metadata: skip all real work, go straight to the backfill gate.
+        - - name: mock-snapshot-and-metadata
+            templateRef:
+              name: document-bulk-load
+              template: donothing
+
+        - - name: approve-backfill
+            templateRef:
+              name: resource-management
+              template: waitforuserapproval
+            arguments:
+              parameters:
+                - name: resourceName
+                  value: documentbackfill.dev-test-backfill
+
+    # Creates an ApprovalGate CRD with status.phase=Created.
+    # `action: apply` creates or no-ops if it already exists.
+    # The status subresource is set in a follow-up patch so it survives
+    # Kubernetes stripping unknown fields on the main resource write.
+    - name: create-approval-gate
+      inputs:
+        parameters:
+          - name: gateName
+      steps:
+        - - name: apply
+            template: apply-approval-gate
+            arguments:
+              parameters:
+                - name: gateName
+                  value: "{{inputs.parameters.gateName}}"
+        - - name: set-created-phase
+            template: patch-approval-gate-status
+            arguments:
+              parameters:
+                - name: gateName
+                  value: "{{inputs.parameters.gateName}}"
+                - name: phase
+                  value: Created
+
+    - name: apply-approval-gate
+      inputs:
+        parameters:
+          - name: gateName
+      resource:
+        action: apply
+        manifest: |
+          apiVersion: migrations.opensearch.org/v1alpha1
+          kind: ApprovalGate
+          metadata:
+            name: "{{inputs.parameters.gateName}}"
+            labels:
+              migrations.opensearch.org/dev-test: "approval-gates"
+          spec: {}
+
+    - name: patch-approval-gate-status
+      inputs:
+        parameters:
+          - name: gateName
+          - name: phase
+      resource:
+        action: patch
+        flags:
+          - --type
+          - merge
+          - --subresource=status
+        manifest: |
+          apiVersion: migrations.opensearch.org/v1alpha1
+          kind: ApprovalGate
+          metadata:
+            name: "{{inputs.parameters.gateName}}"
+          status:
+            phase: "{{inputs.parameters.phase}}"

@@ -121,3 +121,8 @@ the extracted uuid to be 1, which is not the case in normal runs. To fix either 
   value: "1"
 ```
 in above script for local runs. Fix to handle this dynamically to be filed shortly.
+
+
+#### Gradle Flags
+- only set flag -PexcludeESCustomTestImages in gradle build command when you already have the respective images in your registry. Otherwise the build might fail cause another
+  step references one of the elastic images.

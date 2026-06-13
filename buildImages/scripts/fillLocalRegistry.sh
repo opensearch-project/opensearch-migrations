@@ -27,12 +27,22 @@ docker ps -q -f name=^buildkitd$ | grep -q . || docker run -d --privileged \
   --addr tcp://0.0.0.0:1234 \
   --config /etc/buildkit/buildkitd.toml
 
+# Wait for buildkitd to accept connections before registering the builder or running builds.
+echo "Waiting for buildkitd to be ready..."
+timeout 60 sh -c 'until nc -z localhost 1234 2>/dev/null; do sleep 1; done' \
+  || { echo "ERROR: buildkitd did not become ready within 60 seconds"; exit 1; }
+
 docker buildx inspect local-remote-builder >/dev/null 2>&1 || docker buildx create --name local-remote-builder --driver remote tcp://localhost:1234
 
-# NOTE: if only testing changes in solr and / or ES, can use flags -PincludeSolr666, -PexcludeESCustomTestImages params respectively
-PLATFORM=$(uname -m)
+# NOTE: if only testing changes in solr and / or ES, can use flags -PincludeSolr666, -PexcludeESCustomTestImages params respectiv
+case $(uname -m) in
+  aarch64) PLATFORM="arm64" ;;
+  x86_64)  PLATFORM="amd64" ;;
+  *)       PLATFORM=$(uname -m) ;;
+esac
+
 echo "Building general and test images"
-../gradlew "buildImagesToRegistry_${PLATFORM}" "buildKitTestAll_${PLATFORM}" -PregistryEndpoint=localhost:5001 -Pbuilder=local-remote-builder -PincludeSolr660TestImage -PexcludeESCustomTestImages
+../gradlew "buildImagesToRegistry_${PLATFORM}" "buildKitTestAll_${PLATFORM}" -PregistryEndpoint=localhost:5001 -Pbuilder=local-remote-builder -PincludeSolr660TestImage
 
 
 echo "Registry contents:"

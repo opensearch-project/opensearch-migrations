@@ -1,4 +1,5 @@
 # templates/migrationsResources
+{{- $existingMRJob := lookup "batch/v1" "Job" .Release.Namespace (printf "%s-install-migrations-resources" .Release.Name) }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -6,7 +7,7 @@ metadata:
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "5"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-delete-policy": {{ if $existingMRJob }}before-hook-creation,{{ end }}hook-succeeded,hook-failed
 spec:
   ttlSecondsAfterFinished: 600
   backoffLimit: 3

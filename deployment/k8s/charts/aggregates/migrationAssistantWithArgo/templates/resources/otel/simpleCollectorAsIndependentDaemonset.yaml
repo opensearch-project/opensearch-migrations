@@ -109,6 +109,7 @@ spec:
 # pre-install chart installer job. Helm caches API discovery before running hooks,
 # so it can't validate ServiceMonitor resources directly. We apply it via kubectl
 # in a post-install Job instead.
+{{- $existingOtelJob := lookup "batch/v1" "Job" .Release.Namespace "create-otel-service-monitor" }}
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -116,7 +117,7 @@ metadata:
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "1"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-delete-policy": {{ if $existingOtelJob }}before-hook-creation,{{ end }}hook-succeeded,hook-failed
 spec:
   activeDeadlineSeconds: 120
   podFailurePolicy:
