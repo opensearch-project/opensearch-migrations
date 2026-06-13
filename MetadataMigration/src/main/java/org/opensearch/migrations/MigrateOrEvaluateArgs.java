@@ -109,6 +109,17 @@ public class MigrateOrEvaluateArgs {
     )
     public boolean allowExistingIndexes = false;
 
+    @Parameter(required = false,
+        names = { "--delete-existing-indexes" },
+        description = "When true, each in-scope index (subject to the index allowlist) is deleted from the " +
+            "target cluster by name before metadata migration recreates it, giving a clean re-run. Deleting by " +
+            "exact name works even when the target has action.destructive_requires_name=true, and only touches " +
+            "indexes being migrated (unlike a wildcard clear). Only takes effect during the migrate phase, not " +
+            "evaluate. When false (default), existing indexes are left untouched. [Destructive]",
+        arity = 1
+    )
+    public boolean deleteExistingIndexes = false;
+
     // Accepted for parity with RfsMigrateDocuments but not used by MetadataMigration.
     // The orchestration layer forwards a shared config bag to both CLIs.
     @Parameter(required = false,

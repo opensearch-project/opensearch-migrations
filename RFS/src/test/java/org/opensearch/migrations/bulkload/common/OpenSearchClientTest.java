@@ -153,6 +153,32 @@ class OpenSearchClientTest {
         assertThat(exception.getMessage(), containsString("illegal_argument_exception"));
     }
 
+    @Test
+    void testDeleteIndex_deleted() {
+        when(restClient.deleteAsync(any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(200, "", null, "{\"acknowledged\":true}")));
+
+        assertThat(openSearchClient.deleteIndex("my-index"), equalTo(true));
+    }
+
+    @Test
+    void testDeleteIndex_notFoundIsNoOp() {
+        when(restClient.deleteAsync(any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(404, "", null, "{\"error\":\"index_not_found_exception\"}")));
+
+        assertThat(openSearchClient.deleteIndex("missing-index"), equalTo(false));
+    }
+
+    @Test
+    void testDeleteIndex_errorThrows() {
+        when(restClient.deleteAsync(any(), any()))
+            .thenReturn(Mono.just(new HttpResponse(403, "", null, "{\"error\":\"forbidden\"}")));
+
+        var exception = assertThrows(OpenSearchClient.OperationFailed.class,
+            () -> openSearchClient.deleteIndex("blocked-index"));
+        assertThat(exception.getMessage(), containsString("blocked-index"));
+    }
+
     private void setupOkResponse(RestClient restClient, String url, String body) {
         var versionResponse = new HttpResponse(200, "OK", Map.of(), body);
         when(restClient.getAsync(url, null)).thenReturn(Mono.just(versionResponse));

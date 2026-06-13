@@ -230,6 +230,37 @@ public abstract class OpenSearchClient {
         return createObjectIdempotent(targetPath, settings, context);
     }
 
+    /**
+     * Deletes a single index by exact name. Deleting by name (rather than a wildcard
+     * expression) works even when the target cluster has
+     * {@code action.destructive_requires_name=true}. A missing index (404) is treated as
+     * a successful no-op so the operation is idempotent.
+     *
+     * @return true if an index was deleted, false if it did not exist.
+     */
+    public boolean deleteIndex(String indexName) {
+        var targetPath = getCreateIndexPath(indexName);
+        var response = client.deleteAsync(targetPath, null)
+            .flatMap(resp -> {
+                if (resp.statusCode == HttpURLConnection.HTTP_OK
+                    || resp.statusCode == HttpURLConnection.HTTP_NOT_FOUND) {
+                    return Mono.just(resp);
+                }
+                return Mono.error(new OperationFailed(
+                    "Could not delete index: " + indexName + ". " + getString(resp), resp));
+            })
+            .doOnError(e -> log.error(e.getMessage()))
+            .block();
+        boolean deleted = response != null && response.statusCode == HttpURLConnection.HTTP_OK;
+        if (deleted) {
+            log.atInfo().setMessage("Deleted existing target index {}").addArgument(indexName).log();
+        } else {
+            log.atDebug().setMessage("Target index {} did not exist; nothing to delete")
+                .addArgument(indexName).log();
+        }
+        return deleted;
+    }
+
     private Optional<ObjectNode> createObjectIdempotent(
         String objectPath,
         ObjectNode settings,
