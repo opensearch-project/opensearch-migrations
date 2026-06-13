@@ -580,8 +580,8 @@ class WorkflowTreeApp(App):
                 return
             if summary.get('resources'):
                 status_bar.update(
-                    f"Config changes: [cyan]{summary.get('to_submit', 0)} to submit[/], "
-                    f"[magenta]{summary.get('pending', 0)} pending[/]  Values: {value_mode}"
+                    f"Config changes: [green]{summary.get('to_submit', 0)} to submit[/], "
+                    f"[grey50]{summary.get('pending', 0)} pending[/]  Values: {value_mode}"
                 )
                 return
         if not self.current_node_data:
@@ -924,12 +924,23 @@ class WorkflowTreeApp(App):
                 return
             label = str(node.get("label", "+ Add")).replace("[OK] ", "")
             self.push_screen(
-                TextInputModal(f"{label} name"),
+                TextInputModal(
+                    f"{label} name",
+                    documentation=self._edit_node_documentation(node),
+                    validation=node.get("validation"),
+                    required=True,
+                ),
                 lambda value: self._handle_add_config_name(node, value),
             )
         elif kind == "scalar":
             self.push_screen(
-                TextInputModal(f"Edit {'.'.join(node.get('path', []))}", str(node.get("value") or "")),
+                TextInputModal(
+                    f"Edit {'.'.join(node.get('path', []))}",
+                    str(node.get("value") or ""),
+                    documentation=self._edit_node_documentation(node),
+                    validation=node.get("validation"),
+                    required=bool(node.get("required")),
+                ),
                 lambda value: self._handle_scalar_config_value(node, value),
             )
         elif kind == "boolean":
@@ -950,7 +961,12 @@ class WorkflowTreeApp(App):
             return
         path = ".".join(str(part) for part in node.get("path", []))
         self.push_screen(
-            ChoiceSelectModal(f"Select {path}", variants, node.get("value")),
+            ChoiceSelectModal(
+                f"Select {path}",
+                variants,
+                node.get("value"),
+                documentation=self._edit_node_documentation(node),
+            ),
             lambda value: self._handle_config_variant_choice(node, value),
         )
 
@@ -1014,6 +1030,10 @@ class WorkflowTreeApp(App):
         if not node or node.get("valueKind") == "command":
             return False
         return cls._is_removable_config_path(node.get("path") or [])
+
+    @staticmethod
+    def _edit_node_documentation(node: Dict) -> str:
+        return str(node.get("description") or node.get("descriptionShort") or "")
 
     @classmethod
     def _config_edit_enter_description(cls, node: Optional[Dict]) -> str:

@@ -71,7 +71,7 @@ Implemented pieces:
   migration configs.
 - Current guided variants cover HTTP auth (`none`, `basic`, `sigv4`, `mtls`)
   and Kafka mode (`autoCreate`, `existing`).
-- `Enter` edits scalar values, toggles booleans, cycles unions, expands objects,
+- `Enter` edits scalar values, toggles booleans, opens union pickers, expands objects,
   or starts add rows depending on the selected row.
 - `Del` and `Backspace` remove config entries after a confirmation modal, and
   are not bound on synthetic add rows.
@@ -82,9 +82,9 @@ Current interaction details:
 | Key | Current edit-mode behavior |
 | --- | --- |
 | `e` | Enter edit mode from resource view |
-| `Enter` | Edit scalar with a small input modal, toggle/cycle simple values, expand/collapse object rows, or start an add row |
+| `Enter` | Edit scalar with a small input modal, toggle booleans, open union pickers, expand/collapse object rows, approve running gates, or start an add row |
 | `a` | Start the selected synthetic add row |
-| `Left` / `Right` | Cycle union variants when selected; otherwise collapse/expand |
+| `Left` / `Right` | Collapse/expand the selected tree row |
 | `Space` | Toggle boolean rows |
 | `v` | Cycle value projection mode |
 | `t` | Cycle status projection mode |
@@ -102,7 +102,7 @@ The current prototype runs TS more often than the original batching sketch:
 
 - once when entering edit mode, to build the initial editable tree;
 - once for each committed edit operation, such as a completed scalar edit,
-  boolean toggle, union cycle, add, or remove;
+  boolean toggle, union choice, add, or remove;
 - not on cursor movement;
 - not on every keystroke while typing in the input modal;
 - not on normal manage polling refreshes.
@@ -149,7 +149,7 @@ virtual source/target resources, and pending edit state.
 
 Edit mode keeps the user inside the resource tree. The selected resource is
 expanded into schema-backed config rows. Leaf values can be edited in place:
-booleans toggle, enum/union fields cycle with side arrows, and text-like values
+booleans toggle, enum/union fields open a picker from `Enter`, and text-like values
 open a focused inline input below the selected row. If a union selection requires
 nested input, the tree grows those child rows immediately beneath it. Branch
 labels show aggregate completion/error cues, and a bottom help strip follows the
@@ -291,7 +291,7 @@ back again.
 | Row type | Interaction |
 | --- | --- |
 | Object/resource | `Enter` expands/collapses children; help panel shows resource description |
-| Enum/union | Left/right cycles options; `Enter` opens an option picker if there are many choices |
+| Enum/union | `Enter` opens an option picker; `Left`/`Right` collapse or expand the tree row |
 | Boolean | `Space` toggles |
 | String/number | `Enter` opens an inline input row directly under the selected field |
 | Array | `Enter` expands items; `+ Add item` synthetic row appends a value |
@@ -339,6 +339,62 @@ badge in the main label and summarize the rest in the bottom help/status panel.
 For example, a source cluster row might show `[REQ 1] source: legacy-cluster`
 while the help strip says `1 required field, 2 changed fields`. This keeps the
 tree readable without hiding the queue of work under the branch.
+
+### Field Validation and Hints
+
+The validation model should be layered so Python stays a thin UI and TS remains
+the schema authority:
+
+1. Static scalar validation metadata should travel in `EditStateV1` with each
+   editable node. For example, a string field can include a regex pattern,
+   a human message, requiredness, and the field description. Python can then
+   show immediate feedback in the input dialog without invoking Node on every
+   keystroke.
+2. Cross-field and lifecycle validation should stay in TS. This includes Zod
+   `refine`/`superRefine` logic such as unknown source/target references,
+   duplicate names, source snapshot references, SigV4 snapshot constraints,
+   and policy checks. Python should render the resulting diagnostics and
+   aggregate status counts returned by TS after committed edits, preview, save,
+   and submit.
+3. Reference fields should eventually be modeled as suggestions or selectable
+   values instead of plain strings. Examples: `fromSource` should be a picker
+   over current `sourceClusters`, `toTarget` over `targetClusters`, proxy
+   references over `traffic.proxies`, Kafka references over
+   `kafkaClusterConfiguration`, and snapshot names over the selected source's
+   `snapshotInfo.snapshots`.
+
+The DTO can grow without changing the Python architecture:
+
+```ts
+type EditInputHint =
+  | { kind: "text"; pattern?: string; message?: string }
+  | { kind: "select"; options: { label: string; value: string; description?: string }[]; allowCustom?: boolean }
+  | { kind: "number"; min?: number; max?: number; step?: number };
+```
+
+For now, scalar regex validation is cheap enough to run locally in Python using
+metadata supplied by TS. The source of truth is still the Zod schema and the
+full TS validation pass; the modal feedback is a fast, user-friendly first line
+of defense.
+
+There are two viable ways to pick up richer Zod refinements without rewriting
+them in Python:
+
+- Keep one-shot TS commands for committed operations. This is the safest v1:
+  Python sends an operation, TS applies it, runs Zod validation/refinements,
+  returns the next tree, and Python renders it. It avoids daemon lifecycle bugs
+  and is already consistent with submit.
+- Add a manage-scoped Node helper later if the UI needs per-keystroke
+  cross-field validation, dynamic suggestions, or very low-latency preview. If
+  we do this, it should be a child process using stdio JSON-RPC, not a network
+  daemon. Python would start it when manage enters edit mode, send
+  `load`, `validateField`, `apply`, `suggest`, and `preview` requests, and
+  terminate it when manage exits edit mode or quits.
+
+The daemon/helper option becomes attractive only if one-shot startup latency is
+visible or if we decide that reference pickers must update live while the user
+types. Until then, one-shot commands plus richer DTO metadata keep the failure
+model simpler.
 
 For HTTP Basic auth, selecting `basic` immediately adds the required child rows.
 Until `secretName` is set, both the child and the parent auth branch show
@@ -662,7 +718,11 @@ saves the current draft YAML to `WorkflowConfigStore`; the TS apply step has
 already run when the user committed each row operation. If one-shot startup
 latency becomes noticeable, cache by input hashes in Python first: pending
 config hash, latest `MigrationRun` identity, and live CR `resourceVersion` set.
-A daemon is a later optimization, not part of the initial design.
+A long-lived Node helper is a later optimization, not part of the initial
+design. If added, it should be a manage-scoped child process over stdio
+JSON-RPC, not a cluster daemon or listening network service. The purpose would
+be latency and richer interactive hints only; schema ownership would still stay
+in TS.
 
 The Textual UI already has:
 
@@ -676,7 +736,7 @@ The Textual UI already has:
 - Synthetic add rows under current editable collections.
 - Confirmation modals for config removal.
 - Contextual edit-mode bindings for add rows, scalar edits, boolean toggles,
-  union cycling, and removable config entries.
+  union pickers, and removable config entries.
 
 The Textual UI still needs:
 
@@ -734,6 +794,16 @@ Submit:
 - Invoke existing workflow submit.
 
 ## Change Presentation Rules
+
+Use a single effective color per resource/config row, chosen from the highest
+priority state represented by that row and its children:
+
+- Green: pending-submit/unsubmitted changes, meaning saved config differs from
+  the submitted workflow projection and can still be submitted.
+- Grey: submitted-rollout/in-progress changes, meaning the submitted workflow
+  projection differs from the deployed resource state and is still converging.
+- Default foreground: fully deployed values, meaning the deployed state matches
+  the submitted projection and there is no newer saved edit for that field.
 
 Pending-submit changes:
 

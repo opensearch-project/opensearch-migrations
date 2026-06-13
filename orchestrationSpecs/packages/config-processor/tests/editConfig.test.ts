@@ -89,6 +89,32 @@ describe("editConfig state", () => {
         expect(endpoint?.description).toContain("HTTP(S) endpoint URL");
     });
 
+    it("returns regex validation metadata and marks invalid scalar values", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {
+                legacy: {
+                    endpoint: "https://legacy.example.com:9200",
+                    version: "Elasticsearch seven",
+                },
+            },
+            targetClusters: {
+                prod: {
+                    endpoint: "prod.example.com:9200",
+                },
+            },
+            snapshotMigrationConfigs: [],
+        });
+
+        const version = findNode(state.nodes, "edit:sourceClusters.legacy.version");
+        const endpoint = findNode(state.nodes, "edit:targetClusters.prod.endpoint");
+
+        expect(version?.validation?.pattern).toContain("ES");
+        expect(version?.status).toBe("error");
+        expect(version?.diagnostics?.[0].message).toContain("Use '<ENGINE> <VERSION>'");
+        expect(endpoint?.validation?.message).toContain("http:// or https://");
+        expect(endpoint?.status).toBe("error");
+    });
+
     it("applies auth variant changes and refreshes required children", () => {
         const result = applyEditOperationToObject({
             sourceClusters: {

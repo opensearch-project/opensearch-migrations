@@ -13,6 +13,8 @@ class ChoiceSelectModal(ModalScreen[Any]):
     ChoiceSelectModal { align: center middle; background: $background 60%; }
     #dialog { width: 72; height: auto; border: thick $primary; background: $surface; padding: 1 2; }
     #title { text-align: center; margin-bottom: 1; }
+    #documentation { color: gray; margin-bottom: 1; }
+    #choice-doc { color: gray; margin-top: 1; min-height: 1; }
     #buttons { height: auto; }
     Button { margin: 0 1 1 0; min-width: 24; }
     """
@@ -23,15 +25,23 @@ class ChoiceSelectModal(ModalScreen[Any]):
         Binding("escape", "cancel", "Cancel", show=False),
     ]
 
-    def __init__(self, title: str, choices: List[Dict[str, Any]], current_value: Any = None):
+    def __init__(
+        self,
+        title: str,
+        choices: List[Dict[str, Any]],
+        current_value: Any = None,
+        documentation: str = "",
+    ):
         super().__init__()
         self.title_text = title
         self.choices = choices
         self.current_value = current_value
+        self.documentation = documentation
 
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
             yield Static(escape(self.title_text), id="title")
+            yield Static(escape(self.documentation), id="documentation")
             with Vertical(id="buttons"):
                 for index, choice in enumerate(self.choices):
                     label = str(choice.get("label") or choice.get("value") or "")
@@ -39,6 +49,7 @@ class ChoiceSelectModal(ModalScreen[Any]):
                         label = f"{label} (current)"
                     yield Button(label, id=f"choice-{index}")
                 yield Button("Cancel", id="cancel", variant="error")
+            yield Static("", id="choice-doc")
 
     def on_mount(self) -> None:
         choice_index = next(
@@ -47,12 +58,15 @@ class ChoiceSelectModal(ModalScreen[Any]):
         )
         if self.choices:
             self.query_one(f"#choice-{choice_index}", Button).focus()
+            self._update_choice_doc()
 
     def action_focus_previous(self) -> None:
         self.focus_previous()
+        self._update_choice_doc()
 
     def action_focus_next(self) -> None:
         self.focus_next()
+        self._update_choice_doc()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -76,3 +90,11 @@ class ChoiceSelectModal(ModalScreen[Any]):
             return
         index = int(str(button.id).removeprefix("choice-"))
         self.dismiss(self.choices[index].get("value"))
+
+    def _update_choice_doc(self) -> None:
+        focused = self.focused
+        description = ""
+        if isinstance(focused, Button) and focused.id and focused.id.startswith("choice-"):
+            index = int(str(focused.id).removeprefix("choice-"))
+            description = str(self.choices[index].get("description") or "")
+        self.query_one("#choice-doc", Static).update(escape(description))

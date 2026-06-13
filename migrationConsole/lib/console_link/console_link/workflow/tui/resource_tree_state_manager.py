@@ -184,9 +184,9 @@ class ResourceTreeStateManager:
         if not diff:
             return ''
         if diff.get('has_pending_submit_changes'):
-            return ' [cyan](to submit)[/cyan]'
+            return ' [green](to submit)[/green]'
         if diff.get('has_submitted_changes'):
-            return ' [magenta](pending)[/magenta]'
+            return ' [grey50](pending)[/grey50]'
         return ''
 
     @staticmethod
@@ -322,8 +322,18 @@ class ResourceTreeStateManager:
     def _add_resource_details(self, resource_node: TreeNode, resource: ResourceNode) -> None:
         for field in format_spec_fields(resource):
             resource_node.add(f"[dim]{field}[/dim]", data=None)
+        change_style = self._resource_config_change_style(resource)
         for field in format_config_diff_fields(resource, self._config_value_mode):
-            resource_node.add(f"[cyan]{field}[/cyan]", data=None)
+            resource_node.add(f"[{change_style}]{field}[/{change_style}]" if change_style else field, data=None)
+
+    @staticmethod
+    def _resource_config_change_style(resource: ResourceNode) -> str:
+        diff = resource.config_diff or {}
+        if diff.get('has_pending_submit_changes'):
+            return 'green'
+        if diff.get('has_submitted_changes'):
+            return 'grey50'
+        return ''
 
     def _add_workflow_progress(self, resource_node: TreeNode, resource: ResourceNode) -> None:
         """Add filtered workflow progress subtree if notable steps exist."""

@@ -1,12 +1,15 @@
 import {
     CLUSTER_CONFIG,
     CAPTURE_CONFIG,
+    HTTP_ENDPOINT_PATTERN,
     HTTP_AUTH_BASIC,
     HTTP_AUTH_MTLS,
     HTTP_AUTH_SIGV4,
+    K8S_NAMING_PATTERN,
     KAFKA_CLUSTER_CONFIG,
     KAFKA_CLUSTERS_MAP,
     NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG,
+    OPTIONAL_HTTP_ENDPOINT_PATTERN,
     REPLAYER_CONFIG,
     SOURCE_CLUSTER_CONFIG,
     SOURCE_CLUSTERS_MAP,
@@ -37,6 +40,11 @@ export interface EditDiagnostic {
     path?: string[];
 }
 
+export interface EditNodeValidation {
+    pattern?: string;
+    message?: string;
+}
+
 export interface EditNode {
     id: string;
     path: string[];
@@ -55,6 +63,7 @@ export interface EditNode {
         gated?: number;
         blocked?: number;
     };
+    validation?: EditNodeValidation;
     diagnostics?: EditDiagnostic[];
     variants?: {
         label: string;
@@ -120,6 +129,22 @@ const CAPTURE_DESCRIPTION = descriptionOf(CAPTURE_CONFIG);
 const REPLAYER_DESCRIPTION = descriptionOf(REPLAYER_CONFIG);
 const SNAPSHOT_MIGRATION_DESCRIPTION = descriptionOf(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG);
 const AUTH_DESCRIPTION = "Authentication configuration for connecting to the cluster. Supports HTTP Basic (Kubernetes Secret), AWS SigV4, or mutual TLS.";
+const VERSION_VALIDATION: EditNodeValidation = {
+    pattern: "^(?:ES [125678]|OS [123]|SOLR [6789])(?:\\.[0-9]+)+$",
+    message: "Use '<ENGINE> <VERSION>', such as 'ES 7.10.2', 'OS 2.11.0', or 'SOLR 9.7.0'.",
+};
+const K8S_NAME_VALIDATION: EditNodeValidation = {
+    pattern: K8S_NAMING_PATTERN.source,
+    message: "Use a valid Kubernetes DNS name: lowercase letters, numbers, '-' or '.', starting and ending with an alphanumeric character.",
+};
+const HTTP_ENDPOINT_VALIDATION: EditNodeValidation = {
+    pattern: HTTP_ENDPOINT_PATTERN,
+    message: "Use an http:// or https:// endpoint with an optional port and trailing slash.",
+};
+const OPTIONAL_HTTP_ENDPOINT_VALIDATION: EditNodeValidation = {
+    pattern: OPTIONAL_HTTP_ENDPOINT_PATTERN,
+    message: "Leave empty or use an http:// or https:// endpoint with an optional port and trailing slash.",
+};
 
 function descriptionOf(schema: {description?: string}): string | undefined {
     return schema.description;
@@ -227,12 +252,24 @@ function scalarNode(
     key: string,
     value: unknown,
     description: string,
-    required = false
+    required = false,
+    validation?: EditNodeValidation
 ): EditNode {
     const missing = required && (value === undefined || value === null || value === "");
-    const diagnostics: EditDiagnostic[] = missing
-        ? [{severity: "required", message: `${key} is required.`, path}]
-        : [];
+    const present = value !== undefined && value !== null && value !== "";
+    const patternMismatch = !missing && present && validation?.pattern
+        ? !(new RegExp(validation.pattern).test(String(value)))
+        : false;
+    const diagnostics: EditDiagnostic[] = [];
+    if (missing) {
+        diagnostics.push({severity: "required", message: `${key} is required.`, path});
+    } else if (patternMismatch) {
+        diagnostics.push({
+            severity: "error",
+            message: validation?.message ?? `${key} does not match the expected format.`,
+            path,
+        });
+    }
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
@@ -241,7 +278,8 @@ function scalarNode(
         valueKind: typeof value === "boolean" ? "boolean" : "scalar",
         description,
         required,
-        status: missing ? "required" : "ok",
+        validation,
+        status: missing ? "required" : patternMismatch ? "error" : "ok",
         diagnostics,
     });
 }
@@ -283,7 +321,8 @@ function authChildren(path: string[], variant: ReturnType<typeof authVariant>, a
                 "secretName",
                 authConfig?.basic?.secretName,
                 "Name of a Kubernetes Secret containing 'username' and 'password' keys for HTTP Basic authentication.",
-                true
+                true,
+                K8S_NAME_VALIDATION
             ),
         ];
     }
@@ -404,7 +443,7 @@ function kafkaGroupNode(config: Record<string, any> | undefined): EditNode {
     const children = Object.entries(config ?? {})
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([name, value]) => kafkaClusterNode(name, value));
-    children.push(addRow(path, "Kafka cluster", "Create a Kafka cluster configuration in pending workflow YAML."));
+    children.push(addRow(path, "Kafka cluster", "Create a Kafka cluster configuration in pending workflow YAML.", true, K8S_NAME_VALIDATION));
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
@@ -427,8 +466,8 @@ function captureProxyNode(name: string, value: any): EditNode {
         status: "ok",
         children: [
             scalarNode([...rootPath, "source"], "source", value?.source, "Name of the source cluster this proxy sits in front of. Must match a key in sourceClusters.", true),
-            scalarNode([...rootPath, "kafka"], "kafka", value?.kafka ?? "default", "Label of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration."),
-            scalarNode([...rootPath, "kafkaTopic"], "kafkaTopic", value?.kafkaTopic ?? "", "Kafka topic name for captured traffic. If empty, defaults to the proxy name."),
+            scalarNode([...rootPath, "kafka"], "kafka", value?.kafka ?? "default", "Label of the Kafka cluster to use for captured traffic. Must match a key in kafkaClusterConfiguration.", false, K8S_NAME_VALIDATION),
+            scalarNode([...rootPath, "kafkaTopic"], "kafkaTopic", value?.kafkaTopic ?? "", "Kafka topic name for captured traffic. If empty, defaults to the proxy name.", false, K8S_NAME_VALIDATION),
         ],
     });
 }
@@ -453,7 +492,7 @@ function trafficGroupNode(traffic: any): EditNode {
     const proxyChildren = Object.entries(traffic?.proxies ?? {})
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([name, value]) => captureProxyNode(name, value));
-    proxyChildren.push(addRow(["traffic", "proxies"], "capture proxy", "Create a capture proxy configuration in pending workflow YAML."));
+    proxyChildren.push(addRow(["traffic", "proxies"], "capture proxy", "Create a capture proxy configuration in pending workflow YAML.", true, K8S_NAME_VALIDATION));
 
     const replayChildren = Object.entries(traffic?.replayers ?? {})
         .sort(([a], [b]) => a.localeCompare(b))
@@ -529,11 +568,12 @@ function clusterNode(kind: "source" | "target", name: string, value: any): EditN
         scalarNode([...rootPath, "endpoint"], "endpoint", value?.endpoint, kind === "target"
             ? "HTTP(S) endpoint URL for the target cluster (e.g. 'https://target-cluster:9200/'). Required for target clusters."
             : "HTTP(S) endpoint URL for the cluster (e.g. 'https://my-cluster:9200/'). Leave empty if the cluster is not directly accessible or will be accessed through a proxy.",
-        kind === "target"),
+        kind === "target",
+        kind === "target" ? HTTP_ENDPOINT_VALIDATION : OPTIONAL_HTTP_ENDPOINT_VALIDATION),
         booleanNode([...rootPath, "allowInsecure"], "allowInsecure", value?.allowInsecure, "When true, disables TLS certificate verification when connecting to the cluster. Use only for development or self-signed certificates."),
     ];
     if (kind === "source") {
-        children.push(scalarNode([...rootPath, "version"], "version", value?.version, "Cluster version string in '<ENGINE> <VERSION>' format. Examples: 'ES 7.10.2', 'OS 2.11.0'.", true));
+        children.push(scalarNode([...rootPath, "version"], "version", value?.version, "Cluster version string in '<ENGINE> <VERSION>' format. Examples: 'ES 7.10.2', 'OS 2.11.0'.", true, VERSION_VALIDATION));
     }
     children.push(authNode([...rootPath, "authConfig"], value?.authConfig));
     if (kind === "source") {
@@ -552,13 +592,20 @@ function clusterNode(kind: "source" | "target", name: string, value: any): EditN
     });
 }
 
-function addRow(path: string[], label: string, description: string, requiresName = true): EditNode {
+function addRow(
+    path: string[],
+    label: string,
+    description: string,
+    requiresName = true,
+    validation?: EditNodeValidation
+): EditNode {
     return finalizeNode({
         id: `edit:${path.join(".")}:add`,
         path,
         label: `+ Add ${label}`,
         valueKind: "command",
         description,
+        validation,
         command: {requiresName},
         status: "ok",
     });

@@ -148,7 +148,11 @@ def edit_state_with_missing_basic_auth():
                                 "variants": [
                                     {"label": "none", "value": "none"},
                                     {"label": "basic", "value": "basic"},
-                                    {"label": "sigv4", "value": "sigv4"},
+                                    {
+                                        "label": "sigv4",
+                                        "value": "sigv4",
+                                        "description": "AWS SigV4 request signing authentication.",
+                                    },
                                 ],
                                 "children": [
                                     {
@@ -245,6 +249,13 @@ def edit_state_with_editable_source_fields():
                                 "value": "https://new.example.com:9200",
                                 "valueKind": "scalar",
                                 "description": "HTTP(S) endpoint URL for the cluster.",
+                                "validation": {
+                                    "pattern": (
+                                        r"^https?:\/\/[^:\/\s]+(?::(?:[1-9]\d{0,3}|[1-5]\d{4}|"
+                                        r"6[0-4]\d{3}|65[0-4]\d{2}|655[0-2]\d|6553[0-5]))?(?:\/)?$"
+                                    ),
+                                    "message": "Use an http:// or https:// endpoint with an optional port and trailing slash.",
+                                },
                                 "status": "changed",
                                 "statusCounts": {"changed": 1},
                                 "states": {
@@ -705,7 +716,9 @@ async def test_resource_view_edit_mode_applies_variant_and_saves(mock_workflow_w
 
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ChoiceSelectModal))
-            app.screen.query_one("#choice-2").focus()
+            assert "Authentication configuration" in str(app.screen.query_one("#documentation").content)
+            await pilot.press("down")
+            assert "AWS SigV4 request signing" in str(app.screen.query_one("#choice-doc").content)
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: len(service.apply_calls) == 1)
             assert service.apply_calls[0] == (
@@ -1017,8 +1030,16 @@ async def test_resource_view_edit_mode_edits_scalar_and_boolean_fields(mock_work
             value_input = app.screen.query_one("#value")
             original_value = "https://new.example.com:9200"
             assert value_input.value == original_value
+            assert "HTTP(S) endpoint URL for the cluster." in str(app.screen.query_one("#documentation").content)
             await pilot.press("backspace")
             assert value_input.value == original_value[:-1]
+            value_input.value = "not-an-endpoint"
+            await pilot.press("enter")
+            assert await wait_until(
+                pilot,
+                lambda: "Use an http:// or https:// endpoint" in str(app.screen.query_one("#validation").content),
+            )
+            assert len(service.apply_calls) == 0
             value_input.value = "https://edited.example.com:9200"
             await pilot.press("enter")
 
