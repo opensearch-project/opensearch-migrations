@@ -61,13 +61,13 @@ jobs:
           curl -sS http://docker-registry:5000/v2/ || true
 
       - name: Restore Docker Cache
-        uses: AndreKurait/docker-cache@0.7.0
+        uses: AndreKurait/docker-cache@7a3887908bdb97935395833df69b060cfcca0f7f # 0.7.0
         with:
           key: docker-${{ runner.os }}-${{ needs.generate-cache-key.outputs.docker_cache_key }}
           read-only: ${{ github.event_name != 'push' }}
 
       - name: Set up Buildx builder (BuildKit)
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
         with:
           driver: docker-container
           name: local-remote-builder
@@ -79,7 +79,7 @@ jobs:
               insecure = true
 
       - name: Set up Kind cluster
-        uses: helm/kind-action@v1.14.0
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
         with:
           cluster_name: generate-workflow-schema
           node_image: kindest/node:v1.35.0
@@ -116,7 +116,7 @@ jobs:
           ./deployment/k8s/generateWorkflowSchemaArtifact.sh
 
       - name: Upload workflow schema artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: workflowMigration-schema-${{ github.sha }}
           path: workflowMigration.schema.json

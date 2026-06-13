@@ -99,7 +99,8 @@ RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
 COPY kafkaExport.sh /root/kafka-tools
-RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
+COPY kafkaImport.sh /root/kafka-tools
+RUN chmod ug+x /root/kafka-tools/kafkaExport.sh /root/kafka-tools/kafkaImport.sh
 
 COPY loadServicesFromParameterStore.sh /root/
 RUN chmod ug+x /root/loadServicesFromParameterStore.sh

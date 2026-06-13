@@ -19,7 +19,7 @@
       }
     },
     "replayers": {
-      "replayer1": { "fromProxy": "proxy1", "toTarget": "target" }
+      "replayer1": { "fromCapturedTraffic": "proxy1", "toTarget": "target" }
     }
   }
 }

@@ -76,7 +76,7 @@ describe('MigrationConfigTransformer validation', () => {
             },
             replayers: {
                 "replay1": {
-                    "fromProxy": "proxy1",
+                    "fromCapturedTraffic": "proxy1",
                     "toTarget": "target1"
                 }
             }
@@ -150,6 +150,93 @@ describe('MigrationConfigTransformer validation', () => {
         expect(() => {
             transformer.validateInput(baseConfig);
         }).not.toThrow();
+    });
+
+    it('should reject s3 traffic sources that reference an unknown kafka cluster', () => {
+        const config = cloneBaseConfig();
+        config.traffic.s3Sources = {
+            "loaded-dump": {
+                s3Uri: "s3://traffic-bucket/captures/one.proto.gz",
+                awsRegion: "us-east-1",
+                kafka: "missing",
+                sourceLabel: "detached-source"
+            }
+        };
+        config.traffic.replayers.replay1.fromCapturedTraffic = "loaded-dump";
+
+        expect(() => transformer.validateInput(config))
+            .toThrow(/s3Source 'loaded-dump' references unknown kafka cluster 'missing'/);
+    });
+
+    it('should transform s3 captured traffic sources without a live proxy', async () => {
+        const config = cloneBaseConfig();
+        delete config.kafkaClusterConfiguration;
+        config.snapshotMigrationConfigs = [];
+        config.traffic = {
+            s3Sources: {
+                "loaded-dump": {
+                    s3Uri: "s3://traffic-bucket/captures/one.proto.gz",
+                    awsRegion: "us-east-1",
+                    endpoint: "http://localstack:4566",
+                    sourceLabel: "detached-source"
+                }
+            },
+            replayers: {
+                "replay1": {
+                    fromCapturedTraffic: "loaded-dump",
+                    toTarget: "target1",
+                    replayerConfig: {
+                        speedupFactor: 2
+                    }
+                }
+            }
+        };
+
+        const result = await transformer.processFromObject(config);
+
+        expect(result.proxies).toEqual([]);
+        expect(result.kafkaClusters).toEqual([
+            expect.objectContaining({
+                name: "default",
+                topics: ["loaded-dump"]
+            })
+        ]);
+
+        expect(result.s3TrafficLoaders).toHaveLength(1);
+        const loader = result.s3TrafficLoaders![0];
+        expect(loader).toEqual(expect.objectContaining({
+            name: "loaded-dump",
+            sourceLabel: "detached-source",
+            s3Uri: "s3://traffic-bucket/captures/one.proto.gz",
+            awsRegion: "us-east-1",
+            endpoint: "http://localstack:4566",
+            kafkaClusterName: "default",
+            checksumForReplayer: expect.stringMatching(/^[a-f0-9]{16}$/),
+            configChecksum: expect.stringMatching(/^[a-f0-9]{16}$/)
+        }));
+        expect(loader.kafkaConfig).toEqual(expect.objectContaining({
+            label: "default",
+            kafkaTopic: "loaded-dump",
+            managedByWorkflow: true,
+            configChecksum: expect.stringMatching(/^[a-f0-9]{16}$/)
+        }));
+
+        expect(result.trafficReplays).toHaveLength(1);
+        expect(result.trafficReplays![0]).toEqual(expect.objectContaining({
+            name: "loaded-dump-target1-replay1",
+            sourceLabel: "detached-source",
+            fromCapturedTraffic: "loaded-dump",
+            kafkaClusterName: "default",
+            dependsOn: ["loaded-dump"],
+            fromCapturedTrafficConfigChecksum: loader.checksumForReplayer,
+            replayerConfig: expect.objectContaining({
+                speedupFactor: 2
+            })
+        }));
+        expect(result.trafficReplays![0].kafkaConfig).toEqual(expect.objectContaining({
+            kafkaTopic: "loaded-dump",
+            managedByWorkflow: true
+        }));
     });
 
     it('should lower transform pipelines into provider configs with file-source mounts', async () => {
@@ -882,7 +969,7 @@ describe('MigrationConfigTransformer validation', () => {
                 ...baseConfig.traffic,
                 replayers: {
                     replay2: {
-                        fromProxy: "proxy1",
+                        fromCapturedTraffic: "proxy1",
                         toTarget: "target2",
                         dependsOnSnapshotMigrations: [
                             {source: "source1", snapshot: "snap1"}

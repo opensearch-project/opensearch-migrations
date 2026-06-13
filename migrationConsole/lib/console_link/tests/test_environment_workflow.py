@@ -230,8 +230,8 @@ def test_get_kafka_consumer_groups_returns_replayer_target_groups():
     config = {
         "traffic": {
             "replayers": {
-                "first": {"fromProxy": "p1", "toTarget": "alpha"},
-                "second": {"fromProxy": "p1", "toTarget": "beta"},
+                "first": {"fromCapturedTraffic": "p1", "toTarget": "alpha"},
+                "second": {"fromCapturedTraffic": "p1", "toTarget": "beta"},
             }
         }
     }
@@ -243,8 +243,8 @@ def test_get_kafka_consumer_groups_dedupes_when_replayers_share_target():
     config = {
         "traffic": {
             "replayers": {
-                "r1": {"fromProxy": "p1", "toTarget": "default"},
-                "r2": {"fromProxy": "p2", "toTarget": "default"},
+                "r1": {"fromCapturedTraffic": "p1", "toTarget": "default"},
+                "r2": {"fromCapturedTraffic": "p2", "toTarget": "default"},
             }
         }
     }
@@ -263,9 +263,9 @@ def test_get_kafka_consumer_groups_skips_replayers_missing_totarget():
     config = {
         "traffic": {
             "replayers": {
-                "good": {"fromProxy": "p", "toTarget": "tgt"},
-                "missing": {"fromProxy": "p"},
-                "blank": {"fromProxy": "p", "toTarget": ""},
+                "good": {"fromCapturedTraffic": "p", "toTarget": "tgt"},
+                "missing": {"fromCapturedTraffic": "p"},
+                "blank": {"fromCapturedTraffic": "p", "toTarget": ""},
             }
         }
     }
@@ -282,7 +282,7 @@ def test_from_workflow_config_populates_kafka_consumer_groups(
     mock_store_cls.return_value.load_config.return_value = {
         "traffic": {
             "replayers": {
-                "r": {"fromProxy": "p", "toTarget": "my-target"},
+                "r": {"fromCapturedTraffic": "p", "toTarget": "my-target"},
             }
         }
     }

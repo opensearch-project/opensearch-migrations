@@ -66,6 +66,14 @@ class TrafficStreamDumperTest {
             .build();
     }
 
+    private static TrafficObservation writeObs(long epochSeconds, byte[] data) {
+        return TrafficObservation.newBuilder()
+            .setTs(ts(epochSeconds))
+            .setWrite(WriteObservation.newBuilder()
+                .setData(ByteString.copyFrom(data)))
+            .build();
+    }
+
     private static TrafficObservation connectObs(long epochSeconds) {
         return TrafficObservation.newBuilder()
             .setTs(ts(epochSeconds))
@@ -140,6 +148,21 @@ class TrafficStreamDumperTest {
     }
 
     @Test
+    void testZeroLengthReadDoesNotStopCoalescing() {
+        var ts = TrafficStream.newBuilder()
+            .setNodeId("n").setConnectionId("c").setNumber(0)
+            .addSubStream(readObs(100, ""))
+            .addSubStream(readSegmentObs(101, "NEXT"))
+            .build();
+
+        var result = TrafficStreamDumper.format(ts, -1, -1, 64, 64);
+        log.info("zero-length read coalescing: {}", result);
+
+        Assertions.assertTrue(result.contains("R[4]: NEXT"));
+        Assertions.assertEquals(1, countOccurrences(result, "R["));
+    }
+
+    @Test
     void testConsecutiveWritesCoalesced() {
         var ts = TrafficStream.newBuilder()
             .setNodeId("n").setConnectionId("c").setNumber(0)
@@ -182,6 +205,19 @@ class TrafficStreamDumperTest {
 
         // Preview should be 10 chars + "..."
         Assertions.assertTrue(result.contains("R[" + longData.length() + "]: GET /very/..."));
+    }
+
+    @Test
+    void testNonPrintablePreviewCharactersAreSanitized() {
+        var ts = TrafficStream.newBuilder()
+            .setNodeId("n").setConnectionId("c").setNumber(0)
+            .addSubStream(writeObs(100, new byte[]{'A', 0x01, 0x7f, 'Z'}))
+            .build();
+
+        var result = TrafficStreamDumper.format(ts, -1, -1, 64, 64);
+        log.info("non-printable preview: {}", result);
+
+        Assertions.assertTrue(result.contains("W[4]: A..Z"));
     }
 
     @Test

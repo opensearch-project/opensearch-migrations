@@ -1,16 +1,17 @@
 # ShimProxy Observability
 
-The ShimProxy emits OpenTelemetry traces and metrics for every proxied request. Instrumentation follows the `coreUtilities` framework patterns and is controlled via a single CLI flag.
+The ShimProxy emits OpenTelemetry traces and metrics for every proxied request. Instrumentation follows the `coreUtilities` framework patterns and is controlled by separate trace and metrics endpoint flags.
 
 ## Enabling Telemetry
 
-Pass `--otelCollectorEndpoint` to point at any OTLP gRPC receiver:
+Pass one or both endpoint flags to point at OTLP gRPC receivers:
 
 ```
---otelCollectorEndpoint http://localhost:4317
+--otelTraceCollectorEndpoint http://localhost:4317
+--otelMetricsCollectorEndpoint http://localhost:4317
 ```
 
-When omitted, instrumentation runs in no-op mode with zero overhead.
+When an endpoint is omitted, that signal runs in no-op mode. Blank endpoint strings are rejected; omit the flag instead.
 
 ## Trace Structure
 

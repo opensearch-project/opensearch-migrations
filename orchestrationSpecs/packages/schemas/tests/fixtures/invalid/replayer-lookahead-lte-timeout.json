@@ -22,7 +22,7 @@
     },
     "replayers": {
       "replayer1": {
-        "fromProxy": "proxy1",
+        "fromCapturedTraffic": "proxy1",
         "toTarget": "target",
         "replayerConfig": {
           "lookaheadTimeSeconds": 300,

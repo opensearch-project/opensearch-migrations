@@ -9,6 +9,9 @@ def call(Map config = [:]) {
     def targetVersion = config.targetVersion ?: ""
     def sourceClusterType = config.sourceClusterType ?: ""
     def targetClusterType = config.targetClusterType ?: ""
+    def traceTestIds = config.traceTestIds ?: ""
+    def traceValuesFile = config.traceValuesFile ?: "../../deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesTraceXray.yaml"
+    def traceBackend = config.traceBackend ?: "xray"
     def clusterContextFilePath = "tmp/cluster-context-cdc-integ-${currentBuild.number}.json"
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
@@ -256,8 +259,12 @@ def call(Map config = [:]) {
                         dir('libraries/testAutomation') {
                             script {
                                 sh "pipenv install --deploy"
+                                def traceArgs = ""
+                                if (traceTestIds != "") {
+                                    traceArgs = "--trace-test-ids='$traceTestIds' --trace-values-file='$traceValuesFile' --trace-backend='$traceBackend'"
+                                }
                                 withMigrationsTestAccount(region: params.REGION, duration: 14400) { accountId ->
-                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}' --transform-image-context='${env.TRANSFORM_IMAGE_CONTEXT}'"
+                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer --test-ids='${params.TEST_IDS}' $traceArgs --speedup-factor=${params.SPEEDUP_FACTOR} --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext} --transform-image-basic='${env.TRANSFORM_IMAGE_BASIC}' --transform-image-sequence='${env.TRANSFORM_IMAGE_SEQUENCE}' --transform-image-context='${env.TRANSFORM_IMAGE_CONTEXT}'"
                                 }
                             }
                         }

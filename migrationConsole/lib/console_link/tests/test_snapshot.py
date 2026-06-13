@@ -305,7 +305,8 @@ def test_get_snpashot_fails_for_config_with_fs_and_s3():
 def test_fs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
     config = {
         "snapshot": {
-            "otel_endpoint": "http://otel:1111",
+            "otel_trace_endpoint": "http://otel-traces:1111",
+            "otel_metrics_endpoint": "http://otel-metrics:2222",
             "snapshot_name": "reindex_from_snapshot",
             "fs": {
                 "repo_path": "/path/for/snapshot/repo"
@@ -325,7 +326,8 @@ def test_fs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   '--snapshot-repo-name', snapshot.snapshot_repo_name,
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
-                                  "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
+                                  "--otel-trace-collector-endpoint", config["snapshot"]["otel_trace_endpoint"],
+                                  "--otel-metrics-collector-endpoint", config["snapshot"]["otel_metrics_endpoint"],
                                   "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
                                   ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
 
@@ -333,7 +335,8 @@ def test_fs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
 def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
     config = {
         "snapshot": {
-            "otel_endpoint": "http://otel:1111",
+            "otel_trace_endpoint": "http://otel-traces:1111",
+            "otel_metrics_endpoint": "http://otel-metrics:2222",
             "snapshot_name": "reindex_from_snapshot",
             "s3": {
                 "repo_uri": "s3://my-bucket",
@@ -355,7 +358,8 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   '--snapshot-repo-name', snapshot.snapshot_repo_name,
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
-                                  "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
+                                  "--otel-trace-collector-endpoint", config["snapshot"]["otel_trace_endpoint"],
+                                  "--otel-metrics-collector-endpoint", config["snapshot"]["otel_metrics_endpoint"],
                                   "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait",
@@ -367,7 +371,8 @@ def test_s3_snapshot_create_with_custom_snapshot_repo_name_calls_subprocess_run_
     custom_repo_name = "my-repo"
     config = {
         "snapshot": {
-            "otel_endpoint": "http://otel:1111",
+            "otel_trace_endpoint": "http://otel-traces:1111",
+            "otel_metrics_endpoint": "http://otel-metrics:2222",
             "snapshot_name": "reindex_from_snapshot",
             "snapshot_repo_name": custom_repo_name,
             "s3": {
@@ -390,7 +395,8 @@ def test_s3_snapshot_create_with_custom_snapshot_repo_name_calls_subprocess_run_
                                   '--snapshot-repo-name', custom_repo_name,
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
-                                  "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
+                                  "--otel-trace-collector-endpoint", config["snapshot"]["otel_trace_endpoint"],
+                                  "--otel-metrics-collector-endpoint", config["snapshot"]["otel_metrics_endpoint"],
                                   "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--no-wait",
