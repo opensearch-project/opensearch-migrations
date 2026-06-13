@@ -15,6 +15,7 @@ class ConfirmModal(ModalScreen[bool]):
     Button { margin: 0 1; min-width: 12; }
     """
     BINDINGS = [
+        Binding("enter", "confirm", "Yes", show=False, priority=True),
         Binding("y", "confirm", "Yes"),
         Binding("n", "cancel", "No"),
         Binding("escape", "cancel", "No", show=False)
@@ -39,6 +40,11 @@ class ConfirmModal(ModalScreen[bool]):
 
     def action_cancel(self) -> None:
         self.dismiss(False)
+
+    def on_key(self, event) -> None:
+        if event.key == "enter":
+            event.stop()
+            self.action_confirm()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "yes")

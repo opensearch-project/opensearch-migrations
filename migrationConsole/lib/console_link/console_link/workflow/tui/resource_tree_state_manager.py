@@ -7,7 +7,7 @@ from textual.widgets._tree import TreeNode, Tree
 from console_link.workflow.resource_tree import (
     ResourceNode, ResourceGroup, ResourceSection,
     PHASE_SYMBOLS, RESOURCE_SECTIONS, DISPLAY_PHASES,
-    format_spec_fields, format_live_status, has_notable_steps,
+    CONFIG_MODE_ALL, format_config_diff_fields, format_spec_fields, format_live_status, has_notable_steps,
     collect_notable_steps, find_last_succeeded, step_timestamp,
     maybe_rewrite_wait_step,
 )
@@ -27,9 +27,13 @@ class ResourceTreeStateManager:
         self._namespace = namespace
         self._workflow_data: Dict = {}
         self._on_new_pod = on_new_pod
+        self._config_value_mode = CONFIG_MODE_ALL
 
     def set_tree_widget(self, tree_widget: Tree) -> None:
         self.tree = tree_widget
+
+    def set_config_value_mode(self, value_mode: str) -> None:
+        self._config_value_mode = value_mode
 
     def reset(self, root_label: str) -> None:
         self.tree.clear()
@@ -127,10 +131,8 @@ class ResourceTreeStateManager:
             for resource in sorted_resources:
                 rid = f'{RESOURCE_ID_PREFIX}{resource.name}'
                 resource_node = existing[rid]
-                # Update label if phase changed
-                old_phase = resource_node.data.get('phase')
-                if old_phase != resource.phase:
-                    resource_node.set_label(self._resource_label(resource))
+                resource_node.set_label(self._resource_label(resource))
+                resource_node.data['phase'] = resource.phase
                 # Always rebuild the subtree below the resource (details + workflow steps)
                 self._rebuild_resource_children(resource_node, resource)
 
@@ -139,8 +141,7 @@ class ResourceTreeStateManager:
         collapsed = self._save_collapsed_recursive(resource_node)
         self._remove_children(resource_node)
 
-        for field in format_spec_fields(resource):
-            resource_node.add(f"[dim]{field}[/dim]", data=None)
+        self._add_resource_details(resource_node, resource)
         if resource.depends_on and resource.phase not in ('Ready', 'Completed'):
             resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
         live = format_live_status(resource)
@@ -169,9 +170,24 @@ class ResourceTreeStateManager:
     @staticmethod
     def _resource_label(resource: ResourceNode) -> str:
         symbol, color = PHASE_SYMBOLS.get(resource.phase, ('?', 'white'))
+        change_label = ResourceTreeStateManager._resource_change_label(resource)
         if resource.phase in DISPLAY_PHASES:
-            return f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold] [{color}]({resource.phase})[/{color}]"
-        return f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold]"
+            return (
+                f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold] "
+                f"[{color}]({resource.phase})[/{color}]{change_label}"
+            )
+        return f"[{color}]{symbol}[/{color}] [bold]{resource.name}[/bold]{change_label}"
+
+    @staticmethod
+    def _resource_change_label(resource: ResourceNode) -> str:
+        diff = resource.config_diff or {}
+        if not diff:
+            return ''
+        if diff.get('has_pending_submit_changes'):
+            return ' [cyan](to submit)[/cyan]'
+        if diff.get('has_submitted_changes'):
+            return ' [magenta](pending)[/magenta]'
+        return ''
 
     @staticmethod
     def _existing_by_id(parent: TreeNode) -> Dict[str, TreeNode]:
@@ -285,8 +301,7 @@ class ResourceTreeStateManager:
         })
 
         # Spec details
-        for field in format_spec_fields(resource):
-            resource_node.add(f"[dim]{field}[/dim]", data=None)
+        self._add_resource_details(resource_node, resource)
         if resource.depends_on and resource.phase not in ('Ready', 'Completed'):
             resource_node.add(f"[dim]Depends on: {', '.join(resource.depends_on)}[/dim]", data=None)
         live = format_live_status(resource)
@@ -303,6 +318,12 @@ class ResourceTreeStateManager:
         # Children (e.g., topics under kafka)
         for child in resource.children:
             self._add_resource(resource_node, child)
+
+    def _add_resource_details(self, resource_node: TreeNode, resource: ResourceNode) -> None:
+        for field in format_spec_fields(resource):
+            resource_node.add(f"[dim]{field}[/dim]", data=None)
+        for field in format_config_diff_fields(resource, self._config_value_mode):
+            resource_node.add(f"[cyan]{field}[/cyan]", data=None)
 
     def _add_workflow_progress(self, resource_node: TreeNode, resource: ResourceNode) -> None:
         """Add filtered workflow progress subtree if notable steps exist."""

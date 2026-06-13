@@ -101,6 +101,35 @@ class TestRebuild:
         labels = [str(c.label) for c in resource_node.children]
         assert any('Backfill status:' in ln for ln in labels)
 
+    def test_rebuild_shows_config_changes_and_mode(self, tree_and_manager):
+        tree, mgr = tree_and_manager
+        resource = make_resource('kafka-1', 'kafkaclusters', spec={'version': '3.6.0'})
+        resource.config_diff = {
+            'has_submitted_changes': True,
+            'has_pending_submit_changes': True,
+            'fields': [{
+                'path': 'version',
+                'label': 'version',
+                'values': {
+                    'deployed': {'present': True, 'value': '3.6.0'},
+                    'submitted': {'present': True, 'value': '3.7.0'},
+                    'pending': {'present': True, 'value': '3.8.0'},
+                },
+            }],
+        }
+
+        mgr.rebuild(make_sections({'Buffer': [resource]}))
+        resource_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}kafka-1')
+        assert 'to submit' in str(resource_node.label)
+        labels = [str(c.label) for c in resource_node.children]
+        assert any('deployed=3.6.0 | pending=3.7.0 | to-submit=3.8.0' in ln for ln in labels)
+
+        mgr.set_config_value_mode('pendingSubmit')
+        mgr.update(make_sections({'Buffer': [resource]}))
+        resource_node = find_node_by_id(tree.root, f'{RESOURCE_ID_PREFIX}kafka-1')
+        labels = [str(c.label) for c in resource_node.children]
+        assert any('version: to-submit=3.8.0' in ln for ln in labels)
+
 
 # --- Incremental Update ---
 

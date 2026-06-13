@@ -16,6 +16,7 @@ class TextInputModal(ModalScreen[str]):
     Button { margin: 0 1; min-width: 12; }
     """
     BINDINGS = [
+        Binding("enter", "submit", "Save", show=False, priority=True),
         Binding("escape", "cancel", "Cancel", show=False),
     ]
 
@@ -27,16 +28,26 @@ class TextInputModal(ModalScreen[str]):
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
             yield Static(escape(self.prompt), id="prompt")
-            yield Input(value=self.initial_value, id="value")
+            yield Input(value=self.initial_value, id="value", select_on_focus=False)
             with Horizontal(id="buttons"):
                 yield Button("Save", id="save", variant="success")
                 yield Button("Cancel", id="cancel", variant="error")
 
     def on_mount(self) -> None:
-        self.query_one("#value", Input).focus()
+        input_widget = self.query_one("#value", Input)
+        input_widget.focus()
+        input_widget.cursor_position = len(input_widget.value)
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    def action_submit(self) -> None:
+        self.dismiss(self.query_one("#value", Input).value)
+
+    def on_key(self, event) -> None:
+        if event.key == "enter":
+            event.stop()
+            self.action_submit()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.dismiss(event.value)
