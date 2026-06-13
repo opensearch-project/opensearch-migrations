@@ -278,6 +278,20 @@ spec:
                   name: migrations-default-s3-config
                   key: ENDPOINT_HTTP
                   optional: true
+            # Symmetric with the RFS bulk-load pod (see documentBulkLoad.ts) so
+            # `console backfill dlq …` and `_augment_status_with_dlq` resolve the
+            # SAME bucket/region the RFS writes to. Required for the workflow
+            # status count to equal the persisted DLQ contents.
+            - name: MIGRATIONS_DEFAULT_S3_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: BUCKET_NAME
+            - name: MIGRATIONS_DEFAULT_S3_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: migrations-default-s3-config
+                  key: AWS_REGION
             {{- end }}
             {{- if index .Values.conditionalPackageInstalls "cert-manager" }}
             - name: PROXY_DEFAULT_AWS_REGION

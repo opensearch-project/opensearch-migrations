@@ -17,6 +17,7 @@ except (AttributeError, ValueError):
 import console_link.middleware.clusters as clusters_
 import console_link.middleware.metrics as metrics_
 import console_link.middleware.backfill as backfill_
+import console_link.middleware.dlq as dlq_
 import console_link.middleware.snapshot as snapshot_
 import console_link.middleware.metadata as metadata_
 import console_link.middleware.replay as replay_
@@ -906,18 +907,127 @@ def status_backfill_cmd(ctx, deep_check):
     logger.info(f"Called `console backfill status`, with {deep_check=}")
     if ctx.json and deep_check:
         try:
-            message = json.dumps(ctx.env.backfill.build_backfill_status().model_dump(mode="json"))
+            payload = ctx.env.backfill.build_backfill_status().model_dump(mode="json")
         except DeepStatusNotYetAvailable:
-            message = json.dumps(BackfillOverallStatus(
+            payload = BackfillOverallStatus(
                 status=StepStateWithPause.PENDING,
                 percentage_completed=0.0,
-            ).model_dump(mode="json"))
-        click.echo(message)
+            ).model_dump(mode="json")
+        _augment_status_with_dlq(payload)
+        click.echo(json.dumps(payload))
         return
     exitcode, message = backfill_.status(ctx.env.backfill, deep_check=deep_check)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
+    # Append DLQ summary so operators see failed-document inventory without a second command.
+    try:
+        cfg = dlq_.load_config()
+        c = dlq_.safe_count(cfg)
+        click.echo(f"DLQ location: {cfg.location_uri}")
+        click.echo(f"Failed document count: {c if c is not None else 'unavailable'}")
+    except dlq_.DlqNotConfigured:
+        # DLQ is optional; only surface when configured.
+        pass
+
+
+def _augment_status_with_dlq(payload: dict) -> None:
+    try:
+        cfg = dlq_.load_config()
+    except dlq_.DlqNotConfigured:
+        return
+    payload["dlq_location"] = cfg.location_uri
+    payload["failed_document_count"] = dlq_.safe_count(cfg)
+
+
+# ##################### DLQ (Reindex-from-Snapshot Dead Letter Queue) ###################
+
+
+@click.group(name="dlq", help="Inspect or manage RFS terminal-failure DLQ records.")
+def dlq_group():
+    """All actions related to the durable RFS DLQ for the current session."""
+
+
+@dlq_group.command(name="location", help="Print the S3 URI of the DLQ for the current session.")
+@click.option('--session', default=None, help='Override the session id (defaults to RFS_DLQ_SESSION_ID).')
+def backfill_dlq_location_cmd(session):
+    try:
+        cfg = dlq_.load_config(session_override=session)
+    except dlq_.DlqNotConfigured as e:
+        raise click.ClickException(str(e))
+    click.echo(cfg.location_uri)
+
+
+@dlq_group.command(name="count",
+                   help="Count distinct failed documents in the current session's DLQ "
+                        "(de-duplicated by index + document id, since the DLQ is at-least-once).")
+@click.option('--session', default=None, help='Override the session id (defaults to RFS_DLQ_SESSION_ID).')
+def backfill_dlq_count_cmd(session):
+    try:
+        cfg = dlq_.load_config(session_override=session)
+    except dlq_.DlqNotConfigured as e:
+        raise click.ClickException(str(e))
+    click.echo(str(dlq_.count(cfg)))
+
+
+@dlq_group.command(name="list", help="List failed document records in stable order.")
+@click.option('--session', default=None, help='Override the session id (defaults to RFS_DLQ_SESSION_ID).')
+@click.option('--limit', default=100, show_default=True, type=int, help='Maximum records to print.')
+@click.pass_obj
+def backfill_dlq_list_cmd(ctx, session, limit):
+    try:
+        cfg = dlq_.load_config(session_override=session)
+    except dlq_.DlqNotConfigured as e:
+        raise click.ClickException(str(e))
+    records = dlq_.list_records(cfg, limit=limit)
+    if ctx.json:
+        click.echo(json.dumps(records))
+        return
+    if not records:
+        click.echo("(no DLQ records for this session)")
+        return
+    for r in records:
+        click.echo(f"{r.get('timestamp', '-')}\t{r.get('targetIndex', '-')}\t"
+                   f"{r.get('documentId', '-')}\t{r.get('failureClass', '-')}\t"
+                   f"{r.get('failureType', '-')}")
+
+
+@backfill_group.command(name="reset",
+                        help="Delete backfill metadata for this session. By default DLQ records are kept.")
+@click.option('--include-dlq', is_flag=True, default=False,
+              help='Also delete the durable DLQ for this session. Irreversible.')
+@click.option('--yes', is_flag=True, default=False, help='Skip the confirmation prompt.')
+@click.pass_obj
+def reset_backfill_cmd(ctx, include_dlq, yes):
+    # The existing 'stop' command already archives backfill working state; 'reset' wraps
+    # that and (optionally) also deletes the DLQ records for this run.
+    click.echo("Archiving the working state of the backfill operation...")
+    exitcode, message = backfill_.archive(ctx.env.backfill)
+    if isinstance(message, WorkingIndexDoesntExist):
+        click.echo("Working state index doesn't exist, skipping archive operation.")
+    else:
+        while isinstance(message, RfsWorkersInProgress):
+            click.echo("RFS Workers are still running, waiting for them to complete...")
+            time.sleep(5)
+            exitcode, message = backfill_.archive(ctx.env.backfill)
+        if exitcode != ExitCode.SUCCESS:
+            raise click.ClickException(message)
+        click.echo(f"Backfill working state archived to: {message}")
+
+    if not include_dlq:
+        click.echo("DLQ records preserved. Re-run with --include-dlq to delete them.")
+        return
+
+    try:
+        cfg = dlq_.load_config()
+    except dlq_.DlqNotConfigured as e:
+        click.echo(f"DLQ not configured; nothing to delete ({e})")
+        return
+    if not yes:
+        click.confirm(f"About to delete ALL DLQ objects under {cfg.location_uri}. Proceed?",
+                      abort=True)
+    deleted = dlq_.delete_session(cfg)
+    click.echo(f"Deleted {deleted} DLQ object(s) under {cfg.location_uri}")
 
 
 # ##################### REPLAY ###################
@@ -1344,6 +1454,7 @@ def show(inputfile, outputfile):
 cli.add_command(cluster_group)
 cli.add_command(completion)
 cli.add_command(kafka_group)
+cli.add_command(dlq_group)
 
 if not DISABLE_LEGACY_COMMANDS:
     cli.add_command(snapshot_group)

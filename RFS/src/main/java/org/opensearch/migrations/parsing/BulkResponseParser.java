@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
 
+import org.opensearch.migrations.BulkDocErrorTypes;
 import org.opensearch.migrations.bulkload.common.DocumentExceptionAllowlist;
 
 import com.fasterxml.jackson.core.JsonFactory;
@@ -12,13 +13,16 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import lombok.Builder;
 import lombok.Getter;
+import lombok.Value;
 import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @UtilityClass
 public class BulkResponseParser {
-    private static JsonFactory jsonFactory = new JsonFactory();
+    private static final JsonFactory jsonFactory = new JsonFactory();
+    private static final String ITEMS_FIELD = "items";
+    private static final String MALFORMED_RESPONSE_ITEM = "malformed_response_item";
 
     /**
      * Scans a bulk response for all operations that were a success
@@ -61,7 +65,7 @@ public class BulkResponseParser {
                 while (parser.nextToken() != JsonToken.END_OBJECT) {
                     var fieldName = parser.currentName();
 
-                    if ("items".equals(fieldName)) {
+                    if (ITEMS_FIELD.equals(fieldName)) {
                         scanItems(parser, successfulDocumentIds, allowlist);
                     } else {
                         // Skip other fields at the root level
@@ -88,7 +92,7 @@ public class BulkResponseParser {
                 return null; // Can't parse - retry all
             }
             while (parser.nextToken() != JsonToken.END_OBJECT) {
-                if ("items".equals(parser.currentName())) {
+                if (ITEMS_FIELD.equals(parser.currentName())) {
                     scanItemPositions(parser, failedPositions, allowlist);
                     foundItems = true;
                 } else {
@@ -240,5 +244,137 @@ public class BulkResponseParser {
         private String result;
         private String errorType;
         private Integer status;
+    }
+
+    /**
+     * Partition a bulk response into three buckets keyed by the item's position in
+     * the original bulk request:
+     * <ul>
+     *   <li>{@code successPositions}: succeeded or allowlisted — drop from pending.</li>
+     *   <li>{@code nonRetryableFailures}: failed with a type in
+     *       {@link BulkDocErrorTypes#NON_RETRYABLE} (and not allowlisted) — emit to DLQ
+     *       immediately and drop from pending so we don't keep retrying them.</li>
+     *   <li>{@code retryableFailures}: any other failure — keep in pending for retry.
+     *       If retries are exhausted, callers should emit these to the DLQ with
+     *       {@code FailureClass.RETRYABLE_EXHAUSTED}.</li>
+     * </ul>
+     *
+     * <p>Each failure carries the raw per-item response JSON so the DLQ record can
+     * include the cluster's full error object verbatim.
+     *
+     * @return parsed partition, or {@code null} if the response could not be parsed
+     *         (caller should fall back to retrying all docs).
+     */
+    public static ItemPartition partitionItems(String bulkResponse, DocumentExceptionAllowlist allowlist) {
+        var partition = ItemPartition.builder();
+        boolean foundItems = false;
+        try (var parser = jsonFactory.createParser(bulkResponse)) {
+            if (parser.nextToken() != JsonToken.START_OBJECT) {
+                return null;
+            }
+            while (parser.nextToken() != JsonToken.END_OBJECT) {
+                if (ITEMS_FIELD.equals(parser.currentName())) {
+                    scanItemsPartitioned(parser, partition, allowlist);
+                    foundItems = true;
+                } else {
+                    parser.skipChildren();
+                }
+            }
+        } catch (IOException e) {
+            log.warn("Unable to parse bulk response for partitioning", e);
+            return null;
+        }
+        if (!foundItems) {
+            return null;
+        }
+        return partition.build();
+    }
+
+    private static void scanItemsPartitioned(
+        JsonParser parser,
+        ItemPartition.ItemPartitionBuilder partition,
+        DocumentExceptionAllowlist allowlist
+    ) throws IOException {
+        if (parser.nextToken() != JsonToken.START_ARRAY) {
+            throw new IOException("Expected 'items' to be an array");
+        }
+        int position = 0;
+        while (parser.nextToken() != JsonToken.END_ARRAY) {
+            if (parser.getCurrentToken() != JsonToken.START_OBJECT) {
+                continue;
+            }
+            classifyItemFromRaw(copyCurrentStructure(parser), position, partition, allowlist);
+            position++;
+        }
+    }
+
+    private static String copyCurrentStructure(JsonParser parser) throws IOException {
+        var sw = new java.io.StringWriter();
+        try (var gen = jsonFactory.createGenerator(sw)) {
+            gen.copyCurrentStructure(parser);
+        }
+        return sw.toString();
+    }
+
+    private static void classifyItemFromRaw(
+        String rawJson,
+        int position,
+        ItemPartition.ItemPartitionBuilder partition,
+        DocumentExceptionAllowlist allowlist
+    ) throws IOException {
+        classifyParsed(parseItemFields(rawJson), rawJson, position, partition, allowlist);
+    }
+
+    private static void classifyParsed(
+        DocInfo parsed,
+        String rawJson,
+        int position,
+        ItemPartition.ItemPartitionBuilder partition,
+        DocumentExceptionAllowlist allowlist
+    ) {
+        if (parsed == null) {
+            partition.retryableFailure(new ItemFailure(position, null, MALFORMED_RESPONSE_ITEM, rawJson));
+            return;
+        }
+        if (parsed.getResult() != null
+            || (parsed.getErrorType() != null && allowlist.isAllowed(parsed.getErrorType()))) {
+            partition.successPosition(position);
+            return;
+        }
+        if (parsed.getErrorType() != null && BulkDocErrorTypes.NON_RETRYABLE.contains(parsed.getErrorType())) {
+            partition.nonRetryableFailure(new ItemFailure(position, parsed.getId(), parsed.getErrorType(), rawJson));
+        } else {
+            partition.retryableFailure(new ItemFailure(position, parsed.getId(), parsed.getErrorType(), rawJson));
+        }
+    }
+
+    private static DocInfo parseItemFields(String rawJson) throws IOException {
+        try (var p = jsonFactory.createParser(rawJson)) {
+            if (p.nextToken() != JsonToken.START_OBJECT
+                || p.nextToken() != JsonToken.FIELD_NAME
+                || p.nextToken() != JsonToken.START_OBJECT) {
+                return null;
+            }
+            return extractDocInfo(p);
+        }
+    }
+
+    /** One failed bulk item with enough context to be written to a DLQ. */
+    @Value
+    public static class ItemFailure {
+        int position;
+        String documentId;
+        String errorType;
+        /** Full per-item response JSON from the bulk API. */
+        String responseItemJson;
+    }
+
+    /** Three-way classification of a bulk response, by item position. */
+    @Value
+    @Builder
+    public static class ItemPartition {
+        @lombok.Singular("successPosition") List<Integer> successPositions;
+        @lombok.Singular("nonRetryableFailure") List<ItemFailure> nonRetryableFailures;
+        @lombok.Singular("retryableFailure") List<ItemFailure> retryableFailures;
     }
 }

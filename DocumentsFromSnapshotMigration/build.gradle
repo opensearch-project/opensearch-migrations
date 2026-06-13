@@ -28,6 +28,10 @@ dependencies {
     implementation libs.slf4j.api
     implementation libs.log4j.slf4j2.impl
 
+    // For DLQ S3 sink (see RfsMigrateDocuments#buildDlqSink)
+    implementation libs.aws.s3
+    implementation libs.aws.sdk.core
+
 
     testImplementation testFixtures(project(":RFS"))
     testImplementation testFixtures(project(":SolrReader"))

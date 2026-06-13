@@ -966,6 +966,17 @@ export const USER_RFS_PROCESS_OPTIONS = z.object({
             "so results can be inconsistent. Use only when reconstruction from doc_values and stored fields is insufficient.")
         .checksumFor('replayer')
         .changeRestriction('impossible'),
+    dlqS3Prefix: z.string().default("rfs-dlq/").optional()
+        .describe("S3 key prefix for the dead-letter queue (DLQ) where terminal document failures are persisted. " +
+            "Each RFS run writes under <prefix>/session=<workflow-uid>/. " +
+            "Defaults to 'rfs-dlq/'."),
+    dlqS3Bucket: z.string().optional()
+        .describe("S3 bucket for the DLQ. When omitted, falls back to the deployment-provisioned " +
+            "default bucket (MIGRATIONS_DEFAULT_S3_BUCKET). Set this to use a separate bucket for DLQ records."),
+    dlqMaxBufferBytes: z.number().default(67108864).optional()
+        .describe("Maximum uncompressed bytes buffered in memory per target index before the DLQ rotates " +
+            "to a new S3 object. Bounds heap use when a shard produces a very large number of terminal " +
+            "failures. Default 67108864 (64 MiB)."),
     positionGapStopword: z.string().default("a").optional()
         .describe("Token used to fill skipped Lucene positions when reconstructing analyzed-text fields from postings. " +
             "ES preserves position increments for stop-word-filtered tokens (e.g. 'i like the tree' with stopword 'the' indexes " +

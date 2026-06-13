@@ -58,6 +58,8 @@ import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.SnapshotReaderRegistry;
 import org.opensearch.migrations.jcommander.EnvVarParameterPuller;
 import org.opensearch.migrations.jcommander.JsonCommandLineParser;
+import org.opensearch.migrations.reindexer.dlq.DlqSink;
+import org.opensearch.migrations.reindexer.dlq.S3DlqSink;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -82,6 +84,8 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
 import org.slf4j.MDC;
+import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.s3.S3AsyncClient;
 
 @Slf4j
 public class RfsMigrateDocuments {
@@ -310,7 +314,7 @@ public class RfsMigrateDocuments {
         private VersionStrictness versionStrictness = new VersionStrictness();
 
         @ParametersDelegate
-        private ExperimentalArgs experimental = new ExperimentalArgs();
+        ExperimentalArgs experimental = new ExperimentalArgs();
 
         @Parameter(required = false,
             names = { "--allowed-doc-exception-types", "--allowedDocExceptionTypes" },
@@ -320,6 +324,53 @@ public class RfsMigrateDocuments {
                 "rather than failure. Example: --allowed-doc-exception-types version_conflict_engine_exception")
         public List<String> allowedDocExceptionTypes = List.of();
 
+        @ParametersDelegate
+        public DlqArgs dlqArgs = new DlqArgs();
+
+    }
+
+    /**
+     * Configuration for the durable DLQ where terminal document failures are persisted.
+     * DLQ is enabled when --dlq-s3-bucket is provided, or when the
+     * deployment-provisioned default bucket is available via MIGRATIONS_DEFAULT_S3_BUCKET;
+     * otherwise terminal failures are not captured to a sink.
+     */
+    public static class DlqArgs {
+        @Parameter(required = false,
+            names = { "--dlq-s3-bucket" },
+            description = "S3 bucket for durable DLQ records. When unset, the deployment-provisioned " +
+                "default bucket (migrations-default-<account>-<stage>-<region>, conveyed via the " +
+                "MIGRATIONS_DEFAULT_S3_BUCKET env var) is used.")
+        public String dlqS3Bucket = null;
+
+        @Parameter(required = false,
+            names = { "--dlq-s3-prefix" },
+            description = "S3 key prefix under the DLQ bucket. Records are written to " +
+                "<prefix>/session=<sessionId>/worker=<workerId>/... Default: \"rfs-dlq/\".")
+        public String dlqS3Prefix = "rfs-dlq/";
+
+        @Parameter(required = false,
+            names = { "--dlq-s3-region" },
+            description = "AWS region for the DLQ bucket. Defaults to the same region as --s3-region when present.")
+        public String dlqS3Region = null;
+
+        @Parameter(required = false,
+            names = { "--dlq-s3-endpoint" },
+            description = "Optional S3 endpoint override for DLQ uploads (e.g. for localstack in tests).")
+        public String dlqS3Endpoint = null;
+
+        @Parameter(required = false,
+            names = { "--dlq-session-id" },
+            description = "Identifier for this RFS run; used as the S3 prefix that isolates this run's " +
+                "DLQ records from prior runs. Defaults to the Argo workflow UID when available.")
+        public String dlqSessionId = null;
+
+        @Parameter(required = false,
+            names = { "--dlq-max-buffer-bytes" },
+            description = "Maximum uncompressed bytes buffered in memory per target index before the DLQ " +
+                "rotates to a new S3 object. Bounds heap use when a shard produces a very large number of " +
+                "terminal failures. Default 67108864 (64 MiB).")
+        public long dlqMaxBufferBytes = S3DlqSink.DEFAULT_MAX_BUFFER_BYTES;
     }
 
     public static class ExperimentalArgs {
@@ -555,6 +606,25 @@ public class RfsMigrateDocuments {
         OpenSearchClient targetClient = targetClientFactory.determineVersionAndCreate();
         var targetVersion = targetClient.getClusterVersion();
 
+        // Build the DLQ sink and attach it to the target client. The sink is closed in
+        // the shutdown hook below; intermediate flushes happen per-shard in
+        // DocumentMigrationBootstrap before completeWorkItem.
+        var resolvedSessionId = resolveSessionId(arguments, workerId);
+        var dlqSink = buildDlqSink(arguments, workerId, resolvedSessionId);
+        targetClient.setDlqContext(dlqSink, resolvedSessionId, workerId);
+        if (dlqSink != null) {
+            log.atInfo().setMessage("DLQ enabled: sessionId={} location={}")
+                .addArgument(resolvedSessionId)
+                .addArgument(dlqSink.getLocation())
+                .log();
+            // Expose the DLQ location to the orchestrator on a dedicated line that the
+            // workflow can capture as an output parameter (see Argo template).
+            System.out.println("RFS_DLQ_LOCATION=" + dlqSink.getLocation());
+        } else {
+            log.atInfo().setMessage("DLQ disabled: no --dlq-s3-bucket configured "
+                + "and MIGRATIONS_DEFAULT_S3_BUCKET is not set").log();
+        }
+
         boolean useServerGeneratedIds = switch (arguments.serverGeneratedIds) {
             case ALWAYS -> true;
             case NEVER -> false;
@@ -592,7 +662,7 @@ public class RfsMigrateDocuments {
         }
 
         var coordinatorInfo = resolveCoordinatorConnection(arguments, targetConnectionContext, targetVersion);
-        runMigration(workerId, arguments, coordinatorInfo, context, sourceFactory);
+        runMigration(workerId, arguments, coordinatorInfo, context, sourceFactory, dlqSink);
     }
 
     private static void runMigration(
@@ -600,7 +670,8 @@ public class RfsMigrateDocuments {
         Args arguments,
         CoordinatorInfo coordinatorInfo,
         RootDocumentMigrationContext context,
-        MigrationSourceFactory sourceFactory
+        MigrationSourceFactory sourceFactory,
+        DlqSink dlqSink
     ) throws Exception {
         var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
         var progressCursor = new AtomicReference<WorkItemCursor>();
@@ -628,7 +699,8 @@ public class RfsMigrateDocuments {
                         () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
                         cleanShutdownCompleted,
                         context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
-                        context.getWorkCoordinationContext()::createReleaseWorkItemContext),
+                        context.getWorkCoordinationContext()::createReleaseWorkItemContext,
+                        dlqSink),
                 Clock.systemUTC());) {
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 Thread.currentThread().setName("Cleanup-Hook-Thread");
@@ -636,7 +708,8 @@ public class RfsMigrateDocuments {
                 try {
                     executeCleanShutdownProcess(workItemRef, progressCursor, workCoordinator, cleanShutdownCompleted,
                             context.getWorkCoordinationContext()::createSuccessorWorkItemsContext,
-                            context.getWorkCoordinationContext()::createReleaseWorkItemContext);
+                            context.getWorkCoordinationContext()::createReleaseWorkItemContext,
+                            dlqSink);
                     log.atInfo().setMessage("Clean shutdown completed.").log();
                 } catch (InterruptedException e) {
                     log.atError().setMessage("Clean exit process was interrupted: {}").addArgument(e).log();
@@ -644,6 +717,15 @@ public class RfsMigrateDocuments {
                 } catch (Exception e) {
                     log.atError().setMessage("Could not complete clean exit process: {}").addArgument(e).log();
                 } finally {
+                    // Close the DLQ sink so any buffered records get flushed to S3 before
+                    // the JVM exits. Safe to call even if completeWorkItem was never reached.
+                    if (dlqSink != null) {
+                        try {
+                            dlqSink.close();
+                        } catch (Exception e) {
+                            log.atError().setCause(e).setMessage("Error closing DLQ sink during shutdown").log();
+                        }
+                    }
                     LogManager.shutdown();
                 }
             }));
@@ -777,7 +859,7 @@ public class RfsMigrateDocuments {
      * Does not include request execution time or network latency.
      * Logic matches the runtime retry implementation in OpenSearchWorkCoordinator.retryWithExponentialBackoff()
      */
-    private static long calculateTotalRetryWindowSeconds(OpenSearchWorkCoordinator.CompletionRetryConfig config) {
+    static long calculateTotalRetryWindowSeconds(OpenSearchWorkCoordinator.CompletionRetryConfig config) {
         long totalMs = 0;
         long delay = config.initialDelayMs();
         for (int i = 0; i < config.maxRetries(); i++) {
@@ -797,7 +879,7 @@ public class RfsMigrateDocuments {
      * Build the coordinator completion-retry configuration from CLI args and log its summary.
      * Shared between the ES and Solr backfill paths.
      */
-    private static OpenSearchWorkCoordinator.CompletionRetryConfig buildCompletionRetryConfig(Args arguments) {
+    static OpenSearchWorkCoordinator.CompletionRetryConfig buildCompletionRetryConfig(Args arguments) {
         var completionRetryConfig = new OpenSearchWorkCoordinator.CompletionRetryConfig(
             arguments.coordinatorRetryMaxRetries,
             arguments.coordinatorRetryInitialDelayMs,
@@ -809,6 +891,85 @@ public class RfsMigrateDocuments {
             .addArgument(calculateTotalRetryWindowSeconds(completionRetryConfig))
             .log();
         return completionRetryConfig;
+    }
+
+    /**
+     * Resolve the DLQ session id, preferring an explicit CLI/env override, then the
+     * Argo workflow UID, then a worker-scoped fallback. The result drives the S3
+     * prefix that isolates this run's DLQ entries from prior runs.
+     */
+    static String resolveSessionId(Args arguments, String workerId) {
+        if (arguments.dlqArgs.dlqSessionId != null && !arguments.dlqArgs.dlqSessionId.isBlank()) {
+            return arguments.dlqArgs.dlqSessionId;
+        }
+        var fromEnv = System.getenv("ARGO_WORKFLOW_UID");
+        if (fromEnv != null && !fromEnv.isBlank()) {
+            return fromEnv;
+        }
+        return "worker-" + workerId;
+    }
+
+    /**
+     * Build the S3 DLQ sink, or return null when no bucket is configured. The bucket
+     * comes from --dlq-s3-bucket; when absent we fall back to the migrations-default
+     * bucket (``migrations-default-<account>-<stage>-<region>``) that the deployment
+     * provisions and exposes to the pod as MIGRATIONS_DEFAULT_S3_BUCKET. The per-
+     * session prefix keeps DLQ and snapshot objects in their own keyspace.
+     */
+    static DlqSink buildDlqSink(Args arguments, String workerId, String sessionId) {
+        String bucket = arguments.dlqArgs.dlqS3Bucket;
+        if (bucket == null || bucket.isBlank()) {
+            var fromEnv = System.getenv("MIGRATIONS_DEFAULT_S3_BUCKET");
+            if (fromEnv != null && !fromEnv.isBlank()) {
+                bucket = fromEnv;
+            }
+        }
+        if (bucket == null || bucket.isBlank()) {
+            return null;
+        }
+        var region = arguments.dlqArgs.dlqS3Region != null ? arguments.dlqArgs.dlqS3Region
+            : arguments.s3Region;
+        if (region == null) {
+            throw new ParameterException("--dlq-s3-region (or --s3-region) is required when --dlq-s3-bucket is set");
+        }
+        log.atInfo().setMessage("DLQ config: region={} bucket={}")
+            .addArgument(region).addArgument(bucket).log();
+
+        var s3ClientBuilder = S3AsyncClient.builder()
+            .region(Region.of(region));
+        if (arguments.dlqArgs.dlqS3Endpoint != null) {
+            s3ClientBuilder.endpointOverride(URI.create(arguments.dlqArgs.dlqS3Endpoint));
+        }
+        var s3Client = s3ClientBuilder.build();
+
+        return S3DlqSink.builder()
+            .bucket(bucket)
+            .prefix(arguments.dlqArgs.dlqS3Prefix)
+            .sessionId(sessionId)
+            .workerId(workerId)
+            .region(region)
+            .uploader(S3DlqSink.s3ClientUploader(s3Client))
+            .maxBufferBytes(arguments.dlqArgs.dlqMaxBufferBytes)
+            .build();
+    }
+
+    /**
+     * Returns true only when the coordinator confirms there are no pending work items.
+     * Any exception (typically the coordination index not existing yet on first run)
+     * is swallowed and treated as "not done" so the caller falls through to the normal
+     * flow, which creates the index and seeds work items via ShardWorkPreparer.
+     */
+    static boolean isCoordinatorWorkAlreadyDone(
+            IWorkCoordinator workCoordinator,
+            RootDocumentMigrationContext context) {
+        try {
+            return !workCoordinator.workItemsNotYetComplete(
+                context.getWorkCoordinationContext()::createItemsPendingContext);
+        } catch (Exception e) {
+            log.atDebug().setCause(e)
+                .setMessage("Pre-check of coordinator pending work failed; proceeding with normal flow").log();
+            return false;
+        }
     }
 
     /**
@@ -840,7 +1001,7 @@ public class RfsMigrateDocuments {
      * Build the document-exception allowlist from CLI args and log when non-empty.
      * Shared between the ES and Solr backfill paths.
      */
-    private static DocumentExceptionAllowlist buildDocumentExceptionAllowlist(Args arguments) {
+    static DocumentExceptionAllowlist buildDocumentExceptionAllowlist(Args arguments) {
         var allowedExceptionTypesSet = new HashSet<>(arguments.allowedDocExceptionTypes);
         var allowlist = new DocumentExceptionAllowlist(allowedExceptionTypesSet);
         if (!allowedExceptionTypesSet.isEmpty()) {
@@ -882,7 +1043,8 @@ public class RfsMigrateDocuments {
             IWorkCoordinator coordinator,
             AtomicBoolean cleanShutdownCompleted,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier,
-            Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier
+            Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier,
+            DlqSink dlqSink
     ) throws IOException, InterruptedException {
         if (cleanShutdownCompleted.get())  {
             log.atInfo().setMessage("Clean shutdown already completed").log();
@@ -902,13 +1064,57 @@ public class RfsMigrateDocuments {
             cleanShutdownCompleted.set(true);
             return;
         }
-        log.atInfo().setMessage("Marking progress: " + workItemAndDuration.getWorkItem().toString() + ", at doc " + progressCursor.get().getProgressCheckpointNum()).log();
-        var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, progressCursor.get());
+        var workItemId = workItemAndDuration.getWorkItem().toString();
+        log.atInfo().setMessage("Marking progress: " + workItemId + ", at doc " + progressCursor.get().getProgressCheckpointNum()).log();
+
+        // Don't checkmark the work item as done until the DLQ stuff is written/flushed.
+        // If the flush fails, refuse to mark complete so the lease naturally expires and a
+        // successor worker re-processes from a known-good state — preserving evidence of
+        // any terminal failures we accumulated but couldn't persist.
+        if (!flushDlqBeforeComplete(dlqSink, workItemId)) {
+            return;
+        }
+
+        // The flush succeeded, so every document processed through the current cursor is now
+        // durable in the DLQ. That cursor is our DLQ watermark — checkpoint the successor to it
+        // so we never advance the work item past what we've durably persisted. (Under the
+        // current flush-before-complete gate the watermark equals the progress cursor; capturing
+        // it after the flush makes that invariant explicit.)
+        var dlqWatermark = progressCursor.get();
+        var successorWorkItem = getSuccessorWorkItemIds(workItemAndDuration, dlqWatermark);
 
         coordinator.createSuccessorWorkItemsAndMarkComplete(
-                workItemAndDuration.getWorkItem().toString(), successorWorkItem, 1, contextSupplier
+                workItemId, successorWorkItem, 1, contextSupplier
         );
         cleanShutdownCompleted.set(true);
+    }
+
+    /**
+     * Flush any buffered DLQ records to S3 before marking the current work item complete.
+     * Returns {@code true} if it's safe to proceed with the mark-complete call. A
+     * {@code false} return means the flush failed and the caller must NOT mark the work
+     * item complete — letting the lease expire naturally lets a successor worker pick
+     * up the partition and re-emit terminal failures to the DLQ.
+     *
+     * <p>A null {@code dlqSink} (DLQ disabled) returns {@code true} immediately. The 5-min
+     * timeout mirrors {@link DocumentMigrationBootstrap}'s flush deadline.
+     */
+    static boolean flushDlqBeforeComplete(DlqSink dlqSink, String workItemId) {
+        if (dlqSink == null) {
+            return true;
+        }
+        try {
+            dlqSink.flush().block(Duration.ofMinutes(5));
+            return true;
+        } catch (Exception e) {
+            log.atError().setCause(e)
+                .setMessage("DLQ flush failed before checkmarking work item {} complete; "
+                    + "skipping mark-complete so the lease expires and a successor retries — "
+                    + "any unflushed DLQ records will be re-emitted by the successor")
+                .addArgument(workItemId)
+                .log();
+            return false;
+        }
     }
 
     /**
@@ -940,7 +1146,8 @@ public class RfsMigrateDocuments {
             Runnable cancellationRunnable,
             AtomicBoolean cleanShutdownCompleted,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier,
-            Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier) {
+            Supplier<IWorkCoordinationContexts.IReleaseWorkItemContext> releaseContextSupplier,
+            DlqSink dlqSink) {
         log.atWarn().setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
                 .addArgument(workItemId)
                 .log();
@@ -968,6 +1175,18 @@ public class RfsMigrateDocuments {
                     log.atWarn().setMessage("Successor Work Ids: {}").addArgument(String.join(", ", successorWorkItemIds))
                             .log();
                     var successorNextAcquisitionLeaseExponent = getSuccessorNextAcquisitionLeaseExponent(workItemTimeProvider, initialLeaseDuration, workItemAndDuration.getLeaseExpirationTime());
+
+                    // Don't checkmark the work item as done until the DLQ stuff is flushed.
+                    // On flush failure, skip the mark-complete and let the lease expire so a
+                    // successor reprocesses the partition and re-emits its terminal failures.
+                    if (!flushDlqBeforeComplete(dlqSink, workItemId)) {
+                        return;
+                    }
+
+                    // The flush succeeded, so everything through progressCursor is durable in the
+                    // DLQ — that cursor is the DLQ watermark, and successorWorkItemIds (computed
+                    // from it above) checkpoints the successor to exactly that point, never past
+                    // what we've persisted.
                     coordinator.createSuccessorWorkItemsAndMarkComplete(
                             workItemId,
                             successorWorkItemIds,
@@ -1061,7 +1280,7 @@ public class RfsMigrateDocuments {
         return successorShardNextAcquisitionLeaseExponent;
     }
 
-    private static List<String> getSuccessorWorkItemIds(IWorkCoordinator.WorkItemAndDuration workItemAndDuration, WorkItemCursor progressCursor) {
+    static List<String> getSuccessorWorkItemIds(IWorkCoordinator.WorkItemAndDuration workItemAndDuration, WorkItemCursor progressCursor) {
         if (workItemAndDuration == null) {
             throw new IllegalStateException("Unexpected worker coordination state. Expected workItem set when progressCursor not null.");
         }
@@ -1100,6 +1319,15 @@ public class RfsMigrateDocuments {
     ) {
         return (workCoordinator, processManager, progressCursor, cancellationRunnableRef, workItemTimeProvider) -> {
             DocumentExceptionAllowlist allowlist = buildDocumentExceptionAllowlist(arguments);
+
+            // Check the coordinator for pending work before any S3 setup so a pod restart
+            // after the migration finishes doesn't redo the bucket-list + S3 client setup.
+            // The first run throws here because the coordination index doesn't exist yet;
+            // we swallow that and fall through to the normal flow, which creates the index
+            // via ShardWorkPreparer.
+            if (isCoordinatorWorkAlreadyDone(workCoordinator, context)) {
+                throw new NoWorkLeftException("All work items already complete; skipping Solr metadata download.");
+            }
 
             Path backupDir;
             S3Repo s3Repo = null;

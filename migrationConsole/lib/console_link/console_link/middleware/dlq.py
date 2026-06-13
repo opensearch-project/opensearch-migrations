@@ -1,0 +1,280 @@
+"""Workflow-facing operations for the RFS Reindex-from-Snapshot DLQ.
+
+The DLQ is an append-only set of NDJSON.gz objects in S3, written by RFS workers
+when terminal document failures occur. Records for a given
+backfill session live under ``s3://<bucket>/<prefix>/session=<session_id>/`` —
+new runs use a new ``session_id``, so prior-run records are never mixed in.
+
+Location/session are conveyed to the console via these sources, in priority order:
+
+1. **CLI / env override** — for explicit operator control:
+   * ``RFS_DLQ_S3_BUCKET`` — explicit bucket override
+   * ``RFS_DLQ_S3_PREFIX`` — key prefix above ``session=``
+   * ``RFS_DLQ_SESSION_ID`` — pinned session id
+   * ``RFS_DLQ_S3_REGION`` — region for the bucket
+
+2. **Kubernetes ConfigMap** (``rfs-dlq-current-session``) — the bulk-load
+   workflow patches this ConfigMap with the current ``{{workflow.uid}}``
+   before launching RFS. The console reads it via the Kubernetes API on
+   demand, so it always sees the latest run's session with no refresh delay.
+
+3. **Default bucket fallback** — ``MIGRATIONS_DEFAULT_S3_BUCKET`` /
+   ``BUCKET_NAME`` from the deployment-provisioned
+   ``migrations-default-<account>-<stage>-<region>`` bucket.
+
+This module is intentionally a thin wrapper around the S3 listing/get APIs so a
+customer can also inspect the DLQ with the aws CLI if they prefer.
+"""
+from __future__ import annotations
+
+import gzip
+import io
+import json
+import logging
+import os
+from dataclasses import dataclass
+from typing import Iterator, List, Optional
+
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DlqConfig:
+    bucket: str
+    prefix: str          # always trailing-slash-terminated
+    session_id: str
+    region: Optional[str] = None
+
+    @property
+    def session_prefix(self) -> str:
+        return f"{self.prefix}session={self.session_id}/"
+
+    @property
+    def location_uri(self) -> str:
+        return f"s3://{self.bucket}/{self.session_prefix}"
+
+
+class DlqNotConfigured(RuntimeError):
+    """Raised when no session id / bucket is available from any source."""
+
+
+DLQ_SESSION_CONFIGMAP_NAME = "rfs-dlq-current-session"
+
+_configmap_cache: Optional[dict] = None
+
+
+def _read_configmap(key: str) -> Optional[str]:
+    """Read a key from the rfs-dlq-current-session ConfigMap via the Kubernetes API."""
+    global _configmap_cache
+    if _configmap_cache is None:
+        _configmap_cache = _fetch_configmap_data()
+    value = _configmap_cache.get(key)
+    return value.strip() if value else None
+
+
+def _fetch_configmap_data() -> dict:
+    try:
+        from kubernetes import client, config
+        from kubernetes.client.rest import ApiException
+        try:
+            config.load_incluster_config()
+        except config.ConfigException:
+            config.load_kube_config()
+        v1 = client.CoreV1Api()
+        from console_link.workflow.models.utils import get_current_namespace
+        ns = get_current_namespace()
+        cm = v1.read_namespaced_config_map(name=DLQ_SESSION_CONFIGMAP_NAME, namespace=ns)
+        return cm.data or {}
+    except ImportError:
+        logger.debug("kubernetes client not available; ConfigMap lookup skipped")
+        return {}
+    except ApiException as e:
+        if e.status == 404:
+            logger.debug("ConfigMap %s not found (no bulk-load run yet)", DLQ_SESSION_CONFIGMAP_NAME)
+        else:
+            logger.warning("Failed to read ConfigMap %s: %s", DLQ_SESSION_CONFIGMAP_NAME, e)
+        return {}
+    except Exception as e:
+        logger.warning("Failed to read ConfigMap %s: %s", DLQ_SESSION_CONFIGMAP_NAME, e)
+        return {}
+
+
+def load_config(session_override: Optional[str] = None) -> DlqConfig:
+    global _configmap_cache
+    _configmap_cache = None
+    # Bucket resolution: explicit override → ConfigMap → deployment
+    # default bucket. The explicit override exists so an operator can pin
+    # inspection to a non-default bucket (e.g., investigating a historical
+    # run that wrote elsewhere).
+    bucket = (
+        os.environ.get("RFS_DLQ_S3_BUCKET") or
+        _read_configmap("bucket") or
+        os.environ.get("MIGRATIONS_DEFAULT_S3_BUCKET") or
+        os.environ.get("BUCKET_NAME")
+    )
+    if not bucket:
+        raise DlqNotConfigured(
+            "No DLQ bucket is configured. Run a bulk-load workflow first (which "
+            "creates the rfs-dlq-current-session ConfigMap), or set RFS_DLQ_S3_BUCKET / "
+            "MIGRATIONS_DEFAULT_S3_BUCKET / BUCKET_NAME in the console env."
+        )
+    # Prefix resolution: env override → ConfigMap → safe default.
+    prefix = (
+        os.environ.get("RFS_DLQ_S3_PREFIX") or
+        _read_configmap("prefix") or
+        "rfs-dlq/"
+    )
+    if not prefix.endswith("/"):
+        prefix = prefix + "/"
+    # Session resolution: --session arg → env override → ConfigMap.
+    # The ConfigMap holds the *current* session id (Argo workflow UID) that
+    # the bulk-load workflow most recently patched in.
+    session = (
+        session_override or
+        os.environ.get("RFS_DLQ_SESSION_ID") or
+        _read_configmap("session_id")
+    )
+    if not session:
+        raise DlqNotConfigured(
+            "No DLQ session id is available. Run a bulk-load workflow first "
+            "(which patches the rfs-dlq-current-session ConfigMap with the workflow UID), "
+            "or pass --session <id> to target a specific historical run."
+        )
+    region = os.environ.get("RFS_DLQ_S3_REGION") or _read_configmap("region")
+    return DlqConfig(bucket=bucket, prefix=prefix, session_id=session, region=region)
+
+
+def _s3_client(cfg: DlqConfig):
+    if cfg.region:
+        return boto3.client("s3", region_name=cfg.region)
+    return boto3.client("s3")
+
+
+def location(cfg: DlqConfig) -> str:
+    """Return the customer-visible S3 URI for the current session's DLQ."""
+    return cfg.location_uri
+
+
+def _iter_objects(cfg: DlqConfig, client=None) -> Iterator[dict]:
+    client = client or _s3_client(cfg)
+    paginator = client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=cfg.bucket, Prefix=cfg.session_prefix):
+        for obj in page.get("Contents", []) or []:
+            yield obj
+
+
+def _read_all_records(cfg: DlqConfig, client=None) -> List[dict]:
+    """Read and JSON-parse every NDJSON record across all session objects (no sort/dedup/limit).
+
+    Skips non-gzip objects and malformed lines with a warning so a single bad object can't
+    break inspection of the rest.
+    """
+    client = client or _s3_client(cfg)
+    records: List[dict] = []
+    for obj in _iter_objects(cfg, client=client):
+        body = client.get_object(Bucket=cfg.bucket, Key=obj["Key"])["Body"].read()
+        try:
+            decoded = gzip.GzipFile(fileobj=io.BytesIO(body)).read().decode("utf-8")
+        except OSError as e:
+            logger.warning("Skipping non-gzip DLQ object %s: %s", obj["Key"], e)
+            continue
+        for line in decoded.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError as e:
+                logger.warning("Skipping malformed DLQ record in %s: %s", obj["Key"], e)
+    return records
+
+
+def _dedup_key(record: dict):
+    """Stable identity of a failed document: ``(targetIndex, documentId)``.
+
+    This is invariant across re-emissions — a successor that reprocesses a partition writes the
+    same (targetIndex, documentId) regardless of which checkpoint it resumed from (so it is NOT
+    keyed on workItemId, which changes when the checkpoint advances). Returns ``None`` when
+    documentId is absent/empty (e.g. server-generated ids): such records can't be correlated, so
+    they are never collapsed.
+    """
+    doc_id = record.get("documentId")
+    if not doc_id:
+        return None
+    return (record.get("targetIndex"), doc_id)
+
+
+def dedupe_records(records: List[dict]) -> List[dict]:
+    """Collapse duplicate failures for the same document into a single record.
+
+    The DLQ is at-least-once: a worker crash or a failed flush makes a successor reprocess the
+    partition and re-emit the same terminal failures, so the same ``(targetIndex, documentId)``
+    can appear in multiple objects. We keep the latest record per document (by timestamp).
+    Records without a documentId can't be correlated and are all retained.
+    """
+    by_doc: dict = {}
+    without_id: List[dict] = []
+    for r in records:
+        key = _dedup_key(r)
+        if key is None:
+            without_id.append(r)
+            continue
+        existing = by_doc.get(key)
+        if existing is None or (r.get("timestamp") or "") >= (existing.get("timestamp") or ""):
+            by_doc[key] = r
+    return list(by_doc.values()) + without_id
+
+
+def list_records(cfg: DlqConfig, limit: Optional[int] = None) -> List[dict]:
+    """Stream de-duplicated NDJSON records from all session objects in stable order.
+
+    Records are de-duplicated by (targetIndex, documentId) — see ``dedupe_records`` — because the
+    DLQ is at-least-once. Stable order = (timestamp asc, documentId asc); records without a
+    timestamp sort to the end. ``limit`` caps the returned list — useful in CLI contexts.
+    """
+    records = dedupe_records(_read_all_records(cfg))
+    records.sort(key=lambda r: (r.get("timestamp") or "~", r.get("documentId") or ""))
+    if limit is not None:
+        return records[:limit]
+    return records
+
+
+def count(cfg: DlqConfig) -> int:
+    """Count distinct failed documents in this session's DLQ.
+
+    De-duplicates by (targetIndex, documentId) so re-emitted failures (the DLQ is at-least-once)
+    are counted once rather than inflating the total. For very large DLQs we read object bodies —
+    workflows typically expect a small number of failures, so this favors accuracy over a cheap
+    object/line-count approximation.
+    """
+    return len(dedupe_records(_read_all_records(cfg)))
+
+
+def delete_session(cfg: DlqConfig) -> int:
+    """Delete every object under the current session prefix. Returns count deleted."""
+    client = _s3_client(cfg)
+    deleted = 0
+    batch: List[dict] = []
+    for obj in _iter_objects(cfg, client=client):
+        batch.append({"Key": obj["Key"]})
+        if len(batch) == 1000:  # DeleteObjects max per call
+            client.delete_objects(Bucket=cfg.bucket, Delete={"Objects": batch})
+            deleted += len(batch)
+            batch = []
+    if batch:
+        client.delete_objects(Bucket=cfg.bucket, Delete={"Objects": batch})
+        deleted += len(batch)
+    return deleted
+
+
+def safe_count(cfg: DlqConfig) -> Optional[int]:
+    """Like ``count`` but swallows S3 errors so a status command never breaks
+    on a misconfigured DLQ. Returns ``None`` if the count is unavailable."""
+    try:
+        return count(cfg)
+    except (BotoCoreError, ClientError) as e:
+        logger.warning("Failed to count DLQ records: %s", e)
+        return None

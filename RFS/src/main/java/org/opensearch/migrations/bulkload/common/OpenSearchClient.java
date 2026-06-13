@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.common;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.HashMap;
@@ -28,7 +29,12 @@ import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.pipeline.model.Document;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.parsing.BulkResponseParser;
+import org.opensearch.migrations.parsing.BulkResponseParser.ItemFailure;
+import org.opensearch.migrations.parsing.BulkResponseParser.ItemPartition;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
+import org.opensearch.migrations.reindexer.dlq.DlqRecord;
+import org.opensearch.migrations.reindexer.dlq.DlqSink;
+import org.opensearch.migrations.reindexer.dlq.FailureClass;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -67,6 +73,18 @@ public abstract class OpenSearchClient {
     private final Version version;
     private final CompressionMode compressionMode;
 
+    // DLQ context — null when no DLQ is configured. The bootstrap in RfsMigrateDocuments
+    // calls setDlqContext(...) to install an S3DlqSink when a bucket is provided.
+    // volatile: emitDlqRecord runs on concurrent bulk-write threads (batchConcurrency defaults
+    // to 10) while setDlqContext/setDlqWorkItem are written from the pipeline thread, so these
+    // need safe publication across threads.
+    private volatile DlqSink dlqSink;
+    private volatile String dlqSessionId = "unknown-session";
+    private volatile String dlqWorkerId = "unknown-worker";
+    // Canonical work-item id (index + shard + checkpoint) for the work item currently being
+    // processed. Updated per work item via setDlqWorkItem; null until the first work item starts.
+    private volatile String dlqWorkItemId;
+
     protected OpenSearchClient(ConnectionContext connectionContext, Version version, CompressionMode compressionMode) {
         this(new RestClient(connectionContext), new FailedRequestsLogger(), version, compressionMode);
     }
@@ -76,6 +94,33 @@ public abstract class OpenSearchClient {
         this.failedRequestsLogger = failedRequestsLogger;
         this.version = version;
         this.compressionMode = compressionMode;
+    }
+
+    /**
+     * Install the DLQ sink and identifiers used to tag records. Called by the bootstrap
+     * once the session/worker identifiers are known. Safe to call before any bulk
+     * requests are issued.
+     */
+    public void setDlqContext(DlqSink dlqSink, String sessionId, String workerId) {
+        this.dlqSink = dlqSink;
+        this.dlqSessionId = sessionId;
+        this.dlqWorkerId = workerId;
+    }
+
+    /**
+     * Update the work-coordination work item id stamped on subsequent DLQ records. The target
+     * client is long-lived and processes many work items over its lifetime, so the bootstrap
+     * calls this at the start of each work item. The id is the canonical
+     * {@code IWorkCoordinator.WorkItemAndDuration.WorkItem#toString()} form
+     * ({@code base64url(index)__shard__startingDocId}), so a DLQ record round-trips back to the
+     * exact work item that produced it.
+     */
+    public void setDlqWorkItem(String workItemId) {
+        this.dlqWorkItemId = workItemId;
+    }
+
+    public DlqSink getDlqSink() {
+        return dlqSink;
     }
 
     public Version getClusterVersion() {
@@ -439,6 +484,7 @@ public abstract class OpenSearchClient {
                 .operation(newMetadata)
                 .document(original.getDocument())
                 .includeDocument(original.isIncludeDocument())
+                .originalSource(original.getOriginalSource())
                 .build();
         }
         return original;
@@ -557,7 +603,7 @@ public abstract class OpenSearchClient {
                     // Allow lazy initialization of pendingOps (e.g., raw→ops conversion)
                     preCompactHook.run();
 
-                    int successCount = compactPendingDocs(pendingOps, resp, allowlist);
+                    int successCount = compactPendingDocs(indexName, pendingOps, resp, allowlist);
 
                     if (pendingOps.isEmpty()) {
                         return Mono.just(resp);
@@ -576,6 +622,7 @@ public abstract class OpenSearchClient {
         .retryWhen(getBulkRetryStrategy())
         .doOnError(error -> {
             if (!pendingOps.isEmpty()) {
+                emitRetryExhaustedToDlq(indexName, pendingOps, error, allowlist);
                 failedRequestsLogger.logBulkFailure(
                     indexName,
                     pendingOps::size,
@@ -611,24 +658,170 @@ public abstract class OpenSearchClient {
     }
     
     /**
-     * Compacts pendingDocs in-place: keeps only failed docs using nextSetBit iteration.
-     * O(f) where f = number of failures, no allocation beyond BitSet.
-     * @return number of successful documents removed
+     * Partitions the bulk response into success / non-retryable / retryable buckets,
+     * emits one DLQ record per non-retryable failure, and compacts {@code pendingDocs}
+     * in place so it contains only the items that should be retried.
+     *
+     * <p>Behavior change vs. the previous BitSet-based compactor: items whose error
+     * type is in {@link org.opensearch.migrations.BulkDocErrorTypes#NON_RETRYABLE}
+     * are written to the DLQ immediately and removed from {@code pendingDocs} so the
+     * retry loop does not keep hammering them.
+     *
+     * @return number of documents removed because they succeeded (or were allowlisted)
      */
-    private int compactPendingDocs(ArrayList<BulkOperationSpec> pendingDocs, BulkResponse resp, DocumentExceptionAllowlist allowlist) {
-        BitSet failedPositions = BulkResponseParser.getFailedPositions(resp.body, allowlist);
-        if (failedPositions == null) {
+    private int compactPendingDocs(
+        String indexName,
+        ArrayList<BulkOperationSpec> pendingDocs,
+        BulkResponse resp,
+        DocumentExceptionAllowlist allowlist
+    ) {
+        ItemPartition partition = BulkResponseParser.partitionItems(resp.body, allowlist);
+        if (partition == null) {
             // Can't parse response - assume all failed, retry all
             return 0;
         }
-        
+
+        // Snapshot the ops we're about to drop so we can emit DLQ records before mutating.
+        for (ItemFailure failure : partition.getNonRetryableFailures()) {
+            BulkOperationSpec op = failure.getPosition() < pendingDocs.size()
+                ? pendingDocs.get(failure.getPosition())
+                : null;
+            emitDlqRecord(indexName, op, failure, FailureClass.NON_RETRYABLE);
+        }
+
+        // Keep only retryable failures in pendingDocs, in original order.
+        BitSet keep = new BitSet(pendingDocs.size());
+        for (ItemFailure failure : partition.getRetryableFailures()) {
+            keep.set(failure.getPosition());
+        }
         int writeIdx = 0;
-        for (int i = failedPositions.nextSetBit(0); i >= 0; i = failedPositions.nextSetBit(i + 1)) {
+        for (int i = keep.nextSetBit(0); i >= 0; i = keep.nextSetBit(i + 1)) {
             pendingDocs.set(writeIdx++, pendingDocs.get(i));
         }
-        int successCount = pendingDocs.size() - writeIdx;
+        int removed = pendingDocs.size() - writeIdx;
         pendingDocs.subList(writeIdx, pendingDocs.size()).clear();
-        return successCount;
+        // removed = successes + non-retryable; return only the success count for the existing log line.
+        return removed - partition.getNonRetryableFailures().size();
+    }
+
+    /**
+     * Emit one DLQ record per item still in {@code pendingOps} after all retries were
+     * exhausted. Best-effort correlation with per-item response details from the last
+     * failing response (carried on {@link OperationFailed}); falls back to null
+     * responseItem when the error is not an {@code OperationFailed} (e.g. a network
+     * failure that never produced a bulk response).
+     *
+     * <p>The configured {@code allowlist} is honored when classifying the last response:
+     * allowlisted items are routed to {@code successPositions} and intentionally NOT
+     * added to {@code perPosition}, so a position-shifted lookup can never attach an
+     * allowlisted item's {@code failureType} or documentId to a real retryable failure's
+     * DLQ record.
+     */
+    private void emitRetryExhaustedToDlq(
+        String indexName,
+        ArrayList<BulkOperationSpec> pendingOps,
+        Throwable error,
+        DocumentExceptionAllowlist allowlist
+    ) {
+        // Retry exhausted by Reactor wraps the underlying OperationFailed inside a
+        // RetryExhausted/RuntimeException — unwrap the cause chain to recover the
+        // per-item response details from the last attempt.
+        OperationFailed opFailed = null;
+        Throwable cursor = error;
+        while (cursor != null) {
+            if (cursor instanceof OperationFailed) {
+                opFailed = (OperationFailed) cursor;
+                break;
+            }
+            cursor = cursor.getCause();
+        }
+        HttpResponse lastResponse = opFailed != null ? opFailed.response : null;
+        Map<Integer, ItemFailure> perPosition = new HashMap<>();
+        if (lastResponse != null && lastResponse.body != null) {
+            ItemPartition partition = BulkResponseParser.partitionItems(lastResponse.body, allowlist);
+            if (partition != null) {
+                for (ItemFailure f : partition.getRetryableFailures()) {
+                    perPosition.put(f.getPosition(), f);
+                }
+                for (ItemFailure f : partition.getNonRetryableFailures()) {
+                    perPosition.put(f.getPosition(), f);
+                }
+            }
+        }
+        for (int i = 0; i < pendingOps.size(); i++) {
+            BulkOperationSpec op = pendingOps.get(i);
+            ItemFailure failure = perPosition.get(i);
+            emitDlqRecord(indexName, op, failure, FailureClass.RETRYABLE_EXHAUSTED);
+        }
+    }
+
+    void emitDlqRecord(String indexName, BulkOperationSpec op, ItemFailure failure, FailureClass cls) {
+        if (dlqSink == null) {
+            return;
+        }
+        try {
+            String docId = failure != null && failure.getDocumentId() != null
+                ? failure.getDocumentId()
+                : extractDocumentId(op);
+            JsonNode requestItem = op != null ? OBJECT_MAPPER.valueToTree(op) : null;
+            // Persist the original source-index document rather than the transformed one.
+            // The transformed body is what was actually sent, but the DLQ is meant to let
+            // operators inspect/replay the source document, so swap it in when available.
+            if (requestItem instanceof ObjectNode && op != null && op.getOriginalSource() != null) {
+                ((ObjectNode) requestItem).set("document", OBJECT_MAPPER.valueToTree(op.getOriginalSource()));
+            }
+            JsonNode responseItem = failure != null && failure.getResponseItemJson() != null
+                ? OBJECT_MAPPER.readTree(failure.getResponseItemJson()) : null;
+            String failureType = failure != null ? failure.getErrorType() : null;
+            DlqRecord dlqRecord = DlqRecord.builder()
+                .sessionId(dlqSessionId)
+                .workerId(dlqWorkerId)
+                .workItemId(dlqWorkItemId)
+                .targetIndex(indexName)
+                .documentId(docId)
+                .failureType(failureType)
+                .failureClass(cls)
+                .timestamp(Instant.now().toString())
+                .requestItem(requestItem)
+                .responseItem(responseItem)
+                .build();
+            dlqSink.write(dlqRecord).subscribe(
+                v -> {},
+                err -> log.atError().setCause(err)
+                    .setMessage("Failed to buffer DLQ record for index {}: {}")
+                    .addArgument(indexName)
+                    .addArgument(err.getMessage())
+                    .log()
+            );
+        } catch (Exception e) {
+            log.atError().setCause(e)
+                .setMessage("Unexpected error while emitting DLQ record for index {}").addArgument(indexName).log();
+        }
+    }
+
+    static String extractDocumentId(BulkOperationSpec op) {
+        if (op == null) return null;
+        try {
+            // The bulk operation Jackson tree wraps the request payload under an
+            // "operation" object that has an "_id" field; the bulk-API action key
+            // ("index"/"create"/"update") is also a fallback when callers pass
+            // pre-shaped nodes through Jackson.
+            JsonNode tree = OBJECT_MAPPER.valueToTree(op);
+            if (tree == null) return null;
+            JsonNode meta = tree.path("operation").path("_id");
+            if (meta.isMissingNode() || meta.isNull()) {
+                meta = tree.path("index").path("_id");
+            }
+            if (meta.isMissingNode() || meta.isNull()) {
+                meta = tree.path("create").path("_id");
+            }
+            if (meta.isMissingNode() || meta.isNull()) {
+                meta = tree.path("update").path("_id");
+            }
+            return meta.isMissingNode() || meta.isNull() ? null : meta.asText();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public HttpResponse refresh(IRfsContexts.IRequestContext context) {
