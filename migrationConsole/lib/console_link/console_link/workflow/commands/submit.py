@@ -16,7 +16,7 @@ from ..services.script_runner import ScriptRunner
 from .argo_utils import workflow_exists, stop_workflow, delete_workflow, wait_until_workflow_deleted
 from .autocomplete_workflows import DEFAULT_WORKFLOW_NAME, get_workflow_completions
 from .secret_utils import get_credentials_secret_store_for_namespace, verify_configured_secrets_exist
-from .hints import hint_after_submit
+from .hints import hint_after_submit, hint_after_submit_wait, hint_on_submit_error
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,8 @@ def _handle_workflow_wait(
         namespace: str,
         workflow_name: str,
         timeout: int,
-        wait_interval: int):
-    """Handle waiting for workflow completion."""
+        wait_interval: int) -> str:
+    """Handle waiting for workflow completion. Returns the final phase string, or '' on error."""
     click.echo(f"\nWaiting for workflow to complete (timeout: {timeout}s)...")
 
     try:
@@ -43,11 +43,15 @@ def _handle_workflow_wait(
         if output_message:
             click.echo(f"Container output: {output_message}")
 
+        return phase
+
     except TimeoutError as e:
         click.echo(f"\n{str(e)}", err=True)
         click.echo(f"Workflow {workflow_name} is still running", err=True)
+        return 'Running'
     except Exception as e:
         click.echo(f"\nError monitoring workflow: {str(e)}", err=True)
+        return ''
 
 
 def _remove_existing_workflow(workflow_name, namespace):
@@ -178,12 +182,12 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
 
             logger.info(f"Workflow {workflow_name} submitted successfully with namespace {namespace}")
 
-            if not wait:
-                hint_after_submit()
-
             if wait:
                 service = WorkflowService()
-                _handle_workflow_wait(service, namespace, workflow_name, timeout, wait_interval)
+                phase = _handle_workflow_wait(service, namespace, workflow_name, timeout, wait_interval)
+                hint_after_submit_wait(phase)
+            else:
+                hint_after_submit()
 
         except FileNotFoundError as e:
             click.echo(f"Error: {str(e)}", err=True)
@@ -194,9 +198,11 @@ def submit_command(ctx, namespace, wait, timeout, wait_interval, session, workfl
             click.echo(f"Script failed with exit code {e.returncode}", err=True)
             if e.stderr:
                 click.echo(e.stderr, err=True)
+            hint_on_submit_error()
             ctx.exit(ExitCode.FAILURE.value)
         except Exception as e:
             click.echo(f"Error submitting workflow: {str(e)}", err=True)
+            hint_on_submit_error()
             ctx.exit(ExitCode.FAILURE.value)
 
     except Exception as e:

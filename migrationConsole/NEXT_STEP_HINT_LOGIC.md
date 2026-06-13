@@ -1,54 +1,121 @@
 # Next-Step Hint Logic
 
-One-line hints printed at the end of successful `workflow` commands to guide users through the migration CLI sequence without memorising the full command set.
+One-line hints printed at the end of `workflow` commands to guide users through the migration CLI sequence. Hints appear after both success and certain error states.
 
-## User journey
-
-```
-workflow configure edit
-  → Hint: `workflow submit` to start the migration
-
-workflow submit
-  → Hint: `workflow manage` to monitor progress
-
-workflow approve step <gate>
-  → Hint: `workflow manage` to monitor progress,
-          or `workflow approve step --list` to check for more gates
-
-workflow approve change <gate>
-  → Hint: `workflow manage` to monitor progress
-
-workflow approve retry <gate>
-  → Hint: `workflow manage` to monitor progress
-```
-
-## Implementation
-
-All hint strings live in a single module:
+## Module
 
 ```
 console_link/workflow/commands/hints.py
 ```
 
-Functions: `hint_after_configure_edit`, `hint_after_submit`, `hint_after_approve_step`, `hint_after_approve_change`, `hint_after_approve_retry`. Each calls `click.echo(f"\nHint: ...")`.
+All hint strings are defined here. The shared helper `_hint_for_phase(phase, *, running_hint, succeeded_hint, failed_hint)` dispatches by Argo workflow phase (`Running`/`Pending`, `Succeeded`, `Failed`/`Error`/`Stopped`). Unknown or empty phases produce no hint.
 
-### Call sites
+---
 
-| File | Location | Condition |
-|------|----------|-----------|
-| `configure.py` | end of `_handle_editor_edit` | after valid save + `process_secrets` |
-| `configure.py` | end of `_handle_stdin_edit` | after valid save + `process_secrets` |
-| `submit.py` | after success block | only when `--wait` is **not** set |
-| `approve.py` | end of `_run_subcommand` | after `_apply_approvals`, dispatched by `category` |
+## Full hint map
 
-### Why `--wait` suppresses the submit hint
+### `workflow configure edit` → static
 
-When `--wait` is used, `submit_command` already blocks until the workflow finishes and prints the final phase. A "monitor with manage" hint after that is misleading.
+```
+Hint: `workflow submit` to start the migration
+```
 
-### Why approve hints are static (not live-queried)
+Call site: end of `_handle_editor_edit` and `_handle_stdin_edit` in `configure.py`, after a valid save. The "save anyway" (validation-failed) path is **not** hinted — the config is known-invalid and `workflow submit` would fail immediately.
 
-After patching an ApprovalGate CRD to `Approved`, the Argo workflow node may not have unblocked yet and the next gate may not be in `waiting` state. Re-querying immediately would give a stale view. The hint therefore points to `workflow approve step --list` rather than listing specific next gates.
+---
 
-### "Save anyway" path not hinted
+### `workflow submit` → static / phase-aware
 
-`workflow configure edit` lets users save a config that failed validation (choice `s`). This path does **not** emit a hint because the config is known-invalid and `workflow submit` would fail immediately.
+**Without `--wait`:**
+```
+Hint: `workflow manage` to monitor progress
+```
+
+**With `--wait`** (phase-aware, from `_handle_workflow_wait` return value):
+
+| Phase | Hint |
+|-------|------|
+| Running / Pending | `` `workflow manage` to monitor progress `` |
+| Succeeded | `migration complete — view results with `workflow show`` |
+| Failed / Error / Stopped | `update config with `workflow configure edit`, then resubmit with `workflow submit`` |
+
+**On script error** (`CalledProcessError` or general `Exception` from the submit script):
+```
+Hint: fix the issue above, then update config with `workflow configure edit`
+```
+Not emitted for `FileNotFoundError` (that is a setup/environment issue, not a config issue).
+
+Call site: `submit.py`. `_handle_workflow_wait` now returns the phase string (`'Running'` on timeout, `''` on unexpected error).
+
+---
+
+### `workflow approve step` → static
+
+```
+Hint: `workflow manage` to monitor progress, or `workflow approve step --list` to check for more gates
+```
+
+Re-querying live gate state after approval is unreliable: the Argo node may not yet have unblocked, and the next gate may not be in `waiting` state. The hint therefore points to `--list` for follow-up discovery rather than naming specific next gates.
+
+### `workflow approve change` / `workflow approve retry` → static
+
+```
+Hint: `workflow manage` to monitor progress
+```
+
+Call site: `_run_subcommand` in `approve.py`, after `_apply_approvals`, dispatched by `category`.
+
+---
+
+### `workflow status` → phase-aware
+
+| Phase | Hint |
+|-------|------|
+| Running / Pending | `workflow is running — re-run `workflow status` or open TUI with `workflow manage`` |
+| Succeeded | `migration complete — view results with `workflow show`` |
+| Failed / Error / Stopped | `workflow failed — update config with `workflow configure edit`, then resubmit with `workflow submit`` |
+| Unknown / no workflow | *(no hint)* |
+
+**Implementation:** `StatusCommandHandler` stores `self._last_phase` (set in `_display_workflow_with_tree` from the already-fetched workflow data — no extra API call). The Click command reads `handler._last_phase` after `handle_status_command` returns.
+
+Hint is **not** emitted for `--all-workflows` (multiple workflows shown, no single canonical phase) or `--resource-view` (resource tree view, phase not surfaced).
+
+---
+
+### `workflow manage` → phase-aware
+
+| Phase | Hint |
+|-------|------|
+| Running / Pending | `workflow still running — re-open with `workflow manage` or check with `workflow status`` |
+| Succeeded | `migration complete — view results with `workflow show`` |
+| Failed / Error / Stopped | `workflow failed — update config with `workflow configure edit`, then resubmit with `workflow submit`` |
+| Unknown / no workflow | *(no hint)* |
+
+**Implementation:** After `app.run()` returns, `manage.py` calls `get_workflow(namespace, workflow_name)` (one lightweight Kubernetes API call) to read the current phase. The TUI itself does not expose an exit phase. Exceptions during this lookup are swallowed — a failed lookup simply produces no hint.
+
+---
+
+### `workflow show` → terminal (static)
+
+```
+Hint: migration complete — no further action needed
+```
+
+Emitted only when the command is in output-viewing mode: `not list_resources and not history and not run_selector`. List (`--list`), history (`--history`), and retained-run (`--run`) modes do not hint.
+
+Call site: end of `show_command` in `show.py`.
+
+---
+
+## Commands with no hint
+
+| Command | Reason |
+|---------|--------|
+| `workflow configure view` | Informational read; no action implied |
+| `workflow configure sample` | Informational read |
+| `workflow configure credentials *` | Credential management sub-flow; not in the migration journey |
+| `workflow log` | Output streaming; user is already monitoring |
+| `workflow reset` | Recovery step; next action depends on context |
+| `workflow status --all-workflows` | Multiple workflows shown; no single canonical next step |
+| `workflow status --resource-view` | Resource tree view; phase not surfaced |
+| `workflow show --list` / `--history` / `--run` | Exploration/audit modes, not end-of-migration |
