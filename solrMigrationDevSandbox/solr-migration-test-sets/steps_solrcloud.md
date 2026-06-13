@@ -247,7 +247,7 @@ aws-cli.aws s3 sync ./backups/jeff ${S3_BASE}/jeff
 
 Upload the config file:
 ```
-kubectl exec -i migration-console-0 -n ma -- workflow configure edit --stdin < ./ma_configs/nyc_taxis_8_ma_config.json
+kubectl exec -i migration-console-0 -n ma -- workflow configure edit --stdin < ./ma_configs/solrcloud/nyc_taxis_8_ma_config.json
 ```
 
 Jump into the console:
