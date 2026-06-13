@@ -65,14 +65,16 @@ describe("Capture proxy Deployments declare a readinessProbe", () => {
         assertMinReadySecondsIsSet(deployment);
     });
 
-    it("proxy deployment templates expose inline client CA PEM through the expected env var", () => {
+    it("proxy deployment templates escape inline client CA PEM for safe YAML embedding", () => {
         for (const templateName of ["deployproxydeployment", "deployproxydeploymentwithtls"]) {
-            const deployment = getResourceManifest(setupCapture, templateName);
-            const container = getFirstContainer(deployment);
-            expect(getEnv(container, "CAPTURE_PROXY_SSL_TRUST_CERT_PEM")).toEqual({
-                name: "CAPTURE_PROXY_SSL_TRUST_CERT_PEM",
-                value: "{{inputs.parameters.sslTrustCertPem}}"
-            });
+            const manifest = getRawManifest(setupCapture, templateName);
+            const container = getFirstContainer(getResourceManifest(setupCapture, templateName));
+            const envEntry = getEnv(container, "CAPTURE_PROXY_SSL_TRUST_CERT_PEM");
+            expect(envEntry).toBeDefined();
+            expect(envEntry.name).toBe("CAPTURE_PROXY_SSL_TRUST_CERT_PEM");
+            // Value must use regexReplaceAll to escape newlines for safe YAML embedding (see #3108)
+            expect(manifest).toContain("regexReplaceAll");
+            expect(manifest).toContain("sslTrustCertPem");
         }
     });
 
