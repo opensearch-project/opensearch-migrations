@@ -1,0 +1,36 @@
+baseConfig: ../fixtures/fullMigrationWithTraffic.skipApprovals.wf.yaml
+phaseCompletionTimeoutSeconds: 600
+
+# Gated capture-proxy mTLS (clientAuth) change. clientAuth lives in the gated
+# `tls` subtree of the proxy config, so toggling it must surface the capture
+# proxy retry/approval gate before the workflow proceeds. This also guards the
+# regression in #3069 (fixed in #3071): before the fix the resolved mTLS fields
+# leaked into the CaptureProxy CR and the upsert step failed outright, which
+# would show up here as a non-terminal failure rather than a clean gate.
+#
+# Two responses are exercised:
+#   - leave-blocked: the gate appears and the workflow stays held.
+#   - approve:       approving the gate lets the change proceed and converge.
+matrix:
+  subject: captureproxy:capture-proxy
+  select:
+    - changeClass: gated
+      patterns: [subject-gated-change]
+      response: leave-blocked
+    - changeClass: gated
+      patterns: [subject-gated-change]
+      response: approve
+
+lifecycle:
+  setup: [create-basic-auth-secrets]
+  teardown: []
+
+fixtures:
+  basicAuthCredentials:
+    bySecretName:
+      source-creds:
+        usernameEnv: E2E_SOURCE_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_SOURCE_BASIC_AUTH_PASSWORD
+      target-creds:
+        usernameEnv: E2E_TARGET_BASIC_AUTH_USERNAME
+        passwordEnv: E2E_TARGET_BASIC_AUTH_PASSWORD
