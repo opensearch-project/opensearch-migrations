@@ -89,6 +89,43 @@ describe("editConfig state", () => {
         expect(endpoint?.description).toContain("HTTP(S) endpoint URL");
     });
 
+    it("shows optional empty source endpoint as unset, not required", () => {
+        const state = buildEditStateFromObject({
+            sourceClusters: {
+                legacy: {
+                    endpoint: "",
+                    version: "ES 7.10.2",
+                },
+            },
+            targetClusters: {
+                prod: {
+                    endpoint: "https://prod.example.com:9200",
+                },
+            },
+            snapshotMigrationConfigs: [],
+        });
+
+        const endpoint = findNode(state.nodes, "edit:sourceClusters.legacy.endpoint");
+        const source = findNode(state.nodes, "edit:sourceClusters.legacy");
+
+        expect(endpoint?.status).toBe("ok");
+        expect(endpoint?.label).toContain("endpoint: <unset>");
+        expect(endpoint?.label).not.toContain("<required>");
+        expect(source?.status).toBe("ok");
+    });
+
+    it("propagates whole-config validation diagnostics into visible tree status", () => {
+        const state = buildEditStateFromObject({});
+
+        const sourceClusters = findNode(state.nodes, "edit:sourceClusters");
+        const targetClusters = findNode(state.nodes, "edit:targetClusters");
+
+        expect(state.validation.valid).toBe(false);
+        expect(sourceClusters?.status).toBe("required");
+        expect(sourceClusters?.label).toContain("[REQ 1]");
+        expect(targetClusters?.status).toBe("required");
+    });
+
     it("returns regex validation metadata and marks invalid scalar values", () => {
         const state = buildEditStateFromObject({
             sourceClusters: {

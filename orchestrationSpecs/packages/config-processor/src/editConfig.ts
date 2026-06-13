@@ -370,6 +370,90 @@ function finalizeNode(node: EditNode): EditNode {
     return node;
 }
 
+function stripBadge(label: string): string {
+    return label.replace(/^\[[^\]]+\]\s*/, "");
+}
+
+function refreshNodeBadge(node: EditNode): void {
+    node.label = `${badge(node.status ?? "ok", node.statusCounts ?? {})} ${stripBadge(node.label)}`;
+}
+
+function samePath(left: unknown[] = [], right: unknown[] = []): boolean {
+    return left.length === right.length && left.every((part, index) => String(part) === String(right[index]));
+}
+
+function pathStartsWith(path: string[], prefix: string[]): boolean {
+    return prefix.length <= path.length && prefix.every((part, index) => part === path[index]);
+}
+
+function findPathAncestors(nodes: EditNode[], path: string[]): EditNode[] {
+    const ancestors: EditNode[] = [];
+    const stack = [...nodes];
+    while (stack.length) {
+        const node = stack.pop()!;
+        if (pathStartsWith(path, node.path)) {
+            ancestors.push(node);
+            stack.push(...(node.children ?? []));
+        }
+    }
+    ancestors.sort((left, right) => left.path.length - right.path.length);
+    return ancestors;
+}
+
+function addDiagnosticIfNew(node: EditNode, diagnostic: EditDiagnostic): boolean {
+    const existing = node.diagnostics ?? [];
+    const isDuplicate = existing.some(item =>
+        item.message === diagnostic.message && samePath(item.path, diagnostic.path)
+    );
+    if (isDuplicate) {
+        return false;
+    }
+    node.diagnostics = [...existing, diagnostic];
+    return true;
+}
+
+function isMissingRequiredValue(node: EditNode): boolean {
+    return node.required === true && (node.value === undefined || node.value === null || node.value === "");
+}
+
+function severityForDiagnosticNode(diagnostic: EditDiagnostic, target: EditNode): EditDiagnostic["severity"] {
+    if (diagnostic.severity === "error" && (
+        isMissingRequiredValue(target) || Boolean(target.statusCounts?.required)
+    )) {
+        return "required";
+    }
+    return diagnostic.severity;
+}
+
+function applyValidationDiagnostics(nodes: EditNode[], diagnostics: EditDiagnostic[]): void {
+    for (const diagnostic of diagnostics) {
+        const path = diagnostic.path ?? [];
+        const ancestors = findPathAncestors(nodes, path);
+        if (!ancestors.length) {
+            continue;
+        }
+        const target = ancestors[ancestors.length - 1];
+        const severity = severityForDiagnosticNode(diagnostic, target);
+        const adjustedDiagnostic = {...diagnostic, severity};
+        if (!addDiagnosticIfNew(target, adjustedDiagnostic)) {
+            continue;
+        }
+        const alreadyRepresentedRequired = (
+            diagnostic.severity === "error"
+            && severity === "required"
+            && Boolean(target.statusCounts?.required)
+        );
+        for (const node of ancestors) {
+            node.statusCounts = node.statusCounts ?? emptyCounts();
+            if (!alreadyRepresentedRequired) {
+                addCount(node.statusCounts, severity);
+            }
+            node.status = highestStatus(node.status ?? "ok", severity);
+            refreshNodeBadge(node);
+        }
+    }
+}
+
 function highestStatus(a: EditNodeStatus, b: EditNodeStatus): EditNodeStatus {
     return STATUS_RANK[a] >= STATUS_RANK[b] ? a : b;
 }
@@ -401,7 +485,7 @@ function scalarNode(
     return finalizeNode({
         id: `edit:${path.join(".")}`,
         path,
-        label: `${key}: ${value === undefined || value === null || value === "" ? "<required>" : String(value)}`,
+        label: `${key}: ${value === undefined || value === null || value === "" ? (required ? "<required>" : "<unset>") : String(value)}`,
         value,
         valueKind: typeof value === "boolean" ? "boolean" : "scalar",
         description,
@@ -772,6 +856,21 @@ function diagnosticPath(path: PropertyKey[]): string[] {
     return path.map(part => String(part));
 }
 
+function messageSeverity(message: string): EditDiagnostic["severity"] {
+    const lower = message.toLowerCase();
+    if (lower.includes("required") || lower.includes("received undefined")) {
+        return "required";
+    }
+    return "error";
+}
+
+function zodIssueSeverity(issue: z.core.$ZodIssue): EditDiagnostic["severity"] {
+    if (issue.code === "invalid_type" && (issue as any).input === undefined) {
+        return "required";
+    }
+    return messageSeverity(issue.message);
+}
+
 function validationForConfig(config: unknown): EditStateV1["validation"] {
     try {
         new MigrationConfigTransformer().validateInput(config);
@@ -782,7 +881,7 @@ function validationForConfig(config: unknown): EditStateV1["validation"] {
                 valid: false,
                 errors: [formatInputValidationError(error)],
                 diagnostics: error.errors.map(item => ({
-                    severity: "error",
+                    severity: messageSeverity(item.message),
                     message: item.message,
                     path: diagnosticPath(item.path),
                 })),
@@ -793,7 +892,7 @@ function validationForConfig(config: unknown): EditStateV1["validation"] {
                 valid: false,
                 errors: error.issues.map(issue => `${issue.path.join(".")}: ${issue.message}`),
                 diagnostics: error.issues.map(issue => ({
-                    severity: "error",
+                    severity: zodIssueSeverity(issue),
                     message: issue.message,
                     path: diagnosticPath(issue.path),
                 })),
@@ -809,6 +908,15 @@ function validationForConfig(config: unknown): EditStateV1["validation"] {
 
 export function buildEditStateFromObject(config: any): EditStateV1 {
     const ctx = buildEditContext(config);
+    const nodes = [
+        clusterGroupNode("source", config?.sourceClusters),
+        clusterGroupNode("target", config?.targetClusters),
+        kafkaGroupNode(config?.kafkaClusterConfiguration),
+        trafficGroupNode(config?.traffic, ctx),
+        snapshotMigrationGroupNode(config?.snapshotMigrationConfigs, ctx),
+    ];
+    const validation = validationForConfig(config);
+    applyValidationDiagnostics(nodes, validation.diagnostics ?? []);
     return {
         formatVersion: 1,
         provenance: {
@@ -816,17 +924,11 @@ export function buildEditStateFromObject(config: any): EditStateV1 {
             lossy: false,
             warnings: [],
         },
-        nodes: [
-            clusterGroupNode("source", config?.sourceClusters),
-            clusterGroupNode("target", config?.targetClusters),
-            kafkaGroupNode(config?.kafkaClusterConfiguration),
-            trafficGroupNode(config?.traffic, ctx),
-            snapshotMigrationGroupNode(config?.snapshotMigrationConfigs, ctx),
-        ],
+        nodes,
         pendingSubmitChanges: [],
         submittedRolloutChanges: [],
         policyPreview: [],
-        validation: validationForConfig(config),
+        validation,
     };
 }
 
