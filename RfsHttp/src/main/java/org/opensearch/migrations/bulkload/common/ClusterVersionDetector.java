@@ -20,10 +20,17 @@ import reactor.util.retry.Retry;
 @Slf4j
 public class ClusterVersionDetector {
     private static final ObjectMapper objectMapper = new ObjectMapper();
-    private static final Retry RETRY_STRATEGY = Retry.max(1)
-        .filter(throwable -> !(throwable instanceof UnexpectedStatusCode &&
-            ((UnexpectedStatusCode) throwable).response.statusCode >= 400 &&
-            ((UnexpectedStatusCode) throwable).response.statusCode < 500));
+    private static final int MAX_VERSION_DETECTION_RETRIES = 2;
+    private static final Duration VERSION_DETECTION_REQUEST_TIMEOUT = Duration.ofSeconds(30);
+    private static final Retry RETRY_STRATEGY = Retry.backoff(MAX_VERSION_DETECTION_RETRIES, Duration.ofSeconds(1))
+        .maxBackoff(Duration.ofSeconds(5))
+        .filter(ClusterVersionDetector::isRetryable)
+        .doBeforeRetry(retrySignal -> log.atWarn()
+            .setCause(retrySignal.failure())
+            .setMessage("Cluster version detection failed; retrying attempt {} of {}")
+            .addArgument(retrySignal.totalRetries() + 1)
+            .addArgument(MAX_VERSION_DETECTION_RETRIES + 1)
+            .log());
 
     /** Amazon OpenSearch Serverless clusters don't have a version number */
     private static final Version AMAZON_SERVERLESS_VERSION = Version.builder()
@@ -39,32 +46,36 @@ public class ClusterVersionDetector {
     }
 
     public static Version detect(RestClient client) {
-        var versionFromRootApi = client.getAsync("", null)
-            .flatMap(resp -> {
-                if (resp.statusCode == 200) {
-                    return versionFromResponse(resp, client);
-                }
-                if (resp.statusCode == 404) {
-                    return Mono.just(AMAZON_SERVERLESS_VERSION);
-                }
-                return Mono.error(new UnexpectedStatusCode(resp));
-            })
+        return detect(client, VERSION_DETECTION_REQUEST_TIMEOUT, RETRY_STRATEGY);
+    }
+
+    static Version detect(RestClient client, Duration requestTimeout, Retry retryStrategy) {
+        var versionFromRootApi = withVersionDetectionRetry(
+            client.getAsync("", null)
+                .flatMap(resp -> {
+                    if (resp.statusCode == 200) {
+                        return versionFromResponse(resp, client);
+                    }
+                    if (resp.statusCode == 404) {
+                        return Mono.just(AMAZON_SERVERLESS_VERSION);
+                    }
+                    return Mono.error(new UnexpectedStatusCode(resp));
+                }),
+            requestTimeout,
+            retryStrategy)
             .doOnError(e -> log.atDebug()
                 .setMessage("ES/OS version detection failed, will try Solr detection")
                 .setCause(e)
                 .log())
-            .retryWhen(RETRY_STRATEGY)
-            .onErrorResume(e -> detectSolrVersion(client))
-            .block(Duration.ofSeconds(30));
+            .onErrorResume(e -> detectSolrVersion(client).timeout(requestTimeout))
+            .block();
 
         // Compatibility mode is only enabled on OpenSearch clusters responding with the version of 7.10.2
         if (!VersionMatchers.isES_7_10.test(versionFromRootApi)) {
             return versionFromRootApi;
         }
-        return client.getAsync("_cluster/settings?include_defaults=true", null)
+        return withVersionDetectionRetry(client.getAsync("_cluster/settings?include_defaults=true", null)
             .flatMap(resp -> checkCompatibilityModeFromResponse(resp))
-            .doOnError(e -> log.error(e.getMessage()))
-            .retryWhen(RETRY_STRATEGY)
             .flatMap(hasCompatibilityModeEnabled -> {
                 log.atInfo().setMessage("After querying target, compatibilityMode={}").addArgument(hasCompatibilityModeEnabled).log();
                 if (Boolean.FALSE.equals(hasCompatibilityModeEnabled)) {
@@ -73,9 +84,11 @@ public class ClusterVersionDetector {
                 }
                 return client.getAsync("_nodes/_all/nodes,version?format=json", null)
                     .flatMap(resp -> getVersionFromNodes(resp, client))
-                    .doOnError(e -> log.error(e.getMessage()))
-                    .retryWhen(RETRY_STRATEGY);
+                    .doOnError(e -> log.error(e.getMessage()));
             })
+            .doOnError(e -> log.error(e.getMessage())),
+            requestTimeout,
+            retryStrategy)
             .onErrorResume(e -> {
                 log.atWarn()
                     .setCause(e)
@@ -84,7 +97,19 @@ public class ClusterVersionDetector {
                 assert versionFromRootApi != null;
                 return Mono.just(versionFromRootApi);
             })
-            .block(Duration.ofSeconds(30));
+            .block();
+    }
+
+    private static <T> Mono<T> withVersionDetectionRetry(Mono<T> operation, Duration requestTimeout, Retry retryStrategy) {
+        return operation
+            .timeout(requestTimeout)
+            .retryWhen(retryStrategy);
+    }
+
+    private static boolean isRetryable(Throwable throwable) {
+        return !(throwable instanceof UnexpectedStatusCode &&
+            ((UnexpectedStatusCode) throwable).response.statusCode >= 400 &&
+            ((UnexpectedStatusCode) throwable).response.statusCode < 500);
     }
 
     private static Mono<Version> detectSolrVersion(RestClient client) {

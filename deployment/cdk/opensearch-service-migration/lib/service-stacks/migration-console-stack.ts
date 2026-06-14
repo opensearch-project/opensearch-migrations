@@ -29,7 +29,8 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly targetGroups?: ELBTargetGroup[],
     readonly servicesYaml: ServicesYaml,
     readonly sourceClusterVersion?: string,
-    readonly otelCollectorEnabled?: boolean,
+    readonly otelMetricsCollectorEnabled?: boolean,
+    readonly otelTraceCollectorEnabled?: boolean,
     readonly managedServiceSourceSnapshotEnabled?: boolean
 }
 
@@ -190,15 +191,21 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         // Upload the services.yaml file to Parameter Store
         servicesYaml.metadata_migration = new MetadataMigrationYaml();
         servicesYaml.metadata_migration.source_cluster_version = props.sourceClusterVersion
-        if (props.otelCollectorEnabled) {
+        if (props.otelMetricsCollectorEnabled || props.otelTraceCollectorEnabled) {
             const otelSidecarEndpoint = OtelCollectorSidecar.getOtelLocalhostEndpoint();
-            if (servicesYaml.metadata_migration) {
-                servicesYaml.metadata_migration.otel_endpoint = otelSidecarEndpoint;
+            if (props.otelTraceCollectorEnabled && servicesYaml.metadata_migration) {
+                servicesYaml.metadata_migration.otel_trace_endpoint = otelSidecarEndpoint;
             }
-            if (servicesYaml.snapshot) {
-                servicesYaml.snapshot.otel_endpoint = otelSidecarEndpoint;
+            if (props.otelMetricsCollectorEnabled && servicesYaml.metadata_migration) {
+                servicesYaml.metadata_migration.otel_metrics_endpoint = otelSidecarEndpoint;
             }
-            if (servicesYaml.metrics_source?.cloudwatch !== undefined) {
+            if (props.otelTraceCollectorEnabled && servicesYaml.snapshot) {
+                servicesYaml.snapshot.otel_trace_endpoint = otelSidecarEndpoint;
+            }
+            if (props.otelMetricsCollectorEnabled && servicesYaml.snapshot) {
+                servicesYaml.snapshot.otel_metrics_endpoint = otelSidecarEndpoint;
+            }
+            if (props.otelMetricsCollectorEnabled && servicesYaml.metrics_source?.cloudwatch !== undefined) {
                 servicesYaml.metrics_source.cloudwatch = {
                     ...servicesYaml.metrics_source.cloudwatch,
                     qualifier : props.stage };

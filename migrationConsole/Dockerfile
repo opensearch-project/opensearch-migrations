@@ -99,7 +99,8 @@ RUN chmod +x /tmp/setupVimSchemaChecker.sh && \
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
 COPY kafkaExport.sh /root/kafka-tools
-RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
+COPY kafkaImport.sh /root/kafka-tools
+RUN chmod ug+x /root/kafka-tools/kafkaExport.sh /root/kafka-tools/kafkaImport.sh
 
 COPY loadServicesFromParameterStore.sh /root/
 RUN chmod ug+x /root/loadServicesFromParameterStore.sh
@@ -123,6 +124,10 @@ WORKDIR /root/cluster_tools
 RUN pipenv install
 WORKDIR /root
 
+RUN mkdir -p /usr/share/bash-completion/completions && \
+    _CONSOLE_COMPLETE=bash_source console > /usr/share/bash-completion/completions/console && \
+    test -s /usr/share/bash-completion/completions/console
+
 COPY nodeStaging/configProcessor /root/configProcessor
 
 RUN chmod +x /root/configProcessor/*.sh
@@ -143,7 +148,7 @@ RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh && \
     echo '. /etc/profile.d/venv.sh' >> ~/.bashrc && \
     echo 'echo Welcome to the Migration Assistant Console' >> ~/.bashrc && \
     echo 'eval "$(register-python-argcomplete cluster_tools)"' >> ~/.bashrc && \
-    echo 'console completion bash 2> /dev/null > /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
+    echo '. /usr/share/bash-completion/completions/console' >> ~/.bashrc && \
     echo 'workflow util completions bash > /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo '. /usr/share/bash-completion/completions/workflow' >> ~/.bashrc && \
     echo 'PS1="(\\t) \\[\\e[92m\\]migration-console \\[\\e[0m\\](\\w) -> "'>> ~/.bashrc

@@ -147,9 +147,8 @@ public class KafkaTopicDumper {
         Long endOffset, Long endTime,
         int previewBytesRead, int previewBytesWrite
     ) {
-        for (var polled = consumer.poll(Duration.ofSeconds(2));
-             !polled.isEmpty();
-             polled = consumer.poll(Duration.ofSeconds(2))) {
+        while (!isAtEnd(consumer, endOffsets)) {
+            var polled = consumer.poll(Duration.ofSeconds(2));
             for (var rec : polled) {
                 if (pastEnd(rec, endOffset, endTime, endOffsets)) return;
                 try {
@@ -181,9 +180,8 @@ public class KafkaTopicDumper {
             dumper
         );
         try {
-            for (var polled = consumer.poll(Duration.ofSeconds(2));
-                 !polled.isEmpty();
-                 polled = consumer.poll(Duration.ofSeconds(2))) {
+            while (!isAtEnd(consumer, endOffsets)) {
+                var polled = consumer.poll(Duration.ofSeconds(2));
                 if (processHttpRecords(polled, endOffset, endTime, endOffsets,
                     emitRaw, previewBytesRead, previewBytesWrite,
                     accumulator, dumper, channelContextManager, topContext)) {
@@ -193,6 +191,27 @@ public class KafkaTopicDumper {
         } finally {
             accumulator.close();
         }
+    }
+
+    /**
+     * The dump loop terminates only when every assigned partition's current
+     * position has reached the endOffset snapshot taken at startup. Using
+     * !poll.isEmpty() as the exit condition (the prior approach) raced the
+     * consumer's first metadata round-trip — on a fresh `assign()` the very
+     * first poll often returns just one warm-up record and the second poll
+     * comes back empty before the prefetch kicks in, exiting after a single
+     * record. Driving termination off position vs. endOffsets is what the
+     * Kafka client API gives us for "I've drained the snapshot I asked for"
+     * and is robust to empty intermediate polls.
+     */
+    private static boolean isAtEnd(KafkaConsumer<String, byte[]> consumer,
+                                   Map<TopicPartition, Long> endOffsets) {
+        for (var entry : endOffsets.entrySet()) {
+            if (consumer.position(entry.getKey()) < entry.getValue()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private boolean processHttpRecords(

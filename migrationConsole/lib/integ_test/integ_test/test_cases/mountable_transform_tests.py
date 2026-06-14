@@ -317,7 +317,7 @@ class Test0042CdcFullE2eMountableTransforms(MATestBase):
         wait_for_proxy_ready(ns, timeout_seconds)
 
         logger.info("Waiting for replayer to join Kafka consumer group...")
-        wait_for_replayer_consuming(namespace=ns, timeout_seconds=300)
+        wait_for_replayer_consuming(namespace=ns, timeout_seconds=300, workflow_name=self.workflow_name)
         log_kafka_consumer_group_state(label="replay-start")
 
         proxy_cluster = make_proxy_cluster(self.source_cluster)

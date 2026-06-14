@@ -121,6 +121,9 @@ const INTERNAL_PROJECTED_FIELDS: readonly InternalProjectedField[] = [
     {resourceKind: "CapturedTraffic", specPath: ["partitions"], schema: z.number().min(1), changeRestriction: "gated", invariant: "nonDecreasing"},
     {resourceKind: "CapturedTraffic", specPath: ["replicas"], schema: z.number().min(1), changeRestriction: "gated"},
     {resourceKind: "CapturedTraffic", specPath: ["topicConfig"], schema: GENERIC_JSON_OBJECT, changeRestriction: "gated"},
+    {resourceKind: "CapturedTraffic", specPath: ["sourceKind"], schema: z.enum(["proxy", "s3"]), changeRestriction: "impossible"},
+    {resourceKind: "CapturedTraffic", specPath: ["s3SourceUri"], schema: z.string(), changeRestriction: "impossible"},
+    {resourceKind: "CapturedTraffic", specPath: ["loadStarted"], schema: z.boolean(), changeRestriction: "impossible"},
 
     {resourceKind: "SnapshotMigration", specPath: ["migrationLabel"], schema: z.string(), changeRestriction: "impossible"},
     {resourceKind: "SnapshotMigration", specPath: ["sourceVersion"], schema: z.string(), changeRestriction: "impossible"},

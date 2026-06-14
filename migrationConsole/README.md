@@ -27,3 +27,19 @@ Export only the first 200 messages from Kafka and store locally
 ```shell
 ./kafkaExport.sh -- --max-messages 200 --from-beginning
 ```
+
+## Importing Captured Traffic into Kafka
+
+The inverse operation: load a previously exported archive (whether produced by
+`kafkaExport.sh` here or by an earlier migration) back onto a Kafka topic so it
+can be replayed by a TrafficReplayer. The topic must already exist (this script
+does not create it).
+
+```shell
+cd /root/kafka-tools
+./kafkaImport.sh --topic "$TOPIC" --s3-uri "s3://bucket/kafka_export_*.proto.gz"
+./kafkaImport.sh --topic "$TOPIC" --input-file /shared-logs-output/kafka_export_*.proto.gz
+```
+
+See [`kafkaCmdRef.md`](./kafkaCmdRef.md) for the full set of options and the
+underlying `kafkaUtils` recipe.

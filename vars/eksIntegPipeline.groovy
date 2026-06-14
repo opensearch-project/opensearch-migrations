@@ -7,6 +7,9 @@ def call(Map config = [:]) {
     def sourceClusterType = config.sourceClusterType ?: ""
     def targetClusterType = config.targetClusterType ?: ""
     def testIds = config.testIds ?: "0001,0002"
+    def traceTestIds = config.traceTestIds ?: ""
+    def traceValuesFile = config.traceValuesFile ?: "../../deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesTraceXray.yaml"
+    def traceBackend = config.traceBackend ?: "xray"
     def gitBranchDefault = config.gitBranchDefault ?: 'main'
     def clusterContextFilePath = "tmp/cluster-context-integ-${currentBuild.number}.json"
     pipeline {
@@ -221,9 +224,13 @@ def call(Map config = [:]) {
                                 if (testIdsResolved != "" && testIdsResolved != "all") {
                                     testIdsArg = "--test-ids='$testIdsResolved'"
                                 }
+                                def traceArgs = ""
+                                if (traceTestIds != "") {
+                                    traceArgs = "--trace-test-ids='$traceTestIds' --trace-values-file='$traceValuesFile' --trace-backend='$traceBackend'"
+                                }
                                 sh "pipenv install --deploy"
                                 withMigrationsTestAccount(region: params.REGION) { accountId ->
-                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
+                                    sh "pipenv run app --source-version=$sourceVer --target-version=$targetVer $testIdsArg $traceArgs --reuse-clusters --skip-delete --skip-install --kube-context=${env.eksKubeContext}"
                                 }
                             }
                         }

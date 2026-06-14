@@ -231,7 +231,8 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
                 "aws_region": "us-east-1"
             },
         },
-        "otel_endpoint": "http://otel:1111",
+        "otel_trace_endpoint": "http://otel-traces:1111",
+        "otel_metrics_endpoint": "http://otel-metrics:2222",
     }
     target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     metadata = Metadata(config, target, create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
@@ -243,7 +244,8 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
 
     mock.assert_called_once_with([
         "/root/metadataMigration/bin/MetadataMigration",
-        "--otel-collector-endpoint", config["otel_endpoint"],
+        "--otel-trace-collector-endpoint", config["otel_trace_endpoint"],
+        "--otel-metrics-collector-endpoint", config["otel_metrics_endpoint"],
         "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
@@ -265,7 +267,8 @@ def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
                 "repo_path": "path/to/repo"
             },
         },
-        "otel_endpoint": "http://otel:1111",
+        "otel_trace_endpoint": "http://otel-traces:1111",
+        "otel_metrics_endpoint": "http://otel-metrics:2222",
     }
     target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     metadata = Metadata(config, target, create_valid_cluster(version=MOCK_SOURCE_VERSION), None)
@@ -277,7 +280,8 @@ def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
 
     mock.assert_called_once_with([
         "/root/metadataMigration/bin/MetadataMigration",
-        "--otel-collector-endpoint", config["otel_endpoint"],
+        "--otel-trace-collector-endpoint", config["otel_trace_endpoint"],
+        "--otel-metrics-collector-endpoint", config["otel_metrics_endpoint"],
         "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
@@ -327,7 +331,8 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
                 "repo_path": "path/to/repo"
             },
         },
-        "otel_endpoint": "http://otel:1111",
+        "otel_trace_endpoint": "http://otel-traces:1111",
+        "otel_metrics_endpoint": "http://otel-metrics:2222",
         "index_allowlist": ["index1", "index2"],
         "index_template_allowlist": ["index_template1", "index_template2"],
         "component_template_allowlist": ["component_template1", "component_template2"]
@@ -342,7 +347,8 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
 
     mock.assert_called_once_with([
         "/root/metadataMigration/bin/MetadataMigration",
-        "--otel-collector-endpoint", config["otel_endpoint"],
+        "--otel-trace-collector-endpoint", config["otel_trace_endpoint"],
+        "--otel-metrics-collector-endpoint", config["otel_metrics_endpoint"],
         "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
