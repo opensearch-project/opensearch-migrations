@@ -1,5 +1,7 @@
 package org.opensearch.migrations.commands;
 
+import java.util.regex.Pattern;
+
 import org.opensearch.migrations.MetadataMigration;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
@@ -15,6 +17,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 
 class MigrateTest {
+
+    // Matches a Java stack-trace frame, e.g. "at com.foo.Bar.method(Bar.java:42)".
+    private static final Pattern JAVA_STACK_FRAME = Pattern.compile("\\bat [\\w.$]+\\([^)]*:\\d+\\)");
 
     @Test
     void migrate_failsInvalidParameters() {
@@ -62,6 +67,8 @@ class MigrateTest {
         assertThat(result.getErrorMessage(), containsString("Non-retriable snapshot read failure"));
         assertThat(result.getErrorMessage(), containsString("corrupt repo metadata: index-0"));
         assertThat(result.getErrorMessage(), containsString("snap1"));
+        assertThat("error should be a labeled line, not a raw stack trace",
+            JAVA_STACK_FRAME.matcher(result.getErrorMessage()).find(), equalTo(false));
     }
 
     @Test
@@ -80,6 +87,8 @@ class MigrateTest {
 
         assertThat(result.getExitCode(), equalTo(MigratorEvaluatorBase.SNAPSHOT_READ_FAILED_EXIT_CODE));
         assertThat(result.getErrorMessage(), containsString("repo=/backups/repo"));
+        assertThat("error should be a labeled line, not a raw stack trace",
+            JAVA_STACK_FRAME.matcher(result.getErrorMessage()).find(), equalTo(false));
     }
 
     @Test
