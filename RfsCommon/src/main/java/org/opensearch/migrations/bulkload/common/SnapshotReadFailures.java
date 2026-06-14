@@ -11,13 +11,6 @@ public final class SnapshotReadFailures {
     private SnapshotReadFailures() {
     }
 
-    /**
-     * Exit code emitted when a non-retriable snapshot read failure terminates a process. Shared by
-     * the document-migration worker and the metadata-migration command so a workflow can detect a
-     * snapshot read failure by a single code regardless of which step hit it.
-     */
-    public static final int EXIT_CODE = 5;
-
     /** Bound the cause-chain walk so a pathological cyclic chain can never loop forever. */
     private static final int MAX_CAUSE_CHAIN_DEPTH = 100;
 

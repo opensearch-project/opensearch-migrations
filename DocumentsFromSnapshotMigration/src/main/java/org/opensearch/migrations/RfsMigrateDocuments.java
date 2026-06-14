@@ -88,7 +88,8 @@ public class RfsMigrateDocuments {
     public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
     public static final int NO_WORK_AVAILABLE_EXIT_CODE = 4;
-    public static final int SNAPSHOT_READ_FAILED_EXIT_CODE = SnapshotReadFailures.EXIT_CODE;
+    // Keep harmonized with the metadata command's MigratorEvaluatorBase.SNAPSHOT_READ_FAILED_EXIT_CODE.
+    public static final int SNAPSHOT_READ_FAILED_EXIT_CODE = 5;
 
     // Arbitrary value, increasing from 5 to 15 seconds due to prevalence of clock skew exceptions
     // observed on production clusters during migrations

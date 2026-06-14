@@ -34,6 +34,8 @@ public abstract class MigratorEvaluatorBase {
 
     static final int INVALID_PARAMETER_CODE = 999;
     static final int UNEXPECTED_FAILURE_CODE = 888;
+    // Keep harmonized with the document worker's RfsMigrateDocuments.SNAPSHOT_READ_FAILED_EXIT_CODE.
+    public static final int SNAPSHOT_READ_FAILED_EXIT_CODE = 5;
 
     protected final MigrateOrEvaluateArgs arguments;
     protected final ClusterReaderExtractor clusterReaderCliExtractor;
@@ -172,7 +174,7 @@ public abstract class MigratorEvaluatorBase {
     /**
      * Classify a failure from the migrate/evaluate flow. A non-retriable snapshot read failure —
      * the snapshot's repo/global/index metadata could not be read — is mapped to the
-     * dedicated {@link SnapshotReadFailures#EXIT_CODE} and a labeled message naming the snapshot
+     * dedicated {@link #SNAPSHOT_READ_FAILED_EXIT_CODE} and a labeled message naming the snapshot
      * path; anything else keeps the generic "unexpected failure" behavior. The detailed cause is
      * logged here (to the run log); the caller surfaces the summary on stdout (see
      * {@code MetadataMigration.run}) so it reaches the workflow log / CloudWatch before the process
@@ -185,7 +187,7 @@ public abstract class MigratorEvaluatorBase {
             var message = SnapshotReadFailures.describe(
                 readFailure, arguments.snapshotName, repo, arguments.s3Region);
             log.atError().setCause(e).setMessage("{}").addArgument(message).log();
-            return new FailureClassification(SnapshotReadFailures.EXIT_CODE, message);
+            return new FailureClassification(SNAPSHOT_READ_FAILED_EXIT_CODE, message);
         }
         log.atError().setCause(e).setMessage("Unexpected failure").log();
         return new FailureClassification(UNEXPECTED_FAILURE_CODE, createUnexpectedErrorMessage(e));

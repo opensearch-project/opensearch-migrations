@@ -2,7 +2,6 @@ package org.opensearch.migrations.commands;
 
 import org.opensearch.migrations.MetadataMigration;
 import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.common.SnapshotReadFailures;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 
@@ -59,7 +58,7 @@ class MigrateTest {
 
         var result = migrate.execute(context);
 
-        assertThat(result.getExitCode(), equalTo(SnapshotReadFailures.EXIT_CODE));
+        assertThat(result.getExitCode(), equalTo(MigratorEvaluatorBase.SNAPSHOT_READ_FAILED_EXIT_CODE));
         assertThat(result.getErrorMessage(), containsString("Non-retriable snapshot read failure"));
         assertThat(result.getErrorMessage(), containsString("corrupt repo metadata: index-0"));
         assertThat(result.getErrorMessage(), containsString("snap1"));
@@ -79,7 +78,7 @@ class MigrateTest {
 
         var result = migrate.execute(context);
 
-        assertThat(result.getExitCode(), equalTo(SnapshotReadFailures.EXIT_CODE));
+        assertThat(result.getExitCode(), equalTo(MigratorEvaluatorBase.SNAPSHOT_READ_FAILED_EXIT_CODE));
         assertThat(result.getErrorMessage(), containsString("repo=/backups/repo"));
     }
 
