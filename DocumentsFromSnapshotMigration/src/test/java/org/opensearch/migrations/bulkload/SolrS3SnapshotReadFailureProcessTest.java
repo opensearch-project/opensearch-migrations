@@ -6,7 +6,6 @@ import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -15,6 +14,7 @@ import java.util.concurrent.TimeUnit;
 import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.bulkload.solr.framework.SolrClusterContainer;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import lombok.extern.slf4j.Slf4j;
@@ -24,14 +24,11 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
-import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.localstack.LocalStackContainer;
-import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
-import org.testcontainers.utility.MountableFile;
 
 /**
  * When a Solr migration cannot read what it needs from a Solr snapshot stored on S3, the worker
@@ -90,29 +87,8 @@ public class SolrS3SnapshotReadFailureProcessTest {
         .withNetworkAliases(LOCALSTACK_ALIAS);
 
     @Container
-    static final GenericContainer<?> SOLR_CLOUD = new GenericContainer<>(
-            DockerImageName.parse("solr:8.11.4"))
-        .withNetwork(NETWORK)
-        .withExposedPorts(8983)
-        .withCopyFileToContainer(
-            MountableFile.forClasspathResource("solr-s3-backup.xml"),
-            "/var/solr/data/solr.xml")
-        .withEnv("AWS_ACCESS_KEY_ID", "test")
-        .withEnv("AWS_SECRET_ACCESS_KEY", "test")
-        .withEnv("SOLR_OPTS",
-            "-DS3_BUCKET_NAME=" + BUCKET_NAME
-                + " -DS3_REGION=" + REGION
-                + " -DS3_ENDPOINT=http://" + LOCALSTACK_ALIAS + ":4566")
-        .withEnv("SOLR_SECURITY_MANAGER_ENABLED", "false")
-        .withCreateContainerCmdModifier(cmd -> cmd.withUser("root"))
-        .withCommand("bash", "-c",
-            "cp /opt/solr/dist/solr-s3-repository-*.jar "
-                + "/opt/solr/contrib/s3-repository/lib/ && "
-                + "exec solr -c -f -force")
-        .waitingFor(Wait.forHttp("/solr/admin/collections?action=LIST&wt=json")
-            .forPort(8983)
-            .forStatusCode(200)
-            .withStartupTimeout(Duration.ofMinutes(3)));
+    static final SolrClusterContainer SOLR_CLOUD = SolrClusterContainer.cloudWithS3Backup(
+        SolrClusterContainer.SOLR_8, NETWORK, BUCKET_NAME, REGION, LOCALSTACK_ALIAS);
 
     @BeforeAll
     static void createBucket() throws Exception {
@@ -300,7 +276,7 @@ public class SolrS3SnapshotReadFailureProcessTest {
     // ---- Solr helpers ----
 
     private static String solrUrl() {
-        return "http://" + SOLR_CLOUD.getHost() + ":" + SOLR_CLOUD.getMappedPort(8983);
+        return SOLR_CLOUD.getSolrUrl();
     }
 
     private static String localStackEndpoint() {
