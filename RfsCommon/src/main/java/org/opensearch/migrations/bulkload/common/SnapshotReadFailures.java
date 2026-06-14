@@ -12,7 +12,7 @@ public final class SnapshotReadFailures {
     }
 
     /** Bound the cause-chain walk so a pathological cyclic chain can never loop forever. */
-    private static final int MAX_CAUSE_CHAIN_DEPTH = 100;
+    private static final int MAX_CAUSE_CHAIN_DEPTH = 20;
 
     /**
      * Walk the cause chain of {@code t} and return the first throwable marked as a
