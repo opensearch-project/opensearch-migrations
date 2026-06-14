@@ -70,4 +70,5 @@ class RfsMigrateDocumentsTest {
             Arguments.of(RfsMigrateDocuments.EmitDocTypeMode.AUTO, null, someTransformer, false)
         );
     }
+
 }

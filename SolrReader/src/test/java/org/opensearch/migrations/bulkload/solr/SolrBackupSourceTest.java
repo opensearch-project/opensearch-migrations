@@ -134,6 +134,22 @@ class SolrBackupSourceTest {
     }
 
     @Test
+    void throwsClassifiedFailureOnUnreadableShardMetadata() throws IOException {
+        // shard_backup_metadata/ present (so the UUID path is taken) but the metadata JSON is
+        // corrupt: the read failure must surface as a classified SolrBackupReadException, carrying
+        // the underlying cause, rather than an unclassified exception.
+        var metadataDir = tempDir.resolve("shard_backup_metadata");
+        Files.createDirectories(metadataDir);
+        Files.writeString(metadataDir.resolve("md_shard1_0.json"), "{ not valid json");
+
+        var source = new SolrBackupSource(tempDir, "test", emptySchema(), 8);
+        var ex = assertThrows(SolrBackupReadException.class, () -> source.listPartitions("test"));
+        assertThat(ex, org.hamcrest.Matchers.instanceOf(
+            org.opensearch.migrations.bulkload.common.SnapshotReadFailure.class));
+        assertThat(ex.getCause() != null, equalTo(true));
+    }
+
+    @Test
     void metadataReflectsShardCount() throws IOException {
         var shard1 = tempDir.resolve("shard1");
         var shard2 = tempDir.resolve("shard2");

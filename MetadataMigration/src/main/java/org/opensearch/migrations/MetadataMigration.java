@@ -86,6 +86,13 @@ public class MetadataMigration {
         reportLogPath();
         reportTransformationPath();
 
+        if (result.getExitCode() == MigratorEvaluatorBase.SNAPSHOT_READ_FAILED_EXIT_CODE) {
+            // Surface the snapshot read failure on stderr so it stays visible in the workflow log /
+            // CloudWatch before exit. The detailed cause is already in the run log (classifyFailure)
+            // and the message is in the JSON result; stderr avoids corrupting --output json on stdout.
+            System.err.println(result.getErrorMessage());
+        }
+
         exitWithCode(result.getExitCode());
     }
 
