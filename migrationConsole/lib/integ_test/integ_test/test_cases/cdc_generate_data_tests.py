@@ -41,7 +41,7 @@ class Test0032CdcOnlyGenerateData(MATestBase):
 
     def post_migration_actions(self):
         logger.info("Waiting for replayer to join Kafka consumer group...")
-        wait_for_replayer_consuming(namespace=self.argo_service.namespace)
+        wait_for_replayer_consuming(namespace=self.argo_service.namespace, workflow_name=self.workflow_name)
         log_kafka_consumer_group_state(label="replay-start")
 
         logger.info("Generating %d docs via proxy into %s", CDC_NUM_DOCS, self.cdc_index)

@@ -50,8 +50,12 @@ function clone<T>(value: T): T {
 }
 
 function getAutoCreateProperties(schema: any): Record<string, unknown> {
-    return schema.properties.kafkaClusterConfiguration.additionalProperties.anyOf[0]
-        .properties.autoCreate.properties;
+    const kafkaClusterBranches = schema.properties.kafkaClusterConfiguration.additionalProperties.anyOf;
+    const autoCreateBranch = kafkaClusterBranches.find((branch: any) => branch.properties?.autoCreate);
+    if (!autoCreateBranch) {
+        throw new Error("Kafka cluster configuration schema is missing an autoCreate branch");
+    }
+    return autoCreateBranch.properties.autoCreate.properties;
 }
 
 function addSchemaMetadata(schema: Record<string, unknown>, mode: UnifiedSchemaMode, detail: string) {

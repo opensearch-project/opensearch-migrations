@@ -107,7 +107,8 @@
 ###                "allowLooseVersionMatching": true,
 ###                "clusterAwarenessAttributes": 1,
 ###                "loggingConfigurationOverrideConfigMap": "",  # string
-###                "otelCollectorEndpoint": "http://otel-collector:4317",
+###                "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
+###                "otelTraceCollectorEndpoint": "http://otel-trace-collector:4317",
 ###                "output": "",  # "HUMAN_READABLE" | "JSON"
 ###                "transformerConfigBase64": "",  # string
 ###                "skipEvaluateApproval": false,
@@ -123,7 +124,8 @@
 ###                "initialLeaseDuration": "PT10M",
 ###                "maxConnections": 10,
 ###                "maxShardSizeBytes": 85899345920,
-###                "otelCollectorEndpoint": "http://otel-collector:4317",
+###                "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
+###                "otelTraceCollectorEndpoint": "http://otel-trace-collector:4317",
 ###                "skipApproval": false,
 ##                # Resource limits and requests for RFS container
 ##                "resources": ""  # unknown
@@ -163,7 +165,8 @@
 ##                        "ephemeral-storage": ""  # string
 #                    }
 #                },
-#                "otelCollectorEndpoint": "http://otel-collector:4317",
+#                "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
+#                "otelTraceCollectorEndpoint": "http://otel-trace-collector:4317",
 #                "setHeaders": [],  # string[]
 #                "destinationConnectionPoolSize": 0,
 #                "destinationConnectionPoolTimeout": "PT30S",
@@ -183,7 +186,7 @@
     "replayers": {
         "REPLAYER": {
 #            "skipApprovals": false,
-            "fromProxy": "",  # string
+            "fromCapturedTraffic": "",  # string
             "toTarget": "",  # string
 #            "dependsOnSnapshotMigrations": [
 #                {
@@ -217,9 +220,10 @@
 ###                        "ephemeral-storage": ""  # string
 ##                    }
 ##                }
+##                "otelMetricsCollectorEndpoint": "http://otel-collector:4317",
+##                "otelTraceCollectorEndpoint": "http://otel-trace-collector:4317"
 #            }
         }
     }
 }
 }
-

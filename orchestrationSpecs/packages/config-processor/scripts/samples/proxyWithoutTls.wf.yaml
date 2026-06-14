@@ -63,5 +63,5 @@ traffic:
 
   replayers:
     replay1:
-      fromProxy: "capture-proxy"
+      fromCapturedTraffic: "capture-proxy"
       toTarget: "target"

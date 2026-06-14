@@ -1,0 +1,38 @@
+{
+  "sourceClusters": {
+    "source": {
+      "version": "ES 7.10.2",
+      "endpoint": "http://source:9200"
+    }
+  },
+  "targetClusters": {
+    "target": {
+      "endpoint": "http://target:9200"
+    }
+  },
+  "snapshotMigrationConfigs": [],
+  "traffic": {
+    "proxies": {
+      "shared-topic": {
+        "source": "source",
+        "proxyConfig": {
+          "listenPort": 9201
+        }
+      }
+    },
+    "s3Sources": {
+      "loader": {
+        "s3Uri": "s3://bucket/dump.proto.gz",
+        "awsRegion": "us-east-2",
+        "kafkaTopic": "shared-topic",
+        "sourceLabel": "source"
+      }
+    },
+    "replayers": {
+      "r1": {
+        "fromCapturedTraffic": "shared-topic",
+        "toTarget": "target"
+      }
+    }
+  }
+}

@@ -6,6 +6,8 @@ plugins {
     id 'com.github.node-gradle.node'
 }
 
+evaluationDependsOn(":libraries:kafkaUtils")
+
 node {
     version = '22.14.0'
     download = true
@@ -114,6 +116,7 @@ tasks.register('buildAndStageMigrationResources', NpmTask) {
 def buildAndStageConfigProcessorProvider = tasks.named("buildAndStageConfigProcessor")
 def nodeSetupProvider = tasks.named("nodeSetup")
 def nodeExt = extensions.getByType(NodeExtension)
+def byocPutTrafficFixtureTask = project(":libraries:kafkaUtils").tasks.named("generateByocPutTrafficFixture")
 
 tasks.register("confirmConfigProcessorStagingPath") {
     // make sure both bits of work are done
@@ -135,11 +138,13 @@ tasks.register('syncDockerBuildContext', Sync) {
     dependsOn makeAndStageWorkflowTemplates
     dependsOn buildAndStageConfigProcessor
     dependsOn buildAndStageMigrationResources
+    dependsOn byocPutTrafficFixtureTask
 
     // Explicitly declare inputs for all files being synced
     inputs.file(project.file("Dockerfile"))
     inputs.file(project.file("kafkaCmdRef.md"))
     inputs.file(project.file("kafkaExport.sh"))
+    inputs.file(project.file("kafkaImport.sh"))
     inputs.file(project.file("loadServicesFromParameterStore.sh"))
     inputs.file(project.file("msk-iam-auth.properties"))
     inputs.file(project.file("setupVimSchemaChecker.sh"))
@@ -151,11 +156,13 @@ tasks.register('syncDockerBuildContext', Sync) {
     inputs.file(project.file("lib/console_link/Pipfile.lock"))
     inputs.file(project.file("lib/console_link/setup.py"))
     inputs.dir(project.file("lib/integ_test"))
+    inputs.files(byocPutTrafficFixtureTask)
 
     // Copy your Dockerfile and any other docker-related files
     from(project.file("Dockerfile"))
     from(project.file("kafkaCmdRef.md"))
     from(project.file("kafkaExport.sh"))
+    from(project.file("kafkaImport.sh"))
     from(project.file("loadServicesFromParameterStore.sh"))
     from(project.file("msk-iam-auth.properties"))
     from(project.file("setupVimSchemaChecker.sh"))
@@ -192,6 +199,9 @@ tasks.register('syncDockerBuildContext', Sync) {
     from(project.file("lib/integ_test")) {
         into "lib/integ_test"
         exclude commonExcludes
+    }
+    from(byocPutTrafficFixtureTask) {
+        into "lib/integ_test/resources/byoc"
     }
 
     // Preserve the nodeStaging directory if it exists

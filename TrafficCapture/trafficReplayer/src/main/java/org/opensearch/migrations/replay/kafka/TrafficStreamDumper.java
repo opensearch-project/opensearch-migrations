@@ -9,13 +9,14 @@
 package org.opensearch.migrations.replay.kafka;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.List;
 
 import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
+
+import com.google.protobuf.ByteString;
 
 /**
  * Formats a single TrafficStream record as one line of text for the dump-raw mode.
@@ -97,68 +98,99 @@ public class TrafficStreamDumper {
      * SegmentEnd observations are absorbed into the current run since they're
      * just internal framing from the capture proxy's chunking mechanism.
      * Returns the index past the last coalesced observation.
+     *
+     * Only the first `previewBytes` of payload are copied — any observation
+     * encountered past that point contributes its size (read from the protobuf
+     * length, no copy) and is discarded. This keeps heap bounded regardless of
+     * how large any single observation's payload is, e.g. a multi-GB bulk
+     * request captured as one Read observation.
      */
     private static int appendCoalesced(StringBuilder sb, List<TrafficObservation> observations,
                                        int start, boolean reads, int previewBytes) {
-        var allBytes = new ArrayList<byte[]>();
-        int totalSize = 0;
+        // We only ever need up to `previewBytes` of bytes copied for the preview;
+        // capture them eagerly into a fixed buffer and just tally the rest.
+        byte[] previewBuf = previewBytes > 0 ? new byte[previewBytes] : null;
+        int previewCopied = 0;
+        long totalSize = 0;
         int i = start;
         while (i < observations.size()) {
             var obs = observations.get(i);
             if (obs.hasSegmentEnd()) {
                 i++; // absorb into current run
+            } else if (!isReadOrWritePayload(obs, reads)) {
+                break;
             } else {
-                byte[] data = reads ? getReadData(obs) : getWriteData(obs);
-                if (data.length == 0) { break; }
-                allBytes.add(data);
-                totalSize += data.length;
+                int dataLen = dataLength(obs, reads);
+                totalSize += dataLen;
+                if (previewBuf != null && previewCopied < previewBytes && dataLen > 0) {
+                    previewCopied += copyPreviewBytes(obs, reads, previewBuf, previewCopied);
+                }
                 i++;
             }
         }
 
         sb.append(' ').append(reads ? 'R' : 'W').append('[').append(totalSize).append(']');
         if (previewBytes > 0 && totalSize > 0) {
-            sb.append(": ").append(buildPreview(allBytes, previewBytes));
+            sb.append(": ").append(formatPreview(previewBuf, previewCopied, totalSize));
         }
         return i;
     }
 
-    private static byte[] getReadData(TrafficObservation obs) {
-        if (obs.hasRead()) return obs.getRead().getData().toByteArray();
-        if (obs.hasReadSegment()) return obs.getReadSegment().getData().toByteArray();
-        return new byte[0];
-    }
-
-    private static byte[] getWriteData(TrafficObservation obs) {
-        if (obs.hasWrite()) return obs.getWrite().getData().toByteArray();
-        if (obs.hasWriteSegment()) return obs.getWriteSegment().getData().toByteArray();
-        return new byte[0];
-    }
-
-    static String buildPreview(List<byte[]> chunks, int maxBytes) {
-        var buf = new byte[maxBytes];
-        int copied = 0;
-        for (var chunk : chunks) {
-            int toCopy = Math.min(chunk.length, maxBytes - copied);
-            System.arraycopy(chunk, 0, buf, copied, toCopy);
-            copied += toCopy;
-            if (copied >= maxBytes) break;
+    /** Return the payload byte length without materializing it. */
+    private static int dataLength(TrafficObservation obs, boolean reads) {
+        if (reads) {
+            if (obs.hasRead()) return obs.getRead().getData().size();
+            if (obs.hasReadSegment()) return obs.getReadSegment().getData().size();
+        } else {
+            if (obs.hasWrite()) return obs.getWrite().getData().size();
+            if (obs.hasWriteSegment()) return obs.getWriteSegment().getData().size();
         }
-        // Replace non-printable chars with '.'
+        return 0;
+    }
+
+    /** True if `obs` carries a read/write payload of the requested kind (even if zero-length). */
+    private static boolean isReadOrWritePayload(TrafficObservation obs, boolean reads) {
+        return reads
+            ? (obs.hasRead() || obs.hasReadSegment())
+            : (obs.hasWrite() || obs.hasWriteSegment());
+    }
+
+    /**
+     * Copy up to (previewBuf.length - copiedSoFar) bytes from `obs`'s payload into
+     * `previewBuf` starting at `copiedSoFar`. Uses ByteString.copyTo to avoid the
+     * intermediate byte[] allocation that .toByteArray() would create.
+     * Returns the number of bytes copied.
+     */
+    private static int copyPreviewBytes(TrafficObservation obs, boolean reads, byte[] previewBuf, int copiedSoFar) {
+        ByteString data = getPayloadData(obs, reads);
+        int remaining = previewBuf.length - copiedSoFar;
+        int toCopy = Math.min(data.size(), remaining);
+        if (toCopy > 0) {
+            data.substring(0, toCopy).copyTo(previewBuf, copiedSoFar);
+        }
+        return toCopy;
+    }
+
+    private static ByteString getPayloadData(TrafficObservation obs, boolean reads) {
+        if (reads) {
+            if (obs.hasRead()) {
+                return obs.getRead().getData();
+            }
+            return obs.getReadSegment().getData();
+        }
+        if (obs.hasWrite()) {
+            return obs.getWrite().getData();
+        }
+        return obs.getWriteSegment().getData();
+    }
+
+    private static String formatPreview(byte[] buf, int copied, long totalSize) {
+        // Replace non-printable chars with '.' in-place for the preview slice.
         for (int j = 0; j < copied; j++) {
             if (buf[j] < 0x20 || buf[j] > 0x7e) buf[j] = '.';
         }
         var preview = new String(buf, 0, copied, StandardCharsets.US_ASCII);
-        if (copied < totalSize(chunks)) {
-            return preview + "...";
-        }
-        return preview;
-    }
-
-    private static int totalSize(List<byte[]> chunks) {
-        int total = 0;
-        for (var c : chunks) total += c.length;
-        return total;
+        return copied < totalSize ? preview + "..." : preview;
     }
 
     private static String tokenFor(TrafficObservation obs) {

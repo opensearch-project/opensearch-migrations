@@ -56,6 +56,9 @@ PREBUILT="$BIN_DIR/migration-assistant-bin"
 if [[ -x "$PREBUILT" ]]; then
   exec "$PREBUILT" "$@"
 fi
+if [[ -x "$PREBUILT.exe" ]]; then
+  exec "$PREBUILT.exe" "$@"
+fi
 
 # 3. A release binary already built at target/release/ — reuse it. The Gradle
 #    build (buildMigrationAssistantBinary) drops it here, possibly via `cross`
