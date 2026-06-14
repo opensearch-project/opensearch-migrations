@@ -7,7 +7,6 @@ import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionStrictness;
 import org.opensearch.migrations.bulkload.common.ClusterVersionDetector;
 import org.opensearch.migrations.bulkload.common.SnapshotFileFinder;
-import org.opensearch.migrations.bulkload.common.SnapshotReadFailure;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.version_es_1_7.SnapshotReader_ES_1_7;
@@ -120,7 +119,11 @@ public class SnapshotReaderRegistry {
             .map(p -> p.initialize(connection));
     }
 
-    static class UnsupportedVersionException extends RuntimeException implements SnapshotReadFailure {
+    // A version/configuration problem (no compatible reader), NOT a snapshot read failure: the
+    // snapshot bytes may be perfectly intact, and this is also thrown on the live-remote path where
+    // no snapshot is read. Left unmarked so it doesn't get the snapshot-read exit code; mirrors
+    // ClusterWriterRegistry.UnsupportedVersionException.
+    static class UnsupportedVersionException extends RuntimeException {
         public UnsupportedVersionException(String msg) {
             super(msg);
         }

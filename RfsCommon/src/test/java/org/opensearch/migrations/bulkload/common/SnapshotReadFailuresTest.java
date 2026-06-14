@@ -10,6 +10,10 @@ class SnapshotReadFailuresTest {
         FakeSnapshotReadFailure(String message) {
             super(message);
         }
+
+        FakeSnapshotReadFailure(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 
     @Test
@@ -23,6 +27,14 @@ class SnapshotReadFailuresTest {
         var cause = new FakeSnapshotReadFailure("could not read snapshot");
         var wrapper = new RuntimeException("partition migration failed", cause);
         Assertions.assertSame(cause, SnapshotReadFailures.find(wrapper));
+    }
+
+    @Test
+    void findSnapshotReadFailure_nestedMarkersPrefersDeepest() {
+        // Wrapper marker around a specific marker: find() returns the deepest (specific) one.
+        var specific = new FakeSnapshotReadFailure("Failed to read object from S3 bucket: b, key: k");
+        var wrapper = new FakeSnapshotReadFailure("Could not unpack shard: Index i, Shard s", specific);
+        Assertions.assertSame(specific, SnapshotReadFailures.find(wrapper));
     }
 
     @Test

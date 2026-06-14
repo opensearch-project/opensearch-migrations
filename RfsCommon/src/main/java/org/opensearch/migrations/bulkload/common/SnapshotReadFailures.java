@@ -15,20 +15,24 @@ public final class SnapshotReadFailures {
     private static final int MAX_CAUSE_CHAIN_DEPTH = 20;
 
     /**
-     * Walk the cause chain of {@code t} and return the first throwable marked as a
+     * Walk the cause chain of {@code t} and return the <em>deepest</em> throwable marked as a
      * {@link SnapshotReadFailure}, or {@code null} if none is present. The match may be the
      * top-level throwable or any wrapped cause, since snapshot read failures often surface wrapped
      * (e.g. an {@code RfsException} re-thrown around the reactive pipeline, or a metadata wrapper).
+     *
+     * <p>The deepest marker is preferred so {@link #describe} surfaces the specific inner cause
+     * (e.g. {@code CouldNotReadFromS3} with bucket/key) rather than a broad wrapper's generic message.
      */
     public static Throwable find(Throwable t) {
         var current = t;
+        Throwable deepestMatch = null;
         for (int depth = 0; current != null && depth < MAX_CAUSE_CHAIN_DEPTH; depth++) {
             if (current instanceof SnapshotReadFailure) {
-                return current;
+                deepestMatch = current;
             }
             current = current.getCause();
         }
-        return null;
+        return deepestMatch;
     }
 
     /**
