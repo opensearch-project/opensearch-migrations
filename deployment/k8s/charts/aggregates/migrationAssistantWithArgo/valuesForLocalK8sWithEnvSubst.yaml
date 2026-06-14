@@ -55,7 +55,7 @@ charts:
         enabled: true
 
   strimzi-kafka-operator:
-    waitForInstallation: true
+    waitForInstallation: false
     values:
       # Recommended baseline resources to ensure the JVM has enough heap for metadata
       resources:

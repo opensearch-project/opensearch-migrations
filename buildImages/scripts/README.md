@@ -122,6 +122,11 @@ the extracted uuid to be 1, which is not the case in normal runs. To fix either 
 ```
 in above script for local runs. Fix to handle this dynamically to be filed shortly.
 
+- when `-PexcludeESCustomTestImages` is set in `fillLocalRegistry.sh`, and the build script has not been run before
+  for the currently deployed local registry, build will fail: `elasticsearchWithSearchGuard` (in
+ `buildKitProjects`) has `requiredDependencies: ["buildKit_customElasticsearch710"]`, which is not available
+ if script not run without above flag at least once.
+
 
 #### Gradle Flags
 - only set flag -PexcludeESCustomTestImages in gradle build command when you already have the respective images in your registry. Otherwise the build might fail cause another
