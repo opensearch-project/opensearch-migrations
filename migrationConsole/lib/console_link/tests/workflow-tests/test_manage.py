@@ -793,6 +793,81 @@ async def test_resource_view_edit_mode_applies_variant_and_saves(mock_workflow_w
 
 
 @pytest.mark.asyncio
+async def test_resource_view_edit_mode_confirms_discard_on_escape(mock_workflow_with_two_pods):
+    """Esc should confirm before discarding dirty config edit drafts."""
+
+    class FakeConfigEditService:
+        def __init__(self):
+            self.apply_calls = []
+
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_missing_basic_auth(),
+            }
+
+        def apply_operation(self, raw_yaml, operation):
+            self.apply_calls.append((raw_yaml, operation))
+            return {
+                "raw_yaml": "updated-yaml",
+                "edit_state": edit_state_with_sigv4_auth(),
+            }
+
+    service = FakeConfigEditService()
+    argo_service = ArgoService(
+        get_workflow=lambda name, namespace: ({"success": True}, mock_workflow_with_two_pods),
+        approve_step=MagicMock(),
+    )
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="test-wf",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=service,
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_for_manage_tests()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: len(tree.root.children) > 0, timeout=5.0)
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+
+            app._select_tree_node_by_id("edit:sourceClusters.legacy.authConfig")
+            app._update_dynamic_bindings()
+            await pilot.pause()
+
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ChoiceSelectModal))
+            await pilot.press("down")
+            await pilot.press("enter")
+            assert await wait_until(pilot, lambda: len(service.apply_calls) == 1)
+            assert app._edit_dirty is True
+
+            await pilot.press("escape")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ConfirmModal))
+            await pilot.press("n")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+            assert app._edit_mode is True
+            assert app._edit_dirty is True
+
+            await pilot.press("escape")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ConfirmModal))
+            await pilot.press("y")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Migration Status")
+            assert app._edit_mode is False
+
+
+@pytest.mark.asyncio
 async def test_resource_view_edit_mode_colors_and_data_modes(mock_workflow_with_two_pods):
     """Edit rows use one status color and can switch value/status projection modes."""
 

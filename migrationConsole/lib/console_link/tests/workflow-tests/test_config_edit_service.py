@@ -1,4 +1,7 @@
+import subprocess
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from console_link.workflow.models.config import WorkflowConfig
 from console_link.workflow.services.config_edit_service import ConfigEditService
@@ -33,6 +36,26 @@ def test_load_pending_resolved_config_uses_config_processor():
     assert args[0] == "resolveMigrationResources"
     assert args[1] == "--user-config"
     assert args[3:] == ("--workflow-name", "migration")
+
+
+def test_apply_operation_reports_config_processor_stderr():
+    runner = MagicMock()
+    runner.run_config_processor_node_script.side_effect = subprocess.CalledProcessError(
+        2,
+        ["node-22", "/root/configProcessor/index.js"],
+        output="",
+        stderr="Usage: editConfig apply --pending-config <file|-> --operation <json-file|->",
+    )
+    service = ConfigEditService(namespace="test", store=FakeStore(), runner=runner)
+
+    with pytest.raises(RuntimeError) as error:
+        service.apply_operation(
+            "sourceClusters: {}\n",
+            {"op": "set", "path": ["snapshotMigrationConfigs", "0", "fromSource"], "value": "aux-source"},
+        )
+
+    assert "config processor failed with exit code 2" in str(error.value)
+    assert "Usage: editConfig apply --pending-config" in str(error.value)
 
 
 @patch("console_link.workflow.services.config_edit_service.wait_until_workflow_deleted", return_value=True)

@@ -1,6 +1,7 @@
 """Service boundary for schema-driven workflow config edit state."""
 
 import json
+import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
@@ -61,8 +62,7 @@ class ConfigEditService:
             with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=True) as config_file:
                 config_file.write(raw_yaml)
                 config_file.flush()
-                runner = self.runner or ScriptRunner()
-                output = runner.run_config_processor_node_script(
+                output = self._run_config_processor_node_script(
                     "editConfig",
                     "apply",
                     "--pending-config",
@@ -146,8 +146,7 @@ class ConfigEditService:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=True) as temp_file:
             temp_file.write(raw_yaml)
             temp_file.flush()
-            runner = self.runner or ScriptRunner()
-            output = runner.run_config_processor_node_script(
+            output = self._run_config_processor_node_script(
                 "editConfig",
                 "state",
                 "--pending-config",
@@ -165,7 +164,6 @@ class ConfigEditService:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=True) as temp_file:
             temp_file.write(input_data)
             temp_file.flush()
-            runner = self.runner or ScriptRunner()
             args = [
                 "resolveMigrationResources",
                 input_arg,
@@ -173,7 +171,7 @@ class ConfigEditService:
             ]
             if workflow_name:
                 args.extend(["--workflow-name", workflow_name])
-            output = runner.run_config_processor_node_script(*args)
+            output = self._run_config_processor_node_script(*args)
 
         return json.loads(output)
 
@@ -185,14 +183,20 @@ class ConfigEditService:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=True) as temp_file:
             temp_file.write(json.dumps(input_data))
             temp_file.flush()
-            runner = self.runner or ScriptRunner()
-            output = runner.run_config_processor_node_script(
+            output = self._run_config_processor_node_script(
                 "resolveConsoleResources",
                 input_arg,
                 temp_file.name,
             )
 
         return json.loads(output)
+
+    def _run_config_processor_node_script(self, *args: str) -> str:
+        runner = self.runner or ScriptRunner()
+        try:
+            return runner.run_config_processor_node_script(*args)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(_format_config_processor_error(e)) from e
 
 
 def _migration_run_sort_key(item: Dict[str, Any]):
@@ -209,3 +213,15 @@ def _migration_run_sort_key(item: Dict[str, Any]):
         metadata.get("creationTimestamp") or "",
         metadata.get("name") or "",
     )
+
+
+def _format_config_processor_error(error: subprocess.CalledProcessError) -> str:
+    details = []
+    stderr = (error.stderr or "").strip()
+    stdout = (error.stdout or "").strip()
+    if stderr:
+        details.append(stderr)
+    if stdout:
+        details.append(f"stdout: {stdout}")
+    detail = "\n".join(details) or str(error)
+    return f"config processor failed with exit code {error.returncode}: {detail}"

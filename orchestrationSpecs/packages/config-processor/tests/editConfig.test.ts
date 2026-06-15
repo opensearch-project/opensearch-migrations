@@ -2,6 +2,8 @@ import {applyEditOperationToObject, buildEditStateFromObject, EditNode} from "..
 import {parse} from "yaml";
 import {spawnSync} from "child_process";
 import path from "path";
+import {mkdtempSync, rmSync, writeFileSync} from "fs";
+import {tmpdir} from "os";
 
 function findNode(nodes: EditNode[], id: string): EditNode | undefined {
     const stack = [...nodes];
@@ -241,6 +243,93 @@ describe("editConfig state", () => {
 
         expect(toggleResult.yaml).toContain("endpoint: https://legacy.example.com:9200");
         expect(toggleResult.yaml).toContain("allowInsecure: true");
+    });
+
+    it("applies hyphenated source references in snapshot and traffic configs", () => {
+        const config = {
+            sourceClusters: {
+                "aux-source": {
+                    endpoint: "",
+                    version: "ES 7.10.2",
+                },
+            },
+            targetClusters: {
+                prod: {endpoint: "https://prod.example.com:9200"},
+            },
+            traffic: {
+                proxies: {
+                    capture: {source: ""},
+                },
+                replayers: {},
+            },
+            snapshotMigrationConfigs: [
+                {fromSource: "", toTarget: "prod", perSnapshotConfig: {}},
+            ],
+        };
+
+        const snapshotResult = applyEditOperationToObject(config, {
+            op: "set",
+            path: ["snapshotMigrationConfigs", "0", "fromSource"],
+            value: "aux-source",
+        });
+        const trafficResult = applyEditOperationToObject(parse(snapshotResult.yaml), {
+            op: "set",
+            path: ["traffic", "proxies", "capture", "source"],
+            value: "aux-source",
+        });
+
+        expect(snapshotResult.yaml).toContain("fromSource: aux-source");
+        expect(trafficResult.yaml).toContain("source: aux-source");
+    });
+
+    it("applies hyphenated source references through the editConfig apply CLI", () => {
+        const tempDir = mkdtempSync(path.join(tmpdir(), "edit-config-"));
+        try {
+            const configPath = path.join(tempDir, "config.yaml");
+            const operationPath = path.join(tempDir, "operation.yaml");
+            writeFileSync(configPath, [
+                "sourceClusters:",
+                "  aux-source:",
+                "    endpoint: \"\"",
+                "    version: ES 7.10.2",
+                "targetClusters:",
+                "  prod:",
+                "    endpoint: https://prod.example.com:9200",
+                "snapshotMigrationConfigs:",
+                "  - fromSource: \"\"",
+                "    toTarget: prod",
+                "    perSnapshotConfig: {}",
+                "",
+            ].join("\n"));
+            writeFileSync(operationPath, JSON.stringify({
+                op: "set",
+                path: ["snapshotMigrationConfigs", "0", "fromSource"],
+                value: "aux-source",
+            }));
+
+            const cliPath = path.resolve(__dirname, "../src/cliRouter.ts");
+            const result = spawnSync(
+                process.execPath,
+                [
+                    "--import",
+                    "tsx",
+                    cliPath,
+                    "editConfig",
+                    "apply",
+                    "--pending-config",
+                    configPath,
+                    "--operation",
+                    operationPath,
+                ],
+                {encoding: "utf8"}
+            );
+
+            expect(result.status).toBe(0);
+            expect(result.stderr).not.toContain("Usage: editConfig apply");
+            expect(JSON.parse(result.stdout).yaml).toContain("fromSource: aux-source");
+        } finally {
+            rmSync(tempDir, {recursive: true, force: true});
+        }
     });
 
     it("adds and removes virtual cluster config entries", () => {

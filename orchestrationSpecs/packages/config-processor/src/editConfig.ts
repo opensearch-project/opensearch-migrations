@@ -939,13 +939,33 @@ function ensureContainer(parent: any, key: string): Record<string, unknown> {
     return parent[key];
 }
 
+function isArrayIndex(part: string): boolean {
+    const index = Number(part);
+    return Number.isInteger(index) && index >= 0;
+}
+
 function parentAtPath(config: any, path: string[]): { parent: any; key: string } {
     if (path.length === 0) {
         throw new Error("Operation path must not be empty");
     }
     let parent = config;
-    for (const part of path.slice(0, -1)) {
-        parent = ensureContainer(parent, part);
+    const containerPath = path.slice(0, -1);
+    for (const [index, part] of containerPath.entries()) {
+        const nextPart = containerPath[index + 1] ?? path[path.length - 1];
+        if (Array.isArray(parent)) {
+            const arrayIndex = Number(part);
+            if (!Number.isInteger(arrayIndex) || arrayIndex < 0) {
+                throw new Error(`Invalid array index '${part}' in path ${path.join(".")}`);
+            }
+            if (!parent[arrayIndex] || typeof parent[arrayIndex] !== "object" || Array.isArray(parent[arrayIndex])) {
+                parent[arrayIndex] = {};
+            }
+            parent = parent[arrayIndex];
+        } else if (Array.isArray(parent?.[part]) && isArrayIndex(nextPart)) {
+            parent = parent[part];
+        } else {
+            parent = ensureContainer(parent, part);
+        }
     }
     return {parent, key: path[path.length - 1]};
 }
