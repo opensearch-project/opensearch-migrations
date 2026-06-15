@@ -804,6 +804,16 @@ class WorkflowTreeApp(App):
             return
         self._discard_config_edit()
 
+    def action_quit(self) -> None:
+        """Quit the app, confirming first if a config edit draft is dirty."""
+        if self._edit_mode and self._edit_dirty:
+            self.push_screen(
+                ConfirmModal("Discard unsaved config edits and quit?"),
+                lambda confirmed: self.exit() if confirmed else None,
+            )
+            return
+        self.exit()
+
     def _discard_config_edit(self) -> None:
         """Discard the current edit session and restore the live resource tree."""
         self._edit_mode = False

@@ -860,6 +860,20 @@ async def test_resource_view_edit_mode_confirms_discard_on_escape(mock_workflow_
             assert app._edit_mode is True
             assert app._edit_dirty is True
 
+            await pilot.press("q")
+            assert await wait_until(pilot, lambda: isinstance(app.screen, ConfirmModal))
+            await pilot.press("n")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+            assert app._edit_mode is True
+            assert app._edit_dirty is True
+
+            with patch.object(app, "exit") as exit_mock:
+                await pilot.press("q")
+                assert await wait_until(pilot, lambda: isinstance(app.screen, ConfirmModal))
+                await pilot.press("y")
+                await pilot.pause()
+                exit_mock.assert_called_once()
+
             await pilot.press("escape")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ConfirmModal))
             await pilot.press("y")
