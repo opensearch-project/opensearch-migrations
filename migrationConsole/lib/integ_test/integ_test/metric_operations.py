@@ -12,7 +12,7 @@ from typing import List, Dict, Tuple
 from unittest import TestCase
 from console_link.models.metrics_source import MetricsSource, CloudwatchMetricsSource
 from console_link.middleware.metrics import get_metric_data
-from console_link.models.utils import create_boto3_client, raise_for_aws_api_error
+from console_link.models.utils import raise_for_aws_api_error
 
 logger = logging.getLogger(__name__)
 CW_NAMESPACE = "OpenSearchMigrations"
