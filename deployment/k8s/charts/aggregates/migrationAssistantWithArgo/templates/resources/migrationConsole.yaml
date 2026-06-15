@@ -267,17 +267,10 @@ spec:
               value: "/root/schema/sample.yaml"
             {{- if eq .Values.cloudProvider "aws" }}
             {{- if .Values.defaultBucketConfiguration.create }}
-            - name: S3_ARTIFACTS_BUCKET_NAME
-              valueFrom:
-                configMapKeyRef:
-                  name: migrations-default-s3-config
-                  key: BUCKET_NAME
-            - name: S3_ARTIFACTS_REGION
-              valueFrom:
-                configMapKeyRef:
-                  name: migrations-default-s3-config
-                  key: AWS_REGION
-            - name: S3_ARTIFACTS_ENDPOINT_URL
+            {{- $s3Bucket := printf "migrations-default-%s-%s-%s" (toString .Values.aws.account) .Values.stageName .Values.aws.region }}
+            - name: REPO_ARTIFACTS_BUCKET
+              value: {{ printf "s3://%s" $s3Bucket | quote }}
+            - name: REPO_ARTIFACTS_ENDPOINT_URL
               valueFrom:
                 configMapKeyRef:
                   name: migrations-default-s3-config
@@ -285,17 +278,13 @@ spec:
                   optional: true
             {{- end }}
             {{- else if eq .Values.cloudProvider "gcp" }}
-            - name: GCS_ARTIFACTS_BUCKET
-              valueFrom:
-                configMapKeyRef:
-                  name: migrations-default-gcs-config
-                  key: GCS_BUCKET_NAME
-            - name: GCS_ARTIFACTS_ENDPOINT_URL
-              valueFrom:
-                configMapKeyRef:
-                  name: migrations-default-gcs-config
-                  key: GCS_ENDPOINT_URL
-                  optional: true
+            {{- if .Values.gcsBucketConfiguration.create }}
+            {{- $gcsBucket := .Values.gcsBucketConfiguration.bucketName | default (printf "migration-snapshots-%s" .Values.gcp.project) }}
+            - name: REPO_ARTIFACTS_BUCKET
+              value: {{ printf "gs://%s" $gcsBucket | quote }}
+            - name: REPO_ARTIFACTS_ENDPOINT_URL
+              value: {{ .Values.gcsBucketConfiguration.endpoint | default "" | quote }}
+            {{- end }}
             {{- end }}
             {{- if and (eq .Values.cloudProvider "aws") (index .Values.conditionalPackageInstalls "cert-manager") }}
             - name: PROXY_DEFAULT_AWS_REGION
@@ -305,7 +294,7 @@ spec:
                   key: AWS_REGION
                   optional: true
             {{- end }}
-          {{- if .Values.defaultBucketConfiguration.create }}
+          {{- if or .Values.defaultBucketConfiguration.create .Values.gcsBucketConfiguration.create }}
           securityContext:
             privileged: true
             capabilities:
