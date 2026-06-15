@@ -48,6 +48,17 @@ pipenv run app --test-ids=0031 --source-version=ES_8.19 --target-version=OS_3.1 
   --capture-proxy-service-type=ClusterIP
 ```
 
+**Run a two-phase trace test:**
+```bash
+pipenv run app --test-ids=0001,0040 --trace-test-ids=0051,0053 \
+  --trace-values-file=../../deployment/k8s/charts/aggregates/migrationAssistantWithArgo/valuesTraceJaeger.yaml \
+  --trace-backend=jaeger \
+  --source-version=ES_8.19 --target-version=OS_3.1 \
+  --capture-proxy-service-type=ClusterIP
+```
+
+The trace phase runs after the default phase. It resets migration workflow resources, upgrades the same Helm release with `--reuse-values`, waits for `otel-trace-collector`, and then runs only the trace IDs. Use `--trace-backend=xray` with `valuesTraceXray.yaml` for EKS.
+
 ## Development Mode
 
 The `--dev` flag combines options for fast iteration: `--skip-delete`, `--reuse-clusters`, `--keep-workflows`.

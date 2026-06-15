@@ -331,3 +331,6 @@ class MATestBase:
         status_result = self.argo_service.get_workflow_status(workflow_name=self.workflow_name)
         phase = status_result.value.get("phase", "")
         assert phase == "Succeeded", f"Expected workflow phase 'Succeeded', got '{phase}'"
+
+    def assert_observability(self):
+        pass

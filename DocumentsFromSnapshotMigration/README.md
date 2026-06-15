@@ -83,7 +83,8 @@ To see the default shard size, use the `--help` CLI option:
 | --index-allowlist                 | Optional. List of index names to migrate (e.g. 'logs_2024_01, logs_2024_02'). Default: all non-system indices (e.g. those not starting with '.')         |
 | --max-shard-size-bytes            | Optional. The maximum shard size, in bytes, to allow when performing the document migration. Default: 80 * 1024 * 1024 * 1024 (80 GB)                    |
 | --initial-lease-duration          | Optional. The time that the first attempt to migrate a shard's documents should take. Default: PT10M                                                     |
-| --otel-collector-endpoint         | Optional. Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be forwarded. If not provided, metrics will not be forwarded |
+| --otel-trace-collector-endpoint   | Optional. Endpoint (host:port or URL) for the OpenTelemetry Collector to which traces should be forwarded. Omit to disable trace export                  |
+| --otel-metrics-collector-endpoint | Optional. Endpoint (host:port or URL) for the OpenTelemetry Collector to which metrics should be forwarded. Omit to disable metric export                |
 | --target-host                     | The target host and port (e.g. http://localhost:9200)                                                                                                    |
 | --target-username                 | The username for target cluster authentication                                                                                                           |
 | --target-password                 | The password for target cluster authentication                                                                                                           |

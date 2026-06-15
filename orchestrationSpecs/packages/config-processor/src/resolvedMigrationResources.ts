@@ -10,6 +10,7 @@ import {FILE_SOURCE_RUNTIME_FIELDS, fileSourceRefsForTrace} from "./fileSourceUt
 type WorkflowConfig = z.infer<typeof ARGO_MIGRATION_CONFIG_PRE_ENRICH>;
 type KafkaClusterConfig = NonNullable<WorkflowConfig["kafkaClusters"]>[number];
 type ProxyConfig = WorkflowConfig["proxies"][number];
+type S3TrafficLoaderConfig = WorkflowConfig["s3TrafficLoaders"][number];
 type SnapshotConfig = WorkflowConfig["snapshots"][number];
 type SnapshotItemConfig = SnapshotConfig["createSnapshotConfig"][number];
 type SnapshotMigrationConfig = WorkflowConfig["snapshotMigrations"][number];
@@ -250,6 +251,20 @@ function capturedTrafficParameters(proxy: ProxyConfig): Record<string, unknown> 
     };
 }
 
+function s3CapturedTrafficParameters(loader: S3TrafficLoaderConfig): Record<string, unknown> {
+    return {
+        dependsOn: [loader.kafkaConfig.label],
+        kafkaClusterName: loader.kafkaConfig.label,
+        topicName: loader.kafkaConfig.kafkaTopic,
+        partitions: loader.kafkaConfig.topicSpecOverrides?.partitions,
+        replicas: loader.kafkaConfig.topicSpecOverrides?.replicas,
+        topicConfig: loader.kafkaConfig.topicSpecOverrides?.config,
+        sourceKind: "s3",
+        s3SourceUri: loader.s3Uri,
+        loadStarted: true,
+    };
+}
+
 function captureProxyParameters(proxy: ProxyConfig): Record<string, unknown> {
     return {
         ...omitFields(proxy.proxyConfig as Record<string, unknown>, CAPTURE_PROXY_RESOURCE_OMITTED_FIELDS),
@@ -316,6 +331,10 @@ export function buildResolvedMigrationResourceList(
             options,
             captureProxyAnnotations(proxy)
         ));
+    }
+
+    for (const loader of workflowConfig.s3TrafficLoaders ?? []) {
+        resources.push(resource("CapturedTraffic", `${loader.name}-topic`, s3CapturedTrafficParameters(loader), options));
     }
 
     for (const snapshot of workflowConfig.snapshots ?? []) {

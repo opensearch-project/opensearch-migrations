@@ -16,7 +16,7 @@
     },
     "replayers": {
       "replayer1": {
-        "fromProxy": "does-not-exist",
+        "fromCapturedTraffic": "does-not-exist",
         "toTarget": "target"
       }
     }

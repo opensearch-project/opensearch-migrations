@@ -11,7 +11,7 @@ metadata:
 spec:
   mode: daemonset
   serviceAccount: otel-collector
-  image: {{ .Values.otelCollectorImage | default "public.ecr.aws/aws-observability/aws-otel-collector:v0.43.3" }}
+  image: {{ .Values.otelCollectorImage }}
   env:
     - name: OTEL_CONFIG_LOG
       value: "true"
@@ -73,10 +73,6 @@ spec:
         send_timestamps: true
         metric_expiration: 5m
         enable_open_metrics: true
-      otlp/jaeger: # Jaeger supports OTLP directly. The default port for OTLP/gRPC is 4317
-        endpoint: jaeger:4317
-        tls:
-          insecure: true
     service:
       extensions: [ zpages, pprof, health_check ]
       pipelines:
@@ -84,10 +80,6 @@ spec:
           receivers: [ otlp ]
           processors: [ batch ]
           exporters: [ debug, prometheus ]
-        traces:
-          receivers: [ otlp ]
-          processors: [ batch ]
-          exporters: [ debug, otlp/jaeger ]
         logs:
           receivers: [ otlp ]
           processors:
