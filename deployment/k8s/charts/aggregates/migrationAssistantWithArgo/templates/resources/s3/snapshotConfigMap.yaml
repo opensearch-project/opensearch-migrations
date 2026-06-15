@@ -23,4 +23,5 @@ data:
   SNAPSHOT_ROLE_ARN: ""
   {{- end }}
   BUCKET_NAME: {{ printf "\"migrations-default-%s-%s-%s\"" (toString .Values.aws.account) .Values.stageName .Values.aws.region }}
+  BUCKET_URI: {{ printf "\"s3://migrations-default-%s-%s-%s\"" (toString .Values.aws.account) .Values.stageName .Values.aws.region }}
 {{- end }}

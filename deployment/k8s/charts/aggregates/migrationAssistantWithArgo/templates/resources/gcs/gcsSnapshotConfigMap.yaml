@@ -10,4 +10,6 @@ metadata:
 data:
   GCS_BUCKET_NAME: {{ $bucketName | quote }}
   GCS_ENDPOINT_URL: ""
+  BUCKET_URI: {{ printf "gs://%s" $bucketName | quote }}
+  ENDPOINT: {{ .Values.gcsBucketConfiguration.endpoint | default "" | quote }}
 {{- end }}

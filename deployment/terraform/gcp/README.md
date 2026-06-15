@@ -151,10 +151,12 @@ workflow. The Migration Assistant's GCP service account must have
 ### Submitting a BYOS workflow
 
 Use the
-[`fullMigrationImportedClustersGcs.yaml`](../../../migrationConsole/lib/integ_test/testWorkflows/fullMigrationImportedClustersGcs.yaml)
-sample workflow template. To switch it from "create-and-migrate" to BYOS, set:
+[`fullMigrationImportedClusters.yaml`](../../../migrationConsole/lib/integ_test/testWorkflows/fullMigrationImportedClusters.yaml)
+sample workflow template, passing `snapshot-configmap: migrations-default-gcs-config`
+as a workflow parameter to use the GCS bucket instead of the default S3 one.
+To switch it from "create-and-migrate" to BYOS, set:
 
-- `source.snapshotRepo.gcsRepoPathUri` to the GCS URI you staged
+- `source.snapshotRepo.repoPathUri` to the GCS URI you staged
   (`gs://migration-snapshots-<project>/e2e-test`).
 - `snapshotConfig.snapshotNameConfig.externallyManagedSnapshotName` to the
   name of the snapshot inside that repo (for the bundled test snapshot, this
