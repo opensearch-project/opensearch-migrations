@@ -14,6 +14,7 @@ import {
     OPTIONAL_HTTP_ENDPOINT_PATTERN,
     OVERALL_MIGRATION_CONFIG,
     REPLAYER_CONFIG,
+    S3_CAPTURED_TRAFFIC_SOURCE,
     SOURCE_CLUSTER_CONFIG,
     SOURCE_CLUSTERS_MAP,
     TARGET_CLUSTER_CONFIG,
@@ -128,6 +129,7 @@ interface EditContext {
     targetOptions: EditOption[];
     kafkaOptions: EditOption[];
     proxyOptions: EditOption[];
+    capturedTrafficOptions: EditOption[];
 }
 
 const STATUS_RANK: Record<EditNodeStatus, number> = {
@@ -170,14 +172,16 @@ const BASIC_SECRET_NAME_HINT = uiHintAt(HTTP_AUTH_BASIC, ["basic", "secretName"]
 const CAPTURE_SOURCE_HINT = uiHintAt(CAPTURE_CONFIG, ["source"]);
 const CAPTURE_KAFKA_HINT = uiHintAt(CAPTURE_CONFIG, ["kafka"]);
 const CAPTURE_KAFKA_TOPIC_HINT = uiHintAt(CAPTURE_CONFIG, ["kafkaTopic"]) ?? K8S_NAME_INPUT_HINT;
-const REPLAYER_PROXY_HINT = uiHintAt(REPLAYER_CONFIG, ["fromProxy"]);
+const REPLAYER_CAPTURED_TRAFFIC_HINT = uiHintAt(REPLAYER_CONFIG, ["fromCapturedTraffic"]);
 const REPLAYER_TARGET_HINT = uiHintAt(REPLAYER_CONFIG, ["toTarget"]);
+const S3_CAPTURED_TRAFFIC_DESCRIPTION = descriptionOf(S3_CAPTURED_TRAFFIC_SOURCE);
 const SNAPSHOT_SOURCE_HINT = uiHintAt(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, ["fromSource"]);
 const SNAPSHOT_TARGET_HINT = uiHintAt(NORMALIZED_PARAMETERIZED_MIGRATION_CONFIG, ["toTarget"]);
 const KAFKA_RECORD_HINT = uiHintOf(KAFKA_CLUSTERS_MAP);
 const SOURCE_RECORD_HINT = uiHintOf(SOURCE_CLUSTERS_MAP);
 const TARGET_RECORD_HINT = uiHintOf(TARGET_CLUSTERS_MAP);
 const TRAFFIC_PROXIES_RECORD_HINT = uiHintAt(TRAFFIC_CONFIG, ["proxies"]);
+const TRAFFIC_S3_SOURCES_RECORD_HINT = uiHintAt(TRAFFIC_CONFIG, ["s3Sources"]);
 const TRAFFIC_REPLAYERS_RECORD_HINT = uiHintAt(TRAFFIC_CONFIG, ["replayers"]);
 const SNAPSHOT_MIGRATION_ARRAY_HINT = uiHintAt(OVERALL_MIGRATION_CONFIG, ["snapshotMigrationConfigs"]) ?? {
     kind: "array" as const,
@@ -246,12 +250,23 @@ function optionsFromRecord(record: Record<string, unknown> | undefined): EditOpt
         .map(name => ({label: name, value: name}));
 }
 
+function capturedTrafficOptions(traffic: any): EditOption[] {
+    const names = new Set([
+        ...Object.keys(traffic?.proxies ?? {}),
+        ...Object.keys(traffic?.s3Sources ?? {}),
+    ]);
+    return [...names]
+        .sort((a, b) => a.localeCompare(b))
+        .map(name => ({label: name, value: name}));
+}
+
 function buildEditContext(config: any): EditContext {
     return {
         sourceOptions: optionsFromRecord(config?.sourceClusters),
         targetOptions: optionsFromRecord(config?.targetClusters),
         kafkaOptions: optionsFromRecord(config?.kafkaClusterConfiguration),
         proxyOptions: optionsFromRecord(config?.traffic?.proxies),
+        capturedTrafficOptions: capturedTrafficOptions(config?.traffic),
     };
 }
 
@@ -686,6 +701,26 @@ function captureProxyNode(name: string, value: any, ctx: EditContext): EditNode 
     });
 }
 
+function s3CapturedTrafficSourceNode(name: string, value: any, ctx: EditContext): EditNode {
+    const rootPath = ["traffic", "s3Sources", name];
+    return finalizeNode({
+        id: `edit:${rootPath.join(".")}`,
+        path: rootPath,
+        label: `S3 captured traffic source: ${name}`,
+        valueKind: "object",
+        description: S3_CAPTURED_TRAFFIC_DESCRIPTION,
+        status: "ok",
+        children: [
+            scalarNode([...rootPath, "s3Uri"], "s3Uri", value?.s3Uri, "S3 URI of a gzipped traffic export produced by kafkaExport.sh.", true),
+            scalarNode([...rootPath, "awsRegion"], "awsRegion", value?.awsRegion, "AWS region of the S3 bucket holding the export.", true),
+            scalarNode([...rootPath, "endpoint"], "endpoint", value?.endpoint ?? "", "Override the S3 endpoint URL.", false, SOURCE_ENDPOINT_HINT),
+            scalarNode([...rootPath, "kafka"], "kafka", value?.kafka ?? "default", "Label of the Kafka cluster to load captured traffic into. Must match a key in kafkaClusterConfiguration.", false, referenceHint(CAPTURE_KAFKA_HINT, ctx.kafkaOptions)),
+            scalarNode([...rootPath, "kafkaTopic"], "kafkaTopic", value?.kafkaTopic ?? "", "Kafka topic name to load captured traffic into. If empty, defaults to the s3Source name.", false, CAPTURE_KAFKA_TOPIC_HINT),
+            scalarNode([...rootPath, "sourceLabel"], "sourceLabel", value?.sourceLabel, "Label of the source cluster this dump was originally captured from.", true),
+        ],
+    });
+}
+
 function trafficReplayNode(name: string, value: any, ctx: EditContext): EditNode {
     const rootPath = ["traffic", "replayers", name];
     return finalizeNode({
@@ -696,7 +731,7 @@ function trafficReplayNode(name: string, value: any, ctx: EditContext): EditNode
         description: REPLAYER_DESCRIPTION,
         status: "ok",
         children: [
-            scalarNode([...rootPath, "fromProxy"], "fromProxy", value?.fromProxy, "Name of the capture proxy to replay traffic from. Must match a key in traffic.proxies.", true, referenceHint(REPLAYER_PROXY_HINT, ctx.proxyOptions)),
+            scalarNode([...rootPath, "fromCapturedTraffic"], "fromCapturedTraffic", value?.fromCapturedTraffic, "Name of the captured-traffic source to replay from. Must match a key in either traffic.proxies or traffic.s3Sources.", true, referenceHint(REPLAYER_CAPTURED_TRAFFIC_HINT, ctx.capturedTrafficOptions)),
             scalarNode([...rootPath, "toTarget"], "toTarget", value?.toTarget, "Name of the target cluster to replay traffic to. Must match a key in targetClusters.", true, referenceHint(REPLAYER_TARGET_HINT, ctx.targetOptions)),
         ],
     });
@@ -707,6 +742,11 @@ function trafficGroupNode(traffic: any, ctx: EditContext): EditNode {
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([name, value]) => captureProxyNode(name, value, ctx));
     proxyChildren.push(addRow(["traffic", "proxies"], "capture proxy", "Create a capture proxy configuration in pending workflow YAML.", true, recordKeyHint(TRAFFIC_PROXIES_RECORD_HINT)));
+
+    const s3SourceChildren = Object.entries(traffic?.s3Sources ?? {})
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([name, value]) => s3CapturedTrafficSourceNode(name, value, ctx));
+    s3SourceChildren.push(addRow(["traffic", "s3Sources"], "S3 captured traffic source", "Create a pre-recorded traffic source from an S3 archive in pending workflow YAML.", true, recordKeyHint(TRAFFIC_S3_SOURCES_RECORD_HINT)));
 
     const replayChildren = Object.entries(traffic?.replayers ?? {})
         .sort(([a], [b]) => a.localeCompare(b))
@@ -730,6 +770,16 @@ function trafficGroupNode(traffic: any, ctx: EditContext): EditNode {
                 inputHint: TRAFFIC_PROXIES_RECORD_HINT,
                 status: "ok",
                 children: proxyChildren,
+            }),
+            finalizeNode({
+                id: "edit:traffic.s3Sources",
+                path: ["traffic", "s3Sources"],
+                label: "S3 Captured Traffic",
+                valueKind: "record",
+                description: "Pre-recorded traffic archives loaded from S3 into Kafka for replay.",
+                inputHint: TRAFFIC_S3_SOURCES_RECORD_HINT,
+                status: "ok",
+                children: s3SourceChildren,
             }),
             finalizeNode({
                 id: "edit:traffic.replayers",
@@ -1054,8 +1104,11 @@ function defaultConfigForPath(path: string[]): Record<string, unknown> {
     if (key === "traffic.proxies") {
         return {source: ""};
     }
+    if (key === "traffic.s3Sources") {
+        return {s3Uri: "", awsRegion: "", sourceLabel: ""};
+    }
     if (key === "traffic.replayers") {
-        return {fromProxy: "", toTarget: ""};
+        return {fromCapturedTraffic: "", toTarget: ""};
     }
     if (key === "snapshotMigrationConfigs") {
         return {fromSource: "", toTarget: "", perSnapshotConfig: {}};

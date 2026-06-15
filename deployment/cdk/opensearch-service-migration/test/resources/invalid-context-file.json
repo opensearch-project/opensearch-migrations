@@ -3,5 +3,6 @@
 "vpcEnabled": true,
 "migrationAssistanceEnabled": true,
 "kafkaBrokerServiceEnabled": true,
-"otelCollectorEnabled": false
+"otelMetricsCollectorEnabled": false,
+"otelTraceCollectorEnabled": false
 }

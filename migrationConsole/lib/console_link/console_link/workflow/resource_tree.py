@@ -66,7 +66,6 @@ SPEC_DISPLAY_FIELDS = {
     'snapshotmigrations': [
         'documentBackfillPodReplicas', 'sourceVersion',
         'documentBackfillIndexAllowlist', 'metadataMigrationIndexAllowlist',
-        'metadataMigrationMultiTypeBehavior',
     ],
     'trafficreplays': ['podReplicas', 'speedupFactor', 'removeAuthHeader'],
 }

@@ -6,7 +6,15 @@ public class MetadataArgs {
     @Parameter(names = {"--help", "-h"}, help = true, description = "Displays information about how to use this tool")
     public boolean help;
 
-    @Parameter(names = { "--otel-collector-endpoint" }, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
-            + "forwarded. If no value is provided, metrics will not be forwarded.")
-    public String otelCollectorEndpoint;
+    @Parameter(
+        names = { "--otel-trace-collector-endpoint", "--otelTraceCollectorEndpoint" },
+        description = "Endpoint for the OpenTelemetry Collector to which traces should be forwarded. " +
+            "Omit this option to disable trace export.")
+    public String otelTraceCollectorEndpoint;
+
+    @Parameter(
+        names = { "--otel-metrics-collector-endpoint", "--otelMetricsCollectorEndpoint" },
+        description = "Endpoint for the OpenTelemetry Collector to which metrics should be forwarded. " +
+            "Omit this option to disable metric export.")
+    public String otelMetricsCollectorEndpoint;
 }

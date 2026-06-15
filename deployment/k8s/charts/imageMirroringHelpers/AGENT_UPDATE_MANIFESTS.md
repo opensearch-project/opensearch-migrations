@@ -10,13 +10,16 @@ and chart lists are maintained in version-locked manifest files.
 
 ```
 deployment/k8s/charts/aggregates/migrationAssistantWithArgo/
+  infra/mirror/
+    private-ecr-manifest.yaml      # Production images + charts
   scripts/
-    privateEcrManifest.sh          # Production images + charts
-    testClustersEcrManifest.sh     # Test cluster images + charts  
     generatePrivateEcrValues.sh    # Helm values overrides for ECR
     mirrorToEcr.sh                 # Copies everything to ECR
-    verifyNoPublicImages.sh        # Validates no public refs remain
-    updateEcrManifest.sh           # Discovery script (helper)
+deployment/k8s/charts/aggregates/testClusters/
+  testClustersEcrManifest.sh       # Test cluster images + charts
+deployment/k8s/charts/imageMirroringHelpers/
+  verifyNoPublicImages.sh          # Validates no public refs remain
+  updateEcrManifest.sh             # Discovery script (helper)
   values.yaml                     # Chart defaults (images section)
   templates/resources/
     imageConfigmap.yaml            # Configmap for workflow images
@@ -75,15 +78,14 @@ helm template test deployment/k8s/charts/aggregates/migrationAssistantWithArgo \
 
 ### 5. Update the manifest files
 
-**`privateEcrManifest.sh`**: All production images + charts. Format:
-```
-CHARTS="
-name|version|repository
-"
-IMAGES="
-# --- component ---
-registry/path:tag
-"
+**`infra/mirror/private-ecr-manifest.yaml`**: All production images + charts. Format:
+```yaml
+charts:
+  # Format: "name|version|repository"
+  - "cert-manager|1.17.2|https://charts.jetstack.io"
+images:
+  # component
+  - "registry/path:tag"
 ```
 
 **`testClustersEcrManifest.sh`**: Only test cluster images (elasticsearch, opensearch).

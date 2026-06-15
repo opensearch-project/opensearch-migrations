@@ -1,9 +1,10 @@
-#!/bin/sh
+#!/bin/bash
 # =============================================================================
 # updateEcrManifest.sh
 #
 # Discovers all container images from all helm charts (migrationAssistantWithArgo
-# + testClusters), updates privateEcrManifest.sh, and runs verifyNoPublicImages.sh.
+# + testClusters), compares them with private-ecr-manifest.yaml, and runs
+# verifyNoPublicImages.sh.
 #
 # Designed to run autonomously after chart version bumps. Can be invoked by an
 # agent or developer.
@@ -13,11 +14,40 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CHART_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-TEST_CHART_DIR="$(cd "$CHART_DIR/../testClusters" && pwd)"
-MANIFEST="$SCRIPT_DIR/privateEcrManifest.sh"
+CHART_DIR="$(cd "$SCRIPT_DIR/../aggregates/migrationAssistantWithArgo" && pwd)"
+TEST_CHART_DIR="$(cd "$SCRIPT_DIR/../aggregates/testClusters" && pwd)"
+MANIFEST="$CHART_DIR/infra/mirror/private-ecr-manifest.yaml"
 ECR_HOST="${ECR_HOST:-123456789012.dkr.ecr.us-east-1.amazonaws.com}"
 DRY_RUN=false
+
+manifest_section() {
+  local manifest="$1" section="$2"
+  awk -v section="$section" '
+    /^[A-Za-z0-9_-]+:[[:space:]]*$/ {
+      if (in_section) {
+        exit
+      }
+      in_section = ($1 == section ":")
+      next
+    }
+    in_section {
+      original = $0
+      sub(/^[[:space:]]*-[[:space:]]*/, "", $0)
+      if ($0 == original) {
+        next
+      }
+      sub(/[[:space:]]*#.*$/, "", $0)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0)
+      if ($0 == "") {
+        next
+      }
+      if ($0 ~ /^".*"$/ || $0 ~ /^'\''.*'\''$/) {
+        $0 = substr($0, 2, length($0) - 2)
+      }
+      print
+    }
+  ' "$manifest"
+}
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -106,9 +136,8 @@ echo "  Discovered $DISCOVERED unique images"
 
 # --- Step 4: Compare with current manifest ---
 echo "Step 4: Comparing with current manifest..."
-. "$MANIFEST"
 CURRENT_IMAGES="$TMPDIR/current_images.txt"
-echo "$IMAGES" | sed 's/^[[:space:]]*//' | grep -v '^#' | grep -v '^$' | sort -u > "$CURRENT_IMAGES"
+manifest_section "$MANIFEST" images | sort -u > "$CURRENT_IMAGES"
 
 NEW_IMAGES=$(comm -23 "$TMPDIR/unique_images.txt" "$CURRENT_IMAGES")
 REMOVED_IMAGES=$(comm -13 "$TMPDIR/unique_images.txt" "$CURRENT_IMAGES")
@@ -132,6 +161,6 @@ echo "Step 5: Running verifyNoPublicImages.sh..."
 echo ""
 echo "=== Done ==="
 if [ -n "$NEW_IMAGES" ]; then
-  echo "Action needed: Add the NEW images above to privateEcrManifest.sh"
+  echo "Action needed: Add the NEW images above to private-ecr-manifest.yaml"
   echo "and add corresponding overrides to generatePrivateEcrValues.sh"
 fi

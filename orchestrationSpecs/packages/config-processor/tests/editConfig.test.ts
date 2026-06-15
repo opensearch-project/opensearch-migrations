@@ -366,8 +366,11 @@ describe("editConfig state", () => {
                 proxies: {
                     capture: {source: "legacy"},
                 },
+                s3Sources: {
+                    archive: {s3Uri: "s3://bucket/path/export.proto.gz", awsRegion: "us-east-1", sourceLabel: "legacy"},
+                },
                 replayers: {
-                    replay: {fromProxy: "capture", toTarget: "prod"},
+                    replay: {fromCapturedTraffic: "archive", toTarget: "prod"},
                 },
             },
             snapshotMigrationConfigs: [{fromSource: "legacy", toTarget: "prod", perSnapshotConfig: {}}],
@@ -375,6 +378,7 @@ describe("editConfig state", () => {
 
         expect(findNode(state.nodes, "edit:kafkaClusterConfiguration.default")?.label).toContain("kafka: default");
         expect(findNode(state.nodes, "edit:traffic.proxies.capture")?.label).toContain("capture proxy: capture");
+        expect(findNode(state.nodes, "edit:traffic.s3Sources.archive")?.label).toContain("S3 captured traffic source: archive");
         expect(findNode(state.nodes, "edit:traffic.replayers.replay")?.label).toContain("traffic replay: replay");
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs.0")?.label).toContain("snapshot migration: legacy -> prod");
         expect(findNode(state.nodes, "edit:snapshotMigrationConfigs:add")?.label).toContain("+ Add snapshot migration");
@@ -382,6 +386,11 @@ describe("editConfig state", () => {
             kind: "reference",
             sourcePath: ["sourceClusters"],
             options: [{label: "legacy", value: "legacy"}],
+        });
+        expect(findNode(state.nodes, "edit:traffic.replayers.replay.fromCapturedTraffic")?.inputHint).toMatchObject({
+            kind: "reference",
+            sourcePath: ["traffic", "proxies"],
+            options: [{label: "archive", value: "archive"}, {label: "capture", value: "capture"}],
         });
         expect(findNode(state.nodes, "edit:traffic.replayers.replay.toTarget")?.inputHint).toMatchObject({
             kind: "reference",
@@ -412,6 +421,16 @@ describe("editConfig state", () => {
             path: ["traffic", "proxies"],
             value: {name: "capture"},
         });
+        const addedS3Source = applyEditOperationToObject(parse(addedProxy.yaml), {
+            op: "add",
+            path: ["traffic", "s3Sources"],
+            value: {name: "archive"},
+        });
+        const addedReplayer = applyEditOperationToObject(parse(addedS3Source.yaml), {
+            op: "add",
+            path: ["traffic", "replayers"],
+            value: {name: "replay"},
+        });
         const removedProxy = applyEditOperationToObject(parse(addedProxy.yaml), {
             op: "removeConfig",
             path: ["traffic", "proxies", "capture"],
@@ -419,6 +438,8 @@ describe("editConfig state", () => {
 
         expect(existingKafka.yaml).toContain("existing: {}");
         expect(addedProxy.yaml).toContain("capture:");
+        expect(addedS3Source.yaml).toContain("archive:");
+        expect(addedReplayer.yaml).toContain("fromCapturedTraffic: \"\"");
         expect(removedProxy.yaml).not.toContain("capture:");
     });
 

@@ -44,6 +44,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
       migrationAssistanceEnabled: true,
+      otelMetricsCollectorEnabled: false,
+      otelTraceCollectorEnabled: false,
     };
 
     const stacks = createStackComposer(contextOptions);
@@ -90,6 +92,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
       migrationAssistanceEnabled: true,
+      otelMetricsCollectorEnabled: false,
+      otelTraceCollectorEnabled: false,
       nodeToNodeEncryptionEnabled: true,
       encryptionAtRestEnabled: true,
       enforceHTTPS: true
@@ -150,6 +154,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
         "auth": {"type": "sigv4", "region": "eu-west-1", "serviceSigningName": "aoss"}
       },
       migrationAssistanceEnabled: true,
+      otelMetricsCollectorEnabled: false,
+      otelTraceCollectorEnabled: false,
     };
 
 
@@ -210,6 +216,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
       migrationAssistanceEnabled: true,
+      otelMetricsCollectorEnabled: false,
+      otelTraceCollectorEnabled: false,
       nodeToNodeEncryptionEnabled: true,
       encryptionAtRestEnabled: true,
       enforceHTTPS: true
@@ -266,6 +274,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
         "version": "ES_7.10"
       },
       migrationAssistanceEnabled: true,
+      otelMetricsCollectorEnabled: false,
+      otelTraceCollectorEnabled: false,
     };
 
     const stacks = createStackComposer(contextOptions);
@@ -288,6 +298,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       },
       reindexFromSnapshotExtraArgs: '--custom-arg value --flag --snapshot-name "custom-snapshot"',
       migrationAssistanceEnabled: true,
+      otelMetricsCollectorEnabled: false,
+      otelTraceCollectorEnabled: false,
     };
 
     const stacks = createStackComposer(contextOptions);
@@ -342,6 +354,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       },
       reindexFromSnapshotWorkerSize: "maximum",
       migrationAssistanceEnabled: true,
+      otelMetricsCollectorEnabled: false,
+      otelTraceCollectorEnabled: false,
     };
 
     const stacks = createStackComposer(contextOptions);
@@ -423,6 +437,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
         "version": "ES_7.10"
       },
       migrationAssistanceEnabled: true,
+      otelMetricsCollectorEnabled: false,
+      otelTraceCollectorEnabled: false,
     };
     const stacks = createStackComposer(contextOptions, undefined, 'us-gov-west-1');
     const reindexStack = stacks.stacks.find(s => s instanceof ReindexFromSnapshotStack) as ReindexFromSnapshotStack;
@@ -469,6 +485,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
         "auth": {"type": "sigv4", "region": "eu-west-1", "serviceSigningName": "aoss"}
       },
       migrationAssistanceEnabled: true,
+      otelMetricsCollectorEnabled: false,
+      otelTraceCollectorEnabled: false,
       reindexFromSnapshotMaxShardSizeGiB: 1.000001
     };
 
@@ -526,6 +544,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
         "version": "ES_7.10"
       },
       migrationAssistanceEnabled: true,
+      otelMetricsCollectorEnabled: false,
+      otelTraceCollectorEnabled: false,
     };
 
     expect(() => createStackComposer(contextOptions, undefined, 'us-gov-west-1')).toThrow(
@@ -543,6 +563,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
       migrationAssistanceEnabled: true,
+      otelMetricsCollectorEnabled: false,
+      otelTraceCollectorEnabled: false,
       nodeToNodeEncryptionEnabled: true,
       encryptionAtRestEnabled: true,
       enforceHTTPS: true
@@ -603,7 +625,9 @@ describe('ReindexFromSnapshotStack Tests', () => {
       },
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
-      migrationAssistanceEnabled: true
+      migrationAssistanceEnabled: true,
+      otelMetricsCollectorEnabled: false,
+      otelTraceCollectorEnabled: false
     };
 
     expect(() => createStackComposer(contextOptions)).toThrow(
@@ -620,7 +644,9 @@ describe('ReindexFromSnapshotStack Tests', () => {
       },
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
-      migrationAssistanceEnabled: true
+      migrationAssistanceEnabled: true,
+      otelMetricsCollectorEnabled: false,
+      otelTraceCollectorEnabled: false
     };
 
     const stacks = createStackComposer(contextOptions);
