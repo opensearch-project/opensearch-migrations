@@ -1059,7 +1059,7 @@ if [[ "$build" == "true" && -z "$ma_images_source" ]]; then
     # Use the ECR-mirrored buildkit image so the kubernetes driver doesn't pull
     # from Docker Hub. mirror_images_to_ecr already copied this image above.
     ECR_HOST="${MIGRATIONS_ECR_REGISTRY%%/*}"
-    export BUILDKIT_IMAGE="${ECR_HOST}/mirrored/moby/buildkit:buildx-stable-1"
+    export BUILDKIT_IMAGE="${ECR_HOST}/mirrored/docker.io/moby/buildkit:buildx-stable-1"
     setup_build_backend
   fi
 
