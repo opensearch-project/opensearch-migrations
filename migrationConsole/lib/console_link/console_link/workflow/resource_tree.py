@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 import json
 
 from rich.console import Console
+from rich.markup import escape
 from rich.tree import Tree
 
 from .commands.crd_utils import list_migration_resources_full
@@ -97,6 +98,12 @@ CONFIG_VALUE_LABELS = {
     CONFIG_MODE_DEPLOYED: 'deployed',
     CONFIG_MODE_CURRENT_WORKFLOW: 'pending',
     CONFIG_MODE_PENDING_SUBMIT: 'to-submit',
+}
+
+CONFIG_VALUE_STYLES = {
+    CONFIG_MODE_DEPLOYED: '',
+    CONFIG_MODE_CURRENT_WORKFLOW: 'grey50',
+    CONFIG_MODE_PENDING_SUBMIT: 'green',
 }
 
 CONFIG_PHASE_KEY = {
@@ -593,7 +600,7 @@ def _render_group(parent_tree, group: ResourceGroup, show_live_status: bool = Tr
 
 
 # Phases shown in the resource label (settled states)
-DISPLAY_PHASES = {'Ready', 'Completed', 'Failed', 'Error'}
+DISPLAY_PHASES = {'Ready', 'Completed', 'Failed', 'Error', 'Pending Config'}
 
 
 def _render_resource(parent_node, resource: ResourceNode, show_live_status: bool = True) -> None:
@@ -767,7 +774,11 @@ def format_spec_fields(resource: ResourceNode) -> List[str]:
     return parts
 
 
-def format_config_diff_fields(resource: ResourceNode, value_mode: str = CONFIG_MODE_ALL) -> List[str]:
+def format_config_diff_fields(
+    resource: ResourceNode,
+    value_mode: str = CONFIG_MODE_ALL,
+    rich_markup: bool = False,
+) -> List[str]:
     diff = resource.config_diff or {}
     fields = diff.get('fields') or []
     if not fields:
@@ -777,19 +788,28 @@ def format_config_diff_fields(resource: ResourceNode, value_mode: str = CONFIG_M
     for field in fields:
         label = field.get('label') or field.get('path')
         values = field.get('values') or {}
+        display_label = escape(str(label)) if rich_markup else str(label)
         if value_mode == CONFIG_MODE_ALL:
             parts = []
             for mode in (CONFIG_MODE_DEPLOYED, CONFIG_MODE_CURRENT_WORKFLOW, CONFIG_MODE_PENDING_SUBMIT):
                 key = CONFIG_PHASE_KEY[mode]
-                parts.append(f"{CONFIG_VALUE_LABELS[mode]}={_format_config_value(values.get(key) or {})}")
-            result.append(f"{label}: {' | '.join(parts)}")
+                parts.append(_format_config_value_segment(mode, values.get(key) or {}, rich_markup))
+            result.append(f"{display_label}: {' | '.join(parts)}")
             continue
 
         key = CONFIG_PHASE_KEY.get(value_mode)
         if key:
-            label_prefix = CONFIG_VALUE_LABELS.get(value_mode, value_mode)
-            result.append(f"{label}: {label_prefix}={_format_config_value(values.get(key) or {})}")
+            result.append(f"{display_label}: {_format_config_value_segment(value_mode, values.get(key) or {}, rich_markup)}")
     return result
+
+
+def _format_config_value_segment(mode: str, state: Dict[str, Any], rich_markup: bool) -> str:
+    segment = f"{CONFIG_VALUE_LABELS.get(mode, mode)}={_format_config_value(state)}"
+    if not rich_markup:
+        return segment
+    style = CONFIG_VALUE_STYLES.get(mode)
+    escaped = escape(segment)
+    return f"[{style}]{escaped}[/{style}]" if style else escaped
 
 
 def _format_config_value(state: Dict[str, Any]) -> str:

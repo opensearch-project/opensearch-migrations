@@ -104,6 +104,7 @@ class WorkflowTreeApp(App):
         self._resource_change_summary = {'pending': 0, 'to_submit': 0, 'resources': 0}
         self._last_resource_sections = None
         self._last_resource_workflow_data: Dict = {}
+        self._expand_changed_resources_on_next_render = resource_view
         self._submitting_workflow = False
         self._edit_validation_generation = 0
         self._edit_validation_timer: Optional[Any] = None
@@ -235,6 +236,9 @@ class WorkflowTreeApp(App):
             self._tree_state.rebuild(sections, workflow_data)
         else:
             self._tree_state.update(sections, workflow_data)
+        if self._expand_changed_resources_on_next_render:
+            self._expand_changed_resources_on_next_render = False
+            self._expand_changed_resource_nodes(sections)
 
         self._pods.trigger_resolve(new_run_id, use_cache=not force_reload)
         self.update_pod_status()
@@ -705,6 +709,7 @@ class WorkflowTreeApp(App):
             self._tree_state.set_config_value_mode(self._resource_value_mode)
         if self._last_resource_sections is not None:
             self._tree_state.update(self._last_resource_sections, self._last_resource_workflow_data)
+            self._expand_changed_resource_nodes(self._last_resource_sections)
         self.update_pod_status()
         self._update_dynamic_bindings()
 
@@ -735,6 +740,7 @@ class WorkflowTreeApp(App):
         submitted_name = result.get('workflow_name') or self._workflow_name
         self.notify(f"Workflow submitted: {submitted_name}")
         self.current_run_id = None
+        self._expand_changed_resources_on_next_render = True
         self.action_manual_refresh()
 
     def _handle_workflow_submit_failed(self, error: Exception) -> None:
@@ -835,8 +841,13 @@ class WorkflowTreeApp(App):
         self._edit_status_mode = EDIT_MODE_ALL
         self._cancel_config_edit_validation()
         self.current_run_id = None
+        self._expand_changed_resources_on_next_render = True
         self.query_one("#edit-help", Static).display = False
         self.action_manual_refresh()
+
+    def _expand_changed_resource_nodes(self, sections) -> None:
+        if self._resource_view and hasattr(self._tree_state, "expand_config_differences"):
+            self._tree_state.expand_config_differences(sections)
 
     def action_save_config_edit(self) -> None:
         """Save the current edit draft back to the workflow config store."""

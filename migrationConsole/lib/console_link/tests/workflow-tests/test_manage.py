@@ -7,7 +7,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from console_link.workflow.tree_utils import APPROVAL_TEMPLATE_NAME
-from console_link.workflow.resource_tree import ResourceGroup, ResourceNode, ResourceSection
+from console_link.workflow.resource_tree import ResourceGroup, ResourceNode, ResourceSection, _build_tree_from_raw
 from console_link.workflow.tui.workflow_manage_app import (
     WorkflowTreeApp,
     copy_to_clipboard, PHASE_SUCCEEDED, PHASE_RUNNING
@@ -1018,6 +1018,13 @@ async def test_resource_view_shows_config_phases_and_submits_workflow(mock_workf
             assert "Config changes:" in str(app.query_one("#pod-status").content)
             assert binding_descriptions(app, "s") == ["Submit"]
 
+            group_node = find_tree_node_by_id(tree.root, "group:Buffer")
+            assert group_node is not None
+            group_node.collapse()
+            resource_node.collapse()
+            assert not group_node.is_expanded
+            assert not resource_node.is_expanded
+
             await pilot.press("v")
             assert await wait_until(
                 pilot,
@@ -1026,6 +1033,8 @@ async def test_resource_view_shows_config_phases_and_submits_workflow(mock_workf
                     for child in find_tree_node_by_id(tree.root, "resource:default").children
                 ),
             )
+            assert find_tree_node_by_id(tree.root, "group:Buffer").is_expanded
+            assert find_tree_node_by_id(tree.root, "resource:default").is_expanded
             await pilot.press("v")
             await pilot.press("v")
             assert await wait_until(
@@ -1040,6 +1049,119 @@ async def test_resource_view_shows_config_phases_and_submits_workflow(mock_workf
             assert await wait_until(pilot, lambda: isinstance(app.screen, ConfirmModal))
             await pilot.press("enter")
             assert await wait_until(pilot, lambda: service.submit_calls == ["migration"])
+
+
+@pytest.mark.asyncio
+async def test_resource_view_expands_config_changes_after_edit_exit_without_workflow():
+    """Returning from edit mode should reveal changed resource phases even without a workflow."""
+
+    class FakeConfigEditService:
+        def load_edit_session(self):
+            return {
+                "raw_yaml": "initial-yaml",
+                "edit_state": edit_state_with_missing_basic_auth(),
+            }
+
+        def load_resource_config_snapshots(self, workflow_name):
+            return {
+                "pending": {
+                    "resources": [{
+                        "kind": "KafkaCluster",
+                        "name": "default",
+                        "parameters": {"version": "3.8.0", "auth": {"type": "none"}},
+                    }]
+                },
+            }
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": False, "error": "not found"}, {})
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="migration",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=resource_sections_with_kafka_config()):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(pilot, lambda: find_tree_node_by_id(tree.root, "resource:default") is not None)
+
+            find_tree_node_by_id(tree.root, "group:Buffer").collapse()
+            find_tree_node_by_id(tree.root, "resource:default").collapse()
+
+            await pilot.press("e")
+            assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
+            await pilot.press("escape")
+            assert await wait_until(
+                pilot,
+                lambda: (
+                    get_clean_text_label(tree.root) == "Migration Status"
+                    and find_tree_node_by_id(tree.root, "group:Buffer").is_expanded
+                    and find_tree_node_by_id(tree.root, "resource:default").is_expanded
+                ),
+            )
+
+
+@pytest.mark.asyncio
+async def test_resource_view_shows_pending_only_config_resources_without_workflow():
+    """Saved config resources that do not exist in K8s should still render in resource view."""
+
+    class FakeConfigEditService:
+        def load_resource_config_snapshots(self, workflow_name):
+            return {
+                "pending": {
+                    "resources": [{
+                        "kind": "TrafficReplay",
+                        "name": "replay-new",
+                        "parameters": {"podReplicas": 2, "speedupFactor": 1.5, "removeAuthHeader": False},
+                    }]
+                },
+            }
+
+    argo_service = MagicMock(spec=ArgoService(None, None))
+    argo_service.get_workflow.return_value = ({"success": False, "error": "not found"}, {})
+
+    pod_scraper = MagicMock(spec=PodScraperInterface(None, None, None))
+    pod_scraper.fetch_pods_metadata.return_value = []
+
+    app = WorkflowTreeApp(
+        namespace="default",
+        name="migration",
+        argo_service=argo_service,
+        pod_scraper=pod_scraper,
+        workflow_waiter=FAILING_WAITER,
+        refresh_interval=100.0,
+        resource_view=True,
+        config_edit_service=FakeConfigEditService(),
+    )
+
+    with patch("console_link.workflow.resource_tree.build_resource_tree",
+               return_value=_build_tree_from_raw({})):
+        async with app.run_test() as pilot:
+            tree = app.query_one("#workflow-tree")
+            tree.focus()
+            assert await wait_until(
+                pilot,
+                lambda: find_tree_node_by_id(tree.root, "resource:replay-new") is not None,
+                timeout=5.0,
+            )
+
+            replay_node = find_tree_node_by_id(tree.root, "resource:replay-new")
+            assert "Pending Config" in get_clean_text_label(replay_node)
+            assert replay_node.is_expanded
+            labels = [get_clean_text_label(child) for child in replay_node.children]
+            assert "podReplicas: deployed=<absent> | pending=<absent> | to-submit=2" in labels
 
 
 @pytest.mark.asyncio

@@ -47,9 +47,55 @@ class ResourceTreeStateManager:
         self._populate_tree(sections)
         self.tree.root.expand_all()
 
+    def expand_config_differences(self, sections: List[ResourceSection]) -> None:
+        """Expand the ancestors and resource nodes that contain rollout-phase differences."""
+        if not self.tree:
+            return
+        expansion_ids = self._config_difference_expansion_ids(sections)
+        if not expansion_ids:
+            return
+        self.tree.root.expand()
+        stack = list(self.tree.root.children)
+        while stack:
+            node = stack.pop()
+            node_id = (node.data or {}).get('id') if isinstance(node.data, dict) else None
+            if node_id in expansion_ids:
+                node.expand()
+            stack.extend(node.children)
+
+    @classmethod
+    def _config_difference_expansion_ids(cls, sections: List[ResourceSection]) -> set:
+        expansion_ids = set()
+        for section in sections:
+            section_has_changes = False
+            for group in section.groups:
+                group_has_changes = False
+                for resource in group.resources:
+                    if cls._collect_changed_resource_ids(resource, expansion_ids):
+                        group_has_changes = True
+                if group_has_changes:
+                    expansion_ids.add(f'group:{group.display_name}')
+                    section_has_changes = True
+            if section_has_changes:
+                expansion_ids.add(f'section:{section.name}')
+        return expansion_ids
+
+    @classmethod
+    def _collect_changed_resource_ids(cls, resource: ResourceNode, expansion_ids: set) -> bool:
+        has_changes = bool(resource.config_diff)
+        child_has_changes = False
+        for child in resource.children:
+            if cls._collect_changed_resource_ids(child, expansion_ids):
+                child_has_changes = True
+        if has_changes or child_has_changes:
+            expansion_ids.add(f'{RESOURCE_ID_PREFIX}{resource.name}')
+            return True
+        return False
+
     def update(self, sections: List[ResourceSection], workflow_data: Dict = None) -> None:
         """Incremental update preserving cursor, scroll, and expand/collapse state."""
         self._workflow_data = workflow_data or {}
+        self.tree.root.label = "[bold]Migration Status[/]"
         self._update_sections(self.tree.root, sections)
 
     # --- Incremental diffing ---
@@ -322,18 +368,8 @@ class ResourceTreeStateManager:
     def _add_resource_details(self, resource_node: TreeNode, resource: ResourceNode) -> None:
         for field in format_spec_fields(resource):
             resource_node.add(f"[dim]{field}[/dim]", data=None)
-        change_style = self._resource_config_change_style(resource)
-        for field in format_config_diff_fields(resource, self._config_value_mode):
-            resource_node.add(f"[{change_style}]{field}[/{change_style}]" if change_style else field, data=None)
-
-    @staticmethod
-    def _resource_config_change_style(resource: ResourceNode) -> str:
-        diff = resource.config_diff or {}
-        if diff.get('has_pending_submit_changes'):
-            return 'green'
-        if diff.get('has_submitted_changes'):
-            return 'grey50'
-        return ''
+        for field in format_config_diff_fields(resource, self._config_value_mode, rich_markup=True):
+            resource_node.add(field, data=None)
 
     def _add_workflow_progress(self, resource_node: TreeNode, resource: ResourceNode) -> None:
         """Add filtered workflow progress subtree if notable steps exist."""

@@ -50,6 +50,35 @@ class TestWorkflowCLICommands:
             assert '--workflow-name' not in result.output
             assert '--all-workflows' not in result.output
 
+    @patch('console_link.workflow.commands.manage.WorkflowTreeApp')
+    @patch('console_link.workflow.commands.manage.WaiterInterface.default')
+    @patch('console_link.workflow.commands.manage.make_k8s_pod_scraper')
+    @patch('console_link.workflow.commands.manage.make_argo_service')
+    @patch('console_link.workflow.commands.manage._initialize_k8s_client')
+    def test_manage_defaults_to_resource_view(
+        self,
+        mock_init_k8s,
+        mock_make_argo,
+        mock_make_scraper,
+        mock_waiter,
+        mock_app_class,
+    ):
+        runner = CliRunner()
+        app = Mock()
+        mock_app_class.return_value = app
+
+        result = runner.invoke(workflow_cli, ['manage', '--namespace', 'default'])
+
+        assert result.exit_code == 0
+        assert mock_app_class.call_args.kwargs["resource_view"] is True
+        app.run.assert_called_once()
+
+        result = runner.invoke(workflow_cli, ['manage', '--namespace', 'default', '--step-view'])
+
+        assert result.exit_code == 0
+        assert mock_app_class.call_args.kwargs["resource_view"] is False
+        assert app.run.call_count == 2
+
     @patch('console_link.workflow.commands.submit.verify_configured_secrets_exist')
     @patch('console_link.workflow.commands.submit.get_credentials_secret_store_for_namespace')
     @patch('console_link.workflow.commands.submit.delete_workflow')
