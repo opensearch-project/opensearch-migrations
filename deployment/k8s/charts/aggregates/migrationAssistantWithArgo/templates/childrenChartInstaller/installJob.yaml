@@ -281,6 +281,9 @@ spec:
               {{- $gcpProject := required "Missing required value: .Values.gcp.project" $.Values.gcp.project }}
               {{- $gcsBucketName := $.Values.gcsBucketConfiguration.bucketName | default (printf "migration-snapshots-%s" $gcpProject) }}
                    --set artifactRepository.gcs.bucket="{{ $gcsBucketName }}" \
+              {{- if $.Values.gcsBucketConfiguration.useLocalGcs }}
+                   --set artifactRepository.gcs.endpoint="http://{{ $.Values.gcsBucketConfiguration.localGcsEndpoint }}.{{ $.Release.Namespace }}.svc.cluster.local:4443" \
+              {{- end }}
               {{- if $.Values.gcp.serviceAccountEmail }}
                    --set-string "controller.serviceAccount.annotations.iam\\.gke\\.io/gcp-service-account={{ $.Values.gcp.serviceAccountEmail }}" \
                {{- end }}

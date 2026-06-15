@@ -164,8 +164,18 @@ ENV JAVA_HOME=${JAVA_HOME_PATH}
 ENV ES_JAVA_HOME=${JAVA_HOME_PATH}
 ENV PATH="${JAVA_HOME_PATH}/bin:${JAVA_HOME_PATH}/jre/bin:${PATH}"
 
-RUN mkdir -p ${ES_HOME}/data ${ES_HOME}/logs && \
-    chown -R 1000:1000 ${ES_HOME}
+RUN mkdir -p ${ES_HOME}/data ${ES_HOME}/logs
+
+# Install repository-gcs plugin (ES 5.0+; not available for 1.x/2.x)
+# --batch suppresses the security warning prompt (available from ES 5.6+; earlier
+# versions ignore the flag so it is safe to pass unconditionally for 5.x+).
+# Run before the final chown so all plugin files are owned by the elasticsearch user.
+RUN MAJOR=$(echo "${ES_VERSION}" | cut -d. -f1) && \
+    if [ "$MAJOR" -ge 5 ]; then \
+      ${ES_HOME}/bin/elasticsearch-plugin install --batch repository-gcs; \
+    fi
+
+RUN chown -R 1000:1000 ${ES_HOME}
 
 WORKDIR ${ES_HOME}
 USER 1000

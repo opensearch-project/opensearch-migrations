@@ -21,6 +21,7 @@ conditionalPackageInstalls:
 
   # Packages for testing and local development
   localstack: true
+  fake-gcs-server: false  # local GCS emulator; enable alongside cloudProvider=gcp for minikube/kind testing
   # Nice to haves that aren't fully supported yet
   gatekeeper: false
   grafana: false
@@ -123,6 +124,8 @@ gcsBucketConfiguration:
   bucketOperationImage: "google/cloud-sdk:latest"
   bucketOperationImagePullPolicy: "IfNotPresent"
   serviceAccountName: "migrations-service-account"
+  useLocalGcs: false   # set true for minikube/kind; wires fake-gcs-server as the GCS endpoint
+  localGcsEndpoint: "fake-gcs-server"  # K8s service name for fake-gcs-server
 
 kafkaExternal:
   enabled: false

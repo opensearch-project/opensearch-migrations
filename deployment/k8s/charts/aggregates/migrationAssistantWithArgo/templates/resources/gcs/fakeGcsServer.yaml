@@ -1,0 +1,49 @@
+{{- if index .Values.conditionalPackageInstalls "fake-gcs-server" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.gcsBucketConfiguration.localGcsEndpoint }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    app: fake-gcs-server
+  ports:
+    - name: http
+      port: 4443
+      targetPort: 4443
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-gcs-server
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fake-gcs-server
+  template:
+    metadata:
+      labels:
+        app: fake-gcs-server
+    spec:
+      containers:
+        - name: fake-gcs-server
+          image: fsouza/fake-gcs-server:latest
+          args:
+            - "-scheme"
+            - "http"
+            - "-port"
+            - "4443"
+            - "-backend"
+            - "memory"
+          ports:
+            - containerPort: 4443
+          readinessProbe:
+            httpGet:
+              path: /storage/v1/b
+              port: 4443
+            initialDelaySeconds: 2
+            periodSeconds: 5
+{{- end }}

@@ -342,7 +342,8 @@ def test_get_snapshot_for_gcs_config():
 def test_gcs_snapshot_create_calls_subprocess_run(mocker):
     config = {
         "snapshot": {
-            "otel_endpoint": "http://otel:1111",
+            "otel_trace_endpoint": "http://otel-traces:1111",
+            "otel_metrics_endpoint": "http://otel-metrics:2222",
             "snapshot_name": "reindex_from_snapshot",
             "gcs": {
                 "repo_uri": "gs://my-bucket",
@@ -362,7 +363,8 @@ def test_gcs_snapshot_create_calls_subprocess_run(mocker):
 def test_gcs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
     config = {
         "snapshot": {
-            "otel_endpoint": "http://otel:1111",
+            "otel_trace_endpoint": "http://otel-traces:1111",
+            "otel_metrics_endpoint": "http://otel-metrics:2222",
             "snapshot_name": "reindex_from_snapshot",
             "gcs": {
                 "repo_uri": "gs://my-bucket",
@@ -383,7 +385,8 @@ def test_gcs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   '--snapshot-repo-name', snapshot.snapshot_repo_name,
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
-                                  "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
+                                  "--otel-trace-collector-endpoint", config["snapshot"]["otel_trace_endpoint"],
+                                  "--otel-metrics-collector-endpoint", config["snapshot"]["otel_metrics_endpoint"],
                                   "--repo-uri", config["snapshot"]["gcs"]["repo_uri"],
                                   "--no-wait",
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),

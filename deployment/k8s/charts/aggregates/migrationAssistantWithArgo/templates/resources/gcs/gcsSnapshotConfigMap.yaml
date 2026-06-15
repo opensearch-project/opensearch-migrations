@@ -1,6 +1,7 @@
 {{- if eq .Values.cloudProvider "gcp" }}
 {{- $gcpProject := required "Missing required value: .Values.gcp.project" .Values.gcp.project }}
 {{- $bucketName := .Values.gcsBucketConfiguration.bucketName | default (printf "migration-snapshots-%s" $gcpProject) }}
+{{- $localEndpoint := printf "http://%s.%s.svc.cluster.local:4443" .Values.gcsBucketConfiguration.localGcsEndpoint .Release.Namespace }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -9,7 +10,12 @@ metadata:
     workflows.argoproj.io/configmap-type: Parameter
 data:
   GCS_BUCKET_NAME: {{ $bucketName | quote }}
-  GCS_ENDPOINT_URL: ""
-  BUCKET_URI: {{ printf "gs://%s" $bucketName | quote }}
+  {{- if .Values.gcsBucketConfiguration.useLocalGcs }}
+  GCS_ENDPOINT_URL: {{ $localEndpoint | quote }}
+  ENDPOINT: {{ $localEndpoint | quote }}
+  {{- else }}
+  GCS_ENDPOINT_URL: {{ .Values.gcsBucketConfiguration.endpoint | default "" | quote }}
   ENDPOINT: {{ .Values.gcsBucketConfiguration.endpoint | default "" | quote }}
+  {{- end }}
+  BUCKET_URI: {{ printf "gs://%s" $bucketName | quote }}
 {{- end }}

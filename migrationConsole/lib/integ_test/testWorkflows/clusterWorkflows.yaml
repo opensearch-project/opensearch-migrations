@@ -1424,10 +1424,12 @@ spec:
                       - -c
                       - |
                         set -euo pipefail
-                        # Copy bundled plugins to shared volume, install repository-s3, then copy it over
+                        # Copy bundled plugins to shared volume, install repository-s3 and repository-gcs, then copy them over
                         cp -r /usr/share/opensearch/plugins/* /plugins/ 2>/dev/null || true
                         bin/opensearch-plugin install --batch repository-s3
                         cp -r /usr/share/opensearch/plugins/repository-s3 /plugins/
+                        bin/opensearch-plugin install --batch repository-gcs
+                        cp -r /usr/share/opensearch/plugins/repository-gcs /plugins/
                     volumeMounts:
                       - name: plugins
                         mountPath: /plugins

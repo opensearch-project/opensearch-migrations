@@ -1,15 +1,24 @@
 # Development-specific values for local kubernetes environments
+# For S3 local testing: cloudProvider=aws (default here) uses LocalStack
+# For GCS local testing: overlay with cloudProvider=gcp and gcsBucketConfiguration.useLocalGcs=true
 
 cloudProvider: aws
 
 conditionalPackageInstalls:
   kyverno: true
+  fake-gcs-server: true  # deploy fake-gcs-server; used when cloudProvider=gcp for local GCS testing
 
 # Kyverno policy toggles (requires kyverno to be installed)
 kyvernoPolicies:
   zeroResourceRequests: true
   mountLocalAwsCreds: false
   mountLocalAwsCredsPath: "~/.aws"
+
+# GCS local testing — override cloudProvider=gcp to activate
+gcsBucketConfiguration:
+  create: false
+  bucketName: "migration-test-bucket"
+  useLocalGcs: true
 
 # Override image pull policy for dev - always pull latest
 images:
