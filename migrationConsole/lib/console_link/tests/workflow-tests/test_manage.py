@@ -681,7 +681,7 @@ async def test_resource_view_edit_mode_shows_branch_diagnostics(mock_workflow_wi
 
 @pytest.mark.asyncio
 async def test_resource_view_edit_mode_applies_variant_and_saves(mock_workflow_with_two_pods):
-    """Edit mode applies committed UI operations to draft YAML and saves only on Ctrl+s."""
+    """Edit mode applies committed UI operations to draft YAML and saves on s or Ctrl+s."""
 
     class FakeConfigEditService:
         def __init__(self):
@@ -759,6 +759,7 @@ async def test_resource_view_edit_mode_applies_variant_and_saves(mock_workflow_w
             await pilot.pause()
             app._update_dynamic_bindings()
 
+            assert binding_descriptions(app, "s") == ["Save"]
             assert "Next Option" not in binding_descriptions(app, "right")
 
             await pilot.press("left")
@@ -788,8 +789,11 @@ async def test_resource_view_edit_mode_applies_variant_and_saves(mock_workflow_w
             )
             assert "[REQ 1] authConfig: < sigv4 >" in get_clean_text_label(tree.cursor_node)
 
-            await pilot.press("ctrl+s")
+            await pilot.press("s")
             assert await wait_until(pilot, lambda: service.saved_yaml == ["updated-yaml"])
+
+            await pilot.press("ctrl+s")
+            assert await wait_until(pilot, lambda: service.saved_yaml == ["updated-yaml", "updated-yaml"])
 
 
 @pytest.mark.asyncio
@@ -855,14 +859,14 @@ async def test_resource_view_edit_mode_confirms_discard_on_escape(mock_workflow_
 
             await pilot.press("escape")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ConfirmModal))
-            await pilot.press("n")
+            await pilot.press("enter")
             assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
             assert app._edit_mode is True
             assert app._edit_dirty is True
 
             await pilot.press("q")
             assert await wait_until(pilot, lambda: isinstance(app.screen, ConfirmModal))
-            await pilot.press("n")
+            await pilot.press("enter")
             assert await wait_until(pilot, lambda: get_clean_text_label(tree.root) == "Workflow Config Edit")
             assert app._edit_mode is True
             assert app._edit_dirty is True

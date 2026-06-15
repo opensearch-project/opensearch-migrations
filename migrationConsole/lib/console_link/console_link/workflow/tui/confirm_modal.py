@@ -15,36 +15,40 @@ class ConfirmModal(ModalScreen[bool]):
     Button { margin: 0 1; min-width: 12; }
     """
     BINDINGS = [
-        Binding("enter", "confirm", "Yes", show=False, priority=True),
         Binding("y", "confirm", "Yes"),
         Binding("n", "cancel", "No"),
         Binding("escape", "cancel", "No", show=False)
     ]
 
-    def __init__(self, message: str):
+    def __init__(
+        self,
+        message: str,
+        confirm_label: str = "Yes",
+        cancel_label: str = "No",
+        default_confirm: bool = True,
+    ):
         super().__init__()
         self.message = message
+        self.confirm_label = confirm_label
+        self.cancel_label = cancel_label
+        self.default_confirm = default_confirm
 
     def compose(self) -> ComposeResult:
         with Container(id="dialog"):
             yield Static(escape(self.message), id="question")
             with Horizontal(id="buttons"):
-                yield Button("Yes (y)", id="yes", variant="success")
-                yield Button("No (n)", id="no", variant="error")
+                yield Button(f"{escape(self.confirm_label)} (y)", id="yes", variant="success")
+                yield Button(f"{escape(self.cancel_label)} (n)", id="no", variant="error")
 
     def on_mount(self) -> None:
-        self.query_one("#yes", Button).focus()
+        default_button_id = "#yes" if self.default_confirm else "#no"
+        self.query_one(default_button_id, Button).focus()
 
     def action_confirm(self) -> None:
         self.dismiss(True)
 
     def action_cancel(self) -> None:
         self.dismiss(False)
-
-    def on_key(self, event) -> None:
-        if event.key == "enter":
-            event.stop()
-            self.action_confirm()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "yes")

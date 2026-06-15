@@ -620,6 +620,7 @@ class WorkflowTreeApp(App):
         if self._edit_mode:
             node = selected_edit_node(self.tree_root_widget)
             self.bind("escape", "exit_config_edit", description="Exit Edit")
+            self.bind("s", "save_config_edit", description="Save")
             self.bind("ctrl+s", "save_config_edit", description="Save")
             self.bind("?", "show_config_edit_help", description="Help")
             self.bind("v", "cycle_config_value_mode", description="Value Mode")
@@ -798,7 +799,12 @@ class WorkflowTreeApp(App):
             return
         if self._edit_dirty:
             self.push_screen(
-                ConfirmModal("Discard unsaved config edits and leave the editor?"),
+                ConfirmModal(
+                    "Discard unsaved config edits and leave the editor?",
+                    confirm_label="Discard",
+                    cancel_label="Return",
+                    default_confirm=False,
+                ),
                 lambda confirmed: self._discard_config_edit() if confirmed else None,
             )
             return
@@ -808,7 +814,12 @@ class WorkflowTreeApp(App):
         """Quit the app, confirming first if a config edit draft is dirty."""
         if self._edit_mode and self._edit_dirty:
             self.push_screen(
-                ConfirmModal("Discard unsaved config edits and quit?"),
+                ConfirmModal(
+                    "Discard unsaved config edits and quit?",
+                    confirm_label="Discard and quit",
+                    cancel_label="Return",
+                    default_confirm=False,
+                ),
                 lambda confirmed: self.exit() if confirmed else None,
             )
             return
