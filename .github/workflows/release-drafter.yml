@@ -348,21 +348,22 @@ jobs:
             -PcliVersion="${{ steps.get_data.outputs.version }}"
       - name: Draft a release
         if: ${{ !github.event.act }}
-        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd
         with:
-          draft: true
-          generate_release_notes: true
-          files: |
-            deployment/migration-assistant-solution/cdk.out-minified/*-eks.template.json
-            opensearch-migrations-source.tar.gz
-            opensearch-migrations-build.tar.gz
-            agent-skills/build/agent-skills.tar.gz
-            bootstrap-kiro-agent.sh
-            deployment/k8s/build/helm-package/migration-assistant-${{ steps.get_data.outputs.version }}.tgz
-            workflowMigration.schema.json
-            deployment/k8s/aws/dist/aws-bootstrap.sh
-            deployment/k8s/aws/build/migrate-cli-dist/install.sh
-            deployment/k8s/aws/build/migrate-cli-dist/migration-assistant-cli-${{ steps.get_data.outputs.version }}.tar.gz
-            deployment/k8s/aws/build/migrate-cli-dist/release-installers/manifest.json
-            deployment/k8s/aws/build/migrate-cli-dist/release-installers/*.tar.gz
+          immutableCreate: true
+          prerelease: true
+          generateReleaseNotes: true
+          artifacts: >-
+            deployment/migration-assistant-solution/cdk.out-minified/*-eks.template.json,
+            opensearch-migrations-source.tar.gz,
+            opensearch-migrations-build.tar.gz,
+            agent-skills/build/agent-skills.tar.gz,
+            bootstrap-kiro-agent.sh,
+            deployment/k8s/build/helm-package/migration-assistant-${{ steps.get_data.outputs.version }}.tgz,
+            workflowMigration.schema.json,
+            deployment/k8s/aws/dist/aws-bootstrap.sh,
+            deployment/k8s/aws/build/migrate-cli-dist/install.sh,
+            deployment/k8s/aws/build/migrate-cli-dist/migration-assistant-cli-${{ steps.get_data.outputs.version }}.tar.gz,
+            deployment/k8s/aws/build/migrate-cli-dist/release-installers/manifest.json,
+            deployment/k8s/aws/build/migrate-cli-dist/release-installers/*.tar.gz,
             **/*.spdx.json
