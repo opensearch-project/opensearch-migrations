@@ -8,15 +8,6 @@
  */
 import java.nio.file.Paths
 
-pluginManagement {
-    repositories {
-        gradlePluginPortal()
-        maven {
-            url = "https://maven-central.storage-download.googleapis.com/maven2/"
-        }
-    }
-}
-
 plugins {
     id("com.gradle.develocity") version("3.18.1")
     id 'org.gradle.toolchains.foojay-resolver-convention' version '0.10.0'

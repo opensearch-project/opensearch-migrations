@@ -19,11 +19,7 @@ plugins {
 
 allprojects {
     repositories {
-        maven {
-            url = "https://maven-central.storage-download.googleapis.com/maven2/"
-            // Google's Maven Central mirror — avoids Sonatype per-IP rate limiting (HTTP 429)
-            // that affects CI workers. Can revert to mavenCentral() once a caching proxy is in place.
-        }
+        mavenCentral()
     }
 }
 
