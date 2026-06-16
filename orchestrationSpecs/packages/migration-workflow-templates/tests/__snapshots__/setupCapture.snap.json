@@ -812,6 +812,23 @@
           [
             {
               "templateRef": {
+                "template": "waitforuserapproval",
+                "name": "resource-management"
+              },
+              "arguments": {
+                "parameters": [
+                  {
+                    "name": "resourceName",
+                    "value": "{{='captureproxysetup.'+inputs.parameters.proxyName}}"
+                  }
+                ]
+              },
+              "name": "approveProxySetup"
+            }
+          ],
+          [
+            {
+              "templateRef": {
                 "template": "patchcaptureproxyready",
                 "name": "resource-management"
               },
@@ -1168,24 +1185,6 @@
                 ]
               },
               "name": "readKafkaConnectionProfile"
-            }
-          ],
-          [
-            {
-              "templateRef": {
-                "template": "waitforuserapproval",
-                "name": "resource-management"
-              },
-              "when": "{{=true && !(steps.reconcileCaptureProxyResource.outputs.parameters.currentConfigChecksum == inputs.parameters.configChecksum)}}",
-              "arguments": {
-                "parameters": [
-                  {
-                    "name": "resourceName",
-                    "value": "{{='captureproxysetup.'+inputs.parameters.proxyName}}"
-                  }
-                ]
-              },
-              "name": "approveProxySetup"
             }
           ],
           [

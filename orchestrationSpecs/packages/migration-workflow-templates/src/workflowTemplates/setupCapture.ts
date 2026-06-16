@@ -727,6 +727,15 @@ export const SetupCapture = WorkflowBuilder.create({
                         serviceType,
                     })
                 )
+                // Gate here, after the proxy is deployed and its endpoint is serving, so the
+                // operator can swing client traffic through the proxy and verify capture before
+                // approving. Only once approved do we patch the CaptureProxy to Ready below, which
+                // publishes checksumForSnapshot and releases the downstream snapshot/backfill flow.
+                .addStep("approveProxySetup", ResourceManagement, "waitForUserApproval", c =>
+                    c.register({
+                        resourceName: expr.concat(expr.literal("captureproxysetup."), b.inputs.proxyName)
+                    })
+                )
                 .addStep("patchCaptureProxyReady", ResourceManagement, "patchCaptureProxyReady", c =>
                     c.register({
                         resourceName: b.inputs.proxyName,
@@ -854,15 +863,6 @@ export const SetupCapture = WorkflowBuilder.create({
                 { when: c => ({templateExp: expr.and(
                     checksumNotDone(c.reconcileCaptureProxyResource.outputs.currentConfigChecksum, b.inputs.configChecksum),
                     managedByWorkflow
-                )}) }
-            )
-            .addStep("approveProxySetup", ResourceManagement, "waitForUserApproval", c =>
-                c.register({
-                    resourceName: expr.concat(expr.literal("captureproxysetup."), b.inputs.proxyName)
-                }),
-                { when: c => ({templateExp: checksumNotDone(
-                    c.reconcileCaptureProxyResource.outputs.currentConfigChecksum,
-                    b.inputs.configChecksum
                 )}) }
             )
             .addStep("patchCaptureProxyPending", ResourceManagement, "patchCaptureProxyPending", c =>
