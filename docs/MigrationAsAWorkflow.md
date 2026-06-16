@@ -276,7 +276,7 @@ empty phases intentionally produce no hint.
 | `approve step` | `workflow manage`, or `workflow approve step --list` for more gates |
 | `approve change` / `approve retry` | `workflow manage` to monitor progress |
 | `status` / `manage` | phase-aware (running / succeeded / failed); no hint for `--all-workflows` or resource views |
-| `show` (output view) | migration complete — no further action needed (no hint for `--list` / `--history` / `--run`) |
+| `show` (output view) | migration complete — no further action needed (no hint for `--list` / `--history` / `--run` / `--clean`) |
 
 Commands outside the migration journey — `configure view` / `sample` / `credentials`, `log`,
 `reset`, and exploration/audit modes — emit no hint. This behavior is covered by

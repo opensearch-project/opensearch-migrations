@@ -84,7 +84,10 @@ def hint_after_status(phase: str) -> None:
         phase,
         running_hint="workflow is running — re-run `workflow status` or open TUI with `workflow manage`",
         succeeded_hint="migration complete — view results with `workflow show`",
-        failed_hint="workflow failed — update config with `workflow configure edit`, then resubmit with `workflow submit`",
+        failed_hint=(
+            "workflow failed — update config with `workflow configure edit`, "
+            "then resubmit with `workflow submit`"
+        ),
     )
 
 
@@ -96,7 +99,10 @@ def hint_after_manage(phase: str) -> None:
         phase,
         running_hint="workflow still running — re-open with `workflow manage` or check with `workflow status`",
         succeeded_hint="migration complete — view results with `workflow show`",
-        failed_hint="workflow failed — update config with `workflow configure edit`, then resubmit with `workflow submit`",
+        failed_hint=(
+            "workflow failed — update config with `workflow configure edit`, "
+            "then resubmit with `workflow submit`"
+        ),
     )
 
 

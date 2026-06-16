@@ -9,7 +9,7 @@ Section 2 — CLI integration tests: invoke each workflow command via CliRunner
 import subprocess
 import pytest
 from click.testing import CliRunner
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock, patch
 
 from console_link.workflow.cli import workflow_cli
 from console_link.workflow.models.config import WorkflowConfig
@@ -115,9 +115,9 @@ class TestPublicHintFunctions:
 
     @pytest.mark.parametrize("phase,expected", [
         ("Succeeded", COMPLETE_HINT),
-        ("Running",   MANAGE_HINT),
-        ("Failed",    FIX_HINT),
-        ("",          None),
+        ("Running", MANAGE_HINT),
+        ("Failed", FIX_HINT),
+        ("", None),
     ])
     def test_hint_after_submit_wait(self, phase, expected, capsys):
         from console_link.workflow.commands.hints import hint_after_submit_wait
@@ -169,12 +169,12 @@ class TestPublicHintFunctions:
         assert MANAGE_HINT in out
 
     @pytest.mark.parametrize("phase,expected", [
-        ("Running",   IS_RUNNING_HINT),
-        ("Pending",   IS_RUNNING_HINT),
+        ("Running", IS_RUNNING_HINT),
+        ("Pending", IS_RUNNING_HINT),
         ("Succeeded", COMPLETE_HINT),
-        ("Failed",    FAILED_HINT),
-        ("Error",     FAILED_HINT),
-        ("",          None),
+        ("Failed", FAILED_HINT),
+        ("Error", FAILED_HINT),
+        ("", None),
     ])
     def test_hint_after_status(self, phase, expected, capsys):
         from console_link.workflow.commands.hints import hint_after_status
@@ -187,10 +187,10 @@ class TestPublicHintFunctions:
             assert HINT_PREFIX not in out
 
     @pytest.mark.parametrize("phase,expected", [
-        ("Running",   STILL_RUNNING_HINT),
+        ("Running", STILL_RUNNING_HINT),
         ("Succeeded", COMPLETE_HINT),
-        ("Failed",    FAILED_HINT),
-        ("",          None),
+        ("Failed", FAILED_HINT),
+        ("", None),
     ])
     def test_hint_after_manage(self, phase, expected, capsys):
         from console_link.workflow.commands.hints import hint_after_manage
@@ -618,11 +618,11 @@ class TestStatusHints:
     """workflow status — phase-aware hint for single workflow; absent for --all-workflows."""
 
     @pytest.mark.parametrize("phase,expected_fragment", [
-        ("Running",   IS_RUNNING_HINT),
-        ("Pending",   IS_RUNNING_HINT),
+        ("Running", IS_RUNNING_HINT),
+        ("Pending", IS_RUNNING_HINT),
         ("Succeeded", COMPLETE_HINT),
-        ("Failed",    FAILED_HINT),
-        ("Error",     FAILED_HINT),
+        ("Failed", FAILED_HINT),
+        ("Error", FAILED_HINT),
     ])
     @patch("console_link.workflow.commands.status.requests.get")
     @patch("console_link.workflow.commands.status.WorkflowService")
@@ -687,10 +687,10 @@ class TestManageHints:
             return CliRunner().invoke(workflow_cli, ["manage"])
 
     @pytest.mark.parametrize("phase,expected_fragment", [
-        ("Running",   STILL_RUNNING_HINT),
+        ("Running", STILL_RUNNING_HINT),
         ("Succeeded", COMPLETE_HINT),
-        ("Failed",    FAILED_HINT),
-        ("Error",     FAILED_HINT),
+        ("Failed", FAILED_HINT),
+        ("Error", FAILED_HINT),
     ])
     def test_phase_hint(self, phase, expected_fragment):
         result = self._invoke_manage(_workflow_response(phase))
@@ -807,6 +807,19 @@ class TestShowHints:
         ):
             result = CliRunner().invoke(
                 workflow_cli, ["show", "snapshotmigration.migration-0", "--run", "1"]
+            )
+
+        assert result.exit_code == 0
+        assert HINT_PREFIX not in result.output
+
+    def test_clean_flag_does_not_show_hint(self):
+        # --clean is script-friendly raw output; the hint must not leak into it.
+        with (
+            patch("console_link.workflow.commands.show._load_k8s_config_or_exit", return_value=True),
+            patch("console_link.workflow.commands.show._handle_resource_show"),
+        ):
+            result = CliRunner().invoke(
+                workflow_cli, ["show", "snapshotmigration.migration-0", "--clean"]
             )
 
         assert result.exit_code == 0

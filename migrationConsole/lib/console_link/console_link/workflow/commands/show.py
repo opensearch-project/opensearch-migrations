@@ -654,5 +654,6 @@ def show_command(ctx, list_resources, all_resources, history, run_selector, clea
     else:
         _handle_resource_show(ctx, namespace, resource_name, task, list_resources, history, run_selector, clean)
 
-    if not list_resources and not history and not run_selector:
+    # --clean is for script-friendly raw artifact output; never append the hint there.
+    if not list_resources and not history and not run_selector and not clean:
         hint_after_show()
